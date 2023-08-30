@@ -1,0 +1,320 @@
+{
+	"properties":{
+		"name": "Aliyun RDS SQL Server",
+		"icon": "icons/aliyun_rds_mssql.png",
+		"id": "aliyun-rds-sqlserver",
+		"doc": "${doc}"
+	},
+	"configOptions": {
+		"connection": {
+			"type": "object",
+			"properties": {
+				"host": {
+					"type": "string",
+					"title": "${host}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"apiServerKey": "database_host",
+					"required": true,
+					"x-index": 1
+				},
+				"port": {
+					"type": "string",
+					"title": "${port}",
+					"x-decorator": "FormItem",
+					"x-component": "InputNumber",
+					"apiServerKey": "database_port",
+					"required": true,
+					"x-index": 2
+				},
+				"database": {
+					"type": "string",
+					"title": "${database}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"apiServerKey": "database_name",
+					"required": true,
+					"x-index": 3
+				},
+				"user": {
+					"type": "string",
+					"title": "${user}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"apiServerKey": "database_username",
+					"x-index": 4
+				},
+				"password": {
+					"type": "string",
+					"title": "${password}",
+					"x-decorator": "FormItem",
+					"x-component": "Password",
+					"apiServerKey": "database_password",
+					"x-index": 5
+				},
+				"schema": {
+					"type": "string",
+					"title": "Schema",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"apiServerKey": "database_owner",
+					"required": true,
+					"x-index": 6
+				},
+				"extParams": {
+					"type": "string",
+					"title": "${extParams}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"apiServerKey": "additionalString",
+					"x-index": 7
+				},
+				"timezone": {
+					"type": "string",
+					"title": "${timezone}",
+					"default": "",
+					"x-decorator": "FormItem",
+					"x-component": "Select",
+					"enum": [
+						{ "label": "Database Timezone", "value": "" },
+						{ "label": "UTC -11", "value": "-11:00" },
+						{ "label": "UTC -10", "value": "-10:00" },
+						{ "label": "UTC -09", "value": "-09:00" },
+						{ "label": "UTC -08", "value": "-08:00" },
+						{ "label": "UTC -07", "value": "-07:00" },
+						{ "label": "UTC -06", "value": "-06:00" },
+						{ "label": "UTC -05", "value": "-05:00" },
+						{ "label": "UTC -04", "value": "-04:00" },
+						{ "label": "UTC -03", "value": "-03:00" },
+						{ "label": "UTC -02", "value": "-02:00" },
+						{ "label": "UTC -01", "value": "-01:00" },
+						{ "label": "UTC", "value": "+00:00" },
+						{ "label": "UTC +01", "value": "+01:00" },
+						{ "label": "UTC +02", "value": "+02:00" },
+						{ "label": "UTC +03", "value": "+03:00" },
+						{ "label": "UTC +04", "value": "+04:00" },
+						{ "label": "UTC +05", "value": "+05:00" },
+						{ "label": "UTC +06", "value": "+06:00" },
+						{ "label": "UTC +07", "value": "+07:00" },
+						{ "label": "UTC +08", "value": "+08:00" },
+						{ "label": "UTC +09", "value": "+09:00" },
+						{ "label": "UTC +10", "value": "+10:00" },
+						{ "label": "UTC +11", "value": "+11:00" },
+						{ "label": "UTC +12", "value": "+12:00" },
+						{ "label": "UTC +13", "value": "+13:00" },
+						{ "label": "UTC +14", "value": "+14:00" }
+					],
+					"x-index": 8
+				}
+			}
+		}
+	},
+	"messages": {
+		"default": "en_US",
+		"en_US": {
+			"host": "DB Address",
+			"port": "Port",
+			"database": "DB Name",
+			"user": "User",
+			"password": "Password",
+			"extParams": "Other connection string parameters",
+			"timeZone": "Timezone for Datetime",
+			"doc": "docs/aliyun_rds_mssql_zh_CN.md"
+		},
+		"zh_CN": {
+			"host": "数据库地址",
+			"port": "端口",
+			"database": "数据库名称",
+			"user": "账号",
+			"password": "密码",
+			"extParams": "其他连接串参数",
+			"timezone": "时间类型的时区",
+			"doc": "docs/aliyun_rds_mssql_zh_CN.md"
+		},
+		"zh_TW": {
+			"host": "数据库地址",
+			"port": "端口",
+			"database": "数据库名称",
+			"username": "账号",
+			"password": "密码",
+			"extParams": "其他连接串参数",
+			"timezone": "时间类型的时区",
+			"doc": "docs/aliyun_rds_mssql_zh_CN.md"
+		}
+	},
+	"dataTypes": {
+		"char[($byte)]": {
+			"to": "TapString",
+			"byte": 8000,
+			"defaultByte": 1,
+			"fixed": true
+		},
+		"nchar[($byte)]": {
+			"to": "TapString",
+			"byte": 4000,
+			"defaultByte": 1,
+			"byteRatio": 2,
+			"fixed": true
+		},
+		"varchar[($byte)]": {
+			"to": "TapString",
+			"byte": 8000,
+			"defaultByte": 1
+		},
+		"nvarchar[($byte)]": {
+			"to": "TapString",
+			"byte": 4000,
+			"defaultByte": 1,
+			"byteRatio": 2
+		},
+		"text": {
+			"to": "TapString",
+			"byte": 2147483647,
+			"queryOnly": true
+		},
+		"ntext": {
+			"to": "TapString",
+			"byte": 1073741823,
+			"byteRatio": 2,
+			"queryOnly": true
+		},
+		"varchar(max)": {
+			"to": "TapString",
+			"byte": "2g"
+		},
+		"nvarchar(max)": {
+			"to": "TapString",
+			"byte": "2g",
+			"byteRatio": 2
+		},
+		"binary[($byte)]": {
+			"to": "TapBinary",
+			"byte": 8000,
+			"defaultByte": 1,
+			"fixed": true
+		},
+		"varbinary[($byte)]": {
+			"to": "TapBinary",
+			"byte": 8000,
+			"defaultByte": 1
+		},
+		"image": {
+			"to": "TapBinary",
+			"byte": 2147483647,
+			"queryOnly": true
+		},
+		"varbinary(max)": {
+			"to": "TapBinary",
+			"byte": "2g"
+		},
+		"bit": {
+			"to": "TapNumber",
+			"bit": 1,
+			"value": [0, 1]
+		},
+		"tinyint": {
+			"to": "TapNumber",
+			"bit": 8,
+			"value": [0, 255]
+		},
+		"smallint": {
+			"to": "TapNumber",
+			"bit": 16,
+			"value": [-32768, 32767]
+		},
+		"int": {
+			"to": "TapNumber",
+			"bit": 32,
+			"value": [-2147483648, 2147483647]
+		},
+		"bigint": {
+			"to": "TapNumber",
+			"bit": 64,
+			"value": [-9223372036854775808, 9223372036854775807]
+		},
+		"decimal[($precision,$scale)]": {
+			"to": "TapNumber",
+			"precision": [1, 38],
+			"defaultPrecision": 18,
+			"scale": [0, 38],
+			"defaultScale": 0,
+			"fixed": true,
+			"priority": 1
+		},
+		"numeric[($precision,$scale)]": {
+			"to": "TapNumber",
+			"precision": [1, 38],
+			"defaultPrecision": 18,
+			"scale": [0, 38],
+			"defaultScale": 0,
+			"fixed": true
+		},
+		"real": {
+			"to": "TapNumber",
+			"bit": 32,
+			"value": ["-3.40E+38", "3.40E+38"],
+			"scale": true,
+			"fixed": false
+		},
+		"float[($precision)]": {
+			"to": "TapNumber",
+			"bit": 64,
+			"value": ["-1.79E+308", "1.79E+308"],
+			"precision": [
+				1,
+				53
+			],
+			"defaultPrecision": 53,
+			"scale": true,
+			"fixed": false
+		},
+		"date": {
+			"to": "TapDate",
+			"range": ["0001-01-01", "9999-12-31"],
+			"pattern": "yyyy-MM-dd"
+		},
+		"time[($fraction)]": {
+			"to": "TapTime",
+			"range": ["00:00:00", "23:59:59"],
+			"pattern": "HH:mm:ss",
+			"fraction": [0, 7],
+			"defaultFraction": 7
+		},
+		"datetime": {
+			"to": "TapDateTime",
+			"range": ["1753-01-01 00:00:00", "9999-12-31 23:59:59"],
+			"pattern": "yyyy-MM-dd HH:mm:ss",
+			"queryOnly": true
+		},
+		"datetime2[($fraction)]": {
+			"to": "TapDateTime",
+			"range": ["0001-01-01 00:00:00", "9999-12-31 23:59:59"],
+			"pattern": "yyyy-MM-dd HH:mm:ss",
+			"fraction": [0, 7],
+			"defaultFraction": 7
+		},
+		"datetimeoffset[($fraction)]": {
+			"to": "TapDateTime",
+			"range": ["0001-01-01 00:00:00", "9999-12-31 23:59:59"],
+			"pattern": "yyyy-MM-dd HH:mm:ss",
+			"fraction": [0, 7],
+			"defaultFraction": 7,
+			"withTimeZone": true
+		},
+		"smalldatetime": {
+			"to": "TapDateTime",
+			"range": ["1900-01-01 00:00:00", "2079-06-06 23:59:59"],
+			"pattern": "yyyy-MM-dd HH:mm:ss",
+			"queryOnly": true
+		},
+		"geography": {
+			"to": "TapString",
+			"queryOnly": true
+		},
+		"timestamp": {
+			"to": "TapBinary",
+			"byte": 8,
+			"queryOnly": true
+		}
+	}
+}

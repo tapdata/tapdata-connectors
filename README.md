@@ -1,2 +1,2 @@
 # tapdata-connectors
-Open Connectors For Tapdata
+Connectors For Tapdata
