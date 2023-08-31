@@ -18,7 +18,7 @@
     <properties>
         <java.version>8</java.version>
         <sql.core.version>1.0-SNAPSHOT</sql.core.version>
-        <tapdata.pdk.api.verison>1.2.5-RELEASE</tapdata.pdk.api.verison>
+        <tapdata.pdk.api.verison>1.2.2-SNAPSHOT</tapdata.pdk.api.verison>
 
     </properties>
     <dependencyManagement>
