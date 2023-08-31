@@ -801,7 +801,7 @@ public class MongodbConnector extends ConnectorBase {
 		return value;
 	}
 
-	private void getReadPartitions(TapConnectorContext connectorContext, TapTable table, GetReadPartitionOptions options) throws Throwable {
+	private void getReadPartitions(TapConnectorContext connectorContext, TapTable table, GetReadPartitionOptions options) {
 		options.getTypeSplitterMap().registerCustomSplitter(ObjectId.class, new ObjectIdSplitter());
 
 		DatabaseReadPartitionSplitter.calculateDatabaseReadPartitions(connectorContext, table, options)
