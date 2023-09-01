@@ -10,7 +10,7 @@
     <modules>
 		<module>connector-core</module>
 		<module>sql-core</module>
-		<module>mysql-core-build-parent</module>
+		<module>debezium-bucket</module>
 		<module>postgres-core</module>
 		<module>dws-core</module>
         <module>mq-core</module>

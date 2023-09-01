@@ -4,7 +4,6 @@ import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.ddl.DDLSqlMaker;
 import io.tapdata.connector.mysql.MysqlMaker;
 import io.tapdata.connector.tidb.config.TidbConfig;
-import io.tapdata.entity.event.ddl.entity.ValueChange;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
