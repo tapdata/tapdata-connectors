@@ -24,7 +24,6 @@ import org.junit.Test;
 import io.confluent.connect.avro.AvroData;
 import io.debezium.config.CommonConnectorConfig.Version;
 import io.debezium.config.Configuration;
-import io.debezium.connector.mysql.SourceInfoTest.PositionAssert;
 import io.debezium.data.VerifyRecord;
 import io.debezium.doc.FixFor;
 import io.debezium.document.Document;
