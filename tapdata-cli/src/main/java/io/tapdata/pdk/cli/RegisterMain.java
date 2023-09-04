@@ -89,16 +89,6 @@ public class RegisterMain {
 		Ali1688(BASE_PATH + "connectors/dist/ali1688-connector-v1.0-SNAPSHOT.jar", "all", "ali1688"),
         Temu(BASE_PATH + "connectors/dist/temu-connector-v1.0-SNAPSHOT.jar", "all", "temu"),
         GreenPlum(BASE_PATH + "connectors/dist/greenplum-connector-v1.0-SNAPSHOT.jar", "all", "greenplum", "basic", "jdbc"),
-		GBASE8A(BASE_PATH + "connectors/dist/gbase8a-connector-v1.0-SNAPSHOT.jar", "all", "gbase8a", "basic", "jdbc"),
-		GBASE8S(BASE_PATH + "connectors/dist/gbase8s-connector-v1.0-SNAPSHOT.jar", "all", "gbase8s", "basic", "jdbc"),
-		ORACLE(BASE_PATH + "connectors/dist/oracle-connector-v1.0-SNAPSHOT.jar", "all", "oracle", "basic", "jdbc"),
-		MSSQL(BASE_PATH + "connectors/dist/mssql-connector-v1.0-SNAPSHOT.jar", "all", "mssql", "basic", "jdbc"),
-		DB2(BASE_PATH + "connectors/dist/db2-connector-v1.0-SNAPSHOT.jar", "all", "db2", "basic", "jdbc"),
-		KINGBASER6(BASE_PATH + "connectors/dist/kingbaser6-connector-v1.0-SNAPSHOT.jar", "all", "kingbaser6", "basic", "jdbc"),
-		KINGBASER3(BASE_PATH + "connectors/dist/kingbaser3-connector-v1.0-SNAPSHOT.jar", "all", "kingbaser3", "basic", "jdbc"),
-		DAMENG(BASE_PATH + "connectors/dist/dameng-connector-v1.0-SNAPSHOT.jar", "all", "dameng", "basic", "jdbc"),
-		TENCENT_DB_MYSQL(BASE_PATH + "connectors/dist/tencent-db-mysql-connector-v1.0-SNAPSHOT.jar", "all", "tencent-db-mysql"),
-		INFORMIX(BASE_PATH + "connectors/dist/informix-connector-v1.0-SNAPSHOT.jar", "all", "informix"),
         ;
 
 		private final String path;
