@@ -13,6 +13,7 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.Descriptors.DescriptorValidationException;
 import io.grpc.LoadBalancerRegistry;
 import io.grpc.internal.PickFirstLoadBalancerProvider;
+import io.tapdata.bigquery.BigQueryExceptionCollector;
 import io.tapdata.bigquery.service.stream.v2.WriteBigQueryException;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.TapLogger;
@@ -23,10 +24,7 @@ import javax.annotation.concurrent.GuardedBy;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Phaser;
 import java.util.concurrent.TimeUnit;
@@ -41,6 +39,8 @@ public class WriteCommittedStream {
     private String credentialsJson;
     private Offset streamOffset = Offset.offset();
     private BigQueryWriteClient client;
+
+    private final BigQueryExceptionCollector bigQueryExceptionCollector = new BigQueryExceptionCollector();
     public WriteCommittedStream client(BigQueryWriteClient client){
         this.client = client;
         return this;
@@ -157,6 +157,10 @@ public class WriteCommittedStream {
             AppendRowsResponse response = this.writer.append(jsonArr, this.streamOffset.addAndGetBefore(jsonArr.length()));
             //AppendRowsResponse.AppendResult appendResult = response.getAppendResult();
         } catch (Exception e) {
+            bigQueryExceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
+            bigQueryExceptionCollector.collectViolateNull(null,e);
+            bigQueryExceptionCollector.collectWriteType(null,null,jsonArr,e);
+            bigQueryExceptionCollector.collectWriteLength(null,null,jsonArr,e);
             throw new WriteBigQueryException("Stream API write record to target error, data offset is : " + this.streamOffset.get() + ", message:" + e.getMessage());
         }
     }

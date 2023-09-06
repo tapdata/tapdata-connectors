@@ -59,11 +59,13 @@ public class BigQueryConnectorV2 extends ConnectorBase {
     private final AtomicBoolean running = new AtomicBoolean(Boolean.TRUE);
     private String tableId;
     private WriteValve valve;
+    private BigQueryExceptionCollector queryExceptionCollector;
     private final Object lock = new Object();
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Throwable {
         this.writeRecord = (WriteRecord) WriteRecord.create(connectionContext).autoStart();
         this.tableCreate = (TableCreate) TableCreate.create(connectionContext).paperStart(this.writeRecord);
+        this.queryExceptionCollector = new BigQueryExceptionCollector();
         if (connectionContext instanceof TapConnectorContext) {
             TapConnectorContext context = (TapConnectorContext) connectionContext;
             isConnectorStarted(connectionContext, connectorContext -> {
@@ -178,11 +180,17 @@ public class BigQueryConnectorV2 extends ConnectorBase {
     }
 
     private CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) {
-        CreateTableOptions createTableOptions = CreateTableOptions.create().tableExists(tableCreate.isExist(createTableEvent));
-        if (!createTableOptions.getTableExists()) {
-            this.tableCreate.createSchema(createTableEvent);
+        try{
+            CreateTableOptions createTableOptions = CreateTableOptions.create().tableExists(tableCreate.isExist(createTableEvent));
+            if (!createTableOptions.getTableExists()) {
+                this.tableCreate.createSchema(createTableEvent);
+            }
+            return createTableOptions;
+        }catch (Throwable t){
+            queryExceptionCollector.collectUserPwdInvalid("jwt",t);
+            queryExceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), t);
+            throw t;
         }
-        return createTableOptions;
     }
 
     private CommandResult command(TapConnectionContext context, CommandInfo commandInfo) {
@@ -209,6 +217,7 @@ public class BigQueryConnectorV2 extends ConnectorBase {
                                     throw new CoreException(e.getMessage());
                                 }else {
                                     TapLogger.error(TAG, "uploadEvents size {} to table {} failed, {}", writeList.size(), targetTable.getId(), e.getMessage());
+                                    throw new RuntimeException(e);
                                 }
                             }
                         },
