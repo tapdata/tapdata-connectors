@@ -67,6 +67,8 @@ public class KafkaSRService extends KafkaService {
     private TapConnectionContext tapConnectionContext;
     private Boolean isBasicAuth;
 
+    private final KafkaExceptionCollector kafkaExceptionCollector = new KafkaExceptionCollector();
+
     public KafkaSRService() {
         super();
     }
@@ -250,6 +252,10 @@ public class KafkaSRService extends KafkaService {
                 Callback callback = (metadata, exception) -> {
                     try {
                         if (EmptyKit.isNotNull(exception)) {
+                            kafkaExceptionCollector.collectTerminateByServer(exception);
+                            kafkaExceptionCollector.collectUserPwdInvalid(mqConfig.getMqUsername(), exception);
+                            kafkaExceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), exception);
+                            kafkaExceptionCollector.collectWriteLength(null,null,event,exception);
                             listResult.addError(event, exception);
                         }
                         switch (finalMqOp) {

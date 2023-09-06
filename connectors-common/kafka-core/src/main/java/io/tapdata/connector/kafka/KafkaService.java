@@ -62,6 +62,8 @@ public class KafkaService extends AbstractMqService {
     private KafkaConfig kafkaConfig;
     private static final ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata"); //script factory
 
+    private KafkaExceptionCollector kafkaExceptionCollector;
+
 
     public KafkaService() {
 
@@ -70,6 +72,7 @@ public class KafkaService extends AbstractMqService {
     public KafkaService(KafkaConfig mqConfig, Log tapLogger) {
         this.mqConfig = mqConfig;
         this.tapLogger = tapLogger;
+        this.kafkaExceptionCollector = new KafkaExceptionCollector();
         ProducerConfiguration producerConfiguration = new ProducerConfiguration(mqConfig, connectorId);
         try {
             kafkaProducer = new KafkaProducer<>(producerConfiguration.build());
@@ -274,6 +277,10 @@ public class KafkaService extends AbstractMqService {
                 Callback callback = (metadata, exception) -> {
                     try {
                         if (EmptyKit.isNotNull(exception)) {
+                            kafkaExceptionCollector.collectTerminateByServer(exception);
+                            kafkaExceptionCollector.collectUserPwdInvalid(mqConfig.getMqUsername(), exception);
+                            kafkaExceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), exception);
+                            kafkaExceptionCollector.collectWriteLength(null,null,event,exception);
                             listResult.addError(event, exception);
                         }
                         switch (finalMqOp) {
@@ -386,7 +393,7 @@ public class KafkaService extends AbstractMqService {
                                 map.remove("after");
                             }
                             res.put("data",map);
-                            body = jsonParser.toJsonBytes(res.get("data"));
+                            body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
                         }else {
                             body = obj.toString().getBytes();
                         }
