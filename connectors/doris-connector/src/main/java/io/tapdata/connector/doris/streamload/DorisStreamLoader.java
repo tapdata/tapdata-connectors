@@ -184,6 +184,7 @@ public class DorisStreamLoader {
                     || respContent.getMessage().toLowerCase().contains("access denied")) {
                 throw new StreamLoadException("Stream load failed | Error: " + loadResult);
             }
+            throw new DorisRetryableException(loadResult);
         }
         return respContent;
     }
