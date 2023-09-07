@@ -34,7 +34,7 @@ public class MysqlColumn extends CommonColumn {
 
     @Override
     protected Boolean isNullable() {
-        if (EmptyKit.isNull(version) || "5.6".compareTo(version) > 0) {
+        if (EmptyKit.isNotNull(version) && "5.6".compareTo(version) > 0) {
             return true;
         }
         return "YES".equals(this.nullable);

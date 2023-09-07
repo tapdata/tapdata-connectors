@@ -49,6 +49,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * @author samuel
@@ -283,55 +284,55 @@ public class MysqlConnector extends CommonDbConnector {
                 createTableOptions.setTableExists(false);
             }
 
-		} catch (Throwable t) {
-			exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), t);
-			throw new RuntimeException("Create table failed, message: " + t.getMessage(), t);
-		}
-		List<TapIndex> indexList = tapCreateTableEvent.getTable().getIndexList();
-		if (EmptyKit.isNotEmpty(indexList) && tapConnectorContext.getNodeConfig() != null && tapConnectorContext.getNodeConfig().getValue("syncIndex", false)) {
-			List<String> sqlList = TapSimplify.list();
-			List<TapIndex> createIndexList = new ArrayList<>();
-			List<TapIndex> existsIndexList = discoverIndex(tapCreateTableEvent.getTable().getId());
-			// 如果索引已经存在，就不再创建; 名字相同视为存在; 字段以及顺序相同, 也视为存在
-			if (EmptyKit.isNotEmpty(existsIndexList)) {
-				for (TapIndex tapIndex : indexList) {
-					boolean exists = false;
-					for (TapIndex existsIndex : existsIndexList) {
-						if (tapIndex.getName().equals(existsIndex.getName())) {
-							exists = true;
-							break;
-						}
-						if (tapIndex.getIndexFields().size() == existsIndex.getIndexFields().size()) {
-							boolean same = true;
-							for (int i = 0; i < tapIndex.getIndexFields().size(); i++) {
-								if (!tapIndex.getIndexFields().get(i).getName().equals(existsIndex.getIndexFields().get(i).getName())
-										|| tapIndex.getIndexFields().get(i).getFieldAsc() != existsIndex.getIndexFields().get(i).getFieldAsc()) {
-									same = false;
-									break;
-								}
-							}
-							if (same) {
-								exists = true;
-								break;
-							}
-						}
-					}
-					if (!exists) {
-						createIndexList.add(tapIndex);
-					}
-				}
-			} else {
-				createIndexList.addAll(indexList);
-			}
-			TapLogger.info(TAG, "Table: {} will create Index list: {}", tapCreateTableEvent.getTable().getName(), createIndexList);
-			if (EmptyKit.isNotEmpty(createIndexList)) {
-				createIndexList.stream().filter(i -> !i.isPrimary()).forEach(i ->
-						sqlList.add(getCreateIndexSql(tapCreateTableEvent.getTable(), i)));
-			}
-			jdbcContext.batchExecute(sqlList);
-		}
-		return createTableOptions;
-	}
+        } catch (Throwable t) {
+            exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), t);
+            throw new RuntimeException("Create table failed, message: " + t.getMessage(), t);
+        }
+        List<TapIndex> indexList = tapCreateTableEvent.getTable().getIndexList();
+        if (EmptyKit.isNotEmpty(indexList) && tapConnectorContext.getNodeConfig() != null && tapConnectorContext.getNodeConfig().getValue("syncIndex", false)) {
+            List<String> sqlList = TapSimplify.list();
+            List<TapIndex> createIndexList = new ArrayList<>();
+            List<TapIndex> existsIndexList = discoverIndex(tapCreateTableEvent.getTable().getId());
+            // 如果索引已经存在，就不再创建; 名字相同视为存在; 字段以及顺序相同, 也视为存在
+            if (EmptyKit.isNotEmpty(existsIndexList)) {
+                for (TapIndex tapIndex : indexList) {
+                    boolean exists = false;
+                    for (TapIndex existsIndex : existsIndexList) {
+                        if (tapIndex.getName().equals(existsIndex.getName())) {
+                            exists = true;
+                            break;
+                        }
+                        if (tapIndex.getIndexFields().size() == existsIndex.getIndexFields().size()) {
+                            boolean same = true;
+                            for (int i = 0; i < tapIndex.getIndexFields().size(); i++) {
+                                if (!tapIndex.getIndexFields().get(i).getName().equals(existsIndex.getIndexFields().get(i).getName())
+                                        || tapIndex.getIndexFields().get(i).getFieldAsc() != existsIndex.getIndexFields().get(i).getFieldAsc()) {
+                                    same = false;
+                                    break;
+                                }
+                            }
+                            if (same) {
+                                exists = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!exists) {
+                        createIndexList.add(tapIndex);
+                    }
+                }
+            } else {
+                createIndexList.addAll(indexList);
+            }
+            TapLogger.info(TAG, "Table: {} will create Index list: {}", tapCreateTableEvent.getTable().getName(), createIndexList);
+            if (EmptyKit.isNotEmpty(createIndexList)) {
+                createIndexList.stream().filter(i -> !i.isPrimary()).forEach(i ->
+                        sqlList.add(getCreateIndexSql(tapCreateTableEvent.getTable(), i)));
+            }
+            jdbcContext.batchExecute(sqlList);
+        }
+        return createTableOptions;
+    }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
         WriteListResult<TapRecordEvent> writeListResult = this.mysqlWriter.write(tapConnectorContext, tapTable, tapRecordEvents);
@@ -375,9 +376,13 @@ public class MysqlConnector extends CommonDbConnector {
     }
 
     private void batchReadV2(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-//        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> "`" + c + "`").collect(Collectors.joining(","));
-        String sql = String.format("SELECT * FROM `" + tapConnectorContext.getConnectionConfig().getString("database") + "`.`" + tapTable.getId() + "`");
-
+        String sql;
+        if (tapTable.getNameFieldMap().size() > 50) {
+            sql = "SELECT * FROM `" + mysqlConfig.getDatabase() + "`.`" + tapTable.getId() + "`";
+        } else {
+            String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> "`" + c + "`").collect(Collectors.joining(","));
+            sql = String.format("SELECT %s FROM `" + mysqlConfig.getDatabase() + "`.`" + tapTable.getId() + "`", columns);
+        }
         mysqlJdbcContext.query(sql, resultSet -> {
             List<TapEvent> tapEvents = list();
             //get all column names
