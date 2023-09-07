@@ -9,6 +9,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 
@@ -96,7 +97,10 @@ public class NormalRecordWriter {
         } catch (SQLException e) {
             exceptionCollector.collectTerminateByServer(e);
             exceptionCollector.collectViolateNull(null, e);
-            TapRecordEvent errorEvent = listResult.getErrorMap().keySet().stream().findFirst().orElse(null);
+            TapRecordEvent errorEvent = null;
+            if (EmptyKit.isNotNull(listResult.getErrorMap())) {
+                errorEvent = listResult.getErrorMap().keySet().stream().findFirst().orElse(null);
+            }
             exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), errorEvent, null, e);
             exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
             exceptionCollector.collectWriteType(null, null, errorEvent, e);
