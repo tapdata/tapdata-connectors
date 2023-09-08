@@ -13,8 +13,8 @@
     <packaging>jar</packaging>
 
     <properties>
-        <tapdata.api.version>1.2.5-RELEASE</tapdata.api.version>
-        <tapdata.pdk.api.version>1.2.5-RELEASE</tapdata.pdk.api.version>
+        <tapdata.api.version>1.2.6-RELEASE</tapdata.api.version>
+        <tapdata.pdk.api.version>1.2.6-RELEASE</tapdata.pdk.api.version>
         <java.version>8</java.version>
     </properties>
 
