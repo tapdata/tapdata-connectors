@@ -180,7 +180,7 @@ public class TidbConnector extends CommonDbConnector {
     }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
-        new TidbRecordWriter(tidbJdbcContext, tapTable).write(tapRecordEvents, consumer);
+        new TidbRecordWriter(tidbJdbcContext, tapTable).write(tapRecordEvents, consumer, this::isAlive);
     }
 
     @Override
