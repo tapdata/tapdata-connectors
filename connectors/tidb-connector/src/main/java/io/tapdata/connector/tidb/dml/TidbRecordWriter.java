@@ -1,7 +1,7 @@
 package io.tapdata.connector.tidb.dml;
 
 import io.tapdata.common.JdbcContext;
-import io.tapdata.common.RecordWriter;
+import io.tapdata.common.dml.NormalRecordWriter;
 import io.tapdata.entity.schema.TapTable;
 
 import java.sql.SQLException;
@@ -9,7 +9,7 @@ import java.sql.SQLException;
 /**
  * @author lemon
  */
-public class TidbRecordWriter extends RecordWriter {
+public class TidbRecordWriter extends NormalRecordWriter {
 
     public TidbRecordWriter(JdbcContext jdbcContext, TapTable tapTable) throws SQLException {
         super(jdbcContext, tapTable);
