@@ -9,6 +9,7 @@ public enum ValueTypeEnum {
     HASH("Hash"),
     SET("Set"),
     ZSET("ZSet"),
+    REDIS("Redis"),
     ;
 
     private final String type;

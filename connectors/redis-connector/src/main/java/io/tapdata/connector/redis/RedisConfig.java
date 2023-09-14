@@ -1,14 +1,13 @@
 package io.tapdata.connector.redis;
 
+import io.tapdata.connector.redis.constant.DeployModeEnum;
 import io.tapdata.entity.utils.BeanUtils;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.kit.EmptyKit;
+import org.apache.commons.lang3.StringUtils;
 import redis.clients.jedis.HostAndPort;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class RedisConfig {
@@ -47,6 +46,27 @@ public class RedisConfig {
                     new HostAndPort(String.valueOf(v.get("host")), v.get("port"))).collect(Collectors.toList());
         }
         return this;
+    }
+
+    public String getReplicatorUri() {
+        StringBuilder uri = new StringBuilder();
+        switch (Objects.requireNonNull(DeployModeEnum.fromString(deploymentMode))) {
+            case STANDALONE:
+                uri.append("redis://").append(host).append(":").append(port);
+                break;
+            case SENTINEL:
+                uri.append("redis-sentinel://");
+                uri.append(clusterNodes.stream().map(v -> v.getHost() + ":" + v.getPort()).collect(Collectors.joining(",")));
+                break;
+        }
+        uri.append("?1=1");
+        if (StringUtils.isNotBlank(password)) {
+            uri.append("&authPassword=").append(password);
+        }
+        if (StringUtils.isNotBlank(sentinelName)) {
+            uri.append("&master=").append(sentinelName);
+        }
+        return uri.toString();
     }
 
     public String getHost() {

@@ -1,8 +1,14 @@
 package io.tapdata.connector.redis;
 
-import redis.clients.jedis.*;
+import io.tapdata.connector.redis.pipeline.ClusterExtPipeline;
+import io.tapdata.connector.redis.pipeline.ShardedExtPipeline;
+import redis.clients.jedis.GeoCoordinate;
+import redis.clients.jedis.Pipeline;
+import redis.clients.jedis.Response;
+import redis.clients.jedis.StreamEntryID;
 import redis.clients.jedis.args.*;
 import redis.clients.jedis.commands.PipelineCommands;
+import redis.clients.jedis.commands.ProtocolCommand;
 import redis.clients.jedis.params.*;
 import redis.clients.jedis.resps.*;
 import redis.clients.jedis.util.KeyValue;
@@ -35,10 +41,26 @@ public class RedisPipeline implements PipelineCommands, Closeable {
     public void sync() {
         if (pipelineCommands instanceof Pipeline) {
             ((Pipeline) pipelineCommands).sync();
-        } else if (pipelineCommands instanceof ClusterPipeline) {
-            ((ClusterPipeline) pipelineCommands).sync();
-        } else if (pipelineCommands instanceof ShardedPipeline) {
-            ((ShardedPipeline) pipelineCommands).sync();
+        } else if (pipelineCommands instanceof ClusterExtPipeline) {
+            ((ClusterExtPipeline) pipelineCommands).sync();
+        } else if (pipelineCommands instanceof ShardedExtPipeline) {
+            ((ShardedExtPipeline) pipelineCommands).sync();
+        }
+    }
+
+    public void select(int dbName) {
+        if (pipelineCommands instanceof Pipeline) {
+            ((Pipeline) pipelineCommands).select(dbName);
+        }
+    }
+
+    public void sendCommand(ProtocolCommand cmd, byte[]... args) {
+        if (pipelineCommands instanceof Pipeline) {
+            ((Pipeline) pipelineCommands).sendCommand(cmd, args);
+        } else if (pipelineCommands instanceof ClusterExtPipeline) {
+            ((ClusterExtPipeline) pipelineCommands).sendCommand(cmd, args);
+        } else if (pipelineCommands instanceof ShardedExtPipeline) {
+            ((ShardedExtPipeline) pipelineCommands).sendCommand(cmd, args);
         }
     }
 
@@ -404,12 +426,12 @@ public class RedisPipeline implements PipelineCommands, Closeable {
 
     @Override
     public Response<String> restore(String s, long l, byte[] bytes) {
-        return null;
+        return pipelineCommands.restore(s, l, bytes);
     }
 
     @Override
     public Response<String> restore(String s, long l, byte[] bytes, RestoreParams restoreParams) {
-        return null;
+        return pipelineCommands.restore(s, l, bytes, restoreParams);
     }
 
     @Override

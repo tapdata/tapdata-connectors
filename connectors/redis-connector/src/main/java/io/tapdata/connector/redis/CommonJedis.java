@@ -1,5 +1,7 @@
 package io.tapdata.connector.redis;
 
+import io.tapdata.connector.redis.pipeline.ClusterExtPipeline;
+import io.tapdata.connector.redis.pipeline.ShardedExtPipeline;
 import io.tapdata.kit.EmptyKit;
 import redis.clients.jedis.*;
 import redis.clients.jedis.args.*;
@@ -35,9 +37,21 @@ public class CommonJedis implements JedisCommands, Closeable {
         if (jedisCommands instanceof Jedis) {
             return new RedisPipeline(((Jedis) jedisCommands).pipelined());
         } else if (jedisCommands instanceof JedisCluster) {
-            return new RedisPipeline(new ClusterPipeline(new HashSet<>(redisConfig.getClusterNodes()), clientConfigBuilder.build()));
+            return new RedisPipeline(new ClusterExtPipeline(new HashSet<>(redisConfig.getClusterNodes()), clientConfigBuilder.build()));
         } else if (jedisCommands instanceof JedisSharding) {
-            return new RedisPipeline(new ShardedPipeline(redisConfig.getClusterNodes(), clientConfigBuilder.build()));
+            return new RedisPipeline(new ShardedExtPipeline(redisConfig.getClusterNodes(), clientConfigBuilder.build()));
+        } else {
+            throw new UnsupportedOperationException("unsupported jedisCommands type");
+        }
+    }
+
+    public long countKeys() {
+        if (jedisCommands instanceof Jedis) {
+            return ((Jedis) jedisCommands).dbSize();
+        } else if (jedisCommands instanceof JedisCluster) {
+            return ((JedisCluster) jedisCommands).dbSize();
+        } else if (jedisCommands instanceof JedisSharding) {
+            return ((JedisSharding) jedisCommands).dbSize();
         } else {
             throw new UnsupportedOperationException("unsupported jedisCommands type");
         }
