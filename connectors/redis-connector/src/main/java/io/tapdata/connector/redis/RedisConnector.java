@@ -1,25 +1,30 @@
 package io.tapdata.connector.redis;
 
+import com.moilioncircle.redis.replicator.Configuration;
 import com.moilioncircle.redis.replicator.RedisReplicator;
 import com.moilioncircle.redis.replicator.Replicator;
-import com.moilioncircle.redis.replicator.cmd.Command;
-import com.moilioncircle.redis.replicator.cmd.CommandName;
 import com.moilioncircle.redis.replicator.cmd.impl.AbstractCommand;
 import com.moilioncircle.redis.replicator.cmd.impl.DefaultCommand;
-import com.moilioncircle.redis.replicator.cmd.impl.GenericKeyCommand;
-import com.moilioncircle.redis.replicator.cmd.impl.GenericKeyValueCommand;
+import com.moilioncircle.redis.replicator.cmd.impl.PingCommand;
 import com.moilioncircle.redis.replicator.rdb.datatype.AuxField;
+import com.moilioncircle.redis.replicator.rdb.datatype.ZSetEntry;
 import com.moilioncircle.redis.replicator.rdb.dump.datatype.DumpKeyValuePair;
 import com.moilioncircle.redis.replicator.rdb.dump.parser.DefaultDumpValueParser;
 import com.moilioncircle.redis.replicator.util.ByteArrayList;
 import com.moilioncircle.redis.replicator.util.ByteArrayMap;
+import com.moilioncircle.redis.replicator.util.ByteArraySet;
 import io.tapdata.base.ConnectorBase;
+import io.tapdata.connector.redis.bean.ZSetElement;
+import io.tapdata.connector.redis.constant.DeployModeEnum;
 import io.tapdata.connector.redis.constant.ValueTypeEnum;
 import io.tapdata.connector.redis.exception.RedisExceptionCollector;
+import io.tapdata.connector.redis.sentinel.RedisSentinelReplicator;
+import io.tapdata.connector.redis.sentinel.RedisSentinelURI;
 import io.tapdata.connector.redis.util.RedisUtil;
 import io.tapdata.connector.redis.writer.*;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
@@ -31,7 +36,6 @@ import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -40,7 +44,9 @@ import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
+import org.apache.commons.lang3.StringUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -55,9 +61,12 @@ public class RedisConnector extends ConnectorBase {
     private final static String INIT_TABLE_NAME = "tapdata";
     private final static String INIT_FIELD_KEY_NAME = "redis_key";
     private final static String INIT_FIELD_VALUE_NAME = "redis_value";
+    private final byte[] publishBytes = "PUBLISH".getBytes(StandardCharsets.UTF_8);
+    private final byte[] helloBytes = "__sentinel__:hello".getBytes(StandardCharsets.UTF_8);
     private RedisConfig redisConfig;
     private RedisContext redisContext;
     private RedisExceptionCollector redisExceptionCollector;
+    private String firstConnectorId;
 
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Throwable {
@@ -85,7 +94,14 @@ public class RedisConnector extends ConnectorBase {
     public void initConnection(TapConnectionContext connectionContext) throws Throwable {
         this.redisConfig = new RedisConfig();
         redisConfig.load(connectionContext.getConnectionConfig());
-        redisConfig.load(connectionContext.getNodeConfig());
+        isConnectorStarted(connectionContext, connectorContext -> {
+            firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = connectionContext.getId();
+                connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
+            redisConfig.load(connectionContext.getNodeConfig());
+        });
         this.redisContext = new RedisContext(redisConfig);
         this.redisExceptionCollector = new RedisExceptionCollector();
     }
@@ -216,15 +232,9 @@ public class RedisConnector extends ConnectorBase {
     }
 
     private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        String offsetStr;
-        if (EmptyKit.isNull(offsetState)) {
-            offsetStr = "";
-        } else {
-            RedisOffset redisOffset = (RedisOffset) offsetState;
-            offsetStr = "&replOffset=" + redisOffset.getOffsetV1() + "&replId=" + redisOffset.getReplId();
-        }
+        RedisOffset redisOffset = (RedisOffset) offsetState;
         try (
-                Replicator redisReplicator = new RedisReplicator(redisConfig.getReplicatorUri() + offsetStr)
+                Replicator redisReplicator = generateReplicator(redisOffset)
         ) {
             RedisUtil.dress(redisReplicator);
             AtomicReference<Throwable> throwable = new AtomicReference<>();
@@ -234,7 +244,7 @@ public class RedisConnector extends ConnectorBase {
             DefaultDumpValueParser parser = new DefaultDumpValueParser(redisReplicator);
             redisReplicator.addEventListener((replicator, event) -> {
                 if (!isAlive() || event instanceof AbstractCommand) {
-                    ErrorKit.ignoreAnyError(redisReplicator::close);
+                    EmptyKit.closeQuietly(redisReplicator);
                 }
                 try {
                     if (event instanceof DumpKeyValuePair) {
@@ -264,7 +274,7 @@ public class RedisConnector extends ConnectorBase {
                     }
                 } catch (Exception e) {
                     throwable.set(e);
-                    ErrorKit.ignoreAnyError(redisReplicator::close);
+                    EmptyKit.closeQuietly(redisReplicator);
                 }
             });
             redisReplicator.open();
@@ -286,14 +296,8 @@ public class RedisConnector extends ConnectorBase {
         } else {
             redisOffset = (RedisOffset) offsetState;
         }
-        String offsetStr;
-        if (EmptyKit.isNull(redisOffset)) {
-            offsetStr = "";
-        } else {
-            offsetStr = "&replOffset=" + redisOffset.getOffsetV1() + "&replId=" + redisOffset.getReplId();
-        }
         try (
-                Replicator redisReplicator = new RedisReplicator(redisConfig.getReplicatorUri() + offsetStr)
+                Replicator redisReplicator = generateReplicator(redisOffset)
         ) {
             RedisUtil.dress(redisReplicator);
             AtomicReference<Throwable> throwable = new AtomicReference<>();
@@ -301,9 +305,10 @@ public class RedisConnector extends ConnectorBase {
             AtomicLong offsetV1 = new AtomicLong();
             List<TapEvent> eventList = TapSimplify.list();
             AtomicInteger dbNumber = new AtomicInteger();
+            AtomicInteger helloCount = new AtomicInteger(0);
             redisReplicator.addEventListener((replicator, event) -> {
                 if (!isAlive()) {
-                    ErrorKit.ignoreAnyError(redisReplicator::close);
+                    EmptyKit.closeQuietly(redisReplicator);
                 }
                 try {
                     if (event instanceof DefaultCommand) {
@@ -313,23 +318,23 @@ public class RedisConnector extends ConnectorBase {
                             dbNumber.set(Integer.parseInt(new String(commandEvent.getArgs()[0])));
                             return;
                         }
+                        if (((DefaultCommand) event).getArgs().length > 0) {
+                            if (Arrays.equals(publishBytes, commandEvent.getCommand()) && Arrays.equals(helloBytes, ((DefaultCommand) event).getArgs()[0])) {
+                                helloCount.incrementAndGet();
+                                if (helloCount.get() >= 1000) {
+                                    helloCount.set(0);
+                                    consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), new RedisOffset(replId.get(), ((DefaultCommand) event).getContext().getOffsets().getV1()));
+                                }
+                                return;
+                            }
+                        }
                         if (dbNumber.get() != redisConfig.getDatabase()) {
                             return;
                         }
-                        Command redisCommand = replicator.getCommandParser(CommandName.name(command)).parse(commandEvent.getArgs());
-                        Map<String, Object> after;
-                        if (redisCommand instanceof GenericKeyValueCommand) {
-                            after = TapSimplify.map(TapSimplify.entry("redis_key", new String(((GenericKeyValueCommand) redisCommand).getKey())));
-                            if (((GenericKeyValueCommand) redisCommand).getValue().length > 10240) {
-                                after.put("redis_value", "value too large, check info");
-                            } else {
-                                after.put("redis_value", new String(((GenericKeyValueCommand) redisCommand).getValue()));
-                            }
-                        } else if (redisCommand instanceof GenericKeyCommand) {
-                            after = TapSimplify.map(TapSimplify.entry("redis_key", new String(((GenericKeyCommand) redisCommand).getKey())));
-                            after.put("redis_value", command + "(" + Arrays.stream(commandEvent.getArgs()).map(String::new).collect(Collectors.joining(", ")) + ")");
+                        Map<String, Object> after = TapSimplify.map(TapSimplify.entry("redis_key", commandEvent.getArgs().length > 0 ? new String(commandEvent.getArgs()[0]) : command));
+                        if (Arrays.stream(commandEvent.getArgs()).map(v -> v.length).reduce(Integer::sum).orElse(0) > 10240) {
+                            after.put("redis_value", "value too large, check info");
                         } else {
-                            after = TapSimplify.map(TapSimplify.entry("redis_key", command));
                             after.put("redis_value", command + "(" + Arrays.stream(commandEvent.getArgs()).map(String::new).collect(Collectors.joining(", ")) + ")");
                         }
                         TapRecordEvent recordEvent = new TapInsertRecordEvent().init().table(INIT_TABLE_NAME).after(after).referenceTime(System.currentTimeMillis());
@@ -345,10 +350,12 @@ public class RedisConnector extends ConnectorBase {
                         if ("repl-id".equals(auxField.getAuxKey())) {
                             replId.set(auxField.getAuxValue());
                         }
+                    } else if (event instanceof PingCommand) {
+                        consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), new RedisOffset(replId.get(), ((PingCommand) event).getContext().getOffsets().getV1()));
                     }
                 } catch (Exception e) {
                     throwable.set(e);
-                    ErrorKit.ignoreAnyError(redisReplicator::close);
+                    EmptyKit.closeQuietly(redisReplicator);
                 }
             });
             redisReplicator.open();
@@ -358,6 +365,36 @@ public class RedisConnector extends ConnectorBase {
             if (EmptyKit.isNotNull(throwable.get())) {
                 throw throwable.get();
             }
+        }
+    }
+
+    private Replicator generateReplicator(RedisOffset redisOffset) throws Exception {
+        String offsetStr;
+        if (EmptyKit.isNull(redisOffset)) {
+            offsetStr = "";
+        } else {
+            offsetStr = "&replOffset=" + redisOffset.getOffsetV1() + "&replId=" + redisOffset.getReplId();
+        }
+        if (DeployModeEnum.fromString(redisConfig.getDeploymentMode()) == DeployModeEnum.STANDALONE) {
+            return new RedisReplicator(redisConfig.getReplicatorUri() + offsetStr);
+        } else if (DeployModeEnum.fromString(redisConfig.getDeploymentMode()) == DeployModeEnum.SENTINEL) {
+            int slavePort = 40000 + firstConnectorId.hashCode() % 10000;
+            String sentinelUrl = redisConfig.getReplicatorUri() + "&slavePort=" + slavePort;
+            RedisSentinelURI redisSentinelURI = new RedisSentinelURI(sentinelUrl + offsetStr);
+            final Configuration configuration = Configuration.defaultSetting();
+            if (EmptyKit.isNotNull(redisOffset)) {
+                configuration.setReplId(redisOffset.getReplId());
+                configuration.setReplOffset(redisOffset.getOffsetV1());
+            }
+            configuration.setSlavePort(slavePort);
+            if (StringUtils.isNotBlank(redisConfig.getPassword())) {
+                configuration.setAuthPassword(redisConfig.getPassword());
+            }
+            configuration.setRetries(36000);
+            configuration.setRetryTimeInterval(10);
+            return new RedisSentinelReplicator(redisSentinelURI, configuration);
+        } else {
+            return null;
         }
     }
 
@@ -372,6 +409,20 @@ public class RedisConnector extends ConnectorBase {
             return toJson(list);
         } else if (obj instanceof byte[]) {
             return new String((byte[]) obj);
+        } else if (obj instanceof ByteArraySet) {
+            Set<String> set = new HashSet<>();
+            ((ByteArraySet) obj).forEach(v -> set.add(new String(v)));
+            return toJson(set);
+        } else if (obj instanceof LinkedHashSet) {
+            Set<ZSetElement> zSet = new LinkedHashSet<>();
+            ((LinkedHashSet) obj).forEach(v -> {
+                ZSetEntry entry = (ZSetEntry) v;
+                ZSetElement zSetElement = new ZSetElement();
+                zSetElement.setElement(new String(entry.getElement()));
+                zSetElement.setScore(entry.getScore());
+                zSet.add(zSetElement);
+            });
+            return toJson(zSet);
         } else {
             return toJson(obj);
         }
