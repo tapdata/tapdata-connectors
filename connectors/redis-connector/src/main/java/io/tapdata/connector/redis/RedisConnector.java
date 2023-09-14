@@ -401,7 +401,7 @@ public class RedisConnector extends ConnectorBase {
             configuration.setRetryTimeInterval(10);
             return new RedisSentinelReplicator(redisSentinelURI, configuration);
         } else {
-            return null;
+            return new RedisReplicator(redisConfig.getReplicatorUri() + offsetStr);
         }
     }
 

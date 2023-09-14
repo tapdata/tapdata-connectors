@@ -58,12 +58,16 @@ public class RedisConfig {
                 uri.append("redis-sentinel://");
                 uri.append(clusterNodes.stream().map(v -> v.getHost() + ":" + v.getPort()).collect(Collectors.joining(",")));
                 break;
+            case CLUSTER:
+                uri.append("redis://");
+                uri.append(clusterNodes.stream().map(v -> v.getHost() + ":" + v.getPort()).collect(Collectors.joining(",")));
+                break;
         }
         uri.append("?1=1");
         if (StringUtils.isNotBlank(password)) {
             uri.append("&authPassword=").append(password);
         }
-        if (StringUtils.isNotBlank(sentinelName)) {
+        if (StringUtils.isNotBlank(sentinelName) && DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.SENTINEL) {
             uri.append("&master=").append(sentinelName);
         }
         return uri.toString();

@@ -48,12 +48,8 @@ public class CommonJedis implements JedisCommands, Closeable {
     public long countKeys() {
         if (jedisCommands instanceof Jedis) {
             return ((Jedis) jedisCommands).dbSize();
-        } else if (jedisCommands instanceof JedisCluster) {
-            return ((JedisCluster) jedisCommands).dbSize();
-        } else if (jedisCommands instanceof JedisSharding) {
-            return ((JedisSharding) jedisCommands).dbSize();
         } else {
-            throw new UnsupportedOperationException("unsupported jedisCommands type");
+            return 0;
         }
     }
 
