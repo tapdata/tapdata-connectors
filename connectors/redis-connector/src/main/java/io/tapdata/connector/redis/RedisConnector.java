@@ -243,8 +243,14 @@ public class RedisConnector extends ConnectorBase {
             List<TapEvent> eventList = TapSimplify.list();
             DefaultDumpValueParser parser = new DefaultDumpValueParser(redisReplicator);
             redisReplicator.addEventListener((replicator, event) -> {
-                if (!isAlive() || event instanceof AbstractCommand) {
+                if (!isAlive()) {
                     EmptyKit.closeQuietly(redisReplicator);
+                    return;
+                }
+                if (event instanceof AbstractCommand) {
+                    offsetV1.set(((AbstractCommand) event).getContext().getOffsets().getV2());
+                    EmptyKit.closeQuietly(redisReplicator);
+                    return;
                 }
                 try {
                     if (event instanceof DumpKeyValuePair) {
@@ -309,6 +315,7 @@ public class RedisConnector extends ConnectorBase {
             redisReplicator.addEventListener((replicator, event) -> {
                 if (!isAlive()) {
                     EmptyKit.closeQuietly(redisReplicator);
+                    return;
                 }
                 try {
                     if (event instanceof DefaultCommand) {
