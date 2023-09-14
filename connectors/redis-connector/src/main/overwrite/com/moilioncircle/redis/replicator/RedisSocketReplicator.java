@@ -205,7 +205,7 @@ public class RedisSocketReplicator extends AbstractReplicator {
             final String reply = Strings.toString(reply());
             logger.info(reply);
             if (Objects.equals(reply, "OK")) return;
-            if (reply.contains("no password")) {
+            if (reply.contains("no password") || reply.contains("without any password")) {
                 if (user == null) {
                     logger.warn("[AUTH {}] failed. {}", mask, reply);
                 } else {
@@ -357,7 +357,7 @@ public class RedisSocketReplicator extends AbstractReplicator {
             this.inputStream = new RedisInputStream(inputStream, configuration.getBufferSize());
             this.inputStream.setRawByteListeners(this.rawByteListeners);
             replyParser = new ReplyParser(this.inputStream, new RedisCodec());
-            logger.info("Connected to redis-server[{}:{}]", host, port);
+            logger.info("connected to redis-server[{}:{}]", host, port);
         } finally {
             setStatus(CONNECTED);
         }

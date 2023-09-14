@@ -380,7 +380,7 @@ public class RedisConnector extends ConnectorBase {
         } else if (DeployModeEnum.fromString(redisConfig.getDeploymentMode()) == DeployModeEnum.SENTINEL) {
             int slavePort = 40000 + firstConnectorId.hashCode() % 10000;
             String sentinelUrl = redisConfig.getReplicatorUri() + "&slavePort=" + slavePort;
-            RedisSentinelURI redisSentinelURI = new RedisSentinelURI(sentinelUrl + offsetStr);
+            RedisSentinelURI redisSentinelURI = new RedisSentinelURI(sentinelUrl);
             final Configuration configuration = Configuration.defaultSetting();
             if (EmptyKit.isNotNull(redisOffset)) {
                 configuration.setReplId(redisOffset.getReplId());

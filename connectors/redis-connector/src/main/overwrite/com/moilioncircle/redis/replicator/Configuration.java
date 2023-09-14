@@ -188,11 +188,25 @@ public class Configuration {
     this.slavePort = slavePort;
   }
 
-  /**
+    /**
      * @since 3.5.0
      * heartbeat scheduled executor
      */
     private ScheduledExecutorService scheduledExecutor;
+
+    /**
+     * @since 3.7.0
+     *
+     * use SCAN command instead of SYNC and PSYNC
+     */
+    private boolean enableScan = false;
+
+    /**
+     * @since 3.7.0
+     *
+     * set SCAN COUNT if enableScan = true
+     */
+    private int scanStep = 512;
 
     public int getConnectionTimeout() {
         return connectionTimeout;
@@ -424,6 +438,24 @@ public class Configuration {
         return this;
     }
 
+    public boolean isEnableScan() {
+        return enableScan;
+    }
+
+    public Configuration setEnableScan(boolean enableScan) {
+        this.enableScan = enableScan;
+        return this;
+    }
+
+    public int getScanStep() {
+        return scanStep;
+    }
+
+    public Configuration setScanStep(int scanStep) {
+        this.scanStep = scanStep;
+        return this;
+    }
+
     public Configuration merge(SslConfiguration sslConfiguration) {
         if (sslConfiguration == null) return this;
         this.setSslParameters(sslConfiguration.getSslParameters());
@@ -496,6 +528,15 @@ public class Configuration {
         if (parameters.containsKey("replOffset")) {
             configuration.setReplOffset(getLong(parameters.get("replOffset"), -1L));
         }
+
+        // scan
+        if (parameters.containsKey("enableScan")) {
+            configuration.setEnableScan(getBool(parameters.get("enableScan"), false));
+        }
+        if (parameters.containsKey("scanStep")) {
+            configuration.setScanStep(getInt(parameters.get("scanStep"), 512));
+        }
+
         // redis 6
         if (uri.isSsl()) {
             configuration.setSsl(true);
@@ -558,6 +599,8 @@ public class Configuration {
                 ", heartbeatPeriod=" + heartbeatPeriod +
                 ", scheduledExecutor=" + scheduledExecutor +
                 ", useDefaultExceptionListener=" + useDefaultExceptionListener +
+                ", enableScan=" + enableScan +
+                ", scanStep=" + scanStep +
                 ", ssl=" + ssl +
                 ", sslSocketFactory=" + sslSocketFactory +
                 ", sslContextFactory=" + sslContextFactory +
