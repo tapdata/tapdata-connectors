@@ -3,9 +3,9 @@ package io.tapdata.connector.redis;
 import com.moilioncircle.redis.replicator.Configuration;
 import com.moilioncircle.redis.replicator.RedisReplicator;
 import com.moilioncircle.redis.replicator.Replicator;
-import com.moilioncircle.redis.replicator.cmd.impl.AbstractCommand;
 import com.moilioncircle.redis.replicator.cmd.impl.DefaultCommand;
 import com.moilioncircle.redis.replicator.cmd.impl.PingCommand;
+import com.moilioncircle.redis.replicator.event.PreCommandSyncEvent;
 import com.moilioncircle.redis.replicator.rdb.datatype.AuxField;
 import com.moilioncircle.redis.replicator.rdb.datatype.ZSetEntry;
 import com.moilioncircle.redis.replicator.rdb.dump.datatype.DumpKeyValuePair;
@@ -244,12 +244,12 @@ public class RedisConnector extends ConnectorBase {
             DefaultDumpValueParser parser = new DefaultDumpValueParser(redisReplicator);
             redisReplicator.addEventListener((replicator, event) -> {
                 if (!isAlive()) {
-                    EmptyKit.closeQuietly(redisReplicator);
+                    EmptyKit.closeAsyncQuietly(redisReplicator);
                     return;
                 }
-                if (event instanceof AbstractCommand) {
-                    offsetV1.set(((AbstractCommand) event).getContext().getOffsets().getV2());
-                    EmptyKit.closeQuietly(redisReplicator);
+                if (event instanceof PreCommandSyncEvent) {
+                    offsetV1.set(((PreCommandSyncEvent) event).getContext().getOffsets().getV2());
+                    EmptyKit.closeAsyncQuietly(redisReplicator);
                     return;
                 }
                 try {
@@ -280,7 +280,7 @@ public class RedisConnector extends ConnectorBase {
                     }
                 } catch (Exception e) {
                     throwable.set(e);
-                    EmptyKit.closeQuietly(redisReplicator);
+                    EmptyKit.closeAsyncQuietly(redisReplicator);
                 }
             });
             redisReplicator.open();
@@ -307,14 +307,14 @@ public class RedisConnector extends ConnectorBase {
         ) {
             RedisUtil.dress(redisReplicator);
             AtomicReference<Throwable> throwable = new AtomicReference<>();
-            AtomicReference<String> replId = new AtomicReference<>();
-            AtomicLong offsetV1 = new AtomicLong();
+            AtomicReference<String> replId = new AtomicReference<>(redisOffset.getReplId());
+            AtomicLong offsetV1 = new AtomicLong(redisOffset.getOffsetV1());
             List<TapEvent> eventList = TapSimplify.list();
             AtomicInteger dbNumber = new AtomicInteger();
             AtomicInteger helloCount = new AtomicInteger(0);
             redisReplicator.addEventListener((replicator, event) -> {
                 if (!isAlive()) {
-                    EmptyKit.closeQuietly(redisReplicator);
+                    EmptyKit.closeAsyncQuietly(redisReplicator);
                     return;
                 }
                 try {
@@ -330,7 +330,7 @@ public class RedisConnector extends ConnectorBase {
                                 helloCount.incrementAndGet();
                                 if (helloCount.get() >= 1000) {
                                     helloCount.set(0);
-                                    consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), new RedisOffset(replId.get(), ((DefaultCommand) event).getContext().getOffsets().getV1()));
+                                    consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), new RedisOffset(replId.get(), offsetV1.get()));
                                 }
                                 return;
                             }
@@ -346,7 +346,7 @@ public class RedisConnector extends ConnectorBase {
                         }
                         TapRecordEvent recordEvent = new TapInsertRecordEvent().init().table(INIT_TABLE_NAME).after(after).referenceTime(System.currentTimeMillis());
                         recordEvent.addInfo("redis_event", commandEvent);
-                        offsetV1.set(commandEvent.getContext().getOffsets().getV1());
+                        offsetV1.set(commandEvent.getContext().getOffsets().getV2());
                         eventList.add(recordEvent);
                         if (eventList.size() >= recordSize) {
                             consumer.accept(eventList, new RedisOffset(replId.get(), offsetV1.get()));
@@ -358,11 +358,11 @@ public class RedisConnector extends ConnectorBase {
                             replId.set(auxField.getAuxValue());
                         }
                     } else if (event instanceof PingCommand) {
-                        consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), new RedisOffset(replId.get(), ((PingCommand) event).getContext().getOffsets().getV1()));
+                        consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), new RedisOffset(replId.get(), offsetV1.get()));
                     }
                 } catch (Exception e) {
                     throwable.set(e);
-                    EmptyKit.closeQuietly(redisReplicator);
+                    EmptyKit.closeAsyncQuietly(redisReplicator);
                 }
             });
             redisReplicator.open();
