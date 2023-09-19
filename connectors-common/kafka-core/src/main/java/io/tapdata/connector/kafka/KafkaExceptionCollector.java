@@ -22,7 +22,7 @@ public class KafkaExceptionCollector extends AbstractExceptionCollector implemen
 
     @Override
     public void collectTerminateByServer(Throwable cause) {
-        if (cause instanceof BrokerNotAvailableException || cause instanceof DisconnectException) {
+        if (cause instanceof BrokerNotAvailableException || cause instanceof DisconnectException || cause instanceof InterruptException) {
             throw new TapPdkTerminateByServerEx(pdkId, ErrorKit.getLastCause(cause));
         }
     }
