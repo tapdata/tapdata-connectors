@@ -216,6 +216,10 @@
             {
               "label": "Hash",
               "value": "Hash"
+            },
+            {
+              "label": "Redis",
+              "value": "Redis"
             }
           ]
         },
@@ -441,7 +445,7 @@
       "sentinelAddressTip" : "The address port group that the sentry or cluster needs to fill in, for example: 192.168.1.200:6379, 192.168.1.201:6379",
       "Address" : "Please enter the server address",
       "sentinelPort": "Server port",
-      "valueType": "Storage format",
+      "valueType": "Storage format(Redis is isomorphic transfer)",
       "oneKey": "Save in one key",
       "listHead": "Include head",
       "keyExpression": "Key expression",
@@ -486,7 +490,7 @@
       "sentinelAddressTip" : "哨兵或集群需要填写的地址端口组，例如：192.168.1.200:6379, 192.168.1.201:6379",
       "Address" : "服务器地址",
       "sentinelPort": "端口",
-      "valueType": "存储格式",
+      "valueType": "存储格式（选择Redis表示同构迁移）",
       "oneKey": "单键存储",
       "listHead": "包含表头",
       "keyExpression": "键表达式",
@@ -532,7 +536,7 @@
       "sentinelAddressTip" : "哨兵或集群需要填寫的地址端口組，例如：192.168.1.200:6379, 192.168.1.201:6379",
       "Address" : "服務器地址",
       "sentinelPort": "服務器端口",
-      "valueType": "存储格式",
+      "valueType": "存储格式（选择Redis表示同构迁移）",
       "oneKey": "單鍵存储",
       "listHead": "包含表頭",
       "keyExpression": "鍵運算式",

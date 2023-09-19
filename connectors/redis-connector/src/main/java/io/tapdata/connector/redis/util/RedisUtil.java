@@ -1,29 +1,14 @@
-import com.moilioncircle.redis.replicator.RedisReplicator;
+package io.tapdata.connector.redis.util;
+
 import com.moilioncircle.redis.replicator.Replicator;
 import com.moilioncircle.redis.replicator.cmd.CommandName;
 import com.moilioncircle.redis.replicator.cmd.parser.DefaultCommandParser;
 import com.moilioncircle.redis.replicator.cmd.parser.PingParser;
 import com.moilioncircle.redis.replicator.cmd.parser.ReplConfParser;
-import com.moilioncircle.redis.replicator.rdb.datatype.KeyStringValueString;
 import com.moilioncircle.redis.replicator.rdb.dump.DumpRdbVisitor;
 
-import java.io.IOException;
-import java.net.URISyntaxException;
+public class RedisUtil {
 
-public class Main {
-    public static void main(String[] args) throws URISyntaxException, IOException {
-        Replicator replicator = new RedisReplicator("redis://:gj0628@127.0.0.1:6379");
-//        dress(replicator);
-        replicator.addEventListener((replicator1, event) -> {
-            if (event instanceof KeyStringValueString) {
-                KeyStringValueString kv = (KeyStringValueString) event;
-                System.out.println(new String(kv.getKey()));
-                System.out.println(new String(kv.getValue()));
-            } else {
-            }
-        });
-        replicator.open();
-    }
     public static void dress(Replicator r) {
         r.setRdbVisitor(new DumpRdbVisitor(r));
         // ignore PING REPLCONF GETACK
