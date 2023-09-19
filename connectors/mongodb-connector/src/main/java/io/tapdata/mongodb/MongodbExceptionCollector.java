@@ -2,6 +2,7 @@ package io.tapdata.mongodb;
 
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoException;
+import com.mongodb.MongoSecurityException;
 import com.mongodb.bulk.BulkWriteError;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -50,10 +51,19 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
 
     @Override
-    public void collectUserPwdInvalid(String username, Throwable cause) {
-
-        if (cause instanceof MongoException && (((MongoException) cause).getCode())==18) {
-            throw new TapPdkUserPwdInvalidEx(getPdkId(), username, ErrorKit.getLastCause(cause));
+    public void collectUserPwdInvalid(String uri, Throwable cause) {
+        String username = null;
+        // 定义正则表达式模式
+        Pattern pattern = Pattern.compile("mongodb://(.*?):");
+        Matcher matcher = pattern.matcher(uri);
+        if (matcher.find()) {
+            // 提取用户名
+            username = matcher.group(1);
+        }
+        if (cause instanceof MongoException)  {
+            if ( ((MongoException) cause).getCode()==18 || ((MongoException) cause).getCode()==-4){
+                throw new TapPdkUserPwdInvalidEx(getPdkId(), username, ErrorKit.getLastCause(cause));
+            }
         }
     }
 

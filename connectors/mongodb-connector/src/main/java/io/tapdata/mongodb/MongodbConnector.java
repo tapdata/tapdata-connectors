@@ -114,6 +114,7 @@ public class MongodbConnector extends ConnectorBase {
 			collection = mongoDatabase.getCollection(table);
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
+			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
 			exceptionCollector.collectReadPrivileges(e);
 			exceptionCollector.collectWritePrivileges(e);
 		}
@@ -354,7 +355,7 @@ public class MongodbConnector extends ConnectorBase {
 			}
 		} catch (Throwable throwable) {
 			exceptionCollector.collectTerminateByServer(throwable);
-			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUser(),throwable);
+			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),throwable);
 			exceptionCollector.collectReadPrivileges(throwable);
 			exceptionCollector.collectWritePrivileges(throwable);
 			TapLogger.error(TAG, throwable.getMessage());
@@ -580,6 +581,7 @@ public class MongodbConnector extends ConnectorBase {
 					}
 				} catch (Exception ignored) {
 					exceptionCollector.collectTerminateByServer(ignored);
+					exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),ignored);
 					exceptionCollector.collectWritePrivileges(ignored);
 					TapLogger.warn(TAG, "create index failed 2: " + ignored.getMessage());
 					// TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
@@ -912,6 +914,7 @@ public class MongodbConnector extends ConnectorBase {
 			}
 		}
 		}catch (Exception e){
+			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
 			exceptionCollector.throwWriteExIfNeed(null,e);
 		}
 	}
@@ -1017,6 +1020,7 @@ public class MongodbConnector extends ConnectorBase {
 				mongodbWriter.writeRecord(tapRecordEvents, table, writeListResultConsumer);
 			}
 		} catch (Exception e) {
+			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
 			exceptionCollector.throwWriteExIfNeed(tapRecordEvents,e);
 			exceptionCollector.revealException(e);
 			errorHandle(e, connectorContext);
