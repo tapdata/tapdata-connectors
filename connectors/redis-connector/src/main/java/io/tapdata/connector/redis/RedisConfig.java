@@ -40,8 +40,8 @@ public class RedisConfig {
     private String schemaKey = "-schema-key-";
 
     public RedisConfig load(Map<String, Object> map) {
-        if(map !=null && map.get("database") instanceof String){
-            map.put("database",Integer.valueOf(map.get("database").toString()));
+        if (map != null && map.get("database") instanceof String) {
+            map.put("database", Integer.valueOf(map.get("database").toString()));
         }
         beanUtils.mapToBean(map, this);
         if (EmptyKit.isNotNull(sentinelAddress)) {
@@ -72,6 +72,16 @@ public class RedisConfig {
         }
         if (StringUtils.isNotBlank(sentinelName) && DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.SENTINEL) {
             uri.append("&master=").append(sentinelName);
+        }
+        return uri.toString();
+    }
+
+    public String getReplicatorUri(HostAndPort node) {
+        StringBuilder uri = new StringBuilder();
+        uri.append("redis://").append(node.getHost()).append(":").append(node.getPort());
+        uri.append("?1=1");
+        if (StringUtils.isNotBlank(password)) {
+            uri.append("&authPassword=").append(password);
         }
         return uri.toString();
     }

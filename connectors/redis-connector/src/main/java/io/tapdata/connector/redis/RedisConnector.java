@@ -3,13 +3,7 @@ package io.tapdata.connector.redis;
 import com.moilioncircle.redis.replicator.Configuration;
 import com.moilioncircle.redis.replicator.RedisReplicator;
 import com.moilioncircle.redis.replicator.Replicator;
-import com.moilioncircle.redis.replicator.cmd.impl.DefaultCommand;
-import com.moilioncircle.redis.replicator.cmd.impl.PingCommand;
-import com.moilioncircle.redis.replicator.event.PreCommandSyncEvent;
-import com.moilioncircle.redis.replicator.rdb.datatype.AuxField;
 import com.moilioncircle.redis.replicator.rdb.datatype.ZSetEntry;
-import com.moilioncircle.redis.replicator.rdb.dump.datatype.DumpKeyValuePair;
-import com.moilioncircle.redis.replicator.rdb.dump.parser.DefaultDumpValueParser;
 import com.moilioncircle.redis.replicator.util.ByteArrayList;
 import com.moilioncircle.redis.replicator.util.ByteArrayMap;
 import com.moilioncircle.redis.replicator.util.ByteArraySet;
@@ -20,21 +14,17 @@ import io.tapdata.connector.redis.constant.ValueTypeEnum;
 import io.tapdata.connector.redis.exception.RedisExceptionCollector;
 import io.tapdata.connector.redis.sentinel.RedisSentinelReplicator;
 import io.tapdata.connector.redis.sentinel.RedisSentinelURI;
-import io.tapdata.connector.redis.util.RedisUtil;
 import io.tapdata.connector.redis.writer.*;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
-import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.TapDateTimeValue;
 import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -45,12 +35,10 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.apache.commons.lang3.StringUtils;
+import redis.clients.jedis.HostAndPort;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -232,147 +220,162 @@ public class RedisConnector extends ConnectorBase {
     }
 
     private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        RedisOffset redisOffset = (RedisOffset) offsetState;
-        try (
-                Replicator redisReplicator = generateReplicator(redisOffset)
-        ) {
-            RedisUtil.dress(redisReplicator);
-            AtomicReference<Throwable> throwable = new AtomicReference<>();
-            AtomicReference<String> replId = new AtomicReference<>();
-            AtomicLong offsetV1 = new AtomicLong();
-            List<TapEvent> eventList = TapSimplify.list();
-            DefaultDumpValueParser parser = new DefaultDumpValueParser(redisReplicator);
-            redisReplicator.addEventListener((replicator, event) -> {
-                if (!isAlive()) {
-                    EmptyKit.closeAsyncQuietly(redisReplicator);
-                    return;
-                }
-                if (event instanceof PreCommandSyncEvent) {
-                    offsetV1.set(((PreCommandSyncEvent) event).getContext().getOffsets().getV2());
-                    EmptyKit.closeAsyncQuietly(redisReplicator);
-                    return;
-                }
-                try {
-                    if (event instanceof DumpKeyValuePair) {
-                        DumpKeyValuePair dumpEvent = (DumpKeyValuePair) event;
-                        if (dumpEvent.getDb().getDbNumber() != redisConfig.getDatabase()) {
-                            return;
-                        }
-                        Map<String, Object> after = TapSimplify.map(TapSimplify.entry("redis_key", new String(dumpEvent.getKey())));
-                        if (dumpEvent.getValue().length > 10240) {
-                            after.put("redis_value", "value too large, check info");
-                        } else {
-                            after.put("redis_value", dumpValueToJson(parser.parse(dumpEvent).getValue()));
-                        }
-                        TapRecordEvent recordEvent = new TapInsertRecordEvent().init().table(tapTable.getId()).after(after);
-                        recordEvent.addInfo("redis_event", dumpEvent);
-                        offsetV1.set(dumpEvent.getContext().getOffsets().getV1());
-                        eventList.add(recordEvent);
-                        if (eventList.size() >= eventBatchSize) {
-                            eventsOffsetConsumer.accept(eventList, new RedisOffset(replId.get(), offsetV1.get()));
-                            eventList.clear();
-                        }
-                    } else if (event instanceof AuxField) {
-                        AuxField auxField = (AuxField) event;
-                        if ("repl-id".equals(auxField.getAuxKey())) {
-                            replId.set(auxField.getAuxValue());
-                        }
-                    }
-                } catch (Exception e) {
-                    throwable.set(e);
-                    EmptyKit.closeAsyncQuietly(redisReplicator);
-                }
-            });
-            redisReplicator.open();
-            if (EmptyKit.isNotEmpty(eventList)) {
-                eventsOffsetConsumer.accept(eventList, new RedisOffset(replId.get(), offsetV1.get()));
-            }
-            if (EmptyKit.isNotNull(throwable.get())) {
-                throw throwable.get();
-            }
-            tapConnectorContext.getStateMap().put("redisOffset", toJson(new RedisOffset(replId.get(), offsetV1.get())));
-        }
+        RedisReplicatorReader redisReplicatorReader = new RedisReplicatorReader(redisContext, firstConnectorId);
+        redisReplicatorReader.readRdb(tapConnectorContext, tapTable.getId(), eventBatchSize, eventsOffsetConsumer, this::isAlive);
+//        RedisOffset redisOffset = (RedisOffset) offsetState;
+//        try (
+//                Replicator redisReplicator = generateReplicator(redisOffset)
+//        ) {
+//            RedisUtil.dress(redisReplicator);
+//            AtomicReference<Throwable> throwable = new AtomicReference<>();
+//            AtomicReference<String> replId = new AtomicReference<>();
+//            AtomicLong offsetV1 = new AtomicLong();
+//            List<TapEvent> eventList = TapSimplify.list();
+//            DefaultDumpValueParser parser = new DefaultDumpValueParser(redisReplicator);
+//            redisReplicator.addEventListener((replicator, event) -> {
+//                if (!isAlive()) {
+//                    EmptyKit.closeAsyncQuietly(redisReplicator);
+//                    return;
+//                }
+//                if (event instanceof PreCommandSyncEvent) {
+//                    offsetV1.set(((PreCommandSyncEvent) event).getContext().getOffsets().getV2());
+//                    EmptyKit.closeAsyncQuietly(redisReplicator);
+//                    return;
+//                }
+//                try {
+//                    if (event instanceof DumpKeyValuePair) {
+//                        DumpKeyValuePair dumpEvent = (DumpKeyValuePair) event;
+//                        if (dumpEvent.getDb().getDbNumber() != redisConfig.getDatabase()) {
+//                            return;
+//                        }
+//                        Map<String, Object> after = TapSimplify.map(TapSimplify.entry("redis_key", new String(dumpEvent.getKey())));
+//                        if (dumpEvent.getValue().length > 10240) {
+//                            after.put("redis_value", "value too large, check info");
+//                        } else {
+//                            after.put("redis_value", dumpValueToJson(parser.parse(dumpEvent).getValue()));
+//                        }
+//                        TapRecordEvent recordEvent = new TapInsertRecordEvent().init().table(tapTable.getId()).after(after);
+//                        recordEvent.addInfo("redis_event", dumpEvent);
+//                        offsetV1.set(dumpEvent.getContext().getOffsets().getV1());
+//                        eventList.add(recordEvent);
+//                        if (eventList.size() >= eventBatchSize) {
+//                            eventsOffsetConsumer.accept(eventList, new RedisOffset(replId.get(), offsetV1.get()));
+//                            eventList.clear();
+//                        }
+//                    } else if (event instanceof AuxField) {
+//                        AuxField auxField = (AuxField) event;
+//                        if ("repl-id".equals(auxField.getAuxKey())) {
+//                            replId.set(auxField.getAuxValue());
+//                        }
+//                    }
+//                } catch (Exception e) {
+//                    throwable.set(e);
+//                    EmptyKit.closeAsyncQuietly(redisReplicator);
+//                }
+//            });
+//            redisReplicator.open();
+//            if (EmptyKit.isNotEmpty(eventList)) {
+//                eventsOffsetConsumer.accept(eventList, new RedisOffset(replId.get(), offsetV1.get()));
+//            }
+//            if (EmptyKit.isNotNull(throwable.get())) {
+//                throw throwable.get();
+//            }
+//            tapConnectorContext.getStateMap().put("redisOffset", toJson(new RedisOffset(replId.get(), offsetV1.get())));
+//        }
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        RedisOffset redisOffset;
-        if (EmptyKit.isNull(((RedisOffset) offsetState).getReplId())) {
+        Map<HostAndPort, RedisOffset> offsetMap;
+        if (EmptyKit.isEmpty((Map) offsetState)) {
             String stateMapOffset = (String) nodeContext.getStateMap().get("redisOffset");
-            redisOffset = EmptyKit.isNull(stateMapOffset) ? null : fromJson(stateMapOffset, RedisOffset.class);
+            offsetMap = new HashMap<>();
+            if (EmptyKit.isNotNull(stateMapOffset)) {
+                Map map = fromJson(stateMapOffset, Map.class);
+                map.forEach((k, v) -> offsetMap.put(fromJson(k.toString(), HostAndPort.class), fromJson(v.toString(), RedisOffset.class)));
+            }
         } else {
-            redisOffset = (RedisOffset) offsetState;
+            offsetMap = (Map) offsetState;
         }
-        try (
-                Replicator redisReplicator = generateReplicator(redisOffset)
-        ) {
-            RedisUtil.dress(redisReplicator);
-            AtomicReference<Throwable> throwable = new AtomicReference<>();
-            AtomicReference<String> replId = new AtomicReference<>(redisOffset.getReplId());
-            AtomicLong offsetV1 = new AtomicLong(redisOffset.getOffsetV1());
-            List<TapEvent> eventList = TapSimplify.list();
-            AtomicInteger dbNumber = new AtomicInteger();
-            AtomicInteger helloCount = new AtomicInteger(0);
-            redisReplicator.addEventListener((replicator, event) -> {
-                if (!isAlive()) {
-                    EmptyKit.closeAsyncQuietly(redisReplicator);
-                    return;
-                }
-                try {
-                    if (event instanceof DefaultCommand) {
-                        DefaultCommand commandEvent = (DefaultCommand) event;
-                        String command = new String(commandEvent.getCommand());
-                        if ("SELECT".equals(command)) {
-                            dbNumber.set(Integer.parseInt(new String(commandEvent.getArgs()[0])));
-                            return;
-                        }
-                        if (((DefaultCommand) event).getArgs().length > 0) {
-                            if (Arrays.equals(publishBytes, commandEvent.getCommand()) && Arrays.equals(helloBytes, ((DefaultCommand) event).getArgs()[0])) {
-                                helloCount.incrementAndGet();
-                                if (helloCount.get() >= 1000) {
-                                    helloCount.set(0);
-                                    consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), new RedisOffset(replId.get(), offsetV1.get()));
-                                }
-                                return;
-                            }
-                        }
-                        if (dbNumber.get() != redisConfig.getDatabase()) {
-                            return;
-                        }
-                        Map<String, Object> after = TapSimplify.map(TapSimplify.entry("redis_key", commandEvent.getArgs().length > 0 ? new String(commandEvent.getArgs()[0]) : command));
-                        if (Arrays.stream(commandEvent.getArgs()).map(v -> v.length).reduce(Integer::sum).orElse(0) > 10240) {
-                            after.put("redis_value", "value too large, check info");
-                        } else {
-                            after.put("redis_value", command + "(" + Arrays.stream(commandEvent.getArgs()).map(String::new).collect(Collectors.joining(", ")) + ")");
-                        }
-                        TapRecordEvent recordEvent = new TapInsertRecordEvent().init().table(INIT_TABLE_NAME).after(after).referenceTime(System.currentTimeMillis());
-                        recordEvent.addInfo("redis_event", commandEvent);
-                        offsetV1.set(commandEvent.getContext().getOffsets().getV2());
-                        eventList.add(recordEvent);
-                        if (eventList.size() >= recordSize) {
-                            consumer.accept(eventList, new RedisOffset(replId.get(), offsetV1.get()));
-                            eventList.clear();
-                        }
-                    } else if (event instanceof AuxField) {
-                        AuxField auxField = (AuxField) event;
-                        if ("repl-id".equals(auxField.getAuxKey())) {
-                            replId.set(auxField.getAuxValue());
-                        }
-                    } else if (event instanceof PingCommand) {
-                        consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), new RedisOffset(replId.get(), offsetV1.get()));
-                    }
-                } catch (Exception e) {
-                    throwable.set(e);
-                    EmptyKit.closeAsyncQuietly(redisReplicator);
-                }
-            });
-            redisReplicator.open();
-            if (EmptyKit.isNotEmpty(eventList)) {
-                consumer.accept(eventList, new RedisOffset(replId.get(), offsetV1.get()));
-            }
-            if (EmptyKit.isNotNull(throwable.get())) {
-                throw throwable.get();
-            }
-        }
+        RedisReplicatorReader redisReplicatorReader = new RedisReplicatorReader(redisContext, firstConnectorId);
+        redisReplicatorReader.readCommand(offsetMap, recordSize, consumer, this::isAlive);
+//        RedisOffset redisOffset;
+//        if (EmptyKit.isNull(((RedisOffset) offsetState).getReplId())) {
+//            String stateMapOffset = (String) nodeContext.getStateMap().get("redisOffset");
+//            redisOffset = EmptyKit.isNull(stateMapOffset) ? null : fromJson(stateMapOffset, RedisOffset.class);
+//        } else {
+//            redisOffset = (RedisOffset) offsetState;
+//        }
+//        try (
+//                Replicator redisReplicator = generateReplicator(redisOffset)
+//        ) {
+//            RedisUtil.dress(redisReplicator);
+//            AtomicReference<Throwable> throwable = new AtomicReference<>();
+//            AtomicReference<String> replId = new AtomicReference<>(redisOffset.getReplId());
+//            AtomicLong offsetV1 = new AtomicLong(redisOffset.getOffsetV1());
+//            List<TapEvent> eventList = TapSimplify.list();
+//            AtomicInteger dbNumber = new AtomicInteger();
+//            AtomicInteger helloCount = new AtomicInteger(0);
+//            redisReplicator.addEventListener((replicator, event) -> {
+//                if (!isAlive()) {
+//                    EmptyKit.closeAsyncQuietly(redisReplicator);
+//                    return;
+//                }
+//                try {
+//                    if (event instanceof DefaultCommand) {
+//                        DefaultCommand commandEvent = (DefaultCommand) event;
+//                        String command = new String(commandEvent.getCommand());
+//                        if ("SELECT".equals(command)) {
+//                            dbNumber.set(Integer.parseInt(new String(commandEvent.getArgs()[0])));
+//                            return;
+//                        }
+//                        if (((DefaultCommand) event).getArgs().length > 0) {
+//                            if (Arrays.equals(publishBytes, commandEvent.getCommand()) && Arrays.equals(helloBytes, ((DefaultCommand) event).getArgs()[0])) {
+//                                helloCount.incrementAndGet();
+//                                if (helloCount.get() >= 1000) {
+//                                    helloCount.set(0);
+//                                    consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), new RedisOffset(replId.get(), offsetV1.get()));
+//                                }
+//                                return;
+//                            }
+//                        }
+//                        if (dbNumber.get() != redisConfig.getDatabase()) {
+//                            return;
+//                        }
+//                        Map<String, Object> after = TapSimplify.map(TapSimplify.entry("redis_key", commandEvent.getArgs().length > 0 ? new String(commandEvent.getArgs()[0]) : command));
+//                        if (Arrays.stream(commandEvent.getArgs()).map(v -> v.length).reduce(Integer::sum).orElse(0) > 10240) {
+//                            after.put("redis_value", "value too large, check info");
+//                        } else {
+//                            after.put("redis_value", command + "(" + Arrays.stream(commandEvent.getArgs()).map(String::new).collect(Collectors.joining(", ")) + ")");
+//                        }
+//                        TapRecordEvent recordEvent = new TapInsertRecordEvent().init().table(INIT_TABLE_NAME).after(after).referenceTime(System.currentTimeMillis());
+//                        recordEvent.addInfo("redis_event", commandEvent);
+//                        offsetV1.set(commandEvent.getContext().getOffsets().getV2());
+//                        eventList.add(recordEvent);
+//                        if (eventList.size() >= recordSize) {
+//                            consumer.accept(eventList, new RedisOffset(replId.get(), offsetV1.get()));
+//                            eventList.clear();
+//                        }
+//                    } else if (event instanceof AuxField) {
+//                        AuxField auxField = (AuxField) event;
+//                        if ("repl-id".equals(auxField.getAuxKey())) {
+//                            replId.set(auxField.getAuxValue());
+//                        }
+//                    } else if (event instanceof PingCommand) {
+//                        consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), new RedisOffset(replId.get(), offsetV1.get()));
+//                    }
+//                } catch (Exception e) {
+//                    throwable.set(e);
+//                    EmptyKit.closeAsyncQuietly(redisReplicator);
+//                }
+//            });
+//            redisReplicator.open();
+//            if (EmptyKit.isNotEmpty(eventList)) {
+//                consumer.accept(eventList, new RedisOffset(replId.get(), offsetV1.get()));
+//            }
+//            if (EmptyKit.isNotNull(throwable.get())) {
+//                throw throwable.get();
+//            }
+//        }
     }
 
     private Replicator generateReplicator(RedisOffset redisOffset) throws Exception {
@@ -442,6 +445,6 @@ public class RedisConnector extends ConnectorBase {
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
-        return new RedisOffset();
+        return new HashMap<>();
     }
 }

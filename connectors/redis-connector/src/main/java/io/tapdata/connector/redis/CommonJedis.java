@@ -6,6 +6,7 @@ import io.tapdata.kit.EmptyKit;
 import redis.clients.jedis.*;
 import redis.clients.jedis.args.*;
 import redis.clients.jedis.commands.JedisCommands;
+import redis.clients.jedis.commands.ProtocolCommand;
 import redis.clients.jedis.params.*;
 import redis.clients.jedis.resps.*;
 import redis.clients.jedis.util.KeyValue;
@@ -50,6 +51,16 @@ public class CommonJedis implements JedisCommands, Closeable {
             return ((Jedis) jedisCommands).dbSize();
         } else {
             return 0;
+        }
+    }
+
+    public Object sendCommand(ProtocolCommand cmd, String... args) {
+        if (jedisCommands instanceof Jedis) {
+            return ((Jedis) jedisCommands).sendCommand(cmd, args);
+        } else if (jedisCommands instanceof JedisCluster) {
+            return ((JedisCluster) jedisCommands).sendCommand(cmd, args);
+        } else {
+            throw new UnsupportedOperationException("unsupported jedisCommands type");
         }
     }
 
