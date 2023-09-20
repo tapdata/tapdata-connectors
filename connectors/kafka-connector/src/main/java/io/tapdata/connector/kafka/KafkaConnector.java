@@ -4,7 +4,6 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
-import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -230,16 +229,15 @@ public class KafkaConnector extends ConnectorBase {
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) {
-        String enableScript = connectorContext.getNodeConfig().getString("enableScript");
         try{
             if (!this.isSchemaRegister) {
-                if ("true".equals(enableScript)){
+                if (kafkaConfig.getEnableScript()){
                     kafkaService.produce(connectorContext,tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
                 }else {
                     kafkaService.produce(tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
                 }
             } else {
-                if ("true".equals(enableScript)){
+                if (kafkaConfig.getEnableScript()){
                     throw new RuntimeException("Custom message is not support in schema register");
                 }else {
                     kafkaSRService.produce(tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);

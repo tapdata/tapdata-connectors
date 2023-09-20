@@ -105,7 +105,7 @@ public class KafkaSRService extends KafkaService {
                 return new TestItem(MqTestItem.KAFKA_BASE64_CONNECTION.getContent(), TestItem.RESULT_FAILED, e.getMessage());
             }
         }
-        String[] schemaRegisterUrls = tapConnectionContext.getConnectionConfig().getString("schemaRegisterUrl").split(",");
+        String[] schemaRegisterUrls = kafkaConfig.getSchemaRegisterUrl().split(",");
         try {
             if (kafkaConfig.getBasicAuth()) {
                 for (String schemaRegisterUrl : schemaRegisterUrls) {
@@ -153,7 +153,7 @@ public class KafkaSRService extends KafkaService {
     public void loadTables(int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
         BufferedReader reader = null;
         HttpURLConnection connection = null;
-        String schemaRegistryUrl = "http://" + tapConnectionContext.getConnectionConfig().getString("schemaRegisterUrl") + "/subjects";
+        String schemaRegistryUrl = "http://" + kafkaConfig.getSchemaRegisterUrl() + "/subjects";
 
         try {
             URL url = new URL(schemaRegistryUrl);
