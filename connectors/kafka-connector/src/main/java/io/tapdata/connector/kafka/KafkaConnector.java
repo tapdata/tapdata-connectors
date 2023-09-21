@@ -51,6 +51,7 @@ public class KafkaConnector extends ConnectorBase {
 
     private void initConnection(TapConnectionContext connectorContext) {
         kafkaConfig = (KafkaConfig) new KafkaConfig().load(connectorContext.getConnectionConfig());
+        kafkaConfig.load(connectorContext.getNodeConfig());
         this.kafkaExceptionCollector = new KafkaExceptionCollector();
         this.isSchemaRegister = kafkaConfig.getSchemaRegister();
         try {
