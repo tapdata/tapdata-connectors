@@ -145,12 +145,6 @@
             <version>3.10.0</version>
             <scope>compile</scope>
         </dependency>
-        <dependency>
-            <groupId>io.tapdata</groupId>
-            <artifactId>pdk-error-code</artifactId>
-            <version>${pdk-error-code.version}</version>
-            <scope>provided</scope>
-        </dependency>
     </dependencies>
     <build>
         <plugins>
