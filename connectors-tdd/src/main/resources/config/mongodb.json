@@ -1,0 +1,11 @@
+{
+  "connection": {
+    "uri": "mongodb://127.0.0.1:27017/target"
+  },
+  "node": {
+  },
+  "tdd": {
+    "streamReadDelaySec": 10,
+    "deleteRecordAfterCreateTable": false
+  }
+}

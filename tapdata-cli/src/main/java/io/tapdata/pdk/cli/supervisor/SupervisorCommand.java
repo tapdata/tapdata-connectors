@@ -1,7 +1,7 @@
 package io.tapdata.pdk.cli.supervisor;
 
-import io.tapdata.pdk.cli.Main;
 import io.tapdata.pdk.cli.RegisterMain;
+import io.tapdata.pdk.cli.Main;
 import org.apache.commons.io.FilenameUtils;
 
 import java.net.URL;

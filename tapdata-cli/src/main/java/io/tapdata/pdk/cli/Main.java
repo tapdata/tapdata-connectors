@@ -21,11 +21,9 @@ public class Main {
         commandLine.addSubcommand("discoverSchema", new DiscoverSchemaCli());
         commandLine.addSubcommand("connectionTest", new ConnectionTestCli());
         commandLine.addSubcommand("template", new ConnectorProjectBootCli());
-        commandLine.addSubcommand("test", new TDDCli());
         commandLine.addSubcommand("modelPrediction", new ModelPredictionCli());
         commandLine.addSubcommand("jar", new JarHijackerCli());
         commandLine.addSubcommand("capabilities", new TapCapabilitiesCli());
-        commandLine.addSubcommand("run", new TapPDKRunnerCli());
         commandLine.addSubcommand("supervisor", new SupervisorCli());
         commandLine.addSubcommand("py-install", new PythonInstallCli());
         return commandLine;
