@@ -1,6 +1,5 @@
 package io.tapdata.tdd.performance;
 
-import com.tapdata.manager.common.utils.StringUtils;
 import io.tapdata.entity.conversion.TargetTypesGenerator;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
@@ -14,7 +13,6 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.entity.utils.cache.KVMapFactory;
-import io.tapdata.flow.engine.V2.entity.EmptyMap;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableV2Function;
@@ -28,6 +26,7 @@ import io.tapdata.pdk.core.error.PDKRunnerErrorCodes;
 import io.tapdata.pdk.core.monitor.PDKInvocationMonitor;
 import io.tapdata.pdk.core.tapnode.TapNodeInfo;
 import io.tapdata.pdk.core.utils.CommonUtils;
+import io.tapdata.pdk.core.utils.cache.EhcacheKVMap;
 import io.tapdata.tdd.tdd.tests.support.Record;
 import org.junit.Test;
 
@@ -57,7 +56,7 @@ public class TestYashanWriteRecord {
         String jarUrl = "/Users/aplomb/dev/code/NewTapdataProjects/tapdata_enterprise/connectors/dist/yashandb-connector-v1.0-SNAPSHOT.jar";//CommonUtils.getProperty("pdk_test_jar_file", "");
 //        String tddJarUrl = CommonUtils.getProperty("pdk_external_jar_path", "connectors/dist") + "/yashandb-connector-v1.0-SNAPSHOT.jar";
 
-        if (StringUtils.isBlank(jarUrl))
+        if (null == jarUrl || "".equals(jarUrl.trim()))
             throw new IllegalArgumentException("Please specify jar file in env properties or java system properties, key is pdk_test_jar_file");
         File jarFile = new File(jarUrl);
         if (!jarFile.isFile())
@@ -143,8 +142,8 @@ public class TestYashanWriteRecord {
                 .withVersion(spec.getVersion())
                 .withTableMap(kvMap)
                 .withPdkId(spec.getId())
-                .withGlobalStateMap(new EmptyMap())
-                .withStateMap(new EmptyMap())
+                .withGlobalStateMap(new EhcacheKVMap<>())
+                .withStateMap(new EhcacheKVMap<>())
                 .withLog(new TapLog())
                 .withTable(tableID)
                 .build();
