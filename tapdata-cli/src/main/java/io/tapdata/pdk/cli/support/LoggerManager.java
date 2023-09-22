@@ -5,12 +5,6 @@ package io.tapdata.pdk.cli.support;
 //import ch.qos.logback.classic.LoggerContext;
 //import ch.qos.logback.classic.turbo.TurboFilter;
 //import ch.qos.logback.core.spi.FilterReply;
-import io.tapdata.pdk.cli.commands.TDDCli;
-import io.tapdata.pdk.core.utils.CommonUtils;
-import org.slf4j.Marker;
-import org.slf4j.impl.StaticLoggerBinder;
-
-import java.lang.reflect.Field;
 
 public class LoggerManager {
     private static final String TAG = LoggerManager.class.getSimpleName();
