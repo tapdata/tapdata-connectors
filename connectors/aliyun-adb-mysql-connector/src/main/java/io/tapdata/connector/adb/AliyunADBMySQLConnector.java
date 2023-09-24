@@ -1,14 +1,19 @@
 package io.tapdata.connector.adb;
 
+
 import io.tapdata.connector.adb.write.AliyunADBBatchWriter;
 import io.tapdata.connector.mysql.MysqlConnector;
 import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -16,9 +21,10 @@ import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
+import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 
-import java.util.List;
-import java.util.Optional;
+import java.sql.SQLException;
+import java.util.*;
 import java.util.function.Consumer;
 
 /**
@@ -84,4 +90,59 @@ public class AliyunADBMySQLConnector extends MysqlConnector {
         WriteListResult<TapRecordEvent> writeListResult = this.mysqlWriter.write(tapConnectorContext, tapTable, tapRecordEvents);
         consumer.accept(writeListResult);
     }
+
+    private String getCreateTableSql(TapTable tapTable, Boolean commentInField) {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        StringBuilder sb = new StringBuilder("create table ");
+        sb.append(getSchemaAndTable(tapTable.getId())).append('(').append(commonSqlMaker.buildColumnDefinition(tapTable, commentInField));
+        Collection<String> primaryKeys = tapTable.primaryKeys();
+        if (EmptyKit.isNotEmpty(primaryKeys)) {
+            sb.append(", primary key (").append(escapeChar)
+                    .append(String.join(escapeChar + "," + escapeChar, primaryKeys))
+                    .append(escapeChar).append(')');
+        }
+        sb.append(')');
+        if (EmptyKit.isNotEmpty(primaryKeys)) {
+            sb.append(" DISTRIBUTE BY HASH(").append(escapeChar).append(primaryKeys.stream().findFirst().orElse("")).append(escapeChar).append(")");
+        }
+        if (commentInField && EmptyKit.isNotBlank(tapTable.getComment())) {
+            sb.append(" comment='").append(tapTable.getComment()).append("'");
+        }
+        return sb.toString();
+    }
+
+    protected CreateTableOptions createTableV3(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
+        return createTable(connectorContext, createTableEvent);
+    }
+
+    private CreateTableOptions createTable(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
+        TapTable tapTable = createTableEvent.getTable();
+        CreateTableOptions createTableOptions = new CreateTableOptions();
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapTable.getId())).size() > 0) {
+            createTableOptions.setTableExists(true);
+            return createTableOptions;
+        }
+
+        Map<String, TapField> fieldMap = tapTable.getNameFieldMap();
+        for (String field : fieldMap.keySet()) {
+            String fieldDefault = (String) fieldMap.get(field).getDefaultValue();
+            if (EmptyKit.isNotEmpty(fieldDefault)) {
+                if (fieldDefault.contains("'")) {
+                    fieldDefault = fieldDefault.replaceAll("'", "''");
+                    fieldMap.get(field).setDefaultValue(fieldDefault);
+                }
+            }
+        }
+        List<String> sqlList = TapSimplify.list();
+        sqlList.add(getCreateTableSql(tapTable, true));
+        try {
+            jdbcContext.batchExecute(sqlList);
+        } catch (SQLException e) {
+            exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
+            throw e;
+        }
+        createTableOptions.setTableExists(false);
+        return createTableOptions;
+    }
+
 }
