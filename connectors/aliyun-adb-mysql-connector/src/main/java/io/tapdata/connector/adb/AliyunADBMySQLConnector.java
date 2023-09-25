@@ -45,6 +45,7 @@ public class AliyunADBMySQLConnector extends MysqlConnector {
         jdbcContext = mysqlJdbcContext;
         commonSqlMaker = new CommonSqlMaker('`');
         exceptionCollector = new MysqlExceptionCollector();
+        tapLogger = tapConnectionContext.getLog();
         this.version = mysqlJdbcContext.queryVersion();
         if (tapConnectionContext instanceof TapConnectorContext) {
             this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext);
