@@ -1,23 +1,15 @@
-package io.tapdata.connector.mysql.config;
+package io.tapdata.connector.adb;
 
-import io.tapdata.common.CommonDbConfig;
-import io.tapdata.kit.EmptyKit;
+import io.tapdata.connector.mysql.config.MysqlConfig;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.HashMap;
 import java.util.Map;
 
-public class MysqlConfig extends CommonDbConfig {
-
-    public MysqlConfig() {
-        setDbType("mysql");
-        setEscapeChar('`');
-        setJdbcDriver("com.mysql.cj.jdbc.Driver");
-    }
+public class AliyunMysqlConfig extends MysqlConfig {
 
     private static final Map<String, String> DEFAULT_PROPERTIES = new HashMap<String, String>() {{
         put("rewriteBatchedStatements", "true");
-        put("useCursorFetch", "true");
         put("useSSL", "false");
         put("zeroDateTimeBehavior", "convertToNull");
         put("allowPublicKeyRetrieval", "true");
@@ -25,20 +17,6 @@ public class MysqlConfig extends CommonDbConfig {
         put("tinyInt1isBit", "false");
         put("autoReconnect", "true");
     }};
-
-    @Override
-    public MysqlConfig load(Map<String, Object> map) {
-        MysqlConfig config = (MysqlConfig) super.load(map);
-        setUser(EmptyKit.isBlank(getUser()) ? (String) map.get("username") : getUser());
-        setExtParams(EmptyKit.isBlank(getExtParams()) ? (String) map.get("addtionalString") : getExtParams());
-        setSchema(getDatabase());
-        return config;
-    }
-
-    @Override
-    public String getConnectionString() {
-        return getHost() + ":" + getPort() + "/" + getDatabase();
-    }
 
     @Override
     public String getDatabaseUrl() {
@@ -84,15 +62,5 @@ public class MysqlConfig extends CommonDbConfig {
         }
 
         return sbURL.toString();
-    }
-
-    protected String timezone;
-
-    public String getTimezone() {
-        return timezone;
-    }
-
-    public void setTimezone(String timezone) {
-        this.timezone = timezone;
     }
 }
