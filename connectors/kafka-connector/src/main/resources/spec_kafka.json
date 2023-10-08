@@ -335,9 +335,12 @@
           "x-component": "InputNumber",
           "apiServerKey": "partitionNum",
           "default": 3,
-          "value": [1,255],
           "x-decorator-props": {
             "tooltip": "${partitionNumTooltip}"
+          },
+          "x-component-props": {
+            "min": 1,
+            "max": 255
           }
         },
         "replicasSize": {
@@ -348,9 +351,12 @@
           "x-component": "InputNumber",
           "apiServerKey": "replicasSize",
           "default": 1,
-          "value": [1,255],
           "x-decorator-props": {
             "tooltip": "${replicasSizeTooltip}"
+          },
+          "x-component-props": {
+            "min": 1,
+            "max": 255
           }
         },
         "script": {
