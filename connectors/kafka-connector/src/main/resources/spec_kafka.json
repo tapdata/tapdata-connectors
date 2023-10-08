@@ -327,6 +327,38 @@
             "tooltip": "${scriptTooltip}"
           }
         },
+        "partitionNum": {
+          "required": true,
+          "type": "string",
+          "title": "${partitionNum}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "partitionNum",
+          "default": 3,
+          "x-decorator-props": {
+            "tooltip": "${partitionNumTooltip}"
+          },
+          "x-component-props": {
+            "min": 1,
+            "max": 255
+          }
+        },
+        "replicasSize": {
+          "required": true,
+          "type": "string",
+          "title": "${replicasSize}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "replicasSize",
+          "default": 1,
+          "x-decorator-props": {
+            "tooltip": "${replicasSizeTooltip}"
+          },
+          "x-component-props": {
+            "min": 1,
+            "max": 255
+          }
+        },
         "script": {
           "type": "string",
           "required": false,
@@ -358,6 +390,10 @@
   "messages": {
     "default": "en_US",
     "en_US": {
+      "partitionNumTooltip": "If Topic exists, the number of partitions can only increase, not decrease",
+      "replicasSizeTooltip": "The number of replica sets is immutable after Topic creation, and the number of replica sets cannot be greater than the number of Kafka clusters at creation time",
+      "replicasSize": "Number of replications",
+      "partitionNum": "Number of partitions",
       "doc": "docs/kafka_en_US.md",
       "nameSrvAddr": "Kafka Host",
       "nameSrvAddrTip": "Kafka host address, multiple addresses are separated by commas, such as 192.168.1.200:9092,192.168.1.201:9092",
@@ -395,6 +431,10 @@
       "scriptTooltip": "1. Parameter Description:\n· 'record' is the data record, including 'header' and 'data', where 'data' contains 'before' and 'after'.\n· 'op' represents the operation type, with a total of 3 options: insert, update, and delete.\n· 'conditionKeys' is the collection of primary key field names.\n2. Examples:\n· Add the operation type to the Kafka message: record.data.op = op\n· Add a custom header: record.header.test='test header'\n· Delete the 'before' field: delete record.data.before\n· Discard the data record: return null"
     },
     "zh_CN": {
+      "partitionNumTooltip": "若Topic存在，分区的数量只能增加不能减小",
+      "replicasSizeTooltip": "副本集的数量在Topic创建后不可更改，并且创建时副本集的数量不能大于Kafka集群的数量",
+      "replicasSize": "副本数数量",
+      "partitionNum": "分区数量",
       "doc": "docs/kafka_zh_CN.md",
       "nameSrvAddr": "Kafka地址",
       "nameSrvAddrTip": "Kafka地址，多个地址用逗号分隔，如：192.168.1.200:9092,192.168.1.201:9092",
@@ -432,6 +472,11 @@
       "scriptTooltip": "1.参数说明\n·record为每条数据记录，包含header和data，data中包含before和after\n·op为操作类型，共3种：insert，update，delete\n·conditionKeys为主键字段名集合\n2.示例\n·kafka message中添加操作类型: record.data.op = op\n·添加自定义header: record.header.test='test header'\n·删除before: delete record.data.before\n·丢弃该条数据: return null"
     },
     "zh_TW": {
+
+      "partitionNumTooltip": "若Topic存在，分區的數量只能增加不能減小",
+      "replicasSizeTooltip": "副本集的數量在Topic創建後不能更改，並且創建時副本數的數量不能大於Kafka集群的數量",
+      "replicasSize": "副本數數量",
+      "partitionNum": "分區數量",
       "doc": "docs/kafka_zh_TW.md",
       "nameSrvAddr": "Kafka地址",
       "nameSrvAddrTip": "Kafka地址，多個地址用逗號分隔，如：192.168.1.200:9092,192.168.1.201:9092",

@@ -569,7 +569,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     //for mysql type (with offset & limit)
     protected void queryByAdvanceFilterWithOffset(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
-        String sql = commonSqlMaker.buildSelectClause(table, filter) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilter(filter);
+        String sql = commonSqlMaker.buildSelectClause(table, filter, false) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilter(filter);
         jdbcContext.query(sql, resultSet -> {
             FilterResults filterResults = new FilterResults();
             try {
@@ -595,7 +595,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     //for oracle db2 type (with row_number)
     protected void queryByAdvanceFilterWithOffsetV2(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
-        String sql = commonSqlMaker.buildSelectClause(table, filter) + commonSqlMaker.buildRowNumberPreClause(filter) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilterV2(filter);
+        String sql = commonSqlMaker.buildSelectClause(table, filter, true) + commonSqlMaker.buildRowNumberPreClause(filter) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilterV2(filter);
         jdbcContext.query(sql, resultSet -> {
             FilterResults filterResults = new FilterResults();
             try {
