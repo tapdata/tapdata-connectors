@@ -263,6 +263,7 @@ public class MongodbWriter {
 			Map<String, Object> after = updateRecordEvent.getAfter();
 			Map<String, Object> before = updateRecordEvent.getBefore();
 			Map<String, Object> info = recordEvent.getInfo();
+			List<String> removedFields = updateRecordEvent.getRemovedFields();
 			Document pkFilter;
 			Document u = new Document();
 			if (info != null && info.get("$op") != null) {
@@ -282,12 +283,19 @@ public class MongodbWriter {
 				}
 				MongodbUtil.removeIdIfNeed(pks, after);
 				u.append("$set", after);
-				if (info != null) {
-					Object unset = info.get("$unset");
-					if (unset != null) {
-						u.append("$unset", unset);
+				if (removedFields != null && removedFields.size() > 0) {
+					Map<String, Object> unset = new HashMap<>();
+					for (String removeField : removedFields) {
+						unset.put(removeField, true);
 					}
+					u.append("$unset", unset);
 				}
+//				if (info != null) {
+//					Object unset = info.get("$unset");
+//					if (unset != null) {
+//						u.append("$unset", unset);
+//					}
+//				}
 				writeModel = new UpdateManyModel<>(pkFilter, u, options);
 			}
 			updated.incrementAndGet();
