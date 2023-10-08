@@ -2,9 +2,13 @@ package io.tapdata.connector.kafka;
 
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.CommonDbConfig;
+import io.tapdata.connector.kafka.admin.Admin;
+import io.tapdata.connector.kafka.admin.DefaultAdmin;
+import io.tapdata.connector.kafka.config.AdminConfiguration;
 import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
@@ -14,6 +18,7 @@ import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -25,13 +30,16 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
+import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.common.TopicPartitionInfo;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -145,8 +153,48 @@ public class KafkaConnector extends ConnectorBase {
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
-//        connectorFunctions.supportCreateTableV2(this::createTableV2);
+        connectorFunctions.supportCreateTableV2(this::createTableV2);
     }
+
+    private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
+        String tableId = tapCreateTableEvent.getTableId();
+        CreateTableOptions createTableOptions = new CreateTableOptions();
+        if (!this.isSchemaRegister) {
+            DataMap nodeConfig = tapConnectorContext.getNodeConfig();
+            Integer replicasSize = (Integer) nodeConfig.get("replicasSize");
+            Integer partitionNum = (Integer) nodeConfig.get("partitionNum");
+            AdminConfiguration configuration = new AdminConfiguration(kafkaConfig, tapConnectorContext.getId());
+            try (Admin admin = new DefaultAdmin(configuration)) {
+                Set<String> existTopics = admin.listTopics();
+                if (!existTopics.contains(tableId)) {
+                    String nameSrvAddr = kafkaConfig.getNameSrvAddr();
+                    String[] nameSrvAddrs = nameSrvAddr.split(",");
+                    if (nameSrvAddrs.length < replicasSize) {
+                        throw new RuntimeException("The number of replica sets to be created is greater than the number of clusters");
+                    }
+                    createTableOptions.setTableExists(false);
+                    admin.createTopics(tableId, partitionNum, replicasSize.shortValue());
+                } else {
+                    List<TopicPartitionInfo> topicPartitionInfos = admin.getTopicPartitionInfo(tableId);
+                    int existTopicPartition = topicPartitionInfos.size();
+                    int existReplicasSize = topicPartitionInfos.get(0).replicas().size();
+                    if (existReplicasSize != replicasSize) {
+                        TapLogger.warn(TAG, "cannot change the number of replicasSize of an existing table");
+                    }
+                    if (partitionNum <= existTopicPartition) {
+                        TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will kkip");
+                    }else{
+                        admin.increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
+                    }
+                    createTableOptions.setTableExists(true);
+                }
+            }
+        } else {
+            createTableOptions.setTableExists(true);
+        }
+        return createTableOptions;
+    }
+
 
 //    private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws ExecutionException, InterruptedException, IOException {
 //        TapTable tapTable = tapCreateTableEvent.getTable();
