@@ -391,7 +391,7 @@
     "default": "en_US",
     "en_US": {
       "partitionNumTooltip": "If Topic exists, the number of partitions can only increase, not decrease",
-      "replicasSizeTooltip": "The number of replica sets is immutable after Topic creation, and the number of replica sets cannot be greater than the number of Kafka clusters at creation time",
+      "replicasSizeTooltip": "The number of replica sets is immutable after Topic is created. And the number of replica sets cannot be greater than the number of Kafka clusters, if it is greater than the default number of replica sets created is 1",
       "replicasSize": "Number of replications",
       "partitionNum": "Number of partitions",
       "doc": "docs/kafka_en_US.md",
@@ -432,7 +432,7 @@
     },
     "zh_CN": {
       "partitionNumTooltip": "若Topic存在，分区的数量只能增加不能减小",
-      "replicasSizeTooltip": "副本集的数量在Topic创建后不可更改，并且创建时副本集的数量不能大于Kafka集群的数量",
+      "replicasSizeTooltip": "副本集的数量在Topic创建后不可更改。并且创建时副本集的数量不能大于Kafka集群的数量，若大于则默认创建的副本集数量为1",
       "replicasSize": "副本数数量",
       "partitionNum": "分区数量",
       "doc": "docs/kafka_zh_CN.md",
@@ -472,9 +472,8 @@
       "scriptTooltip": "1.参数说明\n·record为每条数据记录，包含header和data，data中包含before和after\n·op为操作类型，共3种：insert，update，delete\n·conditionKeys为主键字段名集合\n2.示例\n·kafka message中添加操作类型: record.data.op = op\n·添加自定义header: record.header.test='test header'\n·删除before: delete record.data.before\n·丢弃该条数据: return null"
     },
     "zh_TW": {
-
       "partitionNumTooltip": "若Topic存在，分區的數量只能增加不能減小",
-      "replicasSizeTooltip": "副本集的數量在Topic創建後不能更改，並且創建時副本數的數量不能大於Kafka集群的數量",
+      "replicasSizeTooltip": "副本集的數量在Topic創建後不能更改，並且創建時副本數的數量不能大於Kafka集群的數量，若大於則創建的副本集的數量為1",
       "replicasSize": "副本數數量",
       "partitionNum": "分區數量",
       "doc": "docs/kafka_zh_TW.md",

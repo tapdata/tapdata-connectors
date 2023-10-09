@@ -170,7 +170,7 @@ public class KafkaConnector extends ConnectorBase {
                     String nameSrvAddr = kafkaConfig.getNameSrvAddr();
                     String[] nameSrvAddrs = nameSrvAddr.split(",");
                     if (nameSrvAddrs.length < replicasSize) {
-                        throw new RuntimeException("The number of replica sets to be created is greater than the number of clusters");
+                        replicasSize = 1;
                     }
                     createTableOptions.setTableExists(false);
                     admin.createTopics(tableId, partitionNum, replicasSize.shortValue());
@@ -179,10 +179,10 @@ public class KafkaConnector extends ConnectorBase {
                     int existTopicPartition = topicPartitionInfos.size();
                     int existReplicasSize = topicPartitionInfos.get(0).replicas().size();
                     if (existReplicasSize != replicasSize) {
-                        TapLogger.warn(TAG, "cannot change the number of replicasSize of an existing table");
+                        TapLogger.warn(TAG, "cannot change the number of replicasSize of an existing table, will skip");
                     }
                     if (partitionNum <= existTopicPartition) {
-                        TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will kkip");
+                        TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will skip");
                     }else{
                         admin.increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
                     }
