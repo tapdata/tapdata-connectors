@@ -71,6 +71,7 @@ public class RedisReplicatorReader implements AutoCloseable {
             clusterNodes = generateClusterNodes();
             executorService = Executors.newFixedThreadPool(clusterNodes.size());
         } else {
+            clusterNodes = new ArrayList<>();
             executorService = Executors.newFixedThreadPool(1);
         }
     }
@@ -277,7 +278,7 @@ public class RedisReplicatorReader implements AutoCloseable {
 
     public void readCommand(Map<HostAndPort, RedisOffset> offset, int recordSize, StreamReadConsumer consumer, Supplier<Boolean> isAlive) throws Throwable {
 //        this.offsetMap = offset;
-        offset.forEach((k,v) -> clusterNodes.stream().filter(node -> node.getMaster().equals(k) || (EmptyKit.isNotEmpty(node.getSlaves()) && node.getSlaves().contains(k))).findFirst().ifPresent(node -> offsetMap.put(node.getMaster(), v)));
+        offset.forEach((k, v) -> clusterNodes.stream().filter(node -> node.getMaster().equals(k) || (EmptyKit.isNotEmpty(node.getSlaves()) && node.getSlaves().contains(k))).findFirst().ifPresent(node -> offsetMap.put(node.getMaster(), v)));
         CountDownLatch countDownLatch;
         if (EmptyKit.isEmpty(clusterNodes)) {
             countDownLatch = new CountDownLatch(1);
