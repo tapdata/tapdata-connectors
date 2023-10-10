@@ -8,7 +8,7 @@
 	<version>1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
     <modules>
-		<module>tdd-connector</module>
+<!--		<module>tdd-connector</module>-->
         <module>dummy-connector</module>
         <module>mongodb-connector</module>
 		<module>mongodb-atlas-connector</module>
