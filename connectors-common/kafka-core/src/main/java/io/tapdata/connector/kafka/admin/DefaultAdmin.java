@@ -62,18 +62,11 @@ public class DefaultAdmin implements Admin {
     }
 
     @Override
-    public List<TopicPartitionInfo> getTopicPartitionInfo(String topic) {
+    public List<TopicPartitionInfo> getTopicPartitionInfo(String topic) throws ExecutionException, InterruptedException {
         List<String> list = new ArrayList<>();
         list.add(topic);
         DescribeTopicsResult describeTopicsResult = adminClient.describeTopics(list);
-        Map<String, TopicDescription> stringTopicDescriptionMap = null;
-        try {
-            stringTopicDescriptionMap = describeTopicsResult.allTopicNames().get();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e);
-        }
+        Map<String, TopicDescription> stringTopicDescriptionMap  = describeTopicsResult.allTopicNames().get();
         TopicDescription topicDescription = stringTopicDescriptionMap.get(topic);
         List<TopicPartitionInfo> partitions = topicDescription.partitions();
         return partitions;

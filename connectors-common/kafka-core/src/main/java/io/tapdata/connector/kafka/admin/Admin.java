@@ -18,6 +18,6 @@ public interface Admin extends AutoCloseable {
 
   void increaseTopicPartitions(String topic,Integer numPartitions) throws ExecutionException, InterruptedException;
 
-  List<TopicPartitionInfo> getTopicPartitionInfo(String topic);
+  List<TopicPartitionInfo> getTopicPartitionInfo(String topic) throws ExecutionException, InterruptedException;
 
 }

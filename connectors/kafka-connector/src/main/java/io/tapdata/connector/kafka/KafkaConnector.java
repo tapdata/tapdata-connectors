@@ -160,7 +160,7 @@ public class KafkaConnector extends ConnectorBase {
     private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
         String tableId = tapCreateTableEvent.getTableId();
         CreateTableOptions createTableOptions = new CreateTableOptions();
-        if (!this.isSchemaRegister) {
+//        if (!this.isSchemaRegister) {
             DataMap nodeConfig = tapConnectorContext.getNodeConfig();
             Integer replicasSize = (Integer) nodeConfig.get("replicasSize");
             Integer partitionNum = (Integer) nodeConfig.get("partitionNum");
@@ -187,9 +187,9 @@ public class KafkaConnector extends ConnectorBase {
             } catch (InterruptedException | ExecutionException e) {
                 throw new RuntimeException("Create Table " + tableId + " Failed | Error: " + e.getMessage());
             }
-        }else{
-            createTableOptions.setTableExists(true);
-        }
+//        }else{
+//            createTableOptions.setTableExists(true);
+//        }
         return createTableOptions;
     }
 
