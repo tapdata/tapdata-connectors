@@ -391,7 +391,7 @@
     "default": "en_US",
     "en_US": {
       "partitionNumTooltip": "If Topic exists, the number of partitions can only increase, not decrease",
-      "replicasSizeTooltip": "The number of replica sets is immutable after Topic is created. And the number of replica sets cannot be greater than the number of Kafka clusters, if it is greater than the default number of replica sets created is 1",
+      "replicasSizeTooltip": "The number of replica sets cannot be changed after the Topic is created. The number of replica sets at creation cannot be greater than the number of Kafka clusters",
       "replicasSize": "Number of replications",
       "partitionNum": "Number of partitions",
       "doc": "docs/kafka_en_US.md",
@@ -432,7 +432,7 @@
     },
     "zh_CN": {
       "partitionNumTooltip": "若Topic存在，分区的数量只能增加不能减小",
-      "replicasSizeTooltip": "副本集的数量在Topic创建后不可更改。并且创建时副本集的数量不能大于Kafka集群的数量，若大于则默认创建的副本集数量为1",
+      "replicasSizeTooltip": "副本集的数量在Topic创建后不可更改。并且创建时副本集的数量不能大于Kafka集群的数量。",
       "replicasSize": "副本数数量",
       "partitionNum": "分区数量",
       "doc": "docs/kafka_zh_CN.md",
@@ -473,7 +473,7 @@
     },
     "zh_TW": {
       "partitionNumTooltip": "若Topic存在，分區的數量只能增加不能減小",
-      "replicasSizeTooltip": "副本集的數量在Topic創建後不能更改，並且創建時副本數的數量不能大於Kafka集群的數量，若大於則創建的副本集的數量為1",
+      "replicasSizeTooltip": "副本集的數量在Topic創建後不能更改，並且創建時副本數的數量不能大於Kafka集群的數量。",
       "replicasSize": "副本數數量",
       "partitionNum": "分區數量",
       "doc": "docs/kafka_zh_TW.md",
