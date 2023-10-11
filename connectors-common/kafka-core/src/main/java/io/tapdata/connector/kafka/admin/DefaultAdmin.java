@@ -48,17 +48,17 @@ public class DefaultAdmin implements Admin {
     }
 
     @Override
-    public void createTopics(String topic, int numPartitions, short replicationFactor) {
+    public void createTopics(String topic, int numPartitions, short replicationFactor) throws ExecutionException, InterruptedException {
         NewTopic newTopic = new NewTopic(topic, numPartitions, replicationFactor);
-        adminClient.createTopics(Collections.singleton(newTopic));
+        adminClient.createTopics(Collections.singleton(newTopic)).all().get();
     }
 
     @Override
-    public void increaseTopicPartitions(String topic, Integer numPartitions) {
+    public void increaseTopicPartitions(String topic, Integer numPartitions) throws ExecutionException, InterruptedException {
         NewPartitions newPartitions = NewPartitions.increaseTo(numPartitions);
         Map<String, NewPartitions> newPartitionsMap = new HashMap<>();
         newPartitionsMap.put(topic, newPartitions);
-        adminClient.createPartitions(newPartitionsMap);
+        adminClient.createPartitions(newPartitionsMap).all().get();
     }
 
     @Override

@@ -40,6 +40,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -167,11 +168,6 @@ public class KafkaConnector extends ConnectorBase {
             try (Admin admin = new DefaultAdmin(configuration)) {
                 Set<String> existTopics = admin.listTopics();
                 if (!existTopics.contains(tableId)) {
-                    String nameSrvAddr = kafkaConfig.getNameSrvAddr();
-                    String[] nameSrvAddrs = nameSrvAddr.split(",");
-                    if (nameSrvAddrs.length < replicasSize) {
-                        replicasSize = 1;
-                    }
                     createTableOptions.setTableExists(false);
                     admin.createTopics(tableId, partitionNum, replicasSize.shortValue());
                 } else {
@@ -183,13 +179,15 @@ public class KafkaConnector extends ConnectorBase {
                     }
                     if (partitionNum <= existTopicPartition) {
                         TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will skip");
-                    }else{
+                    } else {
                         admin.increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
                     }
                     createTableOptions.setTableExists(true);
                 }
+            } catch (InterruptedException | ExecutionException e) {
+                throw new RuntimeException("Create Table " + tableId + " Failed | Error: " + e.getMessage());
             }
-        } else {
+        }else{
             createTableOptions.setTableExists(true);
         }
         return createTableOptions;
