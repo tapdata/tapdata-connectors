@@ -161,10 +161,10 @@ public class MongodbConnector extends ConnectorBase {
 					//List all the tables under the database.
 					List<TapTable> list = list();
 					nameList.forEach(name -> {
-						MongoTable table = new MongoTable(name);
+						TapTable table = new TapTable(name);
 						table.defaultPrimaryKeys("_id");
 						MongoCollection collection = documentMap.get(name);
-						table.setTableAttrs(MongodbUtil.getCollectionStatus(mongoClient, database, name));
+						//table.setTableAttrs(MongodbUtil.getCollectionStatus(mongoClient, database, name));
 						try {
 							MongodbUtil.sampleDataRow(collection, SAMPLE_SIZE_BATCH_SIZE, (dataRow) -> {
 								Set<String> fieldNames = dataRow.keySet();
