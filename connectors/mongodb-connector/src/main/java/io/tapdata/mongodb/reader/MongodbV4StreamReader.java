@@ -68,7 +68,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 	@Override
 	public void read(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
 		List<Bson> pipeline = singletonList(Aggregates.match(
-				Filters.in("ns.coll", tableList)
+			Filters.in("ns.coll", tableList)
 		));
 
 		if (this.globalStateMap == null) {
@@ -134,7 +134,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 							before.put("_id", documentKey.get("_id"));
 							final Map lookupData = MongodbLookupUtil.findDeleteCacheByOid(connectionString, collectionName, documentKey.get("_id"), globalStateMap);
 							TapDeleteRecordEvent recordEvent = deleteDMLEvent(MapUtils.isNotEmpty(lookupData) && lookupData.containsKey("data") && lookupData.get("data") instanceof Map
-									? (Map<String, Object>) lookupData.get("data") : before, collectionName);
+								? (Map<String, Object>) lookupData.get("data") : before, collectionName);
 							recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
 							tapEvents.add(recordEvent);
 						} else {
@@ -152,20 +152,31 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 								}
 							}
 
-							if (MapUtils.isEmpty(fullDocument)) {
+							if (MapUtils.isEmpty(fullDocument) && mongodbConfig.isSkipDeletedEventsOnFilling()) {
 								TapLogger.warn(TAG, "Found update event already deleted in collection {}, _id {}", collectionName, event.getDocumentKey().get("_id"));
 								continue;
 							}
 						}
 
 						if (event.getDocumentKey() != null) {
-							after.putAll(fullDocument);
+							UpdateDescription updateDescription = event.getUpdateDescription();
+							if (MapUtils.isNotEmpty(fullDocument)) {
+								after.putAll(fullDocument);
+							} else if (null != updateDescription) {
+								Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
+								after.putAll(decodeDocument);
+								if (null != updateDescription.getUpdatedFields()) {
+									decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
+									for (String key : decodeDocument.keySet()) {
+										after.put(key, decodeDocument.get(key));
+									}
+								}
+							}
 
 							TapUpdateRecordEvent recordEvent = updateDMLEvent(null, after, collectionName);
 //							Map<String, Object> info = new DataMap();
 //							Map<String, Object> unset = new DataMap();
 							List<String> removedFields = new ArrayList<>();
-							UpdateDescription updateDescription = event.getUpdateDescription();
 							if (updateDescription != null) {
 								for (String f:updateDescription.getRemovedFields()) {
 									if (after.keySet().stream().noneMatch(v -> v.equals(f) || v.startsWith(f + ".") || f.startsWith(v + "."))) {
