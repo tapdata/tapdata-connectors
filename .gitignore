@@ -3,6 +3,7 @@
 ### If you have runtime generated files, please do not configure here, you can set your working directory to achieve this purpose
 *.log
 **/target/
+connectors/dist
 
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
