@@ -302,17 +302,23 @@ public class MongodbWriter {
 				}
 			} else {
 				pkFilter = getPkFilter(pks, before != null && !before.isEmpty() ? before : after);
-				if (ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS.equals(mongodbConfig.getUpdateDmlPolicy())) {
-					options.upsert(false);
-				}
-				MongodbUtil.removeIdIfNeed(pks, after);
-				u.append("$set", after);
-				if (removedFields != null && removedFields.size() > 0) {
-					Map<String, Object> unset = new HashMap<>();
-					for (String removeField : removedFields) {
-						unset.put(removeField, true);
+				if(updateRecordEvent.getIsReplaceEvent() != null && updateRecordEvent.getIsReplaceEvent()){
+					u.putAll(after);
+					writeModel = new ReplaceOneModel<>(pkFilter, u, new ReplaceOptions().upsert(false));
+				}else{
+					if (ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS.equals(mongodbConfig.getUpdateDmlPolicy())) {
+						options.upsert(false);
 					}
-					u.append("$unset", unset);
+					MongodbUtil.removeIdIfNeed(pks, after);
+					u.append("$set", after);
+					if (removedFields != null && removedFields.size() > 0) {
+						Map<String, Object> unset = new HashMap<>();
+						for (String removeField : removedFields) {
+							unset.put(removeField, true);
+						}
+						u.append("$unset", unset);
+					}
+					writeModel = new UpdateManyModel<>(pkFilter, u, options);
 				}
 //				if (info != null) {
 //					Object unset = info.get("$unset");
@@ -320,7 +326,6 @@ public class MongodbWriter {
 //						u.append("$unset", unset);
 //					}
 //				}
-				writeModel = new UpdateManyModel<>(pkFilter, u, options);
 			}
 			updated.incrementAndGet();
 		} else if (recordEvent instanceof TapDeleteRecordEvent && CollectionUtils.isNotEmpty(pks)) {
