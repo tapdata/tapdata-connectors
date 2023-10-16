@@ -127,7 +127,8 @@ public class MongodbConnector extends ConnectorBase {
 	 */
 	@Override
 	public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-		final String version = MongodbUtil.getVersionString(mongoClient, mongoConfig.getDatabase());
+		final String database = mongoConfig.getDatabase();
+		final String version = MongodbUtil.getVersionString(mongoClient, database);
 		MongoIterable<String> collectionNames = mongoDatabase.listCollectionNames();
 		TableFieldTypesGenerator tableFieldTypesGenerator = InstanceFactory.instance(TableFieldTypesGenerator.class);
 		this.stringTypeValueMap = new HashMap<>();
@@ -160,8 +161,10 @@ public class MongodbConnector extends ConnectorBase {
 					//List all the tables under the database.
 					List<TapTable> list = list();
 					nameList.forEach(name -> {
-						TapTable table = table(name).defaultPrimaryKeys("_id");
+						MongoTable table = new MongoTable(name);
+						table.defaultPrimaryKeys("_id");
 						MongoCollection collection = documentMap.get(name);
+						table.setTableAttrs(MongodbUtil.getCollectionStatus(mongoClient, database, name));
 						try {
 							MongodbUtil.sampleDataRow(collection, SAMPLE_SIZE_BATCH_SIZE, (dataRow) -> {
 								Set<String> fieldNames = dataRow.keySet();
@@ -211,7 +214,10 @@ public class MongodbConnector extends ConnectorBase {
 					//List all the tables under the database.
 					List<TapTable> list = list();
 					nameList.forEach(name -> {
-						TapTable table = table(name).defaultPrimaryKeys(singletonList(COLLECTION_ID_FIELD));
+						TapTable table = new TapTable(name);
+						table.defaultPrimaryKeys(singletonList(COLLECTION_ID_FIELD));
+						//@todo save collection info which include capped info
+						//table.setTableAttrs(MongodbUtil.getCollectionStatus(mongoClient, database, name));
 						try (MongoCursor<BsonDocument> cursor = documentMap.get(name).find().iterator()) {
 							while (cursor.hasNext()) {
 								final BsonDocument document = cursor.next();
@@ -568,6 +574,25 @@ public class MongodbConnector extends ConnectorBase {
 					// TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
 				}
 			});
+		}
+
+		//@TODO created capped collection
+		Map<String, Object> tableAttr = new HashMap<>();//Optional.ofNullable(table.getAttr()).orElse(new HashMap<>());
+		Object isCapped = tableAttr.get("capped");//
+		if (isCapped instanceof Boolean && (Boolean) isCapped) {
+			try {
+				BsonDocument bson = new BsonDocument();
+				bson.put("convertToCapped", new BsonString(table.getId()));
+				Long maxCount = toLong(tableAttr.get("size"));
+				Long maxByteSize = toLong(tableAttr.get("maxSize"));
+				if (maxCount > 0) {
+					bson.put("max", new BsonInt64(maxCount));
+				}
+				bson.put("size", new BsonInt64(maxByteSize));
+				mongoDatabase.runCommand(bson);
+			} catch (Exception e) {
+				tapConnectorContext.getLog().warn(" Collection type conversion failed, unable to convert to capped collection, message: {}", e.getMessage());
+			}
 		}
 		return createTableOptions;
 	}
