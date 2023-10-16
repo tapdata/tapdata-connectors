@@ -246,6 +246,7 @@ public abstract class JdbcContext implements AutoCloseable {
         if (EmptyKit.isNotNull(hikariDataSource)) {
             hikariDataSource.close();
         }
+        config.deleteSSlFile();
     }
 
     //static Hikari connection

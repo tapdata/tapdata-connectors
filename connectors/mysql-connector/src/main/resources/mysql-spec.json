@@ -5,7 +5,7 @@
     "id": "mysql",
     "doc": "${doc}",
     "authentication": "Alpha",
-    "tags": ["Database"]
+    "tags": ["Database", "ssl"]
   },
   "configOptions": {
     "capabilities": [
