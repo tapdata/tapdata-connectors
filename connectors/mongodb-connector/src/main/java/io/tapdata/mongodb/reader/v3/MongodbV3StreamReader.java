@@ -337,6 +337,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 						info.put("$op", o);
 					}
 					tapBaseEvent = updateDMLEvent(null, after, collectionName);
+					((TapUpdateRecordEvent) tapBaseEvent).setIsReplaceEvent(!o.keySet().stream().anyMatch(k -> k.startsWith("$")));
 					Map<String, Object> originUnset = o.get("$unset", Map.class);
 										//Map<String, Object> finalUnset = new DataMap();
 										List<String> finalUnset = new ArrayList<>();

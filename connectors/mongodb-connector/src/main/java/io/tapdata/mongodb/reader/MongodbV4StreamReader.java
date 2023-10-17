@@ -196,6 +196,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 							}
 //							recordEvent.setInfo(info);
 							recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
+							recordEvent.setIsReplaceEvent(operationType.equals(OperationType.REPLACE));
 							tapEvents.add(recordEvent);
 						} else {
 							throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));
