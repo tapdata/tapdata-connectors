@@ -1,12 +1,15 @@
 package io.tapdata.connector.mrs.config;
 
 import io.tapdata.connector.hive.config.HiveConfig;
+import io.tapdata.connector.mrs.util.KerberosUtil;
 import io.tapdata.connector.mrs.util.Krb5Util;
 import io.tapdata.kit.EmptyKit;
 
 import java.util.Map;
 
 public class MrsHive3Config extends HiveConfig {
+    private static final String HIVE_DRIVER = "org.apache.hive.jdbc.HiveDriver";
+
 
     public MrsHive3Config(String connectorId) {
         super();
@@ -14,7 +17,6 @@ public class MrsHive3Config extends HiveConfig {
     }
 
     public String getDatabaseUrlPattern() {
-        // last %s reserved for extend params
         return "jdbc:" + getDbType() + "://%s/%s%s";
     }
 
@@ -26,25 +28,28 @@ public class MrsHive3Config extends HiveConfig {
         return connectionString;
     }
 
-    //deal with extend params no matter there is ?
-    public String getDatabaseUrl() {
+    public String getDatabaseUrl()  {
+        init();
         if (EmptyKit.isNull(this.getExtParams())) {
             this.setExtParams("");
         }
         if (EmptyKit.isNotEmpty(this.getExtParams()) && !this.getExtParams().startsWith("?") && !this.getExtParams().startsWith(":")) {
-            this.setExtParams("?" + this.getExtParams());
+            this.setExtParams("" + this.getExtParams());
         }
         StringBuilder strBuilder = new StringBuilder(String.format(this.getDatabaseUrlPattern(), this.getNameSrvAddr(), this.getDatabase(), this.getExtParams()));
         if (krb5) {
+            String keytabPath = Krb5Util.keytabPath(krb5Path);
+            keytabPath = keytabPath.replaceAll("\\\\","/");
             strBuilder.append(";principal=")
                     .append(principal)
                     .append(";user.principal=")
                     .append(getUser())
                     .append(";user.keytab=")
-                    .append(Krb5Util.keytabPath(krb5Path))
+                    .append(keytabPath)
                     .append(";");
         }
         return strBuilder.toString();
+
     }
 
     @Override
@@ -57,6 +62,36 @@ public class MrsHive3Config extends HiveConfig {
         return this;
     }
 
+    public  void init(){
+        if (krb5) {
+            String confPath=  Krb5Util.confPath(this.getKrb5Path());
+            confPath = confPath.replaceAll("\\\\","/");
+            System.setProperty("java.security.krb5.conf", confPath);
+            String zkPrincipal = "zookeeper/" + getUserRealm(this.getKrb5Conf());
+            System.setProperty("zookeeper.server.principal", zkPrincipal);
+        }
+        if (this.getSsl()) {
+            System.setProperty("zookeeper.clientCnxnSocket", "org.apache.zookeeper.ClientCnxnSocketNetty");
+            System.setProperty("zookeeper.client.secure", "true");
+        }
+    }
+
+    public static String getUserRealm(String krb5Conf) {
+        String serverRealm = System.getProperty("SERVER_REALM");
+        String authHostName;
+        if (serverRealm != null && !serverRealm.equals("")) {
+            authHostName = "hadoop." + serverRealm.toLowerCase();
+        } else {
+            serverRealm = KerberosUtil.getKrb5DomainRealm();
+            if (serverRealm != null && !serverRealm.equals("")) {
+                authHostName = "hadoop." + serverRealm.toLowerCase();
+            } else {
+                authHostName = "hadoop";
+            }
+        }
+        return authHostName;
+    }
+
     private final String connectorId;
     private String nameSrvAddr;
     private Boolean krb5;
@@ -65,6 +100,7 @@ public class MrsHive3Config extends HiveConfig {
     private String krb5Conf;
     private Boolean ssl;
     private String principal;
+    private String hdfsAddr;
 
     public String getNameSrvAddr() {
         return nameSrvAddr;
@@ -120,5 +156,13 @@ public class MrsHive3Config extends HiveConfig {
 
     public void setPrincipal(String principal) {
         this.principal = principal;
+    }
+
+    public String getHdfsAddr() {
+        return hdfsAddr;
+    }
+
+    public void setHdfsAddr(String hdfsAddr) {
+        this.hdfsAddr = hdfsAddr;
     }
 }

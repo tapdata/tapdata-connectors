@@ -2,6 +2,8 @@ package io.tapdata.connector.mrs.util;
 
 import io.tapdata.entity.logger.TapLogger;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import sun.security.krb5.Config;
 import sun.security.krb5.KrbException;
 
@@ -21,6 +23,9 @@ import java.util.regex.Pattern;
  * @version v1.0 2021/11/17 下午5:04 Create
  */
 public class Krb5Util {
+    private static final Logger logger = LoggerFactory.getLogger(KerberosUtil.class);
+
+    private static final String JAVA_SECURITY_KRB5_CONF_KEY = "java.security.krb5.conf";
 
     public static final String TAG = Krb5Util.class.getSimpleName();
 
@@ -32,7 +37,7 @@ public class Krb5Util {
     private static String storeDir() {
         String dir = System.getenv("TAPDATA_WORK_DIR");
         if (null == dir) {
-            dir = ".";
+            dir = System.getProperty("user.dir");
         }
         return paths(dir, "krb5");
     }
@@ -113,7 +118,7 @@ public class Krb5Util {
      * @param krb5Principal 主体
      * @return 配置
      */
-    private static String saslJaasConfig(String krb5Path, String krb5Principal) {
+    public static String saslJaasConfig(String krb5Path, String krb5Principal) {
         return "com.sun.security.auth.module.Krb5LoginModule required\n" +
                 "    useKeyTab=true\n" +
                 "    storeKey=true\n" +
@@ -129,7 +134,7 @@ public class Krb5Util {
      * @return 密钥路径
      */
     public static String keytabPath(String dir) {
-        return paths(dir, "krb5.keytab");
+        return paths(dir, "user.keytab");
     }
 
     /**
@@ -198,10 +203,24 @@ public class Krb5Util {
             savePath = confPath(dir);
             bytes = Base64.getDecoder().decode(conf);
             save(bytes, savePath, deleteExists);
+            setKrb5Config(savePath);
         } catch (Exception e) {
             throw new RuntimeException("Save kerberos conf failed: " + savePath, e);
         }
         return dir;
+    }
+
+    private static void setKrb5Config(String krb5ConfFile) throws IOException {
+        System.setProperty(JAVA_SECURITY_KRB5_CONF_KEY, krb5ConfFile);
+        String ret = System.getProperty(JAVA_SECURITY_KRB5_CONF_KEY);
+        if (ret == null) {
+            logger.error(JAVA_SECURITY_KRB5_CONF_KEY + " is null.");
+            throw new IOException(JAVA_SECURITY_KRB5_CONF_KEY + " is null.");
+        }
+        if (!ret.equals(krb5ConfFile)) {
+            logger.error(JAVA_SECURITY_KRB5_CONF_KEY + " is " + ret + " is not " + krb5ConfFile + ".");
+            throw new IOException(JAVA_SECURITY_KRB5_CONF_KEY + " is " + ret + " is not " + krb5ConfFile + ".");
+        }
     }
 
     /**
@@ -253,17 +272,17 @@ public class Krb5Util {
 
     public static void main(String[] args) throws Exception {
         String conf;
-        try (FileInputStream fis = new FileInputStream("/Users/lhs/Downloads/krb5-test.conf")) {
-            try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-                int len;
-                byte[] buf = new byte[1024];
-                while (-1 != (len = fis.read(buf, 0, 1024))) {
-                    baos.write(buf, 0, len);
-                }
-                conf = baos.toString("UTF-8");
-            }
-        }
-        System.out.println(conf);
-        checkKDCDomains(conf);
+//        try (FileInputStream fis = new FileInputStream("/Users/lhs/Downloads/krb5-test.conf")) {
+//            try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+//                int len;
+//                byte[] buf = new byte[1024];
+//                while (-1 != (len = fis.read(buf, 0, 1024))) {
+//                    baos.write(buf, 0, len);
+//                }
+//                conf = baos.toString("UTF-8");
+//            }
+//        }
+//        System.out.println(conf);
+//        checkKDCDomains(conf);
     }
 }
