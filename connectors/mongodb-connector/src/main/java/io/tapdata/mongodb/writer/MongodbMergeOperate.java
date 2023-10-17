@@ -374,16 +374,18 @@ public class MongodbMergeOperate {
 					mergeResult.getUpdate().put("$set", updateOpDoc);
 				}
 				if (removefields != null) {
-					for (Map.Entry<String, Object> entry : removefields.entrySet()) {
-						if (array) {
-							String[] paths = targetPath.split("\\.");
-							if (paths.length > 1) {
-								unsetOpDoc.append(paths[0] + ".$[element1]." + paths[1] + ".$[element2]." + entry.getKey(), entry.getValue());
+					for (String removeField : removefields.keySet()) {
+						if(after.keySet().stream().noneMatch(v -> v.equals(removeField)||v.startsWith(removeField+".")||removeField.startsWith(v + "."))){
+							if (array) {
+								String[] paths = targetPath.split("\\.");
+								if (paths.length > 1) {
+									unsetOpDoc.append(paths[0] + ".$[element1]." + paths[1] + ".$[element2]." + removeField, true);
+								} else {
+									unsetOpDoc.append(targetPath + ".$[element1]." + removeField, true);
+								}
 							} else {
-								unsetOpDoc.append(targetPath + ".$[element1]." + entry.getKey(), entry.getValue());
+								unsetOpDoc.append(targetPath + ".$[element1]." + removeField, true);
 							}
-						} else {
-							unsetOpDoc.append(targetPath + ".$[element1]." + entry.getKey(), entry.getValue());
 						}
 					}
 					if (mergeResult.getUpdate().containsKey("$unset")) {

@@ -19,6 +19,7 @@ import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
+import io.tapdata.mongodb.util.MapUtil;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.mongodb.writer.error.BulkWriteErrorCodeHandlerEnum;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
@@ -314,7 +315,10 @@ public class MongodbWriter {
 					if (removedFields != null && removedFields.size() > 0) {
 						Map<String, Object> unset = new HashMap<>();
 						for (String removeField : removedFields) {
-							unset.put(removeField, true);
+							if (after.keySet().stream().noneMatch(v -> v.equals(removeField) || v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
+//										unset.put(f, true);
+								unset.put(removeField,true);
+							}
 						}
 						u.append("$unset", unset);
 					}
