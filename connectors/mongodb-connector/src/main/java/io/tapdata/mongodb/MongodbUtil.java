@@ -82,6 +82,28 @@ public class MongodbUtil {
 		return map;
 	}
 
+	public static Map<String, Object> getCollectionSharkedKeys(MongoClient mongoClient, String database, String collectionName) {
+		Map<String, Object> map = new HashMap<>();
+		final String collectionFullName = String.format("%s.%s", database, collectionName);
+		try {
+			if (null == mongoClient || null == collectionName || "".equals(collectionName.trim())) return map;
+			MongoDatabase mongoDatabase = mongoClient.getDatabase("config");
+			Document collStats = mongoDatabase.runCommand(new Document("connections", collectionFullName).toBsonDocument());
+			Set<Map.Entry<String, Object>> entries = collStats.entrySet();
+			if (null != entries && !entries.isEmpty()) {
+				collStats.entrySet()
+						.stream()
+						.filter(Objects::nonNull)
+						.forEach(entry ->
+								map.put(entry.getKey(), entry.getValue())
+						);
+			}
+		} catch (Exception e) {
+			TapLogger.warn(MongodbUtil.class.getSimpleName(), "Can not find " + collectionFullName + "'s shared info from config db, message: " + e.getMessage());
+		}
+		return map;
+	}
+
 	public static void sampleDataRow(MongoCollection collection, int sampleSize, Consumer<BsonDocument> callback) {
 		AtomicReference<Boolean> idExist = new AtomicReference<>(false);
 		int sampleTime = 1;
