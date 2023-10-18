@@ -399,7 +399,7 @@ public class MongodbMergeOperate {
 				}
 				if (removefields != null) {
 					for (String removeField : removefields.keySet()) {
-						if(after.keySet().stream().noneMatch(v -> v.equals(removeField)||v.startsWith(removeField+".")||removeField.startsWith(v + "."))){
+						if (after.keySet().stream().noneMatch(v -> v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
 							if (array) {
 								String[] paths = targetPath.split("\\.");
 								if (paths.length > 1) {
@@ -413,9 +413,13 @@ public class MongodbMergeOperate {
 						}
 					}
 					if (mergeResult.getUpdate().containsKey("$unset")) {
-						mergeResult.getUpdate().get("$unset", Document.class).putAll(unsetOpDoc);
+						if (unsetOpDoc.size() > 0) {
+							mergeResult.getUpdate().get("$unset", Document.class).putAll(unsetOpDoc);
+						}
 					} else {
-						mergeResult.getUpdate().put("$unset", unsetOpDoc);
+						if (unsetOpDoc.size() > 0) {
+							mergeResult.getUpdate().put("$unset", unsetOpDoc);
+						}
 					}
 				}
 				break;
