@@ -567,29 +567,43 @@ public class MongodbConnector extends ConnectorBase {
 					
 					//开启分片功能
 					//db.runCommand({enablesharding:"testdb"});
-					MongoDatabase admin = mongoClient.getDatabase("admin");
-					admin.runCommand(new BsonDocument("enablesharding", new BsonString(database)));
-
-
-					//对片键字段建立索引
-					//包含用于建立索引的字段和索引类型。
-					//常见的索引类型如下：
-					//1：创建升序索引
-					//		-1：创建降序索引
-					//“hashed”：创建哈希索引
-					if (!needCreateIndex.isEmpty()) {
-						createIndex(table, needCreateIndex, log);
+					try {
+						MongoDatabase admin = mongoClient.getDatabase("admin");
+						admin.runCommand(new BsonDocument("enablesharding", new BsonString(database)));
+						isShardCollection = true;
+					} catch (Exception e){
+						isShardCollection = false;
+						log.warn(" The current Database does not have a sharding cluster configuration and cannot copy the sharding attributes of the source table. The sharding configuration cannot be opened, message: {}", e.getMessage());
 					}
 
-					//设置分片
-					//db.runCommand({shardcollection:"db.collection",key:{field1:1}});
-					//sh.shardCollection({"": 1/hased, "unique" : true, keys: {}});
-					BsonDocument bson = new BsonDocument();
-					bson.put("shardcollection", new BsonString(String.format("%s.%s", database, table.getId())));
-					bson.put("unique", new BsonBoolean(unique));
-					bson.put("key", shardKeys);
-					admin.runCommand(bson);
-					isShardCollection = true;
+
+					if (isShardCollection ) {
+						isShardCollection = false;
+						//对片键字段建立索引
+						//包含用于建立索引的字段和索引类型。
+						//常见的索引类型如下：
+						//1：创建升序索引
+						//		-1：创建降序索引
+						//“hashed”：创建哈希索引
+						if (!needCreateIndex.isEmpty()) {
+							createIndex(table, needCreateIndex, log);
+						}
+
+						//设置分片
+						//db.runCommand({shardcollection:"db.collection",key:{field1:1}});
+						//sh.shardCollection({"": 1/hased, "unique" : true, keys: {}});
+						BsonDocument bson = new BsonDocument();
+						bson.put("shardcollection", new BsonString(String.format("%s.%s", database, table.getId())));
+						bson.put("unique", new BsonBoolean(unique));
+						bson.put("key", shardKeys);
+						try {
+							admin.runCommand(bson);
+							isShardCollection = true;
+						} catch (Exception e) {
+							isShardCollection = false;
+							log.warn(" Unable to copy the sharding attributes of the source table, message: {}", e.getMessage());
+						}
+					}
 				}
 			}
 		}
@@ -619,7 +633,7 @@ public class MongodbConnector extends ConnectorBase {
 					mongoDatabase.runCommand(bson);
 				}
 			} catch (Exception e) {
-				tapConnectorContext.getLog().warn(" Collection type conversion failed, unable to convert to capped collection, message: {}", e.getMessage());
+				tapConnectorContext.getLog().warn("Collection type conversion failed, unable to convert to capped collection, message: {}", e.getMessage());
 			}
 		}
 
