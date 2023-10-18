@@ -115,7 +115,7 @@ public class MrsHive3Connector extends HiveConnector {
 
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
-        WriteListResult<TapRecordEvent> writeListResult = mrsHive3Write.writeRecord(tapConnectorContext, tapTable, tapRecordEvents);
+        WriteListResult<TapRecordEvent> writeListResult = mrsHive3Write.writeJdbcRecord(tapConnectorContext, tapTable, tapRecordEvents);
         consumer.accept(writeListResult);
     }
 
