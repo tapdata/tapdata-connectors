@@ -180,7 +180,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 							if (updateDescription != null) {
 								for (String f:updateDescription.getRemovedFields()) {
 
-									if (after.keySet().stream().noneMatch(v -> v.equals(f) || ((v.startsWith(f + ".") || f.startsWith(v + ".")) && after.get(v) instanceof ArrayList))) {
+									if (after.keySet().stream().noneMatch(v -> v.equals(f))) {
 //										unset.put(f, true);
 										removedFields.add(f);
 									}

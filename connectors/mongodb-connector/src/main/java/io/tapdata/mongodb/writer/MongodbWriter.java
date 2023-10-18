@@ -315,12 +315,14 @@ public class MongodbWriter {
 					if (removedFields != null && removedFields.size() > 0) {
 						Map<String, Object> unset = new HashMap<>();
 						for (String removeField : removedFields) {
-							if (after.keySet().stream().noneMatch(v -> v.equals(removeField) || v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
+							if (after.keySet().stream().noneMatch(v ->  v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
 //										unset.put(f, true);
 								unset.put(removeField,true);
 							}
 						}
-						u.append("$unset", unset);
+						if (unset.size() > 0) {
+							u.append("$unset", unset);
+						}
 					}
 					writeModel = new UpdateManyModel<>(pkFilter, u, options);
 				}
