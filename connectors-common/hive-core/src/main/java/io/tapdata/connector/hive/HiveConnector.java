@@ -68,7 +68,7 @@ public class HiveConnector extends CommonDbConnector {
         connectorFunctions.supportCreateTableV2(this::createTableV2);
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportClearTable(this::clearTable);
-        connectorFunctions.supportCreateIndex(this::createIndex);
+        //connectorFunctions.supportCreateIndex(this::createIndex);
 //        connectorFunctions.supportWriteRecord(this::writeRecord);
 
 
