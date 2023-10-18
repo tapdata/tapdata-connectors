@@ -280,7 +280,7 @@ public class MongodbWriter {
 				}
                 if(shardKyeMap.containsKey(tableId)){
 					String shardKey = shardKyeMap.get(tableId);
-					pkFilter.append(shardKey,insertRecordEvent.getAfter().get(shardKey));
+					if(insertRecordEvent.getAfter().containsKey(shardKey))pkFilter.append(shardKey,insertRecordEvent.getAfter().get(shardKey));
 				}
 				MongodbUtil.removeIdIfNeed(pks, insertRecordEvent.getAfter());
 				writeModel = new UpdateManyModel<>(pkFilter, new Document().append(operation, insertRecordEvent.getAfter()), options);
