@@ -531,111 +531,11 @@ public class MongodbConnector extends ConnectorBase {
 			createIndex(table, table.getIndexList(), log);
 		}
 
-		Object shardCollection = nodeConfig.get("shardCollection");
-		boolean isShardCollection = shardCollection instanceof Boolean && ((Boolean) shardCollection);
-		if (isShardCollection) {
-			isShardCollection = false;
-			TapIndexEx partitionIndex = table.getPartitionIndex();
-			if (null != partitionIndex) {
-				Boolean unique = Optional.ofNullable(partitionIndex.getUnique()).orElse(false);
-				List<TapIndexField> indexFields = partitionIndex.getIndexFields();
-				if (null != indexFields) {
-					List<TapIndex> needCreateIndex = new ArrayList<>();
-					Set<String> collect = table.getIndexList().stream().filter(Objects::nonNull).map(TapIndex::getName).collect(Collectors.toSet());
-					if (null != pks && !pks.isEmpty()) {
-						collect.addAll(pks);
-					}
-					BsonDocument shardKeys = new BsonDocument();
-					boolean  mandatoryType = indexFields.size() > 1;//如果多个hasedkey，key类型只能是1，如果是单个可以是hashed或1
-					indexFields.stream()
-							.filter(Objects::nonNull)
-							.forEach(shardKey -> {
-								if(!collect.contains(shardKey.getName())) {
-									TapIndex index = new TapIndex();
-									List<TapIndexField> f = new ArrayList<>();
-									f.add(new TapIndexField().name(shardKey.getName())
-											.fieldAsc(shardKey.getFieldAsc())
-											.fieldType(shardKey.getType()));
-									index.setIndexFields(f);
-									index.setName(shardKey.getName());
-									needCreateIndex.add(index);
-								}
-								shardKeys.put(shardKey.getName(), mandatoryType ?
-										new BsonInt64(1) :
-										null == shardKey.getType() || ( "1".endsWith(shardKey.getType())) ? new BsonInt64(1) : new BsonString("hashed"));
-							});
-					
-					//开启分片功能
-					//db.runCommand({enablesharding:"testdb"});
-					try {
-						MongoDatabase admin = mongoClient.getDatabase("admin");
-						admin.runCommand(new BsonDocument("enablesharding", new BsonString(database)));
-						isShardCollection = true;
-					} catch (Exception e){
-						isShardCollection = false;
-						log.warn(" The current Database does not have a sharding cluster configuration and cannot copy the sharding attributes of the source table. The sharding configuration cannot be opened, message: {}", e.getMessage());
-					}
+		//created shared collection
+		final boolean isShardCollection = createSharedCollection(nodeConfig, table, pks, database, log);
 
-
-					if (isShardCollection ) {
-						isShardCollection = false;
-						//对片键字段建立索引
-						//包含用于建立索引的字段和索引类型。
-						//常见的索引类型如下：
-						//1：创建升序索引
-						//		-1：创建降序索引
-						//“hashed”：创建哈希索引
-						if (!needCreateIndex.isEmpty()) {
-							createIndex(table, needCreateIndex, log);
-						}
-
-						//设置分片
-						//db.runCommand({shardcollection:"db.collection",key:{field1:1}});
-						//sh.shardCollection({"": 1/hased, "unique" : true, keys: {}});
-						BsonDocument bson = new BsonDocument();
-						bson.put("shardcollection", new BsonString(String.format("%s.%s", database, table.getId())));
-						bson.put("unique", new BsonBoolean(unique));
-						bson.put("key", shardKeys);
-						try {
-							admin.runCommand(bson);
-							isShardCollection = true;
-						} catch (Exception e) {
-							isShardCollection = false;
-							log.warn(" Unable to copy the sharding attributes of the source table, message: {}", e.getMessage());
-						}
-					}
-				}
-			}
-		}
-
-		//@TODO created capped collection
-		Map<String, Object> tableAttr = Optional.ofNullable(table.getTableAttr()).orElse(new HashMap<>());
-		Object isCapped = tableAttr.get("capped");//
-		if (isCapped instanceof Boolean && (Boolean) isCapped) {
-			Long maxCount = toLong(tableAttr.get("size"));
-			Long maxByteSize = toLong(tableAttr.get("maxSize"));
-			try {
-				if (!isShardCollection) {
-					CreateCollectionOptions options = new CreateCollectionOptions();
-					options.capped(true);
-					if (maxCount > 0) {
-						options.maxDocuments(maxCount);
-					}
-					options.sizeInBytes(maxByteSize);
-					mongoDatabase.createCollection(table.getId(), options);
-				} else {
-					BsonDocument bson = new BsonDocument();
-					bson.put("convertToCapped", new BsonString(table.getId()));
-					if (maxCount > 0) {
-						bson.put("max", new BsonInt64(maxCount));
-					}
-					bson.put("size", new BsonInt64(maxByteSize));
-					mongoDatabase.runCommand(bson);
-				}
-			} catch (Exception e) {
-				tapConnectorContext.getLog().warn("Collection type conversion failed, unable to convert to capped collection, message: {}", e.getMessage());
-			}
-		}
+		//created capped collection
+		createCappedCollection(table, isShardCollection, log);
 
 		return createTableOptions;
 	}
@@ -709,6 +609,121 @@ public class MongodbConnector extends ConnectorBase {
 		});
 	}
 
+	private boolean createSharedCollection(DataMap nodeConfig, TapTable table, Collection<String> pks, String database, Log log) {
+		Object shardCollection = nodeConfig.get("shardCollection");
+		boolean isShardCollection = shardCollection instanceof Boolean && ((Boolean) shardCollection);
+		if (isShardCollection) {
+				isShardCollection = false;
+				TapIndexEx partitionIndex = table.getPartitionIndex();
+				if (null != partitionIndex) {
+					Boolean unique = Optional.ofNullable(partitionIndex.getUnique()).orElse(false);
+					List<TapIndexField> indexFields = partitionIndex.getIndexFields();
+					if (null != indexFields) {
+						List<TapIndex> needCreateIndex = new ArrayList<>();
+						Set<String> collect = table.getIndexList().stream().filter(Objects::nonNull).map(TapIndex::getName).collect(Collectors.toSet());
+						if (null != pks && !pks.isEmpty()) {
+							collect.addAll(pks);
+						}
+						BsonDocument shardKeys = new BsonDocument();
+						boolean mandatoryType = indexFields.size() > 1;//如果多个hasedkey，key类型只能是1，如果是单个可以是hashed或1
+						indexFields.stream()
+								.filter(Objects::nonNull)
+								.forEach(shardKey -> {
+									if (!collect.contains(shardKey.getName())) {
+										TapIndex index = new TapIndex();
+										List<TapIndexField> f = new ArrayList<>();
+										f.add(new TapIndexField().name(shardKey.getName())
+												.fieldAsc(shardKey.getFieldAsc())
+												.fieldType(shardKey.getType()));
+										index.setIndexFields(f);
+										index.setName(shardKey.getName());
+										needCreateIndex.add(index);
+									}
+									shardKeys.put(shardKey.getName(), mandatoryType ?
+											new BsonInt64(1) :
+											null == shardKey.getType() || ("1".endsWith(shardKey.getType())) ? new BsonInt64(1) : new BsonString("hashed"));
+								});
+
+						//开启分片功能
+						//db.runCommand({enablesharding:"testdb"});
+						MongoDatabase admin = null;
+						try {
+							admin = mongoClient.getDatabase("admin");
+							if (null != admin) {
+								admin.runCommand(new BsonDocument("enablesharding", new BsonString(database)));
+								isShardCollection = true;
+							} else {
+								log.warn("The current Database does not have a sharding cluster configuration and cannot copy the sharding attributes of the source table,message: can not use system database 'admin' ");
+								isShardCollection = false;
+							}
+						} catch (Exception e) {
+							isShardCollection = false;
+							log.warn(" The current Database does not have a sharding cluster configuration and cannot copy the sharding attributes of the source table. The sharding configuration cannot be opened, message: {}", e.getMessage());
+						}
+
+
+						if (isShardCollection) {
+							isShardCollection = false;
+							//对片键字段建立索引
+							//包含用于建立索引的字段和索引类型。
+							//常见的索引类型如下：
+							//1：创建升序索引
+							//		-1：创建降序索引
+							//“hashed”：创建哈希索引
+							if (!needCreateIndex.isEmpty()) {
+								createIndex(table, needCreateIndex, log);
+							}
+
+							//设置分片
+							//db.runCommand({shardcollection:"db.collection",key:{field1:1}});
+							//sh.shardCollection({"": 1/hased, "unique" : true, keys: {}});
+							BsonDocument bson = new BsonDocument();
+							bson.put("shardcollection", new BsonString(String.format("%s.%s", database, table.getId())));
+							bson.put("unique", new BsonBoolean(unique));
+							bson.put("key", shardKeys);
+							try {
+								admin.runCommand(bson);
+								isShardCollection = true;
+							} catch (Exception e) {
+								isShardCollection = false;
+								log.warn(" Unable to copy the sharding attributes of the source table, message: {}", e.getMessage());
+							}
+						}
+					}
+				}
+			}
+		return isShardCollection;
+	}
+
+	private void createCappedCollection(TapTable table, boolean isShardCollection, Log log) {
+		Map<String, Object> tableAttr = Optional.ofNullable(table.getTableAttr()).orElse(new HashMap<>());
+		Object isCapped = tableAttr.get("capped");//
+		if (isCapped instanceof Boolean && (Boolean) isCapped) {
+			Long maxCount = toLong(tableAttr.get("size"));
+			Long maxByteSize = toLong(tableAttr.get("maxSize"));
+			try {
+				if (!isShardCollection) {
+					CreateCollectionOptions options = new CreateCollectionOptions();
+					options.capped(true);
+					if (maxCount > 0) {
+						options.maxDocuments(maxCount);
+					}
+					options.sizeInBytes(maxByteSize);
+					mongoDatabase.createCollection(table.getId(), options);
+				} else {
+					BsonDocument bson = new BsonDocument();
+					bson.put("convertToCapped", new BsonString(table.getId()));
+					if (maxCount > 0) {
+						bson.put("max", new BsonInt64(maxCount));
+					}
+					bson.put("size", new BsonInt64(maxByteSize));
+					mongoDatabase.runCommand(bson);
+				}
+			} catch (Exception e) {
+				log.warn("Collection type conversion failed, unable to convert to capped collection, message: {}", e.getMessage());
+			}
+		}
+	}
 
 	private void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, Consumer<ExecuteResult> executeResultConsumer) {
 		try {

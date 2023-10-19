@@ -358,11 +358,21 @@
           "title": "${node_shard_collection}",
           "x-decorator": "FormItem",
           "x-component": "Switch",
-          "required": true,
           "default": false,
           "x-decorator-props": {
+            "layout": "horizontal",
             "colon": false,
             "tooltip": "${node_shard_collection_tip}"
+          },
+          "x-reactions": {
+            "dependencies": [
+              "$inputs"
+            ],
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0].length>0}}"
+              }
+            }
           },
           "x-index": 79
         }
@@ -401,7 +411,7 @@
       "syncIndex": "Sync Index",
       "schemaLimit": "Fields Load Limit For Each Collection",
       "node_shard_collection": " Synchronize Partition Properties ",
-      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB"
+      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster "
     },
     "zh_CN": {
       "doc": "docs/mongodb_zh_CN.md",
@@ -433,7 +443,7 @@
       "syncIndex": "同步索引",
       "schemaLimit": "每张表加载的字段数限制",
       "node_shard_collection": "同步分区属性",
-      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB"
+      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效"
     },
     "zh_TW": {
       "doc": "docs/mongodb_zh_TW.md",
@@ -465,7 +475,7 @@
       "syncIndex": "同步索引",
       "schemaLimit": "每张表加載的字段數限制",
       "node_shard_collection": "同步分區内容",
-      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB"
+      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效"
 
 		}
 	},
