@@ -78,4 +78,25 @@ public class EmptyKit {
         }
     }
 
+    public static void closeAsyncQuietly(Closeable closeable) {
+        if (isNotNull(closeable)) {
+            new Thread(() -> {
+                try {
+                    closeable.close();
+                } catch (Throwable ignore) {
+                }
+            }).start();
+        }
+    }
+
+    public static void closeAsyncQuietly(AutoCloseable autoCloseable) {
+        if (isNotNull(autoCloseable)) {
+            new Thread(() -> {
+                try {
+                    autoCloseable.close();
+                } catch (Throwable ignore) {
+                }
+            }).start();
+        }
+    }
 }

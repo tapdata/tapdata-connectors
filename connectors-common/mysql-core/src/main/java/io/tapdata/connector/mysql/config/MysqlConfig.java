@@ -47,8 +47,6 @@ public class MysqlConfig extends CommonDbConfig {
         if (additionalString.startsWith("?")) {
             additionalString = additionalString.substring(1);
         }
-
-        Map<String, String> properties = new HashMap<>();
         StringBuilder sbURL = new StringBuilder("jdbc:").append(getDbType()).append("://").append(getHost()).append(":").append(getPort()).append("/").append(getDatabase());
 
         if (StringUtils.isNotBlank(additionalString)) {
@@ -86,7 +84,7 @@ public class MysqlConfig extends CommonDbConfig {
         return sbURL.toString();
     }
 
-    private String timezone;
+    protected String timezone;
 
     public String getTimezone() {
         return timezone;

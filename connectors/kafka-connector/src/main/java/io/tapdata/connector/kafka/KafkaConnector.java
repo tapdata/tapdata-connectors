@@ -2,9 +2,13 @@ package io.tapdata.connector.kafka;
 
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.CommonDbConfig;
+import io.tapdata.connector.kafka.admin.Admin;
+import io.tapdata.connector.kafka.admin.DefaultAdmin;
+import io.tapdata.connector.kafka.config.AdminConfiguration;
 import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
@@ -14,6 +18,7 @@ import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -25,12 +30,17 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
+import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.common.TopicPartitionInfo;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -46,20 +56,27 @@ public class KafkaConnector extends ConnectorBase {
     private KafkaConfig kafkaConfig;
     private Boolean isSchemaRegister;
     private Properties properties;
+    private KafkaExceptionCollector kafkaExceptionCollector;
 
     private void initConnection(TapConnectionContext connectorContext) {
         kafkaConfig = (KafkaConfig) new KafkaConfig().load(connectorContext.getConnectionConfig());
         kafkaConfig.load(connectorContext.getNodeConfig());
+        this.kafkaExceptionCollector = new KafkaExceptionCollector();
         this.isSchemaRegister = kafkaConfig.getSchemaRegister();
-        kafkaService = new KafkaService(kafkaConfig, connectorContext.getLog());
-        kafkaService.setConnectorId(connectorContext.getId());
-        kafkaService.init();
-        if (this.isSchemaRegister) {
-            schemaRegisterBuild();
-            kafkaSRService = new KafkaSRService(kafkaConfig, connectorContext, kafkaProducer);
-            kafkaSRService.setTapLogger(connectorContext.getLog());
-            kafkaSRService.setConnectorId(connectorContext.getId());
-            kafkaSRService.init();
+        try {
+            kafkaService = new KafkaService(kafkaConfig, connectorContext.getLog());
+            kafkaService.setConnectorId(connectorContext.getId());
+            kafkaService.init();
+            if (this.isSchemaRegister) {
+                schemaRegisterBuild();
+                kafkaSRService = new KafkaSRService(kafkaConfig, connectorContext, kafkaProducer);
+                kafkaSRService.setTapLogger(connectorContext.getLog());
+                kafkaSRService.setConnectorId(connectorContext.getId());
+                kafkaSRService.init();
+            }
+        }catch (Throwable t){
+            kafkaExceptionCollector.collectTerminateByServer(t);
+            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(),t);
         }
     }
 
@@ -137,8 +154,45 @@ public class KafkaConnector extends ConnectorBase {
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
-//        connectorFunctions.supportCreateTableV2(this::createTableV2);
+        connectorFunctions.supportCreateTableV2(this::createTableV2);
     }
+
+    private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
+        String tableId = tapCreateTableEvent.getTableId();
+        CreateTableOptions createTableOptions = new CreateTableOptions();
+//        if (!this.isSchemaRegister) {
+            DataMap nodeConfig = tapConnectorContext.getNodeConfig();
+            Integer replicasSize = (Integer) nodeConfig.get("replicasSize");
+            Integer partitionNum = (Integer) nodeConfig.get("partitionNum");
+            AdminConfiguration configuration = new AdminConfiguration(kafkaConfig, tapConnectorContext.getId());
+            try (Admin admin = new DefaultAdmin(configuration)) {
+                Set<String> existTopics = admin.listTopics();
+                if (!existTopics.contains(tableId)) {
+                    createTableOptions.setTableExists(false);
+                    admin.createTopics(tableId, partitionNum, replicasSize.shortValue());
+                } else {
+                    List<TopicPartitionInfo> topicPartitionInfos = admin.getTopicPartitionInfo(tableId);
+                    int existTopicPartition = topicPartitionInfos.size();
+                    int existReplicasSize = topicPartitionInfos.get(0).replicas().size();
+                    if (existReplicasSize != replicasSize) {
+                        TapLogger.warn(TAG, "cannot change the number of replicasSize of an existing table, will skip");
+                    }
+                    if (partitionNum <= existTopicPartition) {
+                        TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will skip");
+                    } else {
+                        admin.increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
+                    }
+                    createTableOptions.setTableExists(true);
+                }
+            } catch (InterruptedException | ExecutionException e) {
+                throw new RuntimeException("Create Table " + tableId + " Failed | Error: " + e.getMessage());
+            }
+//        }else{
+//            createTableOptions.setTableExists(true);
+//        }
+        return createTableOptions;
+    }
+
 
 //    private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws ExecutionException, InterruptedException, IOException {
 //        TapTable tapTable = tapCreateTableEvent.getTable();
@@ -170,7 +224,13 @@ public class KafkaConnector extends ConnectorBase {
 //    }
 
     private void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) {
-        kafkaService.produce(tapFieldBaseEvent);
+        try {
+            kafkaService.produce(tapFieldBaseEvent);
+        }catch (Throwable t){
+            kafkaExceptionCollector.collectTerminateByServer(t);
+            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), t);
+            kafkaExceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
+        }
     }
 
     @Override
@@ -195,6 +255,8 @@ public class KafkaConnector extends ConnectorBase {
             kafkaTest.testOneByOne();
         } catch (Throwable throwable) {
             TapLogger.error(TAG, throwable.getMessage());
+            kafkaExceptionCollector.collectTerminateByServer(throwable);
+            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), throwable);
             consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Failed, " + throwable.getMessage()));
         } finally {
             onStop(connectionContext);
@@ -214,27 +276,45 @@ public class KafkaConnector extends ConnectorBase {
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) {
-        if (!this.isSchemaRegister) {
-            if (kafkaConfig.getEnableScript()){
-                kafkaService.produce(connectorContext,tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
-            }else {
-                kafkaService.produce(tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
+        try{
+            if (!this.isSchemaRegister) {
+                if (kafkaConfig.getEnableScript()){
+                    kafkaService.produce(connectorContext,tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
+                }else {
+                    kafkaService.produce(tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
+                }
+            } else {
+                if (kafkaConfig.getEnableScript()){
+                    throw new RuntimeException("Custom message is not support in schema register");
+                }else {
+                    kafkaSRService.produce(tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
+                }
             }
-        } else {
-            if (kafkaConfig.getEnableScript()){
-                throw new RuntimeException("Custom message is not support in schema register");
-            }else {
-                kafkaSRService.produce(tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
-            }
+        }catch (Throwable t){
+            kafkaExceptionCollector.collectTerminateByServer(t);
+            kafkaExceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
         }
+
     }
 
     private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
-        kafkaService.consumeOne(tapTable, eventBatchSize, eventsOffsetConsumer);
+        try {
+            kafkaService.consumeOne(tapTable, eventBatchSize, eventsOffsetConsumer);
+        }catch (Throwable e){
+            kafkaExceptionCollector.collectTerminateByServer(e);
+            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);
+            kafkaExceptionCollector.collectReadPrivileges("batchRead",Collections.emptyList(),e);
+        }
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
-        kafkaService.streamConsume(tableList, recordSize, consumer);
+        try {
+            kafkaService.streamConsume(tableList, recordSize, consumer);
+        }catch (Throwable e){
+            kafkaExceptionCollector.collectTerminateByServer(e);
+            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);
+            kafkaExceptionCollector.collectReadPrivileges("streamRead",Collections.emptyList(),e);
+        }
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {

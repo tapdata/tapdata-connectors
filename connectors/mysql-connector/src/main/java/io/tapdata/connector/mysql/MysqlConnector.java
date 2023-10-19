@@ -61,14 +61,14 @@ public class MysqlConnector extends CommonDbConnector {
     private static final String TAG = MysqlConnector.class.getSimpleName();
 
 
-    private MysqlJdbcContextV2 mysqlJdbcContext;
+    protected MysqlJdbcContextV2 mysqlJdbcContext;
     protected MysqlConfig mysqlConfig;
-    private MysqlReader mysqlReader;
-    private MysqlWriter mysqlWriter;
-    private String version;
-    private TimeZone timezone;
+    protected MysqlReader mysqlReader;
+    protected MysqlWriter mysqlWriter;
+    protected String version;
+    protected TimeZone timezone;
 
-    private final AtomicBoolean started = new AtomicBoolean(false);
+    protected final AtomicBoolean started = new AtomicBoolean(false);
 
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {

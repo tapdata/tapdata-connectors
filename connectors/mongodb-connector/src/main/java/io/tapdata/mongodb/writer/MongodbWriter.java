@@ -93,6 +93,8 @@ public class MongodbWriter {
 		if (null == pksCache) pksCache = table.primaryKeys();
 		final Collection<String> pks = (Collection<String>) pksCache;
 
+		removeOidIfNeed(tapRecordEvents, pks);
+
 		// daas data will cache local
 		if (!is_cloud && mongodbConfig.isEnableSaveDeleteData()) {
 			MongodbLookupUtil.lookUpAndSaveDeleteMessage(tapRecordEvents, this.globalStateMap, this.connectionString, pks, collection);
@@ -128,6 +130,28 @@ public class MongodbWriter {
 				.insertedCount(inserted.get())
 				.modifiedCount(updated.get())
 				.removedCount(deleted.get()));
+	}
+
+	private void removeOidIfNeed(List<TapRecordEvent> tapRecordEvents, Collection<String> pks) {
+		if (null == tapRecordEvents || null == pks) {
+			return;
+		}
+		if (pks.contains("_id")) {
+			return;
+		}
+		// remove _id in after
+		for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
+			Map<String, Object> after = null;
+			if (tapRecordEvent instanceof TapInsertRecordEvent) {
+				after = ((TapInsertRecordEvent) tapRecordEvent).getAfter();
+			} else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
+				after = ((TapUpdateRecordEvent) tapRecordEvent).getAfter();
+			}
+			if (null == after) {
+				continue;
+			}
+			after.remove("_id");
+		}
 	}
 
 	public void writeUpdateRecordWithLog(TapRecordEvent tapRecordEvent, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
@@ -263,6 +287,7 @@ public class MongodbWriter {
 			Map<String, Object> after = updateRecordEvent.getAfter();
 			Map<String, Object> before = updateRecordEvent.getBefore();
 			Map<String, Object> info = recordEvent.getInfo();
+			List<String> removedFields = updateRecordEvent.getRemovedFields();
 			Document pkFilter;
 			Document u = new Document();
 			if (info != null && info.get("$op") != null) {
@@ -277,18 +302,30 @@ public class MongodbWriter {
 				}
 			} else {
 				pkFilter = getPkFilter(pks, before != null && !before.isEmpty() ? before : after);
-				if (ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS.equals(mongodbConfig.getUpdateDmlPolicy())) {
-					options.upsert(false);
-				}
-				MongodbUtil.removeIdIfNeed(pks, after);
-				u.append("$set", after);
-				if (info != null) {
-					Object unset = info.get("$unset");
-					if (unset != null) {
+				if(updateRecordEvent.getIsReplaceEvent() != null && updateRecordEvent.getIsReplaceEvent()){
+					u.putAll(after);
+					writeModel = new ReplaceOneModel<>(pkFilter, u, new ReplaceOptions().upsert(false));
+				}else{
+					if (ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS.equals(mongodbConfig.getUpdateDmlPolicy())) {
+						options.upsert(false);
+					}
+					MongodbUtil.removeIdIfNeed(pks, after);
+					u.append("$set", after);
+					if (removedFields != null && removedFields.size() > 0) {
+						Map<String, Object> unset = new HashMap<>();
+						for (String removeField : removedFields) {
+							unset.put(removeField, true);
+						}
 						u.append("$unset", unset);
 					}
+					writeModel = new UpdateManyModel<>(pkFilter, u, options);
 				}
-				writeModel = new UpdateManyModel<>(pkFilter, u, options);
+//				if (info != null) {
+//					Object unset = info.get("$unset");
+//					if (unset != null) {
+//						u.append("$unset", unset);
+//					}
+//				}
 			}
 			updated.incrementAndGet();
 		} else if (recordEvent instanceof TapDeleteRecordEvent && CollectionUtils.isNotEmpty(pks)) {

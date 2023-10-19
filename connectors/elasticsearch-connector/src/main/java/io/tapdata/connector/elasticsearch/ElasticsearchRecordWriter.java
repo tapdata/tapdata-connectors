@@ -20,10 +20,7 @@ import org.elasticsearch.client.RestHighLevelClient;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.function.Consumer;
 
 public class ElasticsearchRecordWriter {
@@ -39,9 +36,12 @@ public class ElasticsearchRecordWriter {
     private final MessageDigest md = MessageDigest.getInstance("SHA-256");
     private final Map<String, TapRecordEvent> eventMap = new HashMap<>();
 
+    private ElasticsearchExceptionCollector exceptionCollector;
+
     public ElasticsearchRecordWriter(ElasticsearchHttpContext httpContext, TapTable tapTable) throws Throwable {
         this.client = httpContext.getElasticsearchClient();
         this.tapTable = tapTable;
+        this.exceptionCollector = new ElasticsearchExceptionCollector();
         analyzeTable();
     }
 
@@ -60,56 +60,68 @@ public class ElasticsearchRecordWriter {
     public void write(List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
         //result of these events
         listResult = new WriteListResult<>();
-        BulkRequest bulkRequest = new BulkRequest();
+        try{
+            BulkRequest bulkRequest = new BulkRequest();
 //        bulkRequest.setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
-        for (TapRecordEvent recordEvent : tapRecordEvents) {
-            if (recordEvent instanceof TapInsertRecordEvent) {
-                bulkRequest.add(insertDocument(recordEvent));
-            } else if (recordEvent instanceof TapUpdateRecordEvent) {
-                bulkRequest.add(updateDocument(recordEvent));
-            } else if (recordEvent instanceof TapDeleteRecordEvent) {
-                bulkRequest.add(deleteDocument(recordEvent));
+            for (TapRecordEvent recordEvent : tapRecordEvents) {
+                if (recordEvent instanceof TapInsertRecordEvent) {
+                    bulkRequest.add(insertDocument(recordEvent));
+                } else if (recordEvent instanceof TapUpdateRecordEvent) {
+                    bulkRequest.add(updateDocument(recordEvent));
+                } else if (recordEvent instanceof TapDeleteRecordEvent) {
+                    bulkRequest.add(deleteDocument(recordEvent));
+                }
             }
-        }
-        BulkResponse bulkResponse = client.bulk(bulkRequest, RequestOptions.DEFAULT);
-        long insertCount = 0L;
-        long updateCount = 0L;
-        long deleteCount = 0L;
-        for (BulkItemResponse bulkItemResponse : bulkResponse) {
-            switch (bulkItemResponse.getOpType()) {
-                case INDEX:
-                case CREATE:
-                    if (!bulkItemResponse.isFailed()) {
-                        insertCount++;
-                    } else {
-                        BulkItemResponse.Failure failure = bulkItemResponse.getFailure();
-                        listResult.addError(eventMap.get(failure.getId()), new Throwable(failure.getMessage()));
-                    }
-                    break;
-                case UPDATE:
-                    if (!bulkItemResponse.isFailed()) {
-                        updateCount++;
-                    } else {
-                        BulkItemResponse.Failure failure = bulkItemResponse.getFailure();
-                        listResult.addError(eventMap.get(failure.getId()), new Throwable(failure.getMessage()));
-                    }
-                    break;
-                case DELETE:
-                    if (!bulkItemResponse.isFailed()) {
-                        deleteCount++;
-                    } else {
-                        BulkItemResponse.Failure failure = bulkItemResponse.getFailure();
-                        listResult.addError(eventMap.get(failure.getId()), new Throwable(failure.getMessage()));
-                    }
-                    break;
-                default:
-                    break;
+            BulkResponse bulkResponse = client.bulk(bulkRequest, RequestOptions.DEFAULT);
+            long insertCount = 0L;
+            long updateCount = 0L;
+            long deleteCount = 0L;
+            for (BulkItemResponse bulkItemResponse : bulkResponse) {
+                switch (bulkItemResponse.getOpType()) {
+                    case INDEX:
+                    case CREATE:
+                        if (!bulkItemResponse.isFailed()) {
+                            insertCount++;
+                        } else {
+                            BulkItemResponse.Failure failure = bulkItemResponse.getFailure();
+                            listResult.addError(eventMap.get(failure.getId()), new Throwable(failure.getMessage()));
+                            throw failure.getCause();
+                        }
+                        break;
+                    case UPDATE:
+                        if (!bulkItemResponse.isFailed()) {
+                            updateCount++;
+                        } else {
+                            BulkItemResponse.Failure failure = bulkItemResponse.getFailure();
+                            listResult.addError(eventMap.get(failure.getId()), new Throwable(failure.getMessage()));
+                            throw failure.getCause();
+                        }
+                        break;
+                    case DELETE:
+                        if (!bulkItemResponse.isFailed()) {
+                            deleteCount++;
+                        } else {
+                            BulkItemResponse.Failure failure = bulkItemResponse.getFailure();
+                            listResult.addError(eventMap.get(failure.getId()), new Throwable(failure.getMessage()));
+                            throw failure.getCause();
+                        }
+                        break;
+                    default:
+                        break;
+                }
             }
+            writeListResultConsumer.accept(listResult
+                    .insertedCount(insertCount)
+                    .modifiedCount(updateCount)
+                    .removedCount(deleteCount));
+        }catch (Throwable t){
+            TapRecordEvent errorEvent = listResult.getErrorMap().keySet().stream().findFirst().orElse(null);
+            exceptionCollector.collectTerminateByServer(t);
+            exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
+            exceptionCollector.collectWriteType(null, null, errorEvent, t);
+            exceptionCollector.collectWriteLength(null,null,errorEvent,t);
         }
-        writeListResultConsumer.accept(listResult
-                .insertedCount(insertCount)
-                .modifiedCount(updateCount)
-                .removedCount(deleteCount));
+
     }
 
     public ElasticsearchRecordWriter setVersion(String version) {

@@ -180,7 +180,8 @@ public class DorisStreamLoader {
         TapLogger.debug(TAG, "Stream load Result {}", loadResult);
         RespContent respContent = OBJECT_MAPPER.readValue(loadResult, RespContent.class);
         if (!respContent.isSuccess() && !"Publish Timeout".equals(respContent.getStatus())) {
-            if (respContent.getMessage().toLowerCase().contains("too many filtered rows")) {
+            if (respContent.getMessage().toLowerCase().contains("too many filtered rows")
+                    || respContent.getMessage().toLowerCase().contains("access denied")) {
                 throw new StreamLoadException("Stream load failed | Error: " + loadResult);
             }
             throw new DorisRetryableException(loadResult);

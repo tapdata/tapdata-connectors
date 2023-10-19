@@ -49,10 +49,18 @@ public class ElasticsearchConnector extends ConnectorBase {
     private String elasticsearchVersion;
     private static final String TAG = ElasticsearchConnector.class.getSimpleName();
 
+    private ElasticsearchExceptionCollector exceptionCollector;
+
     private void initConnection(TapConnectionContext connectorContext) {
         elasticsearchConfig = new ElasticsearchConfig().load(connectorContext.getConnectionConfig());
-        elasticsearchHttpContext = new ElasticsearchHttpContext(elasticsearchConfig);
-        elasticsearchVersion = elasticsearchHttpContext.queryVersion();
+        exceptionCollector = new ElasticsearchExceptionCollector();
+        try {
+            elasticsearchHttpContext = new ElasticsearchHttpContext(elasticsearchConfig);
+            elasticsearchVersion = elasticsearchHttpContext.queryVersion();
+        }catch (Throwable e){
+            exceptionCollector.collectTerminateByServer(e);
+            exceptionCollector.collectUserPwdInvalid(elasticsearchConfig.getUser(),e);
+        }
     }
 
     @Override
@@ -159,60 +167,64 @@ public class ElasticsearchConnector extends ConnectorBase {
 
     private void createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
         TapTable tapTable = tapCreateTableEvent.getTable();
-        if (!elasticsearchHttpContext.existsIndex(tapTable.getId().toLowerCase())) {
-            int chunkSize = 1;
-            CreateIndexRequest indexRequest = new CreateIndexRequest(tapTable.getId().toLowerCase());
-            indexRequest.settings(Settings.builder()
-                    .put("number_of_shards", chunkSize)
-                    .put("number_of_replicas", 1));
-            XContentBuilder xContentBuilder = XContentFactory.jsonBuilder();
-            xContentBuilder.startObject();
-            xContentBuilder.field("dynamic", "true");
-            xContentBuilder.startObject("properties");
-            for (TapField field : tapTable.getNameFieldMap().values()) {
-                String dataType = field.getDataType();
-                if (null == dataType) {
-                    continue;
+        try{
+            if (!elasticsearchHttpContext.existsIndex(tapTable.getId().toLowerCase())) {
+                int chunkSize = 1;
+                CreateIndexRequest indexRequest = new CreateIndexRequest(tapTable.getId().toLowerCase());
+                indexRequest.settings(Settings.builder()
+                        .put("number_of_shards", chunkSize)
+                        .put("number_of_replicas", 1));
+                XContentBuilder xContentBuilder = XContentFactory.jsonBuilder();
+                xContentBuilder.startObject();
+                xContentBuilder.field("dynamic", "true");
+                xContentBuilder.startObject("properties");
+                for (TapField field : tapTable.getNameFieldMap().values()) {
+                    String dataType = field.getDataType();
+                    if (null == dataType) {
+                        continue;
+                    }
+                    switch (dataType) {
+                        case "text":
+                            xContentBuilder.startObject(field.getName())
+                                    .field("type", "text")
+                                    .startObject("fields").startObject("keyword")
+                                    .field("ignore_above", 256)
+                                    .field("type", "keyword")
+                                    .endObject().endObject()
+                                    .endObject();
+                            break;
+                        case "unsigned_long":
+                            xContentBuilder.startObject(field.getName())
+                                    .field("type", "unsigned_long")
+                                    .endObject();
+                            break;
+                        case "scaled_float":
+                            xContentBuilder.startObject(field.getName())
+                                    .field("type", "scaled_float")
+                                    .field("scaling_factor", 100)
+                                    .endObject();
+                            break;
+                        case "date":
+                            xContentBuilder.startObject(field.getName())
+                                    .field("type", "date")
+                                    .field("format", "yyyy-MM-dd||yyyy-MM-dd HH:mm:ss.SSSSSS||HH:mm:ss||epoch_millis")
+                                    .endObject();
+                            break;
+                        default:
+                            xContentBuilder.startObject(field.getName())
+                                    .field("type", dataType)
+                                    .endObject();
+                            break;
+                    }
                 }
-                switch (dataType) {
-                    case "text":
-                        xContentBuilder.startObject(field.getName())
-                                .field("type", "text")
-                                .startObject("fields").startObject("keyword")
-                                .field("ignore_above", 256)
-                                .field("type", "keyword")
-                                .endObject().endObject()
-                                .endObject();
-                        break;
-                    case "unsigned_long":
-                        xContentBuilder.startObject(field.getName())
-                                .field("type", "unsigned_long")
-                                .endObject();
-                        break;
-                    case "scaled_float":
-                        xContentBuilder.startObject(field.getName())
-                                .field("type", "scaled_float")
-                                .field("scaling_factor", 100)
-                                .endObject();
-                        break;
-                    case "date":
-                        xContentBuilder.startObject(field.getName())
-                                .field("type", "date")
-                                .field("format", "yyyy-MM-dd||yyyy-MM-dd HH:mm:ss.SSSSSS||HH:mm:ss||epoch_millis")
-                                .endObject();
-                        break;
-                    default:
-                        xContentBuilder.startObject(field.getName())
-                                .field("type", dataType)
-                                .endObject();
-                        break;
-                }
+                xContentBuilder.endObject();
+                xContentBuilder.endObject();
+                indexRequest.mapping(xContentBuilder);
+                elasticsearchHttpContext.getElasticsearchClient().indices().create(indexRequest, RequestOptions.DEFAULT);
             }
-            xContentBuilder.endObject();
-            xContentBuilder.endObject();
-            indexRequest.mapping(xContentBuilder);
-
-            elasticsearchHttpContext.getElasticsearchClient().indices().create(indexRequest, RequestOptions.DEFAULT);
+        }catch (Throwable e){
+            exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
+            exceptionCollector.collectUserPwdInvalid(elasticsearchConfig.getUser(),e);
         }
     }
 

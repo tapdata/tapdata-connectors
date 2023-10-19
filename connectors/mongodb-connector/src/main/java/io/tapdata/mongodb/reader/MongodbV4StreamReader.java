@@ -32,6 +32,7 @@ import org.bson.codecs.DecoderContext;
 import org.bson.codecs.DocumentCodec;
 import org.bson.conversions.Bson;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -173,23 +174,29 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 							}
 
 							TapUpdateRecordEvent recordEvent = updateDMLEvent(null, after, collectionName);
-							Map<String, Object> info = new DataMap();
-							Map<String, Object> unset = new DataMap();
+//							Map<String, Object> info = new DataMap();
+//							Map<String, Object> unset = new DataMap();
+							List<String> removedFields = new ArrayList<>();
 							if (updateDescription != null) {
 								for (String f:updateDescription.getRemovedFields()) {
 									if (after.keySet().stream().noneMatch(v -> v.equals(f) || v.startsWith(f + ".") || f.startsWith(v + "."))) {
-										unset.put(f, true);
+//										unset.put(f, true);
+										removedFields.add(f);
 									}
 //									if (!after.containsKey(f)) {
 //										unset.put(f, true);
 //									}
 								}
-								if (unset.size() > 0) {
-									info.put("$unset", unset);
+//								if (unset.size() > 0) {
+//									info.put("$unset", unset);
+//								}
+								if (removedFields.size() > 0) {
+									recordEvent.removedFields(removedFields);
 								}
 							}
-							recordEvent.setInfo(info);
+//							recordEvent.setInfo(info);
 							recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
+							recordEvent.setIsReplaceEvent(operationType.equals(OperationType.REPLACE));
 							tapEvents.add(recordEvent);
 						} else {
 							throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));

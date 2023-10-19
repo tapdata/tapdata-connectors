@@ -6,6 +6,7 @@ import com.google.cloud.bigquery.BigQuery;
 import com.google.cloud.bigquery.BigQueryException;
 import com.google.cloud.bigquery.BigQueryOptions;
 import com.google.cloud.bigquery.QueryJobConfiguration;
+import io.tapdata.bigquery.BigQueryExceptionCollector;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.TapLogger;
 
@@ -22,16 +23,21 @@ public class SqlMarker {
     private GoogleCredentials credentials;
     private BigQuery bigQuery;
 
+    private BigQueryExceptionCollector bigQueryExceptionCollector;
+
     private SqlMarker(String credentialsJson) {
         try {
+            this.bigQueryExceptionCollector = new BigQueryExceptionCollector();
             this.credentials = ServiceAccountCredentials.fromStream(new ByteArrayInputStream(credentialsJson.getBytes(StandardCharsets.UTF_8)));
             this.bigQuery();
-        } catch (IOException e) {
+        } catch (Throwable e) {
+            bigQueryExceptionCollector.collectUserPwdInvalid(credentialsJson,e);
             TapLogger.error(TAG, "Unable to create a connection through Service Account Credentials. Please check whether the Service Account is correct or invalid. ");
         }
     }
 
     private SqlMarker(GoogleCredentials credentials) {
+        this.bigQueryExceptionCollector = new BigQueryExceptionCollector();
         this.credentials = credentials;
         this.bigQuery();
     }
