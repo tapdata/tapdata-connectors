@@ -88,9 +88,9 @@ public class MongodbUtil {
 		try {
 			if (null == mongoClient || null == collectionName || "".equals(collectionName.trim())) return map;
 			MongoDatabase mongoDatabase = mongoClient.getDatabase("config");
-			Document collStats = mongoDatabase.runCommand(new Document("connections", collectionFullName).toBsonDocument());
-			Set<Map.Entry<String, Object>> entries = collStats.entrySet();
-			if (null != entries && !entries.isEmpty()) {
+			FindIterable<Document> collections = mongoDatabase.getCollection("collections").find(new Document("_id", collectionFullName).toBsonDocument());
+			Document collStats = collections.first();//mongoDatabase.runCommand(new Document("connections", collectionFullName).toBsonDocument());
+			if (null != collStats && !collStats.isEmpty()) {
 				collStats.entrySet()
 						.stream()
 						.filter(Objects::nonNull)

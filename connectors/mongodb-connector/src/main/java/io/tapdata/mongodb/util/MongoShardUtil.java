@@ -31,11 +31,19 @@ public class MongoShardUtil {
             map.put("sharded", sharded);
             map.put("shards", removeChar(shards));
             map.put("shard", removeChar(sharkedKeys));
-            if (sharded instanceof Boolean && ((Boolean) sharded)
-                    && null != sharkedKeys && !sharkedKeys.isEmpty()) {
+            if (sharded instanceof Boolean && Boolean.TRUE.equals(sharded)) {
+                if (null == sharkedKeys) {
+                    sharkedKeys = new HashMap<>();
+                }
+                if (sharkedKeys.isEmpty()) {
+                    sharkedKeys.put("unique", false);
+                    Map<String, Object> key = new HashMap<>();
+                    key.put("_id", 1);
+                    sharkedKeys.put("key", key);
+                }
                 Object uniqueObj = sharkedKeys.get("unique");
                 Object shardKeysObj = sharkedKeys.get("key");
-                if (shardKeysObj instanceof Map & !((Map<String, Object>)shardKeysObj).isEmpty()) {
+                if (shardKeysObj instanceof Map && !((Map<String, Object>)shardKeysObj).isEmpty()) {
                     Set<String> shardKeys = ((Map<String, Object>) shardKeysObj).keySet();
                     List<TapIndexField> indexFields = new ArrayList<>();
                     shardKeys.stream().filter(Objects::nonNull).forEach(shardKey -> {
