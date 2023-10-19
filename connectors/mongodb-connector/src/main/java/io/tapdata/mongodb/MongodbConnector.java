@@ -3,11 +3,9 @@ package io.tapdata.mongodb;
 import com.mongodb.*;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.*;
-import com.mongodb.client.model.CreateCollectionOptions;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Sorts;
 import io.tapdata.base.ConnectorBase;
-import io.tapdata.common.CommonDbConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.conversion.TableFieldTypesGenerator;
 import io.tapdata.entity.error.CoreException;
@@ -17,7 +15,6 @@ import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
-import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.*;
 import io.tapdata.entity.schema.value.*;
@@ -31,12 +28,10 @@ import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbStreamReader;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
 import io.tapdata.mongodb.reader.v3.MongodbV3StreamReader;
-import io.tapdata.mongodb.util.MongoShardUtil;
 import io.tapdata.mongodb.writer.MongodbWriter;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
-import io.tapdata.pdk.apis.context.ConfigContext;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
@@ -132,8 +127,8 @@ public class MongodbConnector extends ConnectorBase {
 	 */
 	@Override
 	public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-		final String database = mongoConfig.getDatabase();
-		final String version = MongodbUtil.getVersionString(mongoClient, database);
+		String database = mongoConfig.getDatabase();
+		String version = MongodbUtil.getVersionString(mongoClient, database);
 		MongoIterable<String> collectionNames = mongoDatabase.listCollectionNames();
 		TableFieldTypesGenerator tableFieldTypesGenerator = InstanceFactory.instance(TableFieldTypesGenerator.class);
 		this.stringTypeValueMap = new HashMap<>();
@@ -166,8 +161,7 @@ public class MongodbConnector extends ConnectorBase {
 					//List all the tables under the database.
 					List<TapTable> list = list();
 					nameList.forEach(name -> {
-						TapTable table = new TapTable(name);
-						table.defaultPrimaryKeys("_id");
+						TapTable table = new TapTable(name).defaultPrimaryKeys("_id");
 						MongoCollection<?> collection = documentMap.get(name);
 						try {
 							MongodbUtil.sampleDataRow(collection, SAMPLE_SIZE_BATCH_SIZE, (dataRow) -> {
@@ -194,9 +188,6 @@ public class MongodbConnector extends ConnectorBase {
 							TapLogger.info(TAG, "MongodbConnector discoverSchema table: {} index {}", name, ((Document) index).toJson());
 							table.add(tapIndex);
 						});
-						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
-						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
-
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -220,9 +211,7 @@ public class MongodbConnector extends ConnectorBase {
 					//List all the tables under the database.
 					List<TapTable> list = list();
 					nameList.forEach(name -> {
-						TapTable table = new TapTable(name);
-						table.defaultPrimaryKeys(singletonList(COLLECTION_ID_FIELD));
-						// save collection info which include capped info
+						TapTable table = new TapTable(name).defaultPrimaryKeys(singletonList(COLLECTION_ID_FIELD));
 						try (MongoCursor<BsonDocument> cursor = documentMap.get(name).find().iterator()) {
 							while (cursor.hasNext()) {
 								final BsonDocument document = cursor.next();
@@ -234,8 +223,6 @@ public class MongodbConnector extends ConnectorBase {
 								break;
 							}
 						}
-						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
-						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -488,23 +475,9 @@ public class MongodbConnector extends ConnectorBase {
 
 	private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
 		// TODO: mongodb create table, will do db / collection shard
-		final Log log = tapConnectorContext.getLog();
 		CreateTableOptions createTableOptions = new CreateTableOptions();
 		createTableOptions.setTableExists(false);
 
-		DataMap connectionConfig = tapConnectorContext.getConnectionConfig();
-		if (null == connectionConfig || connectionConfig.isEmpty()) {
-			throw new CoreException("Connection config can not be empty");
-		}
-		CommonDbConfig mongodbConfig = new MongodbConfig().load(connectionConfig);
-		String database = mongodbConfig.getDatabase();
-		if (null == database || "".equals(database.trim())) {
-			throw new CoreException("The value of database name in connection config can not be empty");
-		}
-		DataMap nodeConfig = tapConnectorContext.getNodeConfig();
-		if (null == nodeConfig) {
-			throw new CoreException("Node config can not be empty");
-		}
 		TapTable table = tapCreateTableEvent.getTable();
 		Collection<String> pks = table.primaryKeys();
 		if (CollectionUtils.isNotEmpty(pks) && (pks.size() > 1 || !"_id".equals(pks.iterator().next()))) {
@@ -527,202 +500,77 @@ public class MongodbConnector extends ConnectorBase {
 				TapLogger.info(TAG, "table: " + table.getName() + " has no index");
 				return createTableOptions;
 			}
-
-			createIndex(table, table.getIndexList(), log);
-		}
-
-		//created shared collection
-		final boolean isShardCollection = createSharedCollection(nodeConfig, table, pks, database, log);
-
-		//@todo created capped collection
-		//createCappedCollection(table, isShardCollection, log);
-
-		return createTableOptions;
-	}
-
-	private void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
-		if (null == indexList || indexList.isEmpty()) return;
-		indexList.forEach(index -> {
-			log.info("find index: {}" + index.getName());
-			try {
-				String name = index.getName();
-				// 去除 __t__ 前缀
-				if (!name.startsWith("__t__")) {
-					return;
-				}
-				name = name.substring(5);
-				Document dIndex = Document.parse(name);
-				if (dIndex == null) {
-					return;
-				}
-				MongoCollection<Document> targetCollection = mongoDatabase.getCollection(table.getName());
-				IndexOptions indexOptions = new IndexOptions();
-				// 1. 遍历 index, 生成 indexOptions
-				dIndex.forEach((key, value) -> {
-					if ("unique".equals(key)) {
-						indexOptions.unique((Boolean) value);
-					} else if ("sparse".equals(key)) {
-						indexOptions.sparse((Boolean) value);
-					} else if ("expireAfterSeconds".equals(key)) {
-						indexOptions.expireAfter(((Double) value).longValue(), java.util.concurrent.TimeUnit.SECONDS);
-					} else if ("background".equals(key)) {
-						indexOptions.background((Boolean) value);
-					} else if ("partialFilterExpression".equals(key)) {
-						indexOptions.partialFilterExpression((Bson) value);
-					} else if ("defaultLanguage".equals(key)) {
-						indexOptions.defaultLanguage((String) value);
-					} else if ("languageOverride".equals(key)) {
-						indexOptions.languageOverride((String) value);
-					} else if ("textVersion".equals(key)) {
-						indexOptions.textVersion((Integer) value);
-					} else if ("weights".equals(key)) {
-						indexOptions.weights((Bson) value);
-					} else if ("sphereVersion".equals(key)) {
-						indexOptions.sphereVersion((Integer) value);
-					} else if ("bits".equals(key)) {
-						indexOptions.bits((Integer) value);
-					} else if ("min".equals(key)) {
-						indexOptions.min((Double) value);
-					} else if ("max".equals(key)) {
-						indexOptions.max((Double) value);
-					} else if ("bucketSize".equals(key)) {
-						indexOptions.bucketSize((Double) value);
-					} else if ("storageEngine".equals(key)) {
-						indexOptions.storageEngine((Bson) value);
-					} else if ("wildcardProjection".equals(key)) {
-						indexOptions.wildcardProjection((Bson) value);
-					} else if ("hidden".equals(key)) {
-						indexOptions.hidden((Boolean) value);
-					} else if ("version".equals(key)) {
-						indexOptions.version((Integer) value);
+			List<TapIndex> indexList = table.getIndexList();
+			if (null != indexList && !indexList.isEmpty()) {
+				indexList.forEach(index -> {
+					TapLogger.info(TAG, "find index: " + index.getName());
+					try {
+						String name = index.getName();
+						// 去除 __t__ 前缀
+						if (!name.startsWith("__t__")) {
+							return;
+						}
+						name = name.substring(5);
+						Document dIndex = Document.parse(name);
+						if (dIndex == null) {
+							return;
+						}
+						MongoCollection<Document> targetCollection = mongoDatabase.getCollection(table.getName());
+						IndexOptions indexOptions = new IndexOptions();
+						// 1. 遍历 index, 生成 indexOptions
+						dIndex.forEach((key, value) -> {
+							if ("unique".equals(key)) {
+								indexOptions.unique((Boolean) value);
+							} else if ("sparse".equals(key)) {
+								indexOptions.sparse((Boolean) value);
+							} else if ("expireAfterSeconds".equals(key)) {
+								indexOptions.expireAfter(((Double) value).longValue(), java.util.concurrent.TimeUnit.SECONDS);
+							} else if ("background".equals(key)) {
+								indexOptions.background((Boolean) value);
+							} else if ("partialFilterExpression".equals(key)) {
+								indexOptions.partialFilterExpression((Bson) value);
+							} else if ("defaultLanguage".equals(key)) {
+								indexOptions.defaultLanguage((String) value);
+							} else if ("languageOverride".equals(key)) {
+								indexOptions.languageOverride((String) value);
+							} else if ("textVersion".equals(key)) {
+								indexOptions.textVersion((Integer) value);
+							} else if ("weights".equals(key)) {
+								indexOptions.weights((Bson) value);
+							} else if ("sphereVersion".equals(key)) {
+								indexOptions.sphereVersion((Integer) value);
+							} else if ("bits".equals(key)) {
+								indexOptions.bits((Integer) value);
+							} else if ("min".equals(key)) {
+								indexOptions.min((Double) value);
+							} else if ("max".equals(key)) {
+								indexOptions.max((Double) value);
+							} else if ("bucketSize".equals(key)) {
+								indexOptions.bucketSize((Double) value);
+							} else if ("storageEngine".equals(key)) {
+								indexOptions.storageEngine((Bson) value);
+							} else if ("wildcardProjection".equals(key)) {
+								indexOptions.wildcardProjection((Bson) value);
+							} else if ("hidden".equals(key)) {
+								indexOptions.hidden((Boolean) value);
+							} else if ("version".equals(key)) {
+								indexOptions.version((Integer) value);
+							}
+						});
+						try {
+							targetCollection.createIndex(dIndex.get("key", Document.class), indexOptions);
+						} catch (Exception e) {
+							TapLogger.warn(TAG, "create index failed 1: " + e.getMessage());
+						}
+					} catch (Exception e) {
+						TapLogger.warn(TAG, "create index failed 2: " + e.getMessage());
+						// TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
 					}
 				});
-				try {
-					targetCollection.createIndex(dIndex.get("key", Document.class), indexOptions);
-				} catch (Exception e) {
-					log.warn("create index failed 1: {}", e.getMessage());
-				}
-			} catch (Exception e) {
-				log.warn("create index failed 2: {}", e.getMessage());
-				// TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
-			}
-		});
-	}
-
-	private boolean createSharedCollection(DataMap nodeConfig, TapTable table, Collection<String> pks, String database, Log log) {
-		Object shardCollection = nodeConfig.get("shardCollection");
-		boolean isShardCollection = shardCollection instanceof Boolean && ((Boolean) shardCollection);
-		if (isShardCollection) {
-				isShardCollection = false;
-				TapIndexEx partitionIndex = table.getPartitionIndex();
-				if (null != partitionIndex) {
-					Boolean unique = Optional.ofNullable(partitionIndex.getUnique()).orElse(false);
-					List<TapIndexField> indexFields = partitionIndex.getIndexFields();
-					if (null != indexFields) {
-						List<TapIndex> needCreateIndex = new ArrayList<>();
-						Set<String> collect = table.getIndexList().stream().filter(Objects::nonNull).map(TapIndex::getName).collect(Collectors.toSet());
-						if (null != pks && !pks.isEmpty()) {
-							collect.addAll(pks);
-						}
-						BsonDocument shardKeys = new BsonDocument();
-						boolean mandatoryType = indexFields.size() > 1;//如果多个hasedkey，key类型只能是1，如果是单个可以是hashed或1
-						indexFields.stream()
-								.filter(Objects::nonNull)
-								.forEach(shardKey -> {
-									if (!collect.contains(shardKey.getName())) {
-										TapIndex index = new TapIndex();
-										List<TapIndexField> f = new ArrayList<>();
-										f.add(new TapIndexField().name(shardKey.getName())
-												.fieldAsc(shardKey.getFieldAsc())
-												.fieldType(shardKey.getType()));
-										index.setIndexFields(f);
-										index.setName(shardKey.getName());
-										needCreateIndex.add(index);
-									}
-									shardKeys.put(shardKey.getName(), mandatoryType ?
-											new BsonInt64(1) :
-											null == shardKey.getType() || ("1".endsWith(shardKey.getType())) ? new BsonInt64(1) : new BsonString("hashed"));
-								});
-
-						//开启分片功能
-						//db.runCommand({enablesharding:"testdb"});
-						MongoDatabase admin = null;
-						try {
-							admin = mongoClient.getDatabase("admin");
-							if (null != admin) {
-								admin.runCommand(new BsonDocument("enablesharding", new BsonString(database)));
-								isShardCollection = true;
-							} else {
-								log.warn("The current Database does not have a sharding cluster configuration and cannot copy the sharding attributes of the source table,message: can not use system database 'admin' ");
-								isShardCollection = false;
-							}
-						} catch (Exception e) {
-							isShardCollection = false;
-							log.warn(" The current Database does not have a sharding cluster configuration and cannot copy the sharding attributes of the source table. The sharding configuration cannot be opened, message: {}", e.getMessage());
-						}
-
-
-						if (isShardCollection) {
-							isShardCollection = false;
-							//对片键字段建立索引
-							//包含用于建立索引的字段和索引类型。
-							//常见的索引类型如下：
-							//1：创建升序索引
-							//		-1：创建降序索引
-							//“hashed”：创建哈希索引
-							if (!needCreateIndex.isEmpty()) {
-								createIndex(table, needCreateIndex, log);
-							}
-
-							//设置分片
-							//db.runCommand({shardcollection:"db.collection",key:{field1:1}});
-							//sh.shardCollection({"": 1/hased, "unique" : true, keys: {}});
-							BsonDocument bson = new BsonDocument();
-							bson.put("shardcollection", new BsonString(String.format("%s.%s", database, table.getId())));
-							bson.put("unique", new BsonBoolean(unique));
-							bson.put("key", shardKeys);
-							try {
-								admin.runCommand(bson);
-								isShardCollection = true;
-							} catch (Exception e) {
-								isShardCollection = false;
-								log.warn(" Unable to copy the sharding attributes of the source table, message: {}", e.getMessage());
-							}
-						}
-					}
-				}
-			}
-		return isShardCollection;
-	}
-
-	private void createCappedCollection(TapTable table, boolean isShardCollection, Log log) {
-		Map<String, Object> tableAttr = Optional.ofNullable(table.getTableAttr()).orElse(new HashMap<>());
-		Object isCapped = tableAttr.get("capped");//
-		if (isCapped instanceof Boolean && (Boolean) isCapped) {
-			Long maxCount = toLong(tableAttr.get("size"));
-			Long maxByteSize = toLong(tableAttr.get("maxSize"));
-			try {
-				if (!isShardCollection) {
-					CreateCollectionOptions options = new CreateCollectionOptions();
-					options.capped(true);
-					if (maxCount > 0) {
-						options.maxDocuments(maxCount);
-					}
-					options.sizeInBytes(maxByteSize);
-					mongoDatabase.createCollection(table.getId(), options);
-				} else {
-					BsonDocument bson = new BsonDocument();
-					bson.put("convertToCapped", new BsonString(table.getId()));
-					if (maxCount > 0) {
-						bson.put("max", new BsonInt64(maxCount));
-					}
-					bson.put("size", new BsonInt64(maxByteSize));
-					mongoDatabase.runCommand(bson);
-				}
-			} catch (Exception e) {
-				log.warn("Collection type conversion failed, unable to convert to capped collection, message: {}", e.getMessage());
 			}
 		}
+
+		return createTableOptions;
 	}
 
 	private void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, Consumer<ExecuteResult> executeResultConsumer) {
