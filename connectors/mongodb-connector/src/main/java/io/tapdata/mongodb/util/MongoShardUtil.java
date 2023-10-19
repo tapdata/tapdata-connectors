@@ -31,7 +31,7 @@ public class MongoShardUtil {
             map.put("sharded", sharded);
             map.put("shards", removeChar(shards));
             map.put("shard", removeChar(sharkedKeys));
-            if (sharded instanceof Boolean && Boolean.TRUE.equals(sharded)) {
+            if (Boolean.TRUE.equals(sharded)) {
                 if (null == sharkedKeys) {
                     sharkedKeys = new HashMap<>();
                 }
