@@ -54,7 +54,7 @@ public class MongodbWriter {
 	private final Log tapLogger;
 
 	private boolean is_cloud;
-	private ConcurrentHashMap<String,String> shardKyeMap= new ConcurrentHashMap<>();
+	private ConcurrentHashMap<String,Set<String>> shardKyeMap= new ConcurrentHashMap<>();
 
 	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger) {
 		this.globalStateMap = globalStateMap;
@@ -279,8 +279,13 @@ public class MongodbWriter {
 					operation = "$setOnInsert";
 				}
                 if(shardKyeMap.containsKey(tableId)){
-					String shardKey = shardKyeMap.get(tableId);
-					if(insertRecordEvent.getAfter().containsKey(shardKey))pkFilter.append(shardKey,insertRecordEvent.getAfter().get(shardKey));
+					Map<String,Object> record = insertRecordEvent.getAfter();
+					Set<String> shardKeySet = shardKyeMap.get(tableId);
+					if(CollectionUtils.isNotEmpty(shardKeySet)){
+						shardKeySet.forEach(shardKey -> {
+							if(record.containsKey(shardKey))pkFilter.append(shardKey,record.get(shardKey));
+						});
+					}
 				}
 				MongodbUtil.removeIdIfNeed(pks, insertRecordEvent.getAfter());
 				writeModel = new UpdateManyModel<>(pkFilter, new Document().append(operation, insertRecordEvent.getAfter()), options);
@@ -379,10 +384,9 @@ public class MongodbWriter {
 		if(!shardKyeMap.containsKey(tableId) && isShard(tableId)){
 			Document document = mongoClient.getDatabase(CONFIG).getCollection(COLLECTIONS)
 					.find(new Document("_id", mongodbConfig.getDatabase() + "." + tableId)).first();
-			if(document.containsKey("key")){
+			if(document != null && document.containsKey("key")){
 				Map<String,String> map = (Map<String,String>)document.get("key");
-				String shardKey = map.keySet().stream().findFirst().orElse(null);
-				if(StringUtils.isNotEmpty(shardKey))shardKyeMap.put(tableId,shardKey);
+				if(CollectionUtils.isNotEmpty(map.keySet()))shardKyeMap.put(tableId,map.keySet());
 			}
 
 		}
