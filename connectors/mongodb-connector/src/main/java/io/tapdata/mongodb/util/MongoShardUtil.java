@@ -56,7 +56,7 @@ public class MongoShardUtil {
                     table.setPartitionIndex(indexEx);
                 }
             }
-            table.setTableAttr(map);
+            //table.setTableAttr(map);
         }
     }
 

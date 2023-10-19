@@ -534,8 +534,8 @@ public class MongodbConnector extends ConnectorBase {
 		//created shared collection
 		final boolean isShardCollection = createSharedCollection(nodeConfig, table, pks, database, log);
 
-		//created capped collection
-		createCappedCollection(table, isShardCollection, log);
+		//@todo created capped collection
+		//createCappedCollection(table, isShardCollection, log);
 
 		return createTableOptions;
 	}
