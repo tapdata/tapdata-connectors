@@ -46,7 +46,6 @@ public class MongodbUtil {
 
 	private final static String BUILDINFO = "buildinfo";
 	private final static String VERSION = "version";
-	private final static String COLL_STATS = "collStats";
 
 	public static int getVersion(MongoClient mongoClient, String database) {
 		int versionNum = 0;
@@ -63,45 +62,6 @@ public class MongodbUtil {
 		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
 		Document buildinfo = mongoDatabase.runCommand(new BsonDocument(BUILDINFO, new BsonString("")));
 		return buildinfo.get(VERSION).toString();
-	}
-
-	public static Map<String, Object> getCollectionStatus(MongoClient mongoClient, String database, String collectionName) {
-		Map<String, Object> map = new HashMap<>();
-		if (null == mongoClient || null == database || "".equals(database.trim()) || null == collectionName || "".equals(collectionName.trim())) return map;
-		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
-		Document collStats = mongoDatabase.runCommand(new BsonDocument(COLL_STATS, new BsonString(collectionName)));
-		Set<Map.Entry<String, Object>> entries = collStats.entrySet();
-		if (null != entries && !entries.isEmpty()) {
-			collStats.entrySet()
-					.stream()
-					.filter(Objects::nonNull)
-					.forEach(entry ->
-							map.put(entry.getKey(), entry.getValue())
-					);
-		}
-		return map;
-	}
-
-	public static Map<String, Object> getCollectionSharkedKeys(MongoClient mongoClient, String database, String collectionName) {
-		Map<String, Object> map = new HashMap<>();
-		final String collectionFullName = String.format("%s.%s", database, collectionName);
-		try {
-			if (null == mongoClient || null == collectionName || "".equals(collectionName.trim())) return map;
-			MongoDatabase mongoDatabase = mongoClient.getDatabase("config");
-			FindIterable<Document> collections = mongoDatabase.getCollection("collections").find(new Document("_id", collectionFullName).toBsonDocument());
-			Document collStats = collections.first();//mongoDatabase.runCommand(new Document("connections", collectionFullName).toBsonDocument());
-			if (null != collStats && !collStats.isEmpty()) {
-				collStats.entrySet()
-						.stream()
-						.filter(Objects::nonNull)
-						.forEach(entry ->
-								map.put(entry.getKey(), entry.getValue())
-						);
-			}
-		} catch (Exception e) {
-			TapLogger.warn(MongodbUtil.class.getSimpleName(), "Can not find " + collectionFullName + "'s shared info from config db, message: " + e.getMessage());
-		}
-		return map;
 	}
 
 	public static void sampleDataRow(MongoCollection collection, int sampleSize, Consumer<BsonDocument> callback) {
