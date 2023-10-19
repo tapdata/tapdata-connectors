@@ -83,14 +83,19 @@ function connectionTest(connectionConfig) {
     checkItems.push({"test":"Debugging the Order API and Check API result",
         "code": isCheck ? -1 : 1,
         "result": isCheck? ("Can not get order list, http code: " + goods.httpCode + " " +
-                        ( isValue(result.msg) ? (", msg: " + result.msg) : "" ) +
-                        ( isValue(result.error) ? (", error: " + result.error) : ""))
-                    : "Pass"
+            ( isValue(result.msg) ? (", msg: " + result.msg) : "" ) +
+            ( isValue(result.error) ? (", error: " + result.error) : ""))
+            : "Pass"
     });
 
     if (isCheck) {
         checkItems.push({
             "test": "Read log",
+            "code": 1,
+            "result": "Pass"
+        });
+        checkItems.push({
+            "test": "Read",
             "code": 1,
             "result": "Pass"
         });

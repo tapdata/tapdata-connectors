@@ -35,7 +35,9 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     public void revealException(Throwable cause) {
         if(cause instanceof TapPdkBaseException) return;
         if (cause instanceof MongoException) {
-            throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause)).withServerErrorCode(String.valueOf(((MongoException) cause).getCode()));
+            throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause))
+//                    .withServerErrorCode(String.valueOf(((MongoException) cause).getCode()))
+                    ;
         }
     }
 
