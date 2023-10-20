@@ -18,7 +18,7 @@
     <properties>
         <java.version>8</java.version>
         <sql.core.version>1.0-SNAPSHOT</sql.core.version>
-        <tapdata.pdk.api.verison>1.2.6-RELEASE</tapdata.pdk.api.verison>
+        <tapdata.pdk.api.verison>1.2.2-SNAPSHOT</tapdata.pdk.api.verison>
 
     </properties>
     <dependencyManagement>
@@ -55,19 +55,6 @@
             <groupId>commons-codec</groupId>
             <artifactId>commons-codec</artifactId>
             <version>1.15</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-collections4</artifactId>
-            <version>4.4</version>
-        </dependency>
-
-        <dependency>
-            <!--hadoop客户端-->
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-client</artifactId>
-            <version>3.3.0</version>
         </dependency>
     </dependencies>
     <build>

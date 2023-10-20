@@ -256,17 +256,17 @@ var startTime = new Date();
 function streamRead(connectionConfig, nodeConfig, offset, tableNameList, pageSize, streamReadSender) {
     if (!isParam(offset) || null == offset || typeof(offset) != 'object') offset = {};
     for(let x in tableNameList) {
-      let tableName = tableNameList[x];
-      let isFirst = false;
-      if(!offset[tableName]){
-        offset[tableName] = {tableName:tableName, page: 1, Conditions:[{Key: 'UPDATED_AT',Value: batchStart + '_' + dateUtils.nowDate()}]} ;
-        isFirst = true;
-      }
+        let tableName = tableNameList[x];
+        let isFirst = false;
+        if(!offset[tableName]){
+            offset[tableName] = {tableName:tableName, page: 1, Conditions:[{Key: 'UPDATED_AT',Value: batchStart + '_' + dateUtils.nowDate()}]} ;
+            isFirst = true;
+        }
         offset[tableName].page = 1;
         let condition = arrayUtils.firstElement(offset[tableName].Conditions);
         offset[tableName].Conditions = [{Key:"UPDATED_AT",Value: isParam(condition) && null != condition ? arrayUtils.firstElement(condition.Value.split('_')) + '_' + dateUtils.nowDate(): batchStart + '_' + dateUtils.nowDate()}];
         if(isFirst){
-        offset[tableName]['since'] = new Date(startTime.getTime() - 65000).toISOString();
+            offset[tableName]['since'] = new Date(startTime.getTime() - 65000).toISOString();
         }
         iterateAllData('issues', offset[tableName], (result, offsetNext, error) => {
             let haveNext = false;
@@ -345,6 +345,11 @@ function connectionTest(connectionConfig) {
             });
             res.push({
                 "test": "Read log",
+                "code": 1,
+                "result": "Pass"
+            });
+            res.push({
+                "test": "Read",
                 "code": 1,
                 "result": "Pass"
             });

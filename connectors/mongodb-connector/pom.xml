@@ -13,7 +13,7 @@
 
     <properties>
         <java.version>8</java.version>
-        <tapdata.pdk.api.version>1.2.6-RELEASE</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.2.4-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
     <dependencies>
         <dependency>
@@ -42,6 +42,11 @@
             <artifactId>mongodb-driver-sync</artifactId>
             <version>4.5.1</version>
         </dependency>
+<!--        <dependency>-->
+<!--            <groupId>org.mongodb</groupId>-->
+<!--            <artifactId>mongo-java-driver</artifactId>-->
+<!--            <version>3.12.11</version> &lt;!&ndash; 请使用最新的版本 &ndash;&gt;-->
+<!--        </dependency>-->
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-collections4</artifactId>

@@ -109,16 +109,7 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	private MongoCollection<Document> getMongoCollection(String table) {
-		MongoCollection<Document> collection = null;
-		try {
-			collection = mongoDatabase.getCollection(table);
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
-			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
-			exceptionCollector.collectReadPrivileges(e);
-			exceptionCollector.collectWritePrivileges(e);
-		}
-		return collection;
+		return mongoDatabase.getCollection(table);
 	}
 
 	/**
@@ -136,7 +127,8 @@ public class MongodbConnector extends ConnectorBase {
 	 */
 	@Override
 	public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-		final String version = MongodbUtil.getVersionString(mongoClient, mongoConfig.getDatabase());
+		String database = mongoConfig.getDatabase();
+		String version = MongodbUtil.getVersionString(mongoClient, database);
 		MongoIterable<String> collectionNames = mongoDatabase.listCollectionNames();
 		TableFieldTypesGenerator tableFieldTypesGenerator = InstanceFactory.instance(TableFieldTypesGenerator.class);
 		this.stringTypeValueMap = new HashMap<>();
@@ -169,8 +161,8 @@ public class MongodbConnector extends ConnectorBase {
 					//List all the tables under the database.
 					List<TapTable> list = list();
 					nameList.forEach(name -> {
-						TapTable table = table(name).defaultPrimaryKeys("_id");
-						MongoCollection collection = documentMap.get(name);
+						TapTable table = new TapTable(name).defaultPrimaryKeys("_id");
+						MongoCollection<?> collection = documentMap.get(name);
 						try {
 							MongodbUtil.sampleDataRow(collection, SAMPLE_SIZE_BATCH_SIZE, (dataRow) -> {
 								Set<String> fieldNames = dataRow.keySet();
@@ -196,7 +188,6 @@ public class MongodbConnector extends ConnectorBase {
 							TapLogger.info(TAG, "MongodbConnector discoverSchema table: {} index {}", name, ((Document) index).toJson());
 							table.add(tapIndex);
 						});
-
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -220,7 +211,7 @@ public class MongodbConnector extends ConnectorBase {
 					//List all the tables under the database.
 					List<TapTable> list = list();
 					nameList.forEach(name -> {
-						TapTable table = table(name).defaultPrimaryKeys(singletonList(COLLECTION_ID_FIELD));
+						TapTable table = new TapTable(name).defaultPrimaryKeys(singletonList(COLLECTION_ID_FIELD));
 						try (MongoCursor<BsonDocument> cursor = documentMap.get(name).find().iterator()) {
 							while (cursor.hasNext()) {
 								final BsonDocument document = cursor.next();
@@ -354,10 +345,6 @@ public class MongodbConnector extends ConnectorBase {
 				mongodbTest.testOneByOne();
 			}
 		} catch (Throwable throwable) {
-			exceptionCollector.collectTerminateByServer(throwable);
-			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),throwable);
-			exceptionCollector.collectReadPrivileges(throwable);
-			exceptionCollector.collectWritePrivileges(throwable);
 			TapLogger.error(TAG, throwable.getMessage());
 			consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Failed, " + throwable.getMessage()));
 		} finally {
@@ -376,8 +363,6 @@ public class MongodbConnector extends ConnectorBase {
 				index++;
 			}
 		} catch (Exception e) {
-			exceptionCollector.collectTerminateByServer(e);
-			exceptionCollector.collectReadPrivileges(e);
 			throw e;
 		}
 		return index;
@@ -497,12 +482,13 @@ public class MongodbConnector extends ConnectorBase {
 		Collection<String> pks = table.primaryKeys();
 		if (CollectionUtils.isNotEmpty(pks) && (pks.size() > 1 || !"_id".equals(pks.iterator().next()))) {
 			List<TapIndex> tapIndices = new ArrayList<>();
+			TapIndex tapIndex = new TapIndex();
 			Iterator<String> iterator = pks.iterator();
 			while (iterator.hasNext()) {
 				String pk = iterator.next();
-				TapIndex tapIndex = new TapIndex().indexField(new TapIndexField().name(pk).fieldAsc(true));
-				tapIndices.add(tapIndex);
+				tapIndex.indexField(new TapIndexField().name(pk).fieldAsc(true));
 			}
+			tapIndices.add(tapIndex);
 			TapCreateIndexEvent tapCreateIndexEvent = new TapCreateIndexEvent().indexList(tapIndices);
 			createIndex(tapConnectorContext, table, tapCreateIndexEvent);
 		}
@@ -514,83 +500,78 @@ public class MongodbConnector extends ConnectorBase {
 				TapLogger.info(TAG, "table: " + table.getName() + " has no index");
 				return createTableOptions;
 			}
-
-			table.getIndexList().forEach(index -> {
-				TapLogger.info(TAG, "find index: " + index.getName());
-				try {
-					String name = index.getName();
-					// 去除 __t__ 前缀
-					if (!name.startsWith("__t__")) {
-						return;
-					}
-					name = name.substring(5);
-					Document dIndex = Document.parse(name);
-					if (dIndex == null) {
-						return;
-					}
-					MongoCollection<Document> targetCollection = mongoDatabase.getCollection(table.getName());
-					IndexOptions indexOptions = new IndexOptions();
-					// 1. 遍历 index, 生成 indexOptions
-					dIndex.forEach((key, value) -> {
-						if ("unique".equals(key)) {
-							indexOptions.unique((Boolean) value);
-						} else if ("sparse".equals(key)) {
-							indexOptions.sparse((Boolean) value);
-						} else if ("expireAfterSeconds".equals(key)) {
-							indexOptions.expireAfter(((Double) value).longValue(), java.util.concurrent.TimeUnit.SECONDS);
-						} else if ("background".equals(key)) {
-							indexOptions.background((Boolean) value);
-						} else if ("partialFilterExpression".equals(key)) {
-							indexOptions.partialFilterExpression((Bson) value);
-						} else if ("defaultLanguage".equals(key)) {
-							indexOptions.defaultLanguage((String) value);
-						} else if ("languageOverride".equals(key)) {
-							indexOptions.languageOverride((String) value);
-						} else if ("textVersion".equals(key)) {
-							indexOptions.textVersion((Integer) value);
-						} else if ("weights".equals(key)) {
-							indexOptions.weights((Bson) value);
-						} else if ("sphereVersion".equals(key)) {
-							indexOptions.sphereVersion((Integer) value);
-						} else if ("bits".equals(key)) {
-							indexOptions.bits((Integer) value);
-						} else if ("min".equals(key)) {
-							indexOptions.min((Double) value);
-						} else if ("max".equals(key)) {
-							indexOptions.max((Double) value);
-						} else if ("bucketSize".equals(key)) {
-							indexOptions.bucketSize((Double) value);
-						} else if ("storageEngine".equals(key)) {
-							indexOptions.storageEngine((Bson) value);
-						} else if ("wildcardProjection".equals(key)) {
-							indexOptions.wildcardProjection((Bson) value);
-						} else if ("hidden".equals(key)) {
-							indexOptions.hidden((Boolean) value);
-						} else if ("version".equals(key)) {
-							indexOptions.version((Integer) value);
-						} else if ("partialFilterExpression".equals(key)) {
-							indexOptions.partialFilterExpression((Bson) value);
-						}
-					});
+			List<TapIndex> indexList = table.getIndexList();
+			if (null != indexList && !indexList.isEmpty()) {
+				indexList.forEach(index -> {
+					TapLogger.info(TAG, "find index: " + index.getName());
 					try {
-						targetCollection.createIndex(dIndex.get("key", Document.class), indexOptions);
-					} catch (Exception ignored) {
-						exceptionCollector.collectTerminateByServer(ignored);
-						exceptionCollector.collectWritePrivileges(ignored);
-						TapLogger.warn(TAG, "create index failed 1: " + ignored.getMessage());
+						String name = index.getName();
+						// 去除 __t__ 前缀
+						if (!name.startsWith("__t__")) {
+							return;
+						}
+						name = name.substring(5);
+						Document dIndex = Document.parse(name);
+						if (dIndex == null) {
+							return;
+						}
+						MongoCollection<Document> targetCollection = mongoDatabase.getCollection(table.getName());
+						IndexOptions indexOptions = new IndexOptions();
+						// 1. 遍历 index, 生成 indexOptions
+						dIndex.forEach((key, value) -> {
+							if ("unique".equals(key)) {
+								indexOptions.unique((Boolean) value);
+							} else if ("sparse".equals(key)) {
+								indexOptions.sparse((Boolean) value);
+							} else if ("expireAfterSeconds".equals(key)) {
+								indexOptions.expireAfter(((Double) value).longValue(), java.util.concurrent.TimeUnit.SECONDS);
+							} else if ("background".equals(key)) {
+								indexOptions.background((Boolean) value);
+							} else if ("partialFilterExpression".equals(key)) {
+								indexOptions.partialFilterExpression((Bson) value);
+							} else if ("defaultLanguage".equals(key)) {
+								indexOptions.defaultLanguage((String) value);
+							} else if ("languageOverride".equals(key)) {
+								indexOptions.languageOverride((String) value);
+							} else if ("textVersion".equals(key)) {
+								indexOptions.textVersion((Integer) value);
+							} else if ("weights".equals(key)) {
+								indexOptions.weights((Bson) value);
+							} else if ("sphereVersion".equals(key)) {
+								indexOptions.sphereVersion((Integer) value);
+							} else if ("bits".equals(key)) {
+								indexOptions.bits((Integer) value);
+							} else if ("min".equals(key)) {
+								indexOptions.min((Double) value);
+							} else if ("max".equals(key)) {
+								indexOptions.max((Double) value);
+							} else if ("bucketSize".equals(key)) {
+								indexOptions.bucketSize((Double) value);
+							} else if ("storageEngine".equals(key)) {
+								indexOptions.storageEngine((Bson) value);
+							} else if ("wildcardProjection".equals(key)) {
+								indexOptions.wildcardProjection((Bson) value);
+							} else if ("hidden".equals(key)) {
+								indexOptions.hidden((Boolean) value);
+							} else if ("version".equals(key)) {
+								indexOptions.version((Integer) value);
+							}
+						});
+						try {
+							targetCollection.createIndex(dIndex.get("key", Document.class), indexOptions);
+						} catch (Exception e) {
+							TapLogger.warn(TAG, "create index failed 1: " + e.getMessage());
+						}
+					} catch (Exception e) {
+						TapLogger.warn(TAG, "create index failed 2: " + e.getMessage());
+						// TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
 					}
-				} catch (Exception ignored) {
-					exceptionCollector.collectTerminateByServer(ignored);
-					exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),ignored);
-					exceptionCollector.collectWritePrivileges(ignored);
-					TapLogger.warn(TAG, "create index failed 2: " + ignored.getMessage());
-					// TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
-				}
-			});
+				});
+			}
 		}
+
 		return createTableOptions;
 	}
-
 
 	private void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, Consumer<ExecuteResult> executeResultConsumer) {
 		try {
@@ -611,9 +592,6 @@ public class MongodbConnector extends ConnectorBase {
 				throw new NotSupportedException(command);
 			}
 		} catch (Exception e) {
-			exceptionCollector.collectTerminateByServer(e);
-			exceptionCollector.collectReadPrivileges(e);
-			exceptionCollector.collectWritePrivileges(e);
 			executeResultConsumer.accept(new ExecuteResult<>().error(e));
 		}
 	}
@@ -652,7 +630,6 @@ public class MongodbConnector extends ConnectorBase {
 			minSort = reverseSort(maxSort);
 		}
 		//Get min value
-		try {
 		FindIterable<Document> minIterable = collection.find(query).sort(minSort).projection(new Document().append(fieldName, 1)).limit(1);
 		Document minDoc = minIterable.first();
 		if (minDoc == null) {
@@ -683,10 +660,7 @@ public class MongodbConnector extends ConnectorBase {
 //			return null;
 //		}
 		fieldMinMaxValue.max(maxValue);
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
-			exceptionCollector.collectReadPrivileges(e);
-		}
+
 		return fieldMinMaxValue;
 	}
 
@@ -819,6 +793,13 @@ public class MongodbConnector extends ConnectorBase {
 					}
 				}
 				break;
+			case OBJECT_ID:
+				if (value instanceof String) {
+					try {
+						value = new ObjectId(value.toString());
+					} catch (Exception ignored) {
+					}
+				}
 			default:
 				break;
 		}
@@ -828,7 +809,7 @@ public class MongodbConnector extends ConnectorBase {
 		return value;
 	}
 
-	private void getReadPartitions(TapConnectorContext connectorContext, TapTable table, GetReadPartitionOptions options) throws Throwable {
+	private void getReadPartitions(TapConnectorContext connectorContext, TapTable table, GetReadPartitionOptions options) {
 		options.getTypeSplitterMap().registerCustomSplitter(ObjectId.class, new ObjectIdSplitter());
 
 		DatabaseReadPartitionSplitter.calculateDatabaseReadPartitions(connectorContext, table, options)
@@ -886,7 +867,6 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	private void createIndex(TapConnectorContext tapConnectorContext, TapTable table, TapCreateIndexEvent tapCreateIndexEvent) {
-		try {
 		final List<TapIndex> indexList = tapCreateIndexEvent.getIndexList();
 		if (CollectionUtils.isNotEmpty(indexList)) {
 			for (TapIndex tapIndex : indexList) {
@@ -903,6 +883,7 @@ public class MongodbConnector extends ConnectorBase {
 						keys.append(indexField.getName(), 1);
 					}
 					final IndexOptions indexOptions = new IndexOptions();
+					indexOptions.background(true);
 					if (indexFields.size() != 1 || !"_id".equals(indexFields.stream().findFirst().get().getName())) {
 						indexOptions.unique(tapIndex.isUnique());
 					}
@@ -913,19 +894,11 @@ public class MongodbConnector extends ConnectorBase {
 				}
 			}
 		}
-		}catch (Exception e){
-			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
-			exceptionCollector.throwWriteExIfNeed(null,e);
-		}
 	}
 
 	private String memoryFetcher(List<String> mapKeys, String level) {
 		ParagraphFormatter paragraphFormatter = new ParagraphFormatter(MongodbConnector.class.getSimpleName());
-		try {
 		paragraphFormatter.addRow("MongoConfig", mongoConfig != null ? mongoConfig.getDatabase() : null);
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
-		}
 		return paragraphFormatter.toString();
 	}
 
@@ -944,7 +917,6 @@ public class MongodbConnector extends ConnectorBase {
 				mongoClient = MongodbUtil.createMongoClient(mongoConfig);
 				mongoDatabase = mongoClient.getDatabase(mongoConfig.getDatabase());
 			} catch (Throwable e) {
-				exceptionCollector.collectTerminateByServer(e);
 				throw new RuntimeException(String.format("create mongodb connection failed %s", e.getMessage()), e);
 			}
 		}
@@ -1019,9 +991,7 @@ public class MongodbConnector extends ConnectorBase {
 			} else {
 				mongodbWriter.writeRecord(tapRecordEvents, table, writeListResultConsumer);
 			}
-		} catch (Exception e) {
-			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
-			exceptionCollector.throwWriteExIfNeed(tapRecordEvents,e);
+		} catch (Throwable e) {
 			exceptionCollector.revealException(e);
 			errorHandle(e, connectorContext);
 		}
@@ -1160,15 +1130,7 @@ public class MongodbConnector extends ConnectorBase {
 	private long batchCount(TapConnectorContext connectorContext, TapTable table) throws Throwable {
 //        MongoCollection<Document> collection = getMongoCollection(table.getId());
 //        return collection.countDocuments();
-		Long collectionNotAggregateCountByTableName = null;
-		try {
-			collectionNotAggregateCountByTableName = getCollectionNotAggregateCountByTableName(mongoClient, mongoConfig.getDatabase(), table.getId(), null);
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
-			exceptionCollector.collectReadPrivileges(e);
-		}
-		return collectionNotAggregateCountByTableName;
-//		return getCollectionNotAggregateCountByTableName(mongoClient, mongoConfig.getDatabase(), table.getId(), null);
+		return getCollectionNotAggregateCountByTableName(mongoClient, mongoConfig.getDatabase(), table.getId(), null);
 	}
 
 	public static long getCollectionNotAggregateCountByTableName(MongoClient mongoClient, String db, String collectionName, Bson filter) {
@@ -1262,8 +1224,6 @@ public class MongodbConnector extends ConnectorBase {
 				}
 			}
 		} catch (Exception e) {
-			exceptionCollector.collectTerminateByServer(e);
-			exceptionCollector.collectReadPrivileges(e);
 			exceptionCollector.revealException(e);
 			errorHandle(e, connectorContext);
 		}
@@ -1299,8 +1259,6 @@ public class MongodbConnector extends ConnectorBase {
 		try {
 			mongodbStreamReader.read(connectorContext, tableList, offset, eventBatchSize, consumer);
 		} catch (Exception e) {
-			exceptionCollector.collectTerminateByServer(e);
-			exceptionCollector.collectWritePrivileges(e);
 			try {
 				mongodbStreamReader.onDestroy();
 			} catch (Exception ignored) {
@@ -1324,23 +1282,18 @@ public class MongodbConnector extends ConnectorBase {
 //    public void onDestroy(TapConnectionContext connectionContext) {
 //    }
 	private MongodbStreamReader createStreamReader() {
-		MongodbStreamReader mongodbStreamReader = null;
-		try {
-			final int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
-			if (version >= 4) {
-				mongodbStreamReader = new MongodbV4StreamReader();
-			} else {
-				mongodbStreamReader = new MongodbV3StreamReader();
-			}
-			mongodbStreamReader.onStart(mongoConfig);
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
+		final int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
+		MongodbStreamReader mongodbStreamReader;
+		if (version >= 4) {
+			mongodbStreamReader = new MongodbV4StreamReader();
+		} else {
+			mongodbStreamReader = new MongodbV3StreamReader();
 		}
+		mongodbStreamReader.onStart(mongoConfig);
 		return mongodbStreamReader;
 	}
 
 	private void getTableNames(TapConnectionContext tapConnectionContext, int batchSize, Consumer<List<String>> listConsumer) throws Throwable {
-		try {
 		String database = mongoConfig.getDatabase();
 		List<String> temp = new ArrayList<>();
 		for (Document collection : mongoClient.getDatabase(database).listCollections()) {
@@ -1367,15 +1320,10 @@ public class MongodbConnector extends ConnectorBase {
 			listConsumer.accept(temp);
 			temp.clear();
 		}
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
-			exceptionCollector.collectReadPrivileges(e);
-		}
 	}
 
 	@Override
 	public void onStop(TapConnectionContext connectionContext) throws Throwable {
-		try {
 		isShutDown.set(true);
 		if (mongodbStreamReader != null) {
 			mongodbStreamReader.onDestroy();
@@ -1391,24 +1339,15 @@ public class MongodbConnector extends ConnectorBase {
 			mongodbWriter.onDestroy();
 			mongodbWriter = null;
 		}
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
-		}
 	}
 
 	private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
-		TableInfo tableInfo = new TableInfo();
-		try {
-			String database = mongoConfig.getDatabase();
-			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
-			Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
-			tableInfo = TableInfo.create();
-			tableInfo.setNumOfRows(Long.valueOf(collStats.getInteger("count")));
-			tableInfo.setStorageSize(Long.valueOf(collStats.getInteger("size")));
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
-			exceptionCollector.collectReadPrivileges(e);
-		}
+		String database = mongoConfig.getDatabase();
+		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
+		Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
+		TableInfo tableInfo = TableInfo.create();
+		tableInfo.setNumOfRows(Long.valueOf(collStats.getInteger("count")));
+		tableInfo.setStorageSize(Long.valueOf(collStats.getInteger("size")));
 		return tableInfo;
 	}
 
