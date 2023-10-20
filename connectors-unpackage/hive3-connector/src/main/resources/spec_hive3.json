@@ -65,13 +65,22 @@
           "apiServerKey": "database_password",
           "x-index": 5
         },
+        "hdfsAddr": {
+          "type": "string",
+          "title": "${hdfsAddr}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "hdfsAddr",
+          "x-index": 6,
+          "required": true
+        },
         "extParams": {
           "type": "string",
           "title": "${extParams}",
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "extParams",
-          "x-index": 6
+          "x-index": 7
         },
         "timezone": {
           "type": "string",
@@ -79,7 +88,7 @@
           "default": "",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "x-index": 7,
+          "x-index": 8,
           "enum": [
             {
               "label": "Database Timezone",
