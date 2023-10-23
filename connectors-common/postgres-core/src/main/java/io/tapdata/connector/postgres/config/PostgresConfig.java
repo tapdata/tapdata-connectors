@@ -26,7 +26,8 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
         setJdbcDriver("org.postgresql.Driver");
     }
 
-    public void generateSSlFile() throws IOException {
+    @Override
+    public void generateSSlFile() throws IOException, InterruptedException {
         //SSL开启需要的URL属性
         properties.put("ssl", "true");
         //每个config都用随机路径
@@ -37,18 +38,25 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
         }
         //如果CA证书有内容，表示需要验证CA证书
         if (EmptyKit.isNotBlank(getSslCa())) {
-            String sslCaPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "ca.pem");
+            properties.setProperty("sslmode", "verify-ca");
+            String sslCaPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "ca.crt");
             FileUtil.save(Base64.getUrlDecoder().decode(getSslCa()), sslCaPath, true);
-            properties.put("sslrootcert", FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "ca.pem"));
+            properties.put("sslrootcert", FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "ca.crt"));
         }
         //如果客户端证书有内容，表示需要验证客户端证书，导入keystore.jks
         if (EmptyKit.isNotBlank(getSslCert()) && EmptyKit.isNotBlank(getSslKey())) {
-            String sslCertPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "cert.pem");
+            String sslCertPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client.crt");
             FileUtil.save(Base64.getUrlDecoder().decode(getSslCert()), sslCertPath, true);
-            String sslKeyPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "key.pem");
+            String sslKeyPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client.key");
             FileUtil.save(Base64.getUrlDecoder().decode(getSslKey()), sslKeyPath, true);
-            properties.put("sslcert", FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "cert.pem"));
-            properties.put("sslkey", FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "key.pem"));
+            Runtime.getRuntime().exec("openssl pkcs8 -topk8 -inform PEM -outform DER -nocrypt -in " +
+                    FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client.key") + " -out " +
+                    FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client.pk8")).waitFor();
+            properties.put("sslcert", FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client.crt"));
+            properties.put("sslkey", FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client.pk8"));
+        }
+        if (EmptyKit.isNotBlank(getSslKeyPassword())) {
+            properties.setProperty("sslpassword", getSslKeyPassword());
         }
     }
 

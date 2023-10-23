@@ -70,12 +70,9 @@ public class MysqlConfig extends CommonDbConfig {
         }
 
         if (StringUtils.isNotBlank(timezone)) {
-            try {
-                timezone = "GMT" + timezone;
-                String serverTimezone = timezone.replace("+", "%2B").replace(":00", "");
-                properties.put("serverTimezone", serverTimezone);
-            } catch (Exception ignored) {
-            }
+            timezone = "GMT" + timezone;
+            String serverTimezone = timezone.replace("+", "%2B").replace(":00", "");
+            properties.put("serverTimezone", serverTimezone);
         }
         StringBuilder propertiesString = new StringBuilder();
         properties.forEach((k, v) -> propertiesString.append("&").append(k).append("=").append(v));
@@ -88,6 +85,7 @@ public class MysqlConfig extends CommonDbConfig {
         return sbURL.toString();
     }
 
+    @Override
     public void generateSSlFile() throws IOException, InterruptedException {
         //SSL开启需要的URL属性
         properties.put("useSSL", "true");
@@ -122,6 +120,9 @@ public class MysqlConfig extends CommonDbConfig {
                     " -srcstoretype pkcs12 -srcstorepass 123456 -destkeystore " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "keystore.jks") + " -deststoretype JKS -deststorepass 123456").waitFor();
             properties.put("clientCertificateKeyStoreUrl", "file:" + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "keystore.jks"));
             properties.put("clientCertificateKeyStorePassword", "123456");
+        }
+        if (EmptyKit.isNotBlank(getSslKeyPassword())) {
+            properties.put("clientKeyPassword", getSslKeyPassword());
         }
     }
 

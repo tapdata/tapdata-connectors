@@ -12,12 +12,13 @@ public class Main4 {
         properties.setProperty("user", "postgres");
         properties.setProperty("password", "gj0628");
         properties.setProperty("ssl", "true");
+        properties.setProperty("sslmode", "verify-ca");
         // 配置根证书地址
-        properties.setProperty("sslrootcert","/Users/jarad/Desktop/postgres-local/root.crt");
+        properties.setProperty("sslrootcert","/Users/jarad/Desktop/postgres-local/ca.crt");
         // 配置客户端私钥地址
-        properties.setProperty("sslkey", "/Users/jarad/Desktop/postgres-local/postgresql.unprotected.pk8");
+        properties.setProperty("sslkey", "/Users/jarad/Desktop/postgres-local/client.pk8");
         // 配置客户端证书地址
-        properties.setProperty("sslcert", "/Users/jarad/Desktop/postgres-local/postgresql.crt");
+        properties.setProperty("sslcert", "/Users/jarad/Desktop/postgres-local/client.crt");
         try (
                 Connection connection = DriverManager.getConnection("jdbc:postgresql://localhost:5433/postgres", properties);
                 Statement statement = connection.createStatement();
