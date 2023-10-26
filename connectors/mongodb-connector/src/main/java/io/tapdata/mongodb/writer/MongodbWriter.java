@@ -19,6 +19,7 @@ import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
+import io.tapdata.mongodb.util.MapUtil;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.mongodb.writer.error.BulkWriteErrorCodeHandlerEnum;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
@@ -26,9 +27,11 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.bson.Document;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -42,7 +45,8 @@ import static io.tapdata.base.ConnectorBase.writeListResult;
 public class MongodbWriter {
 
 	public static final String TAG = MongodbV4StreamReader.class.getSimpleName();
-
+    private static final String CONFIG = "config";
+	private static final String COLLECTIONS = "collections";
 	protected MongoClient mongoClient;
 	private MongoDatabase mongoDatabase;
 	private KVMap<Object> globalStateMap;
@@ -51,6 +55,7 @@ public class MongodbWriter {
 	private final Log tapLogger;
 
 	private boolean is_cloud;
+	private ConcurrentHashMap<String,Set<String>> shardKyeMap= new ConcurrentHashMap<>();
 
 	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger) {
 		this.globalStateMap = globalStateMap;
@@ -88,7 +93,7 @@ public class MongodbWriter {
 		WriteListResult<TapRecordEvent> writeListResult = writeListResult();
 
 		MongoCollection<Document> collection = getMongoCollection(table.getId());
-
+		putShardKey(table.getId());
 		Object pksCache = table.primaryKeys(true);
 		if (null == pksCache) pksCache = table.primaryKeys();
 		final Collection<String> pks = (Collection<String>) pksCache;
@@ -167,7 +172,7 @@ public class MongodbWriter {
 		final Collection<String> pks = (Collection<String>) pksCache;
 		UpdateOptions options = new UpdateOptions().upsert(false);
 		MongoCollection<Document> collection = getMongoCollection(table.getId());
-		BulkWriteResult result = collection.bulkWrite(Collections.singletonList(normalWriteMode(inserted, updated, deleted, options, collection, pks, tapRecordEvent)));
+		BulkWriteResult result = collection.bulkWrite(Collections.singletonList(normalWriteMode(inserted, updated, deleted, options, table.getId(), pks, tapRecordEvent)));
 		if (result.getMatchedCount() <= 0) {
 			tapLogger.info("update record ignored: {}", tapRecordEvent);
 		}
@@ -244,7 +249,7 @@ public class MongodbWriter {
 					mergeWriteModels.forEach(bulkWriteModel::addAnyOpModel);
 				}
 			} else {
-				WriteModel<Document> writeModel = normalWriteMode(inserted, updated, deleted, options, collection, pks, recordEvent);
+				WriteModel<Document> writeModel = normalWriteMode(inserted, updated, deleted, options, table.getId(), pks, recordEvent);
 				if (writeModel != null) {
 					bulkWriteModel.addAnyOpModel(writeModel);
 				}
@@ -263,7 +268,7 @@ public class MongodbWriter {
 		return bulkWriteOptions;
 	}
 
-	private WriteModel<Document> normalWriteMode(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, UpdateOptions options, MongoCollection<Document> collection, Collection<String> pks, TapRecordEvent recordEvent) {
+	private WriteModel<Document> normalWriteMode(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, UpdateOptions options, String tableId, Collection<String> pks, TapRecordEvent recordEvent) {
 		WriteModel<Document> writeModel = null;
 		if (recordEvent instanceof TapInsertRecordEvent) {
 			TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
@@ -274,7 +279,15 @@ public class MongodbWriter {
 				if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(mongodbConfig.getInsertDmlPolicy())) {
 					operation = "$setOnInsert";
 				}
-
+                if(shardKyeMap.containsKey(tableId)){
+					Map<String,Object> record = insertRecordEvent.getAfter();
+					Set<String> shardKeySet = shardKyeMap.get(tableId);
+					if(CollectionUtils.isNotEmpty(shardKeySet)){
+						shardKeySet.forEach(shardKey -> {
+							if(record.containsKey(shardKey))pkFilter.append(shardKey,record.get(shardKey));
+						});
+					}
+				}
 				MongodbUtil.removeIdIfNeed(pks, insertRecordEvent.getAfter());
 				writeModel = new UpdateManyModel<>(pkFilter, new Document().append(operation, insertRecordEvent.getAfter()), options);
 			} else {
@@ -314,9 +327,14 @@ public class MongodbWriter {
 					if (removedFields != null && removedFields.size() > 0) {
 						Map<String, Object> unset = new HashMap<>();
 						for (String removeField : removedFields) {
-							unset.put(removeField, true);
+							if (after.keySet().stream().noneMatch(v ->  v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
+//										unset.put(f, true);
+								unset.put(removeField,true);
+							}
 						}
-						u.append("$unset", unset);
+						if (unset.size() > 0) {
+							u.append("$unset", unset);
+						}
 					}
 					writeModel = new UpdateManyModel<>(pkFilter, u, options);
 				}
@@ -366,5 +384,24 @@ public class MongodbWriter {
 		}
 
 		return filter;
+	}
+
+	private void putShardKey(String tableId){
+		if(!shardKyeMap.containsKey(tableId) && isShard(tableId)){
+			Document document = mongoClient.getDatabase(CONFIG).getCollection(COLLECTIONS)
+					.find(new Document("_id", mongodbConfig.getDatabase() + "." + tableId)).first();
+			if(document != null && document.containsKey("key")){
+				Map<String,String> map = (Map<String,String>)document.get("key");
+				if(CollectionUtils.isNotEmpty(map.keySet()))shardKyeMap.put(tableId,map.keySet());
+			}
+
+		}
+	}
+	private Boolean isShard(String tableId){
+		Document document = mongoDatabase.runCommand(new Document("collStats",tableId));
+		if(document.containsKey("sharded")){
+			return (Boolean)document.get("sharded");
+		}
+		return false;
 	}
 }
