@@ -341,7 +341,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					//Map<String, Object> finalUnset = new DataMap();
 					List<String> finalUnset = new ArrayList<>();if (originUnset != null) {
 						for (Map.Entry<String, Object> entry : originUnset.entrySet()) {
-							if (after == null || after.keySet().stream().noneMatch(v -> v.equals(entry.getKey()))) {
+							if (after == null || after.keySet().stream().noneMatch(v -> v.equals(entry.getKey()) || v.startsWith(entry.getKey() + ".") || entry.getKey().startsWith(v + "."))) {
 								//finalUnset.put(entry.getKey(), true);
 							finalUnset.add(entry.getKey());
 							}
