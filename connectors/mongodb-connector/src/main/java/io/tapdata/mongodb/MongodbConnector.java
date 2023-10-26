@@ -638,11 +638,14 @@ public class MongodbConnector extends ConnectorBase {
 				if (null != partitionIndex) {
 					Boolean unique = Optional.ofNullable(partitionIndex.getUnique()).orElse(false);
 					List<TapIndexField> indexFields = partitionIndex.getIndexFields();
-					if (null != indexFields) {
+					if (null != indexFields && !indexFields.isEmpty()) {
 						List<TapIndex> needCreateIndex = new ArrayList<>();
-						Set<String> collect = table.getIndexList().stream().filter(Objects::nonNull).map(TapIndex::getName).collect(Collectors.toSet());
-						if (null != pks && !pks.isEmpty()) {
-							collect.addAll(pks);
+						Set<String> collect = new HashSet<>();
+						if (null != table.getIndexList()) {
+							collect.addAll(table.getIndexList().stream().filter(Objects::nonNull).map(TapIndex::getName).collect(Collectors.toSet()));
+							if (null != pks && !pks.isEmpty()) {
+								collect.addAll(pks);
+							}
 						}
 						BsonDocument shardKeys = new BsonDocument();
 						boolean mandatoryType = indexFields.size() > 1;//如果多个hasedkey，key类型只能是1，如果是单个可以是hashed或1
