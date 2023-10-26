@@ -168,27 +168,15 @@ public class MongodbMergeOperate {
 				if (removeFields != null) {
 					if (EmptyKit.isNotEmpty(targetPath)) {
 						for (Map.Entry<String, Object> entry : removeFields.entrySet()) {
-							Map<String, Object> finalAfter = after;
-							if (after.keySet().stream().noneMatch(v -> (v.startsWith(entry.getKey() + ".") || entry.getKey().startsWith(v + ".")) && finalAfter.get(v) instanceof ArrayList)) {
-								unsetOperateDoc.append(targetPath + "." + entry.getKey(), entry.getValue());
-							}
+							unsetOperateDoc.append(targetPath + "." + entry.getKey(), entry.getValue());
 						}
 					} else {
-						for (Map.Entry<String, Object> entry : removeFields.entrySet()) {
-							Map<String, Object> finalAfter = after;
-							if (after.keySet().stream().noneMatch(v -> (v.startsWith(entry.getKey() + ".") || entry.getKey().startsWith(v + ".")) && finalAfter.get(v) instanceof ArrayList)) {
-								unsetOperateDoc.append(entry.getKey(), entry.getValue());
-							}
-						}
+						unsetOperateDoc.putAll(removeFields);
 					}
 					if (update.containsKey("$unset")) {
-						if (unsetOperateDoc.size() > 0) {
-							update.get("$unset", Document.class).putAll(unsetOperateDoc);
-						}
+						update.get("$unset", Document.class).putAll(unsetOperateDoc);
 					} else {
-						if (unsetOperateDoc.size() > 0) {
-							update.put("$unset", unsetOperateDoc);
-						}
+						update.put("$unset", unsetOperateDoc);
 					}
 				}
 				if (operation == MergeBundle.EventOperation.INSERT) {
@@ -250,21 +238,13 @@ public class MongodbMergeOperate {
 			}
 			if (removeFields != null) {
 				for (Map.Entry<String, Object> entry : removeFields.entrySet()) {
-					Map<String, Object> finalAfter = value;
-					if (value.keySet().stream().noneMatch(v -> (v.startsWith(entry.getKey() + ".") || entry.getKey().startsWith(v + ".")) && finalAfter.get(v) instanceof ArrayList)) {
-						unsetOpDoc.append(updatePatch + "." + entry.getKey(), entry.getValue());
-					}
+					unsetOpDoc.append(updatePatch + "." + entry.getKey(), entry.getValue());
 				}
 			}
 		} else {
 			updateOpDoc.putAll(value);
 			if (removeFields != null) {
-				for (Map.Entry<String, Object> entry : removeFields.entrySet()) {
-					Map<String, Object> finalAfter = value;
-					if (value.keySet().stream().noneMatch(v -> (v.startsWith(entry.getKey() + ".") || entry.getKey().startsWith(v + ".")) && finalAfter.get(v) instanceof ArrayList)) {
-						unsetOpDoc.append(entry.getKey(), entry.getValue());
-					}
-				}
+				unsetOpDoc.putAll(removeFields);
 			}
 		}
 		if (mergeResult.getOperation() == null) {
@@ -280,13 +260,9 @@ public class MongodbMergeOperate {
 				}
 				if (removeFields != null) {
 					if (mergeResult.getUpdate().containsKey("$unset")) {
-						if (unsetOpDoc.size() > 0) {
-							mergeResult.getUpdate().get("unset", Document.class).putAll(unsetOpDoc);
-						}
+						mergeResult.getUpdate().get("unset", Document.class).putAll(unsetOpDoc);
 					} else {
-						if (unsetOpDoc.size() > 0) {
-							mergeResult.getUpdate().put("$unset", unsetOpDoc);
-						}
+						mergeResult.getUpdate().put("$unset", unsetOpDoc);
 					}
 				}
 				break;
@@ -398,28 +374,22 @@ public class MongodbMergeOperate {
 					mergeResult.getUpdate().put("$set", updateOpDoc);
 				}
 				if (removefields != null) {
-					for (String removeField : removefields.keySet()) {
-						if (after.keySet().stream().noneMatch(v -> v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
-							if (array) {
-								String[] paths = targetPath.split("\\.");
-								if (paths.length > 1) {
-									unsetOpDoc.append(paths[0] + ".$[element1]." + paths[1] + ".$[element2]." + removeField, true);
-								} else {
-									unsetOpDoc.append(targetPath + ".$[element1]." + removeField, true);
-								}
+					for (Map.Entry<String, Object> entry : removefields.entrySet()) {
+						if (array) {
+							String[] paths = targetPath.split("\\.");
+							if (paths.length > 1) {
+								unsetOpDoc.append(paths[0] + ".$[element1]." + paths[1] + ".$[element2]." + entry.getKey(), entry.getValue());
 							} else {
-								unsetOpDoc.append(targetPath + ".$[element1]." + removeField, true);
+								unsetOpDoc.append(targetPath + ".$[element1]." + entry.getKey(), entry.getValue());
 							}
+						} else {
+							unsetOpDoc.append(targetPath + ".$[element1]." + entry.getKey(), entry.getValue());
 						}
 					}
 					if (mergeResult.getUpdate().containsKey("$unset")) {
-						if (unsetOpDoc.size() > 0) {
-							mergeResult.getUpdate().get("$unset", Document.class).putAll(unsetOpDoc);
-						}
+						mergeResult.getUpdate().get("$unset", Document.class).putAll(unsetOpDoc);
 					} else {
-						if (unsetOpDoc.size() > 0) {
-							mergeResult.getUpdate().put("$unset", unsetOpDoc);
-						}
+						mergeResult.getUpdate().put("$unset", unsetOpDoc);
 					}
 				}
 				break;

@@ -9,9 +9,12 @@ import io.tapdata.kit.ErrorKit;
 import org.apache.commons.io.FileUtils;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.Serializable;
+import java.util.Base64;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 
 /**
  * common relation database config
@@ -42,7 +45,7 @@ public class CommonDbConfig implements Serializable {
     private String sslCert;
     private String sslKey;
     private String sslKeyPassword;
-    protected String sslRandomPath;
+    private String sslRandomPath;
 
     //pattern for jdbc-url
     public String getDatabaseUrlPattern() {
@@ -107,8 +110,41 @@ public class CommonDbConfig implements Serializable {
         return newConfig;
     }
 
-    public void generateSSlFile() throws Exception {
-        throw new UnsupportedOperationException("generate ssl file failed");
+    public void generateSSlFile() throws IOException, InterruptedException {
+        //SSL开启需要的URL属性
+        properties.put("useSSL", "true");
+        properties.put("requireSSL", "true");
+        //每个config都用随机路径
+        sslRandomPath = UUID.randomUUID().toString().replace("-", "");
+        //如果所有文件都没有上传，表示不验证证书，直接结束
+        if (EmptyKit.isBlank(getSslCa()) && EmptyKit.isBlank(getSslCert()) && EmptyKit.isBlank(getSslKey())) {
+            properties.put("verifyServerCertificate", "false");
+            return;
+        }
+        properties.put("verifyServerCertificate", "true");
+        //如果CA证书有内容，表示需要验证CA证书，导入truststore.jks
+        if (EmptyKit.isNotBlank(getSslCa())) {
+            String sslCaPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "ca.pem");
+            FileUtil.save(Base64.getUrlDecoder().decode(getSslCa()), sslCaPath, true);
+            Runtime.getRuntime().exec("keytool -import -noprompt -file " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "ca.pem") +
+                    " -keystore " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "truststore.jks") + " -storepass 123456").waitFor();
+            properties.put("trustCertificateKeyStoreUrl", "file:" + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "truststore.jks"));
+            properties.put("trustCertificateKeyStorePassword", "123456");
+        }
+        //如果客户端证书有内容，表示需要验证客户端证书，导入keystore.jks
+        if (EmptyKit.isNotBlank(getSslCert()) && EmptyKit.isNotBlank(getSslKey())) {
+            String sslCertPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "cert.pem");
+            FileUtil.save(Base64.getUrlDecoder().decode(getSslCert()), sslCertPath, true);
+            String sslKeyPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "key.pem");
+            FileUtil.save(Base64.getUrlDecoder().decode(getSslKey()), sslKeyPath, true);
+            Runtime.getRuntime().exec("openssl pkcs12 -legacy -export -in " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "cert.pem") +
+                    " -inkey " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "key.pem") +
+                    " -name datasource-client -passout pass:123456 -out " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client-keystore.p12")).waitFor();
+            Runtime.getRuntime().exec("keytool -importkeystore -srckeystore " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client-keystore.p12") +
+                    " -srcstoretype pkcs12 -srcstorepass 123456 -destkeystore " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "keystore.jks") + " -deststoretype JKS -deststorepass 123456").waitFor();
+            properties.put("clientCertificateKeyStoreUrl", "file:" + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "keystore.jks"));
+            properties.put("clientCertificateKeyStorePassword", "123456");
+        }
     }
 
     public void deleteSSlFile() {

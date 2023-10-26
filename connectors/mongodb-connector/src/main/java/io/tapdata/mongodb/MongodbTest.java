@@ -29,7 +29,6 @@ public class MongodbTest extends CommonDbTest {
     private static final Set<String> READ_WRITE_PRIVILEGE_ACTIONS = new HashSet<>();
 
     private static final String CONFIG_DATABASE_SHARDS_COLLECTION = "config.shards";
-    private static final String CONFIG_DATABASE_COLLECTIONS = "config.collections";
     private static final String LOCAL_DATABASEOPLOG_COLLECTION = "local.oplog.rs";
     private static final String CONFIG_DATABASE = "config";
     private static final String LOCAL_DATABASE = "local";
@@ -184,8 +183,6 @@ public class MongodbTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
                     "Warning: target is not replicaset or shards, can not use validator and progress feature."));
             return true;
-        }else if(isMaster.containsKey("msg") && "isdbgrid".equals(isMaster.getString("msg"))){
-            return validateMongodbShardKeys(connectionStatus);
         }
         consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY));
         return true;
@@ -254,32 +251,6 @@ public class MongodbTest extends CommonDbTest {
         if (EmptyKit.isBlank(username) || EmptyKit.isBlank(password)) {
             return false;
         }
-        return true;
-    }
-
-    protected Boolean validateMongodbShardKeys(Document connectionStatus){
-        Document nodeAuthInfo = connectionStatus.get("authInfo", Document.class);
-        List authUserPrivileges = nodeAuthInfo.get("authenticatedUserPrivileges", List.class);
-        Map<String, Set<String>> resourcePrivilegesMap = adaptResourcePrivilegesMap(authUserPrivileges);
-        if (!resourcePrivilegesMap.containsKey(CONFIG_DATABASE) && !resourcePrivilegesMap.containsKey(CONFIG_DATABASE_COLLECTIONS)) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "Missing mongos config.collections collection's read privileges." +
-                    "will not be able to read the collection shard key."));
-            return true;
-        }
-        Set<String> configDBPrivilegeSet = resourcePrivilegesMap.get(CONFIG_DATABASE);
-        if (configDBPrivilegeSet == null) {
-            configDBPrivilegeSet = resourcePrivilegesMap.get(CONFIG_DATABASE_COLLECTIONS);
-        }
-        if (configDBPrivilegeSet == null || !configDBPrivilegeSet.containsAll(READ_PRIVILEGE_ACTIONS)) {
-            Set<String> missActions = new HashSet<>(READ_PRIVILEGE_ACTIONS);
-            missActions.removeAll(configDBPrivilegeSet);
-            StringBuilder sb = new StringBuilder();
-            sb.append("Missing actions ").append(missActions).append(" on mongos config.shards collection, will not be able to use the incremental sync feature.");
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "Missing mongos config.collections collection's read privileges." +
-                    "will not be able to read the collection shard key."));
-            return true;
-        }
-        consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY));
         return true;
     }
 
