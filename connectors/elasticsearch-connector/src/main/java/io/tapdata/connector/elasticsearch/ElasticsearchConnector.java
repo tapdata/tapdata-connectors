@@ -39,7 +39,6 @@ import org.elasticsearch.search.builder.SearchSourceBuilder;
 
 import java.util.*;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 @TapConnectorClass("spec_elasticsearch.json")
@@ -52,46 +51,8 @@ public class ElasticsearchConnector extends ConnectorBase {
 
     private ElasticsearchExceptionCollector exceptionCollector;
 
-    private static List<Predicate<CreateTableFieldWrapper>> createTableFieldFilters = new ArrayList<>();
-
-    static {
-        createTableFieldFilters.add(createTableFieldWrapper -> {
-            // nested filter
-            if (null != createTableFieldWrapper.getTapField().getName() && createTableFieldWrapper.getTapField().getName().contains(".")) {
-                String[] splitFieldName = createTableFieldWrapper.getTapField().getName().split("\\.");
-                if (splitFieldName.length == 2) {
-                    String superFieldName = splitFieldName[0].toString();
-                    return "nested".equals(createTableFieldWrapper.getTapTable().getNameFieldMap().get(superFieldName).getDataType());
-                }
-            }
-            return "nested".equals(createTableFieldWrapper.getTapField().getDataType());
-        });
-        createTableFieldFilters.add(createTableFieldWrapper -> {
-            // oid filter
-            return "_id".equals(createTableFieldWrapper.getTapField().getName());
-        });
-    }
-
-    private static class CreateTableFieldWrapper {
-        private final TapField tapField;
-        private final TapTable tapTable;
-
-        public CreateTableFieldWrapper(TapField tapField, TapTable tapTable) {
-            this.tapField = tapField;
-            this.tapTable = tapTable;
-        }
-
-        public TapField getTapField() {
-            return tapField;
-        }
-
-        public TapTable getTapTable() {
-            return tapTable;
-        }
-    }
     private void initConnection(TapConnectionContext connectorContext) {
         elasticsearchConfig = new ElasticsearchConfig().load(connectorContext.getConnectionConfig());
-        elasticsearchConfig.load(connectorContext.getNodeConfig());
         exceptionCollector = new ElasticsearchExceptionCollector();
         try {
             elasticsearchHttpContext = new ElasticsearchHttpContext(elasticsearchConfig);
@@ -125,17 +86,17 @@ public class ElasticsearchConnector extends ConnectorBase {
             if (tapRawValue != null && tapRawValue.getValue() != null) return tapRawValue.getValue().toString();
             return "null";
         });
-//        codecRegistry.registerFromTapValue(TapArrayValue.class, "text", TapArrayValue -> {
-//            if (TapArrayValue != null && TapArrayValue.getValue() != null) return TapArrayValue.getValue().toString();
-//            return "null";
-//        });
-//        codecRegistry.registerFromTapValue(TapMapValue.class, "text", tapMapValue -> {
-//            if (tapMapValue != null && tapMapValue.getValue() != null) return toJson(tapMapValue.getValue());
-//            return "null";
-//        });
-        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), elasticsearchConfig.getTimeFormat()));
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> formatTapDateTime(tapDateTimeValue.getValue(), elasticsearchConfig.getDatetimeFormat()));
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> formatTapDateTime(tapDateValue.getValue(), elasticsearchConfig.getDateFormat()));
+        codecRegistry.registerFromTapValue(TapArrayValue.class, "text", TapArrayValue -> {
+            if (TapArrayValue != null && TapArrayValue.getValue() != null) return TapArrayValue.getValue().toString();
+            return "null";
+        });
+        codecRegistry.registerFromTapValue(TapMapValue.class, "text", tapMapValue -> {
+            if (tapMapValue != null && tapMapValue.getValue() != null) return toJson(tapMapValue.getValue());
+            return "null";
+        });
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss"));
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS"));
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> formatTapDateTime(tapDateValue.getValue(), "yyyy-MM-dd"));
     }
 
     @Override
@@ -218,15 +179,6 @@ public class ElasticsearchConnector extends ConnectorBase {
                 xContentBuilder.field("dynamic", "true");
                 xContentBuilder.startObject("properties");
                 for (TapField field : tapTable.getNameFieldMap().values()) {
-                    if (null != createTableFieldFilters) {
-                        boolean filter = false;
-                        for (Predicate<CreateTableFieldWrapper> createTableFieldFilter : createTableFieldFilters) {
-                            CreateTableFieldWrapper createTableFieldWrapper = new CreateTableFieldWrapper(field, tapTable);
-                            filter = createTableFieldFilter.test(createTableFieldWrapper);
-                            if (filter) break;
-                        }
-                        if (filter) continue;
-                    }
                     String dataType = field.getDataType();
                     if (null == dataType) {
                         continue;
@@ -255,7 +207,7 @@ public class ElasticsearchConnector extends ConnectorBase {
                         case "date":
                             xContentBuilder.startObject(field.getName())
                                     .field("type", "date")
-                                    .field("format", format("{}||{}||{}||epoch_millis",elasticsearchConfig.getDateFormat(),elasticsearchConfig.getDatetimeFormat(),elasticsearchConfig.getTimeFormat()))
+                                    .field("format", "yyyy-MM-dd||yyyy-MM-dd HH:mm:ss.SSSSSS||HH:mm:ss||epoch_millis")
                                     .endObject();
                             break;
                         default:
