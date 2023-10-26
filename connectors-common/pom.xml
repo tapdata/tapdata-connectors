@@ -10,6 +10,7 @@
     <modules>
 		<module>connector-core</module>
 		<module>sql-core</module>
+		<module>mysql-binlog-connector-java</module>
 		<module>debezium-bucket</module>
 		<module>mysql-core</module>
 		<module>postgres-core</module>
