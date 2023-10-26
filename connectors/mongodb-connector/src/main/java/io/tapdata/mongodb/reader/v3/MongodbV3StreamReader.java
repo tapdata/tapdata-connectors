@@ -336,16 +336,14 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 						info.put("_id", _id);
 						info.put("$op", o);
 					}
-					tapBaseEvent = updateDMLEvent(null, after, collectionName);
-					((TapUpdateRecordEvent) tapBaseEvent).setIsReplaceEvent(!o.keySet().stream().anyMatch(k -> k.startsWith("$")));
+					tapBaseEvent = updateDMLEvent(null, after, collectionName);((TapUpdateRecordEvent) tapBaseEvent).setIsReplaceEvent(!o.keySet().stream().anyMatch(k -> k.startsWith("$")));
 					Map<String, Object> originUnset = o.get("$unset", Map.class);
-										//Map<String, Object> finalUnset = new DataMap();
-										List<String> finalUnset = new ArrayList<>();
-					if (originUnset != null) {
+					//Map<String, Object> finalUnset = new DataMap();
+					List<String> finalUnset = new ArrayList<>();if (originUnset != null) {
 						for (Map.Entry<String, Object> entry : originUnset.entrySet()) {
 							if (after == null || after.keySet().stream().noneMatch(v -> v.equals(entry.getKey()))) {
-													//finalUnset.put(entry.getKey(), true);
-													finalUnset.add(entry.getKey());
+								//finalUnset.put(entry.getKey(), true);
+							finalUnset.add(entry.getKey());
 							}
 //												if (!after.containsKey(entry.getKey())) {
 //													finalUnset.put(entry.getKey(), true);
@@ -353,9 +351,8 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 						}
 					}
 					if (finalUnset.size() > 0) {
-											//info.put("$unset", finalUnset);
-											((TapUpdateRecordEvent) tapBaseEvent).removedFields(finalUnset);
-					}
+						//info.put("$unset", finalUnset);
+					((TapUpdateRecordEvent) tapBaseEvent).removedFields(finalUnset);}
 					tapBaseEvent.setInfo(info);
 				} else if ("i".equalsIgnoreCase(event.getString("op"))) {
 					tapBaseEvent = insertRecordEvent(o, collectionName);
