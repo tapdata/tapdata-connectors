@@ -53,6 +53,7 @@ public class MysqlConfig extends CommonDbConfig {
         }
         StringBuilder sbURL = new StringBuilder("jdbc:").append(getDbType()).append("://").append(getHost()).append(":").append(getPort()).append("/").append(getDatabase());
 
+        Map<String, String> properties = new HashMap<>();
         if (StringUtils.isNotBlank(additionalString)) {
             String[] additionalStringSplit = additionalString.split("&");
             for (String s : additionalStringSplit) {
