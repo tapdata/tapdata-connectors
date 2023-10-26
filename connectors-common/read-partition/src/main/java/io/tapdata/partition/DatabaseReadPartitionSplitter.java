@@ -88,7 +88,12 @@ public class DatabaseReadPartitionSplitter {
 		context.getLog().info(id + ": Start splitting for table {}, maxRecordInPartition {}", table.getId(), maxRecordInPartition);
 		TapPartitionFilter partitionFilter = TapPartitionFilter.create();
 		long time = System.currentTimeMillis();
-		long count = countIsSlow ? -1 : countByPartitionFilter.countByPartitionFilter(context, table, partitionFilter.toAdvanceFilter());
+		long count = 0;
+		try {
+			count = countIsSlow ? -1 : countByPartitionFilter.countByPartitionFilter(context, table, partitionFilter.toAdvanceFilter());
+		} catch (Throwable e) {
+			throw new RuntimeException(e);
+		}
 		context.getLog().info(id + ": Initial count {}, takes {} countIsSlow {}", count, (System.currentTimeMillis() - time), countIsSlow);
 
 		TapIndexEx partitionIndex = table.partitionIndex();
