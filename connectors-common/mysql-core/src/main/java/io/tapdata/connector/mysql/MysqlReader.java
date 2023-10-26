@@ -22,7 +22,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapDate;
@@ -93,9 +93,11 @@ public class MysqlReader implements Closeable {
     private TimeZone DB_TIME_ZONE;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     private final ExceptionCollector exceptionCollector;
+    protected Log tapLogger;
 
-    public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext) {
+    public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger) {
         this.mysqlJdbcContext = mysqlJdbcContext;
+        this.tapLogger = tapLogger;
         this.exceptionCollector = new MysqlExceptionCollector();
         this.running = new AtomicBoolean(true);
         try {
@@ -227,7 +229,7 @@ public class MysqlReader implements Closeable {
             if (null != mysqlStreamOffset) {
                 offsetStr = jsonParser.toJson(mysqlStreamOffset);
             }
-            TapLogger.info(TAG, "Starting mysql cdc, server name: " + serverName);
+            tapLogger.info("Starting mysql cdc, server name: " + serverName);
             this.eventQueue = new LinkedBlockingQueue<>(10);
             this.streamReadConsumer = consumer;
             initMysqlSchemaHistory(tapConnectorContext);
@@ -288,7 +290,7 @@ public class MysqlReader implements Closeable {
                     .append(v)
                     .append("\n"));
             configStr.append("}");
-            TapLogger.info(TAG, configStr.toString());
+            tapLogger.info(configStr.toString());
             embeddedEngine = (EmbeddedEngine) new EmbeddedEngine.BuilderImpl()
                     .using(configuration)
                     .notifying(this::consumeRecords)
@@ -302,9 +304,9 @@ public class MysqlReader implements Closeable {
                         tapConnectorContext.configContext();
                         if (result) {
                             if (StringUtils.isNotBlank(message)) {
-                                TapLogger.info(TAG, "CDC engine stopped: " + message);
+                                tapLogger.info("CDC engine stopped: " + message);
                             } else {
-                                TapLogger.info(TAG, "CDC engine stopped");
+                                tapLogger.info("CDC engine stopped");
                             }
                             throwableAtomicReference.set(null);
                         } else {
@@ -331,7 +333,7 @@ public class MysqlReader implements Closeable {
             }
         } finally {
             Optional.ofNullable(mysqlSchemaHistoryMonitor).ifPresent(ExecutorService::shutdownNow);
-            TapLogger.info(TAG, "Mysql binlog reader stopped");
+            tapLogger.info("Mysql binlog reader stopped");
         }
     }
 
@@ -380,7 +382,7 @@ public class MysqlReader implements Closeable {
                 try {
                     json = StringCompressUtil.compress(json);
                 } catch (IOException e) {
-                    TapLogger.warn(TAG, "Compress Mysql schema history failed, string: " + json + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
+                    tapLogger.warn("Compress Mysql schema history failed, string: " + json + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
                     return;
                 }
                 tapConnectorContext.getStateMap().put(MYSQL_SCHEMA_HISTORY, json);
@@ -410,7 +412,7 @@ public class MysqlReader implements Closeable {
             try {
                 engine.close();
             } catch (IOException e) {
-                TapLogger.warn(TAG, "Close CDC engine failed, error: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
+                tapLogger.warn("Close CDC engine failed, error: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
             }
         });
         Optional.ofNullable(mysqlSchemaHistoryMonitor).ifPresent(ExecutorService::shutdownNow);
@@ -494,7 +496,7 @@ public class MysqlReader implements Closeable {
         String op = value.getString("op");
         MysqlOpType mysqlOpType = MysqlOpType.fromOp(op);
         if (null == mysqlOpType) {
-            TapLogger.debug(TAG, "Unrecognized operation type: " + op + ", will skip it, record: " + record);
+            tapLogger.debug("Unrecognized operation type: " + op + ", will skip it, record: " + record);
             return null;
         }
         Map<String, Object> before = null;
@@ -531,7 +533,7 @@ public class MysqlReader implements Closeable {
         tapRecordEvent.setTableId(table);
         tapRecordEvent.setReferenceTime(eventTime);
         MysqlStreamOffset mysqlStreamOffset = getMysqlStreamOffset(record);
-        TapLogger.debug(TAG, "Read DML - Table: " + table + "\n  - Operation: " + mysqlOpType.getOp()
+        tapLogger.debug("Read DML - Table: " + table + "\n  - Operation: " + mysqlOpType.getOp()
                 + "\n  - Before: " + before + "\n  - After: " + after + "\n  - Offset: " + mysqlStreamOffset);
         mysqlStreamEvent = new MysqlStreamEvent(tapRecordEvent, mysqlStreamOffset);
         return mysqlStreamEvent;
@@ -560,7 +562,7 @@ public class MysqlReader implements Closeable {
                             tapDDLEvent.setTime(System.currentTimeMillis());
                             tapDDLEvent.setReferenceTime(eventTime);
                             mysqlStreamEvents.add(mysqlStreamEvent);
-                            TapLogger.info(TAG, "Read DDL: " + ddlStr + ", about to be packaged as some event(s)");
+                            tapLogger.info("Read DDL: " + ddlStr + ", about to be packaged as some event(s)");
                         }
                 );
             } catch (Throwable e) {
@@ -583,7 +585,7 @@ public class MysqlReader implements Closeable {
             if (!(tapEvent instanceof TapDDLEvent)) {
                 continue;
             }
-            TapLogger.info(TAG, "DDL event  - Table: " + ((TapDDLEvent) tapEvent).getTableId()
+            tapLogger.info("DDL event  - Table: " + ((TapDDLEvent) tapEvent).getTableId()
                     + "\n  - Event type: " + tapEvent.getClass().getSimpleName()
                     + "\n  - Offset: " + mysqlStreamEvent.getMysqlStreamOffset());
         }
