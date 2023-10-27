@@ -632,7 +632,7 @@ public class MongodbConnector extends ConnectorBase {
 	private boolean createSharedCollection(DataMap nodeConfig, TapTable table, Collection<String> pks, String database, Log log) {
 		Object shardCollection = nodeConfig.get("shardCollection");
 		boolean isShardCollection = shardCollection instanceof Boolean && ((Boolean) shardCollection);
-		if (isShardCollection) {
+		if (isShardCollection && null != table) {
 				isShardCollection = false;
 				TapIndexEx partitionIndex = table.getPartitionIndex();
 				if (null != partitionIndex) {
