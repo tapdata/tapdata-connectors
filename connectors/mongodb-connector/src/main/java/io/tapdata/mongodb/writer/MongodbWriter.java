@@ -132,9 +132,9 @@ public class MongodbWriter {
 
 		//Need to tell incremental engine the write result
 		writeListResultConsumer.accept(writeListResult
-				.insertedCount(inserted.get())
-				.modifiedCount(updated.get())
-				.removedCount(deleted.get()));
+			.insertedCount(inserted.get())
+			.modifiedCount(updated.get())
+			.removedCount(deleted.get()));
 	}
 
 	private void removeOidIfNeed(List<TapRecordEvent> tapRecordEvents, Collection<String> pks) {
@@ -177,17 +177,17 @@ public class MongodbWriter {
 			tapLogger.info("update record ignored: {}", tapRecordEvent);
 		}
 		writeListResultConsumer.accept(writeListResult
-				.insertedCount(0)
-				.modifiedCount(1)
-				.removedCount(0));
+			.insertedCount(0)
+			.modifiedCount(1)
+			.removedCount(0));
 	}
 
 	private boolean handleBulkWriteError(
-			MongoBulkWriteException originMongoBulkWriteException,
-			BulkWriteModel bulkWriteModel,
-			BulkWriteOptions bulkWriteOptions,
-			MongoCollection<Document> collection,
-			Consumer<MongoBulkWriteException> errorConsumer
+		MongoBulkWriteException originMongoBulkWriteException,
+		BulkWriteModel bulkWriteModel,
+		BulkWriteOptions bulkWriteOptions,
+		MongoCollection<Document> collection,
+		Consumer<MongoBulkWriteException> errorConsumer
 	) {
 		List<BulkWriteError> writeErrors = originMongoBulkWriteException.getWriteErrors();
 		List<BulkWriteError> cantHandleErrors = new ArrayList<>();
@@ -215,11 +215,11 @@ public class MongodbWriter {
 		if (CollectionUtils.isNotEmpty(cantHandleErrors)) {
 			// Keep errors that cannot handle
 			MongoBulkWriteException mongoBulkWriteException = new MongoBulkWriteException(
-					originMongoBulkWriteException.getWriteResult(),
-					cantHandleErrors,
-					originMongoBulkWriteException.getWriteConcernError(),
-					originMongoBulkWriteException.getServerAddress(),
-					originMongoBulkWriteException.getErrorLabels()
+				originMongoBulkWriteException.getWriteResult(),
+				cantHandleErrors,
+				originMongoBulkWriteException.getWriteConcernError(),
+				originMongoBulkWriteException.getServerAddress(),
+				originMongoBulkWriteException.getErrorLabels()
 			);
 			errorConsumer.accept(mongoBulkWriteException);
 			return false;
@@ -306,6 +306,7 @@ public class MongodbWriter {
 			if (info != null && info.get("$op") != null) {
 				pkFilter = new Document("_id", info.get("_id"));
 				u.putAll((Map<String, Object>) info.get("$op"));
+				u.remove("$v"); // Exists '$v' in update operation of MongoDB(v3.6), remove it because can't apply in write model.
 				boolean isUpdate = u.keySet().stream().anyMatch(k -> k.startsWith("$"));
 				if (isUpdate) {
 					writeModel = new UpdateManyModel<>(pkFilter, u, options);
