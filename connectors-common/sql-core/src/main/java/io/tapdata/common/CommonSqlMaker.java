@@ -204,7 +204,9 @@ public class CommonSqlMaker {
     }
 
     public void buildRowNumberClause(StringBuilder builder, TapAdvanceFilter filter) {
-        builder.append(" A) A ");
+        builder.append(" A ");
+        buildWhereClause(builder, filter);
+        builder.append(") A ");
         if (EmptyKit.isNotNull(filter.getSkip()) || EmptyKit.isNotNull(filter.getLimit())) {
             builder.append("WHERE ");
         }
