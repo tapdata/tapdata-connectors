@@ -6,7 +6,7 @@
     "doc": "${doc}",
     "authentication": "Beta",
     "tags": [
-      "Database"
+      "Database", "ssl"
     ]
   },
   "configOptions": {
