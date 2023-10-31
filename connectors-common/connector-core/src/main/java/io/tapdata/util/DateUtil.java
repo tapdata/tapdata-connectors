@@ -263,6 +263,8 @@ public class DateUtil {
         put("^\\d{14}$", "yyyyMMddHHmmss");
         put("^\\d{8}\\s\\d{6}$", "yyyyMMdd HHmmss");
         put("^\\d{1,2}-\\d{1,2}-\\d{4}\\s\\d{1,2}:\\d{2}:\\d{2}$", "dd-MM-yyyy HH:mm:ss"); // Oracle Date增量更新格式
+        put("^\\d{1,2}-\\d{1,2}-\\d{4}\\s\\n\\d{1,2}:\\d{2}:\\d{2}$", "dd-MM-yyyy \nHH:mm:ss"); // Oracle Date增量更新格式
+        put("^\\d{1,2}-\\d{1,2}-\\d{4}\\s\\r\\n\\d{1,2}:\\d{2}:\\d{2}$", "dd-MM-yyyy \r\nHH:mm:ss"); // Oracle Date增量更新格式
         put("^\\d{4}-\\d{1,2}-\\d{1,2}\\s\\d{1,2}:\\d{2}:\\d{2}$", "yyyy-MM-dd HH:mm:ss");
         put("^\\d{4}-\\d{1,2}-\\d{1,2}\\s\\d{1,2}:\\d{2}:\\d{2}.\\d{1}$", "yyyy-MM-dd HH:mm:ss.S");
         put("^\\d{4}-\\d{1,2}-\\d{1,2}\\s\\d{1,2}:\\d{2}:\\d{2}.\\d{2}$", "yyyy-MM-dd HH:mm:ss.SS");
