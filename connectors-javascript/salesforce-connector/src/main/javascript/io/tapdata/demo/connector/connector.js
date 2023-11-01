@@ -730,7 +730,6 @@ function batchRead(connectionConfig, nodeConfig, offset, tableName, pageSize, ba
     let isFirst = true;
     let pageInfo = {"hasNextPage": true};
     do {
-        let uiApi;
         try {
             if (isFirst) {
                 invoke = invoker.invoke(tableName, clientInfo);
@@ -741,17 +740,61 @@ function batchRead(connectionConfig, nodeConfig, offset, tableName, pageSize, ba
         } catch (e) {
             throw ("Failed to query the data. Please check the connection." + JSON.stringify(invoke));
         }
-        uiApi = invoke.result.data.uiapi;
-        if (!(uiApi.query[tableName + ""] && uiApi.query[tableName + ""].edges[0])) return;
-        pageInfo = uiApi.query[tableName + ""].pageInfo;
+
+        if (!checkHttpResult(invoke.result.data, tableName)) {
+            return;
+        }
+        let uiApi = invoke.result.data.uiapi;
+        let queryTable = uiApi.query[tableName + ""];
+        let queryEdges = queryTable.edges;
+        pageInfo = queryTable.pageInfo;
+
         afterData = pageInfo.endCursor;
-        let resultData = uiApi.query[tableName + ""].edges;
-        disassemblyData(resultData, result);
+        disassemblyData(queryEdges, result);
         isFirst = false;
         batchReadSender.send(result, tableName, {}, false);
         result = [];
         batchStart = Number(Date.parse(new Date()));
     } while (pageInfo.hasNextPage && isAlive());
+}
+
+function checkHttpResult(data, tableName) {
+    let uiApi = data.uiapi;
+    if ('undefined' === uiApi || null == uiApi){
+        log.warn("Query result not contains param which name is 'uiapi', result: {}", data);
+        return false;
+    }
+
+    let resultQuery = uiApi.query;
+    if ('undefined' === resultQuery || null == resultQuery){
+        log.warn("Query result not contains param which name is 'uiapi.query', result: {}", data);
+        return false;
+    }
+
+    let queryTable = resultQuery[tableName + ""];
+    if ('undefined' === queryTable || null == queryTable) {
+        log.warn("Query result not contains param which name is 'uiapi.query.{}', result: {}", tableName, data);
+        return false;
+    }
+
+    let queryEdges = queryTable.edges;
+    if ('undefined' === queryEdges || null == queryEdges) {
+        log.warn("Query result not contains param which name is 'uiapi.query.{}.edges', or this param not array value, result: {}", tableName, data);
+        return false;
+    }
+
+    let queryFirstEdge = queryEdges[0];
+    if ('undefined' === queryFirstEdge || null == queryFirstEdge) {
+        log.warn("Query result not contains param which name is 'uiapi.query.{}.edges[0]', result: {}", tableName, data);
+        return false;
+    }
+
+    let pageInfo = queryTable.pageInfo;
+    if ('undefined' === pageInfo || null == pageInfo) {
+        log.warn("Query result not contains param which name is 'uiapi.query.{}.pageInfo', result: {}", tableName, data);
+        return false;
+    }
+    return true;
 }
 
 function streamRead(connectionConfig, nodeConfig, offset, tableNameList, pageSize, streamReadSender) {
@@ -763,19 +806,23 @@ function streamRead(connectionConfig, nodeConfig, offset, tableNameList, pageSiz
         let arr = [];
         let invoke;
         let first = true;
+        let tableName = tableNameList[index];
         do {
             if (!isAlive()) break;
             try {
                 if (first) {
-                    invoke = invoker.invoke(tableNameList[index] + " stream read", clientInfo);
+                    invoke = invoker.invoke(tableName + " stream read", clientInfo);
                 } else {
                     clientInfo.after = afterData;
-                    invoke = invoker.invoke(tableNameList[index] + " stream read by after", clientInfo);
+                    invoke = invoker.invoke(tableName + " stream read by after", clientInfo);
                 }
             } catch (e) {
                 throw ("Failed to query the data. Please check the connection." + JSON.stringify(invoke));
             }
-            let resultMap = invoke.result.data.uiapi.query[tableNameList[index] + ""];
+            if (!checkHttpResult(invoke.result.data, tableName)) {
+                return;
+            }
+            let resultMap = invoke.result.data.uiapi.query[tableName + ""];
             let resultData = resultMap.edges;
             pageInfo = resultMap.pageInfo;
             afterData = pageInfo.endCursor;
@@ -788,14 +835,14 @@ function streamRead(connectionConfig, nodeConfig, offset, tableNameList, pageSiz
                         if (nod.LastModifiedDate.value === nod.CreatedDate.value) {
                             arr[j] = {
                                 "eventType": "i",
-                                "tableName": tableNameList[index],
+                                "tableName": tableName,
                                 "afterData": sendData(nod),
                                 "referenceTime": Number(new Date())
                             };
                         } else {
                             arr[j] = {
                                 "eventType": "u",
-                                "tableName": tableNameList[index],
+                                "tableName": tableName,
                                 "afterData": sendData(nod),
                                 "referenceTime": Number(new Date())
                             };
@@ -851,38 +898,90 @@ function updateToken(connectionConfig, nodeConfig, apiResponse) {
 function connectionTest(connectionConfig) {
     let invoke;
     let httpCode;
+    let items = [];
+    let opportunityCode = 0;
     try {
         invoke = invoker.invoke('Opportunity', clientInfo);
         httpCode = invoke.httpCode;
-        let items = [
-            {
-                "test": "Permission check",
-                "code": exceptionUtil.statusCode(httpCode),
-                "result": result(invoke, httpCode)
-            }
-        ];
-        if (exceptionUtil.statusCode(httpCode) === 1) {
-            //if support stream, please push read log and read
-            items.push({
-                "test": "Read log",
-                "code": 1,
-                "result": "Pass"
-            });
-            items.push({
-                "test": "Read",
-                "code": 1,
-                "result": "Pass"
-            });
-        }
-        return items;
+        opportunityCode = exceptionUtil.statusCode(httpCode);
+        items.push({
+            "test": "Permission check: Opportunity",
+            "code": opportunityCode,
+            "result": result(invoke, httpCode)
+        });
     } catch (e) {
-        return [
-            {
-                "test": "Authorization failed",
-                "code": -1,
-                "result": exceptionUtil.eMessage(e)
-            }
-        ];
+        items.push({
+            "test": "Permission check: Opportunity",
+            "code": -1,
+            "result": exceptionUtil.eMessage(e)
+        });
     }
+
+    let contactCode = 0;
+    try{
+        invoke = invoker.invoke('Contact', clientInfo);
+        httpCode = invoke.httpCode;
+        contactCode = exceptionUtil.statusCode(httpCode);
+        items.push({
+            "test": "Permission check: Contact",
+            "code": contactCode,
+            "result": result(invoke, httpCode)
+        });
+    } catch (e) {
+        items.push({
+            "test": "Permission check: Contact",
+            "code": -1,
+            "result": exceptionUtil.eMessage(e)
+        });
+    }
+
+    let leadCode = 0;
+    try{
+        invoke = invoker.invoke('Lead', clientInfo);
+        httpCode = invoke.httpCode;
+        leadCode = exceptionUtil.statusCode(httpCode);
+        items.push({
+            "test": "Permission check: Lead",
+            "code": leadCode,
+            "result": result(invoke, httpCode)
+        });
+    } catch (e) {
+        items.push({
+            "test": "Permission check: Lead",
+            "code": -1,
+            "result": exceptionUtil.eMessage(e)
+        });
+    }
+
+    if (!(opportunityCode !== 1 && contactCode !== 1 && leadCode !== 1)) {
+        let str = opportunityCode===1 && contactCode === 1 && leadCode === 1? "Pass with Opportunity, Contact and Lead" : (
+            "Pass only: " +
+            ( opportunityCode===1? "Opportunity, ":"") +
+            ( contactCode===1? "Contact, ":"") +
+            ( leadCode===1? "Lead, ":"") +
+            "and " +
+            ( opportunityCode!==1? "Opportunity, ":"") +
+            ( contactCode!==1? "Contact, ":"") +
+            ( leadCode!==1? "Lead, ":"") +" not be support"
+        )
+        //if support stream, please push read log and read
+        items.push({
+            "test": "Read log",
+            "code": 1,
+            "result": str
+        });
+        items.push({
+            "test": "Read",
+            "code": 1,
+            "result": str
+        });
+    } else {
+        items.push({
+            "test": "Not any table be supported",
+            "code": 0,
+            "result": "Opportunity, Contact and Lead not be support"
+        });
+    }
+    return items;
 }
 
