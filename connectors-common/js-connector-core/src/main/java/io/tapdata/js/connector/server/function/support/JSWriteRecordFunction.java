@@ -90,6 +90,7 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
                 this.execDrop(cacheEventType, context, execData, writeListResultConsumer, tableJsonString);
             }
         }
+        this.javaScripter.scriptEngine().put("tapTable", table);
         this.exec(context, machiningEvents, JSFunctionNames.WriteRecordFunction, writeListResultConsumer, tableJsonString);
         //js执行出错不需要清除缓存，重试时需要使用
         this.writeCache = new ConcurrentHashMap<>();
