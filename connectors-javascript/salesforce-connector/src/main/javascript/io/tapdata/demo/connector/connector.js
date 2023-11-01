@@ -957,12 +957,12 @@ function connectionTest(connectionConfig) {
         let str = opportunityCode===1 && contactCode === 1 && leadCode === 1? "Pass with Opportunity, Contact and Lead" : (
             "Pass only: " +
             ( opportunityCode===1? "Opportunity, ":"") +
-            ( opportunityCode===1? "Contact, ":"") +
-            ( opportunityCode===1? "Lead, ":"") +
+            ( contactCode===1? "Contact, ":"") +
+            ( leadCode===1? "Lead, ":"") +
             "and " +
-            ( opportunityCode===1? "Opportunity, ":"") +
-            ( opportunityCode===1? "Contact, ":"") +
-            ( opportunityCode===1? "Lead, ":"") +" not be support"
+            ( opportunityCode!==1? "Opportunity, ":"") +
+            ( contactCode!==1? "Contact, ":"") +
+            ( leadCode!==1? "Lead, ":"") +" not be support"
         )
         //if support stream, please push read log and read
         items.push({
