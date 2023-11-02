@@ -6,6 +6,8 @@ import java.util.Objects;
 
 public class Api {
     public static final String PAGE_RESULT_PATH_DEFAULT_PATH = "data";
+    public static final String PAGE_RESULT_PATH_UN_KNOW_PATH = "unKnowData";
+    public static final String PAGE_RESULT_PATH_UN_KNOW_MSG = "unKnowMsg";
     String id;
     String name;
     String tableName;
