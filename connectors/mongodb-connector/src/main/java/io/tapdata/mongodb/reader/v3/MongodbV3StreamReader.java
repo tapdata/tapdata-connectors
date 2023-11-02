@@ -14,6 +14,7 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
+import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
 import io.tapdata.mongodb.MongodbConnector;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
@@ -27,6 +28,7 @@ import org.bson.BsonTimestamp;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingDeque;
@@ -111,7 +113,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					if (running.get()) {
 						try {
 							Thread.currentThread().setName("replicaSet-read-thread-" + replicaSetName);
-							readFromOplog(replicaSetName, mongodbURI, eventBatchSize, consumer);
+							readFromOplog(connectorContext, replicaSetName, mongodbURI, eventBatchSize, consumer);
 						} catch (Exception e) {
 							running.compareAndSet(true, false);
 							TapLogger.error(TAG, "read oplog event from {} failed {}", replicaSetName, e.getMessage(), e);
@@ -183,7 +185,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 		}
 	}
 
-	private void readFromOplog(String replicaSetName, String mongodbURI, int eventBatchSize, StreamReadConsumer consumer) {
+	private void readFromOplog(TapConnectorContext connectorContext, String replicaSetName, String mongodbURI, int eventBatchSize, StreamReadConsumer consumer) {
 		Bson filter = null;
 
 		BsonTimestamp startTs = null;
@@ -199,6 +201,26 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 
 		try (MongoClient mongoclient = MongoClients.create(mongodbURI)) {
 			final MongoCollection<Document> oplogCollection = mongoclient.getDatabase(LOCAL_DATABASE).getCollection(OPLOG_COLLECTION);
+			try (final MongoCursor<Document> mongoCursor = oplogCollection.find(fromMigrateFilter).sort(new Document("$natural", 1)).limit(1).cursorType(CursorType.TailableAwait)
+				.noCursorTimeout(true).iterator()) {
+				if (mongoCursor.hasNext()) {
+					Document event = mongoCursor.next();
+					BsonTimestamp bsonTimestamp = event.get("ts", BsonTimestamp.class);
+					if (bsonTimestamp.getTime() > startTs.getTime()) {
+						RuntimeException runtimeException = new RuntimeException(String.format("{replicaSetName: '%s', offsetTimes: '%s', firstLogTimes: '%s'}"
+							, replicaSetName
+							, Instant.ofEpochSecond(startTs.getTime())
+							, Instant.ofEpochSecond(bsonTimestamp.getTime())));
+						throw new TapPdkOffsetOutOfLogEx(connectorContext.getSpecification().getId(), offset, runtimeException);
+					}
+				} else {
+					throw new RuntimeException(String.format("Not found any oplog, replicaSetName: '%s', URI: '%s'", replicaSetName, mongodbURI));
+				}
+			} catch (MongoInterruptedException e) {
+				running.compareAndSet(true, false);
+				return;
+			}
+
 //						List<TapEvent> tapEvents = new ArrayList<>(eventBatchSize);
 			// todo exception retry
 			while (running.get()) {
