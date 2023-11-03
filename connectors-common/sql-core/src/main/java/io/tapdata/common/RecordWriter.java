@@ -14,7 +14,6 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Consumer;
 
 import static io.tapdata.entity.simplify.TapSimplify.toJson;
@@ -87,8 +86,7 @@ public class RecordWriter {
         } catch (SQLException e) {
             exceptionCollector.collectTerminateByServer(e);
             exceptionCollector.collectViolateNull(null, e);
-            Map<TapRecordEvent, Throwable> errorMap = listResult.getErrorMap();
-            TapRecordEvent errorEvent = null != errorMap ? errorMap.keySet().stream().findFirst().orElse(null) : null;
+            TapRecordEvent errorEvent = listResult.getErrorMap().keySet().stream().findFirst().orElse(null);
             exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), errorEvent, null, e);
             exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
             exceptionCollector.collectWriteType(null, null, errorEvent, e);
