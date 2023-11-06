@@ -220,7 +220,7 @@ public class RedisConnector extends ConnectorBase {
     }
 
     private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        RedisReplicatorReader redisReplicatorReader = new RedisReplicatorReader(redisContext, firstConnectorId);
+        RedisReplicatorReader redisReplicatorReader = new RedisReplicatorReader(redisContext, firstConnectorId, tapConnectorContext.getLog());
         redisReplicatorReader.readRdb(tapConnectorContext, tapTable.getId(), eventBatchSize, eventsOffsetConsumer, this::isAlive);
 //        RedisOffset redisOffset = (RedisOffset) offsetState;
 //        try (
@@ -296,7 +296,7 @@ public class RedisConnector extends ConnectorBase {
         } else {
             offsetMap = (Map) offsetState;
         }
-        RedisReplicatorReader redisReplicatorReader = new RedisReplicatorReader(redisContext, firstConnectorId);
+        RedisReplicatorReader redisReplicatorReader = new RedisReplicatorReader(redisContext, firstConnectorId, nodeContext.getLog());
         redisReplicatorReader.readCommand(offsetMap, recordSize, consumer, this::isAlive);
 //        RedisOffset redisOffset;
 //        if (EmptyKit.isNull(((RedisOffset) offsetState).getReplId())) {
