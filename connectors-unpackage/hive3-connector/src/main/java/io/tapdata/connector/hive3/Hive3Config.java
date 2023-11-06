@@ -1,17 +1,14 @@
-package io.tapdata.connector.mrs.config;
+package io.tapdata.connector.hive3;
 
 import io.tapdata.connector.hive.config.HiveConfig;
-import io.tapdata.connector.mrs.util.KerberosUtil;
-import io.tapdata.connector.mrs.util.Krb5Util;
 import io.tapdata.kit.EmptyKit;
 
 import java.util.Map;
 
-public class MrsHive3Config extends HiveConfig {
-    private static final String HIVE_DRIVER = "org.apache.hive.jdbc.HiveDriver";
+public class Hive3Config extends HiveConfig {
 
 
-    public MrsHive3Config(String connectorId) {
+    public Hive3Config(String connectorId) {
         super();
         this.connectorId = connectorId;
     }
@@ -29,68 +26,25 @@ public class MrsHive3Config extends HiveConfig {
     }
 
     public String getDatabaseUrl()  {
-        init();
         if (EmptyKit.isNull(this.getExtParams())) {
             this.setExtParams("");
         }
         if (EmptyKit.isNotEmpty(this.getExtParams()) && !this.getExtParams().startsWith("?") && !this.getExtParams().startsWith(":")) {
             this.setExtParams("" + this.getExtParams());
         }
-        StringBuilder strBuilder = new StringBuilder(String.format(this.getDatabaseUrlPattern(), this.getNameSrvAddr(), this.getDatabase(), this.getExtParams()));
-        if (krb5) {
-            String keytabPath = Krb5Util.keytabPath(krb5Path);
-            keytabPath = keytabPath.replaceAll("\\\\","/");
-            strBuilder.append(";principal=")
-                    .append(principal)
-                    .append(";user.principal=")
-                    .append(getUser())
-                    .append(";user.keytab=")
-                    .append(keytabPath)
-                    .append(";");
-        }
+        StringBuilder strBuilder = new StringBuilder(String.format(this.getDatabaseUrlPattern(), this.getHost()+":"+this.getPort(), this.getDatabase(), this.getExtParams()));
         return strBuilder.toString();
 
     }
 
     @Override
-    public MrsHive3Config load(Map<String, Object> map) {
+    public Hive3Config load(Map<String, Object> map) {
         assert beanUtils != null;
         beanUtils.mapToBean(map, this);
-        if (krb5) {
-            krb5Path = Krb5Util.saveByCatalog("connections-" + connectorId, krb5Keytab, krb5Conf, true);
-        }
         return this;
     }
 
-    public  void init(){
-        if (krb5) {
-            String confPath=  Krb5Util.confPath(this.getKrb5Path());
-            confPath = confPath.replaceAll("\\\\","/");
-            System.setProperty("java.security.krb5.conf", confPath);
-            String zkPrincipal = "zookeeper/" + getUserRealm(this.getKrb5Conf());
-            System.setProperty("zookeeper.server.principal", zkPrincipal);
-        }
-        if (this.getSsl()) {
-            System.setProperty("zookeeper.clientCnxnSocket", "org.apache.zookeeper.ClientCnxnSocketNetty");
-            System.setProperty("zookeeper.client.secure", "true");
-        }
-    }
 
-    public static String getUserRealm(String krb5Conf) {
-        String serverRealm = System.getProperty("SERVER_REALM");
-        String authHostName;
-        if (serverRealm != null && !serverRealm.equals("")) {
-            authHostName = "hadoop." + serverRealm.toLowerCase();
-        } else {
-            serverRealm = KerberosUtil.getKrb5DomainRealm();
-            if (serverRealm != null && !serverRealm.equals("")) {
-                authHostName = "hadoop." + serverRealm.toLowerCase();
-            } else {
-                authHostName = "hadoop";
-            }
-        }
-        return authHostName;
-    }
 
     private final String connectorId;
     private String nameSrvAddr;
