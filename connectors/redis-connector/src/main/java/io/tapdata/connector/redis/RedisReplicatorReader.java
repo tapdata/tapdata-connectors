@@ -276,6 +276,9 @@ public class RedisReplicatorReader implements AutoCloseable {
                 }
             }
         }
+        if (EmptyKit.isNotNull(exceptionRef.get())) {
+            throw exceptionRef.get();
+        }
         if (EmptyKit.isNotEmpty(eventList)) {
             eventsOffsetConsumer.accept(eventList, new HashMap<>());
         }
@@ -343,6 +346,9 @@ public class RedisReplicatorReader implements AutoCloseable {
                 configuration.setReplOffset(redisOffset.getOffsetV1());
             }
             configuration.setSlavePort(slavePort);
+            if (StringUtils.isNotBlank(redisConfig.getUsername())) {
+                configuration.setAuthUser(redisConfig.getUsername());
+            }
             if (StringUtils.isNotBlank(redisConfig.getPassword())) {
                 configuration.setAuthPassword(redisConfig.getPassword());
             }
