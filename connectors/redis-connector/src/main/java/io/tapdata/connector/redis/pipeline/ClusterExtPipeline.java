@@ -22,11 +22,11 @@ public class ClusterExtPipeline extends ClusterPipeline {
     }
 
     public Response<Object> sendCommand(ProtocolCommand cmd, String... args) {
-        return sendCommand(new CommandArguments(cmd).addObjects((Object[]) args));
+        return sendCommand(new ClusterCommandArguments(cmd).addObjects((Object[]) args));
     }
 
     public Response<Object> sendCommand(ProtocolCommand cmd, byte[]... args) {
-        return sendCommand(new CommandArguments(cmd).addObjects((Object[]) args));
+        return sendCommand(new ClusterCommandArguments(cmd).addObjects((Object[]) args));
     }
 
     public Response<Object> sendCommand(CommandArguments args) {
