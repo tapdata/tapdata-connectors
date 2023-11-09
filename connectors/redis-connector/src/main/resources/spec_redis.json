@@ -149,19 +149,14 @@
           "description": "${databaseProp}",
           "required": true
         },
-        "passwordDisplay": {
-          "type": "boolean",
-          "title": "${passwordDisplay}",
+        "username": {
+          "type": "string",
+          "title": "${username}",
           "x-decorator": "FormItem",
-          "x-component": "Switch",
+          "x-component": "Input",
           "x-index": 7,
-          "x-reactions": {
-            "target": "password",
-            "fulfill": {
-              "state": {
-                "visible": "{{!!$self.value}}"
-              }
-            }
+          "x-decorator-props": {
+            "tooltip": "${usernameTip}"
           }
         },
         "password": {
@@ -435,7 +430,8 @@
       "portTip": "Redis port, default 6379",
       "password": "Password",
       "deploymentMode": "Deployment mode",
-      "passwordDisplay":"Whether to use a password",
+      "username": "Username",
+      "usernameTip": "Redis username, default is 'default'",
       "sentinelName": "Sentinel name/Cluster name",
       "sentinelNameTip": "The client name recognized by the server does not affect synchronization and is only used for monitoring",
       "standalone": "Single machine deployment",
@@ -480,7 +476,8 @@
       "portTip": "Redis端口，默认6379",
       "password": "密码",
       "deploymentMode": "部署模式",
-      "passwordDisplay":"是否使用密码",
+      "username": "用户名",
+      "usernameTip": "Redis用户名，默认为 'default'",
       "sentinelName": "哨兵/集群名称",
       "sentinelNameTip": "服务端可识别的客户端名称，不影响同步，仅用于监控",
       "standalone": "单机部署",
@@ -526,7 +523,8 @@
       "portTip": "Redis端口，默認6379",
       "password": "密碼",
       "deploymentMode": "部署模式",
-      "passwordDisplay":"是否使用密碼",
+      "username": "用戶名",
+      "usernameTip": "Redis用戶名，默認為 'default'",
       "sentinelName": "哨兵/集群名稱",
       "sentinelNameTip": "服務端可識別的客戶端名稱，不影響同步，僅用於監控",
       "standalone": "單機部署",

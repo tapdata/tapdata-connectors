@@ -62,10 +62,7 @@ import java.math.BigDecimal;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
@@ -97,6 +94,7 @@ public class MongodbConnector extends ConnectorBase {
 	private MongoBatchOffset batchOffset = null;
 	private MongodbExceptionCollector exceptionCollector;
 	private MongodbStreamReader mongodbStreamReader;
+	private ConcurrentHashMap<String,Set<String>> shardKeyMap = new ConcurrentHashMap<>();
 
 	private volatile MongodbWriter mongodbWriter;
 	private Map<String, Integer> stringTypeValueMap;
@@ -1128,6 +1126,28 @@ public class MongodbConnector extends ConnectorBase {
 //        return null;
 //    }
 
+	private static final String CONFIG = "config";
+	private static final String COLLECTIONS = "collections";
+
+	private void putShardKey(String tableId){
+		if (Boolean.TRUE.equals(isShard(tableId)) && !shardKeyMap.containsKey(tableId)){
+			Document document = mongoClient.getDatabase(CONFIG).getCollection(COLLECTIONS)
+					.find(new Document("_id", mongoConfig.getDatabase() + "." + tableId)).first();
+			if(document != null && document.containsKey("key")){
+				Map<String,String> map = (Map<String,String>)document.get("key");
+				if(CollectionUtils.isNotEmpty(map.keySet()))
+					shardKeyMap.put(tableId,map.keySet());
+			}
+		}
+	}
+
+	private Boolean isShard(String tableId){
+		Document document = mongoDatabase.runCommand(new Document("collStats",tableId));
+		if(document.containsKey("sharded")){
+			return (Boolean)document.get("sharded");
+		}
+		return false;
+	}
 
 	/**
 	 * The method invocation life circle is below,
@@ -1146,11 +1166,12 @@ public class MongodbConnector extends ConnectorBase {
 	 * @param writeListResultConsumer
 	 */
 	private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
+		putShardKey(table.getId());
 		try {
 			if (mongodbWriter == null) {
 				synchronized (this) {
 					if (mongodbWriter == null) {
-						mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog());
+						mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
 						ConnectorCapabilities connectorCapabilities = connectorContext.getConnectorCapabilities();
 						if (null != connectorCapabilities) {
 							mongoConfig.setInsertDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY) ?

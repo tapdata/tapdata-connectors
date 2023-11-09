@@ -7,6 +7,7 @@ import io.tapdata.kit.EmptyKit;
 import org.apache.commons.lang3.StringUtils;
 import redis.clients.jedis.HostAndPort;
 
+import java.net.URLEncoder;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -16,7 +17,7 @@ public class RedisConfig {
 
     private String host;
     private int port;
-    private String user;
+    private String username;
     private String password;
     private String deploymentMode;
     private String sentinelName;
@@ -67,8 +68,11 @@ public class RedisConfig {
                 break;
         }
         uri.append("?1=1");
+        if (StringUtils.isNotBlank(username)) {
+            uri.append("&authUser=").append(username);
+        }
         if (StringUtils.isNotBlank(password)) {
-            uri.append("&authPassword=").append(password);
+            uri.append("&authPassword=").append(URLEncoder.encode(password));
         }
         if (StringUtils.isNotBlank(sentinelName) && DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.SENTINEL) {
             uri.append("&master=").append(sentinelName);
@@ -80,8 +84,11 @@ public class RedisConfig {
         StringBuilder uri = new StringBuilder();
         uri.append("redis://").append(node.getHost()).append(":").append(node.getPort());
         uri.append("?1=1");
+        if (StringUtils.isNotBlank(username)) {
+            uri.append("&authUser=").append(username);
+        }
         if (StringUtils.isNotBlank(password)) {
-            uri.append("&authPassword=").append(password);
+            uri.append("&authPassword=").append(URLEncoder.encode(password));
         }
         return uri.toString();
     }
@@ -130,12 +137,12 @@ public class RedisConfig {
         this.port = port;
     }
 
-    public String getUser() {
-        return user;
+    public String getUsername() {
+        return username;
     }
 
-    public void setUser(String user) {
-        this.user = user;
+    public void setUsername(String username) {
+        this.username = username;
     }
 
     public String getPassword() {

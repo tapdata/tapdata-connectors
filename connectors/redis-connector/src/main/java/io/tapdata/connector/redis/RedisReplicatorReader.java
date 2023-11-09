@@ -24,6 +24,7 @@ import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.control.StopEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -58,20 +59,24 @@ public class RedisReplicatorReader implements AutoCloseable {
     private final AtomicReference<Throwable> exceptionRef = new AtomicReference<>();
     private Map<HostAndPort, RedisOffset> offsetMap = new ConcurrentHashMap<>();
     private final Map<String, HostAndPort> replIdMap = new ConcurrentHashMap<>();
+    private final Log tapLogger;
 
-    public RedisReplicatorReader(RedisContext redisContext, String connectorId) {
+    public RedisReplicatorReader(RedisContext redisContext, String connectorId, Log tapLogger) {
         this.redisContext = redisContext;
         this.redisConfig = redisContext.getRedisConfig();
         this.connectorId = connectorId;
+        this.tapLogger = tapLogger;
         init();
     }
 
     private void init() {
         if (DeployModeEnum.fromString(redisConfig.getDeploymentMode()) == DeployModeEnum.CLUSTER) {
             clusterNodes = generateClusterNodes();
+            tapLogger.info("discover clusterNodes: " + clusterNodes.stream().map(ClusterNode::toString).collect(Collectors.joining(",")));
             executorService = Executors.newFixedThreadPool(clusterNodes.size());
         } else {
             clusterNodes = new ArrayList<>();
+            tapLogger.info("discover no cluster");
             executorService = Executors.newFixedThreadPool(1);
         }
     }
@@ -120,6 +125,7 @@ public class RedisReplicatorReader implements AutoCloseable {
             AtomicReference<String> replId = new AtomicReference<>();
             DefaultDumpValueParser parser = new DefaultDumpValueParser(redisReplicator);
             redisReplicator.addEventListener((replicator, event) -> {
+                tapLogger.debug("thread Name: " + Thread.currentThread().getName() + ", redis event type: " + event.getClass().getSimpleName());
                 if (!isAlive.get()) {
                     EmptyKit.closeAsyncQuietly(redisReplicator);
                     return;
@@ -270,6 +276,9 @@ public class RedisReplicatorReader implements AutoCloseable {
                 }
             }
         }
+        if (EmptyKit.isNotNull(exceptionRef.get())) {
+            throw exceptionRef.get();
+        }
         if (EmptyKit.isNotEmpty(eventList)) {
             eventsOffsetConsumer.accept(eventList, new HashMap<>());
         }
@@ -337,6 +346,9 @@ public class RedisReplicatorReader implements AutoCloseable {
                 configuration.setReplOffset(redisOffset.getOffsetV1());
             }
             configuration.setSlavePort(slavePort);
+            if (StringUtils.isNotBlank(redisConfig.getUsername())) {
+                configuration.setAuthUser(redisConfig.getUsername());
+            }
             if (StringUtils.isNotBlank(redisConfig.getPassword())) {
                 configuration.setAuthPassword(redisConfig.getPassword());
             }

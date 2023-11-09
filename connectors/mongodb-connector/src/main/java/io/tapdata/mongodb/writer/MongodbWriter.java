@@ -19,7 +19,6 @@ import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
-import io.tapdata.mongodb.util.MapUtil;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.mongodb.writer.error.BulkWriteErrorCodeHandlerEnum;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
@@ -27,7 +26,6 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.bson.Document;
 
 import java.util.*;
@@ -45,8 +43,6 @@ import static io.tapdata.base.ConnectorBase.writeListResult;
 public class MongodbWriter {
 
 	public static final String TAG = MongodbV4StreamReader.class.getSimpleName();
-    private static final String CONFIG = "config";
-	private static final String COLLECTIONS = "collections";
 	protected MongoClient mongoClient;
 	private MongoDatabase mongoDatabase;
 	private KVMap<Object> globalStateMap;
@@ -55,9 +51,9 @@ public class MongodbWriter {
 	private final Log tapLogger;
 
 	private boolean is_cloud;
-	private ConcurrentHashMap<String,Set<String>> shardKyeMap= new ConcurrentHashMap<>();
+	private final Map<String,Set<String>> shardKeyMap;
 
-	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger) {
+	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger, Map<String,Set<String>> shardKeyMap) {
 		this.globalStateMap = globalStateMap;
 		this.mongoClient = mongoClient;
 		this.mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
@@ -65,6 +61,7 @@ public class MongodbWriter {
 		this.mongodbConfig = mongodbConfig;
 		this.is_cloud = AppType.init().isCloud();
 		this.tapLogger = tapLogger;
+		this.shardKeyMap = shardKeyMap;
 	}
 
 	/**
@@ -93,7 +90,7 @@ public class MongodbWriter {
 		WriteListResult<TapRecordEvent> writeListResult = writeListResult();
 
 		MongoCollection<Document> collection = getMongoCollection(table.getId());
-		putShardKey(table.getId());
+
 		Object pksCache = table.primaryKeys(true);
 		if (null == pksCache) pksCache = table.primaryKeys();
 		final Collection<String> pks = (Collection<String>) pksCache;
@@ -279,9 +276,9 @@ public class MongodbWriter {
 				if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(mongodbConfig.getInsertDmlPolicy())) {
 					operation = "$setOnInsert";
 				}
-                if(shardKyeMap.containsKey(tableId)){
+                if(shardKeyMap.containsKey(tableId)){
 					Map<String,Object> record = insertRecordEvent.getAfter();
-					Set<String> shardKeySet = shardKyeMap.get(tableId);
+					Set<String> shardKeySet = shardKeyMap.get(tableId);
 					if(CollectionUtils.isNotEmpty(shardKeySet)){
 						shardKeySet.forEach(shardKey -> {
 							if(record.containsKey(shardKey))pkFilter.append(shardKey,record.get(shardKey));
@@ -387,22 +384,4 @@ public class MongodbWriter {
 		return filter;
 	}
 
-	private void putShardKey(String tableId){
-		if(!shardKyeMap.containsKey(tableId) && isShard(tableId)){
-			Document document = mongoClient.getDatabase(CONFIG).getCollection(COLLECTIONS)
-					.find(new Document("_id", mongodbConfig.getDatabase() + "." + tableId)).first();
-			if(document != null && document.containsKey("key")){
-				Map<String,String> map = (Map<String,String>)document.get("key");
-				if(CollectionUtils.isNotEmpty(map.keySet()))shardKyeMap.put(tableId,map.keySet());
-			}
-
-		}
-	}
-	private Boolean isShard(String tableId){
-		Document document = mongoDatabase.runCommand(new Document("collStats",tableId));
-		if(document.containsKey("sharded")){
-			return (Boolean)document.get("sharded");
-		}
-		return false;
-	}
 }
