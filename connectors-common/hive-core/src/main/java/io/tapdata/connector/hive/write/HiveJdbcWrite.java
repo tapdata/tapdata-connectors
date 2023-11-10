@@ -207,7 +207,7 @@ public class HiveJdbcWrite {
         return sql;
     }
 
-    private int doInsertOne(TapConnectorContext tapConnectorContext, TapTable tapTable, TapRecordEvent tapRecordEvent) throws Throwable {
+    protected int doInsertOne(TapConnectorContext tapConnectorContext, TapTable tapTable, TapRecordEvent tapRecordEvent) throws Throwable {
         int row;
         try {
             final Map<String, PreparedStatement> insertMap = getJdbcCache().getInsertMap();
@@ -280,7 +280,7 @@ public class HiveJdbcWrite {
     }
 
 
-    private int doDeleteOne(TapConnectorContext tapConnectorContext, TapTable tapTable, TapRecordEvent tapRecordEvent) throws Throwable {
+    protected int doDeleteOne(TapConnectorContext tapConnectorContext, TapTable tapTable, TapRecordEvent tapRecordEvent) throws Throwable {
         final Map<String, PreparedStatement> deleteMap = getJdbcCache().getDeleteMap();
         PreparedStatement deletePreparedStatement = getDeletePreparedStatement(tapConnectorContext, tapTable, tapRecordEvent, deleteMap);
         setPreparedStatementWhere(tapTable, tapRecordEvent, deletePreparedStatement, 1);

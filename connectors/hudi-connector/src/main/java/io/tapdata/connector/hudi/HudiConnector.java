@@ -141,8 +141,7 @@ public class HudiConnector extends HiveConnector {
                 sb.append("\n) using hudi");
                 sb.append("\noptions (\nprimaryKey = '");
                 sb.append(pk);
-                sb.append("')");
-                sql = sql + sb;
+                sql = sql + StringUtils.removeEnd(sb.toString(), ",") + "')";
                 List<String> sqls = TapSimplify.list();
                 sqls.add(sql);
                 TapLogger.info("table :", "table->{}", tapTable.getId());
