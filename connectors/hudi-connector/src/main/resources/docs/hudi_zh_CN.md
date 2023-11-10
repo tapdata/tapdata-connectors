@@ -14,15 +14,28 @@ Hudi0.11.0
 
 ### **4. 配置说明**
 
-#### 数据源配置
+#### 数据源配置示例
 
-- Host/IP
-- Port
-- 数据库名名称
-- 账户、密码
+*   集群地址
+    *   ip\:port
+*   数据库
+    *   test\_tapdata
+*   Kerberos认证
+    *   密钥表示文件
+        *   上传user.keytab文件
+    *   配置文件
+        *   上传krb5.conf文件
+    *   Hive主体配置
+        *   spark2x/hadoop.<hadoop.com@HADOOP.COM> (对应principal的值)
+*   账户
+    *   test\_tapdata
+*   密码
+*   连接参数
+    *   ;sasl.qop=auth-conf;auth=KERBEROS
 
 ### **5. 连接测试项**
 
 - 检测 host/IP 和 port
 - 检查数据库名称
 - 检查账号和密码
+- 检查写权限

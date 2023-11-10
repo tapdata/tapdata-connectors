@@ -42,7 +42,7 @@ public class HudiWrite extends HiveJdbcWrite {
     protected static final String QUERY_RECORD_SQL = "SELECT * FROM `%s`.`%s` WHERE ";
     protected static final String UPDATE_INSERT_SQL = "INSERT INTO `%s`.`%s` VALUES (";
     protected static final String QUERY_TABLE_TYPE = "DESCRIBE FORMATTED `%s`.`%s`";
-
+    private static Map<String, Boolean> morTableMap = new HashMap<>();
 
     public HudiWrite(HiveJdbcContext hiveJdbcContext, HudiConfig hudiConfig) {
         super(hiveJdbcContext,hudiConfig);
@@ -329,8 +329,9 @@ public class HudiWrite extends HiveJdbcWrite {
         return 0;
     }
     private boolean queryTableType(TapConnectorContext tapConnectorContext, TapTable tapTable) throws SQLException{
-        PreparedStatement pstmt = null;
         String database = tapConnectorContext.getConnectionConfig().getString("database");
+        if (morTableMap.containsKey(database+"."+tapTable.getId())) return morTableMap.get(database+"."+tapTable.getId());
+        PreparedStatement pstmt = null;
         String queryTableSql = String.format(QUERY_TABLE_TYPE, database, tapTable.getId());
         pstmt = getConnection().prepareStatement(queryTableSql);
         ResultSet resultSet = pstmt.executeQuery();
@@ -342,7 +343,10 @@ public class HudiWrite extends HiveJdbcWrite {
              Matcher matcher = pattern.matcher(tableProperties);
             if(matcher.find()){
                 String tableType = matcher.group(1);
-                if ("mor".equals(tableType)) return true;
+                if ("mor".equals(tableType)) {
+                    morTableMap.put(database+"."+tapTable.getId(),true);
+                    return true;
+                }
             }
         }
         return false;
