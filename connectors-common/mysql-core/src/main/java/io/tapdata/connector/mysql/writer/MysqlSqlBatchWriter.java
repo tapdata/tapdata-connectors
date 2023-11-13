@@ -65,7 +65,7 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
                         }
                     } else if (consumeEvents.get(0) instanceof TapUpdateRecordEvent) {
                         String dmlUpdatePolicy = getDmlUpdatePolicy(tapConnectorContext);
-                        if (canReplaceInto(tapTable, dmlUpdatePolicy)) {
+                        if (canReplaceInto(tapTable, dmlUpdatePolicy) && (((TapUpdateRecordEvent) consumeEvents.get(0)).getAfter().size() >= tapTable.getNameFieldMap().size())) {
                             batch = true;
                             writeListResult.get().incrementModified(doUpdate(tapConnectorContext, tapTable, consumeEvents));
                         } else {

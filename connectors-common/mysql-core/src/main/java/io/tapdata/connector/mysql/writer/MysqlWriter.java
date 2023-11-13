@@ -19,12 +19,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.collections4.map.LRUMap;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -104,11 +99,15 @@ public abstract class MysqlWriter {
 
 	protected boolean needAddIntoPreparedStatementValues(TapField field, TapRecordEvent tapRecordEvent) {
 		Map<String, Object> after = getAfter(tapRecordEvent);
+		Map<String, Object> before = getBefore(tapRecordEvent);
 		if (null == after) {
 			return false;
 		}
 		if (!after.containsKey(field.getName())) {
 			TapLogger.debug(TAG, "Found schema field not exists in after data, will skip it: " + field.getName());
+			return false;
+		}
+		if (Objects.equals(after.get(field.getName()), before.get(field.getName()))) {
 			return false;
 		}
 		return true;
