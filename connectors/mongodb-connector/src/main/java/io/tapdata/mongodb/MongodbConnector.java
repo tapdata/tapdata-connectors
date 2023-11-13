@@ -515,9 +515,6 @@ public class MongodbConnector extends ConnectorBase {
 			throw new CoreException("The value of database name in connection config can not be empty");
 		}
 		DataMap nodeConfig = tapConnectorContext.getNodeConfig();
-		if (null == nodeConfig) {
-			throw new CoreException("Node config can not be empty");
-		}
 		TapTable table = tapCreateTableEvent.getTable();
 		Collection<String> pks = table.primaryKeys();
 		if (CollectionUtils.isNotEmpty(pks) && (pks.size() > 1 || !"_id".equals(pks.iterator().next()))) {
@@ -1092,6 +1089,7 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	public void onStart(TapConnectionContext connectionContext) throws Throwable {
+		MongodbUtil.initMongoDBConfig(connectionContext);
 		final DataMap connectionConfig = connectionContext.getConnectionConfig();
 		if (MapUtils.isEmpty(connectionConfig)) {
 			throw new RuntimeException("connection config cannot be empty");
