@@ -6,12 +6,15 @@ import com.mongodb.MongoCredential;
 import com.mongodb.client.*;
 import com.mongodb.connection.ConnectionPoolSettings;
 import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.mongodb.codecs.TapdataBigDecimalCodec;
 import io.tapdata.mongodb.codecs.TapdataBigIntegerCodec;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.util.SSLUtil;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
+import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.commons.collections4.CollectionUtils;
 import org.bson.*;
 import org.bson.codecs.configuration.CodecRegistries;
@@ -565,5 +568,27 @@ public class MongodbUtil {
 			throwables.add(cause);
 		}
 		return matched;
+	}
+
+
+	public static void initMongoDBConfig(TapConnectionContext context) {
+		if (null == context) return;
+		DataMap nodeConfig = context.getNodeConfig();
+		if (null == nodeConfig) {
+			nodeConfig = new DataMap();
+			context.setNodeConfig(nodeConfig);
+		}
+		initDefaultValue(nodeConfig, "syncIndex", false);
+		initDefaultValue(nodeConfig, "enableSaveDeleteData", false);
+		initDefaultValue(nodeConfig, "enableFillingModifiedData", true);
+		initDefaultValue(nodeConfig, "noCursorTimeout", false);
+		initDefaultValue(nodeConfig, "skipDeletedEventsOnFilling", true);
+		initDefaultValue(nodeConfig, "shardCollection", false);
+	}
+
+	private static void initDefaultValue(DataMap dataMap, String key, Object defaultValue) {
+		if (!dataMap.containsKey(key) || null == dataMap.get(key)) {
+			dataMap.put(key, defaultValue);
+		}
 	}
 }
