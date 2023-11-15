@@ -24,6 +24,9 @@ import io.tapdata.entity.utils.Entry;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 
+import java.math.BigDecimal;
+import java.text.DecimalFormat;
+import java.text.ParseException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -100,10 +103,10 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
             String url) {
         Map<String, Object> resultMap = CodingHttp.create(header, body, url).post();
         Object response = resultMap.get("Response");
-        Map<String, Object> responseMap = (Map<String, Object>) response;
-        if (null == response) {
-            throw new RuntimeException("HTTP request exception, Issue list acquisition failed: " + Optional.ofNullable(responseMap.get(CodingHttp.ERROR_KEY)).orElse(url) + "?Action=DescribeIssueListWithPage");
+        if (!(response instanceof Map)) {
+            throw new CoreException("HTTP request exception, url: {}?Action=DescribeIssueListWithPage, issue list acquisition failed: {}", toJson(response), url);
         }
+        Map<String, Object> responseMap = (Map<String, Object>) response;
         Object data = responseMap.get("Data");
         if (null == data) {
             throw new CoreException("Can't get issues page, the response's 'Data' is empty.");
@@ -207,19 +210,20 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
         }
         Map<Integer, String> customFieldMap = new HashMap<>();
 
-        HttpEntity<String, String> heard = HttpEntity.create().builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity<String, String> heard = new HttpEntity<String, String>().builder("Authorization", this.accessToken().get());
+        HttpEntity<String, Object> body = new HttpEntity<String, Object>()
                 .builder("Action", "DescribeProjectIssueFieldList")
                 .builder("ProjectName", contextConfig.getProjectName())
                 .builder("IssueType", issueType);
-        Map<String, Object> post = CodingHttp.create(heard.getEntity(), body.getEntity(), String.format(CodingStarter.OPEN_API_URL)).post();
+        final String url = String.format(CodingStarter.OPEN_API_URL, this.codingConfig.getTeamName());
+        Map<String, Object> post = CodingHttp.create(heard.getEntity(), body.getEntity(),url).post();
         Object response = post.get("Response");
         Map<String, Object> responseMap = (Map<String, Object>) response;
         if (null == response) {
-            throw new CoreException("HTTP request exception, Issue CustomField acquisition failed: " + CodingStarter.OPEN_API_URL + "?Action=DescribeProjectIssueFieldList. " + Optional.ofNullable(post.get(CodingHttp.ERROR_KEY)).orElse(""));
+            throw new CoreException("HTTP request exception, Issue CustomField acquisition failed: {}?Action=DescribeProjectIssueFieldList. {}", url, Optional.ofNullable(post.get(CodingHttp.ERROR_KEY)).orElse(""));
         }
         Object data = responseMap.get("ProjectIssueFieldList");
-        if (null != data && data instanceof JSONArray) {
+        if (data instanceof JSONArray) {
             List<Map<String, Object>> list = (ArrayList) data;
             list.forEach(field -> {
                 Object fieldObj = field.get("IssueField");
@@ -244,8 +248,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
     }
 
     public List<Map<String, Object>> getAllIssueType() {
-        HttpEntity<String, String> header = HttpEntity.create().builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> pageBody = HttpEntity.create().builder("Action", "DescribeTeamIssueTypeList");
+        HttpEntity<String, String> header = new HttpEntity<String, String>().builder("Authorization", this.accessToken().get());
+        HttpEntity<String, Object> pageBody = new HttpEntity<String, Object>().builder("Action", "DescribeTeamIssueTypeList");
         Map<String, Object> issueResponse = CodingHttp.create(
                 header.getEntity(),
                 pageBody.getEntity(),
@@ -298,9 +302,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
     @Override
     public CodingHttp codingHttp(IssueParam param) {
         param.action("DescribeIterationList");
-        HttpEntity<String, String> header = HttpEntity.create()
-                .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity<String, String> header = new HttpEntity<String, String>().builder("Authorization", this.accessToken().get());
+        HttpEntity<String, Object> body = new HttpEntity<String, Object>()
                 .builderIfNotAbsent("Action", "DescribeIssueListWithPage")
                 .builder("ProjectName", this.codingConfig.getProjectName())
                 .builder("IssueType", param.issueType().getName())
@@ -317,9 +320,9 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
 
     @Override
     public Map<String, Object> get(IssueParam param) {
-        HttpEntity<String, String> header = HttpEntity.create()
+        HttpEntity<String, String> header = new HttpEntity<String, String>()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity<String, Object> body = new HttpEntity<String, Object>()
                 .builderIfNotAbsent("Action", "DescribeIssue")
                 .builder("ProjectName", this.codingConfig.getProjectName())
                 .builder("IssueCode", param.issueCode());
@@ -365,57 +368,49 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
     @Override
     public int batchCount() throws Throwable {
         int count = 0;
-        IssuesLoader issuesLoader = IssuesLoader.create(this.tapConnectionContext, super.accessToken());
-        issuesLoader.verifyConnectionConfig();
-        try {
-            DataMap connectionConfig = this.tapConnectionContext.getConnectionConfig();
-            String token = accessToken().get();
-            HttpEntity<String, String> header = HttpEntity.create()
-                    .builder("Authorization", token);
-            HttpEntity<String, Object> body = HttpEntity.create()
-                    .builder("Action", "DescribeIssueListWithPage")
-                    .builder("ProjectName", connectionConfig.getString("projectName"))
-                    .builder("PageSize", 1)
-                    .builder("ShowSubIssues", true)
-                    .builder("PageNumber", 1);
-            try {
-                DataMap nodeConfigMap = this.tapConnectionContext.getNodeConfig();
-                if (null != nodeConfigMap) {
-                    String iterationCodes = nodeConfigMap.getString("DescribeIterationList");//iterationCodes
-                    if (null != iterationCodes) iterationCodes = iterationCodes.trim();
-                    String issueType = nodeConfigMap.getString("issueType");
-                    if (null != issueType) issueType = issueType.trim();
-
-                    body.builder("IssueType", IssueType.verifyType(issueType));
-
-                    if (null != iterationCodes && !"".equals(iterationCodes) && !",".equals(iterationCodes) && !"-1".equals(iterationCodes)) {
-                        //String[] iterationCodeArr = iterationCodes.split(",");
-                        //@TODO 输入的迭代编号需要验证，否则，查询事项列表时作为查询条件的迭代不存在时，查询会报错
-                        //选择的迭代编号不需要验证
-                        body.builder(
-                                "Conditions",
-                                io.tapdata.entity.simplify.TapSimplify.list(map(entry("Key", "ITERATION"), entry("Value", iterationCodes)))
-                        );
-                    }
-                } else {
-                    body.builder("IssueType", "ALL");
-                }
-            } catch (Exception e) {
-                TapLogger.debug(TAG, "Count table error: {}", TABLE_NAME, e.getMessage());
+        verifyConnectionConfig();
+        DataMap connectionConfig = this.tapConnectionContext.getConnectionConfig();
+        String token = accessToken().get();
+        HttpEntity<String, String> header = new HttpEntity<String, String>().builder("Authorization", token);
+        HttpEntity<String, Object> body = new HttpEntity<String, Object>()
+                .builder("Action", "DescribeIssueListWithPage")
+                .builder("ProjectName", connectionConfig.getString("projectName"))
+                .builder("PageSize", 1)
+                .builder("ShowSubIssues", true)
+                .builder("PageNumber", 1);
+        final String issueTypeKey = "IssueType";
+        DataMap nodeConfigMap = this.tapConnectionContext.getNodeConfig();
+        if (null != nodeConfigMap && !nodeConfigMap.isEmpty() && nodeConfigMap.containsKey("DescribeIterationList")) {
+            String iterationCodes = nodeConfigMap.getString("DescribeIterationList");
+            if (null != iterationCodes) iterationCodes = iterationCodes.trim();
+            String issueType = nodeConfigMap.getString(issueTypeKey);
+            if (null != issueType) issueType = issueType.trim();
+            body.builder(issueTypeKey, IssueType.verifyType(issueType));
+            if (!Checker.isNaN(iterationCodes, ",") && !"-1".equals(iterationCodes)) {
+                //String[] iterationCodeArr = iterationCodes.split(",");
+                //输入的迭代编号需要验证，否则，查询事项列表时作为查询条件的迭代不存在时，查询会报错
+                //选择的迭代编号不需要验证
+                List<Map<String, Object>> list = new ArrayList<>();
+                Map<String, Object> map = new HashMap<>();
+                map.put("Key", "ITERATION");
+                map.put("Value", iterationCodes);
+                list.add(map);
+                body.builder("Conditions", list);
             }
-            Map<String, Object> dataMap = issuesLoader.getIssuePage(
-                    header.getEntity(),
-                    body.getEntity(),
-                    String.format(CodingStarter.OPEN_API_URL, connectionConfig.getString("teamName"))
-            );
-            if (null != dataMap) {
-                Object obj = dataMap.get("TotalCount");
-                if (null != obj) count = (Integer) obj;
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e.getMessage());
+        } else {
+            body.builder(issueTypeKey, "ALL");
         }
-        TapLogger.debug(TAG, "Batch count is " + count);
+        Map<String, Object> dataMap = getIssuePage(
+                header.getEntity(),
+                body.getEntity(),
+                String.format(CodingStarter.OPEN_API_URL, connectionConfig.getString("teamName"))
+        );
+        if (null != dataMap && dataMap.containsKey("TotalCount")) {
+            Object obj = dataMap.get("TotalCount");
+            if (obj instanceof Number) {
+                count = ((Number)obj).intValue();
+            }
+        }
         return count;
     }
 
@@ -484,8 +479,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
         Map<String, Object> issueDetail = issueMap;
         this.composeIssue(codingConfig.getProjectName(), codingConfig.getTeamName(), issueMap);
         if (!DELETED_EVENT.equals(eventType)) {
-            HttpEntity<String, String> header = HttpEntity.create().builder("Authorization", this.codingConfig.getToken());
-            HttpEntity<String, Object> issueDetialBody = HttpEntity.create()
+            HttpEntity<String, String> header = new HttpEntity<String, String>().builder("Authorization", this.codingConfig.getToken());
+            HttpEntity<String, Object> issueDetialBody = new HttpEntity<String, Object>()
                     .builder("Action", "DescribeIssue")
                     .builder("ProjectName", this.codingConfig.getProjectName());
             CodingHttp authorization = CodingHttp.create(header.getEntity(), String.format(CodingStarter.OPEN_API_URL, this.codingConfig.getTeamName()));
@@ -601,8 +596,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
         String teamName = codingConfig.getTeamName();
         List<TapEvent> events = new ArrayList<>();
         CodingOffset offset = (CodingOffset) (Checker.isEmpty(offsetState) ? new CodingOffset() : offsetState);
-        HttpEntity<String, String> header = HttpEntity.create();
-        HttpEntity<String, Object> pageBody = HttpEntity.create();
+        HttpEntity<String, String> header = new HttpEntity<>();
+        HttpEntity<String, Object> pageBody = new HttpEntity<>();
         this.defineHttpAttributes(readStartTime, readEndTime, readSize, header, pageBody, false);
         AtomicInteger total = new AtomicInteger(-1);
         Map<Object, Object> offsetMap = Optional.ofNullable(offset.offset()).orElse(new HashMap<>());
@@ -749,9 +744,9 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
         }
         int currentQueryCount = 0, queryIndex = 0;
         final List<TapEvent>[] events = new List[]{new CopyOnWriteArrayList()};
-        HttpEntity<String, String> header = HttpEntity.create().builder("Authorization", this.accessToken().get());
+        HttpEntity<String, String> header = new HttpEntity<String, String>().builder("Authorization", this.accessToken().get());
         String projectName = this.codingConfig.getProjectName();
-        HttpEntity<String, Object> pageBody = HttpEntity.create()
+        HttpEntity<String, Object> pageBody = new HttpEntity<String, Object>()
                 .builder("Action", "DescribeIssueListWithPage")
                 .builder("ProjectName", projectName)
                 .builder("SortKey", "UPDATED_AT")
