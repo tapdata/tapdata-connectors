@@ -1,5 +1,6 @@
 package io.tapdata.coding.utils.tool;
 
+import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Date;
@@ -35,5 +36,21 @@ public class Checker {
         //1576474321000L
         //1576477905000L
         System.out.println(dateStr);
+    }
+
+    public static boolean isNaN(Object value, String splitChar) {
+        if (null == value) return true;
+        if (value instanceof Number) return false;
+        if (!(value instanceof String)) return true;
+        String[] numbers = null == splitChar ? new String[]{(String)value} : ((String) value).split(splitChar);
+        if (numbers.length <= 0) return true;
+        for (String number : numbers) {
+            try {
+                DecimalFormat.getInstance().parse(number);
+            } catch (Exception e) {
+                return true;
+            }
+        }
+        return false;
     }
 }
