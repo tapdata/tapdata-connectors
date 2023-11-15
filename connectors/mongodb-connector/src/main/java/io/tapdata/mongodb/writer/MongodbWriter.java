@@ -296,6 +296,8 @@ public class MongodbWriter {
 			TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
 			Map<String, Object> after = updateRecordEvent.getAfter();
 			Map<String, Object> before = updateRecordEvent.getBefore();
+			before = MongodbUtil.getBeforeForUpdate(after, before, pks);
+			after = MongodbUtil.getAfterForUpdate(after, before);
 			Map<String, Object> info = recordEvent.getInfo();
 			List<String> removedFields = updateRecordEvent.getRemovedFields();
 			Document pkFilter;

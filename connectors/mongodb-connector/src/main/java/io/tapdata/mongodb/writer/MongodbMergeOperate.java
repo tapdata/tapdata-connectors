@@ -7,6 +7,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MergeBundle;
 import io.tapdata.mongodb.entity.MergeResult;
 import io.tapdata.mongodb.util.MapUtil;
@@ -30,7 +31,7 @@ public class MongodbMergeOperate {
 		List<WriteModel<Document>> writeModels = null;
 		try {
 			writeModels = new ArrayList<>();
-			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent);
+			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent, table.primaryKeys(true));
 			final Map<String, Object> info = tapRecordEvent.getInfo();
 			if (tapRecordEvent instanceof TapInsertRecordEvent) {
 				inserted.incrementAndGet();
@@ -437,7 +438,7 @@ public class MongodbMergeOperate {
 		}
 	}
 
-	private static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent) {
+	private static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent, Collection<String> pks) {
 		Map<String, Object> before = null;
 		Map<String, Object> after = null;
 		MergeBundle.EventOperation eventOperation = null;
@@ -448,6 +449,8 @@ public class MongodbMergeOperate {
 		} else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
 			before = ((TapUpdateRecordEvent) tapRecordEvent).getBefore();
 			after = ((TapUpdateRecordEvent) tapRecordEvent).getAfter();
+			before = MongodbUtil.getBeforeForUpdate(after, before, pks);
+			after = MongodbUtil.getAfterForUpdate(after, before);
 			eventOperation = MergeBundle.EventOperation.UPDATE;
 			List<String> removedFields = ((TapUpdateRecordEvent) tapRecordEvent).getRemovedFields();
 			if(removedFields != null && removedFields.size() > 0)
