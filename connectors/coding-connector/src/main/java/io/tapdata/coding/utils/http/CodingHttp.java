@@ -73,7 +73,7 @@ public class CodingHttp {
         return HttpUtil.createPost(url)
                 .addHeaders(this.heads.entrySet()
                         .stream()
-                        .collect(Collectors.toMap(Map.Entry::getKey, e -> (String) e.getValue()))
+                        .collect(Collectors.toMap(Map.Entry::getKey, e -> String.valueOf(e.getValue())))
                 );
     }
 
@@ -82,8 +82,8 @@ public class CodingHttp {
         if (null != heads) {
             request.addHeaders(this.heads.entrySet()
                     .stream()
-                    .filter(entry -> Objects.nonNull(entry.getValue()))
-                    .collect(Collectors.toMap(Map.Entry::getKey, e -> (String) e.getValue()))
+                    .filter(entry -> Objects.nonNull(entry.getKey()))
+                    .collect(Collectors.toMap(Map.Entry::getKey, e -> String.valueOf(e.getValue())))
             );
         }
         return this.post(request);
@@ -94,7 +94,7 @@ public class CodingHttp {
         if (null != heads) {
             request.addHeaders(this.heads.entrySet()
                     .stream()
-                    .collect(Collectors.toMap(Map.Entry::getKey, e -> (String) e.getValue()))
+                    .collect(Collectors.toMap(Map.Entry::getKey, e -> String.valueOf(e.getValue())))
             );
         }
         return this.postWithError(request);

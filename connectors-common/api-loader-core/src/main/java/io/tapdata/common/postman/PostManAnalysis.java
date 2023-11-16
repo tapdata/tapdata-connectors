@@ -16,9 +16,11 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.JsonParser;
+import io.tapdata.kit.ErrorKit;
 import okhttp3.*;
 import okio.Buffer;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -129,25 +131,7 @@ public class PostManAnalysis {
         return false;
     }
 
-    private String comp(Map<String, Object> item1, Map<String, Object> item2) {
-        if (Objects.isNull(item1) || item1.isEmpty() || Objects.isNull(item2) || item2.isEmpty()) return null;
-        StringJoiner joiner = new StringJoiner(", ");
-        item1.forEach((key, value) -> {
-            if (item2.containsKey(key)) {
-                joiner.add(key);
-            }
-        });
-        String result = joiner.toString().trim();
-        return "".equals(result) ? null : result;
-    }
-
     public Request httpPrepare(String uriOrName, String method, Map<String, Object> params) {
-//        String com = this.comp(this.connectorConfig,params);
-//        Optional.ofNullable(com).ifPresent(str->{
-//            "{} may be overwrite by incoming params, please be caution that it is your intention";
-//            TapLogger.warn(TAG," Some of the keys in connectionConfig or nodeConfig have the same name as the api parameters." +
-//                    " At this time, the values in api parameters will be used as the HTTP request data by default, which will lead to errors in the HTTP call parameters. Please confirm. If it is correct, it can be ignored.  Conflicting Key: " + com);
-//        });
         ApiMap.ApiEntity api = this.apiContext.apis().quickGet(uriOrName, method);
         if (Objects.isNull(api)) {
             throw new CoreException(String.format("No such api name or url is [%s],method is [%s]", uriOrName, method));
@@ -219,7 +203,7 @@ public class PostManAnalysis {
                 .url(url)
                 .headers(Headers.of(headMap))
                 .addHeader("Content-Type", contentType);
-        if ("POST".equals(apiMethod) || "PATCH".equals(apiMethod) || "PUT".equals(apiMethod)) {
+        if (!"GET".equals(apiMethod)) {
             builder.method(apiMethod, RequestBody.create(mediaType, apiBody.bodyJson(bodyMap)));
         } else {
             builder.get();
@@ -238,11 +222,11 @@ public class PostManAnalysis {
                 body.writeTo(sink);
                 bodyStr = ScriptUtil.fileToString(sink.inputStream());
             }
-            System.out.printf(
-                    "Http Result: \n\tURL: %s \n\tMETHOD: %s \n\tBODY\\PARAMS: %s\n",
+            TapLogger.info(TAG, "Http Result: \tURL: {} \tMETHOD: {} \tBODY PARAMS: {}",
                     request.url(),
                     request.method(),
-                    bodyStr);
+                    bodyStr
+            );
         }
         OkHttpClient.Builder builder = new OkHttpClient.Builder();
         if (Objects.nonNull(client) && Objects.nonNull(client.connectionPool())){
@@ -251,31 +235,54 @@ public class PostManAnalysis {
         client = this.configHttp(builder).build();
         Call call = client.newCall(request);
         Map<String, Object> result = new HashMap<>();
-        Response response = call.execute();
-        int code = Objects.nonNull(response) ? response.code() : -1;
-        Headers headers = Objects.nonNull(response) ? response.headers() : Headers.of();
-        ResponseBody body = response.body();
-        if (body != null) {
-            String bodyStr = body.string();
-            if (Objects.isNull(bodyStr)) {
-                result.put(Api.PAGE_RESULT_PATH_DEFAULT_PATH, new HashMap<>());
-            } else {
-                try {
-                    result.put(Api.PAGE_RESULT_PATH_DEFAULT_PATH, fromJson(bodyStr));
-                } catch (Exception notMap) {
-                    try {
-                        result.put(Api.PAGE_RESULT_PATH_DEFAULT_PATH, fromJsonArray(bodyStr));
-                    } catch (Exception notArray) {
-                        result.put(Api.PAGE_RESULT_PATH_DEFAULT_PATH, bodyStr);
+        Response response = null;
+        ResponseBody body = null;
+        try {
+            response = call.execute();
+            if (null != response) {
+                int code = response.code();
+                Headers headers = response.headers();
+                body = response.body();
+                if (body != null) {
+                    String bodyStr = body.string();
+                    if (null != bodyStr) {
+                        try {
+                            result.put(Api.PAGE_RESULT_PATH_DEFAULT_PATH, fromJson(bodyStr));
+                            return APIResponse.create()
+                                    .httpCode(code)
+                                    .result(result)
+                                    .headers(getHeaderMap(headers));
+                        } catch (Exception notMap) {
+                            try {
+                                result.put(Api.PAGE_RESULT_PATH_DEFAULT_PATH, fromJsonArray(bodyStr));
+                                return APIResponse.create()
+                                        .httpCode(code)
+                                        .result(result)
+                                        .headers(getHeaderMap(headers));
+                            } catch (Exception notArray) {
+                                result.put(Api.PAGE_RESULT_PATH_UN_KNOW_PATH, bodyStr);
+                                result.put(Api.PAGE_RESULT_PATH_UN_KNOW_MSG, String.format("%s, %s", notMap.getMessage(), notArray.getMessage()));
+                            }
+                        }
                     }
                 }
             }
+            result.computeIfAbsent(Api.PAGE_RESULT_PATH_DEFAULT_PATH, key -> new HashMap<String, Object>());
+            return APIResponse.create()
+                    .httpCode(-1)
+                    .result(result)
+                    .headers(getHeaderMap(Headers.of()));
+        } finally {
+            if (null != response) {
+                ErrorKit.ignoreAnyError(response::close);
+            }
+            if (null != body) {
+                ErrorKit.ignoreAnyError(body::close);
+            }
+            if (call instanceof Closeable) {
+                ErrorKit.ignoreAnyError(((Closeable) call)::close);
+            }
         }
-        result.computeIfAbsent(Api.PAGE_RESULT_PATH_DEFAULT_PATH, key -> new HashMap<String, Object>());
-        return APIResponse.create()
-                .httpCode(code)
-                .result(result)
-                .headers(getHeaderMap(headers));
     }
 
     private OkHttpClient.Builder configHttp(OkHttpClient.Builder builder) {
@@ -317,7 +324,12 @@ public class PostManAnalysis {
             }
             String property = System.getProperty("show_api_invoker_result", "1");
             if (!"1".equals(property)) {
-                System.out.printf("Http Result: Post Man: %s url - %s, method - %s, params - %s\n\t%s%n", uriOrName, request.url(), method, toJson(params), toJson(http.result().get("data"), JsonParser.ToJsonFeature.PrettyFormat));
+                TapLogger.info(TAG, "Http Result: Post Man: {} url - {}, method - {}, params - {}\n\t{}",
+                        uriOrName,
+                        request.url(),
+                        method,
+                        toJson(params),
+                        toJson(http.result().get("data"), JsonParser.ToJsonFeature.PrettyFormat));
             }
             return http;
         } catch (Exception e) {
