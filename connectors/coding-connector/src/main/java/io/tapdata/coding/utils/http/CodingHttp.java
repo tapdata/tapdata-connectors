@@ -25,6 +25,15 @@ public class CodingHttp {
     private boolean hasIgnore = Boolean.FALSE;
     public static final String ERROR_KEY = "ERROR";
 
+    public static boolean hasTokenExpired(Map<?, ?> response){
+        if (null == response) return false;
+        String code = (String)response.get("Code");
+        String message = (String)response.get("Message");
+        return "AuthFailure".equals(code)
+                || "ResourceNotFound".equals(code)
+                || "User not found, authorization invalid".equals(message);
+    }
+
     public static CodingHttp create(Map<String, String> heads, Map<String, Object> body, String url) {
         return new CodingHttp(heads, body, url);
     }
