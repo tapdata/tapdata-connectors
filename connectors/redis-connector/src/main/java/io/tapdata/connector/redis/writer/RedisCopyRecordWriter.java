@@ -13,9 +13,6 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import redis.clients.jedis.Protocol;
 
-import static redis.clients.jedis.Protocol.Command.RESTORE;
-import static redis.clients.jedis.Protocol.toByteArray;
-
 public class RedisCopyRecordWriter extends AbstractRedisRecordWriter {
 
     private int dbNumber = 0;
@@ -36,13 +33,13 @@ public class RedisCopyRecordWriter extends AbstractRedisRecordWriter {
                 dbNumber = index;
             }
             if (EmptyKit.isNull(dkv.getExpiredMs())) {
-                pipelined.sendCommand(RESTORE, dkv.getKey(), toByteArray(0L), dkv.getValue(), "REPLACE".getBytes());
+                pipelined.set(new String(dkv.getKey()), new String(dkv.getValue()));
             } else {
                 long ms = dkv.getExpiredMs() - System.currentTimeMillis();
                 if (ms <= 0) {
                     return;
                 }
-                pipelined.sendCommand(RESTORE, dkv.getKey(), toByteArray(ms), dkv.getValue(), "REPLACE".getBytes());
+                pipelined.setex(new String(dkv.getKey()), ms / 1000, new String(dkv.getValue()));
             }
         } else if (redisEvent instanceof DefaultCommand) {
             DefaultCommand commandEvent = (DefaultCommand) redisEvent;
