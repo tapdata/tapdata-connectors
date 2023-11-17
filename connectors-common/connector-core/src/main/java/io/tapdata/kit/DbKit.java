@@ -11,10 +11,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.Reader;
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static io.tapdata.entity.simplify.TapSimplify.toJson;
@@ -172,5 +169,31 @@ public class DbKit {
             result.add(data.stream().skip(index).limit(eachPieceSize).collect(Collectors.toList()));
         }
         return result;
+    }
+
+    public static Map<String, Object> getBeforeForUpdate(Map<String, Object> after, Map<String, Object> before, Collection<String> allColumn, Collection<String> uniqueCondition) {
+        //in some datasource, before of events is always empty, so before is unreliable
+        Map<String, Object> lastBefore = new HashMap<>();
+        if (EmptyKit.isEmpty(uniqueCondition)) {
+            allColumn.forEach(v -> lastBefore.put(v, (EmptyKit.isNotEmpty(before) && before.containsKey(v)) ? before.get(v) : after.get(v)));
+        } else {
+            uniqueCondition.forEach(v -> lastBefore.put(v, (EmptyKit.isNotEmpty(before) && before.containsKey(v)) ? before.get(v) : after.get(v)));
+        }
+        return lastBefore;
+    }
+
+    public static Map<String, Object> getAfterForUpdate(Map<String, Object> after, Map<String, Object> before, Collection<String> allColumn, Collection<String> uniqueCondition) {
+        Map<String, Object> lastBefore = getBeforeForUpdate(after, before, allColumn, uniqueCondition);
+        if (EmptyKit.isNotEmpty(before)) {
+            lastBefore.putAll(before);
+        }
+        Map<String, Object> lastAfter = new HashMap<>();
+        for (Map.Entry<String, Object> entry : after.entrySet()) {
+            if (EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(lastBefore.get(entry.getKey()))) {
+                continue;
+            }
+            lastAfter.put(entry.getKey(), entry.getValue());
+        }
+        return lastAfter;
     }
 }
