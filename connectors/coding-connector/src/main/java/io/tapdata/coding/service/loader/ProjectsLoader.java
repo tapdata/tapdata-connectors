@@ -8,6 +8,7 @@ import io.tapdata.coding.utils.http.CodingHttp;
 import io.tapdata.coding.utils.http.HttpEntity;
 import io.tapdata.coding.utils.tool.Checker;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.FormatUtils;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -164,7 +165,7 @@ public class ProjectsLoader extends CodingStarter implements CodingLoader<Projec
 
     @Override
     public void batchRead(Object offset, int batchCount, BiConsumer<List<TapEvent>, Object> consumer) {
-        this.read(offset, batchCount, consumer);
+        this.read(offset, batchCount, consumer, false);
     }
 
     @Override
@@ -185,7 +186,7 @@ public class ProjectsLoader extends CodingStarter implements CodingLoader<Projec
         return null != totalCountObj ? (Integer) totalCountObj : 0;
     }
 
-    private void read(Object offset, int batchCount, BiConsumer<List<TapEvent>, Object> consumer) {
+    private void read(Object offset, int batchCount, BiConsumer<List<TapEvent>, Object> consumer, boolean isStreamRead) {
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
         int startPage = 0;
         Param param = ProjectParam.create()
@@ -215,7 +216,11 @@ public class ProjectsLoader extends CodingStarter implements CodingLoader<Projec
                 for (Map<String, Object> stringObjectMap : result) {
                     Object updatedAtObj = stringObjectMap.get("UpdatedAt");
                     Long updatedAt = Checker.isEmpty(updatedAtObj) ? System.currentTimeMillis() : (Long) updatedAtObj;
-                    events.add(TapSimplify.insertRecordEvent(stringObjectMap, TABLE_NAME).referenceTime(updatedAt));
+                    TapInsertRecordEvent event = TapSimplify.insertRecordEvent(stringObjectMap, TABLE_NAME);
+                    if (isStreamRead) {
+                        event.referenceTime(updatedAt);
+                    }
+                    events.add(event);
                     ((CodingOffset) offset).getTableUpdateTimeMap().put(TABLE_NAME, updatedAt);
                     if (result.size() == batchCount) {
                         consumer.accept(events, offset);
@@ -238,7 +243,7 @@ public class ProjectsLoader extends CodingStarter implements CodingLoader<Projec
 
     @Override
     public void streamRead(List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
-        this.read(offsetState, recordSize, consumer);
+        this.read(offsetState, recordSize, consumer, true);
     }
 
     @Override

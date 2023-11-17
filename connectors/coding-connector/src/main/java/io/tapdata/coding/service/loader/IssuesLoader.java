@@ -692,7 +692,7 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
             //如果在，说明上一次批量读取中以及读取了这条数据，本次不在需要读取 !currentTimePoint.equals(lastTimePoint) &&
 
             if (!lastTimeSplitIssueCode.contains(issueDetailHash)) {
-                events.add(TapSimplify.insertRecordEvent(issueDetail, TABLE_NAME).referenceTime(System.currentTimeMillis()));
+                events.add(TapSimplify.insertRecordEvent(issueDetail, TABLE_NAME));
                 //eventCount.getAndAdd(1);
                 if (!currentTimePoint.equals(lastTimePoint)) {
                     lastTimePoint = currentTimePoint;
