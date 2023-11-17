@@ -27,8 +27,6 @@ public class CodingHttp {
 
     public static boolean hasTokenExpired(Map<?, ?> response){
         if (null == response) return false;
-        response = (Map<?, ?>)response.get("Error");
-        if (null == response) return false;
         String code = (String)response.get("Code");
         String message = (String)response.get("Message");
         return "AuthFailure".equals(code)
