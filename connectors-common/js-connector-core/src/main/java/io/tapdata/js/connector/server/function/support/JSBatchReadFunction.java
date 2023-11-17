@@ -2,6 +2,7 @@ package io.tapdata.js.connector.server.function.support;
 
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
@@ -100,6 +101,9 @@ public class JSBatchReadFunction extends FunctionBase implements FunctionSupport
                     }
                     if (Objects.isNull(tapEvent)) {
                         continue;
+                    }
+                    if (tapEvent instanceof TapRecordEvent) {
+                        ((TapRecordEvent) tapEvent).setReferenceTime(null);
                     }
                     eventList.add(tapEvent);
                     if (eventList.size() == batchCount) {

@@ -51,7 +51,7 @@ public class OrganizationFieldsSchema extends Schema implements SchemaLoader {
             if (Checker.isEmpty(department) || department.isEmpty()) continue;
             long referenceTime = System.currentTimeMillis();
             ((ZoHoOffset) offset).getTableUpdateTimeMap().put(table, referenceTime);
-            events.add(TapSimplify.insertRecordEvent(department, table).referenceTime(referenceTime));
+            events.add(TapSimplify.insertRecordEvent(department, table));
             if (events.size() != batchCount) continue;
             consumer.accept(events, offset);
             events = new ArrayList<>();
