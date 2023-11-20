@@ -114,6 +114,11 @@ public class MysqlConfig extends CommonDbConfig {
             FileUtil.save(Base64.getUrlDecoder().decode(getSslCert()), sslCertPath, true);
             String sslKeyPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "key.pem");
             FileUtil.save(Base64.getUrlDecoder().decode(getSslKey()), sslKeyPath, true);
+            //openssl低版本不需要加-legacy
+            Runtime.getRuntime().exec("openssl pkcs12 -export -in " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "cert.pem") +
+                    " -inkey " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "key.pem") +
+                    " -name datasource-client -passout pass:123456 -out " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client-keystore.p12")).waitFor();
+            //openssl高版本需要加-legacy
             Runtime.getRuntime().exec("openssl pkcs12 -legacy -export -in " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "cert.pem") +
                     " -inkey " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "key.pem") +
                     " -name datasource-client -passout pass:123456 -out " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client-keystore.p12")).waitFor();
