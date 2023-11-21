@@ -539,7 +539,7 @@ public class MongodbUtil {
 	}
 
 	/**
-	 * @param commandStr: db.test.find({}), db.getCollection('test').find({})
+	 * @param throwable: db.test.find({}), db.getCollection('test').find({})
 	 * @return
 	 */
 
@@ -590,26 +590,5 @@ public class MongodbUtil {
 		if (!dataMap.containsKey(key) || null == dataMap.get(key)) {
 			dataMap.put(key, defaultValue);
 		}
-	}
-
-	public static Map<String, Object> getBeforeForUpdate(Map<String, Object> after, Map<String, Object> before, Collection<String> pks) {
-		Map<String, Object> lastBefore = new HashMap<>();
-		if (EmptyKit.isEmpty(pks)) {
-			return before;
-		} else {
-			pks.forEach(v -> lastBefore.put(v, (EmptyKit.isNotEmpty(before) && before.containsKey(v)) ? before.get(v) : after.get(v)));
-		}
-		return lastBefore;
-	}
-
-	public static Map<String, Object> getAfterForUpdate(Map<String, Object> after, Map<String, Object> before) {
-		Map<String, Object> lastAfter = new HashMap<>();
-		for (Map.Entry<String, Object> entry : after.entrySet()) {
-			if (EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(before.get(entry.getKey()))) {
-				continue;
-			}
-			lastAfter.put(entry.getKey(), entry.getValue());
-		}
-		return lastAfter;
 	}
 }

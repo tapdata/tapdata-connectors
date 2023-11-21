@@ -1,13 +1,15 @@
 package io.tapdata.mongodb.writer;
 
-import com.mongodb.client.model.*;
+import com.mongodb.client.model.DeleteOneModel;
+import com.mongodb.client.model.InsertOneModel;
+import com.mongodb.client.model.UpdateManyModel;
+import com.mongodb.client.model.WriteModel;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
-import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MergeBundle;
 import io.tapdata.mongodb.entity.MergeResult;
 import io.tapdata.mongodb.util.MapUtil;
@@ -27,11 +29,11 @@ import java.util.concurrent.atomic.AtomicLong;
  **/
 public class MongodbMergeOperate {
 
-	public static List<WriteModel<Document>> merge(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, TapRecordEvent tapRecordEvent, TapTable table) {
+	public static List<WriteModel<Document>> merge(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, TapRecordEvent tapRecordEvent, Collection<String> allColumn, Collection<String> pks) {
 		List<WriteModel<Document>> writeModels = null;
 		try {
 			writeModels = new ArrayList<>();
-			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent, table.primaryKeys(true));
+			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent, allColumn, pks);
 			final Map<String, Object> info = tapRecordEvent.getInfo();
 			if (tapRecordEvent instanceof TapInsertRecordEvent) {
 				inserted.incrementAndGet();
@@ -438,7 +440,7 @@ public class MongodbMergeOperate {
 		}
 	}
 
-	private static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent, Collection<String> pks) {
+	private static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent, Collection<String> allColumn, Collection<String> pks) {
 		Map<String, Object> before = null;
 		Map<String, Object> after = null;
 		MergeBundle.EventOperation eventOperation = null;
@@ -449,8 +451,8 @@ public class MongodbMergeOperate {
 		} else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
 			before = ((TapUpdateRecordEvent) tapRecordEvent).getBefore();
 			after = ((TapUpdateRecordEvent) tapRecordEvent).getAfter();
-			before = MongodbUtil.getBeforeForUpdate(after, before, pks);
-			after = MongodbUtil.getAfterForUpdate(after, before);
+			before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
+			after = DbKit.getAfterForUpdate(after, before, allColumn, pks);
 			eventOperation = MergeBundle.EventOperation.UPDATE;
 			List<String> removedFields = ((TapUpdateRecordEvent) tapRecordEvent).getRemovedFields();
 			if(removedFields != null && removedFields.size() > 0)

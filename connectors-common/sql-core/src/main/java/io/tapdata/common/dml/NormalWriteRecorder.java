@@ -5,6 +5,7 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -201,8 +202,8 @@ public abstract class NormalWriteRecorder {
             return;
         }
         //去除After和Before的多余字段
-        Map<String, Object> lastBefore = getBeforeForUpdate(after, before);
-        Map<String, Object> lastAfter = getAfterForUpdate(after, lastBefore);
+        Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
+        Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
             case "insert_on_nonexists":
                 insertUpdate(lastAfter, lastBefore, listResult);
@@ -245,28 +246,6 @@ public abstract class NormalWriteRecorder {
             preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
         }
         setBeforeValue(containsNull, before, pos);
-    }
-
-    protected Map<String, Object> getBeforeForUpdate(Map<String, Object> after, Map<String, Object> before) {
-        //in some datasource, before of events is always empty, so before is unreliable
-        Map<String, Object> lastBefore = new HashMap<>();
-        if (EmptyKit.isEmpty(uniqueCondition)) {
-            allColumn.forEach(v -> lastBefore.put(v, (EmptyKit.isNotEmpty(before) && before.containsKey(v)) ? before.get(v) : after.get(v)));
-        } else {
-            uniqueCondition.forEach(v -> lastBefore.put(v, (EmptyKit.isNotEmpty(before) && before.containsKey(v)) ? before.get(v) : after.get(v)));
-        }
-        return lastBefore;
-    }
-
-    protected Map<String, Object> getAfterForUpdate(Map<String, Object> after, Map<String, Object> before) {
-        Map<String, Object> lastAfter = new HashMap<>();
-        for (Map.Entry<String, Object> entry : after.entrySet()) {
-            if (EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(before.get(entry.getKey()))) {
-                continue;
-            }
-            lastAfter.put(entry.getKey(), entry.getValue());
-        }
-        return lastAfter;
     }
 
     protected String getUpdateSql(Map<String, Object> after, Map<String, Object> before, boolean containsNull) {

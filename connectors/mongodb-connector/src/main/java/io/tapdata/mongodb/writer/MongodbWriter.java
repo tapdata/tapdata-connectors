@@ -16,6 +16,7 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVMap;
+import io.tapdata.kit.DbKit;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
@@ -169,7 +170,7 @@ public class MongodbWriter {
 		final Collection<String> pks = (Collection<String>) pksCache;
 		UpdateOptions options = new UpdateOptions().upsert(false);
 		MongoCollection<Document> collection = getMongoCollection(table.getId());
-		BulkWriteResult result = collection.bulkWrite(Collections.singletonList(normalWriteMode(inserted, updated, deleted, options, table.getId(), pks, tapRecordEvent)));
+		BulkWriteResult result = collection.bulkWrite(Collections.singletonList(normalWriteMode(inserted, updated, deleted, options, table, pks, tapRecordEvent)));
 		if (result.getMatchedCount() <= 0) {
 			tapLogger.info("update record ignored: {}", tapRecordEvent);
 		}
@@ -228,6 +229,7 @@ public class MongodbWriter {
 	}
 
 	private BulkWriteModel buildBulkWriteModel(List<TapRecordEvent> tapRecordEvents, TapTable table, AtomicLong inserted, AtomicLong updated, AtomicLong deleted, MongoCollection<Document> collection, Collection<String> pks) {
+		Collection<String> allColumn = table.getNameFieldMap().keySet();
 		BulkWriteModel bulkWriteModel = new BulkWriteModel(pks.contains("_id"));
 		for (TapRecordEvent recordEvent : tapRecordEvents) {
 			if (!(recordEvent instanceof TapInsertRecordEvent)) {
@@ -241,12 +243,12 @@ public class MongodbWriter {
 			final Map<String, Object> info = recordEvent.getInfo();
 			if (MapUtils.isNotEmpty(info) && info.containsKey(MergeInfo.EVENT_INFO_KEY)) {
 				bulkWriteModel.setAllInsert(false);
-				final List<WriteModel<Document>> mergeWriteModels = MongodbMergeOperate.merge(inserted, updated, deleted, recordEvent, table);
+				final List<WriteModel<Document>> mergeWriteModels = MongodbMergeOperate.merge(inserted, updated, deleted, recordEvent, allColumn, pks);
 				if (CollectionUtils.isNotEmpty(mergeWriteModels)) {
 					mergeWriteModels.forEach(bulkWriteModel::addAnyOpModel);
 				}
 			} else {
-				WriteModel<Document> writeModel = normalWriteMode(inserted, updated, deleted, options, table.getId(), pks, recordEvent);
+				WriteModel<Document> writeModel = normalWriteMode(inserted, updated, deleted, options, table, pks, recordEvent);
 				if (writeModel != null) {
 					bulkWriteModel.addAnyOpModel(writeModel);
 				}
@@ -265,7 +267,7 @@ public class MongodbWriter {
 		return bulkWriteOptions;
 	}
 
-	private WriteModel<Document> normalWriteMode(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, UpdateOptions options, String tableId, Collection<String> pks, TapRecordEvent recordEvent) {
+	private WriteModel<Document> normalWriteMode(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, UpdateOptions options, TapTable tapTable, Collection<String> pks, TapRecordEvent recordEvent) {
 		WriteModel<Document> writeModel = null;
 		if (recordEvent instanceof TapInsertRecordEvent) {
 			TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
@@ -276,9 +278,9 @@ public class MongodbWriter {
 				if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(mongodbConfig.getInsertDmlPolicy())) {
 					operation = "$setOnInsert";
 				}
-                if(shardKeyMap.containsKey(tableId)){
+                if(shardKeyMap.containsKey(tapTable.getId())){
 					Map<String,Object> record = insertRecordEvent.getAfter();
-					Set<String> shardKeySet = shardKeyMap.get(tableId);
+					Set<String> shardKeySet = shardKeyMap.get(tapTable.getId());
 					if(CollectionUtils.isNotEmpty(shardKeySet)){
 						shardKeySet.forEach(shardKey -> {
 							if(record.containsKey(shardKey))pkFilter.append(shardKey,record.get(shardKey));
@@ -292,12 +294,12 @@ public class MongodbWriter {
 			}
 			inserted.incrementAndGet();
 		} else if (recordEvent instanceof TapUpdateRecordEvent && CollectionUtils.isNotEmpty(pks)) {
-
+			Collection<String> allColumn = tapTable.getNameFieldMap().keySet();
 			TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
 			Map<String, Object> after = updateRecordEvent.getAfter();
 			Map<String, Object> before = updateRecordEvent.getBefore();
-			before = MongodbUtil.getBeforeForUpdate(after, before, pks);
-			after = MongodbUtil.getAfterForUpdate(after, before);
+			before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
+			after = DbKit.getAfterForUpdate(after, before, allColumn, pks);
 			Map<String, Object> info = recordEvent.getInfo();
 			List<String> removedFields = updateRecordEvent.getRemovedFields();
 			Document pkFilter;
