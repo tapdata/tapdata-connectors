@@ -46,11 +46,11 @@ public class ScriptCore extends Core {
                             .contextMap(this.paper(contextMap)), 1, TimeUnit.SECONDS)) {
                         fullQueueWarn++;
                         if (fullQueueWarn < 4) {
-                            TapLogger.info(TAG, "log queue is full, waiting...");
+                            TapLogger.info(TAG, "log queue is full, waiting");
                         }
                     }
                     if (fullQueueWarn > 0) {
-                        TapLogger.info(TAG, "log queue has been released!");
+                        TapLogger.info(TAG, "log queue has been released");
                         fullQueueWarn = 0;
                     }
                 } catch (Exception ignored) {
@@ -67,11 +67,11 @@ public class ScriptCore extends Core {
                     .contextMap(this.paper(offset)), 1, TimeUnit.SECONDS)) {
                 fullQueueWarn++;
                 if (fullQueueWarn < 4) {
-                    TapLogger.info(TAG, "log queue is full, waiting...");
+                    TapLogger.info(TAG, "log queue is full, waiting");
                 }
             }
             if (fullQueueWarn > 0) {
-                TapLogger.info(TAG, "log queue has been released!");
+                TapLogger.info(TAG, "log queue has been released");
                 fullQueueWarn = 0;
             }
         } catch (Exception ignored) {

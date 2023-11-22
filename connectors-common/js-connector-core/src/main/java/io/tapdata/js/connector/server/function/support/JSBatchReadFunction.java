@@ -46,10 +46,10 @@ public class JSBatchReadFunction extends FunctionBase implements FunctionSupport
 
     private void batchRead(TapConnectorContext context, TapTable table, Object offset, int batchCount, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         if (Objects.isNull(context)) {
-            throw new CoreException("TapConnectorContext cannot not be empty.");
+            throw new CoreException("TapConnectorContext cannot not be empty");
         }
         if (Objects.isNull(table)) {
-            throw new CoreException("TapTable cannot not be empty.");
+            throw new CoreException("TapTable cannot not be empty");
         }
         ScriptEngine scriptEngine = javaScripter.scriptEngine();
         ScriptCore scriptCore = new ScriptCore(new ScriptCoreConfig().ignoreReferenceTime(true));
@@ -92,7 +92,7 @@ public class JSBatchReadFunction extends FunctionBase implements FunctionSupport
                     if (Objects.nonNull(lastContextMap)) {
                         contextMap.set(lastContextMap);
                     } else {
-                        throw new CoreException("The breakpoint offset cannot be empty. Please carry the offset when submitting the event data.");
+                        throw new CoreException("The breakpoint offset cannot be empty. Please carry the offset when submitting the event data");
                     }
                     if (Objects.isNull(tapEvent)) {
                         continue;
@@ -114,7 +114,7 @@ public class JSBatchReadFunction extends FunctionBase implements FunctionSupport
         }
         if (EmptyKit.isNotEmpty(eventList) && Objects.nonNull(eventsOffsetConsumer)) {
             if (Objects.isNull(lastContextMap)) {
-                throw new CoreException("The breakpoint offset cannot be empty. Please carry the offset when submitting the event data.");
+                throw new CoreException("The breakpoint offset cannot be empty. Please carry the offset when submitting the event data");
             }
             eventsOffsetConsumer.accept(eventList, lastContextMap);
             contextMap.set(lastContextMap);
