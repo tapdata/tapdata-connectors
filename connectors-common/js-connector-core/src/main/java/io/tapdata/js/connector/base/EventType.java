@@ -2,6 +2,7 @@ package io.tapdata.js.connector.base;
 
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.simplify.TapSimplify;
 
@@ -46,6 +47,10 @@ public class EventType {
     }
 
     public TapEvent setEvent(Object eventDataFromJs, Integer dataIndex, String tag) {
+        return setEvent(eventDataFromJs, dataIndex, tag, false);
+    }
+
+    public TapEvent setEvent(Object eventDataFromJs, Integer dataIndex, String tag, boolean ignoreReferenceTime) {
         if (eventDataFromJs instanceof Map) {
             Map<String, Object> result = (Map<String, Object>) eventDataFromJs;
             Object eventType = result.get(EventTag.EVENT_TYPE);
@@ -73,34 +78,22 @@ public class EventType {
             if (!(before instanceof Map) && delete.equals(eventType)) {
                 throw new CoreException("Article " + dataIndex + " Record: Wrong data representation, need to use k-v map to represent beforeData. ");
             }
-            Object referenceTimeObj = result.get(EventTag.REFERENCE_TIME);
-            Long referenceTime = System.currentTimeMillis();
-            if (Objects.isNull(referenceTimeObj)) {
-                TapLogger.warn(tag, "Article " + dataIndex + " Record: cannot find referenceTime, and set now time for referenceTime.");
-            } else {
-                boolean casted = false;
-                if (referenceTimeObj instanceof Number) {
-                    referenceTime = ((Number) referenceTimeObj).longValue();
-                    casted = true;
-                } else if (referenceTimeObj instanceof String) {
-                    try {
-                        referenceTime = Long.parseLong((String) referenceTimeObj);
-                        casted = true;
-                    } catch (Exception ignored) {
-                    }
-                }
-                if (!casted) {
-                    TapLogger.warn(tag, "Article " + dataIndex + " Record: cannot find referenceTime, and set now time for referenceTime.");
-                }
-            }
+
+            TapRecordEvent event = null;
             switch (String.valueOf(eventType)) {
                 case "d":
-                    return TapSimplify.deleteDMLEvent((Map<String, Object>) before, String.valueOf(tableName)).referenceTime(referenceTime);
+                    event = TapSimplify.deleteDMLEvent((Map<String, Object>) before, String.valueOf(tableName));
+                    break;
                 case "u":
-                    return TapSimplify.updateDMLEvent((Map<String, Object>) before, (Map<String, Object>) after, String.valueOf(tableName)).referenceTime(referenceTime);
+                    event = TapSimplify.updateDMLEvent((Map<String, Object>) before, (Map<String, Object>) after, String.valueOf(tableName));
+                    break;
                 default:
-                    return TapSimplify.insertRecordEvent((Map<String, Object>) after, String.valueOf(tableName)).referenceTime(referenceTime);
+                    event = TapSimplify.insertRecordEvent((Map<String, Object>) after, String.valueOf(tableName));
             }
+            if (!ignoreReferenceTime) {
+                event.setReferenceTime(findReferenceTimeFromDataMap(result, tag, dataIndex));
+            }
+            return event;
         } else {
             throw new CoreException("Article " + dataIndex + " Record:  The event format is incorrect. Please use the following rules to organize the returned results :\n" +
                     "{\n" +
@@ -111,6 +104,30 @@ public class EventType {
                     "\n\"referenceTime\": Number(timeStamp)" +
                     "}\n");
         }
+    }
+
+    protected static long findReferenceTimeFromDataMap(Map<String, Object> result, String tag, int dataIndex) {
+        Object referenceTimeObj = result.get(EventTag.REFERENCE_TIME);
+        Long referenceTime = System.currentTimeMillis();
+        if (Objects.isNull(referenceTimeObj)) {
+            TapLogger.warn(tag, "Article " + dataIndex + " Record: cannot find referenceTime, and set now time for referenceTime.");
+        } else {
+            boolean casted = false;
+            if (referenceTimeObj instanceof Number) {
+                referenceTime = ((Number) referenceTimeObj).longValue();
+                casted = true;
+            } else if (referenceTimeObj instanceof String) {
+                try {
+                    referenceTime = Long.parseLong((String) referenceTimeObj);
+                    casted = true;
+                } catch (Exception ignored) {
+                }
+            }
+            if (!casted) {
+                TapLogger.warn(tag, "Article " + dataIndex + " Record: cannot find referenceTime, and set now time for referenceTime.");
+            }
+        }
+        return referenceTime;
     }
 
     public static Map<String, Object> defaultEventData(Object dataMap, String tableName) {
