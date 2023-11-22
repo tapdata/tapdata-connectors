@@ -212,14 +212,20 @@ public class MongodbMergeOperate {
 	public static void updateMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult) {
 		final String targetPath = currentProperty.getTargetPath();
 		final boolean array = currentProperty.getIsArray();
+		Map<String, Object> before = mergeBundle.getBefore();
+		Map<String, Object> after = mergeBundle.getAfter();
+		Map<String, Object> filterMap = new HashMap<>(after);
+		if (null != before) {
+			filterMap.putAll(before);
+		}
 		final Document filter = filter(
-				MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+				filterMap,
 				currentProperty.getJoinKeys()
 		);
 		mergeResult.getFilter().putAll(filter);
 		if (array) {
 			final List<Document> arrayFilter = arrayFilter(
-					MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+					filterMap,
 					currentProperty.getJoinKeys(),
 					currentProperty.getTargetPath(),
 					currentProperty.getArrayPath()
