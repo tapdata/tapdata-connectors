@@ -2,12 +2,11 @@ package io.tapdata.js.connector.server.function.support;
 
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
-import io.tapdata.js.connector.JSConnector;
 import io.tapdata.js.connector.base.CustomEventMessage;
 import io.tapdata.js.connector.base.ScriptCore;
+import io.tapdata.js.connector.base.ScriptCoreConfig;
 import io.tapdata.js.connector.iengine.LoadJavaScripter;
 import io.tapdata.js.connector.server.function.FunctionBase;
 import io.tapdata.js.connector.server.function.FunctionSupport;
@@ -47,13 +46,13 @@ public class JSBatchReadFunction extends FunctionBase implements FunctionSupport
 
     private void batchRead(TapConnectorContext context, TapTable table, Object offset, int batchCount, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         if (Objects.isNull(context)) {
-            throw new CoreException("TapConnectorContext cannot not be empty.");
+            throw new CoreException("TapConnectorContext cannot not be empty");
         }
         if (Objects.isNull(table)) {
-            throw new CoreException("TapTable cannot not be empty.");
+            throw new CoreException("TapTable cannot not be empty");
         }
         ScriptEngine scriptEngine = javaScripter.scriptEngine();
-        ScriptCore scriptCore = new ScriptCore();
+        ScriptCore scriptCore = new ScriptCore(new ScriptCoreConfig().ignoreReferenceTime(true));
         scriptEngine.put("core", scriptCore);
         AtomicReference<Throwable> scriptException = new AtomicReference<>();
         AtomicReference<Object> contextMap = new AtomicReference<>(offset);
@@ -61,7 +60,6 @@ public class JSBatchReadFunction extends FunctionBase implements FunctionSupport
         AtomicBoolean batchReadFinished = new AtomicBoolean(false);
         Runnable runnable = () -> {
             try {
-//                synchronized (JSConnector.execLock) {
                 super.javaScripter.invoker(
                         JSFunctionNames.BatchReadFunction.jsName(),
                         Optional.ofNullable(context.getConnectionConfig()).orElse(new DataMap()),
@@ -71,8 +69,6 @@ public class JSBatchReadFunction extends FunctionBase implements FunctionSupport
                         batchCount,
                         sender
                 );
-//                }
-//                Thread.currentThread().stop();
             } catch (Exception e) {
                 scriptException.set(e);
             } finally {
@@ -96,7 +92,7 @@ public class JSBatchReadFunction extends FunctionBase implements FunctionSupport
                     if (Objects.nonNull(lastContextMap)) {
                         contextMap.set(lastContextMap);
                     } else {
-                        throw new CoreException("The breakpoint offset cannot be empty. Please carry the offset when submitting the event data.");
+                        throw new CoreException("The breakpoint offset cannot be empty. Please carry the offset when submitting the event data");
                     }
                     if (Objects.isNull(tapEvent)) {
                         continue;
@@ -118,7 +114,7 @@ public class JSBatchReadFunction extends FunctionBase implements FunctionSupport
         }
         if (EmptyKit.isNotEmpty(eventList) && Objects.nonNull(eventsOffsetConsumer)) {
             if (Objects.isNull(lastContextMap)) {
-                throw new CoreException("The breakpoint offset cannot be empty. Please carry the offset when submitting the event data.");
+                throw new CoreException("The breakpoint offset cannot be empty. Please carry the offset when submitting the event data");
             }
             eventsOffsetConsumer.accept(eventList, lastContextMap);
             contextMap.set(lastContextMap);
