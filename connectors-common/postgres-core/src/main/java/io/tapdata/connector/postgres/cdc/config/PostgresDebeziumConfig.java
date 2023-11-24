@@ -103,6 +103,7 @@ public class PostgresDebeziumConfig {
                 .with("geometry.schema.name", "io.debezium.postgresql.type.Geometry")
                 .with("other.type", "io.tapdata.connector.postgres.converters.OtherConverter")
                 .with("other.schema.name", "io.debezium.postgresql.type.Other")
+                .with("heartbeat.interval.ms", 3000)
                 .with("plugin.name", postgresConfig.getLogPluginName());
         if (EmptyKit.isNotEmpty(observedTableList)) {
             //construct tableWhiteList with schema.table(,) as <public.Student,postgres.test>

@@ -202,7 +202,6 @@ public class MysqlReader implements Closeable {
                            Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer) throws Throwable {
         MysqlConfig mysqlConfig = new MysqlConfig().load(tapConnectorContext.getConnectionConfig());
         try {
-            batchSize = Math.max(batchSize, MIN_BATCH_SIZE);
             initDebeziumServerName(tapConnectorContext);
             this.tapTableMap = tapConnectorContext.getTableMap();
             this.ddlParserType = ddlParserType;
@@ -300,6 +299,8 @@ public class MysqlReader implements Closeable {
                             streamReadConsumer.streamReadStarted();
                         }
                     })
+                    .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
+                            numberOfMessagesSinceLastCommit >= batchSize || timeSinceLastCommit.getSeconds() >= 5)
                     .using((result, message, throwable) -> {
                         tapConnectorContext.configContext();
                         if (result) {
