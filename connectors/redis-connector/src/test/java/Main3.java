@@ -22,7 +22,7 @@ public class Main3 {
         try (
                 ClusterExtPipeline pipeline = new ClusterExtPipeline(nodes, clientConfigBuilder.build());
         ) {
-            pipeline.sendCommand(new ClusterCommandArguments(SET).key("jaradd".getBytes()).addObjects("小77帅哥".getBytes(StandardCharsets.UTF_8)));
+            pipeline.sendCommand(SET, "test".getBytes(StandardCharsets.UTF_8), "test3".getBytes(StandardCharsets.UTF_8));
             pipeline.sync();
         }
     }
