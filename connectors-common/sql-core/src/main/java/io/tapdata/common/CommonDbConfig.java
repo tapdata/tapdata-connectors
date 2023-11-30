@@ -45,7 +45,7 @@ public class CommonDbConfig implements Serializable {
     private String sslCert;
     private String sslKey;
     private String sslKeyPassword;
-    private String sslRandomPath;
+    protected String sslRandomPath;
 
     //pattern for jdbc-url
     public String getDatabaseUrlPattern() {
@@ -290,5 +290,13 @@ public class CommonDbConfig implements Serializable {
 
     public void setSslKeyPassword(String sslKeyPassword) {
         this.sslKeyPassword = sslKeyPassword;
+    }
+
+    public String getSslRandomPath() {
+        return sslRandomPath;
+    }
+
+    public void setSslRandomPath(String sslRandomPath) {
+        this.sslRandomPath = sslRandomPath;
     }
 }
