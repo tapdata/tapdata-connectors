@@ -110,6 +110,7 @@ public class MongodbMergeOperate {
 				mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, data);
 				recursiveMerge(mergeBundle, mergeLookupResult.getProperty(), mergeResults, mergeLookupResult.getMergeLookupResults(), mergeResult);
 			}
+			return;
 		}
 
 		if (mergeResult != null) {
@@ -212,14 +213,20 @@ public class MongodbMergeOperate {
 	public static void updateMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult) {
 		final String targetPath = currentProperty.getTargetPath();
 		final boolean array = currentProperty.getIsArray();
+		Map<String, Object> before = mergeBundle.getBefore();
+		Map<String, Object> after = mergeBundle.getAfter();
+		Map<String, Object> filterMap = new HashMap<>(after);
+		if (null != before) {
+			filterMap.putAll(before);
+		}
 		final Document filter = filter(
-				MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+				filterMap,
 				currentProperty.getJoinKeys()
 		);
 		mergeResult.getFilter().putAll(filter);
 		if (array) {
 			final List<Document> arrayFilter = arrayFilter(
-					MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+					filterMap,
 					currentProperty.getJoinKeys(),
 					currentProperty.getTargetPath(),
 					currentProperty.getArrayPath()
@@ -451,8 +458,6 @@ public class MongodbMergeOperate {
 		} else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
 			before = ((TapUpdateRecordEvent) tapRecordEvent).getBefore();
 			after = ((TapUpdateRecordEvent) tapRecordEvent).getAfter();
-			before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
-			after = DbKit.getAfterForUpdate(after, before, allColumn, pks);
 			eventOperation = MergeBundle.EventOperation.UPDATE;
 			List<String> removedFields = ((TapUpdateRecordEvent) tapRecordEvent).getRemovedFields();
 			if(removedFields != null && removedFields.size() > 0)
