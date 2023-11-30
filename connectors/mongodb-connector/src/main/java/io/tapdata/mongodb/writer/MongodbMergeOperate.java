@@ -110,6 +110,7 @@ public class MongodbMergeOperate {
 				mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, data);
 				recursiveMerge(mergeBundle, mergeLookupResult.getProperty(), mergeResults, mergeLookupResult.getMergeLookupResults(), mergeResult);
 			}
+			return;
 		}
 
 		if (mergeResult != null) {
@@ -457,8 +458,6 @@ public class MongodbMergeOperate {
 		} else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
 			before = ((TapUpdateRecordEvent) tapRecordEvent).getBefore();
 			after = ((TapUpdateRecordEvent) tapRecordEvent).getAfter();
-			before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
-			after = DbKit.getAfterForUpdate(after, before, allColumn, pks);
 			eventOperation = MergeBundle.EventOperation.UPDATE;
 			List<String> removedFields = ((TapUpdateRecordEvent) tapRecordEvent).getRemovedFields();
 			if(removedFields != null && removedFields.size() > 0)
