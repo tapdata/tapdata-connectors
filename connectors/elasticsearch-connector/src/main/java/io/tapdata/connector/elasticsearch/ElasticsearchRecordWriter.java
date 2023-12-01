@@ -4,6 +4,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -23,8 +24,11 @@ import java.security.MessageDigest;
 import java.util.*;
 import java.util.function.Consumer;
 
+import static io.tapdata.base.ConnectorBase.toJson;
+
 public class ElasticsearchRecordWriter {
 
+    private Log log;
     private String insertPolicy = "update-on-exists";
     private String updatePolicy = "ignore-on-non-exists";
     private String version;
@@ -101,11 +105,18 @@ public class ElasticsearchRecordWriter {
                     .modifiedCount(updateCount)
                     .removedCount(deleteCount));
         }catch (Throwable t){
-            TapRecordEvent errorEvent = listResult.getErrorMap().keySet().stream().findFirst().orElse(null);
+            log.warn("{}: {}", t.getMessage(), toJson(t.getStackTrace()));
+            TapRecordEvent errorEvent = null;
+            if(listResult.getErrorMap() != null){
+                 errorEvent = listResult.getErrorMap().keySet().stream().findFirst().orElse(null);
+            }
             exceptionCollector.collectTerminateByServer(t);
             exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
-            exceptionCollector.collectWriteType(null, null, errorEvent, t);
-            exceptionCollector.collectWriteLength(null,null,errorEvent,t);
+            if(errorEvent != null){
+                exceptionCollector.collectWriteType(null, null, errorEvent, t);
+                exceptionCollector.collectWriteLength(null,null,errorEvent,t);
+            }
+            throw new RuntimeException(t);
         }
 
     }
@@ -186,5 +197,10 @@ public class ElasticsearchRecordWriter {
             return new String((byte[]) object);
         }
         return object.toString();
+    }
+
+    public ElasticsearchRecordWriter log(Log log) {
+        this.log = log;
+        return this;
     }
 }
