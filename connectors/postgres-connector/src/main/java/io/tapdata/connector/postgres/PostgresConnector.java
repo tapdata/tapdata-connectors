@@ -177,6 +177,14 @@ public class PostgresConnector extends CommonDbConnector {
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
         codecRegistry.registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
+        codecRegistry.registerFromTapValue(TapStringValue.class, "uuid", tapStringValue -> {
+            Object originValue = tapStringValue.getOriginValue();
+            if (null == originValue || originValue instanceof UUID) {
+                return originValue;
+            }
+            String value = tapStringValue.getValue();
+            return null == value ? null : UUID.fromString(value);
+        });
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
