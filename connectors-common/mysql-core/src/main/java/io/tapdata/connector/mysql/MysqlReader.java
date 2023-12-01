@@ -34,6 +34,7 @@ import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.entity.utils.TypeHolder;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -241,7 +242,7 @@ public class MysqlReader implements Closeable {
                     .with("database.hostname", mysqlConfig.getHost())
                     .with("database.port", mysqlConfig.getPort())
                     .with("database.user", mysqlConfig.getUser())
-                    .with("database.password", mysqlConfig.getPassword())
+                    .with("database.password", EmptyKit.isNull(mysqlConfig.getPassword()) ? "" : mysqlConfig.getPassword())
                     .with("database.server.name", serverName)
                     .with("threadName", "Debezium-Mysql-Connector-" + serverName)
                     .with("database.history.skip.unparseable.ddl", true)

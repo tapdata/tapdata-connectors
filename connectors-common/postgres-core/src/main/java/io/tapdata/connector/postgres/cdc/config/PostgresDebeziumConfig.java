@@ -80,7 +80,7 @@ public class PostgresDebeziumConfig {
                 .with("database.hostname", postgresConfig.getHost())
                 .with("database.port", postgresConfig.getPort())
                 .with("database.user", postgresConfig.getUser())
-                .with("database.password", postgresConfig.getPassword())
+                .with("database.password", EmptyKit.isNull(postgresConfig.getPassword()) ? "" : postgresConfig.getPassword())
                 .with("database.dbname", postgresConfig.getDatabase())
                 .with("time.precision.mode", "connect")
                 .with("transforms.tsFormat1.type", "org.apache.kafka.connect.transforms.TimestampConverter$Value")
