@@ -3,6 +3,7 @@ package io.tapdata.common.exception;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.ErrorKit;
 
+import java.io.IOException;
 import java.sql.SQLException;
 import java.util.List;
 
@@ -64,7 +65,7 @@ public abstract class AbstractExceptionCollector implements ExceptionCollector {
 
     @Override
     public void revealException(Throwable cause) {
-        if (cause instanceof SQLException) {
+        if (cause instanceof SQLException || cause instanceof IOException) {
             throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause))
 //                    .withServerErrorCode(String.valueOf(((SQLException) cause).getErrorCode()))
                     ;
