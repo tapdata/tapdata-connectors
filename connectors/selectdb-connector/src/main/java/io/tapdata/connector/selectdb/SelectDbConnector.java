@@ -177,6 +177,9 @@ public class SelectDbConnector extends CommonDbConnector {
         });
         Throwable match;
         if (null != (match = matchThrowable(throwable, CoreException.class)) && ((CoreException) match).getCode() == SelectDbErrorCodes.ERROR_SDB_COPY_INTO_CANCELLED) {
+            if (match.getMessage().contains("No available backends")) {
+                return retryOptions.needRetry(true);
+            }
             retryOptions.needRetry(false);
             return retryOptions;
         }
@@ -342,7 +345,7 @@ public class SelectDbConnector extends CommonDbConnector {
      * @param writeListResultConsumer
      * @param events
      */
-    private void uploadEvents(TapConnectorContext connectorContext,Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, List<TapRecordEvent> events, TapTable table) {
+    private void uploadEvents(TapConnectorContext connectorContext,Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, List<TapRecordEvent> events, TapTable table) throws InterruptedException {
 
         int catchCount = 0;
         while (catchCount <= selectDbConfig.getRetryCount()) {
@@ -352,13 +355,16 @@ public class SelectDbConnector extends CommonDbConnector {
                 break;
             }catch (CoreException e) {
                 catchCount++;
-                if(SelectDbErrorCodes.ERROR_SDB_COPY_INTO_NETWORK==e.getCode() || SelectDbErrorCodes.ERROR_SDB_COPY_INTO_STATE_NULL==e.getCode()){
+                if(SelectDbErrorCodes.ERROR_SDB_COPY_INTO_NETWORK==e.getCode() || SelectDbErrorCodes.ERROR_SDB_COPY_INTO_STATE_NULL==e.getCode()
+                        || (SelectDbErrorCodes.ERROR_SDB_COPY_INTO_CANCELLED == e.getCode()) && e.getMessage() != null &&
+                        e.getMessage().contains("No available backends")){
                     if (catchCount <= selectDbConfig.getRetryCount()) {
                         connectorContext.getLog().warn("Data source upload retry: {}", catchCount);
                     } else {
                         TapLogger.error(TAG, "Data write failure" + e.getMessage());
                         throw new RuntimeException(e);
                     }
+                    Thread.sleep(15000);
                 }else{
                     TapLogger.error(TAG, "Data write failure" + e.getMessage());
                     throw new RuntimeException(e);
