@@ -609,7 +609,7 @@
     },
     "uuid": {
       "to": "TapString",
-      "preferByte": 256,
+      "preferByte": 26,
       "queryOnly": true
     },
     "xml": {
