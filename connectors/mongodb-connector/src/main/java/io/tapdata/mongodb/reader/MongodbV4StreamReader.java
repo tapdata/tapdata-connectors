@@ -91,12 +91,15 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 				//报错之后， 再watch一遍
 				//如果完全没事件， 就需要从当前时间开始watch
 				if (offset instanceof Integer) {
-					changeStream = mongoDatabase.watch(pipeline).startAtOperationTime(new BsonTimestamp((Integer) offset, 0)).fullDocument(fullDocumentOption).fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
+					changeStream = mongoDatabase.watch(pipeline).startAtOperationTime(new BsonTimestamp((Integer) offset, 0)).fullDocument(fullDocumentOption);
 				} else {
-					changeStream = mongoDatabase.watch(pipeline).resumeAfter((BsonDocument) offset).fullDocument(fullDocumentOption).fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
+					changeStream = mongoDatabase.watch(pipeline).resumeAfter((BsonDocument) offset).fullDocument(fullDocumentOption);
 				}
 			} else {
-				changeStream = mongoDatabase.watch(pipeline).fullDocument(fullDocumentOption).fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
+				changeStream = mongoDatabase.watch(pipeline).fullDocument(fullDocumentOption);
+			}
+			if(isPreImage){
+				changeStream.fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
 			}
 			consumer.streamReadStarted();
 			try (final MongoChangeStreamCursor<ChangeStreamDocument<Document>> streamCursor = changeStream.cursor()) {
