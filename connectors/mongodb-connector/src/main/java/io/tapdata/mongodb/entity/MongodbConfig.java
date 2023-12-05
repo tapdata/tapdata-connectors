@@ -45,6 +45,8 @@ public class MongodbConfig extends CommonDbConfig {
 	private boolean enableFillingModifiedData;
 	private boolean skipDeletedEventsOnFilling = true; // 默认为：true
 
+	private boolean preImage = false; //mongo6.0 support pre_image
+
 	private boolean noCursorTimeout;
 
 	private boolean syncIndex;
@@ -255,5 +257,12 @@ public class MongodbConfig extends CommonDbConfig {
 
 	public void setSkipDeletedEventsOnFilling(boolean skipDeletedEventsOnFilling) {
 		this.skipDeletedEventsOnFilling = skipDeletedEventsOnFilling;
+	}
+	public boolean getPreImage() {
+		return preImage;
+	}
+
+	public void setPreImage(boolean preImage) {
+		this.preImage = preImage;
 	}
 }

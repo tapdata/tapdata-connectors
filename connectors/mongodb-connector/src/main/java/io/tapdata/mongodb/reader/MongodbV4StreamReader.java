@@ -4,10 +4,7 @@ import com.mongodb.*;
 import com.mongodb.client.*;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.changestream.ChangeStreamDocument;
-import com.mongodb.client.model.changestream.FullDocument;
-import com.mongodb.client.model.changestream.OperationType;
-import com.mongodb.client.model.changestream.UpdateDescription;
+import com.mongodb.client.model.changestream.*;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -54,6 +51,12 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 	private MongoDatabase mongoDatabase;
 	private MongodbConfig mongodbConfig;
 	private KVMap<Object> globalStateMap;
+	private boolean isPreImage;
+
+	public MongodbV4StreamReader setPreImage(boolean isPreImage){
+		this.isPreImage = isPreImage;
+		return this;
+	}
 
 	@Override
 	public void onStart(MongodbConfig mongodbConfig) {
@@ -80,6 +83,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
 		ConnectionString connectionString = new ConnectionString(mongodbConfig.getUri());
 		FullDocument fullDocumentOption = FullDocument.UPDATE_LOOKUP;
+		FullDocumentBeforeChange fullDocumentBeforeChangeOption = FullDocumentBeforeChange.WHEN_AVAILABLE;
 		List<TapEvent> tapEvents = list();
 		while (running.get()) {
 			ChangeStreamIterable<Document> changeStream;
@@ -87,12 +91,12 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 				//报错之后， 再watch一遍
 				//如果完全没事件， 就需要从当前时间开始watch
 				if (offset instanceof Integer) {
-					changeStream = mongoDatabase.watch(pipeline).startAtOperationTime(new BsonTimestamp((Integer) offset, 0)).fullDocument(fullDocumentOption);
+					changeStream = mongoDatabase.watch(pipeline).startAtOperationTime(new BsonTimestamp((Integer) offset, 0)).fullDocument(fullDocumentOption).fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
 				} else {
-					changeStream = mongoDatabase.watch(pipeline).resumeAfter((BsonDocument) offset).fullDocument(fullDocumentOption);
+					changeStream = mongoDatabase.watch(pipeline).resumeAfter((BsonDocument) offset).fullDocument(fullDocumentOption).fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
 				}
 			} else {
-				changeStream = mongoDatabase.watch(pipeline).fullDocument(fullDocumentOption);
+				changeStream = mongoDatabase.watch(pipeline).fullDocument(fullDocumentOption).fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
 			}
 			consumer.streamReadStarted();
 			try (final MongoChangeStreamCursor<ChangeStreamDocument<Document>> streamCursor = changeStream.cursor()) {
@@ -121,6 +125,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 					offset = event.getResumeToken();
 					OperationType operationType = event.getOperationType();
 					Document fullDocument = event.getFullDocument();
+					Document fullDocumentBeforeChange = event.getFullDocumentBeforeChange();
 					if (operationType == OperationType.INSERT) {
 						DataMap after = new DataMap();
 						after.putAll(fullDocument);
@@ -131,8 +136,11 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 						DataMap before = new DataMap();
 						if (event.getDocumentKey() != null) {
 							final Document documentKey = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
-							before.put("_id", documentKey.get("_id"));
-
+							if(isPreImage && MapUtils.isNotEmpty(fullDocumentBeforeChange)){
+								before.putAll(fullDocumentBeforeChange);
+							}else{
+								before.put("_id", documentKey.get("_id"));
+							}
 							// Queries take a long time and are disabled when not needed, QPS went down from 4000 to 400.
 							// If you need other field data in delete event can't be disabled.
 							TapDeleteRecordEvent recordEvent;
@@ -150,6 +158,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 							TapLogger.warn(TAG, "Document key is null, failed to delete. {}", event);
 						}
 					} else if (operationType == OperationType.UPDATE || operationType == OperationType.REPLACE) {
+						DataMap before = new DataMap();
 						DataMap after = new DataMap();
 						if (MapUtils.isEmpty(fullDocument)) {
 							if (fullDocumentOption == FullDocument.DEFAULT) {
@@ -166,9 +175,11 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 								continue;
 							}
 						}
-
 						if (event.getDocumentKey() != null) {
 							UpdateDescription updateDescription = event.getUpdateDescription();
+							if(isPreImage && MapUtils.isNotEmpty(fullDocumentBeforeChange)){
+                                before.putAll(fullDocumentBeforeChange);
+							}
 							if (MapUtils.isNotEmpty(fullDocument)) {
 								after.putAll(fullDocument);
 							} else if (null != updateDescription) {
@@ -182,7 +193,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 								}
 							}
 
-							TapUpdateRecordEvent recordEvent = updateDMLEvent(null, after, collectionName);
+							TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
 //							Map<String, Object> info = new DataMap();
 //							Map<String, Object> unset = new DataMap();
 							List<String> removedFields = new ArrayList<>();

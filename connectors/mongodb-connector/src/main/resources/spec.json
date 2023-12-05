@@ -375,6 +375,28 @@
 					},
 					"x-index": 5
 				},
+				"preImage": {
+					"title": "${preImage}",
+					"type": "boolean",
+					"x-component": "Switch",
+					"x-decorator": "FormItem",
+					"x-decorator-props": {
+						"layout": "horizontal",
+						"tooltip": "${preImageTips}"
+					},
+					"default": false,
+					"x-reactions": {
+						"dependencies": [
+							"$outputs"
+						],
+						"fulfill": {
+							"state": {
+								"visible": "{{$deps[0].length>0 && $deps[1]}}"
+							}
+						}
+					},
+					"x-index": 6
+				},
         "shardCollection": {
           "type": "boolean",
           "title": "${node_shard_collection}",
@@ -435,7 +457,9 @@
 			"syncIndex": "Sync Index",
 			"schemaLimit": "Fields Load Limit For Each Collection",
       "node_shard_collection": " Synchronize Partition Properties ",
-      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster "
+      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster ",
+		"preImage": "Document Preimages",
+		"preImageTips": "Enable the preimage function:\\n1. Only MongoDB6.0 and above support enabling it;\\n2. Confirm that the collection has enabled changeStreamPreAndPostImages;\\n3. Confirm the expiration time of the preimage"
     },
     "zh_CN": {
       "doc": "docs/mongodb_zh_CN.md",
@@ -469,7 +493,9 @@
 			"syncIndex": "同步索引",
 			"schemaLimit": "每张表加载的字段数限制",
       "node_shard_collection": "同步分区属性",
-      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效"
+      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效",
+		"preImage": "文档原像",
+		"preImageTips": "启用原像功能：\n1. 只有MongoDB6.0及以上才支持开启；\n2.确认集合已开启changeStreamPreAndPostImages；\n3.确认原像的过期时间"
 		},
 		"zh_TW": {
 			"doc": "docs/mongodb_zh_TW.md",
@@ -503,7 +529,9 @@
 			"syncIndex": "同步索引",
 			"schemaLimit": "每张表加載的字段數限制",
       "node_shard_collection": "同步分區内容",
-      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效"
+      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效",
+			"preImage": "文檔原像",
+			"preImageTips": "啟用原像功能：\n1. 只有MongoDB6.0以上才支援開啟；\n2.確認集合已開啟changeStreamPreAndPostImages；\n3.確認原像的過期時間"
 
 		}
 	},

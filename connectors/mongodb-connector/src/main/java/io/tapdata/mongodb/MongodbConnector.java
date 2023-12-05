@@ -1511,7 +1511,7 @@ public class MongodbConnector extends ConnectorBase {
 		try {
 			final int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
 			if (version >= 4) {
-				mongodbStreamReader = new MongodbV4StreamReader();
+				mongodbStreamReader = new MongodbV4StreamReader().setPreImage(mongoConfig.getPreImage());
 			} else {
 				mongodbStreamReader = new MongodbV3StreamReader();
 			}
