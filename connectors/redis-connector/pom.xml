@@ -109,6 +109,7 @@
                                     <excludes>
                                         <exclude>com/moilioncircle/redis/replicator/Configuration</exclude>
                                         <exclude>com/moilioncircle/redis/replicator/RedisSocketReplicator</exclude>
+                                        <exclude>com/moilioncircle/redis/replicator/cmd/ReplyParser</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
