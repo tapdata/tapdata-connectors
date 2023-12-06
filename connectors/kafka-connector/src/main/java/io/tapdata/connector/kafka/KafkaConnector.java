@@ -18,7 +18,6 @@ import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.simplify.TapSimplify;
-import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -161,9 +160,8 @@ public class KafkaConnector extends ConnectorBase {
         String tableId = tapCreateTableEvent.getTableId();
         CreateTableOptions createTableOptions = new CreateTableOptions();
 //        if (!this.isSchemaRegister) {
-            DataMap nodeConfig = tapConnectorContext.getNodeConfig();
-            Integer replicasSize = (Integer) nodeConfig.get("replicasSize");
-            Integer partitionNum = (Integer) nodeConfig.get("partitionNum");
+            Integer replicasSize = kafkaConfig.getReplicasSize();
+            Integer partitionNum = kafkaConfig.getPartitionNum();
             AdminConfiguration configuration = new AdminConfiguration(kafkaConfig, tapConnectorContext.getId());
             try (Admin admin = new DefaultAdmin(configuration)) {
                 Set<String> existTopics = admin.listTopics();
