@@ -53,7 +53,10 @@
           "x-component": "Select",
           "required": true,
           "x-index": 40,
-          "default": "SESSION",
+          "default": "Session",
+          "x-decorator-props": {
+            "tooltip": "${consistencylevel_tip}"
+          },
           "enum": [
             {
               "label": "STRONG",
@@ -92,7 +95,8 @@
       "dataForm_account_key": "account key",
       "connection_form_account_key_placeholder": "Please enter the account key",
       "connection_form_account_host_placeholder": "Please enter the account host",
-      "dataForm_consistencyLevel": "consistencyLevel"
+      "dataForm_consistencyLevel": "consistencyLevel",
+      "consistencylevel_tip": "The consistency isolation level set must be lower than the consistency isolation level set for the account; otherwise, an error will be reported"
     },
     "zh_CN": {
       "dataForm_form_databaseName": "DBName",
@@ -100,7 +104,8 @@
       "dataForm_account_key": "account key",
       "connection_form_account_key_placeholder": "请输入account key",
       "connection_form_account_host_placeholder": "请输入account host",
-      "dataForm_consistencyLevel": "一致性隔离级别"
+      "dataForm_consistencyLevel": "一致性隔离级别",
+      "consistencylevel_tip": "设置的一致性隔离级别一定要弱于账户设置的一致性隔离级别，否则会报错"
     },
     "zh_TW": {
       "dataForm_form_databaseName": "DBName",
@@ -108,7 +113,8 @@
       "dataForm_account_key": "account key",
       "connection_form_account_key_placeholder": "请輸入account key",
       "connection_form_account_host_placeholder": "請輸入account host",
-      "dataForm_consistencyLevel": "一致性隔離級別"
+      "dataForm_consistencyLevel": "一致性隔離級別",
+      "consistencylevel_tip": "設置的一致性隔離級別一定要弱於賬戶設置的一致性隔離級別，否則會報錯"
     }
   },
   "dataTypes": {
