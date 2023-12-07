@@ -46,6 +46,14 @@ public class CommonDbConfig implements Serializable {
     private String sslKey;
     private String sslKeyPassword;
     protected String sslRandomPath;
+    protected String keyToolPath;
+
+    public CommonDbConfig() {
+        String keyToolPath = System.getProperty("java.home");
+        int of = keyToolPath.lastIndexOf("jre");
+        keyToolPath = keyToolPath.substring(0, of > 0 ? of : keyToolPath.length());
+        this.keyToolPath = "".equals(keyToolPath) ? "keytool" : FileUtil.paths(keyToolPath, "bin", "keytool");
+    }
 
     //pattern for jdbc-url
     public String getDatabaseUrlPattern() {
@@ -126,7 +134,7 @@ public class CommonDbConfig implements Serializable {
         if (EmptyKit.isNotBlank(getSslCa())) {
             String sslCaPath = FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "ca.pem");
             FileUtil.save(Base64.getUrlDecoder().decode(getSslCa()), sslCaPath, true);
-            Runtime.getRuntime().exec("keytool -import -noprompt -file " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "ca.pem") +
+            Runtime.getRuntime().exec(keyToolPath + " -import -noprompt -file " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "ca.pem") +
                     " -keystore " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "truststore.jks") + " -storepass 123456").waitFor();
             properties.put("trustCertificateKeyStoreUrl", "file:" + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "truststore.jks"));
             properties.put("trustCertificateKeyStorePassword", "123456");
@@ -140,7 +148,7 @@ public class CommonDbConfig implements Serializable {
             Runtime.getRuntime().exec("openssl pkcs12 -legacy -export -in " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "cert.pem") +
                     " -inkey " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "key.pem") +
                     " -name datasource-client -passout pass:123456 -out " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client-keystore.p12")).waitFor();
-            Runtime.getRuntime().exec("keytool -importkeystore -srckeystore " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client-keystore.p12") +
+            Runtime.getRuntime().exec(keyToolPath + " -importkeystore -srckeystore " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "client-keystore.p12") +
                     " -srcstoretype pkcs12 -srcstorepass 123456 -destkeystore " + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "keystore.jks") + " -deststoretype JKS -deststorepass 123456").waitFor();
             properties.put("clientCertificateKeyStoreUrl", "file:" + FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath, "keystore.jks"));
             properties.put("clientCertificateKeyStorePassword", "123456");
