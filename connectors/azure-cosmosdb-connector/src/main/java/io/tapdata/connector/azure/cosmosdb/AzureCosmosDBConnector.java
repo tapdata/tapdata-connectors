@@ -70,7 +70,6 @@ public class AzureCosmosDBConnector extends ConnectorBase {
             CosmosContainer cosmosContainer = getCosmosContainer(table.getId());
             final int batchSize = eventBatchSize > 0 ? eventBatchSize : 5000;
             String sql = String.format("select * from c order by c.%s", COLLECTION_ID_FIELD);
-//        String sql="select * from c";
             Iterator<FeedResponse<JsonNode>> iterator;
             if (offset == null) {
                 iterator = cosmosContainer.queryItems(sql, new CosmosQueryRequestOptions(), JsonNode.class).iterableByPage(null, batchSize).iterator();
@@ -124,7 +123,7 @@ public class AzureCosmosDBConnector extends ConnectorBase {
                 count = item.get("count").longValue();
             }
         } catch (Exception e) {
-            throw new RuntimeException("Get Table " + table.getId() + " count Failed! " + e.getMessage());
+            throw new RuntimeException("Get Table " + table.getId() + " Count Failed! " + e.getMessage());
         }
         return count;
     }
@@ -173,7 +172,7 @@ public class AzureCosmosDBConnector extends ConnectorBase {
                     try {
                         countDownLatch.await();
                     } catch (InterruptedException e) {
-                        TapLogger.error(TAG, "AzureCosmosDBConnector discoverSchema countDownLatch await", e);
+                        TapLogger.error(TAG, "AzureCosmosDBConnector DiscoverSchema CountDownLatch Await", e);
                     }
                     List<TapTable> list = list();
                     containerList.forEach(name -> {
@@ -200,7 +199,7 @@ public class AzureCosmosDBConnector extends ConnectorBase {
                 });
             }
         } catch (Exception e) {
-            throw new RuntimeException("DiscoverSchema failed" + e.getMessage());
+            throw new RuntimeException("DiscoverSchema Failed " + e.getMessage());
         }
     }
 
@@ -299,8 +298,8 @@ public class AzureCosmosDBConnector extends ConnectorBase {
         ConnectionOptions connectionOptions = null;
         try {
             onStart(connectionContext);
-            ConnectionOptions.create();
-            try (AzureCosmosDBTest cosmosDBTest = new AzureCosmosDBTest(azureCosmosDBConfig, consumer, cosmosClient);) {
+            connectionOptions= ConnectionOptions.create();
+            try (AzureCosmosDBTest cosmosDBTest = new AzureCosmosDBTest(azureCosmosDBConfig, consumer, cosmosClient)) {
                 cosmosDBTest.testOneByOne();
             }
         } catch (Throwable throwable) {
@@ -329,7 +328,7 @@ public class AzureCosmosDBConnector extends ConnectorBase {
     public void onStart(TapConnectionContext connectionContext) throws Throwable {
         azureCosmosDBConfig = (AzureCosmosDBConfig) new AzureCosmosDBConfig().load(connectionContext.getConnectionConfig());
         if (azureCosmosDBConfig == null) {
-            throw new RuntimeException("load mongo config failed from connection config");
+            throw new RuntimeException("load cosmos config failed from connection config");
         }
         ConsistencyLevel consistencyLevel = getConsistencyLevel(azureCosmosDBConfig.getConsistencyLevel());
         if (cosmosClient == null) {
@@ -341,9 +340,8 @@ public class AzureCosmosDBConnector extends ConnectorBase {
                         .contentResponseOnWriteEnabled(true)
                         .buildClient();
                 cosmosDatabase = cosmosClient.getDatabase(azureCosmosDBConfig.getDatabaseName());
-                Iterator<CosmosContainerProperties> iterator = cosmosDatabase.readAllContainers().iterator();
             } catch (Throwable e) {
-                throw new RuntimeException(String.format("Create CosmosConnection failed %s", e.getMessage()), e);
+                throw new RuntimeException(String.format("Create CosmosConnection Failed %s", e.getMessage()), e);
             }
         }
     }
@@ -356,7 +354,7 @@ public class AzureCosmosDBConnector extends ConnectorBase {
                 cosmosClient = null;
             }
         } catch (Exception e) {
-            throw new RuntimeException(String.format("Close CosmosClient failed %s", e.getMessage()), e);
+            throw new RuntimeException(String.format("Close CosmosClient Failed %s", e.getMessage()), e);
         }
     }
 
