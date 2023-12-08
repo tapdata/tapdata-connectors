@@ -90,7 +90,7 @@
   "messages": {
     "default": "en_US",
     "en_US": {
-      "dataForm_form_databaseName": "DBName",
+      "dataForm_form_databaseName": "DatabaseName",
       "dataForm_host": "account host",
       "dataForm_account_key": "account key",
       "connection_form_account_key_placeholder": "Please enter the account key",
@@ -99,7 +99,7 @@
       "consistencylevel_tip": "The consistency isolation level set must be lower than the consistency isolation level set for the account; otherwise, an error will be reported"
     },
     "zh_CN": {
-      "dataForm_form_databaseName": "DBName",
+      "dataForm_form_databaseName": "数据库名称",
       "dataForm_host": "account host",
       "dataForm_account_key": "account key",
       "connection_form_account_key_placeholder": "请输入account key",
@@ -108,7 +108,7 @@
       "consistencylevel_tip": "设置的一致性隔离级别一定要弱于账户设置的一致性隔离级别，否则会报错"
     },
     "zh_TW": {
-      "dataForm_form_databaseName": "DBName",
+      "dataForm_form_databaseName": "數據庫名稱",
       "dataForm_host": "account host",
       "dataForm_account_key": "account key",
       "connection_form_account_key_placeholder": "请輸入account key",
