@@ -8,7 +8,7 @@
       "Database"
     ],
     "id": "azure-cosmosdb",
-    "authentication": "Alpha"
+    "authentication": "Beta"
   },
   "configOptions": {
     "capabilities": [
@@ -22,7 +22,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-component-props": {
-            "placeholder": "${connection_form_account_key_placeholder}"
+            "placeholder": "${connection_form_account_host_placeholder}"
           },
           "required": true,
           "x-index": 10
@@ -33,7 +33,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-component-props": {
-            "placeholder": "${connection_form_account_host_placeholder}"
+            "placeholder": "${connection_form_account_key_placeholder}"
           },
           "required": true,
           "x-index": 20
@@ -90,6 +90,7 @@
   "messages": {
     "default": "en_US",
     "en_US": {
+      "doc": "docs/cosmosdb_en_US.md",
       "dataForm_form_databaseName": "DatabaseName",
       "dataForm_host": "account host",
       "dataForm_account_key": "account key",
@@ -99,6 +100,7 @@
       "consistencylevel_tip": "The consistency isolation level set must be lower than the consistency isolation level set for the account; otherwise, an error will be reported"
     },
     "zh_CN": {
+      "doc": "docs/cosmosdb_zh_CN.md",
       "dataForm_form_databaseName": "数据库名称",
       "dataForm_host": "account host",
       "dataForm_account_key": "account key",
@@ -108,6 +110,7 @@
       "consistencylevel_tip": "设置的一致性隔离级别一定要弱于账户设置的一致性隔离级别，否则会报错"
     },
     "zh_TW": {
+      "doc": "docs/cosmosdb_zh_TW.md",
       "dataForm_form_databaseName": "數據庫名稱",
       "dataForm_host": "account host",
       "dataForm_account_key": "account key",
