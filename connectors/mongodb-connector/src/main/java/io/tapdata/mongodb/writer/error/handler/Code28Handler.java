@@ -1,7 +1,6 @@
 package io.tapdata.mongodb.writer.error.handler;
 
 import com.mongodb.MongoBulkWriteException;
-import com.mongodb.WriteError;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.BulkWriteOptions;
@@ -17,7 +16,6 @@ import org.bson.Document;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -54,7 +52,7 @@ public class Code28Handler implements BulkWriteErrorHandler {
 			return null;
 		}
 		Map<String, Object> set = (Map) update.get("$set");
-		String errorField = getErrorField(writeError);
+		String errorField = getErrorField(writeError, PATTERN, 2);
 
 		if (MapUtils.isEmpty(set) || StringUtils.isBlank(errorField)) {
 			return null;
@@ -89,17 +87,5 @@ public class Code28Handler implements BulkWriteErrorHandler {
 			return null;
 		}
 		return writeModel;
-	}
-
-	private String getErrorField(WriteError writeError) {
-		if (null == writeError || StringUtils.isBlank(writeError.getMessage())) {
-			return null;
-		}
-		Matcher matcher = PATTERN.matcher(writeError.getMessage());
-		if (matcher.find() && matcher.groupCount() >= 1) {
-			return matcher.group(2);
-		} else {
-			return null;
-		}
 	}
 }
