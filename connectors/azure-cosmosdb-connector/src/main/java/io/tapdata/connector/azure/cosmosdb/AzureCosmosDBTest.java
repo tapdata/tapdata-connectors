@@ -6,7 +6,7 @@ import com.azure.cosmos.CosmosDatabase;
 import com.azure.cosmos.CosmosException;
 import com.azure.cosmos.models.CosmosContainerProperties;
 import com.azure.cosmos.models.CosmosQueryRequestOptions;
-import com.azure.cosmos.util.CosmosPagedIterable;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.azure.cosmosdb.config.AzureCosmosDBConfig;
 import io.tapdata.constant.DbTestItem;
@@ -15,12 +15,12 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Consumer;
 
 import static io.tapdata.base.ConnectorBase.testItem;
 
 public class AzureCosmosDBTest extends CommonDbTest {
+    public static final String TAG = AzureCosmosDBConnector.class.getSimpleName();
     protected final AzureCosmosDBConfig cosmosDBConfig;
 
     protected final CosmosClient cosmosClient;
@@ -46,9 +46,9 @@ public class AzureCosmosDBTest extends CommonDbTest {
     protected Boolean testConnect() {
         try {
             CosmosDatabase cosmosDatabase = cosmosClient.getDatabase(cosmosDBConfig.getDatabaseName());
-            Iterator<CosmosContainerProperties> iterator = cosmosDatabase.readAllContainers().iterator();
-            if(iterator.hasNext()){
-                iterator.next();
+            Iterator<CosmosContainerProperties> databaseIterator = cosmosDatabase.readAllContainers().iterator();
+            if (databaseIterator.hasNext()) {
+                databaseIterator.next();
             }
             consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY, TEST_CONNECTION_LOGIN));
             return true;
@@ -69,23 +69,21 @@ public class AzureCosmosDBTest extends CommonDbTest {
     public Boolean testReadPrivilege() {
         CosmosDatabase cosmosDatabase = cosmosClient.getDatabase(cosmosDBConfig.getDatabaseName());
         try{
-            Iterator<CosmosContainerProperties> iterator = cosmosDatabase.readAllContainers().iterator();
-            if (iterator.hasNext()){
-                CosmosContainerProperties containerProperties = iterator.next();
+            Iterator<CosmosContainerProperties> containerIterator = cosmosDatabase.readAllContainers().iterator();
+            CosmosContainerProperties containerProperties = null;
+            if (containerIterator.hasNext()) {
+                containerProperties = containerIterator.next();
                 CosmosContainer container = cosmosDatabase.getContainer(containerProperties.getId());
-                String sql = "select * from c";
-                CosmosPagedIterable<Map> maps = container.queryItems(sql, new CosmosQueryRequestOptions(), Map.class);
-                Iterator<Map> page= maps.iterator();
-                if (page.hasNext()){
-                    page.next();
+                String query = "SELECT  COUNT(1) as count FROM c";
+                Iterator<ObjectNode> iterator = container.queryItems(query, new CosmosQueryRequestOptions(), ObjectNode.class).iterator();
+                if(iterator.hasNext()){
+                    ObjectNode objectNode = iterator.next();
                 }
-            }else{
-                consumer.accept(testItem(TestItem.ITEM_READ,TestItem.RESULT_SUCCESSFULLY_WITH_WARN,"No Container Found in "+cosmosDBConfig.getDatabaseName()));
             }
             consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY));
             return true;
         }catch (CosmosException e){
-            consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_FAILED, "Missing read privileges on" + cosmosDBConfig.getDatabaseName() + "database"));
+            consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_FAILED, "Missing read privileges on" + cosmosDBConfig.getDatabaseName() + " database reson: "+e.getMessage()));
             return false;
         }
 

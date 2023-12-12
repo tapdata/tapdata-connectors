@@ -1,12 +1,16 @@
 package io.tapdata.mongodb.writer.error;
 
 import com.mongodb.MongoBulkWriteException;
+import com.mongodb.WriteError;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.model.BulkWriteOptions;
-import com.mongodb.client.model.WriteModel;
+import com.mongodb.client.model.*;
 import io.tapdata.mongodb.writer.BulkWriteModel;
+import org.apache.commons.lang3.StringUtils;
 import org.bson.Document;
+
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * @author samuel
@@ -33,4 +37,69 @@ public interface BulkWriteErrorHandler {
 			BulkWriteError writeError,
 			MongoCollection<Document> collection
 	);
+
+	/**
+	 * Find error field in WriteError's message, will use pattern.matcher() method
+	 *
+	 * @param writeError {@link WriteError}
+	 * @param pattern    Match pattern. e.g. Cannot create field '(.*?)' in element \{(.*?): null}
+	 * @param groupIndex After matcher, return which group. e.g. 2
+	 * @return Error field name, "" present not found a field
+	 */
+	default String getErrorField(WriteError writeError, Pattern pattern, int groupIndex) {
+		if (null == writeError || StringUtils.isBlank(writeError.getMessage())) {
+			return null;
+		}
+		Matcher matcher = pattern.matcher(writeError.getMessage());
+		if (matcher.find() && matcher.groupCount() >= 1) {
+			return matcher.group(groupIndex);
+		} else {
+			return "";
+		}
+	}
+
+	default Document updateModelFilter(WriteModel<Document> writeModel) {
+		if (null == writeModel) {
+			return null;
+		}
+		if (writeModel instanceof UpdateOneModel) {
+			return (Document) ((UpdateOneModel<Document>) writeModel).getFilter();
+		}
+		if (writeModel instanceof UpdateManyModel) {
+			return (Document) ((UpdateManyModel<Document>) writeModel).getFilter();
+		}
+		if (writeModel instanceof ReplaceOneModel) {
+			return (Document) ((ReplaceOneModel<Document>) writeModel).getFilter();
+		}
+		return null;
+	}
+
+	default Document updateModelUpdate(WriteModel<Document> writeModel) {
+		if (null == writeModel) {
+			return null;
+		}
+		if (writeModel instanceof UpdateOneModel) {
+			return (Document) ((UpdateOneModel<Document>) writeModel).getUpdate();
+		}
+		if (writeModel instanceof UpdateManyModel) {
+			return (Document) ((UpdateManyModel<Document>) writeModel).getUpdate();
+		}
+		if (writeModel instanceof ReplaceOneModel) {
+			return ((ReplaceOneModel<Document>) writeModel).getReplacement();
+		}
+		return null;
+	}
+
+	default UpdateOptions updateOptions(WriteModel<Document> writeModel) {
+		if (null == writeModel) {
+			return null;
+		}
+		if (writeModel instanceof UpdateOneModel) {
+			return ((UpdateOneModel<Document>) writeModel).getOptions();
+		}
+		if (writeModel instanceof UpdateManyModel) {
+			return ((UpdateManyModel<Document>) writeModel).getOptions();
+		}
+		return null;
+	}
 }
