@@ -237,12 +237,17 @@ public abstract class MysqlJdbcWriter extends MysqlWriter {
 				preparedStatement.setObject(parameterIndex++, after.get(fieldName));
 				afterKeys.remove(fieldName);
 			} catch (SQLException e) {
-				throw new TapPdkSkippableDataEx(String.format("Set prepared statement values failed: %s, field: '%s', value '%s', record: %s"
-						, e.getMessage()
-						, fieldName
-						, after.get(fieldName)
-						, tapRecordEvent
-				), tapConnectorContext.getSpecification().getId(), e);
+				throw exceptionWrapper.wrap(tapConnectorContext, tapTable, tapRecordEvent, e, (ex) -> {
+					if (ex == null) {
+						return new TapPdkSkippableDataEx(String.format("Set prepared statement values failed: %s, field: '%s', value '%s', record: %s"
+								, e.getMessage()
+								, fieldName
+								, after.get(fieldName)
+								, tapRecordEvent)
+								, tapConnectorContext.getSpecification().getId(), e);
+					}
+					return ex;
+				});
 			}
 		}
 		if (CollectionUtils.isNotEmpty(afterKeys)) {
