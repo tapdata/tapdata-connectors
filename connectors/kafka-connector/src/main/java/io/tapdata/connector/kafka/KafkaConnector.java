@@ -34,11 +34,7 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.common.TopicPartitionInfo;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Properties;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -160,8 +156,8 @@ public class KafkaConnector extends ConnectorBase {
         String tableId = tapCreateTableEvent.getTableId();
         CreateTableOptions createTableOptions = new CreateTableOptions();
 //        if (!this.isSchemaRegister) {
-            Integer replicasSize = kafkaConfig.getReplicasSize();
-            Integer partitionNum = kafkaConfig.getPartitionNum();
+            Integer replicasSize = Optional.ofNullable(kafkaConfig.getReplicasSize()).orElse(1);
+            Integer partitionNum = Optional.ofNullable(kafkaConfig.getPartitionNum()).orElse(3);
             AdminConfiguration configuration = new AdminConfiguration(kafkaConfig, tapConnectorContext.getId());
             try (Admin admin = new DefaultAdmin(configuration)) {
                 Set<String> existTopics = admin.listTopics();
