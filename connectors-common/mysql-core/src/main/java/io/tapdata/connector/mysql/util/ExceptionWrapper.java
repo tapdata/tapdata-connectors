@@ -2,10 +2,7 @@ package io.tapdata.connector.mysql.util;
 
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.exception.TapPdkBaseException;
-import io.tapdata.exception.TapPdkViolateNullableEx;
-import io.tapdata.exception.TapPdkViolateUniqueEx;
-import io.tapdata.exception.TapPdkWriteLengthEx;
+import io.tapdata.exception.*;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 
 import java.sql.SQLException;
@@ -105,6 +102,14 @@ public class ExceptionWrapper {
                                 null,
                                 e
                         ));
+                        break;
+                    }
+                    case 0: {
+                        switch (((SQLException) e).getSQLState()) {
+                            case "S1009": {
+                                newEx = new TapPdkTerminateByServerEx(tapConnectorContext.getSpecification().getId(), e);
+                            }
+                        }
                         break;
                     }
                     default:
