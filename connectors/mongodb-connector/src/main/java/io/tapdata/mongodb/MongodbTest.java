@@ -9,6 +9,7 @@ import io.tapdata.common.CommonDbTest;
 import io.tapdata.constant.DbTestItem;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.util.NetUtil;
 import org.apache.commons.collections4.CollectionUtils;
@@ -24,6 +25,8 @@ public class MongodbTest extends CommonDbTest {
 
     protected final MongodbConfig mongodbConfig;
     protected final MongoClient mongoClient;
+
+    protected final ConnectionOptions connectionOptions;
 
     protected static final Set<String> READ_PRIVILEGE_ACTIONS = new HashSet<>();
     private static final Set<String> READ_WRITE_PRIVILEGE_ACTIONS = new HashSet<>();
@@ -60,10 +63,11 @@ public class MongodbTest extends CommonDbTest {
         READ_WRITE_PRIVILEGE_ACTIONS.add("update");
     }
 
-    public MongodbTest(MongodbConfig mongodbConfig, Consumer<TestItem> consumer, MongoClient mongoClient) {
+    public MongodbTest(MongodbConfig mongodbConfig, Consumer<TestItem> consumer, MongoClient mongoClient,ConnectionOptions connectionOptions) {
         super(mongodbConfig, consumer);
         this.mongodbConfig = mongodbConfig;
         this.mongoClient = mongoClient;
+        this.connectionOptions = connectionOptions;
     }
 
     @Override
@@ -118,6 +122,7 @@ public class MongodbTest extends CommonDbTest {
         try {
             String version = MongodbUtil.getVersionString(mongoClient, mongodbConfig.getDatabase());
             String versionMsg = "mongodb version: " + version;
+            connectionOptions.setDbVersion(version);
             if (supportVersions().stream().noneMatch(v -> {
                 String reg = v.replaceAll("\\*", ".*");
                 Pattern pattern = Pattern.compile(reg);

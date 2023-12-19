@@ -51,6 +51,9 @@ public class MongodbConfig extends CommonDbConfig {
 
 	private boolean syncIndex;
 
+
+	private boolean timeSeriesCollection;
+
 	public boolean isSyncIndex() {
 		return syncIndex;
 	}
@@ -257,6 +260,14 @@ public class MongodbConfig extends CommonDbConfig {
 
 	public void setSkipDeletedEventsOnFilling(boolean skipDeletedEventsOnFilling) {
 		this.skipDeletedEventsOnFilling = skipDeletedEventsOnFilling;
+	}
+
+	public boolean isTimeSeriesCollection() {
+		return timeSeriesCollection;
+	}
+
+	public void setTimeSeriesCollection(boolean timeSeriesCollection) {
+		this.timeSeriesCollection = timeSeriesCollection;
 	}
 	public boolean getPreImage() {
 		return preImage;

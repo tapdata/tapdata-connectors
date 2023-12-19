@@ -3,9 +3,7 @@ package io.tapdata.mongodb;
 import com.mongodb.*;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.*;
-import com.mongodb.client.model.CreateCollectionOptions;
-import com.mongodb.client.model.IndexOptions;
-import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.*;
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -203,7 +201,7 @@ public class MongodbConnector extends ConnectorBase {
 						});
 						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
 						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
-
+						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table.getTableAttr());
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -243,6 +241,7 @@ public class MongodbConnector extends ConnectorBase {
 						}
 						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
 						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
+						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table.getTableAttr());
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -360,7 +359,7 @@ public class MongodbConnector extends ConnectorBase {
 		try {
 			onStart(connectionContext);
 			try (
-					MongodbTest mongodbTest = new MongodbTest(mongoConfig, consumer, mongoClient)
+					MongodbTest mongodbTest = new MongodbTest(mongoConfig, consumer, mongoClient,connectionOptions)
 			) {
 				mongodbTest.testOneByOne();
 			}
@@ -540,7 +539,8 @@ public class MongodbConnector extends ConnectorBase {
 
 			createIndex(table, table.getIndexList(), log);
 		}
-
+		//Created Time Series Collection
+		createTimeSeriesCollection(table,log);
 		//created shared collection
 		final boolean isShardCollection = createSharedCollection(nodeConfig, table, pks, database, log);
 
@@ -712,7 +712,28 @@ public class MongodbConnector extends ConnectorBase {
 			}
 		return isShardCollection;
 	}
+	private void createTimeSeriesCollection(TapTable table,Log log) {
+		if(mongoConfig.isTimeSeriesCollection()){
+			Map<String, Object> tableAttr = Optional.ofNullable(table.getTableAttr()).orElse(new HashMap<>());
+			if(!tableAttr.isEmpty()){
+				try {
+					String timeField = (String) tableAttr.get("timeField");
+					if(StringUtils.isNotEmpty(timeField)){
+						CreateCollectionOptions options = new CreateCollectionOptions();
+						TimeSeriesOptions timeSeriesOptions = new TimeSeriesOptions(timeField);
+						if(tableAttr.get("metaField") != null)timeSeriesOptions.metaField((String) tableAttr.get("metaField"));
+						if(tableAttr.get("granularity") != null)timeSeriesOptions.granularity(TimeSeriesGranularity.valueOf(tableAttr.get("granularity").toString().toUpperCase()));
+						options.timeSeriesOptions(timeSeriesOptions);
+						mongoDatabase.createCollection(table.getId(), options);
+					}
+				}catch (Exception e){
+					log.warn("Create Time Series Collection failed , message:{}",e.getMessage());
+				}
+ 			}
+		}
 
+
+	}
 	private void createCappedCollection(TapTable table, boolean isShardCollection, Log log) {
 		Map<String, Object> tableAttr = Optional.ofNullable(table.getTableAttr()).orElse(new HashMap<>());
 		Object isCapped = tableAttr.get("capped");//
@@ -1419,7 +1440,7 @@ public class MongodbConnector extends ConnectorBase {
 				findIterable.noCursorTimeout(true).maxTime(30, TimeUnit.MINUTES);
 			}
 
-			Document lastDocument;
+			Document lastDocument = null;
 
 			try (MongoCursor<Document> mongoCursor = findIterable.iterator()) {
 				while (mongoCursor.hasNext()) {
@@ -1435,7 +1456,13 @@ public class MongodbConnector extends ConnectorBase {
 					}
 				}
 				if (!tapEvents.isEmpty()) {
-					tapReadOffsetConsumer.accept(tapEvents, null);
+					if(lastDocument != null){
+						Object value = lastDocument.get(COLLECTION_ID_FIELD);
+						batchOffset = new MongoBatchOffset(COLLECTION_ID_FIELD, value);
+						tapReadOffsetConsumer.accept(tapEvents, batchOffset);
+					}else{
+						tapReadOffsetConsumer.accept(tapEvents, null);
+					}
 				}
 			} catch (Exception e) {
 				if (!isAlive() && e instanceof MongoInterruptedException) {
