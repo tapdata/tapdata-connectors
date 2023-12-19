@@ -22,7 +22,7 @@ public class MongodbAtlasConnector extends MongodbConnector {
         try {
             onStart(connectionContext);
             try (
-                    MongodbAtlasTest mongodbAtlasTest = new MongodbAtlasTest(mongoConfig, consumer,mongoClient)
+                    MongodbAtlasTest mongodbAtlasTest = new MongodbAtlasTest(mongoConfig, consumer,mongoClient,connectionOptions)
             ) {
                 mongodbAtlasTest.testOneByOne();
             }
