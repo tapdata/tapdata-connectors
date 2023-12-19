@@ -1440,7 +1440,7 @@ public class MongodbConnector extends ConnectorBase {
 				findIterable.noCursorTimeout(true).maxTime(30, TimeUnit.MINUTES);
 			}
 
-			Document lastDocument;
+			Document lastDocument = null;
 
 			try (MongoCursor<Document> mongoCursor = findIterable.iterator()) {
 				while (mongoCursor.hasNext()) {
@@ -1456,7 +1456,13 @@ public class MongodbConnector extends ConnectorBase {
 					}
 				}
 				if (!tapEvents.isEmpty()) {
-					tapReadOffsetConsumer.accept(tapEvents, null);
+					if(lastDocument != null){
+						Object value = lastDocument.get(COLLECTION_ID_FIELD);
+						batchOffset = new MongoBatchOffset(COLLECTION_ID_FIELD, value);
+						tapReadOffsetConsumer.accept(tapEvents, batchOffset);
+					}else{
+						tapReadOffsetConsumer.accept(tapEvents, null);
+					}
 				}
 			} catch (Exception e) {
 				if (!isAlive() && e instanceof MongoInterruptedException) {
