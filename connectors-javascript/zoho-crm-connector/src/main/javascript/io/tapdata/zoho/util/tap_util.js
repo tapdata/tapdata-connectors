@@ -22,7 +22,7 @@ function iterateAllData(apiName, offset, call) {
             let response = invoker.invoke(apiName, offset);
             res = response.result;
             if(response.httpCode >= 300 || response.httpCode < 200){
-               log.error("Get Http data failed, message: {}", JSON.stringify(response));
+               log.warn("Get Http data failed, message: {}", JSON.stringify(response));
             }
         }catch (e){
             log.error(e);
