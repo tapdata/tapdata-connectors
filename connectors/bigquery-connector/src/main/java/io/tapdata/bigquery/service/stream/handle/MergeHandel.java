@@ -11,7 +11,6 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapNumber;
@@ -31,8 +30,6 @@ import static io.tapdata.entity.simplify.TapSimplify.*;
 import static io.tapdata.entity.utils.JavaTypesToTapTypes.*;
 
 public class MergeHandel extends BigQueryStart {
-    private static final String TAG = MergeHandel.class.getSimpleName();
-
     public static final String MERGE_KEY_ID = "merge_id";
     public static final String MERGE_KEY_ID_LAST = "merge_id_last";
     public static final String MERGE_KEY_TYPE = "merge_type";
@@ -128,7 +125,7 @@ public class MergeHandel extends BigQueryStart {
         event.setTable(temporaryTable);
         event.setReferenceTime(System.currentTimeMillis());
         if (tableCreate.isExist(event)) {
-            TapLogger.info(TAG, "Temporary table [" + super.config().tempCursorSchema() + "] already exists.");
+            log.info("Temporary table [" + super.config().tempCursorSchema() + "] already exists.");
             return table;
         }
         this.createSchema(table, tableId);
@@ -323,7 +320,7 @@ public class MergeHandel extends BigQueryStart {
                     try {
                         this.mergeTableOnce();
                     } catch (Throwable throwable) {
-                        TapLogger.error(TAG, "Try upload failed in scheduler, {}", throwable.getMessage());
+                        log.error("Try upload failed in scheduler, {}", throwable.getMessage());
                     }
                 }
             }, 60, this.mergeDelaySeconds, TimeUnit.SECONDS);

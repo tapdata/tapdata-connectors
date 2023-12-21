@@ -1,12 +1,18 @@
 package io.tapdata.bigquery.service.bigQuery;
 
 import io.tapdata.bigquery.util.tool.Checker;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.type.TapNumber;
 
 public class TableFields {
     private static final String TAG = TableFields.class.getSimpleName();
+    Log log;
+
+    public TableFields(Log log) {
+        this.log = log;
+    }
 
     protected String createTableAppendField(TapField tapField) {
         String datatype = tapField.getDataType().toUpperCase();
@@ -18,7 +24,7 @@ public class TableFields {
             if (tapField.getPrimaryKeyPos() == 1) {
                 fieldSql += " AUTO_INCREMENT";
             } else {
-                TapLogger.warn(TAG, "Field \"{}\" cannot be auto increment in mysql, there can be only one auto column and it must be defined the first key", tapField.getName());
+                log.warn("Field \"{}\" cannot be auto increment in mysql, there can be only one auto column and it must be defined the first key", tapField.getName());
             }
         }
 
