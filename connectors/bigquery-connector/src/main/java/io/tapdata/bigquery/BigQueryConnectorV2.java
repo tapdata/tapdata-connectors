@@ -19,10 +19,8 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
-import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
@@ -144,7 +142,7 @@ public class BigQueryConnectorV2 extends ConnectorBase {
                 this.merge.config().tempCursorSchema(null);
                 stateMap.put(StateMapOperator.TABLE_CONFIG_NAME, null);
             } catch (Exception e) {
-                TapLogger.warn(TAG, " Temporary table cannot be drop temporarily. Details: " + e.getMessage());
+                context.getLog().warn(" Temporary table cannot be drop temporarily. Details: " + e.getMessage());
             }
         }
     }
@@ -158,7 +156,7 @@ public class BigQueryConnectorV2 extends ConnectorBase {
             try {
                 this.merge.dropTemporaryTableByMainTable(dropTableEvent.getTableId());
             } catch (Exception e) {
-                TapLogger.info(TAG, " Temporary table data cannot be cleared temporarily. Details: " + e.getMessage());
+                context.getLog().info(" Temporary table data cannot be cleared temporarily. Details: " + e.getMessage());
             }
         }
     }
@@ -171,11 +169,11 @@ public class BigQueryConnectorV2 extends ConnectorBase {
                 try {
                     this.merge.cleanTemporaryTable(tableId);
                 } catch (Exception e) {
-                    TapLogger.warn(TAG, " Temporary table data cannot be cleared temporarily. Details: " + e.getMessage());
+                    connectorContext.getLog().warn(" Temporary table data cannot be cleared temporarily. Details: " + e.getMessage());
                 }
             }
         } catch (Exception e) {
-            TapLogger.warn(TAG, " Table data cannot be cleared temporarily. Details: " + e.getMessage());
+            connectorContext.getLog().warn(" Table data cannot be cleared temporarily. Details: " + e.getMessage());
         }
     }
 
@@ -216,7 +214,7 @@ public class BigQueryConnectorV2 extends ConnectorBase {
                                 if (e instanceof WriteBigQueryException){
                                     throw new CoreException(e.getMessage());
                                 }else {
-                                    TapLogger.error(TAG, "uploadEvents size {} to table {} failed, {}", writeList.size(), targetTable.getId(), e.getMessage());
+                                    context.getLog().error("uploadEvents size {} to table {} failed, {}", writeList.size(), targetTable.getId(), e.getMessage());
                                     throw new RuntimeException(e);
                                 }
                             }
