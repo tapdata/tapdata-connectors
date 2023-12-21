@@ -7,7 +7,6 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -208,14 +207,14 @@ public class WriteRecord extends BigQueryStart {
         Map<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
         if (null == nameFieldMap || nameFieldMap.isEmpty()) {
             String finalSql = sql.toString();
-            TapLogger.debug(TAG, "Not any fields on tap table,sql must not delete any data,sql is [{}]", finalSql);
+            log.debug("Not any fields on tap table,sql must not delete any data,sql is [{}]", finalSql);
             return finalSql;
         }
         event.forEach(eve -> {
             Map<String, Object> filter = eve.getFilter(tapTable.primaryKeys(true));
             if (null == filter || filter.isEmpty()) {
                 String error = String.format("A tapEvent can not filter primary keys,event = %s", eve);
-                TapLogger.debug(TAG, error);
+                log.debug(error);
                 return;
             }
             int filterSize = filter.size();
@@ -406,7 +405,7 @@ public class WriteRecord extends BigQueryStart {
         if (keySql.length() > 0 && valueSql.length() > 0) {
             return " (" + keySql.toString() + " ) VALUES ( " + valueSql.toString() + " ) ";
         } else {
-            TapLogger.info(TAG, "A insert sql error ,keys or values can not be find. keys = {},values = {}", keySql.toString(), valueSql.toString());
+            log.info("A insert sql error ,keys or values can not be find. keys = {},values = {}", keySql.toString(), valueSql.toString());
             return this.empty;
         }
     }
@@ -428,7 +427,7 @@ public class WriteRecord extends BigQueryStart {
                         .append(this.tab)
         );
         if (subSql.length() <= 0) {
-            TapLogger.debug(TAG, "A update sql error, not key-value for subSql,record = {}", record);
+            log.debug("A update sql error, not key-value for subSql,record = {}", record);
         }
         return subSql.toString();
     }
