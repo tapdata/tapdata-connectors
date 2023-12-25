@@ -58,6 +58,7 @@
 		<module>yashandb-connector</module>
 		<module>greenplum-connector</module>
 		<module>dws-connector</module>
+		<module>azure-cosmosdb-connector</module>
     </modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
@@ -74,6 +75,8 @@
 		<maven.compiler.encoding>UTF-8</maven.compiler.encoding>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<pdk-error-code.version>1.0-SNAPSHOT</pdk-error-code.version>
+		<mockito.version>4.11.0</mockito.version>
+		<byte-buddy.version>1.12.23</byte-buddy.version>
 	</properties>
 
 	<dependencies>
@@ -83,6 +86,12 @@
 			<version>5.8.1</version>
 			<scope>test</scope>
 		</dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-all</artifactId>
+            <version>1.10.19</version>
+            <scope>test</scope>
+        </dependency>
 
 	</dependencies>
 
@@ -164,6 +173,36 @@
 				<artifactId>pdk-error-code</artifactId>
 				<version>${pdk-error-code.version}</version>
 				<scope>provided</scope>
+			</dependency>
+
+			<!-- Mockito -->
+			<dependency>
+				<groupId>org.mockito</groupId>
+				<artifactId>mockito-core</artifactId>
+				<version>${mockito.version}</version>
+				<scope>test</scope>
+			</dependency>
+			<dependency>
+				<groupId>org.mockito</groupId>
+				<artifactId>mockito-junit-jupiter</artifactId>
+				<version>${mockito.version}</version>
+				<scope>test</scope>
+			</dependency>
+			<dependency>
+				<groupId>org.mockito</groupId>
+				<artifactId>mockito-inline</artifactId>
+				<version>${mockito.version}</version>
+				<scope>test</scope>
+			</dependency>
+			<dependency>
+				<groupId>net.bytebuddy</groupId>
+				<artifactId>byte-buddy</artifactId>
+				<version>${byte-buddy.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>net.bytebuddy</groupId>
+				<artifactId>byte-buddy-agent</artifactId>
+				<version>${byte-buddy.version}</version>
 			</dependency>
 
 		</dependencies>
