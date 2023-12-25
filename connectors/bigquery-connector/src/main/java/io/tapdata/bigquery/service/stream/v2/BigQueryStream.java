@@ -9,7 +9,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -68,6 +68,7 @@ public class BigQueryStream extends BigQueryStart {
                         super.config().tableSet(),
                         tableName,
                         super.config().serviceAccount())
+                        .log(log)
                         .client(WriteCommittedStream.createClient(super.config().serviceAccount()))
                         .maxStreamCount(super.config().maxStreamAppendCount())
                         .create();
@@ -92,7 +93,7 @@ public class BigQueryStream extends BigQueryStart {
         Long mergeId = this.stateMap.getLong(tableId, MergeHandel.MERGE_KEY_ID);
         EventAfter eventAfter = new EventAfter(streamToBatchTime)
                 .hasMerged(Objects.nonNull(mergeId))
-                .table(table);
+                .table(table, log);
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         this.tapTable = table;
         eventAfter.convertData(events, this.merge, table);
@@ -112,11 +113,11 @@ public class BigQueryStream extends BigQueryStart {
                 try {
                     this.merge.createTemporaryTable(table, temporaryTableName);
                 }catch (Exception e){
-                    TapLogger.error(TAG,"Temporary table creation failed. temporary table name: {}, table name: {},  ",temporaryTableName,tableId);
+                    log.error("Temporary table creation failed. temporary table name: {}, table name: {},  ",temporaryTableName,tableId);
                 }
                 this.stateMap.saveForTable(tableId, ContextConfig.TEMP_CURSOR_SCHEMA_NAME, temporaryTableName);
                 this.stateMap.save(MergeHandel.BATCH_TO_STREAM_TIME, System.nanoTime());
-                TapLogger.info(TAG, String.format(" The data has been written in stream mode,and will be written to a temporary table. A temporary table has been created for [ %s ] which name is: %s", tableId, temporaryTableName));
+                log.info(String.format(" The data has been written in stream mode,and will be written to a temporary table. A temporary table has been created for [ %s ] which name is: %s", tableId, temporaryTableName));
                 this.tableWithTempTable.put(tableId, temporaryTableName);
             }
             // 启动merge线程
@@ -196,9 +197,11 @@ public class BigQueryStream extends BigQueryStart {
         private Object mergeKeyId;
         public Long streamToBatchTime;
         private TapTable table;
+        private Log log;
 
-        public EventAfter table(TapTable mainTable) {
+        public EventAfter table(TapTable mainTable, Log log) {
             this.table = mainTable;
+            this.log = log;
             return this;
         }
 
@@ -252,14 +255,14 @@ public class BigQueryStream extends BigQueryStart {
                     if (this.isAppend) {
                         this.isAppend = false;
                         this.streamToBatchTime = System.nanoTime();
-                        TapLogger.info(TAG,"The full quantity has ended and is entering the increment. The data will be written to the temporary table. Please note.");
+                        log.info("The full quantity has ended and is entering the increment. The data will be written to the temporary table. Please note.");
                     }
                     if (event instanceof TapUpdateRecordEvent) {
                         this.update++;
                     } else if (event instanceof TapDeleteRecordEvent) {
                         this.delete++;
                     } else {
-                        TapLogger.warn(TAG, "Unable to process invalid time type, invalid record, ignored. ");
+                        log.warn("Unable to process invalid time type, invalid record, ignored. ");
                     }
                 }
                 if (this.isAppend) {
