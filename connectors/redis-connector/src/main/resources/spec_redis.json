@@ -216,6 +216,16 @@
               "label": "Redis",
               "value": "Redis"
             }
+          ],
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
           ]
         },
         "oneKey": {
@@ -230,10 +240,10 @@
           "default": true,
           "x-reactions": [
             {
-              "dependencies": [".valueType"],
+              "dependencies": [".valueType","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{$deps[0] !== 'String'}}"
+                  "visible": "{{$deps[0] !== 'String' && $deps[0] !== 'Redis' && $deps[1].length > 0}}"
                 }
               }
             }
@@ -251,10 +261,10 @@
           "default": true,
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey"],
+              "dependencies": [".valueType",".oneKey","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] !== 'String') && $deps[1]}}"
+                  "visible": "{{($deps[0] !== 'String' && $deps[0] !== 'Redis') && $deps[1] && $deps[2].length > 0}}"
                 }
               }
             }
@@ -272,10 +282,10 @@
           "required": true,
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey","type"],
+              "dependencies": [".valueType",".oneKey","type","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && ($deps[2] !== 'database')}}"
+                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && $deps[0] !== 'Redis' && ($deps[2] !== 'database') && $deps[3].length > 0}}"
                 }
               }
             }
@@ -292,10 +302,10 @@
           },
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey","type"],
+              "dependencies": [".valueType",".oneKey","type","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && ($deps[2] === 'database')}}"
+                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && $deps[0] !== 'Redis' && ($deps[2] === 'database') && $deps[3].length > 0}}"
                 }
               }
             }
@@ -313,10 +323,10 @@
           },
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey","type"],
+              "dependencies": [".valueType",".oneKey","type","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && ($deps[2] === 'database')}}"
+                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && $deps[0] !== 'Redis' && ($deps[2] === 'database') && $deps[3].length > 0}}"
                 }
               }
             }
@@ -333,10 +343,10 @@
           },
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey","type"],
+              "dependencies": [".valueType",".oneKey","type","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && ($deps[2] === 'database')}}"
+                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && $deps[0] !== 'Redis' && ($deps[2] === 'database') && $deps[3].length > 0}}"
                 }
               }
             }
@@ -363,8 +373,11 @@
             }
           ],
           "x-reactions": {
-            "dependencies": [".valueType",".oneKey"],
+            "dependencies": [".valueType",".oneKey","$inputs"],
             "fulfill": {
+              "state": {
+                "visible": "{{$deps[0] !== 'Redis' && $deps[2].length > 0}}"
+              },
               "run": "{{$self.value = 'Json'}}",
               "schema": {
                 "x-component-props.options": "{{$deps[0] === 'Hash' && !$deps[1] ? [$self.dataSource[1]] : $self.dataSource}}"
@@ -385,10 +398,10 @@
           "required": true,
           "x-reactions": [
             {
-              "dependencies": [".valueData"],
+              "dependencies": [".valueData","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{$deps[0] === 'Text'}}"
+                  "visible": "{{$deps[0] === 'Text' && $deps[1].length > 0}}"
                 }
               }
             }
@@ -406,14 +419,34 @@
           "default": true,
           "x-reactions": [
             {
-              "dependencies": [".valueData"],
+              "dependencies": [".valueData","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{$deps[0] === 'Text'}}"
+                  "visible": "{{$deps[0] === 'Text' && $deps[1].length > 0}}"
                 }
               }
             }
           ]
+        },
+        "rateLimit": {
+          "type": "string",
+          "title": "${rateLimit}",
+          "default": 5000,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-index": 4,
+          "x-decorator-props": {
+            "tooltip": "${rateLimitTooltip}",
+            "min": 100
+          },
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          }
         }
       }
     }
@@ -464,7 +497,9 @@
       "valueDataTooltip": "The format of each row of data stored, supporting text and JSON formats",
       "valueJoinStringTooltip": "If the data is in TEXT format, the interval character can be customized",
       "csvFormatTooltip": "Turn on the CSV formatting switch to convert TEXT to a standard line of CSV",
-      "databaseProp": "Please enter a integer between 0 and 15"
+      "databaseProp": "Please enter a integer between 0 and 15",
+      "rateLimit": "Rate Limit QPS",
+      "rateLimitTooltip": "The maximum number of requests per second, the default is 5000"
     },
     "zh_CN": {
       "doc": "docs/redis_zh_CN.md",
@@ -510,8 +545,9 @@
       "valueDataTooltip": "存储的每行数据的格式，支持TEXT、JSON格式",
       "valueJoinStringTooltip": "若数据为TEXT格式，可自定义间隔符",
       "csvFormatTooltip": "打开CSV格式化开关，可以将TEXT转换为CSV的标准行",
-      "databaseProp": "请输入0-15的整数"
-
+      "databaseProp": "请输入0-15的整数",
+      "rateLimit": "限流QPS",
+      "rateLimitTooltip": "QPS限流，默认为5000"
     },
     "zh_TW": {
       "doc": "docs/redis_zh_TW.md",
@@ -557,8 +593,9 @@
       "valueDataTooltip": "存儲的每行數據的格式，支持TEXT、JSON格式",
       "valueJoinStringTooltip": "若數據為TEXT格式，可自定義間隔符",
       "csvFormatTooltip": "打開CSV格式化開關，可以將TEXT轉換為CSV的標準行",
-      "databaseProp": "請輸入0-15的整數"
-
+      "databaseProp": "請輸入0-15的整數",
+      "rateLimit": "限流QPS",
+      "rateLimitTooltip": "QPS限流，默認為5000"
     }
   },
   "dataTypes": {
