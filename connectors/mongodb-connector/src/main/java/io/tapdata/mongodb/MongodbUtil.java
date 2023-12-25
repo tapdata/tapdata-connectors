@@ -85,6 +85,32 @@ public class MongodbUtil {
 		return map;
 	}
 
+	public static void getTimeSeriesCollectionStatus(MongoClient mongoClient, String database, String collectionName,Map<String,Object> tableAttr){
+		if (null == mongoClient || null == database || "".equals(database.trim()) || null == collectionName || "".equals(collectionName.trim())) return ;
+		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
+		BsonDocument bsonDocument = new BsonDocument();
+		bsonDocument.put("listCollections", new BsonInt32(1));
+		bsonDocument.put("filter",new BsonDocument( "name", new BsonString(collectionName)));
+		Document cursor = (Document) mongoDatabase.runCommand(bsonDocument).get("cursor");
+		if(cursor != null && cursor.get("firstBatch")!= null){
+			if(tableAttr == null)tableAttr = new HashMap<>();
+		    List<Document> firstBatch =(List<Document>) cursor.get("firstBatch");
+			Document first = firstBatch.stream().findFirst().orElse(null);
+			if (first != null && first.get("type").equals("timeseries") && first.get("options") != null){
+				Document timeSeries =(Document)first.get("options");
+				Set<Map.Entry<String, Object>> entries = ((Document)timeSeries.get("timeseries")).entrySet();
+				if (!entries.isEmpty()) {
+					Map<String, Object> finalTableAttr = tableAttr;
+					entries.stream()
+							.filter(Objects::nonNull)
+							.forEach(entry ->
+									finalTableAttr.put(entry.getKey(), entry.getValue())
+							);
+				}
+			}
+		}
+	}
+
 	public static Map<String, Object> getCollectionSharkedKeys(MongoClient mongoClient, String database, String collectionName) {
 		Map<String, Object> map = new HashMap<>();
 		final String collectionFullName = String.format("%s.%s", database, collectionName);
