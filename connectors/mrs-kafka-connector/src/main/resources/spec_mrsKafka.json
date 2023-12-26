@@ -1,0 +1,479 @@
+{
+  "properties": {
+    "name": "MrsKafka",
+    "icon": "icons/kafka.png",
+    "doc": "${doc}",
+    "id": "MrsKafka",
+    "authentication": "Alpha",
+    "tags": [
+      "Database",
+      "schema-free"
+    ]
+  },
+  "configOptions": {
+    "connection": {
+      "type": "object",
+      "properties": {
+        "nameSrvAddr": {
+          "required": true,
+          "type": "string",
+          "title": "${nameSrvAddr}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "mq_nameSrvAddr",
+          "x-decorator-props": {
+            "tooltip": "${nameSrvAddrTip}"
+          },
+          "x-index": 1
+        },
+        "mqTopicString": {
+          "type": "string",
+          "title": "${mqTopicString}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${mqTopicStringTooltip}"
+          },
+          "x-component": "Input",
+          "apiServerKey": "mq_topics",
+          "x-index": 8
+        },
+        "huaweiKerberos": {
+          "type": "boolean",
+          "title": "${huaweiKerberos}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "apiServerKey": "huaweiKerberos",
+          "x-reactions": [
+            {
+              "target": "*(huaweiKeytab,huaweiKrb5Conf,huaweiPrincipal,huaweiServiceName,huaweiDomainName,huaweiZookeeperPrincipal)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===true}}"
+                }
+              }
+            }
+          ],
+          "x-index": 60
+        },
+        "huaweiKeytab": {
+          "type": "string",
+          "title": "${huaweiKeytab}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "x-component-props": {
+            "base64": true
+          },
+          "x-decorator-props": {
+            "tooltip": "${huaweiKeytabTip}"
+          },
+          "apiServerKey": "huaweiKeytab",
+          "fileNameField": "huaweiKeytabFile",
+          "required": true,
+          "x-index": 70
+        },
+        "huaweiKrb5Conf": {
+          "type": "string",
+          "title": "${huaweiKrb5Conf}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "x-component-props": {
+            "base64": true
+          },
+          "x-decorator-props": {
+            "tooltip": "${huaweiKrb5ConfTip}"
+          },
+          "apiServerKey": "huaweiKrb5Conf",
+          "fileNameField": "huaweiKrb5ConfFile",
+          "required": true,
+          "x-index": 80
+        },
+        "huaweiPrincipal": {
+          "type": "string",
+          "title": "${huaweiPrincipal}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "huaweiPrincipal",
+          "x-decorator-props": {
+            "tooltip": "${huaweiPrincipalTip}"
+          },
+          "required": true,
+          "x-index": 90
+        },
+        "huaweiServiceName": {
+          "type": "string",
+          "title": "${huaweiServiceName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "huaweiServiceName",
+          "x-decorator-props": {
+            "tooltip": "${huaweiServiceNameTip}"
+          },
+          "required": true,
+          "x-index": 100
+        },
+        "huaweiDomainName": {
+          "type": "string",
+          "title": "${huaweiDomainName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "huaweiDomainName",
+          "required": true,
+          "x-index": 110
+        },
+        "huaweiZookeeperPrincipal": {
+          "type": "string",
+          "title": "${huaweiZookeeperPrincipal}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "huaweiZookeeperPrincipal",
+          "required": true,
+          "x-index": 120
+        },
+        "mqUsername": {
+          "type": "string",
+          "title": "${mqUsername}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "mq_username",
+          "x-index": 130
+        },
+        "mqPassword": {
+          "type": "string",
+          "title": "${mqPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "mq_password",
+          "x-index": 140
+        },
+        "OPTIONAL_FIELDS": {
+          "type": "void",
+          "properties": {
+            "kafkaSaslMechanism": {
+              "type": "string",
+              "title": "${kafkaSaslMechanism}",
+              "default": "PLAIN",
+              "x-decorator": "FormItem",
+              "x-component": "Select",
+              "apiServerKey": "kafkaSaslMechanism",
+              "x-index": 80,
+              "enum": [
+                {
+                  "label": "PLAIN",
+                  "value": "PLAIN"
+                },
+                {
+                  "label": "SHA256",
+                  "value": "SHA256"
+                },
+                {
+                  "label": "SHA512",
+                  "value": "SHA512"
+                }
+              ]
+            },
+            "kafkaIgnoreInvalidRecord": {
+              "type": "boolean",
+              "title": "${kafkaIgnoreInvalidRecord}",
+              "default": false,
+              "x-decorator": "FormItem",
+              "x-component": "Switch",
+              "apiServerKey": "kafkaIgnoreInvalidRecord",
+              "x-index": 90
+            },
+            "kafkaAcks": {
+              "type": "string",
+              "title": "${kafkaAcks}",
+              "default": "-1",
+              "x-decorator": "FormItem",
+              "x-component": "Select",
+              "apiServerKey": "kafkaAcks",
+              "x-index": 100,
+              "enum": [
+                {
+                  "label": "${not_sure}",
+                  "value": "0"
+                },
+                {
+                  "label": "${just_write_master}",
+                  "value": "1"
+                },
+                {
+                  "label": "${write_most_isr}",
+                  "value": "-1"
+                },
+                {
+                  "label": "${write_all_isr}",
+                  "value": "all"
+                }
+              ]
+            },
+            "kafkaCompressionType": {
+              "type": "string",
+              "title": "${kafkaCompressionType}",
+              "default": "gzip",
+              "x-decorator": "FormItem",
+              "x-component": "Select",
+              "apiServerKey": "kafkaCompressionType",
+              "x-index": 110,
+              "enum": [
+                {
+                  "label": "gzip",
+                  "value": "gzip"
+                },
+                {
+                  "label": "snappy",
+                  "value": "snappy"
+                },
+                {
+                  "label": "lz4",
+                  "value": "lz4"
+                },
+                {
+                  "label": "zstd",
+                  "value": "zstd"
+                }
+              ]
+            },
+            "kafkaIgnorePushError": {
+              "type": "boolean",
+              "title": "${kafkaIgnorePushError}",
+              "default": false,
+              "x-decorator": "FormItem",
+              "x-component": "Switch",
+              "apiServerKey": "kafkaIgnorePushError",
+              "x-index": 120
+            }
+          }
+        }
+      }
+    },
+    "node":{
+      "properties": {
+        "enableScript": {
+          "title": "${enableScript}",
+          "type": "boolean",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${scriptTooltip}"
+          }
+        },
+        "partitionNum": {
+          "required": true,
+          "type": "string",
+          "title": "${partitionNum}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "partitionNum",
+          "default": 3,
+          "x-decorator-props": {
+            "tooltip": "${partitionNumTooltip}"
+          },
+          "x-component-props": {
+            "min": 1,
+            "max": 255
+          }
+        },
+        "replicasSize": {
+          "required": true,
+          "type": "string",
+          "title": "${replicasSize}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "replicasSize",
+          "default": 1,
+          "x-decorator-props": {
+            "tooltip": "${replicasSizeTooltip}"
+          },
+          "x-component-props": {
+            "min": 1,
+            "max": 255
+          }
+        },
+        "script": {
+          "type": "string",
+          "required": false,
+          "default": "function process(record, op, conditionKeys){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
+          "x-decorator": "FormItem",
+          "x-component": "JsEditor",
+          "x-component-props": {
+            "options": { "showPrintMargin": false, "useWrapMode": true },
+            "includeBeforeAndAfter": true,
+            "before": "function process(record, op, conditionKeys){",
+            "beforeRegexp": "^[^]*function\\s+process\\s*\\(record, op, conditionKeys\\)\\{",
+            "afterRegexp": "}[^}]*$",
+            "after": "}"
+          },
+          "x-reactions": {
+            "dependencies": [
+              "nodeConfig.enableScript"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "messages": {
+    "default": "en_US",
+    "en_US": {
+      "partitionNumTooltip": "If Topic exists, the number of partitions can only increase, not decrease",
+      "replicasSizeTooltip": "The number of replica sets cannot be changed after the Topic is created. The number of replica sets at creation cannot be greater than the number of Kafka clusters",
+      "replicasSize": "Number of replications",
+      "partitionNum": "Number of partitions",
+      "doc": "docs/kafka_en_US.md",
+      "nameSrvAddr": "Kafka Host",
+      "nameSrvAddrTip": "Kafka host address, multiple addresses are separated by commas, such as 192.168.1.200:9092,192.168.1.201:9092",
+      "mqTopicString": "topic expression",
+      "mqTopicStringTooltip": "Multiple topics are separated by commas, support *? wildcard expression (non regular)",
+      "mqUsername": "User Name",
+      "mqPassword": "Password",
+      "kafkaSaslMechanism": "Encryption",
+      "kafkaIgnoreInvalidRecord": "Ignore non-JSON Object format messages",
+      "kafkaAcks": "ACK confirmation mechanism",
+      "not_sure": "Do not confirm",
+      "just_write_master": "Write to master partition only",
+      "write_most_isr": "Write to most ISR partitions",
+      "write_all_isr": "Write to all ISR partitions",
+      "kafkaCompressionType": "Message compression type",
+      "kafkaIgnorePushError": "Ignore push message exception",
+      "enableScript": "Custom message body format",
+      "script": "script",
+      "scriptTooltip": "1. Parameter Description:\n· 'record' is the data record, including 'header' and 'data', where 'data' contains 'before' and 'after'.\n· 'op' represents the operation type, with a total of 3 options: insert, update, and delete.\n· 'conditionKeys' is the collection of primary key field names.\n2. Examples:\n· Add the operation type to the Kafka message: record.data.op = op\n· Add a custom header: record.header.test='test header'\n· Delete the 'before' field: delete record.data.before\n· Discard the data record: return null",
+      "huaweiKerberos": "Huawei Kerberos Authentication",
+      "huaweiKeytab": "Keytab Secret key file",
+      "huaweiKeytabTip": "The Keytab key file can be downloaded in User -> Download Credentials",
+      "huaweiKrb5Conf": "Krb5.conf configuration files",
+      "huaweiKrb5ConfTip": "The Krb5.conf configuration file can be downloaded in User -> Download Credentials",
+      "huaweiPrincipal": "Huawei username",
+      "huaweiPrincipalTip": "Enter the user name of the Huawei management terminal",
+      "huaweiServiceName": "service name",
+      "huaweiServiceNameTip": "usually is kafka",
+      "huaweiDomainName": "kerberos domain name",
+      "huaweiZookeeperPrincipal":"ZookeeperPrincipal"
+    },
+    "zh_CN": {
+      "partitionNumTooltip": "若Topic存在，分区的数量只能增加不能减小",
+      "replicasSizeTooltip": "副本集的数量在Topic创建后不可更改。并且创建时副本集的数量不能大于Kafka集群的数量。",
+      "replicasSize": "副本数数量",
+      "partitionNum": "分区数量",
+      "doc": "docs/kafka_zh_CN.md",
+      "nameSrvAddr": "Kafka地址",
+      "nameSrvAddrTip": "Kafka地址，多个地址用逗号分隔，如：192.168.1.200:9092,192.168.1.201:9092",
+      "mqTopicString": "主题表达式",
+      "mqTopicStringTooltip": "多个主题用逗号分隔，支持*?通配表达式（非正则）",
+      "mqUsername": "账号",
+      "mqPassword": "密码",
+      "kafkaSaslMechanism": "加密方式",
+      "kafkaIgnoreInvalidRecord": "忽略非JSON对象格式消息",
+      "kafkaAcks": "ACK确认机制",
+      "not_sure": "不确认",
+      "just_write_master": "仅写入master分区",
+      "write_most_isr": "写入大多数ISR分区",
+      "write_all_isr": "写入所有ISR分区",
+      "kafkaCompressionType": "消息压缩类型",
+      "kafkaIgnorePushError": "忽略推送消息异常",
+      "enableScript": "自定义消息体格式",
+      "script": "脚本",
+      "scriptTooltip": "1.参数说明\n·record为每条数据记录，包含header和data，data中包含before和after\n·op为操作类型，共3种：insert，update，delete\n·conditionKeys为主键字段名集合\n2.示例\n·kafka message中添加操作类型: record.data.op = op\n·添加自定义header: record.header.test='test header'\n·删除before: delete record.data.before\n·丢弃该条数据: return null",
+      "huaweiKerberos": "华为Kerberos认证",
+      "huaweiKeytab": "Keytab秘钥文件",
+      "huaweiKeytabTip": "可在用户->下载认证凭证中下载Keytab秘钥文件",
+      "huaweiKrb5Conf": "Krb5.conf配置文件",
+      "huaweiKrb5ConfTip": "可在用户->下载认证凭证中下载Krb5.conf配置文件",
+      "huaweiPrincipal": "账号名称",
+      "huaweiPrincipalTip": "填入华为管理端的用户名",
+      "huaweiServiceName": "服务名",
+      "huaweiServiceNameTip": "一般为kafka",
+      "huaweiDomainName": "kerberos域名",
+      "huaweiZookeeperPrincipal":"Zookeeper认证Principal"
+    },
+    "zh_TW": {
+      "partitionNumTooltip": "若Topic存在，分區的數量只能增加不能減小",
+      "replicasSizeTooltip": "副本集的數量在Topic創建後不能更改，並且創建時副本數的數量不能大於Kafka集群的數量。",
+      "replicasSize": "副本數數量",
+      "partitionNum": "分區數量",
+      "doc": "docs/kafka_zh_TW.md",
+      "nameSrvAddr": "Kafka地址",
+      "nameSrvAddrTip": "Kafka地址，多個地址用逗號分隔，如：192.168.1.200:9092,192.168.1.201:9092",
+      "mqTopicString": "主題表達式",
+      "mqTopicStringTooltip": "多個主題用逗號分隔，支持*?通配運算式（非正則）",
+      "mqUsername": "賬號",
+      "mqPassword": "密碼",
+      "kafkaSaslMechanism": "加密方式",
+      "kafkaIgnoreInvalidRecord": "忽略非JSON對象格式消息",
+      "kafkaAcks": "ACK確認機制",
+      "not_sure": "不確認",
+      "just_write_master": "僅寫入master分區",
+      "write_most_isr": "寫入大多數ISR分區",
+      "write_all_isr": "寫入所有ISR分區",
+      "kafkaCompressionType": "消息壓縮類型",
+      "kafkaIgnorePushError": "忽略推理消息異常",
+      "enableScript": "自定義消息體格式",
+      "script": "腳本",
+      "scriptTooltip": "1.參數說明\n·record為每條數據記錄，包含header和data，data中包含before和after\n·op為操作類型，共有 3 種：insert，update，delete\n·conditionKeys為主鍵字段名集合\n2.示例\n·在 Kafka message中添加操作類型：record.data.op = op\n·添加自訂header：record.header.test = 'test header'\n·刪除before：delete record.data.before\n·丟棄該條數據：return null",
+      "huaweiKerberos": "華爲Kerberos認證",
+      "huaweiKeytab": "Keytab密鑰文件",
+      "huaweiKeytabTip": "可在用戶->下載認真憑證中下載Keytab密鑰文件",
+      "huaweiKrb5Conf": "Krb5.conf配置文件",
+      "huaweiKrb5ConfTip": "可在用戶->下載認證憑證中下載Krb5.conf配置文件",
+      "huaweiPrincipal": "賬號名稱",
+      "huaweiPrincipalTip": "填入華爲管理端的用戶名",
+      "huaweiServiceName": "服務名",
+      "huaweiServiceNameTip": "一般為kafka",
+      "huaweiDomainName": "kerberos域名",
+      "huaweiZookeeperPrincipal":"Zookeeper認證Principal"
+    }
+  },
+  "dataTypes": {
+    "OBJECT": {
+      "to": "TapMap"
+    },
+    "ARRAY": {
+      "to": "TapArray"
+    },
+    "NUMBER": {
+      "precision": [
+        1,
+        1000
+      ],
+      "scale": [
+        0,
+        1000
+      ],
+      "fixed": true,
+      "preferPrecision": 20,
+      "preferScale": 8,
+      "priority": 1,
+      "to": "TapNumber"
+    },
+    "INTEGER": {
+      "bit": 32,
+      "priority": 1,
+      "value": [
+        -2147483648,
+        2147483647
+      ],
+      "to": "TapNumber"
+    },
+    "BOOLEAN": {
+      "to": "TapBoolean"
+    },
+    "STRING": {
+      "byte": 200,
+      "priority": 1,
+      "defaultByte": 200,
+      "preferByte": 200,
+      "to": "TapString"
+    },
+    "TEXT": {
+      "to": "TapString"
+    }
+  }
+}
