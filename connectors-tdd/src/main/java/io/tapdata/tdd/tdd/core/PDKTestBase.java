@@ -89,7 +89,7 @@ public class PDKTestBase {
 
     public static final String inNeedFunFormat = "function.inNeed";
     public static final String anyOneFunFormat = "functions.anyOneNeed";
-    public static final String DEFAULT_TDD_CONFIG_PATH = "connectors-tdd/src/main/resources/default/tdd-default-config.json";
+    public static final String DEFAULT_TDD_CONFIG_PATH = "D:/gittapdata/tapdata-connectors/connectors-tdd/src/main/resources/default/tdd-default-config.json";
 
     private static final String TAG = PDKTestBase.class.getSimpleName();
     protected TapConnector testConnector;
