@@ -1,4 +1,4 @@
-package io.tapdata.connector.hudi;
+package io.tapdata.connector.hudi.write;
 
 import io.tapdata.connector.hive.HiveJdbcContext;
 import io.tapdata.connector.hive.write.HiveJdbcWrite;
