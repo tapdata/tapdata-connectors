@@ -176,6 +176,7 @@ public class RedisReplicatorReader implements AutoCloseable {
             RedisUtil.dress(redisReplicator);
             AtomicReference<String> replId = new AtomicReference<>();
             AtomicLong offsetV1 = new AtomicLong();
+            DefaultDumpValueParser parser = new DefaultDumpValueParser(redisReplicator);
             if (EmptyKit.isNotNull(redisOffset)) {
                 replId.set(redisOffset.getReplId());
                 offsetV1.set(redisOffset.getOffsetV1());
@@ -225,6 +226,20 @@ public class RedisReplicatorReader implements AutoCloseable {
                             replId.set(auxField.getAuxValue());
                             replIdMap.put(replId.get(), node);
                         }
+                    } else if (event instanceof DumpKeyValuePair) {
+                        DumpKeyValuePair dumpEvent = (DumpKeyValuePair) event;
+                        if (dumpEvent.getDb().getDbNumber() != redisConfig.getDatabase()) {
+                            return;
+                        }
+                        Map<String, Object> after = TapSimplify.map(TapSimplify.entry("redis_key", new String(dumpEvent.getKey())));
+                        if (dumpEvent.getValue().length > 10240) {
+                            after.put("redis_value", "value too large, check info");
+                        } else {
+                            after.put("redis_value", dumpValueToJson(parser.parse(dumpEvent).getValue()));
+                        }
+                        TapRecordEvent recordEvent = new TapInsertRecordEvent().init().table(table).after(after).referenceTime(System.currentTimeMillis());
+                        recordEvent.addInfo("redis_event", dumpEvent);
+                        enqueueEvent(recordEvent, null);
                     } else if (event instanceof PingCommand) {
                         enqueueEvent(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis()), new RedisOffset(replId.get(), offsetV1.get()));
                     }
@@ -314,7 +329,9 @@ public class RedisReplicatorReader implements AutoCloseable {
                     isFinish = true;
                 }
             } else {
-                offsetMap.put(replIdMap.get(event.getOffset().getReplId()), event.getOffset());
+                if (EmptyKit.isNotNull(event.getOffset())){
+                    offsetMap.put(replIdMap.get(event.getOffset().getReplId()), event.getOffset());
+                }
                 eventList.add(event.getEvent());
                 if (eventList.size() >= recordSize) {
                     consumer.accept(eventList, offsetMap);
