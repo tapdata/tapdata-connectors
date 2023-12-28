@@ -92,7 +92,9 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     private static String hiveSitePath = "hive-site.xml";
     Configuration hadoopConf;
 
-    Predicate<Void> isAlive;
+    String insertDmlPolicy;
+    String updateDmlPolicy;
+
     Log log;
 
     /**
@@ -100,7 +102,8 @@ public class HuDiWriteBySparkClient extends HudiWrite {
      * */
     private ConcurrentHashMap<String, ClientEntity> tablePathMap;
 
-    private ClientEntity getClientEntity(String tableId) {
+    private ClientEntity getClientEntity(TapTable tapTable) {
+        final String tableId = tapTable.getId();
         ClientEntity clientEntity = null;
         synchronized (clientEntityLock) {
             if (tablePathMap.containsKey(tableId)
@@ -120,14 +123,8 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         sparkConf.setMaster("local");
         sparkConf.set("spark.driver.maxResultSize", "8G");
         sparkConf.set("ipc.maximum.data.length", "8G");
-        String allPrimaryKeys = getAllPrimaryKeys();
-        sparkConf.set("hoodie.datasource.write.recordkey.field", allPrimaryKeys);
-        String allPartitionKeys = getAllPartitionKeys();
-        if (null != allPartitionKeys) {
-            sparkConf.set("hoodie.datasource.write.partitionpath.field", allPartitionKeys);
-        }
         JavaSparkContext jsc = new JavaSparkContext(sparkConf);
-        clientEntity = new ClientEntity(getFileSystem(tableId, tablePath, sparkConf), config.getDatabase(), tableId, tablePath, allPrimaryKeys, allPartitionKeys, jsc, log);
+        clientEntity = new ClientEntity(getFileSystem(tableId, tablePath, sparkConf), config.getDatabase(), tableId, tablePath, tapTable, jsc, log);
         synchronized (clientEntityLock) {
             tablePathMap.put(tableId, clientEntity);
         }
@@ -165,15 +162,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     public HuDiWriteBySparkClient log(Log log) {
         this.log = log;
         return this;
-    }
-
-    public HuDiWriteBySparkClient judgedAlive(Predicate<Void> isAlive) {
-        this.isAlive = isAlive;
-        return this;
-    }
-
-    protected boolean isAlive() {
-        return null != isAlive && isAlive.test(null);
     }
 
     protected void init() {
@@ -225,16 +213,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         return tablePath.get();
     }
 
-    private String getAllPrimaryKeys(){
-
-        return "uuid";
-    }
-
-    private String getAllPartitionKeys(){
-
-        return null;
-    }
-
     private FileSystem getFileSystem(String tableId, String tablePath, SparkConf sparkConf) {
         FileSystem fileSystem;
         try (JavaSparkContext jsc = new JavaSparkContext(sparkConf)) {
@@ -256,135 +234,183 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         return fileSystem;
     }
 
-    private Map<Integer, List<HoodieRecord<HoodieAvroPayload>>> groupRecordsByEventType(List<TapRecordEvent> events) {
-        Map<Integer, List<HoodieRecord<HoodieAvroPayload>>> recordsGroup = new HashMap<>();
+    private WriteListResult<TapRecordEvent> groupRecordsByEventType(TapTable tapTable, List<TapRecordEvent> events, WriteListResult<TapRecordEvent> writeListResult) {
+        TapRecordEvent errorRecord = null;
         List<HoodieRecord<HoodieAvroPayload>> recordsOneBatch = new ArrayList<>();
-        List<List<HoodieKey>> deleteEventsKeys = new ArrayList<>();
+        List<HoodieKey> deleteEventsKeys = new ArrayList<>();
+        TapRecordEvent batchFirstRecord = null;
         int tag = -1;
-        String tableId = null;
-        for (TapRecordEvent e : events) {
-            HoodieRecord<HoodieAvroPayload> hoodieRecord = null;
-            int tempTag = tag;
-            String tempTableId = tableId;
-            if (e instanceof TapInsertRecordEvent) {
-                tag = 1;
-                TapInsertRecordEvent insertRecord = (TapInsertRecordEvent)e;
-                tableId = insertRecord.getTableId();
-                hoodieRecord = genericRecord(tableId, insertRecord.getAfter());
-            } else if (e instanceof TapUpdateRecordEvent) {
-                tag = 2;
-                TapUpdateRecordEvent updateRecord = (TapUpdateRecordEvent)e;
-                tableId = updateRecord.getTableId();
-                hoodieRecord = genericRecord(tableId, updateRecord.getAfter());
-            } else if (e instanceof TapDeleteRecordEvent) {
-                //@TODO how to delete
-                tag = 3;
-                TapDeleteRecordEvent deleteRecord = (TapDeleteRecordEvent)e;
-                tableId = deleteRecord.getTableId();
-                hoodieRecord = genericRecord(tableId, deleteRecord.getBefore());
-            }
+        //String tableId = null;
+        try {
+            for (TapRecordEvent e : events) {
+                if (!isAlive()) break;
+                if (-1 == tag) {
+                    batchFirstRecord = e;
+                }
+                HoodieRecord<HoodieAvroPayload> hoodieRecord = null;
+                int tempTag = tag;
+                //String tempTableId = tableId;
+                try {
+                    if (e instanceof TapInsertRecordEvent) {
+                        tag = 1;
+                        TapInsertRecordEvent insertRecord = (TapInsertRecordEvent) e;
+                        //tableId = insertRecord.getTableId();
+                        hoodieRecord = genericRecord(tapTable, insertRecord.getAfter());
+                    } else if (e instanceof TapUpdateRecordEvent) {
+                        tag = 1;
+                        TapUpdateRecordEvent updateRecord = (TapUpdateRecordEvent) e;
+                        //tableId = updateRecord.getTableId();
+                        hoodieRecord = genericRecord(tapTable, updateRecord.getAfter());
+                    } else if (e instanceof TapDeleteRecordEvent) {
+                        tag = 3;
+                        TapDeleteRecordEvent deleteRecord = (TapDeleteRecordEvent) e;
+                        //tableId = deleteRecord.getTableId();
+                        deleteEventsKeys.add(genericDeleteRecord(tapTable, deleteRecord.getBefore()));
+                    }
 
-            if ((-1 != tempTag && tempTag != tag) || (null != tempTableId && !tempTableId.equals(tableId))) {
-                recordsGroup.put(tempTag, recordsOneBatch);
-                commitButch(tempTag, tempTableId, recordsOneBatch, deleteEventsKeys);
-                recordsOneBatch = new ArrayList<>();
+                    if ((-1 != tempTag && tempTag != tag)) { //|| (null != tempTableId && !tempTableId.equals(tableId))) {
+                        commitButch(tempTag, tapTable, recordsOneBatch, deleteEventsKeys);
+                        batchFirstRecord = e;
+                    }
+                    if (tag > 0 && null != hoodieRecord) {
+                        recordsOneBatch.add(hoodieRecord);
+                    }
+                } catch (Exception fail) {
+                    log.error("target database process message failed", "table name:{},error msg:{}", tapTable.getId(), fail.getMessage(), fail);
+                    errorRecord = batchFirstRecord;
+                    throw fail;
+                }
             }
-            if (tag > 0 && null != hoodieRecord) {
-                recordsOneBatch.add(hoodieRecord);
+            if (!recordsOneBatch.isEmpty() || !deleteEventsKeys.isEmpty()) {
+                try {
+                    commitButch(tag, tapTable, recordsOneBatch, deleteEventsKeys);
+                } catch (Exception fail) {
+                    log.error("target database process message failed", "table name:{},error msg:{}", tapTable.getId(), fail.getMessage(), fail);
+                    errorRecord = batchFirstRecord;
+                    throw fail;
+                }
             }
+        } catch (Throwable e) {
+            if (null != errorRecord) writeListResult.addError(errorRecord, e);
+            throw e;
         }
-
-        return recordsGroup;
+        return writeListResult;
     }
 
-    private void commitButch(int batchType, String tableId, List<HoodieRecord<HoodieAvroPayload>> batch, List<List<HoodieKey>> deleteEventsKeys) {
-        ClientEntity clientEntity = getClientEntity(tableId);
+    private void commitButch(int batchType, TapTable tapTable, List<HoodieRecord<HoodieAvroPayload>> batch, List<HoodieKey> deleteEventsKeys) {
+        ClientEntity clientEntity = getClientEntity(tapTable);
         SparkRDDWriteClient<HoodieAvroPayload> client = clientEntity.getClient();
+        if (null == client) {
+            throw new CoreException("Fail to write recodes, message: SparkRDDWriteClient can not be empty for table {}", clientEntity.tableId);
+        }
+        JavaSparkContext jsc = clientEntity.getJsc();
+        if (null == jsc) {
+            throw new CoreException("Fail to write recodes, message: JavaSparkContext can not be empty for table {}", clientEntity.tableId);
+        }
         switch (batchType) {
             case 1 :
             case 2 :
-                String startCommit = client.startCommit();
-
+                String startCommit = startCommitAndGetCommitTime(clientEntity);
+                client.upsert(jsc.parallelize(batch, 1), startCommit);
+                batch.clear();
                 break;
             case 3 :
-                String startDeleteCommit = client.startCommit();
-
+                String startDeleteCommit = startCommitAndGetCommitTime(clientEntity);
+                client.delete(jsc.parallelize(deleteEventsKeys, 1), startDeleteCommit);
+                deleteEventsKeys.clear();
                 break;
 
         }
     }
 
-    private HoodieRecord<HoodieAvroPayload> genericRecord(String tableId, Map<String, Object> record) {
-        ClientEntity clientEntity = getClientEntity(tableId);
-        Schema schema = clientEntity.getSchema();
-        GenericRecord genericRecord = new GenericData.Record(schema);
-        record.forEach(genericRecord::put);
-        HoodieKey hoodieKey = new HoodieKey(clientEntity.getPrimaryKeys(), clientEntity.getPartitionKeys());
+    private HoodieRecord<HoodieAvroPayload> genericRecord(TapTable tapTable, Map<String, Object> record) {
+        ClientEntity clientEntity = getClientEntity(tapTable);
+        GenericRecord genericRecord = getGenericRecordOfRecord(tapTable, record);
+        HoodieKey hoodieKey =  genericHoodieKey(genericRecord, clientEntity.getPrimaryKeys(), clientEntity.getPartitionKeys());
         HoodieAvroPayload payload = new HoodieAvroPayload(Option.of(genericRecord));
         return new HoodieAvroRecord<>(hoodieKey, payload);
     }
 
-    private List<List<HoodieKey>> genericDeleteRecord(String tableId, Map<String, Object> record) {
-
-        return null;
+    private GenericRecord getGenericRecordOfRecord(TapTable tapTable, Map<String, Object> record) {
+        ClientEntity clientEntity = getClientEntity(tapTable);
+        Schema schema = clientEntity.getSchema();
+        GenericRecord genericRecord = new GenericData.Record(schema);
+        record.forEach(genericRecord::put);
+        return genericRecord;
+    }
+    private HoodieKey genericDeleteRecord(TapTable tapTable, Map<String, Object> record) {
+        ClientEntity clientEntity = getClientEntity(tapTable);
+        GenericRecord genericRecord = getGenericRecordOfRecord(tapTable, record);
+        return genericHoodieKey(genericRecord, clientEntity.getPrimaryKeys(), clientEntity.getPartitionKeys());
     }
 
-    private HoodieKey genericHoodieKey(String tableId, Map<String, Object> record, Set<String> keyNames){
+    private HoodieKey genericHoodieKey(GenericRecord genericRecord, Set<String> keyNames, Set<String> partitionKeys){
         TypedProperties props = new TypedProperties();
-        props.put(KeyGeneratorOptions.RECORDKEY_FIELD_NAME.key(), "");
-        new ComplexKeyGenerator(props);
-        return null;
+        props.put(KeyGeneratorOptions.RECORDKEY_FIELD_NAME.key(), StringUtils.join(keyNames, ","));
+        props.put(KeyGeneratorOptions.PARTITIONPATH_FIELD_NAME.key(), StringUtils.join(partitionKeys, ","));
+        ComplexKeyGenerator keyGenerator = new ComplexKeyGenerator(props);
+        return keyGenerator.getKey(genericRecord);
     }
 
-    private void delete(List<TapRecordEvent> events) {
+//    public void process() {
+//        String tableId = "";
+//        ClientEntity clientEntity = getClientEntity(tableId);
+//
+//        SparkRDDWriteClient<HoodieAvroPayload> client = clientEntity.getClient();
+//        JavaSparkContext jsc = clientEntity.getJsc();
+//
+//
+//
+//        // inserts
+//        String newCommitTime = client.startCommit();
+//        //LOG.info("Starting commit " + newCommitTime);
+//
+//        List<HoodieRecord<HoodieAvroPayload>> records = dataGen.generateInserts(newCommitTime, 10);
+//        List<HoodieRecord<HoodieAvroPayload>> recordsSoFar = new ArrayList<>(records);
+//        JavaRDD<HoodieRecord<HoodieAvroPayload>> writeRecords = jsc.parallelize(records, 1);
+//        client.upsert(writeRecords, newCommitTime);
+//
+//        // updates
+//        newCommitTime = client.startCommit();
+//        //LOG.info("Starting commit " + newCommitTime);
+//        List<HoodieRecord<HoodieAvroPayload>> toBeUpdated = dataGen.generateUpdates(newCommitTime, 2);
+//        records.addAll(toBeUpdated);
+//        recordsSoFar.addAll(toBeUpdated);
+//        writeRecords = jsc.parallelize(records, 1);
+//        client.upsert(writeRecords, newCommitTime);
+//
+//        // Delete
+//        newCommitTime = client.startCommit();
+//        //LOG.info("Starting commit " + newCommitTime);
+//        // just delete half of the records
+//        int numToDelete = recordsSoFar.size() / 2;
+//        List<HoodieKey> toBeDeleted = recordsSoFar.stream().map(HoodieRecord::getKey).limit(numToDelete).collect(Collectors.toList());
+//        JavaRDD<HoodieKey> deleteRecords = jsc.parallelize(toBeDeleted, 1);
+//        client.delete(deleteRecords, newCommitTime);
+//
+//        // compaction
+//        if (HoodieTableType.valueOf(tableType) == HoodieTableType.MERGE_ON_READ) {
+//            Option<String> instant = client.scheduleCompaction(Option.empty());
+//            HoodieWriteMetadata<JavaRDD<WriteStatus>> writeStatues = client.compact(instant.get());
+//            client.commitCompaction(instant.get(), writeStatues.getCommitMetadata().get(), Option.empty());
+//        }
+//
+//    }
 
+    public WriteListResult<TapRecordEvent> writeByClient(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents) throws Throwable {
+        this.insertDmlPolicy = dmlInsertPolicy(tapConnectorContext);
+        this.updateDmlPolicy = dmlUpdatePolicy(tapConnectorContext);
+        WriteListResult<TapRecordEvent> writeListResult = new WriteListResult<>(0L, 0L, 0L, new HashMap<>());
+        //if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(insertDmlPolicy)) {
+            return groupRecordsByEventType(tapTable, tapRecordEvents, writeListResult);
+       // } else {
+           // return null;
+       // }
     }
 
-    public void process() {
-        String tableId = "";
-        ClientEntity clientEntity = getClientEntity(tableId);
-
-        SparkRDDWriteClient<HoodieAvroPayload> client = clientEntity.getClient();
-        JavaSparkContext jsc = clientEntity.getJsc();
-
-
-
-        // inserts
-        String newCommitTime = client.startCommit();
-        //LOG.info("Starting commit " + newCommitTime);
-
-        List<HoodieRecord<HoodieAvroPayload>> records = dataGen.generateInserts(newCommitTime, 10);
-        List<HoodieRecord<HoodieAvroPayload>> recordsSoFar = new ArrayList<>(records);
-        JavaRDD<HoodieRecord<HoodieAvroPayload>> writeRecords = jsc.parallelize(records, 1);
-        client.upsert(writeRecords, newCommitTime);
-
-        // updates
-        newCommitTime = client.startCommit();
-        //LOG.info("Starting commit " + newCommitTime);
-        List<HoodieRecord<HoodieAvroPayload>> toBeUpdated = dataGen.generateUpdates(newCommitTime, 2);
-        records.addAll(toBeUpdated);
-        recordsSoFar.addAll(toBeUpdated);
-        writeRecords = jsc.parallelize(records, 1);
-        client.upsert(writeRecords, newCommitTime);
-
-        // Delete
-        newCommitTime = client.startCommit();
-        //LOG.info("Starting commit " + newCommitTime);
-        // just delete half of the records
-        int numToDelete = recordsSoFar.size() / 2;
-        List<HoodieKey> toBeDeleted = recordsSoFar.stream().map(HoodieRecord::getKey).limit(numToDelete).collect(Collectors.toList());
-        JavaRDD<HoodieKey> deleteRecords = jsc.parallelize(toBeDeleted, 1);
-        client.delete(deleteRecords, newCommitTime);
-
-        // compaction
-        if (HoodieTableType.valueOf(tableType) == HoodieTableType.MERGE_ON_READ) {
-            Option<String> instant = client.scheduleCompaction(Option.empty());
-            HoodieWriteMetadata<JavaRDD<WriteStatus>> writeStatues = client.compact(instant.get());
-            client.commitCompaction(instant.get(), writeStatues.getCommitMetadata().get(), Option.empty());
-        }
-
+    public WriteListResult<TapRecordEvent> writeRecord(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents) throws Throwable {
+        return this.writeByClient(tapConnectorContext, tapTable, tapRecordEvents);
     }
-
 
     @Override
     public WriteListResult<TapRecordEvent> writeJdbcRecord(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents) throws Throwable {
@@ -408,11 +434,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     @Override
     protected int doUpdateOne(TapConnectorContext tapConnectorContext, TapTable tapTable, TapRecordEvent tapRecordEvent) throws Throwable {
         throw new UnsupportedOperationException("UnSupport JDBC operator");
-    }
-
-    public String file(String filePath) {
-        System.out.println(filePath);
-        return "D:\\Gavin\\kit\\IDEA\\hudi-demo\\java-client\\src\\main\\resources\\" + filePath;
     }
 
     private String startCommitAndGetCommitTime(ClientEntity clientEntity) {
