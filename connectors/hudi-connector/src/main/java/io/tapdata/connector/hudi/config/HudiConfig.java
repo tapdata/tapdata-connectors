@@ -165,4 +165,9 @@ public class HudiConfig extends HiveConfig {
     public void setHdfsAddr(String hdfsAddr) {
         this.hdfsAddr = hdfsAddr;
     }
+
+    public String authFilePath(String filePath) {
+        System.out.println(filePath);
+        return "D:\\Gavin\\kit\\IDEA\\hudi-demo\\java-client\\src\\main\\resources\\" + filePath;
+    }
 }

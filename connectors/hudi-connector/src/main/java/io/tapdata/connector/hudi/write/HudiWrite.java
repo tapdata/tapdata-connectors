@@ -49,6 +49,10 @@ public class HudiWrite extends HiveJdbcWrite {
 
     }
 
+    protected boolean isAlive() {
+        return null != running && !running.get();
+    }
+
 
     public void onDestroy() {
         this.running.set(false);
@@ -83,21 +87,42 @@ public class HudiWrite extends HiveJdbcWrite {
         return connection2;
     }
 
-    @Override
-    public WriteListResult<TapRecordEvent> writeJdbcRecord(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents) throws Throwable {
-        boolean isMor = queryTableType(tapConnectorContext, tapTable);
-        if (isMor) throw new RuntimeException("Mor tables are not supported currently.");
+    public WriteListResult<TapRecordEvent> writeByClient(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents) throws Throwable {
+        throw new UnsupportedOperationException("Unsupport write by spark cllient");
+    }
+
+    public WriteListResult<TapRecordEvent> writeRecord(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents) throws Throwable {
+       return this.writeJdbcRecord(tapConnectorContext, tapTable, tapRecordEvents);
+    }
+
+    protected String dmlInsertPolicy(TapConnectorContext tapConnectorContext) {
         String insertDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
             insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
         }
+        return insertDmlPolicy;
+    }
+
+    protected String dmlUpdatePolicy(TapConnectorContext tapConnectorContext) {
+        String updateDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
+        if (updateDmlPolicy == null) {
+            updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_INSERT_ON_NON_EXISTS;
+        }
+        return updateDmlPolicy;
+    }
+
+        @Override
+    public WriteListResult<TapRecordEvent> writeJdbcRecord(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents) throws Throwable {
+        boolean isMor = queryTableType(tapConnectorContext, tapTable);
+        if (isMor) throw new RuntimeException("Mor tables are not supported currently.");
+        String insertDmlPolicy = dmlInsertPolicy(tapConnectorContext);
         WriteListResult<TapRecordEvent> writeListResult = new WriteListResult<>(0L, 0L, 0L, new HashMap<>());
         TapRecordEvent errorRecord = null;
         List<TapRecordEvent> tapRecordEventList = new ArrayList<>();
         try {
             int msgCnt = 0;
             for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
-                if (!running.get()) break;
+                if (!isAlive()) break;
                 try {
                     if (tapRecordEvent instanceof TapInsertRecordEvent) {
                         tapRecordEventList.add(tapRecordEvent);
