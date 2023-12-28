@@ -544,8 +544,8 @@ public class MongodbConnector extends ConnectorBase {
 		//created shared collection
 		final boolean isShardCollection = createSharedCollection(nodeConfig, table, pks, database, log);
 
-		//@todo created capped collection
-		//createCappedCollection(table, isShardCollection, log);
+		//created capped collection
+		createCappedCollection(table, isShardCollection, log);
 
 		return createTableOptions;
 	}
@@ -738,13 +738,13 @@ public class MongodbConnector extends ConnectorBase {
 		Map<String, Object> tableAttr = Optional.ofNullable(table.getTableAttr()).orElse(new HashMap<>());
 		Object isCapped = tableAttr.get("capped");//
 		if (isCapped instanceof Boolean && (Boolean) isCapped) {
-			Long maxCount = toLong(tableAttr.get("size"));
+			Long maxCount = toLong(tableAttr.get("max"));
 			Long maxByteSize = toLong(tableAttr.get("maxSize"));
 			try {
 				if (!isShardCollection) {
 					CreateCollectionOptions options = new CreateCollectionOptions();
 					options.capped(true);
-					if (maxCount > 0) {
+					if (maxCount >= 0) {
 						options.maxDocuments(maxCount);
 					}
 					options.sizeInBytes(maxByteSize);
