@@ -2,11 +2,14 @@ package io.tapdata.connector.hudi.write;
 
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapTable;
 import org.apache.avro.Schema;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hudi.client.SparkRDDWriteClient;
 import org.apache.hudi.client.common.HoodieSparkEngineContext;
 import org.apache.hudi.common.model.HoodieAvroPayload;
+import org.apache.hudi.common.model.WriteOperationType;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.TableSchemaResolver;
 import org.apache.hudi.config.HoodieCompactionConfig;
@@ -15,7 +18,10 @@ import org.apache.hudi.config.HoodieWriteConfig;
 import org.apache.hudi.index.HoodieIndex;
 import org.apache.spark.api.java.JavaSparkContext;
 
+import java.util.Collection;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.Set;
 
 public class ClientEntity implements AutoCloseable {
     public static final long CACHE_TIME = 300000; //5min
@@ -27,8 +33,8 @@ public class ClientEntity implements AutoCloseable {
     JavaSparkContext jsc;
     SparkRDDWriteClient<HoodieAvroPayload> client;
 
-    String primaryKeys;
-    String partitionKeys;
+    Set<String> primaryKeys;
+    Set<String> partitionKeys;
 
     Log log;
 
@@ -36,24 +42,32 @@ public class ClientEntity implements AutoCloseable {
 
     Schema schema;
 
-    public ClientEntity(FileSystem fs, String database, String tableId, String tablePath, String primaryKeys, String partitionKeys, JavaSparkContext jsc, Log log) {
+    TapTable tapTable;
+
+    public ClientEntity(FileSystem fs, String database, String tableId, String tablePath,  TapTable tapTable, JavaSparkContext jsc, Log log) {
         this.fs = fs;
         this.database = database;
         this.tableId = tableId;
         this.tablePath = tablePath;
-        this.primaryKeys = primaryKeys;
-        this.partitionKeys = partitionKeys;
+        this.tapTable = tapTable;
+        this.primaryKeys = getAllPrimaryKeys();
+        this.partitionKeys = getAllPartitionKeys();
         this.jsc = jsc;
+        saveArvoSchema();
         HoodieWriteConfig cfg = HoodieWriteConfig.newBuilder()
                 .withPath(tablePath)
-                .withSchema(HoodieExampleDataGenerator.TRIP_EXAMPLE_SCHEMA)
+                .withSchema(schema.toString())
                 .withParallelism(2, 2)
-                .withDeleteParallelism(2).forTable(tableId)
+                .withDeleteParallelism(2)
+                //.withRecordKeyFields(StringUtils.join(partitionKeys, ","))
+                //.withPartitionFields("col2:simple,col4:timestamp")
+                .forTable(tableId)
                 .withIndexConfig(HoodieIndexConfig.newBuilder().withIndexType(HoodieIndex.IndexType.BLOOM).build())
                 .withCompactionConfig(HoodieCompactionConfig.newBuilder().archiveCommitsWith(20, 30).build())
                 .build();
         this.client = new SparkRDDWriteClient<>(new HoodieSparkEngineContext(jsc), cfg);
-        saveArvoSchema();
+        // @TODO set write mode: upsert or only insert:
+        // @TODO this.client.setOperationType(WriteOperationType.BOOTSTRAP);
         this.log = log;
         updateTimestamp();
     }
@@ -185,22 +199,22 @@ public class ClientEntity implements AutoCloseable {
         }
     }
 
-    public String getPrimaryKeys() {
+    public Set<String> getPrimaryKeys() {
         updateTimestamp();
         return primaryKeys;
     }
 
-    public void setPrimaryKeys(String primaryKeys) {
+    public void setPrimaryKeys(Set<String> primaryKeys) {
         updateTimestamp();
         this.primaryKeys = primaryKeys;
     }
 
-    public String getPartitionKeys() {
+    public Set<String> getPartitionKeys() {
         updateTimestamp();
         return partitionKeys;
     }
 
-    public void setPartitionKeys(String partitionKeys) {
+    public void setPartitionKeys(Set<String> partitionKeys) {
         updateTimestamp();
         this.partitionKeys = partitionKeys;
     }
@@ -208,5 +222,21 @@ public class ClientEntity implements AutoCloseable {
     public synchronized long getTimestamp() {
         updateTimestamp();
         return timestamp;
+    }
+
+    private Set<String> getAllPrimaryKeys(){
+        Set<String> pks = new HashSet<>();
+        Collection<String> keys = tapTable.primaryKeys(true);
+        if (null != keys && !keys.isEmpty()) {
+            pks.addAll(keys);
+        } else {
+            pks.add("uuid");
+        }
+        return pks;
+    }
+
+    private Set<String> getAllPartitionKeys(){
+        //@TODO do not support partition table now,
+        return null;
     }
 }

@@ -4,6 +4,7 @@ import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.hive.HiveConnector;
 import io.tapdata.connector.hudi.config.HudiConfig;
+import io.tapdata.connector.hudi.write.HuDiWriteBySparkClient;
 import io.tapdata.connector.hudi.write.HudiWrite;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
@@ -54,7 +55,7 @@ public class HudiConnector extends HiveConnector {
         commonDbConfig = hiveConfig;
         jdbcContext = hiveJdbcContext;
         commonSqlMaker = new CommonSqlMaker('`');
-        hudiWrite = new HudiWrite(hiveJdbcContext, hudiConfig);
+        hudiWrite = new HuDiWriteBySparkClient(hiveJdbcContext, hudiConfig);
 
     }
 
@@ -115,7 +116,7 @@ public class HudiConnector extends HiveConnector {
 
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
-        WriteListResult<TapRecordEvent> writeListResult = hudiWrite.writeJdbcRecord(tapConnectorContext, tapTable, tapRecordEvents);
+        WriteListResult<TapRecordEvent> writeListResult = hudiWrite.writeRecord(tapConnectorContext, tapTable, tapRecordEvents);
         consumer.accept(writeListResult);
     }
 
