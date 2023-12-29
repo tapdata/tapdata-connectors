@@ -33,9 +33,6 @@ public class ClientEntity implements AutoCloseable {
     String tablePath;
     Path path;
 
-    //JavaSparkContext jsc;
-
-    //SparkRDDWriteClient<HoodieAvroPayload> client;
     HoodieJavaWriteClient<HoodieRecordPayload> client;
 
     Set<String> primaryKeys;
@@ -52,49 +49,97 @@ public class ClientEntity implements AutoCloseable {
     TapTable tapTable;
     Configuration hadoopConf;
 
-//    public ClientEntity(FileSystem fs, String database, String tableId, String tablePath,  TapTable tapTable, JavaSparkContext jsc, Log log) {
-//        this.fs = fs;
-//        this.database = database;
-//        this.tableId = tableId;
-//        this.tablePath = tablePath;
-//        this.tapTable = tapTable;
-//        this.primaryKeys = getAllPrimaryKeys();
-//        this.partitionKeys = getAllPartitionKeys();
-//        this.jsc = jsc;
-//        saveArvoSchema();
-//        HoodieWriteConfig cfg = HoodieWriteConfig.newBuilder()
-//                .withPath(tablePath)
-//                .withSchema(schema.toString())
-//                .withParallelism(2, 2)
-//                .withDeleteParallelism(2)
-//                //.withRecordKeyFields(StringUtils.join(partitionKeys, ","))
-//                //.withPartitionFields("col2:simple,col4:timestamp")
-//                .forTable(tableId)
-//                .withIndexConfig(HoodieIndexConfig.newBuilder().withIndexType(HoodieIndex.IndexType.BLOOM).build())
-//                .withCompactionConfig(HoodieCompactionConfig.newBuilder().archiveCommitsWith(20, 30).build())
-//                .build();
-//        this.client = new SparkRDDWriteClient<>(new HoodieSparkEngineContext(jsc), cfg);
-//        // @TODO set write mode: upsert or only insert:
-//        // @TODO this.client.setOperationType(WriteOperationType.BOOTSTRAP);
-//        this.log = log;
-//        updateTimestamp();
-//    }
-
     WriteOperationType operationType;
-    public ClientEntity(Configuration hadoopConf, String database, String tableId, String tablePath,  TapTable tapTable, Log log) {
-        //@TODO
-        this.operationType = WriteOperationType.UPSERT;
 
-        this.hadoopConf = hadoopConf;
-        this.tableId = tableId;
-        this.tablePath = tablePath;
+    static class Param {
+        Configuration hadoopConf;
+        String database;
+        String tableId;
+        String tablePath;
+        TapTable tapTable;
+        WriteOperationType operationType;
+        Log log;
+
+        public static Param witStart() {
+            return new Param();
+        }
+        public Param withHadoopConf(Configuration hadoopConf) {
+            this.hadoopConf = hadoopConf;
+            return this;
+        }
+
+        public Param withDatabase(String database) {
+            this.database = database;
+            return this;
+        }
+
+        public Param withTableId(String tableId) {
+            this.tableId = tableId;
+            return this;
+        }
+
+        public Param withTablePath(String tablePath) {
+            this.tablePath = tablePath;
+            return this;
+        }
+
+        public Param withTapTable(TapTable tapTable) {
+            this.tapTable = tapTable;
+            return this;
+        }
+
+        public Param withOperationType(WriteOperationType operationType) {
+            this.operationType = operationType;
+            return this;
+        }
+
+        public Param withLog(Log log) {
+            this.log = log;
+            return this;
+        }
+
+        public Configuration getHadoopConf() {
+            return hadoopConf;
+        }
+
+        public String getDatabase() {
+            return database;
+        }
+
+        public String getTableId() {
+            return tableId;
+        }
+
+        public String getTablePath() {
+            return tablePath;
+        }
+
+        public TapTable getTapTable() {
+            return tapTable;
+        }
+
+        public WriteOperationType getOperationType() {
+            return operationType;
+        }
+
+        public Log getLog() {
+            return log;
+        }
+    }
+    public ClientEntity(Param param) {
+        //@TODO
+        this.operationType = param.getOperationType();
+
+        this.hadoopConf = param.getHadoopConf();
+        this.tableId = param.getTableId();
+        this.tablePath = param.getTablePath();
         try {
             initFs();
         } catch (IOException e) {
             throw new CoreException("Can not init FileSystem, table path: {}", tablePath, e);
         }
-        this.database = database;
-        this.tapTable = tapTable;
+        this.database = param.getDatabase();
+        this.tapTable = param.getTapTable();
         this.primaryKeys = getAllPrimaryKeys();
         this.partitionKeys = getAllPartitionKeys();
         saveArvoSchema();
@@ -103,7 +148,7 @@ public class ClientEntity implements AutoCloseable {
         } catch (IOException e) {
             throw new CoreException("Can not init Hadoop client, table path: {}", tablePath, e);
         }
-        this.log = log;
+        this.log = param.getLog();
         updateTimestamp();
     }
 
