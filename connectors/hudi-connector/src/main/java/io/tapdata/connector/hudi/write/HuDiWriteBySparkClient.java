@@ -22,7 +22,6 @@ import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hudi.client.HoodieJavaWriteClient;
 import org.apache.hudi.common.config.TypedProperties;
@@ -34,9 +33,8 @@ import org.apache.hudi.keygen.constant.KeyGeneratorOptions;
 
 public class HuDiWriteBySparkClient extends HudiWrite {
     private final ScheduledExecutorService cleanService = Executors.newSingleThreadScheduledExecutor();
-    private ScheduledFuture<?> cleanFuture;
+    private final ScheduledFuture<?> cleanFuture;
     private static final String DESCRIBE_EXTENDED_SQL = "describe Extended `%s`.`%s`";
-    private static String tableType = HoodieTableType.COPY_ON_WRITE.name();
     Configuration hadoopConf;
 
     String insertDmlPolicy;
@@ -51,7 +49,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
 
     private ClientEntity getClientEntity(TapTable tapTable) {
         final String tableId = tapTable.getId();
-        ClientEntity clientEntity = null;
+        ClientEntity clientEntity;
         synchronized (clientEntityLock) {
             if (tablePathMap.containsKey(tableId)
                     && null != tablePathMap.get(tableId)
@@ -61,16 +59,15 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             }
         }
         String tablePath = getTablePath(tableId);
-        /**
-         * @see org.apache.hudi.keygen.constant.KeyGeneratorOptions
-         * **/
+
+        //org.apache.hudi.keygen.constant.KeyGeneratorOptions
         // add parimary keys : hoodie.datasource.write.recordkey.field
         // add partition keys : hoodie.datasource.write.partitionpath.field
-//        SparkConf sparkConf = HoodieExampleSparkUtils.buildSparkConf("hoodie-client-example", hadoopConf.getValByRegex(".*"));
-//        sparkConf.setMaster("local");
-//        sparkConf.set("spark.driver.maxResultSize", "8G");
-//        sparkConf.set("ipc.maximum.data.length", "8G");
-//        JavaSparkContext jsc = new JavaSparkContext(sparkConf);
+        //SparkConf sparkConf = HoodieExampleSparkUtils.buildSparkConf("hoodie-client-example", hadoopConf.getValByRegex(".*"));
+        //sparkConf.setMaster("local");
+        //sparkConf.set("spark.driver.maxResultSize", "8G");
+        //sparkConf.set("ipc.maximum.data.length", "8G");
+        //JavaSparkContext jsc = new JavaSparkContext(sparkConf);
         clientEntity = new ClientEntity(hadoopConf, config.getDatabase(), tableId, tablePath, tapTable, log);
         synchronized (clientEntityLock) {
             tablePathMap.put(tableId, clientEntity);
@@ -79,7 +76,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     }
 
     HudiConfig config;
-    FileSystem fs;
 
     final Object clientEntityLock = new Object();
     public HuDiWriteBySparkClient(HiveJdbcContext hiveJdbcContext, HudiConfig hudiConfig) {
