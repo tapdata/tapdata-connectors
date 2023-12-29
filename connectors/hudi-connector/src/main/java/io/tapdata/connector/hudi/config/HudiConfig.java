@@ -84,7 +84,8 @@ public class HudiConfig extends HiveConfig {
         if (krb5) {
             String confPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.KRB5_NAME);
             confPath = confPath.replaceAll("\\\\","/");
-            authenticate(FileUtil.paths(confPath, Krb5Util.USER_KEY_TAB_NAME), principal, confPath);
+            final String userPrincipal = getUser() + "@" + KerberosUtil.DEFAULT_REALM;
+            authenticate(FileUtil.paths(confPath, Krb5Util.USER_KEY_TAB_NAME), userPrincipal, confPath);
             System.setProperty("java.security.krb5.conf", confPath);
             String zkPrincipal = "zookeeper/" + getUserRealm(this.getKrb5Conf());
             System.setProperty("zookeeper.server.principal", zkPrincipal);
