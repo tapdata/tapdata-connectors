@@ -373,6 +373,6 @@ public class ClientEntity implements AutoCloseable {
 
     private Set<String> getAllPartitionKeys(){
         //@TODO do not support partition table now,
-        return null;
+        return new HashSet<>();
     }
 }
