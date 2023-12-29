@@ -1,19 +1,34 @@
 package io.tapdata.connector.hudi.config;
 
 import io.tapdata.connector.hive.config.HiveConfig;
+import io.tapdata.connector.hudi.util.FileUtil;
 import io.tapdata.connector.hudi.util.KerberosUtil;
 import io.tapdata.connector.hudi.util.Krb5Util;
+import io.tapdata.connector.hudi.util.SiteXMLUtil;
+import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.kit.EmptyKit;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.security.UserGroupInformation;
 
 import java.util.Map;
 
 public class HudiConfig extends HiveConfig {
+    public static final Object AUTH_LOCK = new Object();
     private static final String HIVE_DRIVER = "org.apache.hive.jdbc.HiveDriver";
-
+    private String hadoopCoreSiteXML;
+    private String hdfsSiteXML;
+    private String hiveSiteXML;
+    Log log;
 
     public HudiConfig(String connectorId) {
         super();
         this.connectorId = connectorId;
+    }
+
+    public HudiConfig log(Log log) {
+        this.log = log;
+        return this;
     }
 
     public String getDatabaseUrlPattern() {
@@ -56,16 +71,20 @@ public class HudiConfig extends HiveConfig {
     public HudiConfig load(Map<String, Object> map) {
         assert beanUtils != null;
         beanUtils.mapToBean(map, this);
+        final String catalog = "connections-" + connectorId;
         if (krb5) {
-            krb5Path = Krb5Util.saveByCatalog("connections-" + connectorId, krb5Keytab, krb5Conf, true);
+            krb5Path = Krb5Util.saveByCatalog(catalog, krb5Keytab, krb5Conf, true);
         }
+        //save core-site.xml, hdfs-site.xml, hive-site.xml
+        this.xmlPath = SiteXMLUtil.saveSiteXMLS(catalog, hadoopCoreSiteXML, hdfsSiteXML, hiveSiteXML);
         return this;
     }
 
-    public  void init(){
+    public void init(){
         if (krb5) {
-            String confPath=  Krb5Util.confPath(this.getKrb5Path());
+            String confPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.KRB5_NAME);
             confPath = confPath.replaceAll("\\\\","/");
+            authenticate(FileUtil.paths(confPath, Krb5Util.USER_KEY_TAB_NAME), principal, confPath);
             System.setProperty("java.security.krb5.conf", confPath);
             String zkPrincipal = "zookeeper/" + getUserRealm(this.getKrb5Conf());
             System.setProperty("zookeeper.server.principal", zkPrincipal);
@@ -73,6 +92,24 @@ public class HudiConfig extends HiveConfig {
         if (this.getSsl()) {
             System.setProperty("zookeeper.clientCnxnSocket", "org.apache.zookeeper.ClientCnxnSocketNetty");
             System.setProperty("zookeeper.client.secure", "true");
+        }
+    }
+
+    private void authenticate(String localKeytabPath, String principal, String krb5Path) {
+        try {
+            synchronized (AUTH_LOCK) {
+                System.clearProperty("java.security.krb5.conf");
+                System.setProperty("java.security.krb5.conf", krb5Path);
+                Configuration conf = new Configuration();
+                conf.set("hadoop.security.authentication", "kerberos");
+                UserGroupInformation.setConfiguration(conf);
+                UserGroupInformation.loginUserFromKeytab(principal, localKeytabPath);
+            }
+            if (null != log) {
+                log.info("Safety certification passed");
+            }
+        } catch (Exception e) {
+            throw new CoreException("Fail to get certification, message: {}", e.getMessage(), e);
         }
     }
 
@@ -96,6 +133,7 @@ public class HudiConfig extends HiveConfig {
     private String nameSrvAddr;
     private Boolean krb5;
     private String krb5Path;
+    private String xmlPath;
     private String krb5Keytab;
     private String krb5Conf;
     private Boolean ssl;
@@ -166,8 +204,31 @@ public class HudiConfig extends HiveConfig {
         this.hdfsAddr = hdfsAddr;
     }
 
+    public String getHadoopCoreSiteXML() {
+        return hadoopCoreSiteXML;
+    }
+
+    public void setHadoopCoreSiteXML(String hadoopCoreSiteXML) {
+        this.hadoopCoreSiteXML = hadoopCoreSiteXML;
+    }
+
+    public String getHdfsSiteXML() {
+        return hdfsSiteXML;
+    }
+
+    public void setHdfsSiteXML(String hdfsSiteXML) {
+        this.hdfsSiteXML = hdfsSiteXML;
+    }
+
+    public String getHiveSiteXML() {
+        return hiveSiteXML;
+    }
+
+    public void setHiveSiteXML(String hiveSiteXML) {
+        this.hiveSiteXML = hiveSiteXML;
+    }
+
     public String authFilePath(String filePath) {
-        System.out.println(filePath);
-        return "D:\\Gavin\\kit\\IDEA\\hudi-demo\\java-client\\src\\main\\resources\\" + filePath;
+        return FileUtil.paths(xmlPath, filePath);
     }
 }
