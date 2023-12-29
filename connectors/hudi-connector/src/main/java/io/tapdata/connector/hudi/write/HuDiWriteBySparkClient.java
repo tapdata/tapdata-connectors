@@ -14,6 +14,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -39,6 +40,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
 
     String insertDmlPolicy;
     String updateDmlPolicy;
+    WriteOperationType appendType;
 
     Log log;
 
@@ -59,16 +61,15 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             }
         }
         String tablePath = getTablePath(tableId);
-
-        //org.apache.hudi.keygen.constant.KeyGeneratorOptions
-        // add parimary keys : hoodie.datasource.write.recordkey.field
-        // add partition keys : hoodie.datasource.write.partitionpath.field
-        //SparkConf sparkConf = HoodieExampleSparkUtils.buildSparkConf("hoodie-client-example", hadoopConf.getValByRegex(".*"));
-        //sparkConf.setMaster("local");
-        //sparkConf.set("spark.driver.maxResultSize", "8G");
-        //sparkConf.set("ipc.maximum.data.length", "8G");
-        //JavaSparkContext jsc = new JavaSparkContext(sparkConf);
-        clientEntity = new ClientEntity(hadoopConf, config.getDatabase(), tableId, tablePath, tapTable, log);
+        clientEntity = new ClientEntity(
+            ClientEntity.Param.witStart()
+                    .withHadoopConf(hadoopConf)
+                    .withDatabase(config.getDatabase())
+                    .withTableId(tableId)
+                    .withTablePath(tablePath)
+                    .withTapTable(tapTable)
+                    .withOperationType(appendType)
+                    .withLog(log));
         synchronized (clientEntityLock) {
             tablePathMap.put(tableId, clientEntity);
         }
@@ -263,6 +264,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     public WriteListResult<TapRecordEvent> writeByClient(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents) throws Throwable {
         this.insertDmlPolicy = dmlInsertPolicy(tapConnectorContext);
         this.updateDmlPolicy = dmlUpdatePolicy(tapConnectorContext);
+        this.appendType = appendType(tapConnectorContext);
         WriteListResult<TapRecordEvent> writeListResult = new WriteListResult<>(0L, 0L, 0L, new HashMap<>());
         //if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(insertDmlPolicy)) {
             return groupRecordsByEventType(tapTable, tapRecordEvents, writeListResult);
@@ -315,5 +317,19 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         hadoopConf.addResource(new Path(config.authFilePath(SiteXMLUtil.CORE_SITE_NAME)));
         hadoopConf.addResource(new Path(config.authFilePath(SiteXMLUtil.HDFS_SITE_NAME)));
         hadoopConf.addResource(new Path(config.authFilePath(SiteXMLUtil.HIVE_SITE_NAME)));
+    }
+
+    /**
+     * @deprecated engine not support send writeStrategy to connector
+     * hudi only support updateOrInsert or appendWrite now
+     * */
+    protected WriteOperationType appendType(TapConnectorContext tapConnectorContext) {
+        DataMap configOptions = tapConnectorContext.getSpecification().getConfigOptions();
+        String writeStrategy = String.valueOf(configOptions.get("writeStrategy"));
+        switch (writeStrategy) {
+            case "appendWrite": return WriteOperationType.INSERT;
+            default: return WriteOperationType.UPSERT;
+        }
+
     }
 }
