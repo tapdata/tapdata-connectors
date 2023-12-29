@@ -50,7 +50,9 @@ public class HudiConnector extends HiveConnector {
                 connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
         });
-        hudiConfig = new HudiConfig(firstConnectorId).load(connectionContext.getConnectionConfig());
+        hudiConfig = new HudiConfig(firstConnectorId)
+                .log(connectionContext.getLog())
+                .load(connectionContext.getConnectionConfig());
         hiveJdbcContext = new HudiJdbcContext(hudiConfig);
         commonDbConfig = hiveConfig;
         jdbcContext = hiveJdbcContext;
@@ -105,7 +107,9 @@ public class HudiConnector extends HiveConnector {
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
-        HudiConfig hudiConfig = new HudiConfig(null).load(connectionContext.getConnectionConfig());
+        HudiConfig hudiConfig = new HudiConfig(null)
+                .log(connectionContext.getLog())
+                .load(connectionContext.getConnectionConfig());
         try (
                 HudiTest hudiTest = new HudiTest(hudiConfig, consumer)
         ) {
