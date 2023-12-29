@@ -6,7 +6,22 @@
 
 ### **2. 限制说明**
 
-Tapdata 系统当前版本 Hudi 仅支持作为目标。
+1. Tapdata 系统当前版本 Hudi 仅支持作为目标。
+
+2. 环境配置要求
+
+   - 计算引擎的机器上应具备Hadoop的环境变量，Hadoop版本与您的服务端安装的Hadoop应保持一致
+    
+     ```
+     执行以下命令检查您的机器是否具备此条件：
+       Windows环境下
+            按住 win+R， 
+            输入 cmd 或 prowershell 后
+            在命令窗口输入 hadoop -version 检查是否具备此条件
+       Linux或Mac环境下，
+            打开终端，
+            在命令窗口输入 hadoop -version 检查是否具备此条件
+     ```
 
 ### **3. 支持版本**
 
@@ -30,6 +45,9 @@ Hudi0.11.0
 *   账户
     *   test\_tapdata
 *   密码
+*   服务端hadoop的配置文件：core-site.xml， 一般在你服务端Hadoop安装目录下etc/Hadoop目录下
+*   服务端hdfs的配置文件：hdfs-site.xml， 一般在你服务端Hadoop安装目录下etc/Hadoop目录下
+*   服务端hive的配置文件：hive-site.xml， 一般在你服务端Hive安装目录的配置文件目录下
 *   连接参数
     *   ;sasl.qop=auth-conf;auth=KERBEROS
 
