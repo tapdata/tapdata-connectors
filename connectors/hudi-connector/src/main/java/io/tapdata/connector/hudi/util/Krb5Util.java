@@ -1,5 +1,6 @@
 package io.tapdata.connector.hudi.util;
 
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.TapLogger;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -27,49 +28,14 @@ public class Krb5Util {
 
     private static final String JAVA_SECURITY_KRB5_CONF_KEY = "java.security.krb5.conf";
 
+    public static final String KRB5_NAME = "krb5.conf";
+
+    public static final String USER_KEY_TAB_NAME = "user.keytab";
     public static final String TAG = Krb5Util.class.getSimpleName();
 
     private static String decodeConf(String base64Conf) {
         byte[] bytes = Base64.getUrlDecoder().decode(base64Conf);
         return new String(bytes, StandardCharsets.UTF_8);
-    }
-
-    private static String storeDir() {
-        String dir = System.getenv("TAPDATA_WORK_DIR");
-        if (null == dir) {
-            dir = System.getProperty("user.dir");
-        }
-        return paths(dir, "krb5");
-    }
-
-    private static String paths(String... paths) {
-        return String.join(File.separator, paths);
-    }
-
-    /**
-     * 保存文件
-     *
-     * @param data         数据
-     * @param savePath     保存路径
-     * @param deleteExists 是否存在删除
-     * @throws IOException 异常
-     */
-    private static void save(byte[] data, String savePath, boolean deleteExists) throws IOException {
-        File file = new File(savePath);
-        if (file.exists()) {
-            if (!deleteExists) {
-                throw new RuntimeException("Save config is exists: " + savePath);
-            }
-            file.delete();
-        } else {
-            File dir = file.getParentFile();
-            if (!dir.exists()) {
-                dir.mkdirs();
-            }
-        }
-        try (FileOutputStream fos = new FileOutputStream(file)) {
-            fos.write(data);
-        }
     }
 
     public static Map<String, Map<String, String>> getRealms(String krb5Conf) {
@@ -134,17 +100,7 @@ public class Krb5Util {
      * @return 密钥路径
      */
     public static String keytabPath(String dir) {
-        return paths(dir, "user.keytab");
-    }
-
-    /**
-     * 获取配置路径
-     *
-     * @param dir 配置目录
-     * @return 配置路径
-     */
-    public static String confPath(String dir) {
-        return paths(dir, "krb5.conf");
+        return FileUtil.paths(dir, USER_KEY_TAB_NAME);
     }
 
     /**
@@ -189,37 +145,29 @@ public class Krb5Util {
      * @return 配置路径
      */
     public static String saveByCatalog(String catalog, String keytab, String conf, boolean deleteExists) {
-        byte[] bytes;
-        String savePath = null;
-        String dir = paths(storeDir(), catalog);
+        String dir = FileUtil.paths(FileUtil.storeDir(catalog), "krb5");
         try {
-            savePath = keytabPath(dir);
-            bytes = Base64.getDecoder().decode(keytab);
-            save(bytes, savePath, deleteExists);
+            FileUtil.saveBase64File(dir, USER_KEY_TAB_NAME, keytab, deleteExists);
         } catch (Exception e) {
-            throw new RuntimeException("Save kerberos keytab failed: " + savePath, e);
+            throw new CoreException("Save kerberos keytab failed: {}/user.keytab", dir, e);
         }
         try {
-            savePath = confPath(dir);
-            bytes = Base64.getDecoder().decode(conf);
-            save(bytes, savePath, deleteExists);
-            setKrb5Config(savePath);
+            FileUtil.saveBase64File(dir, KRB5_NAME, conf, deleteExists);
         } catch (Exception e) {
-            throw new RuntimeException("Save kerberos conf failed: " + savePath, e);
+            throw new CoreException("Save kerberos conf failed: {}/krb5.conf", dir, e);
         }
         return dir;
     }
 
-    private static void setKrb5Config(String krb5ConfFile) throws IOException {
-        System.setProperty(JAVA_SECURITY_KRB5_CONF_KEY, krb5ConfFile);
+    private static void setKrb5Config(String krb5ConfFilePath) throws IOException {
+        String paths = FileUtil.paths(krb5ConfFilePath, KRB5_NAME);
+        System.setProperty(JAVA_SECURITY_KRB5_CONF_KEY, paths);
         String ret = System.getProperty(JAVA_SECURITY_KRB5_CONF_KEY);
         if (ret == null) {
-            logger.error(JAVA_SECURITY_KRB5_CONF_KEY + " is null.");
             throw new IOException(JAVA_SECURITY_KRB5_CONF_KEY + " is null.");
         }
-        if (!ret.equals(krb5ConfFile)) {
-            logger.error(JAVA_SECURITY_KRB5_CONF_KEY + " is " + ret + " is not " + krb5ConfFile + ".");
-            throw new IOException(JAVA_SECURITY_KRB5_CONF_KEY + " is " + ret + " is not " + krb5ConfFile + ".");
+        if (!ret.equals(krb5ConfFilePath)) {
+            throw new IOException(JAVA_SECURITY_KRB5_CONF_KEY + " is " + ret + " is not " + paths );
         }
     }
 
@@ -234,7 +182,7 @@ public class Krb5Util {
      */
     public static void updateKafkaConf(String serviceName, String principal, String krb5Path, String krb5Conf, Map<String, Object> conf) {
         try {
-            String krb5ConfPath = confPath(krb5Path);
+            String krb5ConfPath = FileUtil.paths(krb5Path, KRB5_NAME);
             String saslJaasConfig = saslJaasConfig(krb5Path, principal);
 
             conf.put("security.protocol", "SASL_PLAINTEXT");
@@ -270,8 +218,8 @@ public class Krb5Util {
     }
 
 
-    public static void main(String[] args) throws Exception {
-        String conf;
+//    public static void main(String[] args) throws Exception {
+//        String conf;
 //        try (FileInputStream fis = new FileInputStream("/Users/lhs/Downloads/krb5-test.conf")) {
 //            try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
 //                int len;
@@ -284,5 +232,5 @@ public class Krb5Util {
 //        }
 //        System.out.println(conf);
 //        checkKDCDomains(conf);
-    }
+//    }
 }

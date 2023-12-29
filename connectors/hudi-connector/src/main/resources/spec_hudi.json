@@ -28,7 +28,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "mq_nameSrvAddr",
-          "x-index": 1
+          "x-index": 10
         },
         "database": {
           "type": "string",
@@ -36,8 +36,24 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_name",
-          "x-index": 2,
+          "x-index": 20,
           "required": true
+        },
+        "user": {
+          "type": "string",
+          "title": "${user}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_username",
+          "x-index": 30
+        },
+        "password": {
+          "type": "string",
+          "title": "${password}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "database_password",
+          "x-index": 40
         },
         "krb5": {
           "type": "boolean",
@@ -56,7 +72,7 @@
               }
             }
           ],
-          "x-index": 3
+          "x-index": 50
         },
         "krb5Keytab": {
           "type": "string",
@@ -69,7 +85,7 @@
           "apiServerKey": "krb5Keytab",
           "fileNameField": "krb5KeytabFile",
           "required": true,
-          "x-index": 4
+          "x-index": 60
         },
         "krb5Conf": {
           "type": "string",
@@ -82,7 +98,7 @@
           "apiServerKey": "krb5Conf",
           "fileNameField": "krb5ConfFile",
           "required": true,
-          "x-index": 5
+          "x-index": 70
         },
         "principal": {
           "type": "string",
@@ -91,7 +107,46 @@
           "x-component": "Input",
           "apiServerKey": "principal",
           "required": true,
-          "x-index": 6
+          "x-index": 80
+        },
+        "hadoopCoreSiteXML": {
+          "type": "string",
+          "title": "${hadoopCoreSiteXML}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "x-component-props": {
+            "base64": true
+          },
+          "apiServerKey": "hadoopCoreSiteXML",
+          "fileNameField": "hadoopCoreSiteXMLFile",
+          "required": true,
+          "x-index": 90
+        },
+        "hdfsSiteXML": {
+          "type": "string",
+          "title": "${hdfsSiteXML}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "x-component-props": {
+            "base64": true
+          },
+          "apiServerKey": "hdfsSiteXML",
+          "fileNameField": "hdfsSiteXMLFile",
+          "required": true,
+          "x-index": 100
+        },
+        "hiveSiteXML": {
+          "type": "string",
+          "title": "${hiveSiteXML}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "x-component-props": {
+            "base64": true
+          },
+          "apiServerKey": "hiveSiteXML",
+          "fileNameField": "hiveSiteXMLFile",
+          "required": true,
+          "x-index": 110
         },
         "ssl": {
           "type": "boolean",
@@ -100,23 +155,7 @@
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "apiServerKey": "ssl",
-          "x-index": 7
-        },
-        "user": {
-          "type": "string",
-          "title": "${user}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "apiServerKey": "database_username",
-          "x-index": 8
-        },
-        "password": {
-          "type": "string",
-          "title": "${password}",
-          "x-decorator": "FormItem",
-          "x-component": "Password",
-          "apiServerKey": "database_password",
-          "x-index": 9
+          "x-index": 120
         },
         "extParams": {
           "type": "string",
@@ -124,7 +163,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "extParams",
-          "x-index": 10
+          "x-index": 130
         },
         "timezone": {
           "type": "string",
@@ -132,7 +171,7 @@
           "default": "",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "x-index": 11,
+          "x-index": 140,
           "enum": [
             {
               "label": "Database Timezone",
@@ -261,7 +300,13 @@
       "password": "password",
       "extParams": "Connection Parameter String",
       "timezone": "timezone",
-      "doc": "docs/hudi_en_US.md"
+      "doc": "docs/hudi_en_US.md",
+      "hiveSiteXML": "Hive conf file",
+      "hdfsSiteXML": "HDFS conf file",
+      "hadoopCoreSiteXML": "Hadoop conf",
+      "hiveSiteXML_tip": "Hive configuration file(hive-site.xml)",
+      "hdfsSiteXML_tip": "HDFS configuration file(hdfs-site.xml)",
+      "hadoopCoreSiteXML_tip": "Hadoop configuration file(core-site.xml)"
     },
     "zh_CN": {
       "nameSrvAddr": "集群地址",
@@ -275,7 +320,13 @@
       "password": "密码",
       "extParams": "连接参数",
       "timezone": "时区",
-      "doc": "docs/hudi_zh_CN.md"
+      "doc": "docs/hudi_zh_CN.md",
+      "hiveSiteXML": "Hive conf file",
+      "hdfsSiteXML": "HDFS conf file",
+      "hadoopCoreSiteXML": "Hadoop conf",
+      "hiveSiteXML_tip": "Hive配置文件(hive-site.xml)",
+      "hdfsSiteXML_tip": "HDFS配置文件(hdfs-site.xml)",
+      "hadoopCoreSiteXML_tip": "Hadoop配置文件(core-site.xml)"
     },
     "zh_TW": {
       "nameSrvAddr": "集群地址",
@@ -289,7 +340,13 @@
       "password": "密碼",
       "extParams": "連接參數",
       "timezone": "時區",
-      "doc": "docs/hudi_zh_TW.md"
+      "doc": "docs/hudi_zh_TW.md",
+      "hiveSiteXML": "Hive conf file",
+      "hdfsSiteXML": "HDFS conf file",
+      "hadoopCoreSiteXML": "Hadoop conf",
+      "hiveSiteXML_tip": "Hive配置文件(hive-site.xml)",
+      "hdfsSiteXML_tip": "HDFS配置文件(hdfs-site.xml)",
+      "hadoopCoreSiteXML_tip": "Hadoop配置文件(core-site.xml)"
     }
   },
 

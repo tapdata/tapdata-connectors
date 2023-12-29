@@ -5,23 +5,25 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import org.apache.avro.Schema;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hudi.client.SparkRDDWriteClient;
-import org.apache.hudi.client.common.HoodieSparkEngineContext;
-import org.apache.hudi.common.model.HoodieAvroPayload;
-import org.apache.hudi.common.model.WriteOperationType;
+import org.apache.hadoop.fs.Path;
+import org.apache.hudi.client.HoodieJavaWriteClient;
+import org.apache.hudi.client.common.HoodieJavaEngineContext;
+import org.apache.hudi.common.bootstrap.index.NoOpBootstrapIndex;
+import org.apache.hudi.common.fs.FSUtils;
+import org.apache.hudi.common.model.*;
 import org.apache.hudi.common.table.HoodieTableMetaClient;
 import org.apache.hudi.common.table.TableSchemaResolver;
-import org.apache.hudi.config.HoodieCompactionConfig;
-import org.apache.hudi.config.HoodieIndexConfig;
-import org.apache.hudi.config.HoodieWriteConfig;
+import org.apache.hudi.config.*;
+import org.apache.hudi.exception.TableNotFoundException;
 import org.apache.hudi.index.HoodieIndex;
-import org.apache.spark.api.java.JavaSparkContext;
 
-import java.util.Collection;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.Set;
+import java.io.IOException;
+import java.util.*;
+import java.util.stream.Collectors;
+
+import static org.apache.hudi.config.HoodieIndexConfig.BLOOM_INDEX_FILTER_DYNAMIC_MAX_ENTRIES;
 
 public class ClientEntity implements AutoCloseable {
     public static final long CACHE_TIME = 300000; //5min
@@ -29,11 +31,16 @@ public class ClientEntity implements AutoCloseable {
     String database;
     String tableId;
     String tablePath;
+    Path path;
 
-    JavaSparkContext jsc;
-    SparkRDDWriteClient<HoodieAvroPayload> client;
+    //JavaSparkContext jsc;
+
+    //SparkRDDWriteClient<HoodieAvroPayload> client;
+    HoodieJavaWriteClient<HoodieRecordPayload> client;
 
     Set<String> primaryKeys;
+    Set<String> preCombineFields;
+    Set<String> orderingFields;
     Set<String> partitionKeys;
 
     Log log;
@@ -43,33 +50,131 @@ public class ClientEntity implements AutoCloseable {
     Schema schema;
 
     TapTable tapTable;
+    Configuration hadoopConf;
 
-    public ClientEntity(FileSystem fs, String database, String tableId, String tablePath,  TapTable tapTable, JavaSparkContext jsc, Log log) {
-        this.fs = fs;
-        this.database = database;
+//    public ClientEntity(FileSystem fs, String database, String tableId, String tablePath,  TapTable tapTable, JavaSparkContext jsc, Log log) {
+//        this.fs = fs;
+//        this.database = database;
+//        this.tableId = tableId;
+//        this.tablePath = tablePath;
+//        this.tapTable = tapTable;
+//        this.primaryKeys = getAllPrimaryKeys();
+//        this.partitionKeys = getAllPartitionKeys();
+//        this.jsc = jsc;
+//        saveArvoSchema();
+//        HoodieWriteConfig cfg = HoodieWriteConfig.newBuilder()
+//                .withPath(tablePath)
+//                .withSchema(schema.toString())
+//                .withParallelism(2, 2)
+//                .withDeleteParallelism(2)
+//                //.withRecordKeyFields(StringUtils.join(partitionKeys, ","))
+//                //.withPartitionFields("col2:simple,col4:timestamp")
+//                .forTable(tableId)
+//                .withIndexConfig(HoodieIndexConfig.newBuilder().withIndexType(HoodieIndex.IndexType.BLOOM).build())
+//                .withCompactionConfig(HoodieCompactionConfig.newBuilder().archiveCommitsWith(20, 30).build())
+//                .build();
+//        this.client = new SparkRDDWriteClient<>(new HoodieSparkEngineContext(jsc), cfg);
+//        // @TODO set write mode: upsert or only insert:
+//        // @TODO this.client.setOperationType(WriteOperationType.BOOTSTRAP);
+//        this.log = log;
+//        updateTimestamp();
+//    }
+
+    WriteOperationType operationType;
+    public ClientEntity(Configuration hadoopConf, String database, String tableId, String tablePath,  TapTable tapTable, Log log) {
+        //@TODO
+        this.operationType = WriteOperationType.UPSERT;
+
+        this.hadoopConf = hadoopConf;
         this.tableId = tableId;
         this.tablePath = tablePath;
+        try {
+            initFs();
+        } catch (IOException e) {
+            throw new CoreException("Can not init FileSystem, table path: {}", tablePath, e);
+        }
+        this.database = database;
         this.tapTable = tapTable;
         this.primaryKeys = getAllPrimaryKeys();
         this.partitionKeys = getAllPartitionKeys();
-        this.jsc = jsc;
         saveArvoSchema();
-        HoodieWriteConfig cfg = HoodieWriteConfig.newBuilder()
-                .withPath(tablePath)
-                .withSchema(schema.toString())
-                .withParallelism(2, 2)
-                .withDeleteParallelism(2)
-                //.withRecordKeyFields(StringUtils.join(partitionKeys, ","))
-                //.withPartitionFields("col2:simple,col4:timestamp")
-                .forTable(tableId)
-                .withIndexConfig(HoodieIndexConfig.newBuilder().withIndexType(HoodieIndex.IndexType.BLOOM).build())
-                .withCompactionConfig(HoodieCompactionConfig.newBuilder().archiveCommitsWith(20, 30).build())
-                .build();
-        this.client = new SparkRDDWriteClient<>(new HoodieSparkEngineContext(jsc), cfg);
-        // @TODO set write mode: upsert or only insert:
-        // @TODO this.client.setOperationType(WriteOperationType.BOOTSTRAP);
+        try {
+            initClient(hadoopConf);
+        } catch (IOException e) {
+            throw new CoreException("Can not init Hadoop client, table path: {}", tablePath, e);
+        }
         this.log = log;
         updateTimestamp();
+    }
+
+    //@TODO
+    String tableType = HoodieTableType.COPY_ON_WRITE.name();
+    private void initFs() throws IOException {
+        this.fs = FSUtils.getFs(tablePath, hadoopConf);
+        path = new Path(tablePath);
+        if (!fs.exists(path)) {
+            HoodieTableMetaClient.withPropertyBuilder()
+                    .setTableType(tableType)
+                    .setTableName(tableId)
+                    .setPayloadClassName(HoodieAvroPayload.class.getName())
+                    .initTable(hadoopConf, tablePath);
+        }
+    }
+
+    //@TODO preCombineField, orderingField
+    String preCombineField = "id";
+    String orderingField = "ts";
+
+    private Long smallFileLimit = 25 * 1024 * 1024L;
+    private Long maxFileSize = 32 * 1024 * 1024L;
+
+    private static Integer recordSizeEstimate = 64;
+    void initClient(Configuration hadoopConf) throws IOException {
+        List<String> writeFiledNames = schema.getFields().stream().map(Schema.Field::name).collect(Collectors.toList());
+        final boolean shouldCombine = WriteOperationType.UPSERT.equals(operationType) && writeFiledNames.contains(preCombineField);
+        final boolean shouldOrdering = WriteOperationType.UPSERT.equals(operationType) && writeFiledNames.contains(orderingField);
+        final String payloadClassName = shouldOrdering ? DefaultHoodieRecordPayload.class.getName() :
+                shouldCombine ? OverwriteWithLatestAvroPayload.class.getName() : HoodieAvroPayload.class.getName();
+        final Path hoodiePath = new Path(tablePath + "/" + HoodieTableMetaClient.METAFOLDER_NAME);
+        if (!(fs.exists(path) && fs.exists(hoodiePath))) {
+            if (Arrays.asList(WriteOperationType.INSERT, WriteOperationType.UPSERT).contains(operationType)) {
+                HoodieTableMetaClient.withPropertyBuilder()
+                        .setTableType(tableType)
+                        .setTableName(tableId)
+                        .setPayloadClassName(payloadClassName)
+                        .setRecordKeyFields(StringUtils.join(primaryKeys, ","))
+                        .setPreCombineField(preCombineField)
+                        .setPartitionFields(StringUtils.join(partitionKeys, ","))
+                        .setBootstrapIndexClass(NoOpBootstrapIndex.class.getName())
+                        .initTable(hadoopConf, tablePath);
+            } else if (WriteOperationType.DELETE.equals(operationType)) {
+                throw new TableNotFoundException(tablePath);
+            }
+        }
+        final Properties indexProperties = new Properties();
+        indexProperties.put(BLOOM_INDEX_FILTER_DYNAMIC_MAX_ENTRIES.key(), 150000); // 1000万总体时间提升1分钟
+        final HoodieWriteConfig cfg = HoodieWriteConfig.newBuilder().withPath(tablePath)
+                .withSchema(schema.toString())
+                .withParallelism(2, 2).withDeleteParallelism(2)
+                .forTable(tableId)
+                .withWritePayLoad(payloadClassName)
+                .withPayloadConfig(HoodiePayloadConfig.newBuilder().withPayloadOrderingField(orderingField).build())
+                .withIndexConfig(HoodieIndexConfig.newBuilder()
+                        .withIndexType(HoodieIndex.IndexType.BLOOM)
+//                            .bloomIndexPruneByRanges(false) // 1000万总体时间提升1分钟
+                        .bloomFilterFPP(0.000001)   // 1000万总体时间提升3分钟
+                        .fromProperties(indexProperties)
+                        .build())
+                .withCompactionConfig(HoodieCompactionConfig.newBuilder()
+                        .compactionSmallFileSize(smallFileLimit)
+                        .approxRecordSize(recordSizeEstimate).build())
+                .withArchivalConfig(HoodieArchivalConfig.newBuilder().archiveCommitsWith(150, 200).build())
+                .withCleanConfig(HoodieCleanConfig.newBuilder().retainCommits(100).build())
+                .withStorageConfig(HoodieStorageConfig.newBuilder()
+                        .parquetMaxFileSize(maxFileSize).build())
+                .build();
+        final HoodieJavaEngineContext engineContext = new HoodieJavaEngineContext(hadoopConf);
+        client = new HoodieJavaWriteClient<>(engineContext, cfg);
     }
 
     public void updateTimestamp() {
@@ -116,36 +221,26 @@ public class ClientEntity implements AutoCloseable {
         this.tablePath = tablePath;
     }
 
-    public SparkRDDWriteClient<HoodieAvroPayload> getClient() {
+    public HoodieJavaWriteClient<HoodieRecordPayload> getClient() {
         updateTimestamp();
         return client;
     }
 
-    public void setClient(SparkRDDWriteClient<HoodieAvroPayload> client) {
+    public void setClient(HoodieJavaWriteClient<HoodieRecordPayload> client) {
         updateTimestamp();
         this.client = client;
-    }
-
-    public JavaSparkContext getJsc() {
-        updateTimestamp();
-        return jsc;
-    }
-
-    public void setJsc(JavaSparkContext jsc) {
-        updateTimestamp();
-        this.jsc = jsc;
     }
 
     private void saveArvoSchema() {
         updateTimestamp();
         HoodieTableMetaClient metaClient = HoodieTableMetaClient.builder()
-                .setConf(jsc.hadoopConfiguration())
+                .setConf(hadoopConf)
                 .setBasePath(tablePath)
                 .setLoadActiveTimelineOnLoad(true)
                 .build();
         TableSchemaResolver schemaResolver = new TableSchemaResolver(metaClient);
         try {
-            this.schema = schemaResolver.convertParquetSchemaToAvro(schemaResolver.getTableParquetSchema());
+            this.schema = schemaResolver.getTableAvroSchema();
         } catch (Exception e) {
             throw new CoreException("Can not find Schema from HuDi, table id: {}, error message: {}", tableId, e.getMessage());
         }
@@ -168,14 +263,16 @@ public class ClientEntity implements AutoCloseable {
         log.debug("Table [{}] client info do close", tableId);
         closeFileSystem();
         closeClient();
-        closeJavaSparkContext();
         log.debug("Table [{}] client info do closed", tableId);
     }
 
     private void closeFileSystem() {
         try {
-            fs.close();
-            log.debug("File System has closed, table id: {}", tableId);
+            if (null != fs) {
+                fs.close();
+                fs = null;
+                log.debug("File System has closed, table id: {}", tableId);
+            }
         } catch (Exception e) {
             log.warn("Fail to close File System, table id: [{}], error message: {}", tableId, e.getMessage());
         }
@@ -183,19 +280,13 @@ public class ClientEntity implements AutoCloseable {
 
     private void closeClient() {
         try {
-            client.close();
-            log.debug("SparkRDDWriteClient has closed, table id: {}", tableId);
+            if (null != client) {
+                client.close();
+                client = null;
+                log.debug("SparkRDDWriteClient has closed, table id: {}", tableId);
+            }
         } catch (Exception e) {
             log.warn("Fail to close SparkRDDWriteClient, table id: [{}], error message: {}", tableId, e.getMessage());
-        }
-    }
-
-    private void closeJavaSparkContext() {
-        try {
-            jsc.close();
-            log.debug("JavaSparkContext has closed, table id: {}", tableId);
-        } catch (Exception e) {
-            log.warn("Fail to close JavaSparkContext, table id: [{}], error message: {}", tableId, e.getMessage());
         }
     }
 
