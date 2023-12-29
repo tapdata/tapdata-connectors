@@ -117,6 +117,9 @@
           "x-component-props": {
             "base64": true
           },
+          "x-decorator-props": {
+            "tooltip": "${hadoopCoreSiteXML_tip}"
+          },
           "apiServerKey": "hadoopCoreSiteXML",
           "fileNameField": "hadoopCoreSiteXMLFile",
           "required": true,
@@ -130,6 +133,9 @@
           "x-component-props": {
             "base64": true
           },
+          "x-decorator-props": {
+            "tooltip": "${hdfsSiteXML_tip}"
+          },
           "apiServerKey": "hdfsSiteXML",
           "fileNameField": "hdfsSiteXMLFile",
           "required": true,
@@ -142,6 +148,9 @@
           "x-component": "TextFileReader",
           "x-component-props": {
             "base64": true
+          },
+          "x-decorator-props": {
+            "tooltip": "${hiveSiteXML_tip}"
           },
           "apiServerKey": "hiveSiteXML",
           "fileNameField": "hiveSiteXMLFile",
