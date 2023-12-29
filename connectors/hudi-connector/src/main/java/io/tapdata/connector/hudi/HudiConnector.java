@@ -57,8 +57,7 @@ public class HudiConnector extends HiveConnector {
         commonDbConfig = hiveConfig;
         jdbcContext = hiveJdbcContext;
         commonSqlMaker = new CommonSqlMaker('`');
-        hudiWrite = new HuDiWriteBySparkClient(hiveJdbcContext, hudiConfig);
-
+        hudiWrite = new HuDiWriteBySparkClient(hiveJdbcContext, hudiConfig).log(connectionContext.getLog());
     }
 
 
@@ -142,11 +141,8 @@ public class HudiConnector extends HiveConnector {
                 for (String field : primaryKeys) {
                     pk.append(field).append(",");
                 }
-                StringBuilder sb = new StringBuilder();
-                sb.append("\n) using hudi");
-                sb.append("\noptions (\nprimaryKey = '");
-                sb.append(pk);
-                sql = sql + StringUtils.removeEnd(sb.toString(), ",") + "')";
+                String sb = "\n) using hudi \noptions (\nprimaryKey = '" + pk;
+                sql = sql + StringUtils.removeEnd(sb, ",") + "')";
                 List<String> sqls = TapSimplify.list();
                 sqls.add(sql);
                 TapLogger.info("table :", "table->{}", tapTable.getId());
