@@ -51,7 +51,7 @@ public class HudiWrite extends HiveJdbcWrite {
     }
 
     protected boolean isAlive() {
-        return null != running && !running.get();
+        return null != running && running.get();
     }
 
 

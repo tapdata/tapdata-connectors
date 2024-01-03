@@ -12,11 +12,11 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
+import org.apache.spark.sql.execution.datasources.jdbc.DriverRegistry;
+import org.apache.spark.sql.execution.datasources.jdbc.DriverWrapper;
+import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
@@ -33,9 +33,44 @@ public class HudiJdbcContext extends HiveJdbcContext {
         super(config);
     }
     public Connection getConnection() throws SQLException {
-        Connection connection = super.getConnection();
-        connection.setAutoCommit(true);
+        Connection connection = createConnectionFactory();//super.getConnection();
+        //connection.setAutoCommit(true);
         return connection;
+    }
+
+    private Connection createConnectionFactory() throws SQLException {
+        Map<String, String> options = new HashMap<>();
+        options.put("url", getConfig().getDatabaseUrl());
+        options.put("driver", "org.apache.hive.jdbc.HiveDriver");
+        //options.put("dbtable", dbName + "." + sourceTable);
+        options.put("nullable", "true");
+        String driverClass = options.get(JDBCOptions.JDBC_DRIVER_CLASS());
+        DriverRegistry.register(driverClass);
+        Enumeration<Driver> drivers = DriverManager.getDrivers();
+        Driver driver = null;
+        while (drivers.hasMoreElements()) {
+            Driver d = drivers.nextElement();
+            if (d instanceof DriverWrapper) {
+                if (((DriverWrapper) d).wrapped().getClass().getCanonicalName().equals(driverClass)) {
+                    driver = d;
+                }
+            } else if (d.getClass().getCanonicalName().equals(driverClass)) {
+                driver = d;
+            }
+            if (driver != null) {
+                break;
+            }
+        }
+
+        Objects.requireNonNull(driver, String.format("Did not find registered driver with class %s", driverClass));
+
+        Properties properties = new Properties();
+        properties.putAll(options);
+        Connection connect;
+        String url = options.get(JDBCOptions.JDBC_URL());
+        connect = driver.connect(url, properties);
+        Objects.requireNonNull(connect, String.format("The driver could not open a JDBC connection. Check the URL: %s", url));
+        return connect;
     }
 
     @Override
@@ -47,7 +82,7 @@ public class HudiJdbcContext extends HiveJdbcContext {
             for (String sql : sqlList) {
                 statement.execute(sql);
             }
-            connection.commit();
+           // connection.commit();
         }
     }
     @Override

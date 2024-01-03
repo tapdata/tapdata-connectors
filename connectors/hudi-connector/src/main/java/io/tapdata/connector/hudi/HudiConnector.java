@@ -17,6 +17,7 @@ import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -50,7 +51,7 @@ public class HudiConnector extends HiveConnector {
                 connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
         });
-        hudiConfig = new HudiConfig(firstConnectorId)
+        hudiConfig = new HudiConfig(null)
                 .log(connectionContext.getLog())
                 .load(connectionContext.getConnectionConfig());
         hiveJdbcContext = new HudiJdbcContext(hudiConfig);
@@ -68,6 +69,7 @@ public class HudiConnector extends HiveConnector {
         if(hudiWrite !=null){
             hudiWrite.onDestroy();
         }
+        ErrorKit.ignoreAnyError(hudiConfig::close);
     }
     @Override
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
@@ -106,13 +108,16 @@ public class HudiConnector extends HiveConnector {
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
+        String uuid = UUID.randomUUID().toString().replaceAll("-", "");
         HudiConfig hudiConfig = new HudiConfig(null)
                 .log(connectionContext.getLog())
                 .load(connectionContext.getConnectionConfig());
-        try (
-                HudiTest hudiTest = new HudiTest(hudiConfig, consumer)
-        ) {
+        HudiTest hudiTest = new HudiTest(hudiConfig, consumer);
+        try {
             hudiTest.testOneByOne();
+        } finally {
+            ErrorKit.ignoreAnyError(hudiTest::close);
+            ErrorKit.ignoreAnyError(hudiConfig::close);
         }
         return connectionOptions;
     }

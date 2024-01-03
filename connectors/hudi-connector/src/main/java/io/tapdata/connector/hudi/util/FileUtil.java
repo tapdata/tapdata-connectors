@@ -1,5 +1,9 @@
 package io.tapdata.connector.hudi.util;
 
+import io.tapdata.entity.logger.Log;
+import io.tapdata.kit.ErrorKit;
+import org.apache.commons.io.FileUtils;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -48,6 +52,19 @@ public class FileUtil {
         }
         try (FileOutputStream fos = new FileOutputStream(file)) {
             fos.write(data);
+        }
+    }
+    public static void release(String catlog, Log log) {
+        File file = new File(catlog);
+        if (file.exists() && file.delete()) {
+            log.info("Resources of Hudi connector has be released, release path: {}", file.getPath());
+        } else {
+            if (file.exists()) {
+               ErrorKit.ignoreAnyError(() -> FileUtils.deleteDirectory(file));
+            } else {
+                log.info("Resources of Hudi connector not be released, message: {}",
+                        (file.exists() ? "can not delete directory " : "file not exists ") + file.getPath());
+            }
         }
     }
 }
