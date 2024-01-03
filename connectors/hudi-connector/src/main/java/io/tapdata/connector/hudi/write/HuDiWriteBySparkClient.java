@@ -2,10 +2,13 @@ package io.tapdata.connector.hudi.write;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import io.tapdata.connector.hive.HiveJdbcContext;
 import io.tapdata.connector.hudi.config.HudiConfig;
+import io.tapdata.connector.hudi.util.FileUtil;
+import io.tapdata.connector.hudi.util.Krb5Util;
 import io.tapdata.connector.hudi.util.SiteXMLUtil;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
@@ -61,6 +64,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             }
         }
         String tablePath = getTablePath(tableId);
+        config.authenticate(hadoopConf);
         clientEntity = new ClientEntity(
             ClientEntity.Param.witStart()
                     .withHadoopConf(hadoopConf)
@@ -81,8 +85,9 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     final Object clientEntityLock = new Object();
     public HuDiWriteBySparkClient(HiveJdbcContext hiveJdbcContext, HudiConfig hudiConfig) {
         super(hiveJdbcContext, hudiConfig);
-        init();
         this.config = hudiConfig;
+        init();
+       // hudiConfig.authenticate(hadoopConf);
         this.cleanFuture = this.cleanService.scheduleWithFixedDelay(() -> {
             ConcurrentHashMap.KeySetView<String, ClientEntity> tableIds = tablePathMap.keySet();
             long timestamp = new Date().getTime();
@@ -147,6 +152,15 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         return tablePath.get();
     }
 
+    private void afterCommit(final WriteListResult<TapRecordEvent> writeResult, final AtomicLong insert,  final AtomicLong update,  final AtomicLong delete) {
+        writeResult.incrementInserted(insert.get());
+        insert.set(0);
+        writeResult.incrementModified(update.get());
+        update.set(0);
+        writeResult.incrementRemove(delete.get());
+        delete.set(0);
+    }
+
     private WriteListResult<TapRecordEvent> groupRecordsByEventType(TapTable tapTable, List<TapRecordEvent> events, WriteListResult<TapRecordEvent> writeListResult) {
         TapRecordEvent errorRecord = null;
         List<HoodieRecord<HoodieRecordPayload>> recordsOneBatch = new ArrayList<>();
@@ -154,6 +168,9 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         TapRecordEvent batchFirstRecord = null;
         int tag = -1;
         //String tableId = null;
+        AtomicLong insert = new AtomicLong(0);
+        AtomicLong update = new AtomicLong(0);
+        AtomicLong delete = new AtomicLong(0);
         try {
             for (TapRecordEvent e : events) {
                 if (!isAlive()) break;
@@ -166,16 +183,19 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                 try {
                     if (e instanceof TapInsertRecordEvent) {
                         tag = 1;
+                        insert.incrementAndGet();
                         TapInsertRecordEvent insertRecord = (TapInsertRecordEvent) e;
                         //tableId = insertRecord.getTableId();
                         hoodieRecord = genericRecord(tapTable, insertRecord.getAfter());
                     } else if (e instanceof TapUpdateRecordEvent) {
                         tag = 1;
+                        update.incrementAndGet();
                         TapUpdateRecordEvent updateRecord = (TapUpdateRecordEvent) e;
                         //tableId = updateRecord.getTableId();
                         hoodieRecord = genericRecord(tapTable, updateRecord.getAfter());
                     } else if (e instanceof TapDeleteRecordEvent) {
                         tag = 3;
+                        delete.incrementAndGet();
                         TapDeleteRecordEvent deleteRecord = (TapDeleteRecordEvent) e;
                         //tableId = deleteRecord.getTableId();
                         deleteEventsKeys.add(genericDeleteRecord(tapTable, deleteRecord.getBefore()));
@@ -184,6 +204,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                     if ((-1 != tempTag && tempTag != tag)) { //|| (null != tempTableId && !tempTableId.equals(tableId))) {
                         commitButch(tempTag, tapTable, recordsOneBatch, deleteEventsKeys);
                         batchFirstRecord = e;
+                        afterCommit(writeListResult, insert, update, delete);
                     }
                     if (tag > 0 && null != hoodieRecord) {
                         recordsOneBatch.add(hoodieRecord);
@@ -197,6 +218,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             if (!recordsOneBatch.isEmpty() || !deleteEventsKeys.isEmpty()) {
                 try {
                     commitButch(tag, tapTable, recordsOneBatch, deleteEventsKeys);
+                    afterCommit(writeListResult, insert, update, delete);
                 } catch (Exception fail) {
                     log.error("target database process message failed", "table name:{},error msg:{}", tapTable.getId(), fail.getMessage(), fail);
                     errorRecord = batchFirstRecord;
@@ -210,7 +232,8 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         return writeListResult;
     }
 
-    private void commitButch(int batchType, TapTable tapTable, List<HoodieRecord<HoodieRecordPayload>> batch, List<HoodieKey> deleteEventsKeys) {
+    private WriteListResult<TapRecordEvent> commitButch(int batchType, TapTable tapTable, List<HoodieRecord<HoodieRecordPayload>> batch, List<HoodieKey> deleteEventsKeys) {
+        WriteListResult<TapRecordEvent> writeListResult = new WriteListResult<>(0L, 0L, 0L, new HashMap<>());
         ClientEntity clientEntity = getClientEntity(tapTable);
         HoodieJavaWriteClient<HoodieRecordPayload> client = clientEntity.getClient();
         if (null == client) {
@@ -230,6 +253,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                 break;
 
         }
+        return writeListResult;
     }
 
     private HoodieRecord<HoodieRecordPayload> genericRecord(TapTable tapTable, Map<String, Object> record) {
@@ -306,14 +330,21 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     }
 
     private void initConfig() {
+        String confPath = FileUtil.paths(config.getKrb5Path(), Krb5Util.KRB5_NAME);
+        String krb5Path = confPath.replaceAll("\\\\","/");
+        System.setProperty("HADOOP_USER_NAME","tapdata_test");
+        System.setProperty("KERBEROS_USER_KEYTAB", krb5Path);
         hadoopConf = new Configuration();
         hadoopConf.clear();
-        hadoopConf.set("dfs.namenode.kerberos.principal", "hdfs/hadoop.hadoop.com@HADOOP.COM");
+        hadoopConf.set("dfs.namenode.kerberos.principal", config.getPrincipal());//"hdfs/hadoop.hadoop.com@HADOOP.COM");
         hadoopConf.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
         hadoopConf.set("fs.hdfs.impl.disable.cache", "true");
         hadoopConf.set("mapreduce.app-submission.cross-platform", "true");
-        hadoopConf.set("dfs.client.failover.proxy.provider.hacluster", "org.apache.hadoop.hdfs.server.namenode.ha.AdaptiveFailoverProxyProvider");
+        hadoopConf.set("dfs.client.socket-timeout", "600000");
+        hadoopConf.set("dfs.image.transfer.timeout", "600000");
+        hadoopConf.set("dfs.client.failover.proxy.provider.hacluster", "org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider");
         hadoopConf.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
+        hadoopConf.setInt("ipc.maximum.response.length", 352518912);
         hadoopConf.addResource(new Path(config.authFilePath(SiteXMLUtil.CORE_SITE_NAME)));
         hadoopConf.addResource(new Path(config.authFilePath(SiteXMLUtil.HDFS_SITE_NAME)));
         hadoopConf.addResource(new Path(config.authFilePath(SiteXMLUtil.HIVE_SITE_NAME)));

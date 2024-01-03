@@ -10,7 +10,7 @@ public class SiteXMLUtil {
 
 
     public static String saveSiteXMLS(String catalog, String coreSiteBase64Value, String hdfsXMLBase64Value, String hiveSiteBase64Value) {
-        String dir = FileUtil.paths(FileUtil.storeDir(BASE_PATH_TAG), catalog);
+        String dir = FileUtil.paths(FileUtil.storeDir(catalog), BASE_PATH_TAG);
         final String failMessageRegex = "Fail to save conf file to path: {}, file name: {}";
         saveFile(dir, CORE_SITE_NAME, coreSiteBase64Value,  true, failMessageRegex);
         saveFile(dir, HDFS_SITE_NAME, hdfsXMLBase64Value,  true, failMessageRegex);

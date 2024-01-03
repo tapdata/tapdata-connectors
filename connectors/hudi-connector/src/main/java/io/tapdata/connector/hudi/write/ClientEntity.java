@@ -136,7 +136,7 @@ public class ClientEntity implements AutoCloseable {
         try {
             initFs();
         } catch (IOException e) {
-            throw new CoreException("Can not init FileSystem, table path: {}", tablePath, e);
+            throw new CoreException("Can not init FileSystem, table path: {}, message: {}", tablePath, e.getMessage(), e);
         }
         this.database = param.getDatabase();
         this.tapTable = param.getTapTable();
