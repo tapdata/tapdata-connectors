@@ -13,7 +13,7 @@ import org.apache.hadoop.security.UserGroupInformation;
 
 import java.util.Map;
 
-public class HudiConfig extends HiveConfig {
+public class HudiConfig extends HiveConfig implements AutoCloseable {
     public static final Object AUTH_LOCK = new Object();
     private static final String HIVE_DRIVER = "org.apache.hive.jdbc.HiveDriver";
     private String hadoopCoreSiteXML;
@@ -71,7 +71,7 @@ public class HudiConfig extends HiveConfig {
     public HudiConfig load(Map<String, Object> map) {
         assert beanUtils != null;
         beanUtils.mapToBean(map, this);
-        final String catalog = "connections-" + connectorId;
+        final String catalog = "hudi" + connectorId;
         if (krb5) {
             krb5Path = Krb5Util.saveByCatalog(catalog, krb5Keytab, krb5Conf, true);
         }
@@ -84,9 +84,8 @@ public class HudiConfig extends HiveConfig {
         if (krb5) {
             String confPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.KRB5_NAME);
             confPath = confPath.replaceAll("\\\\","/");
-            final String userPrincipal = getUser() + "@" + KerberosUtil.DEFAULT_REALM;
-            authenticate(FileUtil.paths(confPath, Krb5Util.USER_KEY_TAB_NAME), userPrincipal, confPath);
             System.setProperty("java.security.krb5.conf", confPath);
+            authenticate(new Configuration());
             String zkPrincipal = "zookeeper/" + getUserRealm(this.getKrb5Conf());
             System.setProperty("zookeeper.server.principal", zkPrincipal);
         }
@@ -96,32 +95,39 @@ public class HudiConfig extends HiveConfig {
         }
     }
 
-    private void authenticate(String localKeytabPath, String principal, String krb5Path) {
-        try {
-            synchronized (AUTH_LOCK) {
-                System.clearProperty("java.security.krb5.conf");
-                System.setProperty("java.security.krb5.conf", krb5Path);
-                Configuration conf = new Configuration();
-                conf.set("hadoop.security.authentication", "kerberos");
-                UserGroupInformation.setConfiguration(conf);
-                UserGroupInformation.loginUserFromKeytab(principal, localKeytabPath);
+    public void authenticate(Configuration conf) {
+        if (krb5) {
+            String localKeytabPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.USER_KEY_TAB_NAME);
+            String confPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.KRB5_NAME);
+            String krb5Path = confPath.replaceAll("\\\\","/");
+            final String principal = getUser() + "@" + KerberosUtil.DEFAULT_REALM;
+            try {
+                synchronized (AUTH_LOCK) {
+                    //Configuration.reloadExistingConfigurations();
+                    System.clearProperty("java.security.krb5.conf");
+                    System.setProperty("java.security.krb5.conf", krb5Path);
+                    //Configuration conf = new Configuration();
+                    conf.set("hadoop.security.authentication", "kerberos");
+                    UserGroupInformation.setConfiguration(conf);
+                    UserGroupInformation.loginUserFromKeytab(principal, localKeytabPath);
+                }
+                if (null != log) {
+                    log.info("Safety certification passed");
+                }
+            } catch (Exception e) {
+                throw new CoreException("Fail to get certification, message: {}", e.getMessage(), e);
             }
-            if (null != log) {
-                log.info("Safety certification passed");
-            }
-        } catch (Exception e) {
-            throw new CoreException("Fail to get certification, message: {}", e.getMessage(), e);
         }
     }
 
     public static String getUserRealm(String krb5Conf) {
         String serverRealm = System.getProperty("SERVER_REALM");
         String authHostName;
-        if (serverRealm != null && !serverRealm.equals("")) {
+        if (serverRealm != null && !serverRealm.isEmpty()) {
             authHostName = "hadoop." + serverRealm.toLowerCase();
         } else {
             serverRealm = KerberosUtil.getKrb5DomainRealm();
-            if (serverRealm != null && !serverRealm.equals("")) {
+            if (serverRealm != null && !serverRealm.isEmpty()) {
                 authHostName = "hadoop." + serverRealm.toLowerCase();
             } else {
                 authHostName = "hadoop";
@@ -231,5 +237,10 @@ public class HudiConfig extends HiveConfig {
 
     public String authFilePath(String filePath) {
         return FileUtil.paths(xmlPath, filePath);
+    }
+
+    @Override
+    public void close() throws Exception {
+        FileUtil.release( "hudi" + connectorId, log);
     }
 }
