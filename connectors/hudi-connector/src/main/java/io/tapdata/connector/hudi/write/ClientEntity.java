@@ -145,7 +145,6 @@ public class ClientEntity implements AutoCloseable {
         this.hadoopConf = param.getHadoopConf();
         this.tableId = param.getTableId();
         this.tablePath = param.getTablePath();
-        config.authenticate(hadoopConf);
         try {
             initFs();
         } catch (IOException e) {
