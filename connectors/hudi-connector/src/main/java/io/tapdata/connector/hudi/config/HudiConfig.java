@@ -9,6 +9,8 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.kit.EmptyKit;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.security.AnnotatedSecurityInfo;
+import org.apache.hadoop.security.SecurityUtil;
 import org.apache.hadoop.security.UserGroupInformation;
 
 import java.util.Map;
@@ -101,21 +103,27 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
             String confPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.KRB5_NAME);
             String krb5Path = confPath.replaceAll("\\\\","/");
             final String principal = getUser() + "@" + KerberosUtil.DEFAULT_REALM;
+            ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+            ClassLoader loader = AnnotatedSecurityInfo.class.getClassLoader();
             try {
+                Thread.currentThread().setContextClassLoader(loader);
                 synchronized (AUTH_LOCK) {
                     Configuration.reloadExistingConfigurations();
                     System.clearProperty("java.security.krb5.conf");
-                    System.setProperty("java.security.krb5.conf", "D:\\Tapdata_temp\\software\\conf\\krb5.conf");//krb5Path);
+                    System.setProperty("java.security.krb5.conf", krb5Path);
                     Configuration conf = new Configuration();
                     conf.set("hadoop.security.authentication", "kerberos");
                     UserGroupInformation.setConfiguration(conf);
-                    UserGroupInformation.loginUserFromKeytab(principal, "D:\\Tapdata_temp\\software\\conf\\user.keytab");//localKeytabPath);
+                    UserGroupInformation.loginUserFromKeytab(principal, localKeytabPath);
+                    SecurityUtil.setSecurityInfoProviders(new AnnotatedSecurityInfo());
                 }
                 if (null != log) {
                     log.info("Safety certification passed");
                 }
             } catch (Exception e) {
                 throw new CoreException("Fail to get certification, message: {}", e.getMessage(), e);
+            } finally {
+                Thread.currentThread().setContextClassLoader(classLoader);
             }
         }
         return this;

@@ -10,6 +10,9 @@ import io.tapdata.connector.hudi.config.HudiConfig;
 import io.tapdata.connector.hudi.util.FileUtil;
 import io.tapdata.connector.hudi.util.Krb5Util;
 import io.tapdata.connector.hudi.util.SiteXMLUtil;
+import io.tapdata.connector.hudi.write.generic.GenericDeleteRecord;
+import io.tapdata.connector.hudi.write.generic.HoodieRecordGenericStage;
+import io.tapdata.connector.hudi.write.generic.entity.NormalEntity;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -109,6 +112,17 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         }, 5, 5, TimeUnit.MINUTES);
     }
 
+    class CommitAcceptData {
+        int type;
+        Object data;
+        public CommitAcceptData(Object data, int type) {
+            this.type = type;
+            this.data = data;
+        }
+    }
+
+    final Queue<CommitAcceptData> queue = new LinkedBlockingQueue<>();
+
     public HuDiWriteBySparkClient log(Log log) {
         this.log = log;
         return this;
@@ -172,6 +186,8 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         AtomicLong insert = new AtomicLong(0);
         AtomicLong update = new AtomicLong(0);
         AtomicLong delete = new AtomicLong(0);
+        final ClientEntity clientEntity = getClientEntity(tapTable);
+        final NormalEntity entity = new NormalEntity().withClientEntity(clientEntity).withTapTable(tapTable);
         try {
             for (TapRecordEvent e : events) {
                 if (!isAlive()) break;
@@ -187,19 +203,21 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                         insert.incrementAndGet();
                         TapInsertRecordEvent insertRecord = (TapInsertRecordEvent) e;
                         //tableId = insertRecord.getTableId();
-                        hoodieRecord = genericRecord(tapTable, insertRecord.getAfter());
+                        //hoodieRecord = genericRecord(tapTable, insertRecord.getAfter());
+                        hoodieRecord = HoodieRecordGenericStage.singleton().generic(insertRecord.getAfter(), entity);
                     } else if (e instanceof TapUpdateRecordEvent) {
                         tag = 1;
                         update.incrementAndGet();
                         TapUpdateRecordEvent updateRecord = (TapUpdateRecordEvent) e;
                         //tableId = updateRecord.getTableId();
-                        hoodieRecord = genericRecord(tapTable, updateRecord.getAfter());
+                        //hoodieRecord = genericRecord(tapTable, updateRecord.getAfter());
+                        hoodieRecord = HoodieRecordGenericStage.singleton().generic(updateRecord.getAfter(), entity);
                     } else if (e instanceof TapDeleteRecordEvent) {
                         tag = 3;
                         delete.incrementAndGet();
                         TapDeleteRecordEvent deleteRecord = (TapDeleteRecordEvent) e;
                         //tableId = deleteRecord.getTableId();
-                        deleteEventsKeys.add(genericDeleteRecord(tapTable, deleteRecord.getBefore()));
+                        deleteEventsKeys.add(GenericDeleteRecord.singleton().generic(deleteRecord.getBefore(), entity));
                     }
 
                     if ((-1 != tempTag && tempTag != tag)) { //|| (null != tempTableId && !tempTableId.equals(tableId))) {
@@ -233,18 +251,18 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         return writeListResult;
     }
 
-    private WriteListResult<TapRecordEvent> commitButch(int batchType, TapTable tapTable, List<HoodieRecord<HoodieRecordPayload>> batch, List<HoodieKey> deleteEventsKeys) {
-        WriteListResult<TapRecordEvent> writeListResult = new WriteListResult<>(0L, 0L, 0L, new HashMap<>());
+    private void commitButch(int batchType, TapTable tapTable, List<HoodieRecord<HoodieRecordPayload>> batch, List<HoodieKey> deleteEventsKeys) {
+       long s = System.currentTimeMillis();
         ClientEntity clientEntity = getClientEntity(tapTable);
         HoodieJavaWriteClient<HoodieRecordPayload> client = clientEntity.getClient();
-        if (null == client) {
-            throw new CoreException("Fail to write recodes, message: SparkRDDWriteClient can not be empty for table {}", clientEntity.tableId);
-        }
+//        if (null == client) {
+//            throw new CoreException("Fail to write recodes, message: SparkRDDWriteClient can not be empty for table {}", clientEntity.tableId);
+//        }
         switch (batchType) {
             case 1 :
             case 2 :
                 String startCommit = startCommitAndGetCommitTime(clientEntity);
-                client.upsert(batch, startCommit);
+                client.insert(batch, startCommit);
                 batch.clear();
                 break;
             case 3 :
@@ -254,9 +272,13 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                 break;
 
         }
-        return writeListResult;
+        System.out.println("[TAP_QPS] one commit cost: " + (System.currentTimeMillis() - s));
     }
 
+    /**
+     * @deprecated
+     * @see io.tapdata.connector.hudi.write.generic.HoodieRecordGenericStage
+     * */
     private HoodieRecord<HoodieRecordPayload> genericRecord(TapTable tapTable, Map<String, Object> record) {
         ClientEntity clientEntity = getClientEntity(tapTable);
         GenericRecord genericRecord = getGenericRecordOfRecord(tapTable, record);
@@ -265,6 +287,10 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         return new HoodieAvroRecord<>(hoodieKey, payload);
     }
 
+    /**
+     * @deprecated
+     * @see io.tapdata.connector.hudi.write.generic.GenericMapToRecord
+     * */
     private GenericRecord getGenericRecordOfRecord(TapTable tapTable, Map<String, Object> record) {
         ClientEntity clientEntity = getClientEntity(tapTable);
         Schema schema = clientEntity.getSchema();
@@ -272,12 +298,20 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         record.forEach(genericRecord::put);
         return genericRecord;
     }
+    /**
+     * @deprecated
+     * @see io.tapdata.connector.hudi.write.generic.GenericDeleteRecord
+     * */
     private HoodieKey genericDeleteRecord(TapTable tapTable, Map<String, Object> record) {
         ClientEntity clientEntity = getClientEntity(tapTable);
         GenericRecord genericRecord = getGenericRecordOfRecord(tapTable, record);
         return genericHoodieKey(genericRecord, clientEntity.getPrimaryKeys(), clientEntity.getPartitionKeys());
     }
 
+    /**
+     * @deprecated
+     * @see io.tapdata.connector.hudi.write.generic.GenericHoodieKey
+     * */
     private HoodieKey genericHoodieKey(GenericRecord genericRecord, Set<String> keyNames, Set<String> partitionKeys){
         TypedProperties props = new TypedProperties();
         props.put(KeyGeneratorOptions.RECORDKEY_FIELD_NAME.key(), StringUtils.join(keyNames, ","));
@@ -362,6 +396,5 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             case "appendWrite": return WriteOperationType.INSERT;
             default: return WriteOperationType.UPSERT;
         }
-
     }
 }

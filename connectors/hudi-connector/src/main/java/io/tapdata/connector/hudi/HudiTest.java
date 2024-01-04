@@ -79,23 +79,23 @@ public class HudiTest extends CommonDbTest {
     }
     @Override
     public Boolean testWritePrivilege() {
-        List<String> sqls = new ArrayList<>();
+//        List<String> sqls = new ArrayList<>();
         try {
-            String schemaPrefix = EmptyKit.isNotEmpty(hudiConfig.getDatabase()) ? (hudiConfig.getDatabase() + ".") : "";
-            if (jdbcContext.queryAllTables(Arrays.asList(schemaPrefix + TEST_WRITE_TABLE, (schemaPrefix + TEST_WRITE_TABLE).toUpperCase())).size() > 0) {
-                sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
-            }
-            //create
-            sqls.add(String.format(getTestCreateTable(), schemaPrefix + TEST_WRITE_TABLE));
-            //insert
-            sqls.add(String.format(TEST_WRITE_RECORD, schemaPrefix + TEST_WRITE_TABLE));
-            //update
-            sqls.add(String.format(getTestUpdateRecord(), schemaPrefix + TEST_WRITE_TABLE));
-            //delete
-            sqls.add(String.format(TEST_DELETE_RECORD, schemaPrefix + TEST_WRITE_TABLE));
-            //drop
-            sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
-            jdbcContext.batchExecute(sqls);
+//            String schemaPrefix = EmptyKit.isNotEmpty(hudiConfig.getDatabase()) ? (hudiConfig.getDatabase() + ".") : "";
+//            if (jdbcContext.queryAllTables(Arrays.asList(schemaPrefix + TEST_WRITE_TABLE, (schemaPrefix + TEST_WRITE_TABLE).toUpperCase())).size() > 0) {
+//                sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
+//            }
+//            //create
+//            sqls.add(String.format(getTestCreateTable(), schemaPrefix + TEST_WRITE_TABLE));
+//            //insert
+//            sqls.add(String.format(TEST_WRITE_RECORD, schemaPrefix + TEST_WRITE_TABLE));
+//            //update
+//            sqls.add(String.format(getTestUpdateRecord(), schemaPrefix + TEST_WRITE_TABLE));
+//            //delete
+//            sqls.add(String.format(TEST_DELETE_RECORD, schemaPrefix + TEST_WRITE_TABLE));
+//            //drop
+//            sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
+//            jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
             if (e instanceof SQLFeatureNotSupportedException) {

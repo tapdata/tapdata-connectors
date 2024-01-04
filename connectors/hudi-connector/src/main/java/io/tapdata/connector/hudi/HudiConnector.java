@@ -6,7 +6,6 @@ import io.tapdata.connector.hive.HiveConnector;
 import io.tapdata.connector.hudi.config.HudiConfig;
 import io.tapdata.connector.hudi.write.HuDiWriteBySparkClient;
 import io.tapdata.connector.hudi.write.HudiWrite;
-import io.tapdata.connector.hudi.write.JavaClientHive2Hudi;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
@@ -30,10 +29,15 @@ import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.security.SecurityInfo;
+import org.apache.hadoop.security.UserGroupInformation;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -64,6 +68,20 @@ public class HudiConnector extends HiveConnector {
         hudiWrite = new HuDiWriteBySparkClient(hiveJdbcContext, hudiConfig).log(connectionContext.getLog());
     }
 
+    void initSecurityUtil() {
+        try {
+            ServiceLoader<SecurityInfo> securityInfos = ServiceLoader.load(SecurityInfo.class, UserGroupInformation.HadoopLoginModule.class.getClassLoader());
+            Class<org.apache.hadoop.security.SecurityUtil> utilClass = org.apache.hadoop.security.SecurityUtil.class;
+            Field field = utilClass.getDeclaredField("securityInfoProviders");
+            field.setAccessible(true);
+            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            modifiersField.setAccessible(true);
+            modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+            field.set(securityInfos, new AtomicBoolean(false));
+        } catch(Exception ignore) {
+            //
+        }
+    }
 
     @Override
     public void onStop(TapConnectionContext connectionContext) {
@@ -93,9 +111,24 @@ public class HudiConnector extends HiveConnector {
                 return new String(Base64.encodeBase64(tapValue.getValue()));
             return null;
         });
-        codecRegistry.registerFromTapValue(TapTimeValue.class, "string", tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss.SS"));
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "yyyy-MM-dd"));
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSS"));
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, "timestamp", tapValue -> {
+            if (tapValue != null && tapValue.getValue() != null)
+                return System.currentTimeMillis();
+            return System.currentTimeMillis();
+        });
+        codecRegistry.registerFromTapValue(TapTimeValue.class, "timestamp", tapValue -> {
+            if (tapValue != null && tapValue.getValue() != null)
+                return System.currentTimeMillis();
+            return System.currentTimeMillis();
+        });
+        codecRegistry.registerFromTapValue(TapDateValue.class, "timestamp", tapValue -> {
+            if (tapValue != null && tapValue.getValue() != null)
+                return System.currentTimeMillis();
+            return System.currentTimeMillis();
+        });
+       // codecRegistry.registerFromTapValue(TapTimeValue.class, "string", tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss.SS"));
+        //codecRegistry.registerFromTapValue(TapDateValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "yyyy-MM-dd"));
+       // codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSS"));
 
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         //target
@@ -111,25 +144,27 @@ public class HudiConnector extends HiveConnector {
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
-        JavaClientHive2Hudi.main(new String[]{});
-//        String uuid = UUID.randomUUID().toString().replaceAll("-", "");
-//        HudiConfig hudiConfig = new HudiConfig(null)
-//                .log(connectionContext.getLog())
-//                .load(connectionContext.getConnectionConfig());
-//        HudiTest hudiTest = new HudiTest(hudiConfig, consumer);
-//        try {
-//            hudiTest.testOneByOne();
-//        } finally {
-//            ErrorKit.ignoreAnyError(hudiTest::close);
-//            ErrorKit.ignoreAnyError(hudiConfig::close);
-//        }
+        String uuid = UUID.randomUUID().toString().replaceAll("-", "");
+        HudiConfig hudiConfig = new HudiConfig(null)
+                .log(connectionContext.getLog())
+                .load(connectionContext.getConnectionConfig())
+                .authenticate(new Configuration());
+        HudiTest hudiTest = new HudiTest(hudiConfig, consumer);
+        try {
+            hudiTest.testOneByOne();
+        } finally {
+            ErrorKit.ignoreAnyError(hudiTest::close);
+            ErrorKit.ignoreAnyError(hudiConfig::close);
+        }
         return connectionOptions;
     }
 
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
+        long s = System.currentTimeMillis();
         WriteListResult<TapRecordEvent> writeListResult = hudiWrite.writeRecord(tapConnectorContext, tapTable, tapRecordEvents);
         consumer.accept(writeListResult);
+        System.out.println("[TAP_QPS]" + (System.currentTimeMillis() - s) + ", batch size: " + tapRecordEvents.size());
     }
 
     public CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) {
