@@ -1,5 +1,6 @@
 package io.tapdata.connector.hudi.write;
 
+import io.tapdata.connector.hudi.config.HudiConfig;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
@@ -50,6 +51,7 @@ public class ClientEntity implements AutoCloseable {
     Configuration hadoopConf;
 
     WriteOperationType operationType;
+    HudiConfig config;
 
     static class Param {
         Configuration hadoopConf;
@@ -59,6 +61,8 @@ public class ClientEntity implements AutoCloseable {
         TapTable tapTable;
         WriteOperationType operationType;
         Log log;
+
+        HudiConfig config;
 
         public static Param witStart() {
             return new Param();
@@ -97,6 +101,10 @@ public class ClientEntity implements AutoCloseable {
             this.log = log;
             return this;
         }
+        public Param withConfig(HudiConfig config) {
+            this.config = config;
+            return this;
+        }
 
         public Configuration getHadoopConf() {
             return hadoopConf;
@@ -125,14 +133,19 @@ public class ClientEntity implements AutoCloseable {
         public Log getLog() {
             return log;
         }
+        public HudiConfig getConfig() {
+            return config;
+        }
     }
     public ClientEntity(Param param) {
+        this.config = param.getConfig();
         //@TODO
         this.operationType = param.getOperationType();
 
         this.hadoopConf = param.getHadoopConf();
         this.tableId = param.getTableId();
         this.tablePath = param.getTablePath();
+        config.authenticate(hadoopConf);
         try {
             initFs();
         } catch (IOException e) {
@@ -155,6 +168,7 @@ public class ClientEntity implements AutoCloseable {
     //@TODO
     String tableType = HoodieTableType.COPY_ON_WRITE.name();
     private void initFs() throws IOException {
+
         this.fs = FSUtils.getFs(tablePath, hadoopConf);
         path = new Path(tablePath);
         if (!fs.exists(path)) {

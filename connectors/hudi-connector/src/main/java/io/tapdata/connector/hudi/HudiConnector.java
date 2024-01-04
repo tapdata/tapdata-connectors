@@ -6,6 +6,7 @@ import io.tapdata.connector.hive.HiveConnector;
 import io.tapdata.connector.hudi.config.HudiConfig;
 import io.tapdata.connector.hudi.write.HuDiWriteBySparkClient;
 import io.tapdata.connector.hudi.write.HudiWrite;
+import io.tapdata.connector.hudi.write.JavaClientHive2Hudi;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
@@ -28,6 +29,7 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.hadoop.conf.Configuration;
 
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
@@ -53,7 +55,8 @@ public class HudiConnector extends HiveConnector {
         });
         hudiConfig = new HudiConfig(null)
                 .log(connectionContext.getLog())
-                .load(connectionContext.getConnectionConfig());
+                .load(connectionContext.getConnectionConfig())
+                .authenticate(new Configuration());
         hiveJdbcContext = new HudiJdbcContext(hudiConfig);
         commonDbConfig = hiveConfig;
         jdbcContext = hiveJdbcContext;
@@ -108,17 +111,18 @@ public class HudiConnector extends HiveConnector {
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
-        String uuid = UUID.randomUUID().toString().replaceAll("-", "");
-        HudiConfig hudiConfig = new HudiConfig(null)
-                .log(connectionContext.getLog())
-                .load(connectionContext.getConnectionConfig());
-        HudiTest hudiTest = new HudiTest(hudiConfig, consumer);
-        try {
-            hudiTest.testOneByOne();
-        } finally {
-            ErrorKit.ignoreAnyError(hudiTest::close);
-            ErrorKit.ignoreAnyError(hudiConfig::close);
-        }
+        JavaClientHive2Hudi.main(new String[]{});
+//        String uuid = UUID.randomUUID().toString().replaceAll("-", "");
+//        HudiConfig hudiConfig = new HudiConfig(null)
+//                .log(connectionContext.getLog())
+//                .load(connectionContext.getConnectionConfig());
+//        HudiTest hudiTest = new HudiTest(hudiConfig, consumer);
+//        try {
+//            hudiTest.testOneByOne();
+//        } finally {
+//            ErrorKit.ignoreAnyError(hudiTest::close);
+//            ErrorKit.ignoreAnyError(hudiConfig::close);
+//        }
         return connectionOptions;
     }
 
