@@ -1,5 +1,6 @@
 package io.tapdata.connector.mysql;
 
+import com.mysql.cj.exceptions.StatementIsClosedException;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
@@ -21,6 +22,7 @@ import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -209,7 +211,7 @@ public class MysqlConnector extends CommonDbConnector {
             try {
                 synchronized (this) {
                     //mysqlJdbcContext是否有效
-                    if (mysqlJdbcContext == null || !checkValid() || !started.get()) {
+                    if (mysqlJdbcContext == null || !checkValid() || !started.get() || checkStatementClosed(throwable)) {
                         //如果无效执行onStop,有效就return
                         this.onStop(tapConnectionContext);
                         if (isAlive()) {
@@ -225,6 +227,14 @@ public class MysqlConnector extends CommonDbConnector {
         return retryOptions;
     }
 
+    private boolean checkStatementClosed(Throwable throwable) {
+        Throwable cause = matchThrowable(throwable, StatementIsClosedException.class);
+        if (throwable instanceof TapPdkRetryableEx && null != cause && "S1009".equals(((StatementIsClosedException) cause).getSQLState())) {
+            return true;
+        } else {
+            return false;
+        }
+    }
     private boolean checkValid() {
         try {
             mysqlJdbcContext.queryVersion();
