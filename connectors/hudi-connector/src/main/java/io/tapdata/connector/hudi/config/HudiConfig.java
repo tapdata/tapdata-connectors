@@ -44,7 +44,6 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
     }
 
     public String getDatabaseUrl()  {
-        init();
         if (EmptyKit.isNull(this.getExtParams())) {
             this.setExtParams("");
         }
@@ -77,6 +76,7 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
         }
         //save core-site.xml, hdfs-site.xml, hive-site.xml
         this.xmlPath = SiteXMLUtil.saveSiteXMLS(catalog, hadoopCoreSiteXML, hdfsSiteXML, hiveSiteXML);
+        init();
         return this;
     }
 
@@ -85,7 +85,7 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
             String confPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.KRB5_NAME);
             confPath = confPath.replaceAll("\\\\","/");
             System.setProperty("java.security.krb5.conf", confPath);
-            authenticate(new Configuration());
+            //authenticate(new Configuration());
             String zkPrincipal = "zookeeper/" + getUserRealm(this.getKrb5Conf());
             System.setProperty("zookeeper.server.principal", zkPrincipal);
         }
@@ -95,7 +95,7 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
         }
     }
 
-    public void authenticate(Configuration conf) {
+    public HudiConfig authenticate(Configuration conf1) {
         if (krb5) {
             String localKeytabPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.USER_KEY_TAB_NAME);
             String confPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.KRB5_NAME);
@@ -103,13 +103,13 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
             final String principal = getUser() + "@" + KerberosUtil.DEFAULT_REALM;
             try {
                 synchronized (AUTH_LOCK) {
-                    //Configuration.reloadExistingConfigurations();
+                    Configuration.reloadExistingConfigurations();
                     System.clearProperty("java.security.krb5.conf");
-                    System.setProperty("java.security.krb5.conf", krb5Path);
-                    //Configuration conf = new Configuration();
+                    System.setProperty("java.security.krb5.conf", "D:\\Tapdata_temp\\software\\conf\\krb5.conf");//krb5Path);
+                    Configuration conf = new Configuration();
                     conf.set("hadoop.security.authentication", "kerberos");
                     UserGroupInformation.setConfiguration(conf);
-                    UserGroupInformation.loginUserFromKeytab(principal, localKeytabPath);
+                    UserGroupInformation.loginUserFromKeytab(principal, "D:\\Tapdata_temp\\software\\conf\\user.keytab");//localKeytabPath);
                 }
                 if (null != log) {
                     log.info("Safety certification passed");
@@ -118,6 +118,7 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
                 throw new CoreException("Fail to get certification, message: {}", e.getMessage(), e);
             }
         }
+        return this;
     }
 
     public static String getUserRealm(String krb5Conf) {
@@ -241,6 +242,6 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        FileUtil.release( "hudi" + connectorId, log);
+        //FileUtil.release( "hudi" + connectorId, log);
     }
 }
