@@ -64,7 +64,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             }
         }
         String tablePath = getTablePath(tableId);
-        config.authenticate(hadoopConf);
+        //config.authenticate(hadoopConf);
         clientEntity = new ClientEntity(
             ClientEntity.Param.witStart()
                     .withHadoopConf(hadoopConf)
@@ -73,6 +73,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                     .withTablePath(tablePath)
                     .withTapTable(tapTable)
                     .withOperationType(appendType)
+                    .withConfig(config)
                     .withLog(log));
         synchronized (clientEntityLock) {
             tablePathMap.put(tableId, clientEntity);

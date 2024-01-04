@@ -146,6 +146,7 @@ public class Krb5Util {
      */
     public static String saveByCatalog(String catalog, String keytab, String conf, boolean deleteExists) {
         String dir = FileUtil.paths(FileUtil.storeDir(catalog), "krb5");
+        if (new File(dir).exists()) return dir;
         try {
             FileUtil.saveBase64File(dir, USER_KEY_TAB_NAME, keytab, deleteExists);
         } catch (Exception e) {
