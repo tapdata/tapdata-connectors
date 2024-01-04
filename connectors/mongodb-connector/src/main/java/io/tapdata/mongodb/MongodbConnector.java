@@ -202,7 +202,7 @@ public class MongodbConnector extends ConnectorBase {
 						});
 						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
 						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
-						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table.getTableAttr());
+						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table);
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -242,7 +242,7 @@ public class MongodbConnector extends ConnectorBase {
 						}
 						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
 						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
-						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table.getTableAttr());
+						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table);
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
