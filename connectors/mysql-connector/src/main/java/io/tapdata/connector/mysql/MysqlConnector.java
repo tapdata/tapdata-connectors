@@ -80,8 +80,8 @@ public class MysqlConnector extends CommonDbConnector {
         exceptionCollector = new MysqlExceptionCollector();
         this.version = mysqlJdbcContext.queryVersion();
         if (tapConnectionContext instanceof TapConnectorContext) {
-            this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext);
-            this.mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger);
+            this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext, this::isAlive);
+            this.mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
             this.timezone = mysqlJdbcContext.queryTimeZone();
             ddlSqlGenerator = new MysqlDDLSqlGenerator(version, ((TapConnectorContext) tapConnectionContext).getTableMap());
         }
@@ -235,6 +235,7 @@ public class MysqlConnector extends CommonDbConnector {
             return false;
         }
     }
+
     private boolean checkValid() {
         try {
             mysqlJdbcContext.queryVersion();
@@ -250,10 +251,6 @@ public class MysqlConnector extends CommonDbConnector {
         started.set(false);
         try {
             Optional.ofNullable(this.mysqlReader).ifPresent(MysqlReader::close);
-        } catch (Exception ignored) {
-        }
-        try {
-            Optional.ofNullable(this.mysqlWriter).ifPresent(MysqlWriter::onDestroy);
         } catch (Exception ignored) {
         }
         if (null != mysqlJdbcContext) {
