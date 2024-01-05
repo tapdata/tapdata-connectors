@@ -6,6 +6,7 @@ import com.mongodb.MongoCredential;
 import com.mongodb.client.*;
 import com.mongodb.connection.ConnectionPoolSettings;
 import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
@@ -85,7 +86,7 @@ public class MongodbUtil {
 		return map;
 	}
 
-	public static void getTimeSeriesCollectionStatus(MongoClient mongoClient, String database, String collectionName,Map<String,Object> tableAttr){
+	public static void getTimeSeriesCollectionStatus(MongoClient mongoClient, String database, String collectionName, TapTable table ){
 		if (null == mongoClient || null == database || "".equals(database.trim()) || null == collectionName || "".equals(collectionName.trim())) return ;
 		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
 		BsonDocument bsonDocument = new BsonDocument();
@@ -93,14 +94,14 @@ public class MongodbUtil {
 		bsonDocument.put("filter",new BsonDocument( "name", new BsonString(collectionName)));
 		Document cursor = (Document) mongoDatabase.runCommand(bsonDocument).get("cursor");
 		if(cursor != null && cursor.get("firstBatch")!= null){
-			if(tableAttr == null)tableAttr = new HashMap<>();
+			if(table.getTableAttr() == null)table.setTableAttr(new HashMap<>());
 		    List<Document> firstBatch =(List<Document>) cursor.get("firstBatch");
 			Document first = firstBatch.stream().findFirst().orElse(null);
 			if (first != null && first.get("type").equals("timeseries") && first.get("options") != null){
 				Document timeSeries =(Document)first.get("options");
 				Set<Map.Entry<String, Object>> entries = ((Document)timeSeries.get("timeseries")).entrySet();
 				if (!entries.isEmpty()) {
-					Map<String, Object> finalTableAttr = tableAttr;
+					Map<String, Object> finalTableAttr = table.getTableAttr();
 					entries.stream()
 							.filter(Objects::nonNull)
 							.forEach(entry ->

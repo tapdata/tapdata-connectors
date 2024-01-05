@@ -107,7 +107,7 @@ public class ExceptionWrapper {
                     case 0: {
                         switch (((SQLException) e).getSQLState()) {
                             case "S1009": {
-                                newEx = new TapPdkTerminateByServerEx(tapConnectorContext.getSpecification().getId(), e);
+                                newEx = new TapPdkRetryableEx(tapConnectorContext.getSpecification().getId(), e);
                             }
                         }
                         break;
