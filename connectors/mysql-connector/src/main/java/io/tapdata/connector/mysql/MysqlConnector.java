@@ -24,6 +24,7 @@ import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.ErrorKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -219,6 +220,10 @@ public class MysqlConnector extends CommonDbConnector {
                         }
                     } else {
                         mysqlWriter.selfCheck();
+                        if (EmptyKit.isNotNull(mysqlReader)) {
+                            EmptyKit.closeQuietly(mysqlReader);
+                        }
+                        mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
                     }
                 }
             } catch (Throwable ignore) {
