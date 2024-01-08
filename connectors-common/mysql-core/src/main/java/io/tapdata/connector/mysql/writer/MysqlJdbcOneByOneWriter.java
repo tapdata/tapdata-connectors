@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * @author samuel
@@ -38,12 +39,12 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
      * @throws Throwable
      */
     @Deprecated
-    private MysqlJdbcOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext) throws Throwable {
-        super(mysqlJdbcContext);
+    private MysqlJdbcOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext, Supplier<Boolean> isAlive) throws Throwable {
+        super(mysqlJdbcContext, isAlive);
     }
 
-    public MysqlJdbcOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext, Map<String, JdbcCache> jdbcCacheMap) throws Throwable {
-        super(mysqlJdbcContext, jdbcCacheMap);
+    public MysqlJdbcOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext, Map<String, JdbcCache> jdbcCacheMap, Supplier<Boolean> isAlive) throws Throwable {
+        super(mysqlJdbcContext, jdbcCacheMap, isAlive);
     }
 
     @Override
@@ -52,7 +53,7 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
         TapRecordEvent errorRecord = null;
         try {
             for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
-                if (!isAlive()) break;
+                if (!isAlive.get()) break;
                 try {
                     if (tapRecordEvent instanceof TapInsertRecordEvent) {
                         int insertRow = doInsertOne(tapConnectorContext, tapTable, tapRecordEvent);
@@ -67,7 +68,7 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
                         writeListResult.addError(tapRecordEvent, new Exception("Event type \"" + tapRecordEvent.getClass().getSimpleName() + "\" not support: " + tapRecordEvent));
                     }
                 } catch (Throwable e) {
-                    if (!isAlive()) {
+                    if (!isAlive.get()) {
                         break;
                     }
                     errorRecord = tapRecordEvent;
