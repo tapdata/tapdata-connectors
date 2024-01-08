@@ -250,6 +250,6 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        //FileUtil.release( "hudi" + connectorId, log);
+        FileUtil.release( "hudi" + connectorId, log);
     }
 }
