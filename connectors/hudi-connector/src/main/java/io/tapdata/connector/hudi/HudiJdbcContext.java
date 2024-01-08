@@ -2,29 +2,19 @@ package io.tapdata.connector.hudi;
 
 import io.tapdata.connector.hive.HiveJdbcContext;
 import io.tapdata.connector.hive.config.HiveConfig;
-import io.tapdata.entity.event.dml.TapInsertRecordEvent;
-import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
-import io.tapdata.entity.schema.TapField;
-import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.spark.sql.execution.datasources.jdbc.DriverRegistry;
 import org.apache.spark.sql.execution.datasources.jdbc.DriverWrapper;
 import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions;
 
 import java.sql.*;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
-import static io.tapdata.entity.simplify.TapSimplify.field;
-import static io.tapdata.entity.simplify.TapSimplify.list;
+import static io.tapdata.base.ConnectorBase.list;
 
 public class HudiJdbcContext extends HiveJdbcContext {
     private final static String HUDI_ALL_TABLE = "show tables";
@@ -93,6 +83,20 @@ public class HudiJdbcContext extends HiveJdbcContext {
             return tableList.stream().filter(t -> tableNames.contains(t.getString("tableName"))).collect(Collectors.toList());
         }
         return tableList;
+    }
+
+    public boolean tableIfExists(String tableName) throws SQLException {
+        if (null == tableName || tableName.isEmpty()) return false;
+        AtomicBoolean ifExists = new AtomicBoolean(false);
+        query(String.format("SHOW TABLES LIKE '%s'", tableName), resultSet -> {
+            while (resultSet.next()) {
+                if (tableName.equals(resultSet.getString("tableName"))) {
+                    ifExists.set(true);
+                    break;
+                }
+            }
+        });
+        return ifExists.get();
     }
 
     private Map<String, String> getTableModule() {
@@ -198,4 +202,14 @@ public class HudiJdbcContext extends HiveJdbcContext {
         query(sql.toString(), resultSet -> tableList.addAll(DbKit.getDataFromResultSet(resultSet)));
 
     }*/
+
+    public void execute(String sql) throws SQLException {
+        try (
+                Connection connection = getConnection();
+                Statement statement = connection.createStatement()
+        ) {
+            statement.execute(sql);
+        }
+    }
+
 }
