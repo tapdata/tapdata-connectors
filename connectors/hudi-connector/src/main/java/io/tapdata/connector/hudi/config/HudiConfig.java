@@ -10,6 +10,7 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.kit.EmptyKit;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.security.AnnotatedSecurityInfo;
+import org.apache.hadoop.security.SecurityInfo;
 import org.apache.hadoop.security.SecurityUtil;
 import org.apache.hadoop.security.UserGroupInformation;
 
@@ -115,7 +116,7 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
                     conf.set("hadoop.security.authentication", "kerberos");
                     UserGroupInformation.setConfiguration(conf);
                     UserGroupInformation.loginUserFromKeytab(principal, localKeytabPath);
-                    SecurityUtil.setSecurityInfoProviders(new AnnotatedSecurityInfo());
+                    SecurityUtil.setSecurityInfoProviders(new SecurityInfo[]{new AnnotatedSecurityInfo()});
                 }
                 if (null != log) {
                     log.info("Safety certification passed");

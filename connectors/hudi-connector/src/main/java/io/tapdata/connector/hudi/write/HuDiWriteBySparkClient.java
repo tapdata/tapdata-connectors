@@ -255,10 +255,9 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         HoodieJavaWriteClient<HoodieRecordPayload> client = clientEntity.getClient();
         String startCommit;
         client.setOperationType(appendType);
-        synchronized (HuDiWriteBySparkClient.class) {
-            startCommit = startCommitAndGetCommitTime(clientEntity);
-            ErrorKit.ignoreAnyError(()->Thread.sleep(500));
-        }
+        startCommit = startCommitAndGetCommitTime(clientEntity);
+        ErrorKit.ignoreAnyError(()->Thread.sleep(500));
+
         try {
             switch (batchType) {
                 case 1:
@@ -269,19 +268,19 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                     } else {
                         insert = client.upsert(batch, startCommit);
                     }
-                    clientEntity.getClient().commit(startCommit, insert);
+                    client.commit(startCommit, insert);
                     batch.clear();
                     break;
                 case 3:
                     if (!WriteOperationType.INSERT.equals(this.appendType)) {
                         List<WriteStatus> delete = client.delete(deleteEventsKeys, startCommit);
-                        clientEntity.getClient().commit(startCommit, delete);
+                        client.commit(startCommit, delete);
                         deleteEventsKeys.clear();
                     }
                     break;
             }
         } catch (HoodieRollbackException e) {
-            clientEntity.getClient().rollback(startCommit);
+            client.rollback(startCommit);
             throw e;
         }
         //System.out.println("[TAP_QPS] one commit cost: " + (System.currentTimeMillis() - s));

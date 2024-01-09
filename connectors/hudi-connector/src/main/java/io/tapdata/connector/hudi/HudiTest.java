@@ -2,7 +2,11 @@ package io.tapdata.connector.hudi;
 
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.hudi.config.HudiConfig;
+import io.tapdata.connector.hudi.write.HuDiWriteBySparkClient;
 import io.tapdata.constant.DbTestItem;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.logger.TapLog;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.util.NetUtil;
@@ -79,23 +83,17 @@ public class HudiTest extends CommonDbTest {
     }
     @Override
     public Boolean testWritePrivilege() {
-//        List<String> sqls = new ArrayList<>();
         try {
-//            String schemaPrefix = EmptyKit.isNotEmpty(hudiConfig.getDatabase()) ? (hudiConfig.getDatabase() + ".") : "";
-//            if (jdbcContext.queryAllTables(Arrays.asList(schemaPrefix + TEST_WRITE_TABLE, (schemaPrefix + TEST_WRITE_TABLE).toUpperCase())).size() > 0) {
-//                sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
-//            }
-//            //create
-//            sqls.add(String.format(getTestCreateTable(), schemaPrefix + TEST_WRITE_TABLE));
-//            //insert
-//            sqls.add(String.format(TEST_WRITE_RECORD, schemaPrefix + TEST_WRITE_TABLE));
-//            //update
-//            sqls.add(String.format(getTestUpdateRecord(), schemaPrefix + TEST_WRITE_TABLE));
-//            //delete
-//            sqls.add(String.format(TEST_DELETE_RECORD, schemaPrefix + TEST_WRITE_TABLE));
-//            //drop
-//            sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
-//            jdbcContext.batchExecute(sqls);
+            //create
+//            String sql = String.format(getTestCreateTable(), TEST_WRITE_TABLE);
+//            jdbcContext.execute(sql);
+//            HudiJdbcContext context = new HudiJdbcContext(hudiConfig);
+//            HuDiWriteBySparkClient sparkClient =  new HuDiWriteBySparkClient(context, hudiConfig)
+//                    .log(new TapLog());
+//            List<TapRecordEvent> recordEvents = new ArrayList<>();
+            TapInsertRecordEvent insertRecordEvent = new TapInsertRecordEvent();
+//            sparkClient.writeRecord(recordEvents);
+
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
             if (e instanceof SQLFeatureNotSupportedException) {
@@ -107,7 +105,6 @@ public class HudiTest extends CommonDbTest {
             }
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, e.getMessage()));
             return false;
-
         }
         return true;
     }

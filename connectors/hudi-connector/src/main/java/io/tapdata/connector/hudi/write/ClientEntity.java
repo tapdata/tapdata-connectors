@@ -213,6 +213,7 @@ public class ClientEntity implements AutoCloseable {
         indexProperties.put(BLOOM_INDEX_FILTER_DYNAMIC_MAX_ENTRIES.key(), 150000); // 1000万总体时间提升1分钟
         final HoodieWriteConfig cfg = HoodieWriteConfig.newBuilder().withPath(tablePath)
                 .withSchema(schema.toString())
+                .withAutoCommit(true)
                 .withParallelism(2, 2).withDeleteParallelism(2)
                 .forTable(tableId)
                 .withWritePayLoad(payloadClassName)
