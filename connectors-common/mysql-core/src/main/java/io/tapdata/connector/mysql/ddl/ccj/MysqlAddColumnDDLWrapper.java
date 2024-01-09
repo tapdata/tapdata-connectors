@@ -87,7 +87,7 @@ public class MysqlAddColumnDDLWrapper extends MysqlDDLWrapper {
                             break;
                     }
                 }
-                if (!tapField.getNullable() && EmptyKit.isNull(tapField.getDefaultValue())) {
+                if (EmptyKit.isNotNull(tapField.getNullable()) && !tapField.getNullable() && EmptyKit.isNull(tapField.getDefaultValue())) {
                     tapField.setDefaultValue(getDefaultValueForMysql(tapField.getDataType()));
                 }
                 setColumnPos(tapTable, tapField);
