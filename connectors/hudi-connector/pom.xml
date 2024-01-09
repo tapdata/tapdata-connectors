@@ -324,7 +324,7 @@
                                 <PDK-API-Version>${tapdata.pdk.api.version}</PDK-API-Version>
                                 <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
                                 <Version>${project.version}</Version>
-                                <Authentication>GA</Authentication>
+                                <Authentication>beta</Authentication>
                                 <Git-Build-Time>${git.build.time}</Git-Build-Time>
                                 <Git-Branch>${git.branch}</Git-Branch>
                                 <Git-Commit-Id>${git.commit.id}</Git-Commit-Id>
@@ -349,6 +349,10 @@
                                         <exclude>**/org/apache/log4j/**</exclude>
                                         <exclude>**/org/apache/logging/log4j/**</exclude>
                                         <exclude>**/org/slf4j/**</exclude>
+                                        <!-- 将 jar 解压后有以下文件干扰 reflections 的类加载，将其忽略 -->
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
@@ -379,6 +383,7 @@
                 </configuration>
             </plugin>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-resources-plugin</artifactId>
                 <version>3.1.0</version>
                 <executions>
@@ -410,6 +415,7 @@
                 <extensions>true</extensions>
             </plugin>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.7.0</version>
                 <configuration>
