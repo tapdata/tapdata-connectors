@@ -1,9 +1,9 @@
 package io.tapdata.connector.hudi;
 
-import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.hive.HiveConnector;
 import io.tapdata.connector.hudi.config.HudiConfig;
+import io.tapdata.connector.hudi.write.HuDiSqlMarker;
 import io.tapdata.connector.hudi.write.HuDiWriteBySparkClient;
 import io.tapdata.connector.hudi.write.HudiWrite;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -57,7 +57,7 @@ public class HudiConnector extends HiveConnector {
         hiveJdbcContext = hudiJdbcContext = new HudiJdbcContext(hudiConfig);
         commonDbConfig = hiveConfig;
         jdbcContext = hiveJdbcContext;
-        commonSqlMaker = new CommonSqlMaker('`');
+        commonSqlMaker = new HuDiSqlMarker('`');
     }
 
     @Override
@@ -105,6 +105,36 @@ public class HudiConnector extends HiveConnector {
             }
             return null;
         });
+        codecRegistry.registerFromTapValue(TapNumberValue.class, "smallint", tapValue -> {
+            if (tapValue != null && tapValue.getValue() != null) {
+                return tapValue.getValue().intValue();
+            }
+            return null;
+        });
+        codecRegistry.registerFromTapValue(TapNumberValue.class, "int", tapValue -> {
+            if (tapValue != null && tapValue.getValue() != null) {
+                return tapValue.getValue().intValue();
+            }
+            return null;
+        });
+        codecRegistry.registerFromTapValue(TapNumberValue.class, "tinyint", tapValue -> {
+            if (tapValue != null && tapValue.getValue() != null) {
+                return tapValue.getValue().intValue();
+            }
+            return null;
+        });
+        codecRegistry.registerFromTapValue(TapNumberValue.class, "smallint", tapValue -> {
+            if (tapValue != null && tapValue.getValue() != null) {
+                return tapValue.getValue().intValue();
+            }
+            return null;
+        });
+        codecRegistry.registerFromTapValue(TapNumberValue.class, "bigint", tapValue -> {
+            if (tapValue != null && tapValue.getValue() != null) {
+                return tapValue.getValue().longValue();
+            }
+            return null;
+        });
 
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         //target
@@ -112,6 +142,11 @@ public class HudiConnector extends HiveConnector {
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportWriteRecord(this::writeRecord);
+
+        connectorFunctions.supportBatchCount(null);
+        connectorFunctions.supportBatchRead(null);
+        //query
+        connectorFunctions.supportQueryByAdvanceFilter(null);
 
 
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> hiveJdbcContext.getConnection(), this::isAlive, c));
@@ -137,7 +172,7 @@ public class HudiConnector extends HiveConnector {
 
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
-        long s = System.currentTimeMillis();
+        //long s = System.currentTimeMillis();
         WriteListResult<TapRecordEvent> writeListResult = writeClient(tapConnectorContext)
                 .writeRecord(tapConnectorContext, tapTable, tapRecordEvents, consumer);
         if(null != writeListResult.getErrorMap() && !writeListResult.getErrorMap().isEmpty()) {
@@ -186,8 +221,8 @@ public class HudiConnector extends HiveConnector {
                     pk.add(field);
                 }
                 String sb = "\n) using hudi \noptions (";
-                if (EmptyKit.isEmpty(primaryKeys)) {
-                    sb += "\nprimaryKey = '" + pk +"' ";
+                if (!EmptyKit.isEmpty(primaryKeys)) {
+                    sb += ("\nprimaryKey = '" + pk +"' ");
                 }
                 sql = sql + sb  + ")";
                 List<String> sqls = TapSimplify.list();
