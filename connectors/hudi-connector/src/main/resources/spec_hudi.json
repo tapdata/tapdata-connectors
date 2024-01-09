@@ -293,6 +293,8 @@
           ]
         }
       }
+    },
+    "node" : {
     }
   },
   "messages": {
@@ -301,8 +303,8 @@
       "nameSrvAddr": "Cluster Address",
       "database": "database",
       "krb5": "kerberos authentication",
-      "krb5Keytab": "Key representation file",
-      "krb5Conf": "Configuration file",
+      "krb5Keytab": "Key representation file（*.keytab）",
+      "krb5Conf": "Configuration file（*.conf）",
       "principal": "Hive Principal",
       "ssl": "ssl",
       "user": "user",
@@ -315,14 +317,17 @@
       "hadoopCoreSiteXML": "Hadoop conf",
       "hiveSiteXML_tip": "Hive configuration file(hive-site.xml)",
       "hdfsSiteXML_tip": "HDFS configuration file(hdfs-site.xml)",
-      "hadoopCoreSiteXML_tip": "Hadoop configuration file(core-site.xml)"
+      "hadoopCoreSiteXML_tip": "Hadoop configuration file(core-site.xml)",
+      "deleteStage": "删除策略",
+      "deleteStage_1": "逻辑策略",
+      "deleteStage_2": "物理策略"
     },
     "zh_CN": {
       "nameSrvAddr": "集群地址",
       "database": "数据库",
       "krb5": "kerberos 认证",
-      "krb5Keytab": "密钥表示文件",
-      "krb5Conf": "配置文件",
+      "krb5Keytab": "密钥表示文件（*.keytab）",
+      "krb5Conf": "配置文件（*.conf）",
       "principal": "Hive主体配置",
       "ssl": "ssl",
       "user": "账号",
@@ -330,19 +335,22 @@
       "extParams": "连接参数",
       "timezone": "时区",
       "doc": "docs/hudi_zh_CN.md",
-      "hiveSiteXML": "Hive conf file",
-      "hdfsSiteXML": "HDFS conf file",
-      "hadoopCoreSiteXML": "Hadoop conf",
+      "hiveSiteXML": "Hive配置文件",
+      "hdfsSiteXML": "HDFS配置文件",
+      "hadoopCoreSiteXML": "Hadoop配置文件",
       "hiveSiteXML_tip": "Hive配置文件(hive-site.xml)",
       "hdfsSiteXML_tip": "HDFS配置文件(hdfs-site.xml)",
-      "hadoopCoreSiteXML_tip": "Hadoop配置文件(core-site.xml)"
+      "hadoopCoreSiteXML_tip": "Hadoop配置文件(core-site.xml)",
+      "deleteStage": "删除策略",
+      "deleteStage_1": "逻辑策略",
+      "deleteStage_2": "物理策略"
     },
     "zh_TW": {
       "nameSrvAddr": "集群地址",
       "database": "數據庫",
       "krb5": "kerberos 認證",
-      "krb5Keytab": "密鑰表示文件",
-      "krb5Conf": "配置文件",
+      "krb5Keytab": "密鑰表示文件（*.keytab）",
+      "krb5Conf": "配置文件（*.conf）",
       "principal": "Hive主体配置",
       "ssl": "ssl",
       "user": "賬號",
@@ -350,12 +358,15 @@
       "extParams": "連接參數",
       "timezone": "時區",
       "doc": "docs/hudi_zh_TW.md",
-      "hiveSiteXML": "Hive conf file",
-      "hdfsSiteXML": "HDFS conf file",
-      "hadoopCoreSiteXML": "Hadoop conf",
+      "hiveSiteXML": "Hive配置文件",
+      "hdfsSiteXML": "HDFS配置文件",
+      "hadoopCoreSiteXML": "Hadoop配置文件",
       "hiveSiteXML_tip": "Hive配置文件(hive-site.xml)",
       "hdfsSiteXML_tip": "HDFS配置文件(hdfs-site.xml)",
-      "hadoopCoreSiteXML_tip": "Hadoop配置文件(core-site.xml)"
+      "hadoopCoreSiteXML_tip": "Hadoop配置文件(core-site.xml)",
+      "deleteStage": "删除策略",
+      "deleteStage_1": "逻辑策略",
+      "deleteStage_2": "物理策略"
     }
   },
 
