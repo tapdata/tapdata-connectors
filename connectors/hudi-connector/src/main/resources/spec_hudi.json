@@ -377,7 +377,7 @@
       "byte": "64k",
       "pkEnablement": false
     },
-    "tinyint": {
+    "tinyint[($zerofill)]": {
       "to": "TapNumber",
       "bit": 8,
       "precision": 3,
@@ -386,7 +386,17 @@
         127
       ]
     },
-    "smallint[($zerofill)]": {
+    "tinyint[($zerofill)] unsigned": {
+      "to": "TapNumber",
+      "bit": 8,
+      "precision": 3,
+      "value": [
+        0,
+        127
+      ],
+      "unsigned": "unsigned"
+    },
+    "smallint[($zerofill)] [unsigned]": {
       "to": "TapNumber",
       "bit": 16,
       "precision": 5,
@@ -395,7 +405,17 @@
         32767
       ]
     },
-    "int[($zerofill)]": {
+    "smallint[($zerofill)] unsigned": {
+      "to": "TapNumber",
+      "bit": 16,
+      "precision": 5,
+      "value": [
+        0,
+        32767
+      ],
+      "unsigned": "unsigned"
+    },
+    "int[($zerofill)] [unsigned]": {
       "to": "TapNumber",
       "bit": 32,
       "precision": 10,
@@ -404,7 +424,17 @@
         2147483647
       ]
     },
-    "bigint[($zerofill)]": {
+    "int[($zerofill)] unsigned": {
+      "to": "TapNumber",
+      "bit": 32,
+      "precision": 10,
+      "value": [
+        0,
+        2147483647
+      ],
+      "unsigned": "unsigned"
+    },
+    "bigint[($zerofill)] [unsigned]": {
       "to": "TapNumber",
       "bit": 64,
       "precision": 19,
@@ -413,29 +443,91 @@
         9223372036854775807
       ]
     },
-    "float": {
+    "bigint[($zerofill)] unsigned": {
+      "to": "TapNumber",
+      "bit": 64,
+      "precision": 19,
+      "value": [
+        0,
+        9223372036854775807
+      ],
+      "unsigned": "unsigned"
+    },
+    "float($precision,$scale) [unsigned]": {
       "to": "TapNumber",
       "name": "float",
-      "bit": 32,
+      "precision": [
+        1,
+        30
+      ],
+      "scale": [
+        0,
+        30
+      ],
+      "value": [
+        "-3.402823466E+38",
+        "3.402823466E+38"
+      ],
+      "unsigned": "unsigned",
+      "fixed": false
+    },
+    "float": {
+      "to": "TapNumber",
+      "precision": [
+        1,
+        6
+      ],
+      "scale": [
+        0,
+        6
+      ],
       "fixed": false
     },
     "double": {
       "to": "TapNumber",
-      "bit": 64,
+      "precision": [
+        1,
+        17
+      ],
+      "preferPrecision": 11,
+      "preferScale": 4,
+      "scale": [
+        0,
+        17
+      ],
       "fixed": false
     },
-    "decimal($precision,$scale)": {
+    "double[($precision,$scale)][unsigned]": {
       "to": "TapNumber",
       "precision": [
         1,
-        38
+        255
       ],
       "scale": [
         0,
-        38
+        30
+      ],
+      "value": [
+        "-1.7976931348623157E+308",
+        "1.7976931348623157E+308"
+      ],
+      "unsigned": "unsigned",
+      "fixed": false
+    },
+    "decimal[($precision,$scale)][unsigned]": {
+      "to": "TapNumber",
+      "precision": [
+        1,
+        65
+      ],
+      "scale": [
+        0,
+        30
       ],
       "defaultPrecision": 10,
-      "defaultScale": 0
+      "defaultScale": 0,
+      "unsigned": "unsigned",
+      "fixed": true
     },
     "date": {
       "to": "TapDate",
