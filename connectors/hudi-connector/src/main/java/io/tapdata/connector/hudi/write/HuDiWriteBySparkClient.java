@@ -190,7 +190,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                         recordsOneBatch.add(hoodieRecord);
                     }
                 } catch (Exception fail) {
-                    log.error("target database process message failed", "table name:{},error msg:{}", tapTable.getId(), fail.getMessage(), fail);
+                    log.error("target database process message failed", "table name:{}, record: {}, error msg:{}", tapTable.getId(), e, fail.getMessage(), fail);
                     errorRecord = batchFirstRecord;
                     throw fail;
                 }

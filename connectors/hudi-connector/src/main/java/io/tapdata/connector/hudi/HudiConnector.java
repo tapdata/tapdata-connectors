@@ -242,7 +242,13 @@ public class HudiConnector extends HiveConnector {
 
     private void cleanHdfsPath(String tableId) {
         ClientHandler clientHandler = new ClientHandler(hudiConfig, hudiJdbcContext);
-        String tablePath = clientHandler.getTablePath(tableId);
+        String tablePath = null;
+        try {
+            tablePath = clientHandler.getTablePath(tableId);
+        } catch (Exception e) {
+            return;
+        }
+        if (null == tablePath) return;
         try {
             FileSystem fs = FSUtils.getFs(tablePath, clientHandler.getHadoopConf());
             Path path = new Path(tablePath);
