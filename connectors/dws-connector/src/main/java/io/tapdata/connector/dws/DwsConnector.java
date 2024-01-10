@@ -185,23 +185,30 @@ public class DwsConnector extends PostgresConnector {
         Collection<String> primaryKeys = table.primaryKeys();
         TapField distributeKey=null;
         if(primaryKeys.isEmpty()){
-            distributeKey = table.getNameFieldMap().values().iterator().next();
+            Iterator<TapField> iterator = table.getNameFieldMap().values().iterator();
+            if(iterator.hasNext()){
+                distributeKey = iterator.next();
+            }
         }else{
-            String firstPk = primaryKeys.iterator().next();
-            distributeKey = table.getNameFieldMap().get(firstPk);
-        }
-        Pattern pattern = Pattern.compile("nvarchar2\\(\\d+\\)",Pattern.CASE_INSENSITIVE);
-        if(pattern.matcher(distributeKey.getDataType()).matches()){
-            distributeKey.setDataType("nvarchar2");
-        }
-        LinkedHashMap<String, TapField> nameFieldMap = table.getNameFieldMap();
-        for (Map.Entry<String, TapField> tapFieldEntry : nameFieldMap.entrySet()) {
-            if (tapFieldEntry.equals(distributeKey.getName())){
-                tapFieldEntry.setValue(distributeKey);
-                break;
+            Iterator<String> iterator = primaryKeys.iterator();
+            if(iterator.hasNext()){
+                String firstPk = iterator.next();
+                distributeKey = table.getNameFieldMap().get(firstPk);
             }
         }
-        table.setNameFieldMap(nameFieldMap);
+        if(distributeKey!=null){
+            Pattern pattern = Pattern.compile("nvarchar2\\(\\d+\\)",Pattern.CASE_INSENSITIVE);
+            if(pattern.matcher(distributeKey.getDataType()).matches()){
+                distributeKey.setDataType("nvarchar2");
+            }
+            LinkedHashMap<String, TapField> nameFieldMap = table.getNameFieldMap();
+            for (Map.Entry<String, TapField> tapFieldEntry : nameFieldMap.entrySet()) {
+                if (tapFieldEntry.equals(distributeKey.getName())){
+                    tapFieldEntry.setValue(distributeKey);
+                    break;
+                }
+            }
+        }
         createTableEvent.setTable(table);
         CreateTableOptions createTableOptions = super.createTableV2(connectorContext, createTableEvent);
         createUniqueIndexForLogicPkIfNeed(connectorContext, table);
