@@ -12,10 +12,11 @@
     <artifactId>hudi-connector</artifactId>
 
     <properties>
+        <tapdata.pdk.api.version>1.2.4-SNAPSHOT</tapdata.pdk.api.version>
         <hive.core.version>1.0-SNAPSHOT</hive.core.version>
         <hadoop.version>3.1.1-hw-ei-312005</hadoop.version>
-        <maven.compiler.source.version>1.8</maven.compiler.source.version>
-        <maven.compiler.target.version>1.8</maven.compiler.target.version>
+        <maven.compiler.source.version>8</maven.compiler.source.version>
+        <maven.compiler.target.version>8</maven.compiler.target.version>
         <encoding>UTF-8</encoding>
         <hudi.version>0.12.0</hudi.version>
         <parquet.version>1.10.1</parquet.version>
@@ -323,7 +324,7 @@
                                 <PDK-Runner-Version>${tapdata.pdk.runner.version}</PDK-Runner-Version>
                                 <PDK-API-Version>${tapdata.pdk.api.version}</PDK-API-Version>
                                 <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
-                                <Version>${project.version}</Version>
+                                <Version>${version}</Version>
                                 <Authentication>beta</Authentication>
                                 <Git-Build-Time>${git.build.time}</Git-Build-Time>
                                 <Git-Branch>${git.branch}</Git-Branch>

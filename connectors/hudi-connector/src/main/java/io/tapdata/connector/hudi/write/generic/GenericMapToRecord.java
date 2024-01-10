@@ -6,6 +6,7 @@ import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
 
+import java.math.BigInteger;
 import java.util.Map;
 
 public class GenericMapToRecord implements GenericStage<NormalEntity, Map<String, Object>, GenericRecord> {
@@ -16,7 +17,15 @@ public class GenericMapToRecord implements GenericStage<NormalEntity, Map<String
         Schema schema = clientEntity.getSchema();
         GenericRecord genericRecord = new GenericData.Record(schema);
         if (fromValue.isEmpty()) return genericRecord;
-        fromValue.forEach(genericRecord::put);
+        fromValue.forEach((key,value) -> {
+            if (value instanceof Short) {
+                genericRecord.put(key, ((Short) value).intValue());
+            } else if (value instanceof BigInteger) {
+                genericRecord.put(key, ((BigInteger) value).longValue());
+            } else {
+                genericRecord.put(key, value);
+            }
+        });
         return genericRecord;
     }
 

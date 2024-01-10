@@ -3,6 +3,8 @@ package io.tapdata.connector.hudi;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.hive.HiveConnector;
 import io.tapdata.connector.hudi.config.HudiConfig;
+import io.tapdata.connector.hudi.util.FileUtil;
+import io.tapdata.connector.hudi.write.ClientHandler;
 import io.tapdata.connector.hudi.write.HuDiSqlMarker;
 import io.tapdata.connector.hudi.write.HuDiWriteBySparkClient;
 import io.tapdata.connector.hudi.write.HudiWrite;
@@ -27,7 +29,11 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hudi.common.fs.FSUtils;
 
+import java.io.IOException;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.util.*;
@@ -50,10 +56,14 @@ public class HudiConnector extends HiveConnector {
                 connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
         });
-        hudiConfig = new HudiConfig(firstConnectorId)
+        String id = UUID.randomUUID().toString().replaceAll("-", "");
+        hudiConfig = new HudiConfig(id)
                 .log(connectionContext.getLog())
                 .load(connectionContext.getConnectionConfig())
                 .authenticate(new Configuration());
+        if (connectionContext instanceof TapConnectorContext) {
+            ((TapConnectorContext) connectionContext).getStateMap().put("hudi-lib-id", id);
+        }
         hiveJdbcContext = hudiJdbcContext = new HudiJdbcContext(hudiConfig);
         commonDbConfig = hiveConfig;
         jdbcContext = hiveJdbcContext;
@@ -68,6 +78,15 @@ public class HudiConnector extends HiveConnector {
         writeMap.forEach((id, c)-> c.onDestroy());
         writeMap.clear();
     }
+
+
+    private void release(TapConnectorContext connectorContext) {
+        Object id = connectorContext.getStateMap().get("hudi-lib-id");
+        if (null != id) {
+            FileUtil.release( FileUtil.storeDir("hudi" + String.valueOf(id)), connectorContext.getLog());
+        }
+    }
+
     @Override
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
         codecRegistry.registerFromTapValue(TapRawValue.class, "string", tapRawValue -> {
@@ -105,36 +124,6 @@ public class HudiConnector extends HiveConnector {
             }
             return null;
         });
-        codecRegistry.registerFromTapValue(TapNumberValue.class, "smallint", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) {
-                return tapValue.getValue().intValue();
-            }
-            return null;
-        });
-        codecRegistry.registerFromTapValue(TapNumberValue.class, "int", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) {
-                return tapValue.getValue().intValue();
-            }
-            return null;
-        });
-        codecRegistry.registerFromTapValue(TapNumberValue.class, "tinyint", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) {
-                return tapValue.getValue().intValue();
-            }
-            return null;
-        });
-        codecRegistry.registerFromTapValue(TapNumberValue.class, "smallint", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) {
-                return tapValue.getValue().intValue();
-            }
-            return null;
-        });
-        codecRegistry.registerFromTapValue(TapNumberValue.class, "bigint", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) {
-                return tapValue.getValue().longValue();
-            }
-            return null;
-        });
 
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         //target
@@ -142,13 +131,7 @@ public class HudiConnector extends HiveConnector {
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportWriteRecord(this::writeRecord);
-
-        connectorFunctions.supportBatchCount(null);
-        connectorFunctions.supportBatchRead(null);
-        //query
-        connectorFunctions.supportQueryByAdvanceFilter(null);
-
-
+        connectorFunctions.supportReleaseExternalFunction(this::release);
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> hiveJdbcContext.getConnection(), this::isAlive, c));
     }
 
@@ -172,13 +155,11 @@ public class HudiConnector extends HiveConnector {
 
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
-        //long s = System.currentTimeMillis();
         WriteListResult<TapRecordEvent> writeListResult = writeClient(tapConnectorContext)
                 .writeRecord(tapConnectorContext, tapTable, tapRecordEvents, consumer);
         if(null != writeListResult.getErrorMap() && !writeListResult.getErrorMap().isEmpty()) {
             consumer.accept(writeListResult);
-        };
-        //System.out.println("[TAP_QPS]" + (System.currentTimeMillis() - s) + ", batch size: " + tapRecordEvents.size());
+        }
     }
 
     Map<String, HuDiWriteBySparkClient> writeMap = new ConcurrentHashMap<>();
@@ -206,17 +187,17 @@ public class HudiConnector extends HiveConnector {
                 tapConnectorContext.getLog().info("Table \"{}.{}\" exists, skip auto create table", database, tableId);
             } else {
                 Collection<String> primaryKeys = tapTable.primaryKeys(true);
+                if (EmptyKit.isEmpty(primaryKeys)) {
+                    throw new RuntimeException(
+                            format("Create table {}.{} failed, Hudi does not support creating tables with missing primary keys, please specify the Update Condition field as the primary key.",
+                                    hudiConfig.getDatabase(),
+                                    tapTable.getId())
+                    );
+                }
                 String sql = "CREATE TABLE IF NOT EXISTS " +
                         formatTable(hudiConfig.getDatabase(), tapTable.getId()) + "("
                         + commonSqlMaker.buildColumnDefinition(tapTable, true);
                 StringJoiner pk = new StringJoiner(",");
-//                if (EmptyKit.isEmpty(primaryKeys)) {
-//                    throw new RuntimeException(
-//                            format("Create table {}.{} failed, Please specify the Update Condition field as the primary key.",
-//                                    hudiConfig.getDatabase(),
-//                                    tapTable.getId())
-//                    );
-//                }
                 for (String field : primaryKeys) {
                     pk.add(field);
                 }
@@ -238,14 +219,16 @@ public class HudiConnector extends HiveConnector {
                     return createTableOptions;
                 }
             }
-            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed! " + e.getMessage());
+            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed, " + e.getMessage());
         }
         return createTableOptions;
     }
 
     public void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) {
+        String tableId = tapDropTableEvent.getTableId();
+        cleanHdfsPath(tableId);
         try {
-            jdbcContext.execute("DROP TABLE IF EXISTS " + formatTable(hudiConfig.getDatabase(), tapDropTableEvent.getTableId()));
+            jdbcContext.execute("DROP TABLE IF EXISTS " + formatTable(hudiConfig.getDatabase(), tableId));
         } catch (SQLException e) {
             if (e instanceof SQLFeatureNotSupportedException) {
                 // version compatibility
@@ -253,13 +236,27 @@ public class HudiConnector extends HiveConnector {
                     return;
                 }
             }
-            throw new RuntimeException("Drop Table " + tapDropTableEvent.getTableId() + " Failed! \n ");
+            throw new RuntimeException("Drop Table " + tapDropTableEvent.getTableId() + " failed, " + e.getMessage());
         }
+    }
 
+    private void cleanHdfsPath(String tableId) {
+        ClientHandler clientHandler = new ClientHandler(hudiConfig, hudiJdbcContext);
+        String tablePath = clientHandler.getTablePath(tableId);
+        try {
+            FileSystem fs = FSUtils.getFs(tablePath, clientHandler.getHadoopConf());
+            Path path = new Path(tablePath);
+            if (fs.exists(path)) {
+                fs.delete(path, true);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Clean hdfs files failed, file path: " + tablePath + ", " + e.getMessage());
+        }
     }
 
     public void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) {
         String tableId = tapClearTableEvent.getTableId();
+        cleanHdfsPath(tableId);
         try {
             if (hudiJdbcContext.tableIfExists(tableId)) {
                 hiveJdbcContext.execute("TRUNCATE TABLE " + formatTable(hudiConfig.getDatabase(), tapClearTableEvent.getTableId()));
@@ -271,7 +268,7 @@ public class HudiConnector extends HiveConnector {
                     return;
                 }
             }
-            throw new RuntimeException("TRUNCATE Table " + tapClearTableEvent.getTableId() + " Failed! \n ");
+            throw new RuntimeException("TRUNCATE Table " + tapClearTableEvent.getTableId() + " Failed, " + e.getMessage());
         }
     }
     @Override
