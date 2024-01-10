@@ -7,9 +7,12 @@ import org.apache.commons.io.FileUtils;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Base64;
 
 public class FileUtil {
+    public static final String HU_DI_LIB_TAG = "hudi_lib";
 
     public static void saveBase64File(String baseDir, String fileName, String base64Value, boolean deleteExists) throws IOException {
         String savePath = FileUtil.paths(baseDir, fileName);
@@ -22,7 +25,7 @@ public class FileUtil {
         if (null == dir) {
             dir = System.getProperty("user.dir");
         }
-        return paths(dir, pathName);
+        return paths(dir, FileUtil.HU_DI_LIB_TAG, pathName);
     }
 
     public static String paths(String... paths) {
@@ -55,15 +58,19 @@ public class FileUtil {
         }
     }
     public static void release(String catlog, Log log) {
-        File file = new File(catlog);
-        if (file.exists() && file.delete()) {
-            log.info("Resources of Hudi connector has be released, release path: {}", file.getPath());
-        } else {
-            if (file.exists()) {
-               ErrorKit.ignoreAnyError(() -> FileUtils.deleteDirectory(file));
+       try {
+           Files.delete(Paths.get(catlog));
+       } catch (Exception e) {
+            File file = new File(catlog);
+            if (file.exists() && file.delete()) {
+                log.info("Resources of Hudi connector has be released, release path: {}", file.getPath());
             } else {
-                log.info("Resources of Hudi connector not be released, message: {}",
-                        (file.exists() ? "can not delete directory " : "file not exists ") + file.getPath());
+                if (file.exists()) {
+                   ErrorKit.ignoreAnyError(() -> FileUtils.deleteDirectory(file));
+                } else {
+                    log.info("Resources of Hudi connector not be released, message: {}",
+                            (file.exists() ? "can not delete directory " : "file not exists ") + file.getPath());
+                }
             }
         }
     }

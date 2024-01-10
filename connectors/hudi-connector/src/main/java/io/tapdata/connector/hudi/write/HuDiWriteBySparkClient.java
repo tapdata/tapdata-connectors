@@ -60,7 +60,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                 return clientEntity;
             }
         }
-        String tablePath = getTablePath(tableId);
+        String tablePath = clientHandler.getTablePath(tableId);
         clientEntity = new ClientEntity(
             ClientEntity.Param.witStart()
                     .withHadoopConf(hadoopConf)
@@ -78,13 +78,12 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     }
 
     HudiConfig config;
-
+    ClientHandler clientHandler;
     final Object clientEntityLock = new Object();
     public HuDiWriteBySparkClient(HiveJdbcContext hiveJdbcContext, HudiConfig hudiConfig) {
         super(hiveJdbcContext, hudiConfig);
         this.config = hudiConfig;
         init();
-       // hudiConfig.authenticate(hadoopConf);
         this.cleanFuture = this.cleanService.scheduleWithFixedDelay(() -> {
             ConcurrentHashMap.KeySetView<String, ClientEntity> tableIds = tablePathMap.keySet();
             long timestamp = new Date().getTime();
@@ -105,14 +104,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         }, 5, 5, TimeUnit.MINUTES);
     }
 
-    class CommitAcceptData {
-        int type;
-        Object data;
-        public CommitAcceptData(Object data, int type) {
-            this.type = type;
-            this.data = data;
-        }
-    }
     public HuDiWriteBySparkClient log(Log log) {
         this.log = log;
         return this;
@@ -120,7 +111,12 @@ public class HuDiWriteBySparkClient extends HudiWrite {
 
     protected void init() {
         tablePathMap = new ConcurrentHashMap<>();
-        initConfig();
+        this.clientHandler = new ClientHandler(config, hiveJdbcContext);
+        String confPath = FileUtil.paths(config.getKrb5Path(), Krb5Util.KRB5_NAME);
+        String krb5Path = confPath.replaceAll("\\\\","/");
+        System.setProperty("HADOOP_USER_NAME","tapdata_test");
+        System.setProperty("KERBEROS_USER_KEYTAB", krb5Path);
+        this.hadoopConf = this.clientHandler.getHadoopConf();
     }
 
     private void cleanTableClientMap() {
@@ -133,28 +129,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         Optional.ofNullable(cleanFuture).ifPresent(e -> ErrorKit.ignoreAnyError(() -> e.cancel(true)));
         ErrorKit.ignoreAnyError(cleanService::shutdown);
         cleanTableClientMap();
-    }
-
-
-    public String getTablePath(String tableId) {
-        final String sql = String.format(DESCRIBE_EXTENDED_SQL, config.getDatabase(), tableId);
-        AtomicReference<String> tablePath = new AtomicReference<>();
-        try {
-            hiveJdbcContext.normalQuery(sql, resultSet -> {
-                while (resultSet.next()) {
-                    if ("Location".equals(resultSet.getString("col_name"))) {
-                        tablePath.set(resultSet.getString("data_type"));
-                        break;
-                    }
-                }
-            });
-        } catch (Exception e) {
-            throw new CoreException("Fail to get table path from hdfs system, select sql: {}, error message: {}", sql, e.getMessage());
-        }
-        if (null == tablePath.get()) {
-            throw new CoreException("Can not get table path from hdfs system, select sql: {}", sql);
-        }
-        return tablePath.get();
     }
 
     private WriteListResult<TapRecordEvent> afterCommit(final AtomicLong insert,  final AtomicLong update,  final AtomicLong delete, Consumer<WriteListResult<TapRecordEvent>> consumer) {
@@ -323,27 +297,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
 
     private String startCommitAndGetCommitTime(ClientEntity clientEntity) {
         return clientEntity.getClient().startCommit();
-    }
-
-    private void initConfig() {
-        String confPath = FileUtil.paths(config.getKrb5Path(), Krb5Util.KRB5_NAME);
-        String krb5Path = confPath.replaceAll("\\\\","/");
-        System.setProperty("HADOOP_USER_NAME","tapdata_test");
-        System.setProperty("KERBEROS_USER_KEYTAB", krb5Path);
-        hadoopConf = new Configuration();
-        hadoopConf.clear();
-        hadoopConf.set("dfs.namenode.kerberos.principal", config.getPrincipal());
-        hadoopConf.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
-        hadoopConf.set("fs.hdfs.impl.disable.cache", "true");
-        hadoopConf.set("mapreduce.app-submission.cross-platform", "true");
-        hadoopConf.set("dfs.client.socket-timeout", "600000");
-        hadoopConf.set("dfs.image.transfer.timeout", "600000");
-        hadoopConf.set("dfs.client.failover.proxy.provider.hacluster", "org.apache.hadoop.hdfs.server.namenode.ha.ConfiguredFailoverProxyProvider");
-        hadoopConf.set("fs.hdfs.impl", "org.apache.hadoop.hdfs.DistributedFileSystem");
-        hadoopConf.setInt("ipc.maximum.response.length", 352518912);
-        hadoopConf.addResource(new Path(config.authFilePath(SiteXMLUtil.CORE_SITE_NAME)));
-        hadoopConf.addResource(new Path(config.authFilePath(SiteXMLUtil.HDFS_SITE_NAME)));
-        hadoopConf.addResource(new Path(config.authFilePath(SiteXMLUtil.HIVE_SITE_NAME)));
     }
 
     /**
