@@ -1,6 +1,6 @@
 package io.tapdata.connector.hudi.write.generic;
 
-import io.tapdata.connector.hudi.write.ClientEntity;
+import io.tapdata.connector.hudi.write.ClientPerformer;
 import io.tapdata.connector.hudi.write.generic.entity.KeyEntity;
 import io.tapdata.connector.hudi.write.generic.entity.NormalEntity;
 import org.apache.avro.generic.GenericRecord;
@@ -24,10 +24,10 @@ public class GenericDeleteRecord implements GenericStage<NormalEntity, Map<Strin
     }
     @Override
     public HoodieKey generic(Map<String, Object> fromValue, NormalEntity genericParam) {
-        ClientEntity clientEntity = genericParam.getClientEntity();
+        ClientPerformer clientPerformer = genericParam.getClientEntity();
         GenericRecord genericRecord = GenericMapToRecord.singleton().generic(fromValue, genericParam);
         return GenericHoodieKey.singleton().generic(
                 genericRecord,
-                new KeyEntity().withKeyNames(clientEntity.getPrimaryKeys()).withPartitionKeys(clientEntity.getPartitionKeys()));
+                new KeyEntity().withKeyNames(clientPerformer.getPrimaryKeys()).withPartitionKeys(clientPerformer.getPartitionKeys()));
     }
 }

@@ -3,6 +3,7 @@ package io.tapdata.connector.hudi.write;
 import io.tapdata.connector.hudi.config.HudiConfig;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import org.apache.avro.Schema;
 import org.apache.commons.lang3.StringUtils;
@@ -22,11 +23,11 @@ import org.apache.hudi.index.HoodieIndex;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.stream.Collectors;
 
+import static io.tapdata.base.ConnectorBase.toJson;
 import static org.apache.hudi.config.HoodieIndexConfig.BLOOM_INDEX_FILTER_DYNAMIC_MAX_ENTRIES;
 
-public class ClientEntity implements AutoCloseable {
+public class ClientPerformer implements AutoCloseable {
     public static final long CACHE_TIME = 300000; //5min
     FileSystem fs;
     String database;
@@ -46,6 +47,7 @@ public class ClientEntity implements AutoCloseable {
     long timestamp;
 
     Schema schema;
+    Boolean isLogicSchema;
 
     TapTable tapTable;
     Configuration hadoopConf;
@@ -137,7 +139,8 @@ public class ClientEntity implements AutoCloseable {
             return config;
         }
     }
-    public ClientEntity(Param param) {
+    public ClientPerformer(Param param) {
+        updateTimestamp();
         this.config = param.getConfig();
         //@TODO
         this.operationType = param.getOperationType();
@@ -154,20 +157,18 @@ public class ClientEntity implements AutoCloseable {
         this.tapTable = param.getTapTable();
         this.primaryKeys = getAllPrimaryKeys();
         this.partitionKeys = getAllPartitionKeys();
-        saveArvoSchema();
         try {
             initClient(hadoopConf);
         } catch (IOException e) {
             throw new CoreException("Can not init Hadoop client, table path: {}", tablePath, e);
         }
         this.log = param.getLog();
-        updateTimestamp();
     }
 
     //@TODO
     String tableType = HoodieTableType.COPY_ON_WRITE.name();
-    private void initFs() throws IOException {
 
+    private void initFs() throws IOException {
         this.fs = FSUtils.getFs(tablePath, hadoopConf);
         path = new Path(tablePath);
         if (!fs.exists(path)) {
@@ -188,11 +189,12 @@ public class ClientEntity implements AutoCloseable {
 
     private static Integer recordSizeEstimate = 64;
     void initClient(Configuration hadoopConf) throws IOException {
-        List<String> writeFiledNames = schema.getFields().stream().map(Schema.Field::name).collect(Collectors.toList());
+        List<String> writeFiledNames = new ArrayList<>(tapTable.getNameFieldMap().keySet());//schema.getFields().stream().map(Schema.Field::name).collect(Collectors.toList());
         final boolean shouldCombine = WriteOperationType.UPSERT.equals(operationType) && writeFiledNames.contains(preCombineField);
         final boolean shouldOrdering = WriteOperationType.UPSERT.equals(operationType) && writeFiledNames.contains(orderingField);
         final String payloadClassName = shouldOrdering ? DefaultHoodieRecordPayload.class.getName() :
                 shouldCombine ? OverwriteWithLatestAvroPayload.class.getName() : HoodieAvroPayload.class.getName();
+
         final Path hoodiePath = new Path(tablePath + "/" + HoodieTableMetaClient.METAFOLDER_NAME);
         if (!(fs.exists(path) && fs.exists(hoodiePath))) {
             if (Arrays.asList(WriteOperationType.INSERT, WriteOperationType.UPSERT).contains(operationType)) {
@@ -209,11 +211,14 @@ public class ClientEntity implements AutoCloseable {
                 throw new TableNotFoundException(tablePath);
             }
         }
+        saveArvoSchema();
+
         final Properties indexProperties = new Properties();
         indexProperties.put(BLOOM_INDEX_FILTER_DYNAMIC_MAX_ENTRIES.key(), 150000); // 1000万总体时间提升1分钟
         final HoodieWriteConfig cfg = HoodieWriteConfig.newBuilder().withPath(tablePath)
                 .withSchema(schema.toString())
                 .withAutoCommit(true)
+                .withWriteBufferLimitBytes(100 * 1024 * 1024)
                 .withParallelism(2, 2).withDeleteParallelism(2)
                 .forTable(tableId)
                 .withWritePayLoad(payloadClassName)
@@ -238,46 +243,9 @@ public class ClientEntity implements AutoCloseable {
 
     public void updateTimestamp() {
         this.timestamp = new Date().getTime();
-    }
-
-    public FileSystem getFs() {
-        updateTimestamp();
-        return fs;
-    }
-
-    public void setFs(FileSystem fs) {
-        updateTimestamp();
-        this.fs = fs;
-    }
-
-    public String getDatabase() {
-        updateTimestamp();
-        return database;
-    }
-
-    public void setDatabase(String database) {
-        updateTimestamp();
-        this.database = database;
-    }
-
-    public String getTableId() {
-        updateTimestamp();
-        return tableId;
-    }
-
-    public void setTableId(String tableId) {
-        updateTimestamp();
-        this.tableId = tableId;
-    }
-
-    public String getTablePath() {
-        updateTimestamp();
-        return tablePath;
-    }
-
-    public void setTablePath(String tablePath) {
-        updateTimestamp();
-        this.tablePath = tablePath;
+        if (null != isLogicSchema && isLogicSchema) {
+            saveArvoSchema();
+        }
     }
 
     public HoodieJavaWriteClient<HoodieRecordPayload> getClient() {
@@ -285,13 +253,7 @@ public class ClientEntity implements AutoCloseable {
         return client;
     }
 
-    public void setClient(HoodieJavaWriteClient<HoodieRecordPayload> client) {
-        updateTimestamp();
-        this.client = client;
-    }
-
     private void saveArvoSchema() {
-        updateTimestamp();
         HoodieTableMetaClient metaClient = HoodieTableMetaClient.builder()
                 .setConf(hadoopConf)
                 .setBasePath(tablePath)
@@ -299,9 +261,12 @@ public class ClientEntity implements AutoCloseable {
                 .build();
         TableSchemaResolver schemaResolver = new TableSchemaResolver(metaClient);
         try {
-            this.schema = schemaResolver.getTableAvroSchema();
+            this.schema = schemaResolver.getTableAvroSchemaFromDataFile();
+            this.isLogicSchema = false;
         } catch (Exception e) {
-            throw new CoreException("Can not find Schema from HuDi, table id: {}, error message: {}", tableId, e.getMessage());
+            this.schema = new Schema.Parser().parse(toSchemaStr());
+            this.isLogicSchema = true;
+            //throw new CoreException("Can not find Schema from HuDi, table id: {}, error message: {}", tableId, e.getMessage(), e);
         }
         if (null == schema) {
             throw new CoreException("Can not find Schema from HuDi, table id: {}", tableId);
@@ -380,7 +345,11 @@ public class ClientEntity implements AutoCloseable {
         if (null != keys && !keys.isEmpty()) {
             pks.addAll(keys);
         } else {
-            pks.add("uuid");
+            //无主键表， 仅追加写， 取第一个字段模拟主键用来生成hooidkey
+            List<String> fields = new ArrayList<>(tapTable.getNameFieldMap().keySet());
+            if (!fields.isEmpty()) {
+                pks.add(fields.get(0));
+            }
         }
         return pks;
     }
@@ -388,5 +357,30 @@ public class ClientEntity implements AutoCloseable {
     private Set<String> getAllPartitionKeys(){
         //@TODO do not support partition table now,
         return new HashSet<>();
+    }
+
+    public String toSchemaStr() {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("name", tableId);
+        map.put("type", "record");
+        List<Map<String, Object>> fields = new ArrayList<>();
+        map.put("fields", fields);
+        LinkedHashMap<String, TapField> fieldMap = tapTable.getNameFieldMap();
+        fieldMap.forEach((key, f) -> {
+            String[] type = f.getNullable() ? new String[]{"null", f.getDataType()} : new String[]{f.getDataType()};
+            fields.add(oneKey(key, type, f.getDefaultValue()));
+        });
+//        Collection<String> keys = tapTable.primaryKeys(true);
+//        if ((null == keys || keys.isEmpty()) && !fieldMap.containsKey("uuid")) {
+//            fields.add(oneKey("uuid", "int"));
+//        }
+        return toJson(map);
+    }
+    private Map<String, Object> oneKey(String name, String[] type, Object defaultValue) {
+        Map<String, Object> field = new HashMap<>();
+        field.put("name", name);
+        field.put("type", type);
+        field.put("default", defaultValue);
+        return field;
     }
 }

@@ -295,11 +295,24 @@
       }
     },
     "node" : {
+      "properties": {
+        "noPkAutoInsert": {
+          "type": "boolean",
+          "title": "${noPkAutoInsert}",
+          "default": true,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "apiServerKey": "noPkAutoInsert",
+          "x-index": 10,
+          "x-display": "hidden"
+        }
+      }
     }
   },
   "messages": {
     "default": "en_US",
     "en_US": {
+      "noPkAutoInsert": "No primary key table field append write",
       "nameSrvAddr": "Cluster Address",
       "database": "database",
       "krb5": "kerberos authentication",
@@ -323,6 +336,7 @@
       "deleteStage_2": "物理策略"
     },
     "zh_CN": {
+      "noPkAutoInsert": "无主键表字段追加写入",
       "nameSrvAddr": "集群地址",
       "database": "数据库",
       "krb5": "kerberos 认证",
@@ -346,6 +360,7 @@
       "deleteStage_2": "物理策略"
     },
     "zh_TW": {
+      "noPkAutoInsert": "無主鍵錶欄位追加寫入",
       "nameSrvAddr": "集群地址",
       "database": "數據庫",
       "krb5": "kerberos 認證",
