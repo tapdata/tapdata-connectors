@@ -1,6 +1,6 @@
 package io.tapdata.connector.hudi.write.generic;
 
-import io.tapdata.connector.hudi.write.ClientEntity;
+import io.tapdata.connector.hudi.write.ClientPerformer;
 import io.tapdata.connector.hudi.write.generic.entity.NormalEntity;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
@@ -13,8 +13,8 @@ public class GenericMapToRecord implements GenericStage<NormalEntity, Map<String
     @Override
     public GenericRecord generic(Map<String, Object> fromValue, NormalEntity genericParam) {
         if (null == fromValue) return null;
-        ClientEntity clientEntity = genericParam.getClientEntity();
-        Schema schema = clientEntity.getSchema();
+        ClientPerformer clientPerformer = genericParam.getClientEntity();
+        Schema schema = clientPerformer.getSchema();
         GenericRecord genericRecord = new GenericData.Record(schema);
         if (fromValue.isEmpty()) return genericRecord;
         fromValue.forEach((key,value) -> {

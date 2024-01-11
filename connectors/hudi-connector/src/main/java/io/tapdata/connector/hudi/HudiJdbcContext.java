@@ -19,6 +19,8 @@ import static io.tapdata.base.ConnectorBase.list;
 public class HudiJdbcContext extends HiveJdbcContext {
     private final static String HUDI_ALL_TABLE = "show tables";
     private final static String TABLE_RECORD_COUNT = "select count(*) from ";
+    public static final String CREATE_TABLE_SQL = "CREATE TABLE IF NOT EXISTS %s ( %s ) %s";
+
     public HudiJdbcContext(HiveConfig config) {
         super(config);
     }
