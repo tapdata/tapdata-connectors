@@ -88,7 +88,6 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
             String confPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.KRB5_NAME);
             confPath = confPath.replaceAll("\\\\","/");
             System.setProperty("java.security.krb5.conf", confPath);
-            //authenticate(new Configuration());
             String zkPrincipal = "zookeeper/" + getUserRealm(this.getKrb5Conf());
             System.setProperty("zookeeper.server.principal", zkPrincipal);
         }
@@ -98,7 +97,7 @@ public class HudiConfig extends HiveConfig implements AutoCloseable {
         }
     }
 
-    public HudiConfig authenticate(Configuration conf1) {
+    public HudiConfig authenticate() {
         if (krb5) {
             String localKeytabPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.USER_KEY_TAB_NAME);
             String confPath = FileUtil.paths(this.getKrb5Path(), Krb5Util.KRB5_NAME);

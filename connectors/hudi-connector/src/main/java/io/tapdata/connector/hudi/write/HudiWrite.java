@@ -10,7 +10,6 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -143,7 +142,6 @@ public class HudiWrite extends HiveJdbcWrite {
                         }
                     } else {
                         if (CollectionUtils.isNotEmpty(tapRecordEventList)) {
-//                            WriteListResult<TapRecordEvent> result = batchInsert(tapConnectorContext, tapTable, tapRecordEventList);
                             WriteListResult<TapRecordEvent> result;
                             if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(insertDmlPolicy)){
                                 result = notExistsInsert(tapConnectorContext, tapTable, tapRecordEventList);

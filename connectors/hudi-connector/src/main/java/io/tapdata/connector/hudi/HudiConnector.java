@@ -1,11 +1,11 @@
 package io.tapdata.connector.hudi;
 
+import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.hive.HiveConnector;
 import io.tapdata.connector.hudi.config.HudiConfig;
 import io.tapdata.connector.hudi.util.FileUtil;
 import io.tapdata.connector.hudi.write.ClientHandler;
-import io.tapdata.connector.hudi.write.HuDiSqlMarker;
 import io.tapdata.connector.hudi.write.HuDiWriteBySparkClient;
 import io.tapdata.connector.hudi.write.HudiWrite;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -16,7 +16,6 @@ import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
@@ -29,7 +28,6 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.codec.binary.Base64;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hudi.common.fs.FSUtils;
@@ -61,19 +59,18 @@ public class HudiConnector extends HiveConnector {
         hudiConfig = new HudiConfig(id)
                 .log(connectionContext.getLog())
                 .load(connectionContext.getConnectionConfig())
-                .authenticate(new Configuration());
+                .authenticate();
         if (connectionContext instanceof TapConnectorContext) {
             ((TapConnectorContext) connectionContext).getStateMap().put("hudi-lib-id", id);
         }
         hiveJdbcContext = hudiJdbcContext = new HudiJdbcContext(hudiConfig);
         commonDbConfig = hiveConfig;
         jdbcContext = hiveJdbcContext;
-        commonSqlMaker = new HuDiSqlMarker('`');
+        commonSqlMaker = new CommonSqlMaker('`');
     }
 
     @Override
     public void onStop(TapConnectionContext connectionContext) {
-        connectionContext.getLog().info("线程debug: onStop当前线程为:{}", Thread.currentThread().getName());
         EmptyKit.closeQuietly(hiveJdbcContext);
         ErrorKit.ignoreAnyError(hudiConfig::close);
         writeMap.forEach((id, c)-> c.onDestroy());
@@ -84,7 +81,7 @@ public class HudiConnector extends HiveConnector {
     private void release(TapConnectorContext connectorContext) {
         Object id = connectorContext.getStateMap().get("hudi-lib-id");
         if (null != id) {
-            FileUtil.release( FileUtil.storeDir("hudi" + String.valueOf(id)), connectorContext.getLog());
+            FileUtil.release(FileUtil.storeDir("hudi" + String.valueOf(id)), connectorContext.getLog());
         }
     }
 
@@ -139,11 +136,10 @@ public class HudiConnector extends HiveConnector {
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
-        String uuid = UUID.randomUUID().toString().replaceAll("-", "");
         HudiConfig hudiConfig = new HudiConfig(null)
                 .log(connectionContext.getLog())
                 .load(connectionContext.getConnectionConfig())
-                .authenticate(new Configuration());
+                .authenticate();
         HudiTest hudiTest = new HudiTest(hudiConfig, consumer);
         try {
             hudiTest.testOneByOne();
@@ -166,13 +162,8 @@ public class HudiConnector extends HiveConnector {
     Map<String, HuDiWriteBySparkClient> writeMap = new ConcurrentHashMap<>();
     private HudiWrite writeClient(TapConnectorContext tapConnectorContext) {
         String id = Thread.currentThread().getName() + Thread.currentThread().getId() + Thread.currentThread().getThreadGroup().getName();
-        HuDiWriteBySparkClient write = null;
-        if (!writeMap.containsKey(id) || null == (write = writeMap.get(id))) {
-            write = new HuDiWriteBySparkClient(hiveJdbcContext, hudiConfig)
-                    .log(tapConnectorContext.getLog());
-            writeMap.put(id, write);
-        }
-        return write;
+        return writeMap.computeIfAbsent(id , key -> new HuDiWriteBySparkClient(hiveJdbcContext, hudiConfig)
+                    .log(tapConnectorContext.getLog()).isAlive(this::isAlive));
      }
 
 
@@ -188,13 +179,6 @@ public class HudiConnector extends HiveConnector {
                 tapConnectorContext.getLog().info("Table \"{}.{}\" exists, skip auto create table", database, tableId);
             } else {
                 Collection<String> primaryKeys = tapTable.primaryKeys(true);
-                //if (EmptyKit.isEmpty(primaryKeys)) {
-                //    throw new RuntimeException(
-                //            format("Create table {}.{} failed, Hudi does not support creating tables with missing primary keys, please specify the Update Condition field as the primary key.",
-                //                    hudiConfig.getDatabase(),
-                //                    tapTable.getId())
-                //    );
-                //}
                 String tableConfig;
                 if (!EmptyKit.isEmpty(primaryKeys)) {
                     tableConfig = " using hudi options (primaryKey = '" + String.join(",", primaryKeys) +"' )";
