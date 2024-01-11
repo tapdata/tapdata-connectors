@@ -45,6 +45,7 @@ public class ClientPerformer implements AutoCloseable {
     Log log;
 
     long timestamp;
+    boolean usage;
 
     Schema schema;
     Boolean isLogicSchema;
@@ -139,10 +140,10 @@ public class ClientPerformer implements AutoCloseable {
             return config;
         }
     }
+
     public ClientPerformer(Param param) {
         updateTimestamp();
         this.config = param.getConfig();
-        //@TODO
         this.operationType = param.getOperationType();
 
         this.hadoopConf = param.getHadoopConf();
@@ -225,7 +226,7 @@ public class ClientPerformer implements AutoCloseable {
                 .withPayloadConfig(HoodiePayloadConfig.newBuilder().withPayloadOrderingField(orderingField).build())
                 .withIndexConfig(HoodieIndexConfig.newBuilder()
                         .withIndexType(HoodieIndex.IndexType.BLOOM)
-//                            .bloomIndexPruneByRanges(false) // 1000万总体时间提升1分钟
+                        //.bloomIndexPruneByRanges(false) // 1000万总体时间提升1分钟
                         .bloomFilterFPP(0.000001)   // 1000万总体时间提升3分钟
                         .fromProperties(indexProperties)
                         .build())
@@ -248,6 +249,15 @@ public class ClientPerformer implements AutoCloseable {
         }
     }
 
+    //@TODO
+    public void setUsage() {
+        this.usage = true;
+    }
+
+    public void releaseUsage() {
+        this.usage = false;
+    }
+
     public HoodieJavaWriteClient<HoodieRecordPayload> getClient() {
         updateTimestamp();
         return client;
@@ -266,7 +276,6 @@ public class ClientPerformer implements AutoCloseable {
         } catch (Exception e) {
             this.schema = new Schema.Parser().parse(toSchemaStr());
             this.isLogicSchema = true;
-            //throw new CoreException("Can not find Schema from HuDi, table id: {}, error message: {}", tableId, e.getMessage(), e);
         }
         if (null == schema) {
             throw new CoreException("Can not find Schema from HuDi, table id: {}", tableId);
@@ -370,10 +379,6 @@ public class ClientPerformer implements AutoCloseable {
             String[] type = f.getNullable() ? new String[]{"null", f.getDataType()} : new String[]{f.getDataType()};
             fields.add(oneKey(key, type, f.getDefaultValue()));
         });
-//        Collection<String> keys = tapTable.primaryKeys(true);
-//        if ((null == keys || keys.isEmpty()) && !fieldMap.containsKey("uuid")) {
-//            fields.add(oneKey("uuid", "int"));
-//        }
         return toJson(map);
     }
     private Map<String, Object> oneKey(String name, String[] type, Object defaultValue) {

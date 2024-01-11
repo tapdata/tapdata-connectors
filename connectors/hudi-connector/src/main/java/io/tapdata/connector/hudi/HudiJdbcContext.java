@@ -18,15 +18,13 @@ import static io.tapdata.base.ConnectorBase.list;
 
 public class HudiJdbcContext extends HiveJdbcContext {
     private final static String HUDI_ALL_TABLE = "show tables";
-    private final static String TABLE_RECORD_COUNT = "select count(*) from ";
     public static final String CREATE_TABLE_SQL = "CREATE TABLE IF NOT EXISTS %s ( %s ) %s";
 
     public HudiJdbcContext(HiveConfig config) {
         super(config);
     }
     public Connection getConnection() throws SQLException {
-        Connection connection = createConnectionFactory();//super.getConnection();
-        //connection.setAutoCommit(true);
+        Connection connection = createConnectionFactory();
         return connection;
     }
 
@@ -34,7 +32,6 @@ public class HudiJdbcContext extends HiveJdbcContext {
         Map<String, String> options = new HashMap<>();
         options.put("url", getConfig().getDatabaseUrl());
         options.put("driver", "org.apache.hive.jdbc.HiveDriver");
-        //options.put("dbtable", dbName + "." + sourceTable);
         options.put("nullable", "true");
         String driverClass = options.get(JDBCOptions.JDBC_DRIVER_CLASS());
         DriverRegistry.register(driverClass);
@@ -74,7 +71,6 @@ public class HudiJdbcContext extends HiveJdbcContext {
             for (String sql : sqlList) {
                 statement.execute(sql);
             }
-           // connection.commit();
         }
     }
     @Override
@@ -108,102 +104,6 @@ public class HudiJdbcContext extends HiveJdbcContext {
         map.put("# col_name", "partition_info");
         return map;
     }
-
-//    public TapTable getTableInfo(ResultSet resultSet, String table) throws SQLException {
-//        Map<String, String> tableModuleMap = getTableModule();
-//        TapTable tapTable = TapSimplify.table(table);
-//        LinkedHashMap<String, TapField> nameFieldMap = new LinkedHashMap<>();
-//        String moduleName = "column_info";
-//        AtomicInteger partitionKeyPos = new AtomicInteger(0);
-//        while (resultSet.next()) {
-//            String title = resultSet.getString("col_name").trim();
-//            if (("".equals(title) && resultSet.getString("data_type") == null)) {
-//                continue;
-//            }
-//            if (tableModuleMap.containsKey(title)) {
-//                moduleName = tableModuleMap.get(title);
-//                continue;
-//            }
-//            switch (moduleName) {
-//                case "column_info":
-//                    TapField tapField = field(title, resultSet.getString("data_type"));
-//                    tapField.setComment(resultSet.getString("comment"));
-//                    nameFieldMap.put(title, tapField);
-//                    break;
-//                case "partition_info":
-//                    TapField field = nameFieldMap.get(title);
-//                    field.setPartitionKeyPos(partitionKeyPos.incrementAndGet());
-//                    field.setPartitionKey(true);
-//                    break;
-//            }
-//            if ("Constraints".equals(title)) {
-//                Pattern pattern = Pattern.compile("Primary Key for .*:\\[(.*)].*");
-//                Matcher matcher = pattern.matcher(resultSet.getString("data_type"));
-//                if (matcher.find()) {
-//                    AtomicInteger primaryKeyPos = new AtomicInteger(0);
-//                    Arrays.stream(matcher.group(1).split(",")).forEach(v -> {
-//                        TapField field = nameFieldMap.get(v);
-//                        field.setPrimaryKey(true);
-//                        field.setPrimaryKeyPos(primaryKeyPos.incrementAndGet());
-//                    });
-//                }
-//            } else if (title.startsWith("Not Null Constraints for ")) {
-//                Pattern pattern = Pattern.compile("\\{Constraint Name: [\\w\\s]+, Column Name: ([\\w\\s]+)}");
-//                Matcher matcher = pattern.matcher(title);
-//                while (matcher.find()) {
-//                    TapField field = nameFieldMap.get(matcher.group(1));
-//                    field.setNullable(false);
-//                }
-//            } else if (title.startsWith("Default Constraints for ")) {
-//                Pattern pattern = Pattern.compile("\\{Constraint Name: [\\w\\s]+, \\(Column Name: ([\\w\\s]+), Default Value: ([\\w\\s()]+)\\)}");
-//                Matcher matcher = pattern.matcher(title);
-//                while (matcher.find()) {
-//                    TapField field = nameFieldMap.get(matcher.group(1));
-//                    field.setDefaultValue(matcher.group(2));
-//                }
-//            }
-//        }
-//        tapTable.setNameFieldMap(nameFieldMap);
-//        return tapTable;
-//    }
-
-    /*private boolean queryRecordById(TapConnectorContext tapConnectorContext, TapTable tapTable, TapRecordEvent tapRecordEvent) throws SQLException{
-        List<DataMap> tableList = list();
-        StringBuilder sql = new StringBuilder();
-        DataMap connectionConfig = tapConnectorContext.getConnectionConfig();
-        String database = connectionConfig.getString("database");
-        sql.append(TABLE_RECORD_COUNT).append(database).append(".").append(tapTable.getId()).append(" where ");
-        Collection<String> primaryKeys = tapTable.primaryKeys();
-        Map<String, Object> record = new HashMap<>();
-        if (tapRecordEvent instanceof TapInsertRecordEvent){
-            Map<String, Object> after = ((TapInsertRecordEvent) tapRecordEvent).getAfter();
-            record = after;
-        }else if (tapRecordEvent instanceof TapUpdateRecordEvent){
-            Map<String, Object> before = ((TapUpdateRecordEvent) tapRecordEvent).getBefore();
-            record = before;
-        }else {
-            return false;
-        }
-        Iterator<String> iterator = primaryKeys.iterator();
-        while (iterator.hasNext()){
-            sql.append(iterator.next());
-            sql.append(" = ");
-            if (record.containsKey(iterator.next())){
-                sql.append(record.get(iterator.next()));
-            }
-            iterator.next();
-        }
-
-        for (String primaryKey : primaryKeys) {
-            sql.append(primaryKey);
-            sql.append(" = ");
-            if (record.containsKey(primaryKey)){
-                sql.append(record.get(primaryKey));
-            }
-        }
-        query(sql.toString(), resultSet -> tableList.addAll(DbKit.getDataFromResultSet(resultSet)));
-
-    }*/
 
     public void execute(String sql) throws SQLException {
         try (

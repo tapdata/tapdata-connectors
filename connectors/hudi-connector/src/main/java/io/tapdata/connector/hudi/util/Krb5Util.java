@@ -217,21 +217,4 @@ public class Krb5Util {
             throw new RuntimeException("Refresh krb5 config failed", e);
         }
     }
-
-
-//    public static void main(String[] args) throws Exception {
-//        String conf;
-//        try (FileInputStream fis = new FileInputStream("/Users/lhs/Downloads/krb5-test.conf")) {
-//            try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-//                int len;
-//                byte[] buf = new byte[1024];
-//                while (-1 != (len = fis.read(buf, 0, 1024))) {
-//                    baos.write(buf, 0, len);
-//                }
-//                conf = baos.toString("UTF-8");
-//            }
-//        }
-//        System.out.println(conf);
-//        checkKDCDomains(conf);
-//    }
 }

@@ -296,6 +296,25 @@
     },
     "node" : {
       "properties": {
+        "tableType": {
+          "type": "string",
+          "title": "${tableType}",
+          "default": "COPY_ON_WRITE",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 10,
+          "enum": [
+            {
+              "label": "COPY_ON_WRITE",
+              "value": "COPY_ON_WRITE"
+            },
+            {
+              "label": "MERGE_ON_READ",
+              "value": "MERGE_ON_READ"
+            }
+          ],
+          "x-display": "hidden"
+        },
         "noPkAutoInsert": {
           "type": "boolean",
           "title": "${noPkAutoInsert}",
@@ -303,7 +322,7 @@
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "apiServerKey": "noPkAutoInsert",
-          "x-index": 10,
+          "x-index": 20,
           "x-display": "hidden"
         }
       }
@@ -312,6 +331,7 @@
   "messages": {
     "default": "en_US",
     "en_US": {
+      "tableType": "Table creation type",
       "noPkAutoInsert": "No primary key table field append write",
       "nameSrvAddr": "Cluster Address",
       "database": "database",
@@ -336,6 +356,7 @@
       "deleteStage_2": "物理策略"
     },
     "zh_CN": {
+      "tableType": "建表类型",
       "noPkAutoInsert": "无主键表字段追加写入",
       "nameSrvAddr": "集群地址",
       "database": "数据库",
@@ -360,6 +381,7 @@
       "deleteStage_2": "物理策略"
     },
     "zh_TW": {
+      "tableType": "",
       "noPkAutoInsert": "無主鍵錶欄位追加寫入",
       "nameSrvAddr": "集群地址",
       "database": "數據庫",

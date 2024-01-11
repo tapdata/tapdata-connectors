@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import io.tapdata.connector.hive.HiveJdbcContext;
 import io.tapdata.connector.hudi.config.HudiConfig;
@@ -39,6 +40,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     String updateDmlPolicy;
     WriteOperationType appendType;
     Log log;
+    Supplier<Boolean> isAlive;
 
     /**
      * @apiNote Use function getClientEntity(TableId) to get ClientEntity
@@ -53,6 +55,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                     && null != tablePathMap.get(tableId)
                     && null != (clientPerformer = tablePathMap.get(tableId))) {
                 clientPerformer.updateTimestamp();
+                clientPerformer.setUsage();
                 return clientPerformer;
             }
         }
@@ -73,6 +76,11 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         return clientPerformer;
     }
 
+    @Override
+    protected boolean isAlive() {
+        return null != isAlive && isAlive.get();
+    }
+
     HudiConfig config;
     ClientHandler clientHandler;
     final Object clientEntityLock = new Object();
@@ -90,10 +98,12 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                 ClientPerformer clientPerformer = tablePathMap.get(tableId);
                 if (null == clientPerformer || timestamp - ClientPerformer.CACHE_TIME >= clientPerformer.getTimestamp()) {
                     synchronized (clientEntityLock) {
-                        if (null != clientPerformer) {
+                        if (null != clientPerformer && !clientPerformer.usage) {
                             clientPerformer.doClose();
                         }
-                        tablePathMap.remove(tableId);
+                        if (null == clientPerformer || !clientPerformer.usage) {
+                            tablePathMap.remove(tableId);
+                        }
                     }
                 }
             }
@@ -104,13 +114,17 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         this.log = log;
         return this;
     }
+    public HuDiWriteBySparkClient isAlive(Supplier<Boolean> isAlive) {
+        this.isAlive = isAlive;
+        return this;
+    }
 
     protected void init() {
         tablePathMap = new ConcurrentHashMap<>();
         this.clientHandler = new ClientHandler(config, hiveJdbcContext);
         String confPath = FileUtil.paths(config.getKrb5Path(), Krb5Util.KRB5_NAME);
         String krb5Path = confPath.replaceAll("\\\\","/");
-        System.setProperty("HADOOP_USER_NAME","tapdata_test");
+        System.setProperty("HADOOP_USER_NAME", config.getUser());
         System.setProperty("KERBEROS_USER_KEYTAB", krb5Path);
         this.hadoopConf = this.clientHandler.getHadoopConf();
     }
@@ -178,7 +192,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                     }
 
                     if ((-1 != tempTag && tempTag != tag)) {
-                        commitButch(clientPerformer, tempTag, recordsOneBatch, deleteEventsKeys);
+                        commitBatch(clientPerformer, tempTag, recordsOneBatch, deleteEventsKeys);
                         batchFirstRecord = e;
                         afterCommit(insert, update, delete, consumer);
                     }
@@ -195,23 +209,26 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             if (null != errorRecord) writeListResult.addError(errorRecord, e);
             throw e;
         } finally {
+            synchronized (clientEntityLock) {
+                if (clientPerformer.usage) {
+                    clientPerformer.releaseUsage();
+                }
+            }
             if (!recordsOneBatch.isEmpty()) {
                 try {
-                    commitButch(clientPerformer, 1, recordsOneBatch, deleteEventsKeys);
+                    commitBatch(clientPerformer, 1, recordsOneBatch, deleteEventsKeys);
                     afterCommit(insert, update, delete, consumer);
                 } catch (Exception fail) {
                     log.error("target database process message failed", "table name:{},error msg:{}", tapTable.getId(), fail.getMessage(), fail);
-                    errorRecord = batchFirstRecord;
                     throw fail;
                 }
             }
             if (!deleteEventsKeys.isEmpty()) {
                 try {
-                    commitButch(clientPerformer, 3, recordsOneBatch, deleteEventsKeys);
+                    commitBatch(clientPerformer, 3, recordsOneBatch, deleteEventsKeys);
                     afterCommit(insert, update, delete, consumer);
                 } catch (Exception fail) {
                     log.error("target database process message failed", "table name:{},error msg:{}", tapTable.getId(), fail.getMessage(), fail);
-                    errorRecord = batchFirstRecord;
                     throw fail;
                 }
             }
@@ -219,14 +236,12 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         return writeListResult;
     }
 
-    private void commitButch(ClientPerformer clientPerformer, int batchType, List<HoodieRecord<HoodieRecordPayload>> batch, List<HoodieKey> deleteEventsKeys) {
+    private void commitBatch(ClientPerformer clientPerformer, int batchType, List<HoodieRecord<HoodieRecordPayload>> batch, List<HoodieKey> deleteEventsKeys) {
         if (batchType != 1 && batchType != 2 && batchType != 3) return;
-       //long s = System.currentTimeMillis();
         HoodieJavaWriteClient<HoodieRecordPayload> client = clientPerformer.getClient();
         String startCommit;
         client.setOperationType(appendType);
         startCommit = startCommitAndGetCommitTime(clientPerformer);
-        ErrorKit.ignoreAnyError(()->Thread.sleep(500));
 
         try {
             switch (batchType) {
@@ -252,10 +267,9 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                     break;
             }
         } catch (HoodieRollbackException e) {
-            client.rollback(startCommit);
+            client.restoreToInstant(startCommit, true);
             throw e;
         }
-        //System.out.println("[TAP_QPS] one commit cost: " + (System.currentTimeMillis() - s));
     }
 
     public WriteListResult<TapRecordEvent> writeByClient(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
@@ -307,7 +321,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         DataMap nodeConfig = tapConnectorContext.getNodeConfig();
 
         //无主键表，并且开启了noPkAutoInsert开关，做仅插入操作
-//        if (null == primaryKeys || primaryKeys.isEmpty()) return WriteOperationType.INSERT;
+        //if (null == primaryKeys || primaryKeys.isEmpty()) return WriteOperationType.INSERT;
         if ((null == primaryKeys || primaryKeys.isEmpty()) && null != nodeConfig) {
             Object noPkAutoInsert = nodeConfig.getObject("noPkAutoInsert");
             if (noPkAutoInsert instanceof Boolean && (Boolean)noPkAutoInsert) {
