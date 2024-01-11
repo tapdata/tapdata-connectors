@@ -3,18 +3,15 @@ package io.tapdata.connector.hudi.write;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import io.tapdata.connector.hive.HiveJdbcContext;
 import io.tapdata.connector.hudi.config.HudiConfig;
 import io.tapdata.connector.hudi.util.FileUtil;
 import io.tapdata.connector.hudi.util.Krb5Util;
-import io.tapdata.connector.hudi.util.SiteXMLUtil;
 import io.tapdata.connector.hudi.write.generic.GenericDeleteRecord;
 import io.tapdata.connector.hudi.write.generic.HoodieRecordGenericStage;
 import io.tapdata.connector.hudi.write.generic.entity.NormalEntity;
-import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -26,7 +23,6 @@ import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
 import org.apache.hudi.client.HoodieJavaWriteClient;
 import org.apache.hudi.client.WriteStatus;
 import org.apache.hudi.common.model.*;
@@ -47,22 +43,22 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     /**
      * @apiNote Use function getClientEntity(TableId) to get ClientEntity
      * */
-    private ConcurrentHashMap<String, ClientEntity> tablePathMap;
+    private ConcurrentHashMap<String, ClientPerformer> tablePathMap;
 
-    private ClientEntity getClientEntity(TapTable tapTable) {
+    private ClientPerformer getClientEntity(TapTable tapTable) {
         final String tableId = tapTable.getId();
-        ClientEntity clientEntity;
+        ClientPerformer clientPerformer;
         synchronized (clientEntityLock) {
             if (tablePathMap.containsKey(tableId)
                     && null != tablePathMap.get(tableId)
-                    && null != (clientEntity = tablePathMap.get(tableId))) {
-                clientEntity.updateTimestamp();
-                return clientEntity;
+                    && null != (clientPerformer = tablePathMap.get(tableId))) {
+                clientPerformer.updateTimestamp();
+                return clientPerformer;
             }
         }
         String tablePath = clientHandler.getTablePath(tableId);
-        clientEntity = new ClientEntity(
-            ClientEntity.Param.witStart()
+        clientPerformer = new ClientPerformer(
+            ClientPerformer.Param.witStart()
                     .withHadoopConf(hadoopConf)
                     .withDatabase(config.getDatabase())
                     .withTableId(tableId)
@@ -72,9 +68,9 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                     .withConfig(config)
                     .withLog(log));
         synchronized (clientEntityLock) {
-            tablePathMap.put(tableId, clientEntity);
+            tablePathMap.put(tableId, clientPerformer);
         }
-        return clientEntity;
+        return clientPerformer;
     }
 
     HudiConfig config;
@@ -85,17 +81,17 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         this.config = hudiConfig;
         init();
         this.cleanFuture = this.cleanService.scheduleWithFixedDelay(() -> {
-            ConcurrentHashMap.KeySetView<String, ClientEntity> tableIds = tablePathMap.keySet();
+            ConcurrentHashMap.KeySetView<String, ClientPerformer> tableIds = tablePathMap.keySet();
             long timestamp = new Date().getTime();
             for (String tableId : tableIds) {
                 if (!isAlive()) {
                     break;
                 }
-                ClientEntity clientEntity = tablePathMap.get(tableId);
-                if (null == clientEntity || timestamp - ClientEntity.CACHE_TIME >= clientEntity.getTimestamp()) {
+                ClientPerformer clientPerformer = tablePathMap.get(tableId);
+                if (null == clientPerformer || timestamp - ClientPerformer.CACHE_TIME >= clientPerformer.getTimestamp()) {
                     synchronized (clientEntityLock) {
-                        if (null != clientEntity) {
-                            clientEntity.doClose();
+                        if (null != clientPerformer) {
+                            clientPerformer.doClose();
                         }
                         tablePathMap.remove(tableId);
                     }
@@ -120,7 +116,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     }
 
     private void cleanTableClientMap() {
-        tablePathMap.values().stream().filter(Objects::nonNull).forEach(ClientEntity::doClose);
+        tablePathMap.values().stream().filter(Objects::nonNull).forEach(ClientPerformer::doClose);
         tablePathMap.clear();
     }
     @Override
@@ -153,8 +149,8 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         AtomicLong insert = new AtomicLong(0);
         AtomicLong update = new AtomicLong(0);
         AtomicLong delete = new AtomicLong(0);
-        final ClientEntity clientEntity = getClientEntity(tapTable);
-        final NormalEntity entity = new NormalEntity().withClientEntity(clientEntity).withTapTable(tapTable);
+        final ClientPerformer clientPerformer = getClientEntity(tapTable);
+        final NormalEntity entity = new NormalEntity().withClientEntity(clientPerformer).withTapTable(tapTable);
         try {
             for (TapRecordEvent e : events) {
                 if (!isAlive()) break;
@@ -182,7 +178,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                     }
 
                     if ((-1 != tempTag && tempTag != tag)) {
-                        commitButch(clientEntity, tempTag, recordsOneBatch, deleteEventsKeys);
+                        commitButch(clientPerformer, tempTag, recordsOneBatch, deleteEventsKeys);
                         batchFirstRecord = e;
                         afterCommit(insert, update, delete, consumer);
                     }
@@ -201,7 +197,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         } finally {
             if (!recordsOneBatch.isEmpty()) {
                 try {
-                    commitButch(clientEntity, 1, recordsOneBatch, deleteEventsKeys);
+                    commitButch(clientPerformer, 1, recordsOneBatch, deleteEventsKeys);
                     afterCommit(insert, update, delete, consumer);
                 } catch (Exception fail) {
                     log.error("target database process message failed", "table name:{},error msg:{}", tapTable.getId(), fail.getMessage(), fail);
@@ -211,7 +207,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             }
             if (!deleteEventsKeys.isEmpty()) {
                 try {
-                    commitButch(clientEntity, 3, recordsOneBatch, deleteEventsKeys);
+                    commitButch(clientPerformer, 3, recordsOneBatch, deleteEventsKeys);
                     afterCommit(insert, update, delete, consumer);
                 } catch (Exception fail) {
                     log.error("target database process message failed", "table name:{},error msg:{}", tapTable.getId(), fail.getMessage(), fail);
@@ -223,13 +219,13 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         return writeListResult;
     }
 
-    private void commitButch(ClientEntity clientEntity, int batchType, List<HoodieRecord<HoodieRecordPayload>> batch, List<HoodieKey> deleteEventsKeys) {
+    private void commitButch(ClientPerformer clientPerformer, int batchType, List<HoodieRecord<HoodieRecordPayload>> batch, List<HoodieKey> deleteEventsKeys) {
         if (batchType != 1 && batchType != 2 && batchType != 3) return;
        //long s = System.currentTimeMillis();
-        HoodieJavaWriteClient<HoodieRecordPayload> client = clientEntity.getClient();
+        HoodieJavaWriteClient<HoodieRecordPayload> client = clientPerformer.getClient();
         String startCommit;
         client.setOperationType(appendType);
-        startCommit = startCommitAndGetCommitTime(clientEntity);
+        startCommit = startCommitAndGetCommitTime(clientPerformer);
         ErrorKit.ignoreAnyError(()->Thread.sleep(500));
 
         try {
@@ -250,6 +246,8 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                         List<WriteStatus> delete = client.delete(deleteEventsKeys, startCommit);
                         client.commit(startCommit, delete);
                         deleteEventsKeys.clear();
+                    } else {
+                        log.debug("Append mode: INSERT, ignore delete event: {}", deleteEventsKeys);
                     }
                     break;
             }
@@ -295,8 +293,8 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         throw new UnsupportedOperationException("UnSupport JDBC operator");
     }
 
-    private String startCommitAndGetCommitTime(ClientEntity clientEntity) {
-        return clientEntity.getClient().startCommit();
+    private String startCommitAndGetCommitTime(ClientPerformer clientPerformer) {
+        return clientPerformer.getClient().startCommit();
     }
 
     /**
@@ -306,7 +304,17 @@ public class HuDiWriteBySparkClient extends HudiWrite {
      * */
     protected WriteOperationType appendType(TapConnectorContext tapConnectorContext, TapTable tapTable) {
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
-        if (null == primaryKeys || primaryKeys.isEmpty()) return WriteOperationType.INSERT;
+        DataMap nodeConfig = tapConnectorContext.getNodeConfig();
+
+        //无主键表，并且开启了noPkAutoInsert开关，做仅插入操作
+//        if (null == primaryKeys || primaryKeys.isEmpty()) return WriteOperationType.INSERT;
+        if ((null == primaryKeys || primaryKeys.isEmpty()) && null != nodeConfig) {
+            Object noPkAutoInsert = nodeConfig.getObject("noPkAutoInsert");
+            if (noPkAutoInsert instanceof Boolean && (Boolean)noPkAutoInsert) {
+                return WriteOperationType.INSERT;
+            }
+        }
+
         DataMap configOptions = tapConnectorContext.getSpecification().getConfigOptions();
         String writeStrategy = String.valueOf(configOptions.get("writeStrategy"));
         switch (writeStrategy) {

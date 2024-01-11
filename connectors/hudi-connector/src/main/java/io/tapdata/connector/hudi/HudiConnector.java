@@ -9,6 +9,7 @@ import io.tapdata.connector.hudi.write.HuDiSqlMarker;
 import io.tapdata.connector.hudi.write.HuDiWriteBySparkClient;
 import io.tapdata.connector.hudi.write.HudiWrite;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
@@ -177,40 +178,34 @@ public class HudiConnector extends HiveConnector {
 
     public CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) {
         TapTable tapTable = tapCreateTableEvent.getTable();
+        String database = hudiConfig.getDatabase();
+        String tableId = tapCreateTableEvent.getTableId();
         CreateTableOptions createTableOptions = new CreateTableOptions();
         try {
-            if (hudiJdbcContext.tableIfExists(tapTable.getId())) {
-                DataMap connectionConfig = tapConnectorContext.getConnectionConfig();
-                String database = connectionConfig.getString("database");
-                String tableId = tapCreateTableEvent.getTableId();
-                createTableOptions.setTableExists(true);
+            boolean tableExists = hudiJdbcContext.tableIfExists(tapTable.getId());
+            createTableOptions.setTableExists(tableExists);
+            if (tableExists) {
                 tapConnectorContext.getLog().info("Table \"{}.{}\" exists, skip auto create table", database, tableId);
             } else {
                 Collection<String> primaryKeys = tapTable.primaryKeys(true);
-                if (EmptyKit.isEmpty(primaryKeys)) {
-                    throw new RuntimeException(
-                            format("Create table {}.{} failed, Hudi does not support creating tables with missing primary keys, please specify the Update Condition field as the primary key.",
-                                    hudiConfig.getDatabase(),
-                                    tapTable.getId())
-                    );
-                }
-                String sql = "CREATE TABLE IF NOT EXISTS " +
-                        formatTable(hudiConfig.getDatabase(), tapTable.getId()) + "("
-                        + commonSqlMaker.buildColumnDefinition(tapTable, true);
-                StringJoiner pk = new StringJoiner(",");
-                for (String field : primaryKeys) {
-                    pk.add(field);
-                }
-                String sb = "\n) using hudi \noptions (";
+                //if (EmptyKit.isEmpty(primaryKeys)) {
+                //    throw new RuntimeException(
+                //            format("Create table {}.{} failed, Hudi does not support creating tables with missing primary keys, please specify the Update Condition field as the primary key.",
+                //                    hudiConfig.getDatabase(),
+                //                    tapTable.getId())
+                //    );
+                //}
+                String tableConfig;
                 if (!EmptyKit.isEmpty(primaryKeys)) {
-                    sb += ("\nprimaryKey = '" + pk +"' ");
+                    tableConfig = " using hudi options (primaryKey = '" + String.join(",", primaryKeys) +"' )";
+                } else {
+                    tableConfig = " ROW FORMAT DELIMITED FIELDS TERMINATED BY ','";
                 }
-                sql = sql + sb  + ")";
-                List<String> sqls = TapSimplify.list();
-                sqls.add(sql);
-                tapConnectorContext.getLog().info("Table: table-> {}", tapTable.getId());
-                createTableOptions.setTableExists(false);
-                jdbcContext.batchExecute(sqls);
+                jdbcContext.execute(String.format(HudiJdbcContext.CREATE_TABLE_SQL,
+                        formatTable(database, tapTable.getId()),
+                        commonSqlMaker.buildColumnDefinition(tapTable, true),
+                        tableConfig
+                ));
             }
         } catch (Exception e) {
             if (e instanceof SQLFeatureNotSupportedException) {
@@ -219,7 +214,7 @@ public class HudiConnector extends HiveConnector {
                     return createTableOptions;
                 }
             }
-            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed, " + e.getMessage());
+            throw new CoreException("Create Table {} Failed, {}", tapTable.getId(), e.getMessage(), e);
         }
         return createTableOptions;
     }

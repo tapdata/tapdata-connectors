@@ -1,6 +1,6 @@
 package io.tapdata.connector.hudi.write.generic;
 
-import io.tapdata.connector.hudi.write.ClientEntity;
+import io.tapdata.connector.hudi.write.ClientPerformer;
 import io.tapdata.connector.hudi.write.generic.entity.KeyEntity;
 import io.tapdata.connector.hudi.write.generic.entity.NormalEntity;
 import org.apache.avro.generic.GenericRecord;
@@ -12,9 +12,9 @@ import java.util.Map;
 public class HoodieRecordGenericStage implements GenericStage<NormalEntity, Map<String, Object>, HoodieRecord<HoodieRecordPayload>>{
     @Override
     public HoodieRecord<HoodieRecordPayload> generic(Map<String, Object> fromValue, NormalEntity entity) {
-        ClientEntity clientEntity = entity.getClientEntity();
+        ClientPerformer clientPerformer = entity.getClientEntity();
         GenericRecord genericRecord = GenericMapToRecord.singleton().generic(fromValue, entity);
-        HoodieKey hoodieKey = GenericHoodieKey.singleton().generic(genericRecord,  new KeyEntity().withKeyNames(clientEntity.getPrimaryKeys()).withPartitionKeys(clientEntity.getPartitionKeys()));
+        HoodieKey hoodieKey = GenericHoodieKey.singleton().generic(genericRecord,  new KeyEntity().withKeyNames(clientPerformer.getPrimaryKeys()).withPartitionKeys(clientPerformer.getPartitionKeys()));
         HoodieRecordPayload<HoodieAvroPayload> payload = new org.apache.hudi.common.model.HoodieAvroPayload(Option.of(genericRecord));
         return new HoodieAvroRecord<>(hoodieKey, payload);
     }
