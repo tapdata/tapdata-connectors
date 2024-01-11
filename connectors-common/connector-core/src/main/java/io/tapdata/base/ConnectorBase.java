@@ -363,10 +363,14 @@ public abstract class ConnectorBase implements TapConnector {
         RetryOptions retryOptions = RetryOptions.create();
         retryOptions.setNeedRetry(true);
         retryOptions.beforeRetryMethod(() -> {
-            try {
-                this.onStop(tapConnectionContext);
-                this.onStart(tapConnectionContext);
-            } catch (Throwable ignore) {
+            synchronized (this) {
+                try {
+                    this.onStop(tapConnectionContext);
+                    if (isAlive()) {
+                        this.onStart(tapConnectionContext);
+                    }
+                } catch (Throwable ignore) {
+                }
             }
         });
         return retryOptions;
