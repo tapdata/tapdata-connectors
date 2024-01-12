@@ -73,7 +73,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 				bsonDocument.put("collMod",new BsonString(tableName));
 				bsonDocument.put("changeStreamPreAndPostImages",new BsonDocument("enabled",new BsonBoolean(true)));
 				Document result = mongoDatabase.runCommand(bsonDocument);
-				if(!result.containsKey("ok"))TapLogger.warn(TAG, "{} failed to enable changeStreamPreAndPostImages");
+				if(!result.containsKey("ok"))TapLogger.warn(TAG, "{} failed to enable changeStreamPreAndPostImages",tableName);
 			}
 		}
 		List<Bson> pipeline = singletonList(Aggregates.match(
