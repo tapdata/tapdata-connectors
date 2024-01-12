@@ -289,7 +289,7 @@ public class HuDiWriteBySparkClientV2 extends HudiWrite {
         if ((null == primaryKeys || primaryKeys.isEmpty()) && null != nodeConfig) {
             Object noPkAutoInsert = nodeConfig.getObject("noPkAutoInsert");
             if (noPkAutoInsert instanceof Boolean && (Boolean)noPkAutoInsert) {
-                log.info("Table not any primary keys, do append only mode to insert records, table id: {}", tapTable.getId());
+                log.debug("Table not any primary keys, do append only mode to insert records, table id: {}", tapTable.getId());
                 return WriteOperationType.INSERT;
             }
         }
@@ -321,7 +321,7 @@ public class HuDiWriteBySparkClientV2 extends HudiWrite {
                 return SchemaConverters.toAvroType(structType, false, structName, recordNamespace);
             }
         } catch (Exception e) {
-            log.info("Can not get schema by jdbc, will get schema from hdfs file system next, table id: {}, message: {}", tableId, e.getMessage());
+            log.debug("Can not get schema by jdbc, will get schema from hdfs file system next, table id: {}, message: {}", tableId, e.getMessage());
         }
         return null;
     }
