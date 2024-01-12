@@ -21,7 +21,13 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -203,7 +209,7 @@ public class HudiWrite extends HiveJdbcWrite {
         if (StringUtils.isBlank(sql)) {
             StringBuilder insertValueSB = new StringBuilder();
             LinkedHashMap<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
-            nameFieldMap.keySet().stream().filter(k->after.containsKey(k)).forEach(k -> insertValueSB.append("?,"));
+            nameFieldMap.keySet().stream().filter(after::containsKey).forEach(k -> insertValueSB.append("?,"));
             sql = insertValueSB.toString();
             sql = StringUtils.removeEnd(sql, ",");
         }
