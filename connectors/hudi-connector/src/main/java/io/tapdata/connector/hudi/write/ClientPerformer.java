@@ -20,8 +20,18 @@ import org.apache.hudi.common.table.TableSchemaResolver;
 import org.apache.hudi.config.*;
 import org.apache.hudi.exception.TableNotFoundException;
 import org.apache.hudi.index.HoodieIndex;
+import org.apache.spark.sql.avro.SchemaConverters;
+import org.apache.spark.sql.execution.datasources.jdbc.JDBCOptions;
+import org.apache.spark.sql.execution.datasources.jdbc.JdbcUtils;
+import org.apache.spark.sql.jdbc.JdbcDialect;
+import org.apache.spark.sql.jdbc.JdbcDialects;
+import org.apache.spark.sql.types.StructType;
 
 import java.io.IOException;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.*;
 
 import static io.tapdata.base.ConnectorBase.toJson;
@@ -48,7 +58,6 @@ public class ClientPerformer implements AutoCloseable {
     boolean usage;
 
     Schema schema;
-    Boolean isLogicSchema;
 
     TapTable tapTable;
     Configuration hadoopConf;
@@ -62,6 +71,7 @@ public class ClientPerformer implements AutoCloseable {
         String tableId;
         String tablePath;
         TapTable tapTable;
+        Schema schema;
         WriteOperationType operationType;
         Log log;
 
@@ -139,6 +149,15 @@ public class ClientPerformer implements AutoCloseable {
         public HudiConfig getConfig() {
             return config;
         }
+
+        public Param withSchema(Schema jdbcSchema) {
+            this.schema = jdbcSchema;
+            return this;
+        }
+
+        public Schema getSchema() {
+            return schema;
+        }
     }
 
     public ClientPerformer(Param param) {
@@ -158,6 +177,10 @@ public class ClientPerformer implements AutoCloseable {
         this.tapTable = param.getTapTable();
         this.primaryKeys = getAllPrimaryKeys();
         this.partitionKeys = getAllPartitionKeys();
+        this.schema = param.getSchema();
+        if (null == schema) {
+            saveArvoSchema();
+        }
         try {
             initClient(hadoopConf);
         } catch (IOException e) {
@@ -212,7 +235,6 @@ public class ClientPerformer implements AutoCloseable {
                 throw new TableNotFoundException(tablePath);
             }
         }
-        saveArvoSchema();
 
         final Properties indexProperties = new Properties();
         indexProperties.put(BLOOM_INDEX_FILTER_DYNAMIC_MAX_ENTRIES.key(), 150000); // 1000万总体时间提升1分钟
@@ -244,12 +266,8 @@ public class ClientPerformer implements AutoCloseable {
 
     public void updateTimestamp() {
         this.timestamp = new Date().getTime();
-        if (null != isLogicSchema && isLogicSchema) {
-            saveArvoSchema();
-        }
     }
 
-    //@TODO
     public void setUsage() {
         this.usage = true;
     }
@@ -272,13 +290,11 @@ public class ClientPerformer implements AutoCloseable {
         TableSchemaResolver schemaResolver = new TableSchemaResolver(metaClient);
         try {
             this.schema = schemaResolver.getTableAvroSchemaFromDataFile();
-            this.isLogicSchema = false;
         } catch (Exception e) {
-            this.schema = new Schema.Parser().parse(toSchemaStr());
-            this.isLogicSchema = true;
+            throw new CoreException("Can not find Schema from hdfs file system, table id: {}, message: {}", tableId, e.getMessage(), e);
         }
         if (null == schema) {
-            throw new CoreException("Can not find Schema from HuDi, table id: {}", tableId);
+            throw new CoreException("Can not find Schema from hdfs file system, table id: {}", tableId);
         }
     }
 
