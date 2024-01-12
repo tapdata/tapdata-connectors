@@ -59,7 +59,6 @@
 		<module>greenplum-connector</module>
 		<module>dws-connector</module>
 		<module>azure-cosmosdb-connector</module>
-        <module>hudi-connector</module>
     </modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
