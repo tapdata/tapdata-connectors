@@ -88,7 +88,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                                     .withLog(log));
                 },
                 (tableId, clientPerformer) -> Optional.ofNullable(clientPerformer).ifPresent(ClientPerformer::close),
-                isAlive,
                 AutoExpireInstance.Time.time(15, 15, TimeUnit.MINUTES),
                 30 * 60 * 1000,
                 log
@@ -209,10 +208,10 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                     if (!WriteOperationType.INSERT.equals(this.appendType)) {
                         List<WriteStatus> delete = client.delete(deleteEventsKeys, startCommit);
                         client.commit(startCommit, delete);
-                        deleteEventsKeys.clear();
                     } else {
                         log.debug("Append mode: INSERT, ignore delete event: {}", deleteEventsKeys);
                     }
+                    deleteEventsKeys.clear();
                     break;
             }
         } catch (HoodieRollbackException e) {
