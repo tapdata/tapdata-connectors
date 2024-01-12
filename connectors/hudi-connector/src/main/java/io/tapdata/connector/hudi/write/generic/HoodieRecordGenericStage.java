@@ -4,7 +4,11 @@ import io.tapdata.connector.hudi.write.ClientPerformer;
 import io.tapdata.connector.hudi.write.generic.entity.KeyEntity;
 import io.tapdata.connector.hudi.write.generic.entity.NormalEntity;
 import org.apache.avro.generic.GenericRecord;
-import org.apache.hudi.common.model.*;
+import org.apache.hudi.common.model.HoodieAvroPayload;
+import org.apache.hudi.common.model.HoodieAvroRecord;
+import org.apache.hudi.common.model.HoodieKey;
+import org.apache.hudi.common.model.HoodieRecord;
+import org.apache.hudi.common.model.HoodieRecordPayload;
 import org.apache.hudi.common.util.Option;
 
 import java.util.Map;

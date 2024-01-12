@@ -10,10 +10,10 @@ import org.apache.hadoop.fs.Path;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class ClientHandler {
-    HudiConfig config;
-    HiveJdbcContext hiveJdbcContext;
+    private final HudiConfig config;
+    private final HiveJdbcContext hiveJdbcContext;
 
-    Configuration hadoopConf;
+    private Configuration hadoopConf;
     private static final String DESCRIBE_EXTENDED_SQL = "describe Extended `%s`.`%s`";
 
     public ClientHandler(HudiConfig config, HiveJdbcContext hiveJdbcContext) {

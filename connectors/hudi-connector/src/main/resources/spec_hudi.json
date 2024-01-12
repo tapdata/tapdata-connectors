@@ -332,7 +332,7 @@
     "default": "en_US",
     "en_US": {
       "tableType": "Table creation type",
-      "noPkAutoInsert": "No primary key table field append write",
+      "noPkAutoInsert": "No primary key table auto append write",
       "nameSrvAddr": "Cluster Address",
       "database": "database",
       "krb5": "kerberos authentication",
@@ -357,7 +357,7 @@
     },
     "zh_CN": {
       "tableType": "建表类型",
-      "noPkAutoInsert": "无主键表字段追加写入",
+      "noPkAutoInsert": "无主键表自动追加写入",
       "nameSrvAddr": "集群地址",
       "database": "数据库",
       "krb5": "kerberos 认证",
@@ -381,8 +381,8 @@
       "deleteStage_2": "物理策略"
     },
     "zh_TW": {
-      "tableType": "",
-      "noPkAutoInsert": "無主鍵錶欄位追加寫入",
+      "tableType": "建表類型",
+      "noPkAutoInsert": "無主鍵錶自動追加寫入",
       "nameSrvAddr": "集群地址",
       "database": "數據庫",
       "krb5": "kerberos 認證",

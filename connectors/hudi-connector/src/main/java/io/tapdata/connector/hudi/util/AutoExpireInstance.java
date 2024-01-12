@@ -5,7 +5,11 @@ import io.tapdata.kit.ErrorKit;
 
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -15,9 +19,10 @@ import java.util.function.Supplier;
 /**
  * @author <a href="mailto:harsen_lin@163.com">Harsen</a>
  * @version v1.0 2024/1/11 18:28 Create
+ * @version v2.0 2024/1/12 14:41 update by Gavin'Xiao
  */
 public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
-    final long cacheTimes;
+    private final long cacheTimes;
     private final Function<InitKey, V> initFun;
 
     private final Function<InitKey, K> generateKey;
@@ -26,7 +31,7 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
     private final ScheduledExecutorService cleanService = Executors.newSingleThreadScheduledExecutor();
     private final ScheduledFuture<?> cleanFuture;
     private final Supplier<Boolean> isAlive;
-    final Log log;
+    private final Log log;
     public AutoExpireInstance(Function<InitKey, K> generateKey,
                               Function<InitKey, V> initFun,
                               BiConsumer<K, V> destroyFun,
@@ -45,6 +50,7 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
     private boolean isAlive() {
         return null != isAlive && isAlive.get();
     }
+
     public void call(InitKey key, Consumer<V> consumer) {
         K mapKey = generateKey.apply(key);
         Item<V> item = map.computeIfAbsent(mapKey, k -> new Item<>(0, initFun.apply(key)));
@@ -56,6 +62,40 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
             item.useCounts.addAndGet(-1);
             item.lasted = System.currentTimeMillis();
         }
+    }
+
+    private void runExpire() {
+        for (K k : map.keySet()) {
+            if (!isAlive()) break;
+            map.computeIfPresent(k, (key, val) -> {
+                if (val.useCounts.get() == 0 && System.currentTimeMillis() - val.lasted > this.cacheTimes) {
+                    doDestroyFun(key, val.value);
+                    return null;
+                }
+                return val;
+            });
+        }
+    }
+
+    private void doDestroyFun(K key, V value) {
+        try {
+            destroyFun.accept(key, value);
+        } catch (Exception e) {
+            log.warn("Occur an error when close: {} - {}, message: {}", key, value, e.getMessage());
+        }
+    }
+
+    @Override
+    public void close() {
+        Optional.ofNullable(cleanFuture).ifPresent(e -> ErrorKit.ignoreAnyError(() -> e.cancel(true)));
+        ErrorKit.ignoreAnyError(cleanService::shutdown);
+        for (K k : map.keySet()) {
+            map.computeIfPresent(k, (key, val) -> {
+                doDestroyFun(key, val.value);
+                return null;
+            });
+        }
+        map.clear();
     }
 
     static class Item<V> {
@@ -71,14 +111,12 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
 
     public static class Time {
         private final static long DEFAULT_EXPIRE_TIMES = 10;
-        long expireTimes;
+        private long expireTimes;
         private final static long DEFAULT_INTERVAL = 10;
-        long interval;
+        private long interval;
         private final static TimeUnit DEFAULT_TIME_UTIL = TimeUnit.MINUTES;
-        TimeUnit unit;
-        Time() {
-
-        }
+        private TimeUnit unit;
+        Time() {}
         public static Time defaultTime() {
             return new Time().withExpireTimes(DEFAULT_EXPIRE_TIMES).withInterval(DEFAULT_INTERVAL).withTimeUtil(DEFAULT_TIME_UTIL);
         }
@@ -118,39 +156,5 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
         public TimeUnit getUnit() {
             return unit;
         }
-    }
-
-    private void runExpire() {
-        for (K k : map.keySet()) {
-            if (!isAlive()) break;
-            map.computeIfPresent(k, (key, val) -> {
-                if (val.useCounts.get() == 0 && System.currentTimeMillis() - val.lasted > this.cacheTimes) {
-                    doDestroyFun(key, val.value);
-                    return null;
-                }
-                return val;
-            });
-        }
-    }
-
-    private void doDestroyFun(K key, V value) {
-        try {
-            destroyFun.accept(key, value);
-        } catch (Exception e) {
-            log.warn("Occur an error when close: {} - {}, message: {}", key, value, e.getMessage());
-        }
-    }
-
-    @Override
-    public void close() {
-        Optional.ofNullable(cleanFuture).ifPresent(e -> ErrorKit.ignoreAnyError(() -> e.cancel(true)));
-        ErrorKit.ignoreAnyError(cleanService::shutdown);
-        for (K k : map.keySet()) {
-            map.computeIfPresent(k, (key, val) -> {
-                doDestroyFun(key, val.value);
-                return null;
-            });
-        }
-        map.clear();
     }
 }

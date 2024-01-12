@@ -6,7 +6,7 @@ import io.tapdata.connector.hive.HiveConnector;
 import io.tapdata.connector.hudi.config.HudiConfig;
 import io.tapdata.connector.hudi.util.FileUtil;
 import io.tapdata.connector.hudi.write.ClientHandler;
-import io.tapdata.connector.hudi.write.HuDiWriteBySparkClientV2;
+import io.tapdata.connector.hudi.write.HuDiWriteBySparkClient;
 import io.tapdata.connector.hudi.write.HudiWrite;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
@@ -15,7 +15,13 @@ import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.schema.value.TapArrayValue;
+import io.tapdata.entity.schema.value.TapBinaryValue;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapMapValue;
+import io.tapdata.entity.schema.value.TapRawValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
@@ -35,16 +41,19 @@ import org.apache.hudi.common.fs.FSUtils;
 import java.io.IOException;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
-import java.util.*;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @TapConnectorClass("spec_hudi.json")
 public class HudiConnector extends HiveConnector {
-
     private HudiConfig hudiConfig;
     private HudiJdbcContext hudiJdbcContext;
+    private final Map<String, HuDiWriteBySparkClient> writeMap = new ConcurrentHashMap<>();
 
     @Override
     public void onStart(TapConnectionContext connectionContext) {
@@ -159,10 +168,9 @@ public class HudiConnector extends HiveConnector {
         }
     }
 
-    Map<String, HuDiWriteBySparkClientV2> writeMap = new ConcurrentHashMap<>();
     private HudiWrite writeClient(TapConnectorContext tapConnectorContext) {
         String id = Thread.currentThread().getName() + Thread.currentThread().getId() + Thread.currentThread().getThreadGroup().getName();
-        return writeMap.computeIfAbsent(id , key -> new HuDiWriteBySparkClientV2(hiveJdbcContext, hudiConfig, this::isAlive, tapConnectorContext.getLog()));
+        return writeMap.computeIfAbsent(id , key -> new HuDiWriteBySparkClient(hiveJdbcContext, hudiConfig, this::isAlive, tapConnectorContext.getLog()));
      }
 
 
@@ -261,7 +269,7 @@ public class HudiConnector extends HiveConnector {
         syncSchemaSubmit(tapTableList, consumer);
     }
 
-    String formatTable(String database, String tableId) {
+    private String formatTable(String database, String tableId) {
         return String.format("`%s`.`%s`", database, tableId);
     }
 }
