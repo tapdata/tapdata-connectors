@@ -32,7 +32,7 @@ public class BatchReadSender implements APISender {
     @Override
     public void send(Object data, String tableName, String eventType, Object offset) {
         if (Objects.isNull(core)) {
-            TapLogger.warn(TAG, "ScriptCore can not be null or not be empty.");
+            TapLogger.warn(TAG, "ScriptCore can not be null or not be empty");
             return;
         }
         if (Objects.isNull(data)) {

@@ -3,9 +3,7 @@ package io.tapdata.mongodb;
 import com.mongodb.*;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.*;
-import com.mongodb.client.model.CreateCollectionOptions;
-import com.mongodb.client.model.IndexOptions;
-import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.*;
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -62,10 +60,7 @@ import java.math.BigDecimal;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
@@ -97,6 +92,7 @@ public class MongodbConnector extends ConnectorBase {
 	private MongoBatchOffset batchOffset = null;
 	private MongodbExceptionCollector exceptionCollector;
 	private MongodbStreamReader mongodbStreamReader;
+	private ConcurrentHashMap<String,Set<String>> shardKeyMap = new ConcurrentHashMap<>();
 
 	private volatile MongodbWriter mongodbWriter;
 	private Map<String, Integer> stringTypeValueMap;
@@ -146,6 +142,7 @@ public class MongodbConnector extends ConnectorBase {
 		MongoIterable<String> collectionNames = mongoDatabase.listCollectionNames();
 		TableFieldTypesGenerator tableFieldTypesGenerator = InstanceFactory.instance(TableFieldTypesGenerator.class);
 		this.stringTypeValueMap = new HashMap<>();
+		final int sampleSizeBatchSize = getSampleSizeBatchSize(connectionContext);
 
 		ThreadPoolExecutor executor = new ThreadPoolExecutor(10, 30, 60L, TimeUnit.SECONDS, new ArrayBlockingQueue<>(30));
 
@@ -179,7 +176,7 @@ public class MongodbConnector extends ConnectorBase {
 						table.defaultPrimaryKeys("_id");
 						MongoCollection<?> collection = documentMap.get(name);
 						try {
-							MongodbUtil.sampleDataRow(collection, SAMPLE_SIZE_BATCH_SIZE, (dataRow) -> {
+							MongodbUtil.sampleDataRow(collection, sampleSizeBatchSize, (dataRow) -> {
 								Set<String> fieldNames = dataRow.keySet();
 								for (String fieldName : fieldNames) {
 									BsonValue value = dataRow.get(fieldName);
@@ -205,7 +202,7 @@ public class MongodbConnector extends ConnectorBase {
 						});
 						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
 						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
-
+						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table);
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -245,6 +242,7 @@ public class MongodbConnector extends ConnectorBase {
 						}
 						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
 						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
+						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table);
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -362,7 +360,7 @@ public class MongodbConnector extends ConnectorBase {
 		try {
 			onStart(connectionContext);
 			try (
-					MongodbTest mongodbTest = new MongodbTest(mongoConfig, consumer, mongoClient)
+					MongodbTest mongodbTest = new MongodbTest(mongoConfig, consumer, mongoClient,connectionOptions)
 			) {
 				mongodbTest.testOneByOne();
 			}
@@ -517,9 +515,6 @@ public class MongodbConnector extends ConnectorBase {
 			throw new CoreException("The value of database name in connection config can not be empty");
 		}
 		DataMap nodeConfig = tapConnectorContext.getNodeConfig();
-		if (null == nodeConfig) {
-			throw new CoreException("Node config can not be empty");
-		}
 		TapTable table = tapCreateTableEvent.getTable();
 		Collection<String> pks = table.primaryKeys();
 		if (CollectionUtils.isNotEmpty(pks) && (pks.size() > 1 || !"_id".equals(pks.iterator().next()))) {
@@ -545,12 +540,13 @@ public class MongodbConnector extends ConnectorBase {
 
 			createIndex(table, table.getIndexList(), log);
 		}
-
+		//Created Time Series Collection
+		createTimeSeriesCollection(table,log);
 		//created shared collection
 		final boolean isShardCollection = createSharedCollection(nodeConfig, table, pks, database, log);
 
-		//@todo created capped collection
-		//createCappedCollection(table, isShardCollection, log);
+		//created capped collection
+		createCappedCollection(table, isShardCollection, log);
 
 		return createTableOptions;
 	}
@@ -717,18 +713,39 @@ public class MongodbConnector extends ConnectorBase {
 			}
 		return isShardCollection;
 	}
+	private void createTimeSeriesCollection(TapTable table,Log log) {
+		if(mongoConfig.isTimeSeriesCollection()){
+			Map<String, Object> tableAttr = Optional.ofNullable(table.getTableAttr()).orElse(new HashMap<>());
+			if(!tableAttr.isEmpty()){
+				try {
+					String timeField = (String) tableAttr.get("timeField");
+					if(StringUtils.isNotEmpty(timeField)){
+						CreateCollectionOptions options = new CreateCollectionOptions();
+						TimeSeriesOptions timeSeriesOptions = new TimeSeriesOptions(timeField);
+						if(tableAttr.get("metaField") != null)timeSeriesOptions.metaField((String) tableAttr.get("metaField"));
+						if(tableAttr.get("granularity") != null)timeSeriesOptions.granularity(TimeSeriesGranularity.valueOf(tableAttr.get("granularity").toString().toUpperCase()));
+						options.timeSeriesOptions(timeSeriesOptions);
+						mongoDatabase.createCollection(table.getId(), options);
+					}
+				}catch (Exception e){
+					log.warn("Create Time Series Collection failed , message:{}",e.getMessage());
+				}
+ 			}
+		}
 
+
+	}
 	private void createCappedCollection(TapTable table, boolean isShardCollection, Log log) {
 		Map<String, Object> tableAttr = Optional.ofNullable(table.getTableAttr()).orElse(new HashMap<>());
 		Object isCapped = tableAttr.get("capped");//
 		if (isCapped instanceof Boolean && (Boolean) isCapped) {
-			Long maxCount = toLong(tableAttr.get("size"));
+			Long maxCount = toLong(tableAttr.get("max"));
 			Long maxByteSize = toLong(tableAttr.get("maxSize"));
 			try {
 				if (!isShardCollection) {
 					CreateCollectionOptions options = new CreateCollectionOptions();
 					options.capped(true);
-					if (maxCount > 0) {
+					if (maxCount >= 0) {
 						options.maxDocuments(maxCount);
 					}
 					options.sizeInBytes(maxByteSize);
@@ -1094,6 +1111,7 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	public void onStart(TapConnectionContext connectionContext) throws Throwable {
+		MongodbUtil.initMongoDBConfig(connectionContext);
 		final DataMap connectionConfig = connectionContext.getConnectionConfig();
 		if (MapUtils.isEmpty(connectionConfig)) {
 			throw new RuntimeException("connection config cannot be empty");
@@ -1128,6 +1146,28 @@ public class MongodbConnector extends ConnectorBase {
 //        return null;
 //    }
 
+	private static final String CONFIG = "config";
+	private static final String COLLECTIONS = "collections";
+
+	private void putShardKey(String tableId){
+		if (Boolean.TRUE.equals(isShard(tableId)) && !shardKeyMap.containsKey(tableId)){
+			Document document = mongoClient.getDatabase(CONFIG).getCollection(COLLECTIONS)
+					.find(new Document("_id", mongoConfig.getDatabase() + "." + tableId)).first();
+			if(document != null && document.containsKey("key")){
+				Map<String,String> map = (Map<String,String>)document.get("key");
+				if(CollectionUtils.isNotEmpty(map.keySet()))
+					shardKeyMap.put(tableId,map.keySet());
+			}
+		}
+	}
+
+	private Boolean isShard(String tableId){
+		Document document = mongoDatabase.runCommand(new Document("collStats",tableId));
+		if(document.containsKey("sharded")){
+			return (Boolean)document.get("sharded");
+		}
+		return false;
+	}
 
 	/**
 	 * The method invocation life circle is below,
@@ -1146,11 +1186,12 @@ public class MongodbConnector extends ConnectorBase {
 	 * @param writeListResultConsumer
 	 */
 	private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
+		putShardKey(table.getId());
 		try {
 			if (mongodbWriter == null) {
 				synchronized (this) {
 					if (mongodbWriter == null) {
-						mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog());
+						mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
 						ConnectorCapabilities connectorCapabilities = connectorContext.getConnectorCapabilities();
 						if (null != connectorCapabilities) {
 							mongoConfig.setInsertDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY) ?
@@ -1400,7 +1441,7 @@ public class MongodbConnector extends ConnectorBase {
 				findIterable.noCursorTimeout(true).maxTime(30, TimeUnit.MINUTES);
 			}
 
-			Document lastDocument;
+			Document lastDocument = null;
 
 			try (MongoCursor<Document> mongoCursor = findIterable.iterator()) {
 				while (mongoCursor.hasNext()) {
@@ -1416,7 +1457,13 @@ public class MongodbConnector extends ConnectorBase {
 					}
 				}
 				if (!tapEvents.isEmpty()) {
-					tapReadOffsetConsumer.accept(tapEvents, null);
+					if(lastDocument != null){
+						Object value = lastDocument.get(COLLECTION_ID_FIELD);
+						batchOffset = new MongoBatchOffset(COLLECTION_ID_FIELD, value);
+						tapReadOffsetConsumer.accept(tapEvents, batchOffset);
+					}else{
+						tapReadOffsetConsumer.accept(tapEvents, null);
+					}
 				}
 			} catch (Exception e) {
 				if (!isAlive() && e instanceof MongoInterruptedException) {
@@ -1492,7 +1539,7 @@ public class MongodbConnector extends ConnectorBase {
 		try {
 			final int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
 			if (version >= 4) {
-				mongodbStreamReader = new MongodbV4StreamReader();
+				mongodbStreamReader = new MongodbV4StreamReader().setPreImage(mongoConfig.getPreImage());
 			} else {
 				mongodbStreamReader = new MongodbV3StreamReader();
 			}
@@ -1600,5 +1647,14 @@ public class MongodbConnector extends ConnectorBase {
 			}
 		}
 		throw throwable instanceof RuntimeException ? (RuntimeException) throwable : new RuntimeException(throwable);
+	}
+
+	private int getSampleSizeBatchSize(TapConnectionContext context) {
+		if (null == context) return SAMPLE_SIZE_BATCH_SIZE;
+		DataMap config = context.getConnectionConfig();
+		if (null == config || !config.containsKey("mongodbLoadSchemaSampleSize")) return SAMPLE_SIZE_BATCH_SIZE;
+		Integer integer = config.getInteger("mongodbLoadSchemaSampleSize");
+		if (null == integer || integer <= 0) return SAMPLE_SIZE_BATCH_SIZE;
+		return integer;
 	}
 }

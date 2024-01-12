@@ -5,6 +5,7 @@ import redis.clients.jedis.*;
 import redis.clients.jedis.commands.ProtocolCommand;
 import redis.clients.jedis.providers.ClusterConnectionProvider;
 
+import java.util.Arrays;
 import java.util.Set;
 
 public class ClusterExtPipeline extends ClusterPipeline {
@@ -22,11 +23,11 @@ public class ClusterExtPipeline extends ClusterPipeline {
     }
 
     public Response<Object> sendCommand(ProtocolCommand cmd, String... args) {
-        return sendCommand(new CommandArguments(cmd).addObjects((Object[]) args));
+        return sendCommand(new ClusterCommandArguments(cmd).addObjects((Object[]) args));
     }
 
     public Response<Object> sendCommand(ProtocolCommand cmd, byte[]... args) {
-        return sendCommand(new CommandArguments(cmd).addObjects((Object[]) args));
+        return sendCommand(new ClusterCommandArguments(cmd).key(args[0]).addObjects((Object[]) Arrays.copyOfRange(args, 1, args.length)));
     }
 
     public Response<Object> sendCommand(CommandArguments args) {

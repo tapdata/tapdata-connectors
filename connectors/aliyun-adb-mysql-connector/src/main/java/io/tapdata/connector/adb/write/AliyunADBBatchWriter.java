@@ -17,6 +17,7 @@ import java.sql.Statement;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * @author GavinXiao
@@ -27,9 +28,9 @@ public class AliyunADBBatchWriter extends MysqlSqlBatchWriter implements WriteSt
     private final static String TAG = AliyunADBBatchWriter.class.getSimpleName();
     private static final String DELETE_FROM_SQL_TEMPLATE = "DELETE FROM `%s`.`%s` WHERE %s";
 
-    public AliyunADBBatchWriter(MysqlJdbcContextV2 mysqlJdbcContext) throws Throwable {
-        super(mysqlJdbcContext);
-        mysqlJdbcOneByOneWriter = new AliyunOneByOneWriter(mysqlJdbcContext, jdbcCacheMap);
+    public AliyunADBBatchWriter(MysqlJdbcContextV2 mysqlJdbcContext, Supplier<Boolean> isAlive) throws Throwable {
+        super(mysqlJdbcContext, isAlive);
+        mysqlJdbcOneByOneWriter = new AliyunOneByOneWriter(mysqlJdbcContext, jdbcCacheMap, isAlive);
     }
 
     @Override
@@ -37,7 +38,7 @@ public class AliyunADBBatchWriter extends MysqlSqlBatchWriter implements WriteSt
         AtomicReference<WriteListResult<TapRecordEvent>> writeListResult = new AtomicReference<>(new WriteListResult<>(0L, 0L, 0L, new HashMap<>()));
         try {
             dispatch(tapRecordEvents, consumeEvents -> {
-                if (!isAlive()) return;
+                if (!isAlive.get()) return;
                 boolean batch = false;
                 try {
                     if (consumeEvents.get(0) instanceof TapInsertRecordEvent) {
@@ -62,7 +63,7 @@ public class AliyunADBBatchWriter extends MysqlSqlBatchWriter implements WriteSt
                 } catch (Throwable e) {
                     if (batch) {
                         getJdbcCache().getConnection().rollback();
-                        if (isAlive()) {
+                        if (isAlive.get()) {
                             TapLogger.warn(TAG, "Do batch operation failed: " + e.getMessage() + "\n Will try one by one mode");
                             doOneByOne(tapConnectorContext, tapTable, writeListResult, consumeEvents);
                         }
@@ -73,7 +74,7 @@ public class AliyunADBBatchWriter extends MysqlSqlBatchWriter implements WriteSt
             });
             getJdbcCache().getConnection().commit();
         } catch (Throwable e) {
-            if (isAlive()) {
+            if (isAlive.get()) {
                 throw e;
             }
         }
@@ -90,7 +91,7 @@ public class AliyunADBBatchWriter extends MysqlSqlBatchWriter implements WriteSt
         TapLogger.debug(TAG, "Execute update sql: " + sql);
         JdbcCache jdbcCache = getJdbcCache();
         try (Statement statement = jdbcCache.getStatement()) {
-            while (isAlive()) {
+            while (isAlive.get()) {
                 try {
                     statement.execute(sql);
                     result = tapRecordEvents.size();

@@ -6,6 +6,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -56,8 +57,8 @@ public class AliyunADBWriteRecorder extends NormalWriteRecorder {
             return;
         }
         //去除After和Before的多余字段
-        Map<String, Object> lastBefore = getBeforeForUpdate(after, before);
-        Map<String, Object> lastAfter = getAfterForUpdate(after, lastBefore);
+        Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
+        Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
             case "insert_on_nonexists":
                 insertUpdate(lastAfter, lastBefore, listResult);

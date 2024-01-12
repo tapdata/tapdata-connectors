@@ -21,14 +21,9 @@ import java.sql.Statement;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -50,13 +45,13 @@ public abstract class MysqlJdbcWriter extends MysqlWriter {
 	private static final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
 	protected final Map<String, JdbcCache> jdbcCacheMap;
 
-	public MysqlJdbcWriter(MysqlJdbcContextV2 mysqlJdbcContext) throws Throwable {
-		super(mysqlJdbcContext);
+	public MysqlJdbcWriter(MysqlJdbcContextV2 mysqlJdbcContext, Supplier<Boolean> isAlive) throws Throwable {
+		super(mysqlJdbcContext, isAlive);
 		this.jdbcCacheMap = new ConcurrentHashMap<>();
 	}
 
-	public MysqlJdbcWriter(MysqlJdbcContextV2 mysqlJdbcContext, Map<String, JdbcCache> jdbcCacheMap) throws Throwable {
-		super(mysqlJdbcContext);
+	public MysqlJdbcWriter(MysqlJdbcContextV2 mysqlJdbcContext, Map<String, JdbcCache> jdbcCacheMap, Supplier<Boolean> isAlive) throws Throwable {
+		super(mysqlJdbcContext, isAlive);
 		this.jdbcCacheMap = jdbcCacheMap;
 	}
 
@@ -237,12 +232,17 @@ public abstract class MysqlJdbcWriter extends MysqlWriter {
 				preparedStatement.setObject(parameterIndex++, after.get(fieldName));
 				afterKeys.remove(fieldName);
 			} catch (SQLException e) {
-				throw new TapPdkSkippableDataEx(String.format("Set prepared statement values failed: %s, field: '%s', value '%s', record: %s"
-						, e.getMessage()
-						, fieldName
-						, after.get(fieldName)
-						, tapRecordEvent
-				), tapConnectorContext.getSpecification().getId(), e);
+				throw exceptionWrapper.wrap(tapConnectorContext, tapTable, tapRecordEvent, e, (ex) -> {
+					if (ex == null) {
+						return new TapPdkSkippableDataEx(String.format("Set prepared statement values failed: %s, field: '%s', value '%s', record: %s"
+								, e.getMessage()
+								, fieldName
+								, after.get(fieldName)
+								, tapRecordEvent)
+								, tapConnectorContext.getSpecification().getId(), e);
+					}
+					return ex;
+				});
 			}
 		}
 		if (CollectionUtils.isNotEmpty(afterKeys)) {

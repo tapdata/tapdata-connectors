@@ -94,6 +94,7 @@ public class CommonDbConfig implements Serializable {
             try {
                 generateSSlFile();
             } catch (Exception e) {
+                deleteSSlFile();
                 throw new IllegalArgumentException("generate ssl file failed");
             }
         }

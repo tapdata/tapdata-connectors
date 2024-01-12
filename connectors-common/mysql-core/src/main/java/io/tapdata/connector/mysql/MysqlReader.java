@@ -34,6 +34,7 @@ import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.entity.utils.TypeHolder;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -63,6 +64,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static io.tapdata.connector.mysql.util.MysqlUtil.randomServerId;
@@ -81,7 +83,7 @@ public class MysqlReader implements Closeable {
     private static final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("`");
     public static final long SAVE_DEBEZIUM_SCHEMA_HISTORY_INTERVAL_SEC = 2L;
     private String serverName;
-    private final AtomicBoolean running;
+    private final Supplier<Boolean> isAlive;
     private final MysqlJdbcContextV2 mysqlJdbcContext;
     private EmbeddedEngine embeddedEngine;
     private LinkedBlockingQueue<MysqlStreamEvent> eventQueue;
@@ -95,11 +97,11 @@ public class MysqlReader implements Closeable {
     private final ExceptionCollector exceptionCollector;
     protected Log tapLogger;
 
-    public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger) {
+    public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, Supplier<Boolean> isAlive) {
         this.mysqlJdbcContext = mysqlJdbcContext;
+        this.isAlive = isAlive;
         this.tapLogger = tapLogger;
         this.exceptionCollector = new MysqlExceptionCollector();
-        this.running = new AtomicBoolean(true);
         try {
             this.DB_TIME_ZONE = mysqlJdbcContext.queryTimeZone();
         } catch (Exception ignore) {
@@ -202,7 +204,6 @@ public class MysqlReader implements Closeable {
                            Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer) throws Throwable {
         MysqlConfig mysqlConfig = new MysqlConfig().load(tapConnectorContext.getConnectionConfig());
         try {
-            batchSize = Math.max(batchSize, MIN_BATCH_SIZE);
             initDebeziumServerName(tapConnectorContext);
             this.tapTableMap = tapConnectorContext.getTableMap();
             this.ddlParserType = ddlParserType;
@@ -242,15 +243,15 @@ public class MysqlReader implements Closeable {
                     .with("database.hostname", mysqlConfig.getHost())
                     .with("database.port", mysqlConfig.getPort())
                     .with("database.user", mysqlConfig.getUser())
-                    .with("database.password", mysqlConfig.getPassword())
+                    .with("database.password", EmptyKit.isNull(mysqlConfig.getPassword()) ? "" : mysqlConfig.getPassword())
                     .with("database.server.name", serverName)
                     .with("threadName", "Debezium-Mysql-Connector-" + serverName)
                     .with("database.history.skip.unparseable.ddl", true)
                     .with("database.history.store.only.monitored.tables.ddl", true)
                     .with("database.history.store.only.captured.tables.ddl", true)
                     .with(MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE, MySqlConnectorConfig.SnapshotLockingMode.NONE)
-                    .with("max.queue.size", batchSize * 8)
-                    .with("max.batch.size", batchSize)
+                    .with("max.queue.size", Math.max(batchSize, 100) * 8)
+                    .with("max.batch.size", Math.max(batchSize, 100))
                     .with(MySqlConnectorConfig.SERVER_ID, randomServerId())
                     .with("time.precision.mode", "adaptive_time_microseconds")
 //					.with("converters", "time")
@@ -300,6 +301,8 @@ public class MysqlReader implements Closeable {
                             streamReadConsumer.streamReadStarted();
                         }
                     })
+                    .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
+                            numberOfMessagesSinceLastCommit >= batchSize || timeSinceLastCommit.getSeconds() >= 5)
                     .using((result, message, throwable) -> {
                         tapConnectorContext.configContext();
                         if (result) {
@@ -377,7 +380,7 @@ public class MysqlReader implements Closeable {
         tapConnectorContext.configContext();
         Thread.currentThread().setName("Save-Mysql-Schema-History-" + serverName);
         if (!MysqlSchemaHistoryTransfer.isSave()) {
-            MysqlSchemaHistoryTransfer.executeWithLock(n -> !running.get(), () -> {
+            MysqlSchemaHistoryTransfer.executeWithLock(n -> !isAlive.get(), () -> {
                 String json = InstanceFactory.instance(JsonParser.class).toJson(MysqlSchemaHistoryTransfer.historyMap);
                 try {
                     json = StringCompressUtil.compress(json);
@@ -407,7 +410,6 @@ public class MysqlReader implements Closeable {
 
     @Override
     public void close() {
-        this.running.set(false);
         Optional.ofNullable(embeddedEngine).ifPresent(engine -> {
             try {
                 engine.close();
@@ -672,7 +674,7 @@ public class MysqlReader implements Closeable {
     }
 
     private void eventQueueConsumer() {
-        while (running.get()) {
+        while (isAlive.get()) {
             MysqlStreamEvent mysqlStreamEvent;
             try {
                 mysqlStreamEvent = eventQueue.poll(3L, TimeUnit.SECONDS);
@@ -687,7 +689,7 @@ public class MysqlReader implements Closeable {
     }
 
     private void enqueue(MysqlStreamEvent mysqlStreamEvent) {
-        while (running.get()) {
+        while (isAlive.get()) {
             try {
                 if (eventQueue.offer(mysqlStreamEvent, 3L, TimeUnit.SECONDS)) {
                     break;

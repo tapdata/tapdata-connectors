@@ -355,6 +355,10 @@ public class DateUtil {
 
     public static Object parseInstant(String dateString) {
         String dateFormat = determineDateFormat(dateString);
+        return parseInstant(dateString, dateFormat);
+    }
+
+    public static Object parseInstant(String dateString, String dateFormat) {
         if (EmptyKit.isNull(dateFormat)) {
             return dateString;
         }

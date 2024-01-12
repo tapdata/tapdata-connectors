@@ -9,6 +9,7 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
@@ -236,10 +237,10 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
             if (dwsTapTable.isPartition()){
                 conflictUpdateInsert(after);
             }else {
-                insertUpdate(after, getBeforeForUpdate(after, before));
+                insertUpdate(after, DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition));
             }
         } else {
-            justUpdate(after, getBeforeForUpdate(after, before));
+            justUpdate(after, DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition));
         }
         preparedStatement.addBatch();
     }

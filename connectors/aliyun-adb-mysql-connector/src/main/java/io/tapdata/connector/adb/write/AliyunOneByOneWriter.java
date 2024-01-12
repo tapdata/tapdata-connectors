@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static io.tapdata.base.ConnectorBase.deleteDMLEvent;
@@ -38,8 +39,8 @@ public class AliyunOneByOneWriter extends MysqlJdbcOneByOneWriter implements Wri
 
     private static final String TAG = AliyunOneByOneWriter.class.getSimpleName();
 
-    public AliyunOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext, Map<String, JdbcCache> jdbcCacheMap) throws Throwable {
-        super(mysqlJdbcContext, jdbcCacheMap);
+    public AliyunOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext, Map<String, JdbcCache> jdbcCacheMap, Supplier<Boolean> isAlive) throws Throwable {
+        super(mysqlJdbcContext, jdbcCacheMap, isAlive);
     }
 
     public void splitToInsertAndDeleteFromUpdate(TapConnectorContext context, TapUpdateRecordEvent event, TapTable table, WriteListResult<TapRecordEvent> result) throws Throwable {

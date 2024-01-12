@@ -20,7 +20,27 @@ public class KafkaConfig extends MqConfig {
     private String schemaRegisterUrl;
     private Boolean basicAuth = false;
     private Boolean enableScript = false;
+
+    private Integer partitionNum;
+
+    private Integer replicasSize;
     private String script;
+
+    public Integer getPartitionNum() {
+        return partitionNum;
+    }
+
+    public void setPartitionNum(Integer partitionNum) {
+        this.partitionNum = partitionNum;
+    }
+
+    public Integer getReplicasSize() {
+        return replicasSize;
+    }
+
+    public void setReplicasSize(Integer replicasSize) {
+        this.replicasSize = replicasSize;
+    }
 
     public String getAuthCredentialsSource() {
         return authCredentialsSource;

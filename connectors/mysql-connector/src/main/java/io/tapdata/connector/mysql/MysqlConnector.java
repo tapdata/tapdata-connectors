@@ -1,5 +1,6 @@
 package io.tapdata.connector.mysql;
 
+import com.mysql.cj.exceptions.StatementIsClosedException;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
@@ -21,7 +22,9 @@ import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.ErrorKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -78,8 +81,8 @@ public class MysqlConnector extends CommonDbConnector {
         exceptionCollector = new MysqlExceptionCollector();
         this.version = mysqlJdbcContext.queryVersion();
         if (tapConnectionContext instanceof TapConnectorContext) {
-            this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext);
-            this.mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger);
+            this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext, this::isAlive);
+            this.mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
             this.timezone = mysqlJdbcContext.queryTimeZone();
             ddlSqlGenerator = new MysqlDDLSqlGenerator(version, ((TapConnectorContext) tapConnectionContext).getTableMap());
         }
@@ -209,7 +212,7 @@ public class MysqlConnector extends CommonDbConnector {
             try {
                 synchronized (this) {
                     //mysqlJdbcContext是否有效
-                    if (mysqlJdbcContext == null || !checkValid() || !started.get()) {
+                    if (mysqlJdbcContext == null || !checkValid() || !started.get() || checkStatementClosed(throwable)) {
                         //如果无效执行onStop,有效就return
                         this.onStop(tapConnectionContext);
                         if (isAlive()) {
@@ -217,12 +220,25 @@ public class MysqlConnector extends CommonDbConnector {
                         }
                     } else {
                         mysqlWriter.selfCheck();
+                        if (EmptyKit.isNotNull(mysqlReader)) {
+                            EmptyKit.closeQuietly(mysqlReader);
+                        }
+                        mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
                     }
                 }
             } catch (Throwable ignore) {
             }
         });
         return retryOptions;
+    }
+
+    private boolean checkStatementClosed(Throwable throwable) {
+        Throwable cause = matchThrowable(throwable, StatementIsClosedException.class);
+        if (throwable instanceof TapPdkRetryableEx && null != cause && "S1009".equals(((StatementIsClosedException) cause).getSQLState())) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     private boolean checkValid() {
@@ -240,10 +256,6 @@ public class MysqlConnector extends CommonDbConnector {
         started.set(false);
         try {
             Optional.ofNullable(this.mysqlReader).ifPresent(MysqlReader::close);
-        } catch (Exception ignored) {
-        }
-        try {
-            Optional.ofNullable(this.mysqlWriter).ifPresent(MysqlWriter::onDestroy);
         } catch (Exception ignored) {
         }
         if (null != mysqlJdbcContext) {

@@ -4,6 +4,7 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoDatabase;
 import io.tapdata.mongodb.MongodbTest;
 import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import org.bson.Document;
 
@@ -16,8 +17,8 @@ import static io.tapdata.base.ConnectorBase.testItem;
  * Date: 2023/3/27
  **/
 public class MongodbAtlasTest extends MongodbTest {
-    public MongodbAtlasTest(MongodbConfig mongodbConfig, Consumer<TestItem> consumer, MongoClient mongoClient) {
-        super(mongodbConfig, consumer, mongoClient);
+    public MongodbAtlasTest(MongodbConfig mongodbConfig, Consumer<TestItem> consumer, MongoClient mongoClient, ConnectionOptions connectionOptions) {
+        super(mongodbConfig, consumer, mongoClient,connectionOptions);
         testFunctionMap.remove("testHostPort");
     }
 

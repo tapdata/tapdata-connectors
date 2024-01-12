@@ -89,6 +89,10 @@ public class MysqlAlterColumnAttrsDDLWrapper extends MysqlDDLWrapper {
                 }
                 ColDataType colDataType = columnDataType.getColDataType();
                 String dataType = getDataType(colDataType);
+                if (EmptyKit.isNotNull(tapAlterFieldAttributesEvent.getNullableChange()) && !tapAlterFieldAttributesEvent.getNullableChange().getAfter()
+                        && EmptyKit.isNotNull(tapAlterFieldAttributesEvent.getDefaultChange()) && EmptyKit.isNull(tapAlterFieldAttributesEvent.getDefaultChange().getAfter())) {
+                    tapAlterFieldAttributesEvent.defaultChange(ValueChange.create(getDefaultValueForMysql(dataType)));
+                }
                 tapAlterFieldAttributesEvent.dataType(ValueChange.create(dataType));
                 consumer.accept(tapAlterFieldAttributesEvent);
             }
