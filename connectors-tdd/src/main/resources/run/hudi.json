@@ -1,0 +1,21 @@
+{
+  "connectionConfig": {
+    "nameSrvAddr": "",
+    "database": "",
+    "user": "",
+    "password": "",
+    "krb5": true,
+    "krb5Keytab": "",
+    "krb5Conf": "",
+    "principal": "",
+    "hadoopCoreSiteXML": "",
+    "hdfsSiteXML": "",
+    "hiveSiteXML": "",
+    "ssl": false,
+    "extParams": ""
+  },
+  "nodeConfig": {
+  },
+  "functionParams": {
+  }
+}
