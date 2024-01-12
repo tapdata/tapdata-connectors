@@ -10,11 +10,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 /**
  * @author <a href="mailto:harsen_lin@163.com">Harsen</a>
@@ -30,25 +30,20 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
     private final Map<K, Item<V>> map = new ConcurrentHashMap<>();
     private final ScheduledExecutorService cleanService = Executors.newSingleThreadScheduledExecutor();
     private final ScheduledFuture<?> cleanFuture;
-    private final Supplier<Boolean> isAlive;
     private final Log log;
+    private final AtomicBoolean running;
     public AutoExpireInstance(Function<InitKey, K> generateKey,
                               Function<InitKey, V> initFun,
                               BiConsumer<K, V> destroyFun,
-                              Supplier<Boolean> isAlive,
                               Time time,
                               long cacheTimes, Log log) {
         this.log = log;
-        this.isAlive = isAlive;
+        this.running = new AtomicBoolean(true);;
         this.cacheTimes = cacheTimes;
         this.generateKey = generateKey;
         this.initFun = initFun;
         this.destroyFun = destroyFun;
-        this.cleanFuture = cleanService.scheduleWithFixedDelay(this::runExpire, time.getExpireTimes(), time.getInterval(), time.getUnit());
-    }
-
-    private boolean isAlive() {
-        return null != isAlive && isAlive.get();
+        this.cleanFuture = cleanService.scheduleWithFixedDelay(this::runExpire, time.getInitialDelay(), time.getInterval(), time.getUnit());
     }
 
     public void call(InitKey key, Consumer<V> consumer) {
@@ -66,7 +61,7 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
 
     private void runExpire() {
         for (K k : map.keySet()) {
-            if (!isAlive()) break;
+            if (!running.get()) break;
             map.computeIfPresent(k, (key, val) -> {
                 if (val.useCounts.get() == 0 && System.currentTimeMillis() - val.lasted > this.cacheTimes) {
                     doDestroyFun(key, val.value);
@@ -87,6 +82,7 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
 
     @Override
     public void close() {
+        running.compareAndSet(true, false);
         Optional.ofNullable(cleanFuture).ifPresent(e -> ErrorKit.ignoreAnyError(() -> e.cancel(true)));
         ErrorKit.ignoreAnyError(cleanService::shutdown);
         for (K k : map.keySet()) {
@@ -111,7 +107,7 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
 
     public static class Time {
         private final static long DEFAULT_EXPIRE_TIMES = 10;
-        private long expireTimes;
+        private long initialDelay;
         private final static long DEFAULT_INTERVAL = 10;
         private long interval;
         private final static TimeUnit DEFAULT_TIME_UTIL = TimeUnit.MINUTES;
@@ -120,14 +116,14 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
         public static Time defaultTime() {
             return new Time().withExpireTimes(DEFAULT_EXPIRE_TIMES).withInterval(DEFAULT_INTERVAL).withTimeUtil(DEFAULT_TIME_UTIL);
         }
-        public static Time time(long expireTimes, long interval, TimeUnit timeUtil) {
-            return new Time().withExpireTimes(expireTimes).withInterval(interval).withTimeUtil(timeUtil);
+        public static Time time(long initialDelay, long interval, TimeUnit timeUtil) {
+            return new Time().withExpireTimes(initialDelay).withInterval(interval).withTimeUtil(timeUtil);
         }
-        public Time withExpireTimes(long expireTimes) {
-            if (expireTimes < 0 || expireTimes >= 999999999) {
-                expireTimes = DEFAULT_EXPIRE_TIMES;
+        public Time withExpireTimes(long initialDelay) {
+            if (initialDelay < 0 || initialDelay >= 999999999) {
+                initialDelay = DEFAULT_EXPIRE_TIMES;
             }
-            this.expireTimes = expireTimes;
+            this.initialDelay = initialDelay;
             return this;
         }
         public Time withInterval(long interval) {
@@ -145,8 +141,8 @@ public class AutoExpireInstance<InitKey, K, V> implements AutoCloseable {
             return this;
         }
 
-        public long getExpireTimes() {
-            return expireTimes;
+        public long getInitialDelay() {
+            return initialDelay;
         }
 
         public long getInterval() {
