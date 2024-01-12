@@ -266,6 +266,14 @@
 							"fileNameField": "sslCAFile",
 							"required": true,
 							"x-index": 120
+						},
+						"mongodbLoadSchemaSampleSize": {
+							"title": "${load_schema_sample_size}",
+							"type": "string",
+							"default": 1000,
+							"x-decorator": "FormItem",
+							"x-component": "InputNumber",
+							"x-index": 130
 						}
 					}
 				}
@@ -404,6 +412,7 @@
   "messages": {
     "default": "en_US",
     "en_US": {
+	  "load_schema_sample_size": "Number of sampling records (rows) for Mongodb loading model",
       "doc": "docs/mongodb_en_US.md",
       "isUri": "Connection method",
       "isUrlTips1": "Configure MongoDB database in URI mode. Batch input is supported",
@@ -438,6 +447,7 @@
       "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster "
     },
     "zh_CN": {
+	  "load_schema_sample_size": "Mongodb加载模型采样记录数(行)",
       "doc": "docs/mongodb_zh_CN.md",
       "isUri": "连接方式",
       "isUrlTips1": "以URI方式配置MongoDB数据库，支持批量输入",
@@ -472,6 +482,7 @@
       "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效"
 		},
 		"zh_TW": {
+			"load_schema_sample_size": "Mongodb加載模型採樣記錄數（行）",
 			"doc": "docs/mongodb_zh_TW.md",
 			"isUri": "連接方式",
 			"isUrlTips1": "以URI方式配置MongoDB數據庫，支持批量輸入",

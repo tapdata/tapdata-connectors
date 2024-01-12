@@ -11,7 +11,6 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -162,7 +161,7 @@ public class MergeHandel extends BigQueryStart {
         event.setTable(temporaryTable);
         event.setReferenceTime(System.currentTimeMillis());
         if (tableCreate.isExist(event)) {
-            TapLogger.info(TAG, "Temporary table [" + super.config().tempCursorSchema() + "] already exists.");
+            log.info("Temporary table [" + super.config().tempCursorSchema() + "] already exists.");
             return table;
         }
 //        TapTable eventTable = new TapTable(table.getId(),table.getName());
@@ -287,7 +286,7 @@ public class MergeHandel extends BigQueryStart {
             after.put(MergeHandel.MERGE_KEY_TYPE, MergeHandel.MERGE_VALUE_TYPE_UPDATE);
             Map<String, Object> beforeMap = recordEvent.getBefore();
             if (Objects.isNull(beforeMap) || beforeMap.isEmpty()) {
-                //TapLogger.warn(TAG,String.format("TapUpdateRecordEvent of table [%s] ,before data is empty.",tableId));
+                //log.warn(String.format("TapUpdateRecordEvent of table [%s] ,before data is empty.",tableId));
                 //在after中获取主键的值作为before
                 beforeMap = event.getFilter(table.primaryKeys(true));
             }
@@ -298,7 +297,7 @@ public class MergeHandel extends BigQueryStart {
             } else {
                 after.put(MergeHandel.MERGE_KEY_DATA_BEFORE, beforeMap);
                 if (Objects.isNull(recordEvent.getAfter()) || recordEvent.getAfter().isEmpty()) {
-                    TapLogger.warn(TAG, String.format("TapUpdateRecordEvent of table [%s] ,after data is empty.", tableId));
+                    log.warn(String.format("TapUpdateRecordEvent of table [%s] ,after data is empty.", tableId));
                 }
                 after.put(MergeHandel.MERGE_KEY_DATA_AFTER, recordEvent.getAfter());
             }
@@ -351,7 +350,7 @@ public class MergeHandel extends BigQueryStart {
                     cursorSchema,
                     newestRecordId));
         } catch (Exception e) {
-            TapLogger.warn(TAG, "Failed to empty temporary table, table name is " + super.config().tempCursorSchema() + ", " + e.getMessage());
+            log.warn("Failed to empty temporary table, table name is " + super.config().tempCursorSchema() + ", " + e.getMessage());
         }
     }
 
@@ -399,7 +398,7 @@ public class MergeHandel extends BigQueryStart {
     public boolean dropTemporaryTableByMainTable(String mainTableId) {
         String cursorSchema = this.stateMap.getString(mainTableId, ContextConfig.TEMP_CURSOR_SCHEMA_NAME);
         if (Objects.isNull(cursorSchema) || "".equals(cursorSchema.trim())) {
-            TapLogger.info(TAG, String.format(" A temporary table deletion operation was canceled because a temporary table matching %s table was found ", mainTableId));
+            log.info(String.format(" A temporary table deletion operation was canceled because a temporary table matching %s table was found ", mainTableId));
         }
         return this.dropTemporaryTable(cursorSchema);
     }
@@ -452,7 +451,7 @@ public class MergeHandel extends BigQueryStart {
                 try {
                     this.mergeTableOnce();
                 } catch (Throwable throwable) {
-                    TapLogger.warn(TAG, "An exception occurred during data merge, temporary table: {}, target table: {}, {}", this.stateMap.getOfTable(mainTable.getId(), ContextConfig.TEMP_CURSOR_SCHEMA_NAME), mainTable.getId(), throwable.getMessage());
+                    log.warn("An exception occurred during data merge, temporary table: {}, target table: {}, {}", this.stateMap.getOfTable(mainTable.getId(), ContextConfig.TEMP_CURSOR_SCHEMA_NAME), mainTable.getId(), throwable.getMessage());
                 }
             }
         };
@@ -503,7 +502,7 @@ public class MergeHandel extends BigQueryStart {
         if (Objects.isNull(time)) return;
         TapTable tapTable = this.mergeTable.get(tableName);
         if (Objects.isNull(tapTable)) {
-            TapLogger.warn(TAG, "A merge operation was rejected.");
+            log.warn("A merge operation was rejected.");
         }
         Object mergeKeyId = this.stateMap.getOfTable(tableName, MergeHandel.MERGE_KEY_ID);
         Object mergeKeyIdLast = this.stateMap.getOfTable(tableName, MergeHandel.MERGE_KEY_ID_LAST);
@@ -525,7 +524,7 @@ public class MergeHandel extends BigQueryStart {
             BigQueryResult bigQueryResult = super.sqlMarker.executeOnce(this.assembleMergeSql(builder, finalMergeKeyId, mergeKeyIdLast, projectAndSetId + tableName, projectAndSetId + String.valueOf(mergeTableId)));
             List<Map<String, Object>> result = bigQueryResult.result();
             long totalRows = bigQueryResult.getTotalRows();
-            TapLogger.info(TAG, String.format("Data consolidation has been performed. Merge to table: %s, temporary table: %s, merge result: %s rows, %s.", tapTable.getId(), mergeTableId, totalRows, toJson(result)));
+            log.info(String.format("Data consolidation has been performed. Merge to table: %s, temporary table: %s, merge result: %s rows, %s.", tapTable.getId(), mergeTableId, totalRows, toJson(result)));
             this.stateMap.saveForTable(tableName, MergeHandel.MERGE_KEY_ID_LAST, finalMergeKeyId);
             this.cleanTemporaryTable(tableName);
         }catch (Exception e){

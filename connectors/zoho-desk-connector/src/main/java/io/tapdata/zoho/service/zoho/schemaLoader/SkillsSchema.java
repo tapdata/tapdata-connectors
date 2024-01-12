@@ -2,6 +2,7 @@ package io.tapdata.zoho.service.zoho.schemaLoader;
 
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -69,7 +70,11 @@ public class SkillsSchema extends Schema implements SchemaLoader {
                     referenceTime = this.parseZoHoDatetime((String) modifiedTimeObj);
                     ((ZoHoOffset) offset).getTableUpdateTimeMap().put(tableName, referenceTime);
                 }
-                events[0].add(( TapSimplify.insertRecordEvent(oneProduct, tableName).referenceTime(referenceTime) ));
+                TapInsertRecordEvent tapInsertRecordEvent = TapSimplify.insertRecordEvent(oneProduct, tableName);
+                if (isStreamRead) {
+                    tapInsertRecordEvent.referenceTime(referenceTime);
+                }
+                events[0].add(tapInsertRecordEvent);
                 if (events[0].size() != readSize) return;
                 consumer.accept(events[0], offset);
                 events[0] = new ArrayList<>();

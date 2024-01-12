@@ -2,6 +2,7 @@ package io.tapdata.zoho.service.zoho.schemaLoader;
 
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -346,18 +347,21 @@ public class TicketsSchema extends Schema implements SchemaLoader {
                 }
 
                 if (!isAlive()) return;
-                    Map<String, Object> oneTicket = finalNeedDetail || thisRecordNeedDetail ?
-                            connectionMode.attributeAssignment(ticket, tableName, ticketLoader)
-                            : ticket;
-                    if (Checker.isEmpty(oneTicket) || oneTicket.isEmpty()) return;
-                    Object modifiedTimeObj = isStreamRead ? oneTicket.get("modifiedTime") : oneTicket.get("createdTime");//stream read is sort by "modifiedTime",batch read is sort by "createdTime"
-                    long referenceTime = System.currentTimeMillis();
-                    if (Checker.isNotEmpty(modifiedTimeObj) && modifiedTimeObj instanceof String) {
-                        referenceTime = this.parseZoHoDatetime((String) modifiedTimeObj);
-                        ((ZoHoOffset) offset).getTableUpdateTimeMap().put(tableName, referenceTime);
-                    }
-                    events[0].add(TapSimplify.insertRecordEvent(oneTicket,tableName).referenceTime(referenceTime));
-
+                Map<String, Object> oneTicket = finalNeedDetail || thisRecordNeedDetail ?
+                        connectionMode.attributeAssignment(ticket, tableName, ticketLoader)
+                        : ticket;
+                if (Checker.isEmpty(oneTicket) || oneTicket.isEmpty()) return;
+                Object modifiedTimeObj = isStreamRead ? oneTicket.get("modifiedTime") : oneTicket.get("createdTime");//stream read is sort by "modifiedTime",batch read is sort by "createdTime"
+                long referenceTime = System.currentTimeMillis();
+                if (Checker.isNotEmpty(modifiedTimeObj) && modifiedTimeObj instanceof String) {
+                    referenceTime = this.parseZoHoDatetime((String) modifiedTimeObj);
+                    ((ZoHoOffset) offset).getTableUpdateTimeMap().put(tableName, referenceTime);
+                }
+                TapInsertRecordEvent event = TapSimplify.insertRecordEvent(oneTicket, tableName);
+                if (isStreamRead) {
+                    event.referenceTime(referenceTime);
+                }
+                events[0].add(event);
                 if (events[0].size() != readSize) return;
                 consumer.accept(events[0], offset);
                 events[0] = new ArrayList<>();

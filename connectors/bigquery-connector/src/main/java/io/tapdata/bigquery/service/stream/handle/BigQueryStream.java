@@ -7,6 +7,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -22,7 +23,6 @@ public class BigQueryStream extends BigQueryStart {
     private WriteCommittedStream stream;
     private TapTable tapTable;
     private MergeHandel merge;
-
     public BigQueryStream merge(MergeHandel merge) {
         this.merge = merge;
         return this;
@@ -43,7 +43,7 @@ public class BigQueryStream extends BigQueryStart {
                 super.config().projectId(),
                 super.config().tableSet(),
                 tableName,
-                super.config().serviceAccount());
+                super.config().serviceAccount()).log(log);
         return this;
     }
 

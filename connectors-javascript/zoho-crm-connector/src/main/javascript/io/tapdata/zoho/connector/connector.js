@@ -1594,7 +1594,7 @@ function commandCallback(connectionConfig, nodeConfig, commandInfo) {
  *      - {"key":"value",...} : Type is Object and has key-value ,  At this point, these values will be used to call the interface again after the results are returned.
  * */
 function updateToken(connectionConfig, nodeConfig, apiResponse) {
-    if (apiResponse.httpCode === 401 || (apiResponse.result && apiResponse.result.code === 'INVALID_TOKEN' || apiResponse.result.code === 'AUTHENTICATION_FAILURE')) {
+    if (apiResponse.httpCode === 401 || (apiResponse.result && (apiResponse.result.code === 'INVALID_TOKEN' || apiResponse.result.code === 'AUTHENTICATION_FAILURE'))) {
         try{
             let refreshToken = invoker.invokeWithoutIntercept("refreshToken");
             if(refreshToken && refreshToken.result &&refreshToken.result.access_token){

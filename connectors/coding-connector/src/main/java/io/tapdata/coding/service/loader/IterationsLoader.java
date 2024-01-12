@@ -14,6 +14,7 @@ import io.tapdata.coding.utils.http.HttpEntity;
 import io.tapdata.coding.utils.tool.Checker;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
@@ -357,7 +358,7 @@ public class IterationsLoader extends CodingStarter implements CodingLoader<Iter
                             lastTimeSplitIterationCode.add(iterationHash);
                         }
                     }else {
-                        events.add(TapSimplify.insertRecordEvent(iteration, TABLE_NAME).referenceTime(System.currentTimeMillis()));
+                        events.add(TapSimplify.insertRecordEvent(iteration, TABLE_NAME));
                         if (!currentTimePoint.equals(this.lastTimePoint)) {
                             this.lastTimePoint = currentTimePoint;
                             lastTimeSplitIterationCode = new HashSet<>();

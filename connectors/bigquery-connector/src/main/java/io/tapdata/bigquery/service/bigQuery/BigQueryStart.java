@@ -5,7 +5,7 @@ import cn.hutool.json.JSONUtil;
 import io.tapdata.bigquery.entity.ContextConfig;
 import io.tapdata.bigquery.service.stream.v2.StateMapOperator;
 import io.tapdata.entity.error.CoreException;
-import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -18,6 +18,7 @@ import java.util.UUID;
 public abstract class BigQueryStart {
     public static final String TAG = BigQueryStart.class.getSimpleName();
 
+    protected Log log;
     protected ContextConfig config;
     protected TapConnectionContext connectorContext;
     protected SqlMarker sqlMarker;
@@ -27,6 +28,7 @@ public abstract class BigQueryStart {
     }
 
     public BigQueryStart(TapConnectionContext connectorContext) {
+        this.log = connectorContext.getLog();
         this.connectorContext = connectorContext;
     }
 
@@ -135,7 +137,7 @@ public abstract class BigQueryStart {
                     if (Objects.isNull(tempCursorSchema)) {
                         tempCursorSchema = cursorSchema + "_" + UUID.randomUUID().toString().replaceAll("-", "_");
                         stateMap.put(ContextConfig.TEMP_CURSOR_SCHEMA_NAME, tempCursorSchema);
-                        TapLogger.info(TAG, "Cache Schema has created ,named is " + tempCursorSchema);
+                        log.info("Cache Schema has created ,named is " + tempCursorSchema);
                     }
                     contextConfig.tempCursorSchema(String.valueOf(tempCursorSchema));
                 }
@@ -158,7 +160,7 @@ public abstract class BigQueryStart {
             String cursorSchema = nodeConfig.getString("cursorSchema");
             if (Objects.isNull(cursorSchema) || "".equals(cursorSchema.trim())) {
                 cursorSchema = ContextConfig.TEMP_CURSOR_SCHEMA_NAME_DEFAULT;
-                TapLogger.info(TAG, "The temporary table is named, and the default name has been selected as the prefix , named is " + cursorSchema);
+                log.info("The temporary table is named, and the default name has been selected as the prefix , named is " + cursorSchema);
             }
             contextConfig.cursorSchema(cursorSchema);
             TapConnectorContext context = (TapConnectorContext) connectorContext;
@@ -167,7 +169,7 @@ public abstract class BigQueryStart {
             if (Objects.isNull(tempCursorSchema)) {
                 tempCursorSchema = cursorSchema + "_" + UUID.randomUUID().toString().replaceAll("-", "_");
                 //stateMap.put(ContextConfig.TEMP_CURSOR_SCHEMA_NAME, tempCursorSchema); //这里不需要put,已改变到 临时表建表时put
-                TapLogger.info(TAG, "Cache Schema has created ,named is " + tempCursorSchema);
+                log.info("Cache Schema has created ,named is " + tempCursorSchema);
             }
             contextConfig.tempCursorSchema(String.valueOf(tempCursorSchema));
 
@@ -177,7 +179,7 @@ public abstract class BigQueryStart {
                 time = Long.parseLong(mergeDelay);
             } catch (Exception e) {
                 time = ContextConfig.MERGE_DELAY_DEFAULT;
-                TapLogger.info(TAG, " The merge delay interval is specified, and the default interval has been selected ,it is: " + time + "s.");
+                log.info(" The merge delay interval is specified, and the default interval has been selected ,it is: " + time + "s.");
             }
             contextConfig.mergeDelay(time);
         }
@@ -189,7 +191,7 @@ public abstract class BigQueryStart {
             if (connectorContext instanceof TapConnectorContext ){
                 DataMap nodeConfig = this.connectorContext.getNodeConfig();
                 if(Objects.isNull(nodeConfig)){
-                    //TapLogger.error(TAG," Before creating a temporary table, you need to obtain the temporary table prefix name, but NodeConfig is empty .");
+                    //log.error(" Before creating a temporary table, you need to obtain the temporary table prefix name, but NodeConfig is empty .");
                     //@TODO
                     nodeConfig = new DataMap();
                     nodeConfig.put("cursorSchema",ContextConfig.TEMP_CURSOR_SCHEMA_NAME_DEFAULT);
@@ -197,7 +199,7 @@ public abstract class BigQueryStart {
                 String cursorSchema = nodeConfig.getString("cursorSchema");
                 if (Objects.isNull(cursorSchema) || "".equals(cursorSchema.trim())) {
                     cursorSchema = ContextConfig.TEMP_CURSOR_SCHEMA_NAME_DEFAULT;
-                    TapLogger.info(TAG, "The temporary table is named, and the default name has been selected as the prefix , named is " + cursorSchema);
+                    log.info("The temporary table is named, and the default name has been selected as the prefix , named is " + cursorSchema);
                 }
                 this.config.cursorSchema(cursorSchema);
 
@@ -207,12 +209,12 @@ public abstract class BigQueryStart {
                     time = Long.parseLong(mergeDelay);
                 } catch (Exception e) {
                     time = ContextConfig.MERGE_DELAY_DEFAULT;
-                    TapLogger.info(TAG, " The merge delay interval is specified, and the default interval has been selected ,it is: " + time + "s.");
+                    log.info(" The merge delay interval is specified, and the default interval has been selected ,it is: " + time + "s.");
                 }
                 this.config.mergeDelay(time);
             }
             tempCursorSchema = this.config().cursorSchema() + "_" + UUID.randomUUID().toString().replaceAll("-", "_");
-            TapLogger.info(TAG, "Cache Schema has created ,named is " + tempCursorSchema);
+            log.info("Cache Schema has created ,named is " + tempCursorSchema);
         }
         return String.valueOf(tempCursorSchema);
     }

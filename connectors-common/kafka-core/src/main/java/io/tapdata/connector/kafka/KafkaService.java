@@ -59,7 +59,6 @@ public class KafkaService extends AbstractMqService {
     private static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
     private String connectorId;
     private KafkaProducer<byte[], byte[]> kafkaProducer;
-    private KafkaConfig kafkaConfig;
     private static final ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata"); //script factory
 
     private KafkaExceptionCollector kafkaExceptionCollector;
@@ -330,7 +329,7 @@ public class KafkaService extends AbstractMqService {
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
         ScriptEngine scriptEngine;
-        String script = kafkaConfig.getScript();
+        String script = ((KafkaConfig)mqConfig).getScript();
         Map<String,Object> record = new HashMap();
         try {
             scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
@@ -372,7 +371,6 @@ public class KafkaService extends AbstractMqService {
                 record.put("header",header);
                 String op = mqOp.getOp();
                 Collection<String> conditionKeys = tapTable.primaryKeys(true);
-                kafkaConfig = (KafkaConfig)new KafkaConfig().load(connectorContext.getConnectionConfig());
                 RecordHeaders recordHeaders = new RecordHeaders();
                 byte[] body = {};
                 Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, op, conditionKeys));

@@ -8,6 +8,8 @@ import io.tapdata.coding.utils.http.HttpEntity;
 import io.tapdata.coding.utils.tool.Checker;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -74,10 +76,10 @@ public class IssueTypesLoader extends CodingStarter implements CodingLoader<Issu
 
     @Override
     public void batchRead(Object offset, int batchCount, BiConsumer<List<TapEvent>, Object> consumer) {
-        this.read(offset, batchCount, consumer);
+        this.read(offset, batchCount, consumer, true);
     }
 
-    private void read(Object offset, int batchCount, BiConsumer<List<TapEvent>, Object> consumer) {
+    private void read(Object offset, int batchCount, BiConsumer<List<TapEvent>, Object> consumer, boolean isBatchRead) {
         List<Map<String, Object>> list = list(null);
         if (null == list || list.isEmpty()) {
             throw new CoreException("can not get issue type list, the list is empty.");
@@ -92,10 +94,18 @@ public class IssueTypesLoader extends CodingStarter implements CodingLoader<Issu
             Integer issueTypeHash = MapUtil.create().hashCode(issueType);
             switch (overlayQueryEventDifferentiator.createOrUpdateEvent(issueTypeId, issueTypeHash)) {
                 case CREATED_EVENT:
-                    events.add(TapSimplify.insertRecordEvent(issueType, TABLE_NAME).referenceTime(System.currentTimeMillis()));
+                    TapInsertRecordEvent event = TapSimplify.insertRecordEvent(issueType, TABLE_NAME);
+                    if (!isBatchRead){
+                        event.referenceTime(System.currentTimeMillis());
+                    }
+                    events.add(event);
                     break;
                 case UPDATE_EVENT:
-                    events.add(TapSimplify.updateDMLEvent(null, issueType, TABLE_NAME).referenceTime(System.currentTimeMillis()));
+                    TapUpdateRecordEvent e = TapSimplify.updateDMLEvent(null, issueType, TABLE_NAME);
+                    if (!isBatchRead){
+                        e.referenceTime(System.currentTimeMillis());
+                    }
+                    events.add(e);
                     break;
             }
             //events.add(TapSimplify.insertRecordEvent(issueType, TABLE_NAME).referenceTime(System.currentTimeMillis()));
@@ -114,7 +124,7 @@ public class IssueTypesLoader extends CodingStarter implements CodingLoader<Issu
 
     @Override
     public void streamRead(List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
-        this.read(offsetState, recordSize, consumer);
+        this.read(offsetState, recordSize, consumer, false);
     }
 
     @Override

@@ -132,7 +132,7 @@ class TapApi {
         this.httpConfigParam = null;
         let hasResult = isParam(result);
         let resultData = tapUtil.toMap(result.result).data;
-        if (resultData.toJSONString) {
+        if (resultData && resultData.toJSONString) {
             resultData = JSON.parse(resultData.toJSONString());
         }
         return {
