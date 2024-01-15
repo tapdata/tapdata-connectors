@@ -49,6 +49,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import static io.tapdata.base.ConnectorBase.fromJson;
+import static io.tapdata.base.ConnectorBase.toJson;
+
 
 public class HuDiWriteBySparkClient extends HudiWrite {
     private final Configuration hadoopConf;
@@ -154,7 +157,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                             recordsOneBatch.add(hoodieRecord);
                         }
                     } catch (Exception fail) {
-                        log.error("target database process message failed", "table name:{}, record: {}, error msg:{}", tapTable.getId(), e, fail.getMessage(), fail);
+                        log.warn("Target database process message failed, table name:{}, record: {}, error msg:{}", tapTable.getId(), toJson(e), fail.getMessage(), fail);
                         errorRecord = batchFirstRecord;
                         throw fail;
                     }
@@ -168,7 +171,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                         commitBatch(clientPerformer, 1, recordsOneBatch, deleteEventsKeys);
                         afterCommit(insert, update, delete, consumer);
                     } catch (Exception fail) {
-                        log.error("target database process message failed", "table name:{},error msg:{}", tapTable.getId(), fail.getMessage(), fail);
                         throw fail;
                     }
                 }
@@ -177,7 +179,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                         commitBatch(clientPerformer, 3, recordsOneBatch, deleteEventsKeys);
                         afterCommit(insert, update, delete, consumer);
                     } catch (Exception fail) {
-                        log.error("target database process message failed", "table name:{},error msg:{}", tapTable.getId(), fail.getMessage(), fail);
                         throw fail;
                     }
                 }
