@@ -30,7 +30,7 @@ public class HoodieRecordGenericStage implements GenericStage<NormalEntity, Map<
         }
     }
 
-    private static HoodieRecordGenericStage singleton;
+    private static volatile HoodieRecordGenericStage singleton;
     public static HoodieRecordGenericStage singleton() {
         if (null == HoodieRecordGenericStage.singleton) {
             synchronized (HoodieRecordGenericStage.class) {
