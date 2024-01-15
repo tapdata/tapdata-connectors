@@ -132,11 +132,12 @@ public class HudiConnector extends HiveConnector {
                           .supportReleaseExternalFunction(this::release);
 
         //source
-        connectorFunctions.supportBatchRead(this::batchReadV3)
-                          .supportBatchCount(this::batchCount)
-                          .supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffsetV2)
-                          .supportGetTableNamesFunction(this::getTableNames)
-                          .supportGetTableInfoFunction(this::getTableInfo)
+        connectorFunctions
+                        //.supportBatchRead(this::batchReadV3)
+                        //.supportBatchCount(this::batchCount)
+                        //.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffsetV2)
+                        //.supportGetTableNamesFunction(this::getTableNames)
+                        //.supportGetTableInfoFunction(this::getTableInfo)
                           .supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> hiveJdbcContext.getConnection(), this::isAlive, c));
 
         //target
@@ -144,11 +145,12 @@ public class HudiConnector extends HiveConnector {
                           .supportDropTable(this::dropTable)
                           .supportClearTable(this::clearTable)
                           .supportWriteRecord(this::writeRecord)
-                          .supportCreateIndex(this::createIndex)
-                          .supportNewFieldFunction(this::fieldDDLHandler)
-                          .supportAlterFieldNameFunction(this::fieldDDLHandler)
-                          .supportAlterFieldAttributesFunction(this::fieldDDLHandler)
-                          .supportDropFieldFunction(this::fieldDDLHandler);
+                          //.supportCreateIndex(this::createIndex)
+                          //.supportNewFieldFunction(this::fieldDDLHandler)
+                          //.supportAlterFieldNameFunction(this::fieldDDLHandler)
+                          //.supportAlterFieldAttributesFunction(this::fieldDDLHandler)
+                          //.supportDropFieldFunction(this::fieldDDLHandler)
+        ;
     }
 
     private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
