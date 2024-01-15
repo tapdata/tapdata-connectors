@@ -266,6 +266,13 @@ public class ClientPerformer implements AutoCloseable {
         return new HashSet<>();
     }
 
+    public Log getLog() {
+        return log;
+    }
+
+    public TapTable getTapTable() {
+        return tapTable;
+    }
     static class Param {
         Configuration hadoopConf;
         String database;

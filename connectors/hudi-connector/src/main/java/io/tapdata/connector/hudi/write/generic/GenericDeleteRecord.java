@@ -9,7 +9,7 @@ import org.apache.hudi.common.model.HoodieKey;
 import java.util.Map;
 
 public class GenericDeleteRecord implements GenericStage<NormalEntity, Map<String, Object>, HoodieKey> {
-    private static GenericDeleteRecord singleton;
+    private static volatile GenericDeleteRecord singleton;
     public static GenericDeleteRecord singleton() {
         if (null == GenericDeleteRecord.singleton) {
             synchronized (GenericDeleteRecord.class) {
