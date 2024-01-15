@@ -21,6 +21,7 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.avro.Schema;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hudi.client.HoodieJavaWriteClient;
+import org.apache.hudi.client.HoodieReadClient;
 import org.apache.hudi.client.WriteStatus;
 import org.apache.hudi.common.model.HoodieKey;
 import org.apache.hudi.common.model.HoodieRecord;
@@ -195,29 +196,38 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             switch (batchType) {
                 case 1:
                 case 2:
-                    List<WriteStatus> insert;
-                    if (WriteOperationType.INSERT.equals(this.appendType)) {
-                        insert = client.insert(batch, startCommit);
-                    } else {
-                        insert = client.upsert(batch, startCommit);
-                    }
-                    client.commit(startCommit, insert);
-                    batch.clear();
+                    commitInsertOrUpdate(startCommit, client, batch);
                     break;
                 case 3:
-                    if (!WriteOperationType.INSERT.equals(this.appendType)) {
-                        List<WriteStatus> delete = client.delete(deleteEventsKeys, startCommit);
-                        client.commit(startCommit, delete);
-                    } else {
-                        log.debug("Append mode: INSERT, ignore delete event: {}", deleteEventsKeys);
-                    }
-                    deleteEventsKeys.clear();
+                    commitDelete(startCommit, client, deleteEventsKeys);
                     break;
             }
         } catch (HoodieRollbackException e) {
             client.restoreToInstant(startCommit, true);
             throw e;
         }
+    }
+
+
+    private void commitInsertOrUpdate(String startCommit, HoodieJavaWriteClient<HoodieRecordPayload> client, List<HoodieRecord<HoodieRecordPayload>> batch) {
+        List<WriteStatus> insert;
+        if (WriteOperationType.INSERT.equals(this.appendType)) {
+            insert = client.insert(batch, startCommit);
+        } else {
+            insert = client.upsert(batch, startCommit);
+        }
+        client.commit(startCommit, insert);
+        batch.clear();
+    }
+
+    private void commitDelete(String startCommit, HoodieJavaWriteClient<HoodieRecordPayload> client, List<HoodieKey> deleteEventsKeys) {
+        if (!WriteOperationType.INSERT.equals(this.appendType)) {
+            List<WriteStatus> delete = client.delete(deleteEventsKeys, startCommit);
+            client.commit(startCommit, delete);
+        } else {
+            log.debug("Append mode: INSERT, ignore delete event: {}", deleteEventsKeys);
+        }
+        deleteEventsKeys.clear();
     }
 
     public WriteListResult<TapRecordEvent> writeByClient(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
@@ -292,7 +302,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        ErrorKit.ignoreAnyError(() -> autoExpireInstance.close());
+        ErrorKit.ignoreAnyError(autoExpireInstance::close);
     }
 
     @Override
