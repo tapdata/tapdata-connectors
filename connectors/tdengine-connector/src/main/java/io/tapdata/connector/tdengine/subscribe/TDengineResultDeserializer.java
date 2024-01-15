@@ -9,8 +9,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class TDengineResultDeserializer extends ReferenceDeserializer<Map<String, Object>> {
+
     @Override
-    public Map<String, Object> deserialize(ResultSet data) {
+    public Map<String, Object> deserialize(ResultSet data, String topic, String dbName) {
         Map<String, Object> map = new HashMap<>();
 
         try {
