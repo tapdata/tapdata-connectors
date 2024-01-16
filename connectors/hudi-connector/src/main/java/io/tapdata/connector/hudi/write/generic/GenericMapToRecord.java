@@ -13,6 +13,7 @@ import org.apache.avro.generic.GenericRecord;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.math.MathContext;
 import java.math.RoundingMode;
 import java.util.Map;
 import java.util.Optional;
@@ -45,15 +46,16 @@ public class GenericMapToRecord implements GenericStage<NormalEntity, Map<String
         TapType tapType = field.getTapType();
         if (tapType instanceof TapNumber) {
             Integer scale = Optional.of(((TapNumber) tapType).getScale()).orElse(0);
+            Integer precision = Optional.ofNullable(((TapNumber) tapType).getPrecision()).orElse(0);
             if (value.scale() != scale) {
                 log.warn("Find an BigDecimal({},{}), but schema data type of field [{}] in table [{}] is decimal({}, {}), scale not equals. BigDecimal value: {}",
                         value.precision(),
                         value.scale(),
                         key,
                         table.getId(),
-                        ((TapNumber) tapType).getPrecision(),
+                        precision,
                         scale, value.toString());
-                fromMap.put(key, value.setScale(scale, RoundingMode.UNNECESSARY));
+                fromMap.put(key, new BigDecimal(value.setScale(scale, RoundingMode.UNNECESSARY).toString()));
             }
         }
     }
