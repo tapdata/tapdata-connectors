@@ -128,7 +128,11 @@ public class PostgresExceptionCollector extends AbstractExceptionCollector imple
                             "Check the maximum number of logical replication slots (max_replication_slots) in postgres.conf and promptly clean up any unused replication slots",
                             ErrorKit.getLastCause(cause));
                 case "28000": //pg_hba.conf has no permission for replication
-                    throw new TapDbCdcConfigInvalidEx(pdkId,
+                    /*
+                     * Under certain circumstances, enabling CDC in Postgres may occasionally result in false alarms of no replication permission,
+                     * but retry can still function properly. Therefore, the TapPdkRetryableEx is chosen here
+                     */
+                    throw new TapPdkRetryableEx(pdkId,
                             "Check pg_hba.conf, confirm if you have permission to create a logical replication slot",
                             ErrorKit.getLastCause(cause));
                 case "0"://append error type
@@ -139,7 +143,9 @@ public class PostgresExceptionCollector extends AbstractExceptionCollector imple
     @Override
     public void revealException(Throwable cause) {
         if (cause instanceof SQLException) {
-            throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause)).withServerErrorCode(((SQLException) cause).getSQLState());
+            throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause))
+//                    .withServerErrorCode(((SQLException) cause).getSQLState())
+                    ;
         }
     }
 }

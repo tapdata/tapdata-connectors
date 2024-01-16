@@ -16,7 +16,7 @@ import io.grpc.internal.PickFirstLoadBalancerProvider;
 import io.tapdata.bigquery.BigQueryExceptionCollector;
 import io.tapdata.bigquery.service.stream.v2.WriteBigQueryException;
 import io.tapdata.entity.error.CoreException;
-import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.logger.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -39,6 +39,7 @@ public class WriteCommittedStream {
     private String credentialsJson;
     private Offset streamOffset = Offset.offset();
     private BigQueryWriteClient client;
+    protected Log log;
 
     private final BigQueryExceptionCollector bigQueryExceptionCollector = new BigQueryExceptionCollector();
     public WriteCommittedStream client(BigQueryWriteClient client){
@@ -97,6 +98,10 @@ public class WriteCommittedStream {
         this.credentialsJson = credentialsJson;
         return this;
     }
+    public WriteCommittedStream log(Log log) {
+        this.log = log;
+        return this;
+    }
 
     public static WriteCommittedStream writer(String projectId, String dataSet, String tableName, String credentialsJson) throws DescriptorValidationException, InterruptedException, IOException {
         WriteCommittedStream writeCommittedStream = new WriteCommittedStream()
@@ -127,7 +132,7 @@ public class WriteCommittedStream {
             this.writer = new DataWriter();
             this.writer.initialize(parentTable, this.client, this.credentialsJson);
         } catch (Exception e) {
-            TapLogger.error(TAG, String.format("Unable to create Stream connection, exception information: %s.", e.getMessage()));
+            throw new CoreException(String.format("Unable to create Stream connection, exception information: %s.", e.getMessage()), e.getCause());
         }
         return this;
     }
@@ -154,8 +159,7 @@ public class WriteCommittedStream {
 
     public void append(JSONArray jsonArr){
         try {
-            AppendRowsResponse response = this.writer.append(jsonArr, this.streamOffset.addAndGetBefore(jsonArr.length()));
-            //AppendRowsResponse.AppendResult appendResult = response.getAppendResult();
+            this.writer.append(jsonArr, this.streamOffset.addAndGetBefore(jsonArr.length()));
         } catch (Exception e) {
             bigQueryExceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
             bigQueryExceptionCollector.collectViolateNull(null,e);
@@ -307,7 +311,6 @@ public class WriteCommittedStream {
             }
 
             public void onSuccess(AppendRowsResponse response) {
-                //TapLogger.info(TAG,String.format("Append %d success ", response.getAppendResult().getOffset().getValue()));
                 done();
             }
 

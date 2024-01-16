@@ -1,103 +1,122 @@
 package io.tapdata.connector.tdengine.subscribe;
 
-import com.taosdata.jdbc.tmq.ConsumerRecords;
-import com.taosdata.jdbc.tmq.TMQConstants;
-import com.taosdata.jdbc.tmq.TaosConsumer;
-import com.taosdata.jdbc.tmq.TopicPartition;
+import com.taosdata.jdbc.tmq.*;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.connector.tdengine.TDengineJdbcContext;
-import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.connector.tdengine.config.TDengineConfig;
+import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
-import org.apache.commons.lang3.StringUtils;
+import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 
 import java.lang.reflect.Field;
-import java.sql.*;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BiConsumer;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
+import static io.tapdata.entity.simplify.TapSimplify.insertRecordEvent;
 
 public class TDengineSubscribe {
-    private static final String TAG = TDengineSubscribe.class.getSimpleName();
-    private static final AtomicBoolean shutdown = new AtomicBoolean(false);
 
-    private TDengineJdbcContext tdengineJdbcContext;
+    private final TDengineJdbcContext tdengineJdbcContext;
+    private final Log tapLogger;
+    private Object offsetState;
+    private Map<String, String> timestampColumnMap; //pdk tableMap in streamRead
+    private List<String> tableList; //tableName list
+    private int recordSize;
+    private StreamReadConsumer consumer;
 
-    private List<String> tables;
 
-    private Object offset;
-
-    public TDengineSubscribe(TDengineJdbcContext tdengineJdbcContext, List<String> tables, Object offset) {
+    public TDengineSubscribe(TDengineJdbcContext tdengineJdbcContext, Log tapLogger) {
         this.tdengineJdbcContext = tdengineJdbcContext;
-        this.tables = tables;
-        this.offset = offset;
+        this.tapLogger = tapLogger;
     }
 
-    public void subscribe(BiConsumer<Map<String, Object>, String> biConsumer, ShutdownCallBack shutdownCallBack) {
+    public void init(List<String> tableList, KVReadOnlyMap<TapTable> tableMap,
+                     Object offsetState, int recordSize, StreamReadConsumer consumer) {
+        this.tableList = tableList;
+        this.timestampColumnMap = tableList.stream().collect(Collectors.toMap(v -> v, v -> tableMap.get(v).getNameFieldMap().keySet().stream().findFirst()
+                .orElseThrow(() -> new RuntimeException("table name field is null"))));
+        this.offsetState = offsetState;
+        this.recordSize = recordSize;
+        this.consumer = consumer;
+    }
+
+    public void subscribe(Supplier<Boolean> isAlive) {
 
         try {
-            // prepare
             CommonDbConfig config = tdengineJdbcContext.getConfig();
-            Connection connection = tdengineJdbcContext.getConnection();
-            // create topic
-            List<String> topicList = new ArrayList<>();
-            try (Statement statement = connection.createStatement()) {
-                if (EmptyKit.isNotEmpty(tables)) {
-                    for (String tableName : tables) {
-                        String topic = String.format("topic_%s", tableName);
-                        statement.executeUpdate(String.format("drop topic if exists %s", topic));
-                        statement.executeUpdate(String.format("create topic if not exists %s as select * from %s", topic, tableName));
-                        topicList.add(topic);
-                    }
-                } else {
-                    String topic = String.format("topic_%s", config.getDatabase());
-                    statement.executeUpdate(String.format("drop topic if exists %s", topic));
-                    statement.executeUpdate(String.format("create topic if not exists %s as select * from %s", topic, config.getDatabase()));
-                    topicList.add(topic);
-                }
-            }
 
             // create consumer
             Properties properties = new Properties();
-//            properties.setProperty(TMQConstants.BOOTSTRAP_SERVERS, "127.0.0.1:6030");
-            properties.setProperty(TMQConstants.BOOTSTRAP_SERVERS, String.format("%s:%s", config.getHost(), 6030));
+            if (((TDengineConfig) config).getSupportWebSocket()) {
+                properties.setProperty(TMQConstants.BOOTSTRAP_SERVERS, String.format("%s:%s", config.getHost(), config.getPort()));
+                properties.setProperty(TMQConstants.CONNECT_TYPE, "ws");
+                properties.setProperty(TMQConstants.CONNECT_USER, config.getUser());
+                properties.setProperty(TMQConstants.CONNECT_PASS, config.getPassword());
+            } else {
+                properties.setProperty(TMQConstants.BOOTSTRAP_SERVERS, String.format("%s:%s", config.getHost(), ((TDengineConfig) config).getOriginPort()));
+                properties.setProperty(TMQConstants.CONNECT_TYPE, "jni");
+            }
             properties.setProperty(TMQConstants.MSG_WITH_TABLE_NAME, Boolean.TRUE.toString());
-            properties.setProperty(TMQConstants.ENABLE_AUTO_COMMIT, Boolean.TRUE.toString());
+            properties.setProperty(TMQConstants.ENABLE_AUTO_COMMIT, Boolean.FALSE.toString());
             properties.setProperty(TMQConstants.GROUP_ID, "test_group_id");
-            properties.setProperty(TMQConstants.AUTO_OFFSET_RESET, "latest");
+            properties.setProperty(TMQConstants.AUTO_OFFSET_RESET, "earliest");
             properties.setProperty(TMQConstants.VALUE_DESERIALIZER,
                     "io.tapdata.connector.tdengine.subscribe.TDengineResultDeserializer");
 
+            List<String> topicList = tableList.stream().map(v -> "tap_topic_" + v).collect(Collectors.toList());
             // poll data
             try (TaosConsumer<Map<String, Object>> taosConsumer = new TaosConsumer<>(properties)) {
                 taosConsumer.subscribe(topicList);
-                while (!shutdown.get()) {
+                consumer.streamReadStarted();
+                List<TapEvent> tapEvents = new ArrayList<>();
+                while (isAlive.get()) {
                     ConsumerRecords<Map<String, Object>> records = taosConsumer.poll(Duration.ofMillis(100));
-                    Optional<TopicPartition> topicPartition = getTopicPartition(records);
-                    if (topicPartition.isPresent() && EmptyKit.isNotBlank(this.getTableName(topicPartition.get()))) {
-                        for (Map<String, Object> record : records) {
-                            biConsumer.accept(record, this.getTableName(topicPartition.get()));
+                    if (records.isEmpty()) {
+                        TapSimplify.sleep(1000);
+                    } else {
+                        for (ConsumerRecord<Map<String, Object>> record : records) {
+                            Map<String, Object> recordValue = record.value();
+                            String tableName = getTableName(record.getTopic());
+                            TapInsertRecordEvent tapInsertRecordEvent = insertRecordEvent(recordValue, tableName);
+                            String timeString = recordValue.get(timestampColumnMap.get(tableName)).toString();
+                            tapInsertRecordEvent.setReferenceTime(Timestamp.valueOf(timeString).getTime());
+                            tapEvents.add(tapInsertRecordEvent);
+                            if (tapEvents.size() >= recordSize) {
+                                consumer.accept(tapEvents, offsetState);
+                                taosConsumer.commitSync();
+                                tapEvents.clear();
+                            }
                         }
                     }
-                    Thread.sleep(1000);
                 }
+                if (EmptyKit.isNotEmpty(tapEvents)) {
+                    consumer.accept(tapEvents, offsetState);
+                    taosConsumer.commitSync();
+                }
+                consumer.streamReadEnded();
             }
-        } catch (SQLException | NoSuchFieldException | IllegalAccessException | InterruptedException e) {
-            TapLogger.error(TAG, "Table data sync error: {}", e.getMessage(), e);
-        } finally {
-            shutdownCallBack.call();
+        } catch (SQLException e) {
+            tapLogger.error("Table data sync error: {}", e.getMessage(), e);
         }
     }
 
-    private String getTableName(TopicPartition topicPartition) {
-        String tableName = topicPartition.getTableName();
-        if (EmptyKit.isNotEmpty(tableName)) {
-            return tableName;
-        }
-        if (!topicPartition.getTopic().startsWith("topic_")) {
+    private String getTableName(String topic) {
+        if (EmptyKit.isEmpty(topic)) {
             return null;
         }
-        return topicPartition.getTopic().substring(6);
+        if (topic.startsWith("tap_topic_")) {
+            return topic.substring(10);
+        }
+        return null;
     }
 
     public Optional<TopicPartition> getTopicPartition(ConsumerRecords<Map<String, Object>> consumerRecords) throws NoSuchFieldException, IllegalAccessException {
@@ -106,11 +125,6 @@ public class TDengineSubscribe {
         Map<TopicPartition, List<Map<String, Object>>> records = (Map<TopicPartition, List<Map<String, Object>>>) field.get(consumerRecords);
         Set<TopicPartition> topicPartitions = records.keySet();
         return topicPartitions.stream().filter(Objects::nonNull).findFirst();
-    }
-
-    @FunctionalInterface
-    public interface ShutdownCallBack {
-        void call();
     }
 
 }

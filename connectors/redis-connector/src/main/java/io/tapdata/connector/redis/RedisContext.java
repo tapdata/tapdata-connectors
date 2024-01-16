@@ -3,7 +3,6 @@ package io.tapdata.connector.redis;
 import io.tapdata.connector.redis.constant.DeployModeEnum;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.kit.EmptyKit;
-import org.apache.commons.lang3.StringUtils;
 import redis.clients.jedis.*;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.util.Pool;
@@ -18,7 +17,6 @@ import java.util.Set;
  */
 public class RedisContext implements AutoCloseable {
 
-    private static final String TAG = RedisContext.class.getSimpleName();
     private static final int MAX_TOTAL = 100;
     private static final int MAX_IDLE = 20;
     private static final int MAX_WAIT_MILLIS = -1;
@@ -33,23 +31,18 @@ public class RedisContext implements AutoCloseable {
     private volatile Pool<Jedis> jedisPool;
     private volatile UnifiedJedis jedisCluster;
 
-    public RedisContext(RedisConfig redisConfig) throws Exception {
+    public RedisContext(RedisConfig redisConfig) {
         this.redisConfig = redisConfig;
-        try {
-            synchronized (this) {
-                if (DeployModeEnum.fromString(redisConfig.getDeploymentMode()) == DeployModeEnum.CLUSTER) {
-                    if (jedisCluster == null) {
-                        jedisCluster = initializeJedisCluster(redisConfig);
-                    }
-                } else {
-                    if (jedisPool == null) {
-                        jedisPool = initializeJedisPool(redisConfig);
-                    }
+        synchronized (this) {
+            if (DeployModeEnum.fromString(redisConfig.getDeploymentMode()) == DeployModeEnum.CLUSTER) {
+                if (jedisCluster == null) {
+                    jedisCluster = initializeJedisCluster(redisConfig);
+                }
+            } else {
+                if (jedisPool == null) {
+                    jedisPool = initializeJedisPool(redisConfig);
                 }
             }
-        } catch (Exception e) {
-            TapLogger.error(TAG, "close connection error", e);
-            throw new Exception("Initial redis target failed %s", e);
         }
     }
 
@@ -62,7 +55,9 @@ public class RedisContext implements AutoCloseable {
         connectionPoolConfig.setTestOnCreate(TEST_ON_CREATE);
         connectionPoolConfig.setTestOnReturn(TEST_ON_RETURN);
         connectionPoolConfig.setTestWhileIdle(TEST_WHILE_IDLE);
-        return new JedisCluster(new HashSet<>(redisConfig.getClusterNodes()), 5000, 5000, 10, redisConfig.getPassword(), redisConfig.getSentinelName(), connectionPoolConfig);
+        String username = EmptyKit.isBlank(redisConfig.getUsername()) ? null : redisConfig.getUsername();
+        String password = EmptyKit.isBlank(redisConfig.getPassword()) ? null : redisConfig.getPassword();
+        return new JedisCluster(new HashSet<>(redisConfig.getClusterNodes()), 5000, 5000, 10, username, password, redisConfig.getSentinelName(), connectionPoolConfig);
     }
 
     public static Pool<Jedis> initializeJedisPool(RedisConfig redisConfig) {
@@ -80,26 +75,17 @@ public class RedisContext implements AutoCloseable {
         if (deployModeEnum == null) {
             deployModeEnum = DeployModeEnum.STANDALONE;
         }
-
+        String username = EmptyKit.isBlank(redisConfig.getUsername()) ? null : redisConfig.getUsername();
+        String password = EmptyKit.isBlank(redisConfig.getPassword()) ? null : redisConfig.getPassword();
         if (deployModeEnum == DeployModeEnum.STANDALONE) {
-            if (StringUtils.isNotBlank(redisConfig.getPassword())) {
-                jedisPool = new JedisPool(jedisPoolConfig, redisConfig.getHost(), redisConfig.getPort(), POOL_TIMEOUT, redisConfig.getPassword());
-            } else {
-                jedisPool = new JedisPool(jedisPoolConfig, redisConfig.getHost(), redisConfig.getPort(), POOL_TIMEOUT);
-            }
+            jedisPool = new JedisPool(jedisPoolConfig, redisConfig.getHost(), redisConfig.getPort(), POOL_TIMEOUT, username, password);
         } else if (deployModeEnum == DeployModeEnum.SENTINEL) {
             final List<LinkedHashMap<String, Integer>> hostPorts = redisConfig.getSentinelAddress();
             Set<String> sentinelHostPort = new HashSet<>(hostPorts.size());
             for (LinkedHashMap<String, Integer> hostPort : hostPorts) {
                 sentinelHostPort.add(hostPort.get("host") + ":" + hostPort.get("port"));
             }
-            if (StringUtils.isNotBlank(redisConfig.getPassword())) {
-                jedisPool = new JedisSentinelPool(
-                        redisConfig.getSentinelName(), sentinelHostPort, jedisPoolConfig, POOL_TIMEOUT, redisConfig.getPassword());
-            } else {
-                jedisPool = new JedisSentinelPool(
-                        redisConfig.getSentinelName(), sentinelHostPort, jedisPoolConfig, POOL_TIMEOUT);
-            }
+            jedisPool = new JedisSentinelPool(redisConfig.getSentinelName(), sentinelHostPort, jedisPoolConfig, POOL_TIMEOUT, username, password, redisConfig.getDatabase());
         }
         return jedisPool;
     }

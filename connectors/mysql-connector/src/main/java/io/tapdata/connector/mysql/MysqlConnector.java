@@ -1,5 +1,6 @@
 package io.tapdata.connector.mysql;
 
+import com.mysql.cj.exceptions.StatementIsClosedException;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
@@ -13,7 +14,6 @@ import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
@@ -22,7 +22,9 @@ import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.ErrorKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -58,8 +60,6 @@ import java.util.stream.Collectors;
  **/
 @TapConnectorClass("mysql-spec.json")
 public class MysqlConnector extends CommonDbConnector {
-    private static final String TAG = MysqlConnector.class.getSimpleName();
-
 
     protected MysqlJdbcContextV2 mysqlJdbcContext;
     protected MysqlConfig mysqlConfig;
@@ -77,11 +77,12 @@ public class MysqlConnector extends CommonDbConnector {
         commonDbConfig = mysqlConfig;
         jdbcContext = mysqlJdbcContext;
         commonSqlMaker = new CommonSqlMaker('`');
+        tapLogger = tapConnectionContext.getLog();
         exceptionCollector = new MysqlExceptionCollector();
         this.version = mysqlJdbcContext.queryVersion();
         if (tapConnectionContext instanceof TapConnectorContext) {
-            this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext);
-            this.mysqlReader = new MysqlReader(mysqlJdbcContext);
+            this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext, this::isAlive);
+            this.mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
             this.timezone = mysqlJdbcContext.queryTimeZone();
             ddlSqlGenerator = new MysqlDDLSqlGenerator(version, ((TapConnectorContext) tapConnectionContext).getTableMap());
         }
@@ -211,7 +212,7 @@ public class MysqlConnector extends CommonDbConnector {
             try {
                 synchronized (this) {
                     //mysqlJdbcContext是否有效
-                    if (mysqlJdbcContext == null || !checkValid() || !started.get()) {
+                    if (mysqlJdbcContext == null || !checkValid() || !started.get() || checkStatementClosed(throwable)) {
                         //如果无效执行onStop,有效就return
                         this.onStop(tapConnectionContext);
                         if (isAlive()) {
@@ -219,12 +220,25 @@ public class MysqlConnector extends CommonDbConnector {
                         }
                     } else {
                         mysqlWriter.selfCheck();
+                        if (EmptyKit.isNotNull(mysqlReader)) {
+                            EmptyKit.closeQuietly(mysqlReader);
+                        }
+                        mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
                     }
                 }
             } catch (Throwable ignore) {
             }
         });
         return retryOptions;
+    }
+
+    private boolean checkStatementClosed(Throwable throwable) {
+        Throwable cause = matchThrowable(throwable, StatementIsClosedException.class);
+        if (throwable instanceof TapPdkRetryableEx && null != cause && "S1009".equals(((StatementIsClosedException) cause).getSQLState())) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     private boolean checkValid() {
@@ -244,16 +258,12 @@ public class MysqlConnector extends CommonDbConnector {
             Optional.ofNullable(this.mysqlReader).ifPresent(MysqlReader::close);
         } catch (Exception ignored) {
         }
-        try {
-            Optional.ofNullable(this.mysqlWriter).ifPresent(MysqlWriter::onDestroy);
-        } catch (Exception ignored) {
-        }
         if (null != mysqlJdbcContext) {
             try {
                 this.mysqlJdbcContext.close();
                 this.mysqlJdbcContext = null;
             } catch (Exception e) {
-                TapLogger.error(TAG, "Release connector failed, error: " + e.getMessage() + "\n" + getStackString(e));
+                tapLogger.error("Release connector failed, error: " + e.getMessage() + "\n" + getStackString(e));
             }
         }
     }
@@ -271,12 +281,12 @@ public class MysqlConnector extends CommonDbConnector {
                 String database = connectionConfig.getString("database");
                 String tableId = tapCreateTableEvent.getTableId();
                 createTableOptions.setTableExists(true);
-                TapLogger.info(TAG, "Table \"{}.{}\" exists, skip auto create table", database, tableId);
+                tapLogger.info("Table \"{}.{}\" exists, skip auto create table", database, tableId);
             } else {
                 String mysqlVersion = mysqlJdbcContext.queryVersion();
                 SqlMaker sqlMaker = new MysqlMaker();
                 if (null == tapCreateTableEvent.getTable()) {
-                    TapLogger.warn(TAG, "Create table event's tap table is null, will skip it: " + tapCreateTableEvent);
+                    tapLogger.warn("Create table event's tap table is null, will skip it: " + tapCreateTableEvent);
                     return createTableOptions;
                 }
                 String[] createTableSqls = sqlMaker.createTable(tapConnectorContext, tapCreateTableEvent, mysqlVersion);
@@ -324,7 +334,7 @@ public class MysqlConnector extends CommonDbConnector {
             } else {
                 createIndexList.addAll(indexList);
             }
-            TapLogger.info(TAG, "Table: {} will create Index list: {}", tapCreateTableEvent.getTable().getName(), createIndexList);
+            tapLogger.info("Table: {} will create Index list: {}", tapCreateTableEvent.getTable().getName(), createIndexList);
             if (EmptyKit.isNotEmpty(createIndexList)) {
                 createIndexList.stream().filter(i -> !i.isPrimary()).forEach(i ->
                         sqlList.add(getCreateIndexSql(tapCreateTableEvent.getTable(), i)));
@@ -405,7 +415,7 @@ public class MysqlConnector extends CommonDbConnector {
 
     @Override
     protected void queryByAdvanceFilterWithOffset(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
-        String sql = commonSqlMaker.buildSelectClause(table, filter) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilter(filter);
+        String sql = commonSqlMaker.buildSelectClause(table, filter, false) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilter(filter);
         int batchSize = null != filter.getBatchSize() && filter.getBatchSize().compareTo(0) > 0 ? filter.getBatchSize() : BATCH_ADVANCE_READ_LIMIT;
         jdbcContext.query(sql, resultSet -> {
             FilterResults filterResults = new FilterResults();

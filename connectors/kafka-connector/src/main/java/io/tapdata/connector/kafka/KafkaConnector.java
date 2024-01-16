@@ -2,9 +2,13 @@ package io.tapdata.connector.kafka;
 
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.CommonDbConfig;
+import io.tapdata.connector.kafka.admin.Admin;
+import io.tapdata.connector.kafka.admin.DefaultAdmin;
+import io.tapdata.connector.kafka.config.AdminConfiguration;
 import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
@@ -25,13 +29,13 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
+import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.common.TopicPartitionInfo;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Properties;
+import java.util.*;
+import java.util.concurrent.ExecutionException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -130,9 +134,9 @@ public class KafkaConnector extends ConnectorBase {
             if (tapRawValue != null && tapRawValue.getValue() != null) return tapRawValue.getValue().toString();
             return "null";
         });
-        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss"));
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS"));
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> formatTapDateTime(tapDateValue.getValue(), "yyyy-MM-dd"));
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime());
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
 
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportConnectionCheckFunction(this::checkConnection);
@@ -145,8 +149,44 @@ public class KafkaConnector extends ConnectorBase {
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
-//        connectorFunctions.supportCreateTableV2(this::createTableV2);
+        connectorFunctions.supportCreateTableV2(this::createTableV2);
     }
+
+    private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
+        String tableId = tapCreateTableEvent.getTableId();
+        CreateTableOptions createTableOptions = new CreateTableOptions();
+//        if (!this.isSchemaRegister) {
+            Integer replicasSize = Optional.ofNullable(kafkaConfig.getReplicasSize()).orElse(1);
+            Integer partitionNum = Optional.ofNullable(kafkaConfig.getPartitionNum()).orElse(3);
+            AdminConfiguration configuration = new AdminConfiguration(kafkaConfig, tapConnectorContext.getId());
+            try (Admin admin = new DefaultAdmin(configuration)) {
+                Set<String> existTopics = admin.listTopics();
+                if (!existTopics.contains(tableId)) {
+                    createTableOptions.setTableExists(false);
+                    admin.createTopics(tableId, partitionNum, replicasSize.shortValue());
+                } else {
+                    List<TopicPartitionInfo> topicPartitionInfos = admin.getTopicPartitionInfo(tableId);
+                    int existTopicPartition = topicPartitionInfos.size();
+                    int existReplicasSize = topicPartitionInfos.get(0).replicas().size();
+                    if (existReplicasSize != replicasSize) {
+                        TapLogger.warn(TAG, "cannot change the number of replicasSize of an existing table, will skip");
+                    }
+                    if (partitionNum <= existTopicPartition) {
+                        TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will skip");
+                    } else {
+                        admin.increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
+                    }
+                    createTableOptions.setTableExists(true);
+                }
+            } catch (InterruptedException | ExecutionException e) {
+                throw new RuntimeException("Create Table " + tableId + " Failed | Error: " + e.getMessage());
+            }
+//        }else{
+//            createTableOptions.setTableExists(true);
+//        }
+        return createTableOptions;
+    }
+
 
 //    private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws ExecutionException, InterruptedException, IOException {
 //        TapTable tapTable = tapCreateTableEvent.getTable();

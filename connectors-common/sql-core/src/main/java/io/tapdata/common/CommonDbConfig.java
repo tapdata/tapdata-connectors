@@ -1,10 +1,14 @@
 package io.tapdata.common;
 
+import io.tapdata.common.util.FileUtil;
 import io.tapdata.entity.utils.BeanUtils;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.ErrorKit;
+import org.apache.commons.io.FileUtils;
 
+import java.io.File;
 import java.io.Serializable;
 import java.util.Map;
 import java.util.Properties;
@@ -30,8 +34,15 @@ public class CommonDbConfig implements Serializable {
     private String password;
     private String extParams;
     private String jdbcDriver;
-    private Properties properties;
+    protected Properties properties;
     private char escapeChar = '"';
+
+    private Boolean useSSL = false;
+    private String sslCa;
+    private String sslCert;
+    private String sslKey;
+    private String sslKeyPassword;
+    protected String sslRandomPath;
 
     //pattern for jdbc-url
     public String getDatabaseUrlPattern() {
@@ -76,8 +87,18 @@ public class CommonDbConfig implements Serializable {
      * @return ? extends CommonDbConfig
      */
     public CommonDbConfig load(Map<String, Object> map) {
+        properties = new Properties();
         assert beanUtils != null;
-        return beanUtils.mapToBean(map, this);
+        beanUtils.mapToBean(map, this);
+        if (useSSL && EmptyKit.isNotEmpty(map) && map.containsKey("useSSL")) {
+            try {
+                generateSSlFile();
+            } catch (Exception e) {
+                deleteSSlFile();
+                throw new IllegalArgumentException("generate ssl file failed");
+            }
+        }
+        return this;
     }
 
     public CommonDbConfig copy() throws Exception {
@@ -85,6 +106,19 @@ public class CommonDbConfig implements Serializable {
         CommonDbConfig newConfig = this.getClass().newInstance();
         beanUtils.copyProperties(this, newConfig);
         return newConfig;
+    }
+
+    public void generateSSlFile() throws Exception {
+        throw new UnsupportedOperationException("generate ssl file failed");
+    }
+
+    public void deleteSSlFile() {
+        if (useSSL && EmptyKit.isNotBlank(sslRandomPath)) {
+            File cacheDir = new File(FileUtil.paths(FileUtil.storeDir(".ssl"), sslRandomPath));
+            if (cacheDir.exists()) {
+                ErrorKit.ignoreAnyError(() -> FileUtils.deleteDirectory(cacheDir));
+            }
+        }
     }
 
     public String get__connectionType() {
@@ -181,5 +215,45 @@ public class CommonDbConfig implements Serializable {
 
     public void setEscapeChar(char escapeChar) {
         this.escapeChar = escapeChar;
+    }
+
+    public Boolean getUseSSL() {
+        return useSSL;
+    }
+
+    public void setUseSSL(Boolean useSSL) {
+        this.useSSL = useSSL;
+    }
+
+    public String getSslCa() {
+        return sslCa;
+    }
+
+    public void setSslCa(String sslCa) {
+        this.sslCa = sslCa;
+    }
+
+    public String getSslCert() {
+        return sslCert;
+    }
+
+    public void setSslCert(String sslCert) {
+        this.sslCert = sslCert;
+    }
+
+    public String getSslKey() {
+        return sslKey;
+    }
+
+    public void setSslKey(String sslKey) {
+        this.sslKey = sslKey;
+    }
+
+    public String getSslKeyPassword() {
+        return sslKeyPassword;
+    }
+
+    public void setSslKeyPassword(String sslKeyPassword) {
+        this.sslKeyPassword = sslKeyPassword;
     }
 }

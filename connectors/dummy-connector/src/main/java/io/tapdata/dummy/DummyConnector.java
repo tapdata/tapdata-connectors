@@ -7,6 +7,8 @@ import io.tapdata.dummy.po.DummyOffset;
 import io.tapdata.dummy.utils.TapEventBuilder;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
+import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
 import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -22,6 +24,7 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 
+import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
@@ -83,8 +86,8 @@ public class DummyConnector extends ConnectorBase {
         connectorFunctions.supportTimestampToStreamOffset(this::supportTimestampToStreamOffset);
         // target DDL
 //        connectorFunctions.supportCreateTable(this::supportCreateTable);
-//        connectorFunctions.supportDropTable(this::supportDropTable);
-//        connectorFunctions.supportClearTable(this::supportClearTable);
+        connectorFunctions.supportDropTable(this::dropTable);
+        connectorFunctions.supportClearTable(this::clearTable);
 //        connectorFunctions.supportCreateIndex(this::supportCreateIndex);
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
@@ -98,6 +101,14 @@ public class DummyConnector extends ConnectorBase {
 
         // test and inspect
 //        connectorFunctions.supportQueryByAdvanceFilter(this::supportQueryByAdvanceFilter);
+    }
+
+    private void dropTable(TapConnectorContext connectorContext, TapDropTableEvent dropTableEvent) {
+
+    }
+
+    protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) {
+
     }
 
     @Override

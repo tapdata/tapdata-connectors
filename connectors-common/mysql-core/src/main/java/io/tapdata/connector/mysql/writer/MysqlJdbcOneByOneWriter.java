@@ -8,6 +8,7 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.DbKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -15,10 +16,12 @@ import org.apache.commons.collections4.CollectionUtils;
 
 import java.sql.PreparedStatement;
 import java.sql.SQLIntegrityConstraintViolationException;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * @author samuel
@@ -36,12 +39,12 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
      * @throws Throwable
      */
     @Deprecated
-    private MysqlJdbcOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext) throws Throwable {
-        super(mysqlJdbcContext);
+    private MysqlJdbcOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext, Supplier<Boolean> isAlive) throws Throwable {
+        super(mysqlJdbcContext, isAlive);
     }
 
-    public MysqlJdbcOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext, Map<String, JdbcCache> jdbcCacheMap) throws Throwable {
-        super(mysqlJdbcContext, jdbcCacheMap);
+    public MysqlJdbcOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext, Map<String, JdbcCache> jdbcCacheMap, Supplier<Boolean> isAlive) throws Throwable {
+        super(mysqlJdbcContext, jdbcCacheMap, isAlive);
     }
 
     @Override
@@ -50,7 +53,7 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
         TapRecordEvent errorRecord = null;
         try {
             for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
-                if (!isAlive()) break;
+                if (!isAlive.get()) break;
                 try {
                     if (tapRecordEvent instanceof TapInsertRecordEvent) {
                         int insertRow = doInsertOne(tapConnectorContext, tapTable, tapRecordEvent);
@@ -65,7 +68,7 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
                         writeListResult.addError(tapRecordEvent, new Exception("Event type \"" + tapRecordEvent.getClass().getSimpleName() + "\" not support: " + tapRecordEvent));
                     }
                 } catch (Throwable e) {
-                    if (!isAlive()) {
+                    if (!isAlive.get()) {
                         break;
                     }
                     errorRecord = tapRecordEvent;
@@ -145,6 +148,16 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
 
     protected int doUpdateOne(TapConnectorContext tapConnectorContext, TapTable tapTable, TapRecordEvent tapRecordEvent) throws Throwable {
         String updateDmlPolicy = getDmlUpdatePolicy(tapConnectorContext);
+        //如果写入策略不需要全字段，省流
+        if (!ConnectionOptions.DML_UPDATE_POLICY_INSERT_ON_NON_EXISTS.equals(updateDmlPolicy)) {
+            TapUpdateRecordEvent tapUpdateRecordEvent = (TapUpdateRecordEvent) tapRecordEvent;
+            Map<String, Object> before = tapUpdateRecordEvent.getBefore();
+            Map<String, Object> after = tapUpdateRecordEvent.getAfter();
+            Collection<String> allColumn = tapTable.getNameFieldMap().keySet();
+            Collection<String> pks = tapTable.primaryKeys(true);
+            tapUpdateRecordEvent.setBefore(DbKit.getBeforeForUpdate(after, before, allColumn, pks));
+            tapUpdateRecordEvent.setAfter(DbKit.getAfterForUpdate(after, before, allColumn, pks));
+        }
         PreparedStatement updatePreparedStatement = getUpdatePreparedStatement(tapConnectorContext, tapTable, tapRecordEvent);
         int parameterIndex = setPreparedStatementValues(tapConnectorContext, tapTable, tapRecordEvent, updatePreparedStatement);
         setPreparedStatementWhere(tapTable, tapRecordEvent, updatePreparedStatement, parameterIndex);

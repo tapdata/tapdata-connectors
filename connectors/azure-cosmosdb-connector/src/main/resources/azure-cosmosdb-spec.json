@@ -1,0 +1,216 @@
+{
+  "properties": {
+    "name": "Azure CosmosDB",
+    "icon": "icons/azure-cosmosdb.png",
+    "doc": "${doc}",
+    "tags": [
+      "schema-free",
+      "Database"
+    ],
+    "id": "azure-cosmosdb",
+    "authentication": "Beta"
+  },
+  "configOptions": {
+    "capabilities": [
+    ],
+    "connection": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "title": "${dataForm_host}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-component-props": {
+            "placeholder": "${connection_form_account_host_placeholder}"
+          },
+          "required": true,
+          "x-index": 10
+        },
+        "accountKey": {
+          "type": "string",
+          "title": "${dataForm_account_key}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-component-props": {
+            "placeholder": "${connection_form_account_key_placeholder}"
+          },
+          "required": true,
+          "x-index": 20
+        },
+        "databaseName": {
+          "type": "string",
+          "title": "${dataForm_form_databaseName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "required": true,
+          "x-index": 30
+        },
+        "consistencyLevel": {
+          "type": "string",
+          "title": "${dataForm_consistencyLevel}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "required": true,
+          "x-index": 40,
+          "default": "Session",
+          "x-decorator-props": {
+            "tooltip": "${consistencylevel_tip}"
+          },
+          "enum": [
+            {
+              "label": "STRONG",
+              "value": "Strong"
+            },
+            {
+              "label": "BOUNDED_STALENESS",
+              "value": "BoundedStaleness"
+            },
+            {
+              "label": "SESSION",
+              "value": "Session"
+            },
+            {
+              "label": "EVENTUAL",
+              "value": "Eventual"
+            },
+            {
+              "label": "CONSISTENT_PREFIX",
+              "value": "ConsistentPrefix"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "node": {
+    "properties": {
+    }
+  },
+  "messages": {
+    "default": "en_US",
+    "en_US": {
+      "doc": "docs/cosmosdb_en_US.md",
+      "dataForm_form_databaseName": "DatabaseName",
+      "dataForm_host": "account host",
+      "dataForm_account_key": "account key",
+      "connection_form_account_key_placeholder": "Please enter the account key",
+      "connection_form_account_host_placeholder": "Please enter the account host",
+      "dataForm_consistencyLevel": "consistencyLevel",
+      "consistencylevel_tip": "The consistency isolation level set must be lower than the consistency isolation level set for the account; otherwise, an error will be reported"
+    },
+    "zh_CN": {
+      "doc": "docs/cosmosdb_zh_CN.md",
+      "dataForm_form_databaseName": "数据库名称",
+      "dataForm_host": "account host",
+      "dataForm_account_key": "account key",
+      "connection_form_account_key_placeholder": "请输入account key",
+      "connection_form_account_host_placeholder": "请输入account host",
+      "dataForm_consistencyLevel": "一致性隔离级别",
+      "consistencylevel_tip": "设置的一致性隔离级别一定要弱于账户设置的一致性隔离级别，否则会报错"
+    },
+    "zh_TW": {
+      "doc": "docs/cosmosdb_zh_TW.md",
+      "dataForm_form_databaseName": "數據庫名稱",
+      "dataForm_host": "account host",
+      "dataForm_account_key": "account key",
+      "connection_form_account_key_placeholder": "请輸入account key",
+      "connection_form_account_host_placeholder": "請輸入account host",
+      "dataForm_consistencyLevel": "一致性隔離級別",
+      "consistencylevel_tip": "設置的一致性隔離級別一定要弱於賬戶設置的一致性隔離級別，否則會報錯"
+    }
+  },
+  "dataTypes": {
+    "DOUBLE": {
+      "to": "TapNumber",
+      "value": [
+        "-1.7976931348623157E+308",
+        "1.7976931348623157E+308"
+      ],
+      "preferPrecision": 20,
+      "preferScale": 8,
+      "scale": 17,
+      "precision": 309,
+      "fixed": true
+    },
+    "FLOAT": {
+      "to": "TapNumber",
+      "value": [
+        "-3.4E38",
+        "3.4E38"
+      ],
+      "scale": 2,
+      "precision": 39
+    },
+    "STRING[($byte)]": {
+      "to": "TapString",
+      "preferByte": "100",
+      "byte": "16m"
+    },
+    "OBJECT": {
+      "to": "TapMap",
+      "byte": "16m"
+    },
+    "ARRAY": {
+      "to": "TapArray",
+      "byte": "16m"
+    },
+    "BINARY": {
+      "to": "TapBinary",
+      "byte": "16m"
+    },
+    "BOOLEAN": {
+      "to": "TapBoolean"
+    },
+    "DATE_TIME": {
+      "to": "TapDateTime",
+      "range": [
+        "1000-01-01T00:00:00.001Z",
+        "9999-12-31T23:59:59.999Z"
+      ],
+      "pattern": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+      "fraction": [
+        0,
+        3
+      ],
+      "defaultFraction": 3
+    },
+    "INT": {
+      "to": "TapNumber",
+      "bit": 32,
+      "precision": 10,
+      "value": [
+        -2147483648,
+        2147483647
+      ]
+    },
+    "LONG": {
+      "to": "TapNumber",
+      "bit": 64,
+      "value": [
+        -9223372036854775808,
+        9223372036854775807
+      ]
+    },
+    "BIGINTEGER": {
+      "to": "TapString",
+      "preferByte": "100",
+      "byte": "16m"
+    },
+    "DECIMAL128": {
+      "to": "TapNumber",
+      "value": [
+        -1E+6145,
+        1E+6145
+      ],
+      "scale": 1000
+    },
+    "NULL": {
+      "to": "TapString"
+    },
+    "TIMESTAMP": {
+      "to": "TapString",
+      "queryOnly": true
+    }
+  }
+}

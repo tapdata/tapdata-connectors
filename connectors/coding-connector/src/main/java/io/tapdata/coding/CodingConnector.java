@@ -83,10 +83,7 @@ public class CodingConnector extends ConnectorBase {
             try {
                 Map<?,?> body = fromJson(request.body(),Map.class);
                 Map<?, ?> response = (Map<?, ?>)body.get("Response");
-                response = (Map<?, ?>)response.get("Error");
-                String code = (String)response.get("Code");
-                String message = (String)response.get("Message");
-                if ("ResourceNotFound".equals(code)|| " User not found, authorization invalid".equals(message)) {
+                if (null != response && CodingHttp.hasTokenExpired((Map<?, ?>) response.get("Error"))) {
                     return http.header("Authorization", loader.refreshTokenByOAuth2()).execute();
                 }
             }catch (Exception ignored){
@@ -150,12 +147,9 @@ public class CodingConnector extends ConnectorBase {
         CodingHttp.interceptor = (http, request, hasIgnore) -> {
             if (hasIgnore) return request;
             try {
-                Map<?,?> body = fromJson(request.body(), Map.class);
+                Map<?,?> body = fromJson(request.body(),Map.class);
                 Map<?, ?> response = (Map<?, ?>)body.get("Response");
-                response = (Map<?, ?>)response.get("Error");
-                String code = (String)response.get("Code");
-                String message = (String)response.get("Message");
-                if ("ResourceNotFound".equals(code)|| " User not found, authorization invalid".equals(message)) {
+                if (null != response && CodingHttp.hasTokenExpired((Map<?, ?>) response.get("Error"))) {
                     return http.header("Authorization", loader.refreshTokenByOAuth2()).execute();
                 }
             }catch (Exception ignored){
@@ -288,12 +282,9 @@ public class CodingConnector extends ConnectorBase {
         CodingHttp.interceptor = (http, request, hasIgnore) -> {
             if (hasIgnore) return request;
             try {
-                Map<?,?> body = fromJson(request.body(), Map.class);
+                Map<?,?> body = fromJson(request.body(),Map.class);
                 Map<?, ?> response = (Map<?, ?>)body.get("Response");
-                response = (Map<?, ?>)response.get("Error");
-                String code = (String)response.get("Code");
-                String message = (String)response.get("Message");
-                if ("ResourceNotFound".equals(code)|| " User not found, authorization invalid".equals(message)) {
+                if (null != response && CodingHttp.hasTokenExpired((Map<?, ?>) response.get("Error"))) {
                     return http.header("Authorization", testConnection.refreshTokenByOAuth2()).execute();
                 }
             }catch (Exception ignored){

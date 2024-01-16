@@ -310,12 +310,20 @@ public class LoadJavaScripter {
         //if (Objects.nonNull(connectionConfig) && connectionConfig instanceof Map){
         //}
         //Object nodeConfigMap = this.scriptEngine.get(ExecuteConfig.NODE_CONFIG);
+        Object apply = null;
         try {
             Invocable invocable = (Invocable) this.scriptEngine;
-            Object apply = invocable.invokeFunction(functionName, params);
+            apply = invocable.invokeFunction(functionName, params);
             return LoadJavaScripter.covertData(apply);
         } catch (Exception e) {
-            throw new CoreException(String.format("JavaScript Method execution failed, method name -[%s], params are -[%s], message: %s, %s", functionName, toJson(params), e.getMessage(), InstanceFactory.instance(TapUtils.class).getStackTrace(e)));
+            throw new CoreException(
+                String.format("Method failed, method: [%s], params: [%s], method result: %s, error message: %s, %s",
+                functionName,
+                toJson(params),
+                null != apply ? toJson(apply) : "NULL",
+                e.getMessage(),
+                InstanceFactory.instance(TapUtils.class).getStackTrace(e))
+            );
         }
     }
 

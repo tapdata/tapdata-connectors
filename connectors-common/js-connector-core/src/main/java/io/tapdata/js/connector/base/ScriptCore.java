@@ -6,18 +6,25 @@ import io.tapdata.js.connector.iengine.LoadJavaScripter;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ScriptCore extends Core {
-
+    ScriptCoreConfig coreConfig;
     private static final String TAG = ScriptCore.class.getSimpleName();
     private final LinkedBlockingQueue<CustomEventMessage> eventQueue = new LinkedBlockingQueue<>(5000);
     private int fullQueueWarn = 0;
     private final io.tapdata.js.connector.base.EventType eventType = new io.tapdata.js.connector.base.EventType();
 
+
+    public ScriptCore(ScriptCoreConfig coreConfig) {
+        this.coreConfig = Optional.ofNullable(coreConfig).orElse(new ScriptCoreConfig());
+    }
+
     public ScriptCore() {
+        this.coreConfig = new ScriptCoreConfig();
     }
 
     public LinkedBlockingQueue<CustomEventMessage> getEventQueue() {
@@ -32,18 +39,18 @@ public class ScriptCore extends Core {
                 if (Objects.isNull(dataEventMap)) {
                     continue;
                 }
-                TapEvent event = this.eventType.setEvent(dataEventMap, dataIndex.get(), TAG);
+                TapEvent event = this.eventType.setEvent(dataEventMap, dataIndex.get(), TAG, coreConfig.isIgnoreReferenceTime());
                 dataIndex.getAndIncrement();
                 try {
                     while (!eventQueue.offer(new CustomEventMessage().tapEvent(event)
                             .contextMap(this.paper(contextMap)), 1, TimeUnit.SECONDS)) {
                         fullQueueWarn++;
                         if (fullQueueWarn < 4) {
-                            TapLogger.info(TAG, "log queue is full, waiting...");
+                            TapLogger.info(TAG, "log queue is full, waiting");
                         }
                     }
                     if (fullQueueWarn > 0) {
-                        TapLogger.info(TAG, "log queue has been released!");
+                        TapLogger.info(TAG, "log queue has been released");
                         fullQueueWarn = 0;
                     }
                 } catch (Exception ignored) {
@@ -60,11 +67,11 @@ public class ScriptCore extends Core {
                     .contextMap(this.paper(offset)), 1, TimeUnit.SECONDS)) {
                 fullQueueWarn++;
                 if (fullQueueWarn < 4) {
-                    TapLogger.info(TAG, "log queue is full, waiting...");
+                    TapLogger.info(TAG, "log queue is full, waiting");
                 }
             }
             if (fullQueueWarn > 0) {
-                TapLogger.info(TAG, "log queue has been released!");
+                TapLogger.info(TAG, "log queue has been released");
                 fullQueueWarn = 0;
             }
         } catch (Exception ignored) {

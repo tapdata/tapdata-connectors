@@ -25,6 +25,15 @@ public class CodingHttp {
     private boolean hasIgnore = Boolean.FALSE;
     public static final String ERROR_KEY = "ERROR";
 
+    public static boolean hasTokenExpired(Map<?, ?> response){
+        if (null == response) return false;
+        String code = (String)response.get("Code");
+        String message = (String)response.get("Message");
+        return "AuthFailure".equals(code)
+                || "ResourceNotFound".equals(code)
+                || "User not found, authorization invalid".equals(message);
+    }
+
     public static CodingHttp create(Map<String, String> heads, Map<String, Object> body, String url) {
         return new CodingHttp(heads, body, url);
     }
@@ -73,7 +82,7 @@ public class CodingHttp {
         return HttpUtil.createPost(url)
                 .addHeaders(this.heads.entrySet()
                         .stream()
-                        .collect(Collectors.toMap(Map.Entry::getKey, e -> (String) e.getValue()))
+                        .collect(Collectors.toMap(Map.Entry::getKey, e -> String.valueOf(e.getValue())))
                 );
     }
 
@@ -82,8 +91,8 @@ public class CodingHttp {
         if (null != heads) {
             request.addHeaders(this.heads.entrySet()
                     .stream()
-                    .filter(entry -> Objects.nonNull(entry.getValue()))
-                    .collect(Collectors.toMap(Map.Entry::getKey, e -> (String) e.getValue()))
+                    .filter(entry -> Objects.nonNull(entry.getKey()))
+                    .collect(Collectors.toMap(Map.Entry::getKey, e -> String.valueOf(e.getValue())))
             );
         }
         return this.post(request);
@@ -94,7 +103,7 @@ public class CodingHttp {
         if (null != heads) {
             request.addHeaders(this.heads.entrySet()
                     .stream()
-                    .collect(Collectors.toMap(Map.Entry::getKey, e -> (String) e.getValue()))
+                    .collect(Collectors.toMap(Map.Entry::getKey, e -> String.valueOf(e.getValue())))
             );
         }
         return this.postWithError(request);
