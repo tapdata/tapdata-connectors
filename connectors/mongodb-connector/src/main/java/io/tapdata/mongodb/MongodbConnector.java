@@ -142,6 +142,7 @@ public class MongodbConnector extends ConnectorBase {
 		MongoIterable<String> collectionNames = mongoDatabase.listCollectionNames();
 		TableFieldTypesGenerator tableFieldTypesGenerator = InstanceFactory.instance(TableFieldTypesGenerator.class);
 		this.stringTypeValueMap = new HashMap<>();
+		final int sampleSizeBatchSize = getSampleSizeBatchSize(connectionContext);
 
 		ThreadPoolExecutor executor = new ThreadPoolExecutor(10, 30, 60L, TimeUnit.SECONDS, new ArrayBlockingQueue<>(30));
 
@@ -175,7 +176,7 @@ public class MongodbConnector extends ConnectorBase {
 						table.defaultPrimaryKeys("_id");
 						MongoCollection<?> collection = documentMap.get(name);
 						try {
-							MongodbUtil.sampleDataRow(collection, SAMPLE_SIZE_BATCH_SIZE, (dataRow) -> {
+							MongodbUtil.sampleDataRow(collection, sampleSizeBatchSize, (dataRow) -> {
 								Set<String> fieldNames = dataRow.keySet();
 								for (String fieldName : fieldNames) {
 									BsonValue value = dataRow.get(fieldName);
@@ -201,7 +202,7 @@ public class MongodbConnector extends ConnectorBase {
 						});
 						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
 						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
-						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table.getTableAttr());
+						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table);
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -241,7 +242,7 @@ public class MongodbConnector extends ConnectorBase {
 						}
 						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
 						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
-						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table.getTableAttr());
+						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table);
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -1646,5 +1647,14 @@ public class MongodbConnector extends ConnectorBase {
 			}
 		}
 		throw throwable instanceof RuntimeException ? (RuntimeException) throwable : new RuntimeException(throwable);
+	}
+
+	private int getSampleSizeBatchSize(TapConnectionContext context) {
+		if (null == context) return SAMPLE_SIZE_BATCH_SIZE;
+		DataMap config = context.getConnectionConfig();
+		if (null == config || !config.containsKey("mongodbLoadSchemaSampleSize")) return SAMPLE_SIZE_BATCH_SIZE;
+		Integer integer = config.getInteger("mongodbLoadSchemaSampleSize");
+		if (null == integer || integer <= 0) return SAMPLE_SIZE_BATCH_SIZE;
+		return integer;
 	}
 }

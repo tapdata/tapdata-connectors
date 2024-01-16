@@ -266,6 +266,14 @@
 							"fileNameField": "sslCAFile",
 							"required": true,
 							"x-index": 120
+						},
+						"mongodbLoadSchemaSampleSize": {
+							"title": "${load_schema_sample_size}",
+							"type": "string",
+							"default": 1000,
+							"x-decorator": "FormItem",
+							"x-component": "InputNumber",
+							"x-index": 130
 						}
 					}
 				}
@@ -449,6 +457,7 @@
   "messages": {
     "default": "en_US",
     "en_US": {
+	  "load_schema_sample_size": "Number of sampling records (rows) for Mongodb loading model",
       "doc": "docs/mongodb_en_US.md",
       "isUri": "Connection method",
       "isUrlTips1": "Configure MongoDB database in URI mode. Batch input is supported",
@@ -487,6 +496,7 @@
 		"preImageTips": "Enable the preimage function:\\n1. Only MongoDB6.0 and above support enabling it;\\n2. Confirm that the collection has enabled changeStreamPreAndPostImages;\\n3. Confirm the expiration time of the preimage"
     },
     "zh_CN": {
+	  "load_schema_sample_size": "Mongodb加载模型采样记录数(行)",
       "doc": "docs/mongodb_zh_CN.md",
       "isUri": "连接方式",
       "isUrlTips1": "以URI方式配置MongoDB数据库，支持批量输入",
@@ -525,6 +535,7 @@
 		"timeSeriesCollectionTip": "源表为TimeSeries集合时同步为TimeSeries集合，仅支持源表为MongoDB到MongoDB，且版本为MongoDB5.0以上"
 		},
 		"zh_TW": {
+			"load_schema_sample_size": "Mongodb加載模型採樣記錄數（行）",
 			"doc": "docs/mongodb_zh_TW.md",
 			"isUri": "連接方式",
 			"isUrlTips1": "以URI方式配置MongoDB數據庫，支持批量輸入",

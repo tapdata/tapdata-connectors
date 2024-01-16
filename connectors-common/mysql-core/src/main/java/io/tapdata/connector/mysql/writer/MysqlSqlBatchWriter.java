@@ -19,6 +19,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static io.tapdata.entity.simplify.TapSimplify.toJson;
 
@@ -32,9 +33,9 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
     private static final String DELETE_FROM_SQL_TEMPLATE = "DELETE FROM `%s`.`%s` WHERE %s";
     protected MysqlJdbcOneByOneWriter mysqlJdbcOneByOneWriter;
 
-    public MysqlSqlBatchWriter(MysqlJdbcContextV2 mysqlJdbcContext) throws Throwable {
-        super(mysqlJdbcContext);
-        this.mysqlJdbcOneByOneWriter = new MysqlJdbcOneByOneWriter(mysqlJdbcContext, jdbcCacheMap);
+    public MysqlSqlBatchWriter(MysqlJdbcContextV2 mysqlJdbcContext, Supplier<Boolean> isAlive) throws Throwable {
+        super(mysqlJdbcContext, isAlive);
+        this.mysqlJdbcOneByOneWriter = new MysqlJdbcOneByOneWriter(mysqlJdbcContext, jdbcCacheMap, isAlive);
     }
 
     @Override
@@ -45,7 +46,6 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
 
     public void onDestroy() {
         mysqlJdbcOneByOneWriter.onDestroy();
-        super.onDestroy();
     }
 
     @Override
@@ -53,7 +53,7 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
         AtomicReference<WriteListResult<TapRecordEvent>> writeListResult = new AtomicReference<>(new WriteListResult<>(0L, 0L, 0L, new HashMap<>()));
         try {
             dispatch(tapRecordEvents, consumeEvents -> {
-                if (!isAlive()) return;
+                if (!isAlive.get()) return;
                 boolean batch = false;
                 try {
                     if (consumeEvents.get(0) instanceof TapInsertRecordEvent) {
@@ -78,7 +78,7 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
                 } catch (Throwable e) {
                     if (batch) {
                         getJdbcCache().getConnection().rollback();
-                        if (isAlive()) {
+                        if (isAlive.get()) {
                             TapLogger.warn(TAG, "Do batch operation failed: " + e.getMessage() + "\n Will try one by one mode");
                             doOneByOne(tapConnectorContext, tapTable, writeListResult, consumeEvents);
                         }
@@ -89,7 +89,7 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
             });
             getJdbcCache().getConnection().commit();
         } catch (Throwable e) {
-            if (isAlive()) {
+            if (isAlive.get()) {
                 exceptionCollector.collectTerminateByServer(e);
                 exceptionCollector.collectViolateNull(null, e);
                 TapRecordEvent errorEvent = writeListResult.get().getErrorMap().keySet().stream().findFirst().orElse(null);
@@ -141,7 +141,7 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
         TapLogger.debug(TAG, "Execute insert sql: " + sql);
         JdbcCache jdbcCache = getJdbcCache();
         try (Statement statement = jdbcCache.getStatement()) {
-            while (isAlive()) {
+            while (isAlive.get()) {
                 try {
                     result = statement.executeUpdate(sql);
                     break;
@@ -167,7 +167,7 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
         TapLogger.debug(TAG, "Execute update sql: " + sql);
         JdbcCache jdbcCache = getJdbcCache();
         try (Statement statement = jdbcCache.getStatement()) {
-            while (isAlive()) {
+            while (isAlive.get()) {
                 try {
                     statement.execute(sql);
                     result = tapRecordEvents.size();

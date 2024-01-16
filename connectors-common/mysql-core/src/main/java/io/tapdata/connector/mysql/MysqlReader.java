@@ -64,6 +64,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static io.tapdata.connector.mysql.util.MysqlUtil.randomServerId;
@@ -82,7 +83,7 @@ public class MysqlReader implements Closeable {
     private static final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("`");
     public static final long SAVE_DEBEZIUM_SCHEMA_HISTORY_INTERVAL_SEC = 2L;
     private String serverName;
-    private final AtomicBoolean running;
+    private final Supplier<Boolean> isAlive;
     private final MysqlJdbcContextV2 mysqlJdbcContext;
     private EmbeddedEngine embeddedEngine;
     private LinkedBlockingQueue<MysqlStreamEvent> eventQueue;
@@ -96,11 +97,11 @@ public class MysqlReader implements Closeable {
     private final ExceptionCollector exceptionCollector;
     protected Log tapLogger;
 
-    public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger) {
+    public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, Supplier<Boolean> isAlive) {
         this.mysqlJdbcContext = mysqlJdbcContext;
+        this.isAlive = isAlive;
         this.tapLogger = tapLogger;
         this.exceptionCollector = new MysqlExceptionCollector();
-        this.running = new AtomicBoolean(true);
         try {
             this.DB_TIME_ZONE = mysqlJdbcContext.queryTimeZone();
         } catch (Exception ignore) {
@@ -379,7 +380,7 @@ public class MysqlReader implements Closeable {
         tapConnectorContext.configContext();
         Thread.currentThread().setName("Save-Mysql-Schema-History-" + serverName);
         if (!MysqlSchemaHistoryTransfer.isSave()) {
-            MysqlSchemaHistoryTransfer.executeWithLock(n -> !running.get(), () -> {
+            MysqlSchemaHistoryTransfer.executeWithLock(n -> !isAlive.get(), () -> {
                 String json = InstanceFactory.instance(JsonParser.class).toJson(MysqlSchemaHistoryTransfer.historyMap);
                 try {
                     json = StringCompressUtil.compress(json);
@@ -409,7 +410,6 @@ public class MysqlReader implements Closeable {
 
     @Override
     public void close() {
-        this.running.set(false);
         Optional.ofNullable(embeddedEngine).ifPresent(engine -> {
             try {
                 engine.close();
@@ -674,7 +674,7 @@ public class MysqlReader implements Closeable {
     }
 
     private void eventQueueConsumer() {
-        while (running.get()) {
+        while (isAlive.get()) {
             MysqlStreamEvent mysqlStreamEvent;
             try {
                 mysqlStreamEvent = eventQueue.poll(3L, TimeUnit.SECONDS);
@@ -689,7 +689,7 @@ public class MysqlReader implements Closeable {
     }
 
     private void enqueue(MysqlStreamEvent mysqlStreamEvent) {
-        while (running.get()) {
+        while (isAlive.get()) {
             try {
                 if (eventQueue.offer(mysqlStreamEvent, 3L, TimeUnit.SECONDS)) {
                     break;
