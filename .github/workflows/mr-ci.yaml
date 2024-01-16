@@ -1,0 +1,36 @@
+name: Merge Request CI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+on:
+  pull_request:
+    branches: [ "main", "develop", "release-v*.*" ]
+  workflow_dispatch:
+    inputs:
+      mrci_run:
+        description: 'MRCI run or not'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+
+  Get-Stable-Branch:
+    uses: tapdata/tapdata-application/.github/workflows/get-stable-branch-and-set-tag.yaml@main
+    with:
+      connectors-branch: ${{ github.event.pull_request.head.ref }}
+
+  Sync-Code-to-Office:
+    uses: tapdata/tapdata-application/.github/workflows/sync-code-to-office.yaml@main
+    needs:
+      - Get-Stable-Branch
+    with:
+      tapdata-connectors: ${{ github.event.pull_request.head.ref }}
+
+  Scan-Connectors:
+    uses: tapdata/tapdata-application/.github/workflows/sonarqube-scan.yaml@main
+    needs:
+      - Sync-Code-to-Office
+    with:
+      tapdata-connectors: ${{ github.event.pull_request.head.ref }}
