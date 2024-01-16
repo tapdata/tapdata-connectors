@@ -13,7 +13,6 @@ import org.apache.avro.generic.GenericRecord;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.math.MathContext;
 import java.math.RoundingMode;
 import java.util.Map;
 import java.util.Optional;
@@ -32,22 +31,23 @@ public class GenericMapToRecord implements GenericStage<NormalEntity, Map<String
             } else if (value instanceof BigInteger) {
                 genericRecord.put(key, ((BigInteger) value).longValue());
             } else if (value instanceof BigDecimal) {
-                handelBigDecimal(key, (BigDecimal) value, fromValue, clientPerformer.getTapTable(), clientPerformer.getLog());
+                Object decimal = handelBigDecimal(key, (BigDecimal) value, clientPerformer.getTapTable(), clientPerformer.getLog());
+                genericRecord.put(key, decimal);
             } else {
                 genericRecord.put(key, value);
             }
         });
         return genericRecord;
     }
-    private void handelBigDecimal(String key, BigDecimal value, Map<String, Object> fromMap, TapTable table, Log log) {
-        if (null == table || null == table.getNameFieldMap()) return;
+    private Object handelBigDecimal(String key, BigDecimal value, TapTable table, Log log) {
+        if (null == table || null == table.getNameFieldMap()) return value;
         TapField field = table.getNameFieldMap().get(key);
-        if (null == field || null == field.getTapType()) return;
+        if (null == field || null == field.getTapType()) return value;
         TapType tapType = field.getTapType();
         if (tapType instanceof TapNumber) {
-            Integer scale = Optional.of(((TapNumber) tapType).getScale()).orElse(0);
-            Integer precision = Optional.ofNullable(((TapNumber) tapType).getPrecision()).orElse(0);
-            if (value.scale() != scale) {
+            int scale = Optional.of(((TapNumber) tapType).getScale()).orElse(0);
+            int precision = Optional.ofNullable(((TapNumber) tapType).getPrecision()).orElse(0);
+            if (value.scale() != scale || value.precision() <= 0) {
                 log.warn("Find an BigDecimal({},{}), but schema data type of field [{}] in table [{}] is decimal({}, {}), scale not equals. BigDecimal value: {}",
                         value.precision(),
                         value.scale(),
@@ -55,9 +55,15 @@ public class GenericMapToRecord implements GenericStage<NormalEntity, Map<String
                         table.getId(),
                         precision,
                         scale, value.toString());
-                fromMap.put(key, new BigDecimal(value.setScale(scale, RoundingMode.UNNECESSARY).toString()));
+            }
+            if (value.scale() != scale) {
+                return new BigDecimal(value.setScale(scale, RoundingMode.UNNECESSARY).toString());
+            }
+            if (value.precision() <= 0) {
+                return new BigDecimal(value.toString());
             }
         }
+        return value;
     }
 
     private static volatile GenericMapToRecord singleton;
