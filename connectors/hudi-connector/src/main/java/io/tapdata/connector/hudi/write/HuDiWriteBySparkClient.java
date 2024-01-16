@@ -18,27 +18,14 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.WriteListResult;
-import org.apache.avro.Schema;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hudi.client.HoodieJavaWriteClient;
-import org.apache.hudi.client.HoodieReadClient;
 import org.apache.hudi.client.WriteStatus;
 import org.apache.hudi.common.model.HoodieKey;
 import org.apache.hudi.common.model.HoodieRecord;
 import org.apache.hudi.common.model.HoodieRecordPayload;
 import org.apache.hudi.common.model.WriteOperationType;
 import org.apache.hudi.exception.HoodieRollbackException;
-import org.apache.spark.sql.avro.SchemaConverters;
-import org.apache.spark.sql.execution.datasources.jdbc.JdbcUtils;
-import org.apache.spark.sql.jdbc.JdbcDialect;
-import org.apache.spark.sql.jdbc.JdbcDialects;
-import org.apache.spark.sql.types.StructType;
-
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -49,7 +36,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import static io.tapdata.base.ConnectorBase.fromJson;
 import static io.tapdata.base.ConnectorBase.toJson;
 
 
@@ -88,7 +74,7 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                                     .withTapTable(tapTable)
                                     .withOperationType(appendType)
                                     .withConfig(config)
-                                    .withSchema(getJDBCSchema(tableId, true))
+                                    .withSchema(this.clientHandler.getJDBCSchema(tableId, true, this.log))
                                     .withLog(log));
                 },
                 (tableId, clientPerformer) -> Optional.ofNullable(clientPerformer).ifPresent(ClientPerformer::close),
@@ -269,30 +255,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             return WriteOperationType.INSERT;
         }
         return WriteOperationType.UPSERT;
-    }
-
-    public Schema getJDBCSchema(String tableId, boolean nullable) {
-        JdbcDialect dialect = JdbcDialects.get(config.getDatabaseUrl());
-        try (Connection connection = hiveJdbcContext.getConnection();
-             final Statement confStatement = connection.createStatement();
-             PreparedStatement schemaQueryStatement = connection.prepareStatement(dialect.getSchemaQuery(tableId))) {
-            final String settingSql = "set hive.resultset.use.unique.column.names = false";
-            try {
-                confStatement.execute(settingSql);
-            } catch (SQLException e) {
-                log.warn("Set config error before get JDBC schema, table id: {}, setting sql: {}, message: {}", tableId, settingSql, e.getMessage());
-            }
-
-            try (ResultSet rs = schemaQueryStatement.executeQuery()) {
-                StructType structType = JdbcUtils.getSchema(rs, dialect, nullable);
-                final String structName = "hoodie_" + tableId + "_record";
-                final String recordNamespace = "hoodie." + tableId;
-                return SchemaConverters.toAvroType(structType, false, structName, recordNamespace);
-            }
-        } catch (Exception e) {
-            log.debug("Can not get schema by jdbc, will get schema from hdfs file system next, table id: {}, message: {}", tableId, e.getMessage());
-        }
-        return null;
     }
 
     @Override

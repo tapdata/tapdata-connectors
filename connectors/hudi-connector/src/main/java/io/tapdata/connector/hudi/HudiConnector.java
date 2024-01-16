@@ -235,7 +235,7 @@ public class HudiConnector extends HiveConnector {
 
     public void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) {
         String tableId = tapDropTableEvent.getTableId();
-        cleanHdfsPath(tableId);
+        cleanHDFSPath(tableId);
         try {
             jdbcContext.execute("DROP TABLE IF EXISTS " + formatTable(hudiConfig.getDatabase(), tableId));
         } catch (SQLException e) {
@@ -249,7 +249,7 @@ public class HudiConnector extends HiveConnector {
         }
     }
 
-    private void cleanHdfsPath(String tableId) {
+    private void cleanHDFSPath(String tableId) {
         ClientHandler clientHandler = new ClientHandler(hudiConfig, hudiJdbcContext);
         String tablePath = null;
         try {
@@ -265,13 +265,13 @@ public class HudiConnector extends HiveConnector {
                 fs.delete(path, true);
             }
         } catch (IOException e) {
-            throw new RuntimeException("Clean hdfs files failed, file path: " + tablePath + ", " + e.getMessage());
+            throw new RuntimeException("Clean HDFS files failed, file path: " + tablePath + ", " + e.getMessage());
         }
     }
 
     public void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) {
         String tableId = tapClearTableEvent.getTableId();
-        cleanHdfsPath(tableId);
+        cleanHDFSPath(tableId);
         try {
             if (hudiJdbcContext.tableIfExists(tableId)) {
                 hiveJdbcContext.execute("TRUNCATE TABLE " + formatTable(hudiConfig.getDatabase(), tapClearTableEvent.getTableId()));
