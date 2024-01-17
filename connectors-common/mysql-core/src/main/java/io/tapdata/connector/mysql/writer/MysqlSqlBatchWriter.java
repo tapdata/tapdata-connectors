@@ -8,6 +8,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -20,6 +21,7 @@ import java.sql.Statement;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static io.tapdata.entity.simplify.TapSimplify.toJson;
 
@@ -192,6 +194,7 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
         if (EmptyKit.isEmpty(primaryKeys)) {
             primaryKeys = tapTable.getNameFieldMap().keySet();
         }
+        Set<String> characterColumns = getCharacterColumns(tapTable);
         List<String> whereList = new ArrayList<>();
         for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
             Map<String, Object> before = ((TapDeleteRecordEvent) tapRecordEvent).getBefore();
@@ -200,7 +203,7 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
                 if (!before.containsKey(primaryKey)) {
                     throw new RuntimeException(String.format("Append delete sql failed, before data not contains key '%s', cannot append where clause in delete sql\nBefore data: %s", primaryKey, before));
                 }
-                subWhereList.add("`" + primaryKey + "`<=>" + MysqlUtil.object2String(before.get(primaryKey)));
+                subWhereList.add("`" + primaryKey + "`<=>" + (characterColumns.contains(primaryKey) ? MysqlUtil.object2String(trimTailBlank(before.get(primaryKey).toString())) : MysqlUtil.object2String(before.get(primaryKey))));
             }
             whereList.add("(" + String.join(" AND ", subWhereList) + ")");
         }
