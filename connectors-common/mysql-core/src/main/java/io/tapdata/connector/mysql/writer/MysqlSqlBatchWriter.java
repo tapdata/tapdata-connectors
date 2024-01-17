@@ -203,7 +203,7 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
                 if (!before.containsKey(primaryKey)) {
                     throw new RuntimeException(String.format("Append delete sql failed, before data not contains key '%s', cannot append where clause in delete sql\nBefore data: %s", primaryKey, before));
                 }
-                subWhereList.add("`" + primaryKey + "`<=>" + (characterColumns.contains(primaryKey) ? MysqlUtil.object2String(trimTailBlank(before.get(primaryKey).toString())) : MysqlUtil.object2String(before.get(primaryKey))));
+                subWhereList.add("`" + primaryKey + "`<=>" + (characterColumns.contains(primaryKey) ? MysqlUtil.object2String(trimTailBlank(before.get(primaryKey))) : MysqlUtil.object2String(before.get(primaryKey))));
             }
             whereList.add("(" + String.join(" AND ", subWhereList) + ")");
         }

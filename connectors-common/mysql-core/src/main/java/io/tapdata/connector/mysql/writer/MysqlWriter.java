@@ -195,7 +195,7 @@ public abstract class MysqlWriter {
                 .filter(tapField -> tapField.getDataType().startsWith("char")).map(TapField::getName).collect(Collectors.toSet());
     }
 
-    protected String trimTailBlank(String str) {
+    protected String trimTailBlank(Object str) {
         if (null == str) return null;
         return ("_" + str).trim().substring(1);
     }

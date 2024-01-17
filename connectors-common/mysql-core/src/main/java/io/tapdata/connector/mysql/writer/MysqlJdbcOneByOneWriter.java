@@ -65,15 +65,15 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
                     } else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
                         for (String charKey : characterColumns) {
                             if (EmptyKit.isNotNull(((TapUpdateRecordEvent) tapRecordEvent).getBefore())) {
-                                ((TapUpdateRecordEvent) tapRecordEvent).getBefore().put(charKey, trimTailBlank(((TapUpdateRecordEvent) tapRecordEvent).getBefore().get(charKey).toString()));
+                                ((TapUpdateRecordEvent) tapRecordEvent).getBefore().put(charKey, trimTailBlank(((TapUpdateRecordEvent) tapRecordEvent).getBefore().get(charKey)));
                             }
-                            ((TapUpdateRecordEvent) tapRecordEvent).getAfter().put(charKey, trimTailBlank(((TapUpdateRecordEvent) tapRecordEvent).getAfter().get(charKey).toString()));
+                            ((TapUpdateRecordEvent) tapRecordEvent).getAfter().put(charKey, trimTailBlank(((TapUpdateRecordEvent) tapRecordEvent).getAfter().get(charKey)));
                         }
                         int updateRow = doUpdateOne(tapConnectorContext, tapTable, tapRecordEvent);
                         writeListResult.incrementModified(updateRow);
                     } else if (tapRecordEvent instanceof TapDeleteRecordEvent) {
                         for (String charKey : characterColumns) {
-                            ((TapDeleteRecordEvent) tapRecordEvent).getBefore().put(charKey, trimTailBlank(((TapDeleteRecordEvent) tapRecordEvent).getBefore().get(charKey).toString()));
+                            ((TapDeleteRecordEvent) tapRecordEvent).getBefore().put(charKey, trimTailBlank(((TapDeleteRecordEvent) tapRecordEvent).getBefore().get(charKey)));
                         }
                         int deleteRow = doDeleteOne(tapConnectorContext, tapTable, tapRecordEvent);
                         writeListResult.incrementRemove(deleteRow);
