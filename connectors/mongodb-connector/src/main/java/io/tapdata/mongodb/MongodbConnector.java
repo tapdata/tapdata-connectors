@@ -364,6 +364,10 @@ public class MongodbConnector extends ConnectorBase {
 			) {
 				mongodbTest.testOneByOne();
 			}
+			int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
+			if (version >= 6) {
+				connectionOptions.capability(Capability.create(ConnectionOptions.CAPABILITY_SOURCE_INCREMENTAL_UPDATE_EVENT_HAVE_BEFORE));
+			}
 		} catch (Throwable throwable) {
 			exceptionCollector.collectTerminateByServer(throwable);
 			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),throwable);
