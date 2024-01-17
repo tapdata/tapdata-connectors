@@ -9,6 +9,7 @@ import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.DbKit;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -16,12 +17,10 @@ import org.apache.commons.collections4.CollectionUtils;
 
 import java.sql.PreparedStatement;
 import java.sql.SQLIntegrityConstraintViolationException;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * @author samuel
@@ -50,6 +49,11 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
     @Override
     public WriteListResult<TapRecordEvent> write(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents) throws Throwable {
         WriteListResult<TapRecordEvent> writeListResult = new WriteListResult<>(0L, 0L, 0L, new HashMap<>());
+        Collection<String> primaryKeys = tapTable.primaryKeys(true);
+        if (EmptyKit.isEmpty(primaryKeys)) {
+            primaryKeys = tapTable.getNameFieldMap().keySet();
+        }
+        Set<String> characterColumns = getCharacterColumns(tapTable).stream().filter(primaryKeys::contains).collect(Collectors.toSet());
         TapRecordEvent errorRecord = null;
         try {
             for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
@@ -59,9 +63,18 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
                         int insertRow = doInsertOne(tapConnectorContext, tapTable, tapRecordEvent);
                         writeListResult.incrementInserted(insertRow);
                     } else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
+                        for (String charKey : characterColumns) {
+                            if (EmptyKit.isNotNull(((TapUpdateRecordEvent) tapRecordEvent).getBefore())) {
+                                ((TapUpdateRecordEvent) tapRecordEvent).getBefore().put(charKey, trimTailBlank(((TapUpdateRecordEvent) tapRecordEvent).getBefore().get(charKey).toString()));
+                            }
+                            ((TapUpdateRecordEvent) tapRecordEvent).getAfter().put(charKey, trimTailBlank(((TapUpdateRecordEvent) tapRecordEvent).getAfter().get(charKey).toString()));
+                        }
                         int updateRow = doUpdateOne(tapConnectorContext, tapTable, tapRecordEvent);
                         writeListResult.incrementModified(updateRow);
                     } else if (tapRecordEvent instanceof TapDeleteRecordEvent) {
+                        for (String charKey : characterColumns) {
+                            ((TapDeleteRecordEvent) tapRecordEvent).getBefore().put(charKey, trimTailBlank(((TapDeleteRecordEvent) tapRecordEvent).getBefore().get(charKey).toString()));
+                        }
                         int deleteRow = doDeleteOne(tapConnectorContext, tapTable, tapRecordEvent);
                         writeListResult.incrementRemove(deleteRow);
                     } else {

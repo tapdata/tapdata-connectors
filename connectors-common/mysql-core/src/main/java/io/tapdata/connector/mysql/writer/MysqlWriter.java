@@ -22,6 +22,7 @@ import org.apache.commons.collections4.map.LRUMap;
 import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * @author samuel
@@ -67,8 +68,8 @@ public abstract class MysqlWriter {
 
     abstract public WriteListResult<TapRecordEvent> write(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents) throws Throwable;
 
-	public void onDestroy() {
-	}
+    public void onDestroy() {
+    }
 
     public void selfCheck() {
 
@@ -187,6 +188,16 @@ public abstract class MysqlWriter {
 
     protected interface AnyErrorConsumer<T> {
         void accept(T t) throws Throwable;
+    }
+
+    protected Set<String> getCharacterColumns(TapTable tapTable) {
+        return tapTable.getNameFieldMap().values().stream()
+                .filter(tapField -> tapField.getDataType().startsWith("char")).map(TapField::getName).collect(Collectors.toSet());
+    }
+
+    protected String trimTailBlank(String str) {
+        if (null == str) return null;
+        return ("_" + str).trim().substring(1);
     }
 
 }
