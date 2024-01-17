@@ -106,7 +106,7 @@ public class MrsKafkaConnector extends ConnectorBase {
         mrsKafkaConfig = (MrsKafkaConfig) new MrsKafkaConfig().load(connectorContext.getConnectionConfig());
         mrsKafkaConfig.load(connectorContext.getNodeConfig());
         mrsKafkaExceptionController = new MrsKafkaExceptionController();
-        mrsKafkaService = new MrsKafkaService(mrsKafkaConfig, connectorContext.getId());
+        mrsKafkaService = new MrsKafkaService(mrsKafkaConfig, connectorContext.getId(), connectorContext.getLog());
         try {
             mrsKafkaService.init();
         } catch (Throwable t) {

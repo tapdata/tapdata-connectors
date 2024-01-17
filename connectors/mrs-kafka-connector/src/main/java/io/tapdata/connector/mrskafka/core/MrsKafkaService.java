@@ -17,6 +17,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.script.ScriptFactory;
 import io.tapdata.entity.script.ScriptOptions;
@@ -77,11 +78,12 @@ public class MrsKafkaService extends AbstractMqService {
 
     }
 
-    public MrsKafkaService(MrsKafkaConfig mrsKafkaConfig, String connectorId) {
+    public MrsKafkaService(MrsKafkaConfig mrsKafkaConfig, String connectorId, Log tapLogger) {
         this.mqConfig = mrsKafkaConfig;
         this.mrsKafkaExceptionController = new MrsKafkaExceptionController();
         this.mrsKafkaConfig = mrsKafkaConfig;
         this.connectorId = connectorId;
+        this.tapLogger = tapLogger;
     }
 
     @Override
