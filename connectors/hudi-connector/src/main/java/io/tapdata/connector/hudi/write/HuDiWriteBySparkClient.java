@@ -6,7 +6,9 @@ import io.tapdata.connector.hudi.util.AutoExpireInstance;
 import io.tapdata.connector.hudi.util.FileUtil;
 import io.tapdata.connector.hudi.util.Krb5Util;
 import io.tapdata.connector.hudi.write.generic.GenericDeleteRecord;
+import io.tapdata.connector.hudi.write.generic.GenericHoodieKey;
 import io.tapdata.connector.hudi.write.generic.HoodieRecordGenericStage;
+import io.tapdata.connector.hudi.write.generic.entity.KeyEntity;
 import io.tapdata.connector.hudi.write.generic.entity.NormalEntity;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -36,6 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import static io.tapdata.base.ConnectorBase.list;
 import static io.tapdata.base.ConnectorBase.toJson;
 
 
@@ -126,7 +129,38 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                             tag = 1;
                             update.incrementAndGet();
                             TapUpdateRecordEvent updateRecord = (TapUpdateRecordEvent) e;
+                            HoodieRecord<HoodieRecordPayload> before = null;
+                            if (null != updateRecord.getBefore() && !updateRecord.getBefore().isEmpty()) {
+                                try {
+                                    before = HoodieRecordGenericStage.singleton().generic(updateRecord.getBefore(), entity);
+                                } catch (Exception message) {
+                                    log.warn("Can not generic before hoodie record from before data, error message: {}, table id: {}, before: {}", message.getMessage(), tapTable.getId(), toJson(updateRecord.getBefore()));
+                                }
+                            }
                             hoodieRecord = HoodieRecordGenericStage.singleton().generic(updateRecord.getAfter(), entity);
+
+                            //如果是修改主键，则删除before后重新插入after，并且立马同步做一次删除
+                            if (null != before && null != before.getKey() && !before.getKey().equals(hoodieRecord.getKey())) {
+                                log.debug("An update event has modify primary keys, please ensure, primary key: {}, table: {}, before: {}, after: {}",
+                                        tapTable.primaryKeys(true),
+                                        tapTable.getId(),
+                                        updateRecord.getBefore(),
+                                        updateRecord.getAfter()
+                                        );
+                                try {
+                                    batchFirstRecord = e;
+                                    delete.addAndGet(commitBatch(clientPerformer, 3, recordsOneBatch, list(GenericDeleteRecord.singleton().generic(updateRecord.getBefore(), entity))));
+                                    afterCommit(insert, update, delete, consumer);
+                                } catch (Exception message) {
+                                    log.warn("An update event has modify primary keys, can not delete before record, primary key: {}, table: {}, before: {}, after: {}, error message: {}",
+                                            tapTable.primaryKeys(true),
+                                            tapTable.getId(),
+                                            updateRecord.getBefore(),
+                                            updateRecord.getAfter(),
+                                            message.getMessage()
+                                    );
+                                }
+                            }
                         } else if (e instanceof TapDeleteRecordEvent) {
                             tag = 3;
                             delete.incrementAndGet();
@@ -135,8 +169,8 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                         }
 
                         if ((-1 != tempTag && tempTag != tag)) {
-                            commitBatch(clientPerformer, tempTag, recordsOneBatch, deleteEventsKeys);
                             batchFirstRecord = e;
+                            commitBatch(clientPerformer, tempTag, recordsOneBatch, deleteEventsKeys);
                             afterCommit(insert, update, delete, consumer);
                         }
                         if (tag > 0 && null != hoodieRecord) {
@@ -173,8 +207,8 @@ public class HuDiWriteBySparkClient extends HudiWrite {
         return writeListResult;
     }
 
-    private void commitBatch(ClientPerformer clientPerformer, int batchType, List<HoodieRecord<HoodieRecordPayload>> batch, List<HoodieKey> deleteEventsKeys) {
-        if (batchType != 1 && batchType != 2 && batchType != 3) return;
+    private int commitBatch(ClientPerformer clientPerformer, int batchType, List<HoodieRecord<HoodieRecordPayload>> batch, List<HoodieKey> deleteEventsKeys) {
+        if (batchType != 1 && batchType != 2 && batchType != 3) return 0;
         HoodieJavaWriteClient<HoodieRecordPayload> client = clientPerformer.getClient();
         String startCommit;
         client.setOperationType(appendType);
@@ -183,38 +217,42 @@ public class HuDiWriteBySparkClient extends HudiWrite {
             switch (batchType) {
                 case 1:
                 case 2:
-                    commitInsertOrUpdate(startCommit, client, batch);
-                    break;
+                    return commitInsertOrUpdate(startCommit, client, batch);
                 case 3:
-                    commitDelete(startCommit, client, deleteEventsKeys);
-                    break;
+                    return commitDelete(startCommit, client, deleteEventsKeys);
             }
         } catch (HoodieRollbackException e) {
             client.restoreToInstant(startCommit, true);
             throw e;
         }
+        return 0;
     }
 
 
-    private void commitInsertOrUpdate(String startCommit, HoodieJavaWriteClient<HoodieRecordPayload> client, List<HoodieRecord<HoodieRecordPayload>> batch) {
+    private int commitInsertOrUpdate(String startCommit, HoodieJavaWriteClient<HoodieRecordPayload> client, List<HoodieRecord<HoodieRecordPayload>> batch) {
         List<WriteStatus> insert;
         if (WriteOperationType.INSERT.equals(this.appendType)) {
             insert = client.insert(batch, startCommit);
         } else {
             insert = client.upsert(batch, startCommit);
         }
+        int commitSize = insert.size();
         client.commit(startCommit, insert);
         batch.clear();
+        return commitSize;
     }
 
-    private void commitDelete(String startCommit, HoodieJavaWriteClient<HoodieRecordPayload> client, List<HoodieKey> deleteEventsKeys) {
+    private int commitDelete(String startCommit, HoodieJavaWriteClient<HoodieRecordPayload> client, List<HoodieKey> deleteEventsKeys) {
+        int deleteSize = 0;
         if (!WriteOperationType.INSERT.equals(this.appendType)) {
             List<WriteStatus> delete = client.delete(deleteEventsKeys, startCommit);
             client.commit(startCommit, delete);
+            deleteSize = delete.size();
         } else {
             log.debug("Append mode: INSERT, ignore delete event: {}", deleteEventsKeys);
         }
         deleteEventsKeys.clear();
+        return deleteSize;
     }
 
     public WriteListResult<TapRecordEvent> writeByClient(TapConnectorContext tapConnectorContext, TapTable tapTable, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
