@@ -82,7 +82,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -178,8 +177,6 @@ public class BinaryLogClient implements BinaryLogClientMXBean {
 
     private Boolean isMariaDB;
     private int mariaDbSlaveCapability = 4;
-    private Exception keepAliveException;
-    private KeepAliveMonitorRunner keepAliveMonitorRunner;
 
     /**
      * Alias for BinaryLogClient("localhost", 3306, &lt;no schema&gt; = null, username, password).
@@ -642,7 +639,6 @@ public class BinaryLogClient implements BinaryLogClientMXBean {
             }
             if (keepAlive && !isKeepAliveThreadRunning()) {
                 spawnKeepAliveThread();
-                spawnKeepAliveMonitorThread();
             }
             ensureEventDataDeserializer(EventType.ROTATE, RotateEventDataDeserializer.class);
             synchronized (gtidSetAccessLock) {
@@ -870,55 +866,54 @@ public class BinaryLogClient implements BinaryLogClientMXBean {
             });
         try {
             keepAliveThreadExecutorLock.lock();
-            threadExecutor.submit(new Runnable() {
-                @Override
-                public void run() {
-                    while (!threadExecutor.isShutdown()) {
-                        try {
-                            Thread.sleep(keepAliveInterval);
-                        } catch (InterruptedException e) {
-                            // expected in case of disconnect
-                        }
-                        if (threadExecutor.isShutdown()) {
-                            logger.info("threadExecutor is shut down, terminating keepalive thread");
-                            return;
-                        }
-                        boolean connectionLost = false;
-                        if (heartbeatInterval > 0) {
-                            connectionLost = System.currentTimeMillis() - eventLastSeen > keepAliveInterval;
-                        } else {
-                            try {
-                                channel.write(new PingCommand());
-                            } catch (IOException e) {
-                                connectionLost = true;
-                            }
-                        }
-                        if (connectionLost) {
-                            logger.info("Keepalive: Trying to restore lost connection to " + hostname + ":" + port);
-                            try {
-                                terminateConnect();
-                                connect(connectTimeout);
-                            } catch (Exception ce) {
-                                keepAliveException = ce;
-                                break;
-                            }
-                        }
-                    }
-                }
-            });
             keepAliveThreadExecutor = threadExecutor;
+            SpawnKeepAliveThread spawnKeepAliveThread = new SpawnKeepAliveThread(this);
+            threadExecutor.submit(spawnKeepAliveThread);
         } finally {
             keepAliveThreadExecutorLock.unlock();
         }
     }
-
-    private void spawnKeepAliveMonitorThread() {
-        try {
-            keepAliveThreadExecutorLock.lock();
-            keepAliveMonitorRunner = new KeepAliveMonitorRunner(this);
-            keepAliveMonitorRunner.start();
-        } finally {
-            keepAliveThreadExecutorLock.unlock();
+    class SpawnKeepAliveThread implements Runnable{
+        private BinaryLogClient binaryLogClient;
+        public SpawnKeepAliveThread(BinaryLogClient binaryLogClient){
+            this.binaryLogClient = binaryLogClient;
+        }
+        @Override
+        public void run() {
+            while (!keepAliveThreadExecutor.isShutdown()) {
+                try {
+                    Thread.sleep(keepAliveInterval);
+                } catch (InterruptedException e) {
+                    // expected in case of disconnect
+                }
+                if (keepAliveThreadExecutor.isShutdown()) {
+                    logger.info("threadExecutor is shut down, terminating keepalive thread");
+                    return;
+                }
+                boolean connectionLost = false;
+                if (heartbeatInterval > 0) {
+                    connectionLost = System.currentTimeMillis() - eventLastSeen > keepAliveInterval;
+                } else {
+                    try {
+                        channel.write(new PingCommand());
+                    } catch (IOException e) {
+                        connectionLost = true;
+                    }
+                }
+                if (connectionLost) {
+                    logger.info("Keepalive: Trying to restore lost connection to " + hostname + ":" + port);
+                    try {
+                        terminateConnect();
+                        connect(connectTimeout);
+                    } catch (Exception ce) {
+                        terminateKeepAliveThreadNoWait();
+                        for (LifecycleListener lifecycleListener : lifecycleListeners) {
+                            lifecycleListener.onCommunicationFailure(this.binaryLogClient, ce);
+                        }
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -1328,12 +1323,14 @@ public class BinaryLogClient implements BinaryLogClientMXBean {
     public void disconnect() throws IOException {
         terminateKeepAliveThread();
         terminateConnect();
-        terminateKeepAliveMonitorThread();
     }
 
     private void terminateKeepAliveThread() {
         try {
             keepAliveThreadExecutorLock.lock();
+            if (null == this.keepAliveThreadExecutor) {
+                return;
+            }
             ExecutorService keepAliveThreadExecutor = this.keepAliveThreadExecutor;
             if ( keepAliveThreadExecutor == null ) {
                 return;
@@ -1348,9 +1345,18 @@ public class BinaryLogClient implements BinaryLogClientMXBean {
         }
     }
 
-    private void terminateKeepAliveMonitorThread(){
-        if(null == keepAliveMonitorRunner) return;
-        keepAliveMonitorRunner.stop();
+    private void terminateKeepAliveThreadNoWait() {
+        try {
+            keepAliveThreadExecutorLock.lock();
+            ExecutorService keepAliveThreadExecutor = this.keepAliveThreadExecutor;
+            if ( keepAliveThreadExecutor == null ) {
+                return;
+            }
+            keepAliveThreadExecutor.shutdownNow();
+            this.keepAliveThreadExecutor = null;
+        } finally {
+            keepAliveThreadExecutorLock.unlock();
+        }
     }
 
     private static boolean awaitTerminationInterruptibly(ExecutorService executorService, long timeout, TimeUnit unit) {
@@ -1438,48 +1444,5 @@ public class BinaryLogClient implements BinaryLogClientMXBean {
 
         public void onDisconnect(BinaryLogClient client) { }
 
-    }
-
-    private class KeepAliveMonitorRunner implements Runnable {
-        private BinaryLogClient binaryLogClient;
-        private ExecutorService threadExecutor;
-        private AtomicBoolean running;
-
-        public KeepAliveMonitorRunner(BinaryLogClient binaryLogClient) {
-            this.binaryLogClient = binaryLogClient;
-            this.threadExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
-                @Override
-                public Thread newThread(Runnable runnable) {
-                    return newNamedThread(runnable, "blc-keepalive-monitor-" + hostname + ":" + port);
-                }
-            });
-        }
-
-        public void start(){
-            threadExecutor.submit(this);
-            this.running = new AtomicBoolean(true);
-        }
-
-        @Override
-        public void run() {
-            while (running.get()) {
-                try {
-                    TimeUnit.SECONDS.sleep(1L);
-                } catch (InterruptedException e) {
-                    break;
-                }
-                if (null != keepAliveException) {
-                    for (LifecycleListener lifecycleListener : lifecycleListeners) {
-                        lifecycleListener.onCommunicationFailure(this.binaryLogClient, keepAliveException);
-                    }
-                    break;
-                }
-            }
-            threadExecutor.shutdownNow();
-        }
-
-        public void stop(){
-            this.running.compareAndSet(true,false);
-        }
     }
 }

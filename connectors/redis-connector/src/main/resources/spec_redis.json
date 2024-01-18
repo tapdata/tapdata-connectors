@@ -149,19 +149,14 @@
           "description": "${databaseProp}",
           "required": true
         },
-        "passwordDisplay": {
-          "type": "boolean",
-          "title": "${passwordDisplay}",
+        "username": {
+          "type": "string",
+          "title": "${username}",
           "x-decorator": "FormItem",
-          "x-component": "Switch",
+          "x-component": "Input",
           "x-index": 7,
-          "x-reactions": {
-            "target": "password",
-            "fulfill": {
-              "state": {
-                "visible": "{{!!$self.value}}"
-              }
-            }
+          "x-decorator-props": {
+            "tooltip": "${usernameTip}"
           }
         },
         "password": {
@@ -221,6 +216,16 @@
               "label": "Redis",
               "value": "Redis"
             }
+          ],
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
           ]
         },
         "oneKey": {
@@ -235,10 +240,10 @@
           "default": true,
           "x-reactions": [
             {
-              "dependencies": [".valueType"],
+              "dependencies": [".valueType","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{$deps[0] !== 'String'}}"
+                  "visible": "{{$deps[0] !== 'String' && $deps[0] !== 'Redis' && $deps[1].length > 0}}"
                 }
               }
             }
@@ -256,10 +261,10 @@
           "default": true,
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey"],
+              "dependencies": [".valueType",".oneKey","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] !== 'String') && $deps[1]}}"
+                  "visible": "{{($deps[0] !== 'String' && $deps[0] !== 'Redis') && $deps[1] && $deps[2].length > 0}}"
                 }
               }
             }
@@ -277,10 +282,10 @@
           "required": true,
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey","type"],
+              "dependencies": [".valueType",".oneKey","type","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && ($deps[2] !== 'database')}}"
+                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && $deps[0] !== 'Redis' && ($deps[2] !== 'database') && $deps[3].length > 0}}"
                 }
               }
             }
@@ -297,10 +302,10 @@
           },
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey","type"],
+              "dependencies": [".valueType",".oneKey","type","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && ($deps[2] === 'database')}}"
+                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && $deps[0] !== 'Redis' && ($deps[2] === 'database') && $deps[3].length > 0}}"
                 }
               }
             }
@@ -318,10 +323,10 @@
           },
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey","type"],
+              "dependencies": [".valueType",".oneKey","type","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && ($deps[2] === 'database')}}"
+                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && $deps[0] !== 'Redis' && ($deps[2] === 'database') && $deps[3].length > 0}}"
                 }
               }
             }
@@ -338,10 +343,10 @@
           },
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey","type"],
+              "dependencies": [".valueType",".oneKey","type","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && ($deps[2] === 'database')}}"
+                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && $deps[0] !== 'Redis' && ($deps[2] === 'database') && $deps[3].length > 0}}"
                 }
               }
             }
@@ -368,8 +373,11 @@
             }
           ],
           "x-reactions": {
-            "dependencies": [".valueType",".oneKey"],
+            "dependencies": [".valueType",".oneKey","$inputs"],
             "fulfill": {
+              "state": {
+                "visible": "{{$deps[0] !== 'Redis' && $deps[2].length > 0}}"
+              },
               "run": "{{$self.value = 'Json'}}",
               "schema": {
                 "x-component-props.options": "{{$deps[0] === 'Hash' && !$deps[1] ? [$self.dataSource[1]] : $self.dataSource}}"
@@ -390,10 +398,10 @@
           "required": true,
           "x-reactions": [
             {
-              "dependencies": [".valueData"],
+              "dependencies": [".valueData","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{$deps[0] === 'Text'}}"
+                  "visible": "{{$deps[0] === 'Text' && $deps[1].length > 0}}"
                 }
               }
             }
@@ -411,14 +419,34 @@
           "default": true,
           "x-reactions": [
             {
-              "dependencies": [".valueData"],
+              "dependencies": [".valueData","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{$deps[0] === 'Text'}}"
+                  "visible": "{{$deps[0] === 'Text' && $deps[1].length > 0}}"
                 }
               }
             }
           ]
+        },
+        "rateLimit": {
+          "type": "string",
+          "title": "${rateLimit}",
+          "default": 5000,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-index": 4,
+          "x-decorator-props": {
+            "tooltip": "${rateLimitTooltip}",
+            "min": 100
+          },
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          }
         }
       }
     }
@@ -435,7 +463,8 @@
       "portTip": "Redis port, default 6379",
       "password": "Password",
       "deploymentMode": "Deployment mode",
-      "passwordDisplay":"Whether to use a password",
+      "username": "Username",
+      "usernameTip": "Redis username, default is 'default'",
       "sentinelName": "Sentinel name/Cluster name",
       "sentinelNameTip": "The client name recognized by the server does not affect synchronization and is only used for monitoring",
       "standalone": "Single machine deployment",
@@ -468,7 +497,9 @@
       "valueDataTooltip": "The format of each row of data stored, supporting text and JSON formats",
       "valueJoinStringTooltip": "If the data is in TEXT format, the interval character can be customized",
       "csvFormatTooltip": "Turn on the CSV formatting switch to convert TEXT to a standard line of CSV",
-      "databaseProp": "Please enter a integer between 0 and 15"
+      "databaseProp": "Please enter a integer between 0 and 15",
+      "rateLimit": "Rate Limit QPS",
+      "rateLimitTooltip": "The maximum number of requests per second, the default is 5000"
     },
     "zh_CN": {
       "doc": "docs/redis_zh_CN.md",
@@ -480,7 +511,8 @@
       "portTip": "Redis端口，默认6379",
       "password": "密码",
       "deploymentMode": "部署模式",
-      "passwordDisplay":"是否使用密码",
+      "username": "用户名",
+      "usernameTip": "Redis用户名，默认为 'default'",
       "sentinelName": "哨兵/集群名称",
       "sentinelNameTip": "服务端可识别的客户端名称，不影响同步，仅用于监控",
       "standalone": "单机部署",
@@ -513,8 +545,9 @@
       "valueDataTooltip": "存储的每行数据的格式，支持TEXT、JSON格式",
       "valueJoinStringTooltip": "若数据为TEXT格式，可自定义间隔符",
       "csvFormatTooltip": "打开CSV格式化开关，可以将TEXT转换为CSV的标准行",
-      "databaseProp": "请输入0-15的整数"
-
+      "databaseProp": "请输入0-15的整数",
+      "rateLimit": "限流QPS",
+      "rateLimitTooltip": "QPS限流，默认为5000"
     },
     "zh_TW": {
       "doc": "docs/redis_zh_TW.md",
@@ -526,7 +559,8 @@
       "portTip": "Redis端口，默認6379",
       "password": "密碼",
       "deploymentMode": "部署模式",
-      "passwordDisplay":"是否使用密碼",
+      "username": "用戶名",
+      "usernameTip": "Redis用戶名，默認為 'default'",
       "sentinelName": "哨兵/集群名稱",
       "sentinelNameTip": "服務端可識別的客戶端名稱，不影響同步，僅用於監控",
       "standalone": "單機部署",
@@ -559,8 +593,9 @@
       "valueDataTooltip": "存儲的每行數據的格式，支持TEXT、JSON格式",
       "valueJoinStringTooltip": "若數據為TEXT格式，可自定義間隔符",
       "csvFormatTooltip": "打開CSV格式化開關，可以將TEXT轉換為CSV的標準行",
-      "databaseProp": "請輸入0-15的整數"
-
+      "databaseProp": "請輸入0-15的整數",
+      "rateLimit": "限流QPS",
+      "rateLimitTooltip": "QPS限流，默認為5000"
     }
   },
   "dataTypes": {

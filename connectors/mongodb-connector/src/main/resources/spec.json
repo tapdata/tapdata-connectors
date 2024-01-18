@@ -383,6 +383,28 @@
 					},
 					"x-index": 5
 				},
+				"preImage": {
+					"title": "${preImage}",
+					"type": "boolean",
+					"x-component": "Switch",
+					"x-decorator": "FormItem",
+					"x-decorator-props": {
+						"layout": "horizontal",
+						"tooltip": "${preImageTips}"
+					},
+					"default": false,
+					"x-reactions": {
+						"dependencies": [
+							"$outputs"
+						],
+						"fulfill": {
+							"state": {
+								"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0 && $deps[1]}}"
+							}
+						}
+					},
+					"x-index": 6
+				},
         "shardCollection": {
           "type": "boolean",
           "title": "${node_shard_collection}",
@@ -405,7 +427,30 @@
             }
           },
           "x-index": 79
-        }
+        },
+				"timeSeriesCollection": {
+					"type": "boolean",
+					"title": "${timeSeriesCollection}",
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"default": false,
+					"x-decorator-props": {
+						"layout": "horizontal",
+						"colon": false,
+						"tooltip": "${timeSeriesCollectionTip}"
+					},
+					"x-reactions": {
+						"dependencies": [
+							"$inputs"
+						],
+						"fulfill": {
+							"state": {
+								"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 5 && $deps[0].length>0}}"
+							}
+						}
+					},
+					"x-index": 80
+				}
       }
     }
   },
@@ -444,7 +489,11 @@
 			"syncIndex": "Sync Index",
 			"schemaLimit": "Fields Load Limit For Each Collection",
       "node_shard_collection": " Synchronize Partition Properties ",
-      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster "
+      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster ",
+		"timeSeriesCollection" : "Synchronize Time Series Collections",
+		"timeSeriesCollectionTip": "When the source table is a TimeSeries collection, it is synchronized to a TimeSeries collection. Only the source table is supported from MongoDB to MongoDB, and the version is MongoDB5.0 or above.",
+		"preImage": "Document Preimages",
+		"preImageTips": "Enable the preimage function:\\n1. Only MongoDB6.0 and above support enabling it;\\n2. Confirm that the collection has enabled changeStreamPreAndPostImages;\\n3. Confirm the expiration time of the preimage"
     },
     "zh_CN": {
 	  "load_schema_sample_size": "Mongodb加载模型采样记录数(行)",
@@ -479,7 +528,11 @@
 			"syncIndex": "同步索引",
 			"schemaLimit": "每张表加载的字段数限制",
       "node_shard_collection": "同步分区属性",
-      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效"
+      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效",
+		"preImage": "文档原像",
+		"preImageTips": "启用原像功能：\n1. 只有MongoDB6.0及以上才支持开启；\n2.确认集合已开启changeStreamPreAndPostImages；\n3.确认原像的过期时间",
+		"timeSeriesCollection": "时间序列集合属性",
+		"timeSeriesCollectionTip": "源表为TimeSeries集合时同步为TimeSeries集合，仅支持源表为MongoDB到MongoDB，且版本为MongoDB5.0以上"
 		},
 		"zh_TW": {
 			"load_schema_sample_size": "Mongodb加載模型採樣記錄數（行）",
@@ -514,7 +567,11 @@
 			"syncIndex": "同步索引",
 			"schemaLimit": "每张表加載的字段數限制",
       "node_shard_collection": "同步分區内容",
-      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效"
+      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效",
+			"preImage": "文檔原像",
+			"preImageTips": "啟用原像功能：\n1. 只有MongoDB6.0以上才支援開啟；\n2.確認集合已開啟changeStreamPreAndPostImages；\n3.確認原像的過期時間",
+			"timeSeriesCollection": "時間序列集合屬性",
+			"timeSeriesCollectionTip": "源表為TimeSeries集合時同步為TimeSeries集合，僅支持源表為MongoDB到MongoDB，且版本為MongoDB5.0以上"
 
 		}
 	},

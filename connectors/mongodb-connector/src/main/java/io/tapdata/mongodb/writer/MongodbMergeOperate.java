@@ -1,11 +1,13 @@
 package io.tapdata.mongodb.writer;
 
-import com.mongodb.client.model.*;
+import com.mongodb.client.model.DeleteOneModel;
+import com.mongodb.client.model.InsertOneModel;
+import com.mongodb.client.model.UpdateManyModel;
+import com.mongodb.client.model.WriteModel;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
-import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.entity.MergeBundle;
 import io.tapdata.mongodb.entity.MergeResult;
@@ -15,6 +17,7 @@ import io.tapdata.pdk.apis.entity.merge.MergeLookupResult;
 import io.tapdata.pdk.apis.entity.merge.MergeTableProperties;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.bson.Document;
 
 import java.util.*;
@@ -26,11 +29,13 @@ import java.util.concurrent.atomic.AtomicLong;
  **/
 public class MongodbMergeOperate {
 
-	public static List<WriteModel<Document>> merge(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, TapRecordEvent tapRecordEvent, TapTable table) {
-		List<WriteModel<Document>> writeModels = null;
+	protected static final String UNSET_KEY = "$unset";
+
+	public static List<WriteModel<Document>> merge(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, TapRecordEvent tapRecordEvent, Collection<String> allColumn, Collection<String> pks) {
+		List<WriteModel<Document>> writeModels;
 		try {
 			writeModels = new ArrayList<>();
-			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent);
+			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent, allColumn, pks);
 			final Map<String, Object> info = tapRecordEvent.getInfo();
 			if (tapRecordEvent instanceof TapInsertRecordEvent) {
 				inserted.incrementAndGet();
@@ -45,7 +50,10 @@ public class MongodbMergeOperate {
 				final MergeInfo mergeInfo = (MergeInfo) info.get(MergeInfo.EVENT_INFO_KEY);
 				final MergeTableProperties currentProperty = mergeInfo.getCurrentProperty();
 				final List<MergeLookupResult> mergeLookupResults = mergeInfo.getMergeLookupResults();
-				recursiveMerge(mergeBundle, currentProperty, mergeResults, mergeLookupResults, new MergeResult());
+				Set<String> sharedJoinKeys = mergeInfo.getSharedJoinKeys();
+				Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys = mergeInfo.getUpdateJoinKeys();
+				recursiveMerge(mergeBundle, currentProperty, mergeResults, mergeLookupResults, new MergeResult(), null, updateJoinKeys, sharedJoinKeys, null);
+
 
 				if (CollectionUtils.isNotEmpty(mergeResults)) {
 					for (MergeResult mergeResult : mergeResults) {
@@ -75,29 +83,32 @@ public class MongodbMergeOperate {
 			MergeTableProperties properties,
 			List<MergeResult> mergeResults,
 			List<MergeLookupResult> mergeLookupResults,
-			MergeResult mergeResult
+			MergeResult mergeResult,
+			MergeResult unsetResult,
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
+			Set<String> sharedJoinKeys,
+			MergeTableProperties parentProperties
 	) {
-
+		boolean unsetResultNull = null == unsetResult;
 		switch (properties.getMergeType()) {
-//						case appendWrite:
-//								appendMerge(mergeBundle, properties, mergeResult);
-//								break;
 			case updateOrInsert:
 				upsertMerge(mergeBundle, properties, mergeResult);
 				break;
 			case updateWrite:
-				if (mergeResult.getOperation() != null) {
-					mergeResults.add(mergeResult);
-					mergeResult = new MergeResult();
+				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys);
+				if (unsetResultNull) {
+					addUnsetMerge(mergeResults, unsetResult);
 				}
-				updateMerge(mergeBundle, properties, mergeResult);
+				mergeResult = addMergeResults(mergeResults, mergeResult);
+				mergeResult = updateMergeIfNeed(mergeBundle, properties, mergeResult, sharedJoinKeys);
 				break;
 			case updateIntoArray:
-				if (mergeResult.getOperation() != null) {
-					mergeResults.add(mergeResult);
-					mergeResult = new MergeResult();
+				unsetResult = updateIntoArrayUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, parentProperties);
+				if (unsetResultNull && addUnsetMerge(mergeResults, unsetResult)) {
+					mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
 				}
-				updateIntoArrayMerge(mergeBundle, properties, mergeResult);
+				mergeResult = addMergeResults(mergeResults, mergeResult);
+				mergeResult = updateIntoArrayMergeIfNeed(mergeBundle, properties, mergeResult);
 				break;
 		}
 
@@ -105,8 +116,11 @@ public class MongodbMergeOperate {
 			for (MergeLookupResult mergeLookupResult : mergeLookupResults) {
 				final Map<String, Object> data = mergeLookupResult.getData();
 				mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, data);
-				recursiveMerge(mergeBundle, mergeLookupResult.getProperty(), mergeResults, mergeLookupResult.getMergeLookupResults(), mergeResult);
+				mergeBundle.setRecursive(true);
+				mergeBundle.setDataExists(mergeLookupResult.isDataExists());
+				recursiveMerge(mergeBundle, mergeLookupResult.getProperty(), mergeResults, mergeLookupResult.getMergeLookupResults(), mergeResult, unsetResult, updateJoinKeys, mergeLookupResult.getSharedJoinKeys(), properties);
 			}
+			return;
 		}
 
 		if (mergeResult != null) {
@@ -114,28 +128,181 @@ public class MongodbMergeOperate {
 		}
 	}
 
-	public static void appendMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult) {
-		final String targetPath = currentProperty.getTargetPath();
-		Document insertDoc = new Document();
-		final MergeBundle.EventOperation operation = mergeBundle.getOperation();
-		switch (operation) {
-			case INSERT:
-			case UPDATE:
-				if (EmptyKit.isNotEmpty(targetPath)) {
-					insertDoc.put(targetPath, mergeBundle.getAfter());
-				} else {
-					insertDoc.putAll(mergeBundle.getAfter());
-				}
-				break;
-			default:
-				return;
+	private static MergeResult updateIntoArrayMergeIfNeed(MergeBundle mergeBundle, MergeTableProperties properties, MergeResult mergeResult) {
+		if (mergeBundle.isDataExists()) {
+			updateIntoArrayMerge(mergeBundle, properties, mergeResult);
+		} else {
+			mergeResult = null;
 		}
-		mergeResult.getInsert().putAll(insertDoc);
+		return mergeResult;
+	}
+
+	private static MergeResult updateMergeIfNeed(MergeBundle mergeBundle, MergeTableProperties properties, MergeResult mergeResult, Set<String> sharedJoinKeys) {
+		if (mergeBundle.isDataExists()) {
+			updateMerge(mergeBundle, properties, mergeResult, sharedJoinKeys);
+		} else {
+			mergeResult = null;
+		}
+		return mergeResult;
+	}
+
+	private static boolean addUnsetMerge(List<MergeResult> mergeResults, MergeResult unsetResult) {
+		if (null != unsetResult && null != unsetResult.getOperation()) {
+			mergeResults.add(unsetResult);
+			return true;
+		}
+		return false;
+	}
+
+	private static MergeResult addMergeResults(List<MergeResult> mergeResults, MergeResult mergeResult) {
+		if (null == mergeResult) {
+			mergeResult = new MergeResult();
+		}
+		if (mergeResult.getOperation() != null) {
+			mergeResults.add(mergeResult);
+			mergeResult = new MergeResult();
+		}
+		return mergeResult;
+	}
+
+	private static MergeResult updateWriteUnsetMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult, Set<String> sharedJoinKeys) {
+		if (null == currentProperty) {
+			return mergeResult;
+		}
+		String id = currentProperty.getId();
+		if (null == mergeResult && (MapUtils.isEmpty(updateJoinKeys) || !updateJoinKeys.containsKey(id))) {
+			return mergeResult;
+		}
+		MergeBundle.EventOperation operation = mergeBundle.getOperation();
+		if (MergeBundle.EventOperation.UPDATE != operation
+				&& (MergeBundle.EventOperation.INSERT != operation || !mergeBundle.isRecursive())) {
+			return mergeResult;
+		}
+		Map<String, Object> after = mergeBundle.getAfter();
+		String targetPath = currentProperty.getTargetPath();
+		boolean isArray = currentProperty.getIsArray();
+		String arrayPath = currentProperty.getArrayPath();
+		boolean firstMergeResult = false;
+		if (null == mergeResult) {
+			firstMergeResult = true;
+			MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
+			Map<String, Object> updateJoinKeyBefore = updateJoinKey.getBefore();
+			List<Map<String, String>> joinKeys = currentProperty.getJoinKeys();
+			Document filter;
+			mergeResult = new MergeResult();
+			filter = filter(updateJoinKeyBefore, joinKeys);
+			if (null != updateJoinKey.getParentBefore()) {
+				filter.putAll(updateJoinKey.getParentBefore());
+			}
+			if (isArray) {
+				List<Document> arrayFilter = arrayFilter(
+						updateJoinKeyBefore,
+						joinKeys,
+						arrayPath
+				);
+				mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
+			}
+			if (EmptyKit.isEmpty(filter)) {
+				return mergeResult;
+			}
+			mergeResult.getFilter().putAll(filter);
+		}
+
+		if (null == mergeResult.getOperation()) {
+			mergeResult.setOperation(MergeResult.Operation.UPDATE);
+		}
+		Document unsetDoc = buildUnsetDocument(sharedJoinKeys, after, targetPath, isArray, firstMergeResult);
+		Document update = mergeResult.getUpdate();
+		if (update.containsKey(UNSET_KEY)) {
+			update.get(UNSET_KEY, Document.class).putAll(unsetDoc);
+		} else {
+			update.append(UNSET_KEY, unsetDoc);
+		}
+
+		return mergeResult;
+	}
+
+	private static MergeResult updateIntoArrayUnsetMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult, MergeTableProperties parentProperties) {
+		String id = currentProperty.getId();
+		if (null == mergeResult && (MapUtils.isEmpty(updateJoinKeys) || !updateJoinKeys.containsKey(id))) {
+			return mergeResult;
+		}
+		if (null != parentProperties && MergeTableProperties.MergeType.updateIntoArray.equals(parentProperties.getMergeType())) {
+			mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
+			return null;
+		} else if (null != parentProperties && MergeTableProperties.MergeType.updateWrite.equals(parentProperties.getMergeType())) {
+			mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
+			String targetPath = currentProperty.getTargetPath();
+			if (StringUtils.isNotBlank(targetPath)) {
+				Document update = mergeResult.getUpdate();
+				Document unsetDoc = new Document(targetPath, true);
+				if (update.containsKey(UNSET_KEY)) {
+					update.get(UNSET_KEY, Document.class).putAll(unsetDoc);
+				} else {
+					update.put(UNSET_KEY, unsetDoc);
+				}
+				return mergeResult;
+			} else {
+				return null;
+			}
+		}
+		MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
+		if (null == updateJoinKey) {
+			return mergeResult;
+		}
+		MergeBundle.EventOperation operation = mergeBundle.getOperation();
+		if (MergeBundle.EventOperation.UPDATE != operation
+				&& (MergeBundle.EventOperation.INSERT != operation || !mergeBundle.isRecursive())) {
+			return mergeResult;
+		}
+		String targetPath = currentProperty.getTargetPath();
+		boolean array = currentProperty.getIsArray();
+		List<String> arrayKeys = currentProperty.getArrayKeys();
+		Map<String, Object> updateJoinKeyBefore = updateJoinKey.getBefore();
+		if (null == mergeResult) {
+			mergeResult = new MergeResult();
+		}
+		if (array) {
+			List<Document> arrayFilter = arrayFilter(
+					updateJoinKeyBefore,
+					currentProperty.getJoinKeys(),
+					currentProperty.getArrayPath());
+			mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
+		} else {
+			Document filter = filter(updateJoinKeyBefore, currentProperty.getJoinKeys());
+			if (null != updateJoinKey.getParentBefore()) {
+				filter.putAll(updateJoinKey.getParentBefore());
+			}
+			mergeResult.getFilter().putAll(filter);
+		}
+
+		if (mergeResult.getOperation() == null) {
+			mergeResult.setOperation(MergeResult.Operation.UPDATE);
+		}
+
+		Document updateOpDoc;
+		if (mergeBundle.isDataExists()) {
+			updateOpDoc = buildPullDocument(MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(), arrayKeys, array, targetPath);
+			if (mergeResult.getUpdate().containsKey("$pull")) {
+				mergeResult.getUpdate().get("$pull", Document.class).putAll(updateOpDoc);
+			} else {
+				mergeResult.getUpdate().put("$pull", updateOpDoc);
+			}
+		} else {
+			if (StringUtils.isNotBlank(targetPath)) {
+				updateOpDoc = new Document(targetPath, true);
+				if (mergeResult.getUpdate().containsKey("$unset")) {
+					mergeResult.getUpdate().get("$unset", Document.class).putAll(updateOpDoc);
+				} else {
+					mergeResult.getUpdate().put("$unset", updateOpDoc);
+				}
+			}
+		}
+		return mergeResult;
 	}
 
 	public static void upsertMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult) {
 		final String targetPath = currentProperty.getTargetPath();
-//				final MergeResult.MergeResultBuilder builder = MergeResult.MergeResultBuilder.builder();
 		final MergeBundle.EventOperation operation = mergeBundle.getOperation();
 		final Document filter = filter(
 				MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
@@ -168,15 +335,27 @@ public class MongodbMergeOperate {
 				if (removeFields != null) {
 					if (EmptyKit.isNotEmpty(targetPath)) {
 						for (Map.Entry<String, Object> entry : removeFields.entrySet()) {
-							unsetOperateDoc.append(targetPath + "." + entry.getKey(), entry.getValue());
+							Map<String, Object> finalAfter = after;
+							if (after.keySet().stream().noneMatch(v -> (v.startsWith(entry.getKey() + ".") || entry.getKey().startsWith(v + ".")) && finalAfter.get(v) instanceof ArrayList)) {
+								unsetOperateDoc.append(targetPath + "." + entry.getKey(), entry.getValue());
+							}
 						}
 					} else {
-						unsetOperateDoc.putAll(removeFields);
+						for (Map.Entry<String, Object> entry : removeFields.entrySet()) {
+							Map<String, Object> finalAfter = after;
+							if (after.keySet().stream().noneMatch(v -> (v.startsWith(entry.getKey() + ".") || entry.getKey().startsWith(v + ".")) && finalAfter.get(v) instanceof ArrayList)) {
+								unsetOperateDoc.append(entry.getKey(), entry.getValue());
+							}
+						}
 					}
 					if (update.containsKey("$unset")) {
-						update.get("$unset", Document.class).putAll(unsetOperateDoc);
+						if (unsetOperateDoc.size() > 0) {
+							update.get("$unset", Document.class).putAll(unsetOperateDoc);
+						}
 					} else {
-						update.put("$unset", unsetOperateDoc);
+						if (unsetOperateDoc.size() > 0) {
+							update.put("$unset", unsetOperateDoc);
+						}
 					}
 				}
 				if (operation == MergeBundle.EventOperation.INSERT) {
@@ -194,19 +373,24 @@ public class MongodbMergeOperate {
 		}
 	}
 
-	public static void updateMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult) {
+	public static void updateMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult, Set<String> sharedJoinKeys) {
 		final String targetPath = currentProperty.getTargetPath();
 		final boolean array = currentProperty.getIsArray();
+		Map<String, Object> before = mergeBundle.getBefore();
+		Map<String, Object> after = mergeBundle.getAfter();
+		Map<String, Object> filterMap = new HashMap<>(null != after ? after : before);
+		if (null != before) {
+			filterMap.putAll(before);
+		}
 		final Document filter = filter(
-				MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+				filterMap,
 				currentProperty.getJoinKeys()
 		);
 		mergeResult.getFilter().putAll(filter);
 		if (array) {
 			final List<Document> arrayFilter = arrayFilter(
-					MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+					filterMap,
 					currentProperty.getJoinKeys(),
-					currentProperty.getTargetPath(),
 					currentProperty.getArrayPath()
 			);
 			mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
@@ -238,13 +422,21 @@ public class MongodbMergeOperate {
 			}
 			if (removeFields != null) {
 				for (Map.Entry<String, Object> entry : removeFields.entrySet()) {
-					unsetOpDoc.append(updatePatch + "." + entry.getKey(), entry.getValue());
+					Map<String, Object> finalAfter = value;
+					if (value.keySet().stream().noneMatch(v -> (v.startsWith(entry.getKey() + ".") || entry.getKey().startsWith(v + ".")) && finalAfter.get(v) instanceof ArrayList)) {
+						unsetOpDoc.append(updatePatch + "." + entry.getKey(), entry.getValue());
+					}
 				}
 			}
 		} else {
 			updateOpDoc.putAll(value);
 			if (removeFields != null) {
-				unsetOpDoc.putAll(removeFields);
+				for (Map.Entry<String, Object> entry : removeFields.entrySet()) {
+					Map<String, Object> finalAfter = value;
+					if (value.keySet().stream().noneMatch(v -> (v.startsWith(entry.getKey() + ".") || entry.getKey().startsWith(v + ".")) && finalAfter.get(v) instanceof ArrayList)) {
+						unsetOpDoc.append(entry.getKey(), entry.getValue());
+					}
+				}
 			}
 		}
 		if (mergeResult.getOperation() == null) {
@@ -258,15 +450,21 @@ public class MongodbMergeOperate {
 				} else {
 					mergeResult.getUpdate().put("$set", updateOpDoc);
 				}
-				if (removeFields != null) {
+				if (MapUtils.isNotEmpty(unsetOpDoc)) {
+					unsetOpDoc.keySet().removeIf(key -> !array && isShareJoinKey(sharedJoinKeys, key));
 					if (mergeResult.getUpdate().containsKey("$unset")) {
-						mergeResult.getUpdate().get("unset", Document.class).putAll(unsetOpDoc);
+						if (!unsetOpDoc.isEmpty()) {
+							mergeResult.getUpdate().get("$unset", Document.class).putAll(unsetOpDoc);
+						}
 					} else {
-						mergeResult.getUpdate().put("$unset", unsetOpDoc);
+						if (!unsetOpDoc.isEmpty()) {
+							mergeResult.getUpdate().put("$unset", unsetOpDoc);
+						}
 					}
 				}
 				break;
 			case DELETE:
+				updateOpDoc.keySet().removeIf(key -> !array && isShareJoinKey(sharedJoinKeys, key));
 				if (mergeResult.getUpdate().containsKey("$unset")) {
 					mergeResult.getUpdate().get("$unset", Document.class).putAll(updateOpDoc);
 				} else {
@@ -274,6 +472,16 @@ public class MongodbMergeOperate {
 				}
 				break;
 		}
+	}
+
+	private static boolean isShareJoinKey(Set<String> sharedJoinKey, String field) {
+		if (null == sharedJoinKey) {
+			return false;
+		}
+		if (StringUtils.isBlank(field)) {
+			return false;
+		}
+		return sharedJoinKey.contains(field);
 	}
 
 	public static void updateIntoArrayMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult) {
@@ -294,7 +502,6 @@ public class MongodbMergeOperate {
 				arrayFilter = arrayFilter(
 						MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
 						currentProperty.getJoinKeys(),
-						currentProperty.getTargetPath(),
 						currentProperty.getArrayPath());
 			}
 			mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
@@ -374,30 +581,33 @@ public class MongodbMergeOperate {
 					mergeResult.getUpdate().put("$set", updateOpDoc);
 				}
 				if (removefields != null) {
-					for (Map.Entry<String, Object> entry : removefields.entrySet()) {
-						if (array) {
-							String[] paths = targetPath.split("\\.");
-							if (paths.length > 1) {
-								unsetOpDoc.append(paths[0] + ".$[element1]." + paths[1] + ".$[element2]." + entry.getKey(), entry.getValue());
+					for (String removeField : removefields.keySet()) {
+						if (after.keySet().stream().noneMatch(v -> v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
+							if (array) {
+								String[] paths = targetPath.split("\\.");
+								if (paths.length > 1) {
+									unsetOpDoc.append(paths[0] + ".$[element1]." + paths[1] + ".$[element2]." + removeField, true);
+								} else {
+									unsetOpDoc.append(targetPath + ".$[element1]." + removeField, true);
+								}
 							} else {
-								unsetOpDoc.append(targetPath + ".$[element1]." + entry.getKey(), entry.getValue());
+								unsetOpDoc.append(targetPath + ".$[element1]." + removeField, true);
 							}
-						} else {
-							unsetOpDoc.append(targetPath + ".$[element1]." + entry.getKey(), entry.getValue());
 						}
 					}
 					if (mergeResult.getUpdate().containsKey("$unset")) {
-						mergeResult.getUpdate().get("$unset", Document.class).putAll(unsetOpDoc);
+						if (!unsetOpDoc.isEmpty()) {
+							mergeResult.getUpdate().get("$unset", Document.class).putAll(unsetOpDoc);
+						}
 					} else {
-						mergeResult.getUpdate().put("$unset", unsetOpDoc);
+						if (!unsetOpDoc.isEmpty()) {
+							mergeResult.getUpdate().put("$unset", unsetOpDoc);
+						}
 					}
 				}
 				break;
 			case DELETE:
-				for (String arrayKey : arrayKeys) {
-					updateOpDoc.append(arrayKey, MapUtil.getValueByKey(mergeBundle.getBefore(), arrayKey));
-				}
-				updateOpDoc = new Document(targetPath, updateOpDoc);
+				updateOpDoc = buildPullDocument(mergeBundle.getBefore(), arrayKeys, array, targetPath);
 				if (mergeResult.getUpdate().containsKey("$pull")) {
 					mergeResult.getUpdate().get("$pull", Document.class).putAll(updateOpDoc);
 				} else {
@@ -407,7 +617,48 @@ public class MongodbMergeOperate {
 		}
 	}
 
-	private static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent) {
+	private static Document buildUnsetDocument(Set<String> sharedJoinKeys, Map<String, Object> data, String targetPath, boolean isArray, boolean firstMergeResult) {
+		Document unsetDoc = new Document();
+		if (isArray) {
+			if (firstMergeResult && StringUtils.isNotBlank(targetPath)) {
+				data.keySet().forEach(key -> {
+					if (sharedJoinKeys.contains(String.join(".", targetPath, key))) {
+						return;
+					}
+					unsetDoc.append(String.join(".", targetPath, "$[element1]", key), true);
+				});
+			}
+		} else {
+			data.keySet().forEach(key -> {
+				if (EmptyKit.isNotEmpty(targetPath)) {
+					unsetDoc.append(String.join(".", targetPath, key), true);
+				} else {
+					unsetDoc.append(key, true);
+				}
+			});
+			unsetDoc.keySet().removeIf(key -> isShareJoinKey(sharedJoinKeys, key));
+		}
+		return unsetDoc;
+	}
+
+	private static Document buildPullDocument(Map<String, Object> data, List<String> arrayKeys, boolean array, String targetPath) {
+		Document updateOpDoc = new Document();
+		for (String arrayKey : arrayKeys) {
+			Object value = MapUtil.getValueByKey(data, arrayKey);
+			updateOpDoc.append(arrayKey, value);
+		}
+		if (array) {
+			String[] paths = targetPath.split("\\.");
+			if (paths.length == 2) {
+				updateOpDoc = new Document(paths[0] + ".$[element1]." + paths[1], updateOpDoc);
+			}
+		} else {
+			updateOpDoc = new Document(targetPath, updateOpDoc);
+		}
+		return updateOpDoc;
+	}
+
+	private static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent, Collection<String> allColumn, Collection<String> pks) {
 		Map<String, Object> before = null;
 		Map<String, Object> after = null;
 		MergeBundle.EventOperation eventOperation = null;
@@ -420,11 +671,10 @@ public class MongodbMergeOperate {
 			after = ((TapUpdateRecordEvent) tapRecordEvent).getAfter();
 			eventOperation = MergeBundle.EventOperation.UPDATE;
 			List<String> removedFields = ((TapUpdateRecordEvent) tapRecordEvent).getRemovedFields();
-			if(removedFields != null && removedFields.size() > 0)
-			{
+			if (removedFields != null && removedFields.size() > 0) {
 				removefields = new HashMap<>();
-				for(String removeField : removedFields){
-					removefields.put(removeField,true);
+				for (String removeField : removedFields) {
+					removefields.put(removeField, true);
 				}
 			}
 		} else {
@@ -443,12 +693,11 @@ public class MongodbMergeOperate {
 		return document;
 	}
 
-	private static List<Document> arrayFilter(Map<String, Object> data, List<Map<String, String>> joinKeys, String targetPath, String arrayPath) {
+	private static List<Document> arrayFilter(Map<String, Object> data, List<Map<String, String>> joinKeys, String arrayPath) {
 		List<Document> arrayFilter = new ArrayList<>();
 		Document filter = new Document();
 		for (Map<String, String> joinKey : joinKeys) {
-//			String[] paths = joinKey.get("target").split("\\.");
-			filter.put("element1." + getArrayMatchString(arrayPath, joinKey)/*paths[paths.length - 1]*/, MapUtil.getValueByKey(data, joinKey.get("source")));
+			filter.put("element1." + getArrayMatchString(arrayPath, joinKey), MapUtil.getValueByKey(data, joinKey.get("source")));
 		}
 		arrayFilter.add(filter);
 		return arrayFilter;
@@ -456,7 +705,7 @@ public class MongodbMergeOperate {
 
 	private static String getArrayMatchString(String arrayPath, Map<String, String> joinKey) {
 		String targetStr = joinKey.get("target");
-		if(targetStr.startsWith(arrayPath)) {
+		if (targetStr.startsWith(arrayPath)) {
 			targetStr = targetStr.substring(arrayPath.length() + 1);
 		}
 		return targetStr;
@@ -485,7 +734,7 @@ public class MongodbMergeOperate {
 		for (String arrayKey : arrayKeys) {
 			Document filter = new Document();
 			String[] paths = arrayKey.split("\\.");
-			filter.put("element2." + paths[paths.length-1], MapUtil.getValueByKey(data, arrayKey));
+			filter.put("element2." + paths[paths.length - 1], MapUtil.getValueByKey(data, arrayKey));
 			arrayFilter.add(filter);
 		}
 		return arrayFilter;
@@ -502,5 +751,23 @@ public class MongodbMergeOperate {
 				return new DeleteOneModel<>(mergeResult.getFilter());
 		}
 		return null;
+	}
+
+	private static class MongodbMergeInfo {
+		MergeBundle mergeBundle;
+		MergeTableProperties properties;
+		List<MergeResult> mergeResults;
+		List<MergeLookupResult> mergeLookupResults;
+		MergeResult mergeResult;
+		Set<String> sharedJoinKey;
+
+		public MongodbMergeInfo(MergeBundle mergeBundle, MergeTableProperties properties, List<MergeResult> mergeResults, List<MergeLookupResult> mergeLookupResults, MergeResult mergeResult, Set<String> sharedJoinKey) {
+			this.mergeBundle = mergeBundle;
+			this.properties = properties;
+			this.mergeResults = mergeResults;
+			this.mergeLookupResults = mergeLookupResults;
+			this.mergeResult = mergeResult;
+			this.sharedJoinKey = sharedJoinKey;
+		}
 	}
 }

@@ -62,8 +62,16 @@ public class TDengineTest extends CommonDbTest {
     @Override
     public Boolean testStreamRead() {
         Properties properties = new Properties();
-//            properties.setProperty(TMQConstants.BOOTSTRAP_SERVERS, "127.0.0.1:6030");
-        properties.setProperty(TMQConstants.BOOTSTRAP_SERVERS, String.format("%s:%s", jdbcContext.getConfig().getHost(), 6030));
+        TDengineConfig tDengineConfig = (TDengineConfig) jdbcContext.getConfig();
+        if (tDengineConfig.getSupportWebSocket()) {
+            properties.setProperty(TMQConstants.BOOTSTRAP_SERVERS, String.format("%s:%s", tDengineConfig.getHost(), tDengineConfig.getPort()));
+            properties.setProperty(TMQConstants.CONNECT_TYPE, "ws");
+            properties.setProperty(TMQConstants.CONNECT_USER, tDengineConfig.getUser());
+            properties.setProperty(TMQConstants.CONNECT_PASS, tDengineConfig.getPassword());
+        } else {
+            properties.setProperty(TMQConstants.BOOTSTRAP_SERVERS, String.format("%s:%s", tDengineConfig.getHost(), tDengineConfig.getOriginPort()));
+            properties.setProperty(TMQConstants.CONNECT_TYPE, "jni");
+        }
         properties.setProperty(TMQConstants.MSG_WITH_TABLE_NAME, Boolean.TRUE.toString());
         properties.setProperty(TMQConstants.ENABLE_AUTO_COMMIT, Boolean.TRUE.toString());
         properties.setProperty(TMQConstants.GROUP_ID, "test_group_id");

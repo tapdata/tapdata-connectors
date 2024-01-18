@@ -21,9 +21,13 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.entity.utils.cache.Entry;
+import io.tapdata.entity.utils.cache.Iterator;
+import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -43,10 +47,7 @@ import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -229,6 +230,51 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
+    private static final String PG_REPLICATE_IDENTITY = "select relname, relreplident from pg_class\n" +
+            "where relnamespace=(select oid from pg_namespace where nspname='%s') and relname in (%s)";
+
+    private void testReplicateIdentity(KVReadOnlyMap<TapTable> tableMap) {
+        if ("pgoutput".equals(postgresConfig.getLogPluginName())) {
+            tapLogger.warn("The pgoutput plugin may cause before of data loss, if you need, please use another plugin instead, such as wal2json");
+            return;
+        }
+        if (EmptyKit.isNull(tableMap)) {
+            return;
+        }
+        List<String> tableList = new ArrayList<>();
+        List<String> hasPrimary = new ArrayList<>();
+        Iterator<Entry<TapTable>> iterator = tableMap.iterator();
+        while (iterator.hasNext()) {
+            Entry<TapTable> entry = iterator.next();
+            tableList.add(entry.getKey());
+            if (EmptyKit.isNotEmpty(entry.getValue().primaryKeys())) {
+                hasPrimary.add(entry.getKey());
+            }
+        }
+        List<String> noPrimaryOrFull = new ArrayList<>(); //无主键表且identity不为full
+        List<String> primaryNotDefaultOrFull = new ArrayList<>(); //有主键表但identity不为full也不为default
+        try {
+            postgresJdbcContext.query(String.format(PG_REPLICATE_IDENTITY, postgresConfig.getSchema(), StringKit.joinString(tableList, "'", ",")), resultSet -> {
+                while (resultSet.next()) {
+                    if (!hasPrimary.contains(resultSet.getString("relname")) && !"f".equals(resultSet.getString("relreplident"))) {
+                        noPrimaryOrFull.add(resultSet.getString("relname"));
+                    }
+                    if (hasPrimary.contains(resultSet.getString("relname")) && !"f".equals(resultSet.getString("relreplident")) && !"d".equals(resultSet.getString("relreplident"))) {
+                        primaryNotDefaultOrFull.add(resultSet.getString("relname"));
+                    }
+                }
+            });
+        } catch (Exception e) {
+            return;
+        }
+        if (EmptyKit.isNotEmpty(noPrimaryOrFull)) {
+            tapLogger.warn("The following tables do not have a primary key and the identity is not full, which may cause before of data loss: {}", String.join(",", noPrimaryOrFull));
+        }
+        if (EmptyKit.isNotEmpty(primaryNotDefaultOrFull)) {
+            tapLogger.warn("The following tables have a primary key, but the identity is not full or default, which may cause before of data loss: {}", String.join(",", primaryNotDefaultOrFull));
+        }
+    }
+
     @Override
     public void onStop(TapConnectionContext connectionContext) {
         ErrorKit.ignoreAnyError(() -> {
@@ -319,6 +365,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+        testReplicateIdentity(nodeContext.getTableMap());
         buildSlot(nodeContext, true);
         cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
         cdcRunner.startCdcRunner();
@@ -340,6 +387,7 @@ public class PostgresConnector extends CommonDbConnector {
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
         if (canCdc) {
+            testReplicateIdentity(connectorContext.getTableMap());
             buildSlot(connectorContext, false);
         }
         return new PostgresOffset();

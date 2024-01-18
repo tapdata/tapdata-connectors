@@ -17,28 +17,28 @@ public class BigQueryExceptionCollector extends AbstractExceptionCollector imple
 
     @Override
     public void collectUserPwdInvalid(String username, Throwable cause) {
-        if(cause.getMessage().contains("Invalid JWT Signature")){
+        if(cause.getMessage() != null && cause.getMessage().contains("Invalid JWT Signature")){
             throw new TapPdkUserPwdInvalidEx(pdkId,username, ErrorKit.getLastCause(cause));
         }
     }
 
     @Override
     public void collectReadPrivileges(Object operation, List<String> privileges, Throwable cause) {
-        if(cause.getMessage().contains("Access Denied")){
+        if(cause.getMessage() != null && cause.getMessage().contains("Access Denied")){
             throw new TapPdkWriteMissingPrivilegesEx(pdkId, operation, privileges, ErrorKit.getLastCause(cause));
         }
     }
 
     @Override
     public void collectWritePrivileges(Object operation, List<String> privileges, Throwable cause) {
-       if(cause.getMessage().contains("Access Denied")){
+       if(cause.getMessage() != null && cause.getMessage().contains("Access Denied")){
            throw new TapPdkWriteMissingPrivilegesEx(pdkId, operation, privileges, ErrorKit.getLastCause(cause));
        }
     }
 
     @Override
     public void collectWriteType(String targetFieldName, String targetFieldType, Object data, Throwable cause) {
-        if( cause instanceof Exceptions.AppendSerializtionError && cause.getMessage().contains("Append serialization failed for writer")){
+        if( cause instanceof Exceptions.AppendSerializtionError && cause.getMessage() != null && cause.getMessage().contains("Append serialization failed for writer")){
             String error =  ((Exceptions.AppendSerializtionError) cause).getRowIndexToErrorMessage().get(0);
             String regex = "Field (.*) failed to convert to (\\w+)";
             Pattern pattern = Pattern.compile(regex);
@@ -56,7 +56,7 @@ public class BigQueryExceptionCollector extends AbstractExceptionCollector imple
     @Override
     public void collectWriteLength(String targetFieldName, String targetFieldType, Object data, Throwable cause) {
         //number length
-        if (cause.getCause() !=null && cause.getCause() instanceof Exceptions.AppendSerializtionError) {
+        if (cause.getCause() != null && cause.getCause() instanceof Exceptions.AppendSerializtionError) {
             String error =  ((Exceptions.AppendSerializtionError) cause.getCause()).getRowIndexToErrorMessage().get(0);
             String regex = "Field (\\w+): (.*) has maximum length (\\d+) but got a value with length (\\d+)";
             Pattern pattern = Pattern.compile(regex);
@@ -71,7 +71,7 @@ public class BigQueryExceptionCollector extends AbstractExceptionCollector imple
 
     @Override
     public void collectViolateNull(String targetFieldName, Throwable cause) {
-        if (cause instanceof Exceptions.AppendSerializtionError && cause.getMessage().contains("Append serialization failed for writer")) {
+        if (cause instanceof Exceptions.AppendSerializtionError &&  cause.getMessage() != null && cause.getMessage().contains("Append serialization failed for writer")) {
             String error = ((Exceptions.AppendSerializtionError) cause).getRowIndexToErrorMessage().get(0);
             String regex = "JSONObject does not have the required field (.*)";
             Pattern pattern = Pattern.compile(regex);

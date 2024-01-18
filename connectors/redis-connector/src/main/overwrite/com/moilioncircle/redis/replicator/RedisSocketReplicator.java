@@ -214,9 +214,9 @@ public class RedisSocketReplicator extends AbstractReplicator {
                 return;
             }
             if (user == null) {
-                throw new AssertionError("[AUTH " + mask + "] failed. " + reply);
+                throw new IOException("[AUTH " + mask + "] failed. " + reply);
             } else {
-                throw new AssertionError("[AUTH " + user + " " + mask + "] failed. " + reply);
+                throw new IOException("[AUTH " + user + " " + mask + "] failed. " + reply);
             }
         }
     }

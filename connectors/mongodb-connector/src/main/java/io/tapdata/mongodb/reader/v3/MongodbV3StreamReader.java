@@ -11,13 +11,16 @@ import com.mongodb.client.model.Filters;
 import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
+import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
 import io.tapdata.mongodb.MongodbConnector;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbStreamReader;
+import io.tapdata.mongodb.util.IntervalReport;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -27,6 +30,7 @@ import org.bson.BsonTimestamp;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingDeque;
@@ -103,15 +107,36 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 		}
 
 		if (MapUtils.isNotEmpty(nodesURI)) {
+			int intervalReportMillis = 3000; // interval report offset if no match any table event
 			for (Map.Entry<String, String> entry : nodesURI.entrySet()) {
 				final String replicaSetName = entry.getKey();
 				final String mongodbURI = entry.getValue();
+				final IntervalReport<BsonTimestamp, InterruptedException> intervalReport = new IntervalReport<BsonTimestamp, InterruptedException>(intervalReportMillis) {
+					@Override
+					protected void report(BsonTimestamp bsonTimestamp) throws InterruptedException {
+						while (running.get()) {
+							HeartbeatEvent heartbeatEvent = new HeartbeatEvent().referenceTime(bsonTimestamp.getTime() * 1000L);
+							heartbeatEvent.setTime(heartbeatEvent.getReferenceTime());
+							if (tapEventQueue.offer(
+								new TapEventOffset(
+									heartbeatEvent,
+									new MongoV3StreamOffset(bsonTimestamp.getTime(), bsonTimestamp.getInc()),
+									replicaSetName
+								),
+								3,
+								TimeUnit.SECONDS
+							)) {
+								break;
+							}
+						}
+					}
+				};
 
 				replicaSetReadThreadPool.submit(() -> {
 					if (running.get()) {
 						try {
 							Thread.currentThread().setName("replicaSet-read-thread-" + replicaSetName);
-							readFromOplog(replicaSetName, mongodbURI, eventBatchSize, consumer);
+							readFromOplog(connectorContext, replicaSetName, intervalReport, mongodbURI, eventBatchSize, consumer);
 						} catch (Exception e) {
 							running.compareAndSet(true, false);
 							TapLogger.error(TAG, "read oplog event from {} failed {}", replicaSetName, e.getMessage(), e);
@@ -130,11 +155,13 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					tapEvents.add(tapEventOffset.getTapEvent());
 					this.offset.put(tapEventOffset.getReplicaSetName(), tapEventOffset.getOffset());
 					if (tapEvents.size() >= eventBatchSize) {
-						consumer.accept(tapEvents, this.offset);
+						Map<String, MongoV3StreamOffset> newOffset = new ConcurrentHashMap<>(this.offset);
+						consumer.accept(tapEvents, newOffset);
 						tapEvents = new ArrayList<>(eventBatchSize);
 					}
-				} else if (tapEvents.size() > 0) {
-					consumer.accept(tapEvents, this.offset);
+				} else if (!tapEvents.isEmpty()) {
+					Map<String, MongoV3StreamOffset> newOffset = new ConcurrentHashMap<>(this.offset);
+					consumer.accept(tapEvents, newOffset);
 					tapEvents = new ArrayList<>(eventBatchSize);
 				}
 			} catch (InterruptedException e) {
@@ -181,7 +208,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 		}
 	}
 
-	private void readFromOplog(String replicaSetName, String mongodbURI, int eventBatchSize, StreamReadConsumer consumer) {
+	private void readFromOplog(TapConnectorContext connectorContext, String replicaSetName, IntervalReport<BsonTimestamp, InterruptedException> intervalReport, String mongodbURI, int eventBatchSize, StreamReadConsumer consumer) {
 		Bson filter = null;
 
 		BsonTimestamp startTs = null;
@@ -197,6 +224,26 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 
 		try (MongoClient mongoclient = MongoClients.create(mongodbURI)) {
 			final MongoCollection<Document> oplogCollection = mongoclient.getDatabase(LOCAL_DATABASE).getCollection(OPLOG_COLLECTION);
+			try (final MongoCursor<Document> mongoCursor = oplogCollection.find(fromMigrateFilter).sort(new Document("$natural", 1)).limit(1).cursorType(CursorType.TailableAwait)
+				.noCursorTimeout(true).iterator()) {
+				if (mongoCursor.hasNext()) {
+					Document event = mongoCursor.next();
+					BsonTimestamp bsonTimestamp = event.get("ts", BsonTimestamp.class);
+					if (bsonTimestamp.getTime() > startTs.getTime()) {
+						RuntimeException runtimeException = new RuntimeException(String.format("{replicaSetName: '%s', offsetTimes: '%s', firstLogTimes: '%s'}"
+							, replicaSetName
+							, Instant.ofEpochSecond(startTs.getTime())
+							, Instant.ofEpochSecond(bsonTimestamp.getTime())));
+						throw new TapPdkOffsetOutOfLogEx(connectorContext.getSpecification().getId(), offset, runtimeException);
+					}
+				} else {
+					throw new RuntimeException(String.format("Not found any oplog, replicaSetName: '%s', URI: '%s'", replicaSetName, mongodbURI));
+				}
+			} catch (MongoInterruptedException e) {
+				running.compareAndSet(true, false);
+				return;
+			}
+
 //						List<TapEvent> tapEvents = new ArrayList<>(eventBatchSize);
 			// todo exception retry
 			while (running.get()) {
@@ -212,11 +259,14 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 						if (mongoCursor.hasNext()) {
 							final Document event = mongoCursor.next();
 							final TapBaseEvent tapBaseEvent = handleOplogEvent(event);
+							final BsonTimestamp bsonTimestamp = event.get("ts", BsonTimestamp.class);
 							if (tapBaseEvent == null) {
+								intervalReport.summit(bsonTimestamp);
 								continue;
+							} else {
+								intervalReport.clear();
 							}
 
-							final BsonTimestamp bsonTimestamp = event.get("ts", BsonTimestamp.class);
 							tapBaseEvent.setReferenceTime((long) (bsonTimestamp.getTime()) * 1000);
 
 							while (running.get()) {
@@ -341,7 +391,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					//Map<String, Object> finalUnset = new DataMap();
 					List<String> finalUnset = new ArrayList<>();if (originUnset != null) {
 						for (Map.Entry<String, Object> entry : originUnset.entrySet()) {
-							if (after == null || after.keySet().stream().noneMatch(v -> v.equals(entry.getKey()) || v.startsWith(entry.getKey() + ".") || entry.getKey().startsWith(v + "."))) {
+							if (after == null || after.keySet().stream().noneMatch(v -> v.equals(entry.getKey()))) {
 								//finalUnset.put(entry.getKey(), true);
 							finalUnset.add(entry.getKey());
 							}

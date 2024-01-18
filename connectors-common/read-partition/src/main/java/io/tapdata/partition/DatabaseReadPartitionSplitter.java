@@ -70,7 +70,7 @@ public class DatabaseReadPartitionSplitter {
 	//private QueueWorker readPartitionTimerTask;
 	//private PartitionCollector currentPartitionCollector;
 
-	public void startSplitting() {
+	public void startSplitting() throws Throwable {
 		if(countByPartitionFilter == null) {
 			context.getLog().info("countByPartitionFilter function is not implemented, consider countIsSlow = true, will only use min/max for splitting.");
 			countIsSlow = true;

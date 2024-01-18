@@ -565,53 +565,53 @@ public class SourceInfoTest {
 
     @Test
     public void shouldConsiderPositionsWithSameGtidSetsAsSame() {
-        assertPositionWithGtids("IdA:1-5").isAtOrBefore(positionWithGtids("IdA:1-5")); // same, single
-        assertPositionWithGtids("IdA:1-5,IdB:1-20").isAtOrBefore(positionWithGtids("IdA:1-5,IdB:1-20")); // same, multiple
-        assertPositionWithGtids("IdA:1-5,IdB:1-20").isAtOrBefore(positionWithGtids("IdB:1-20,IdA:1-5")); // equivalent
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5").isAtOrBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5")); // same, single
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20").isAtOrBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20")); // same, multiple
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20").isAtOrBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040c:1-20,4d1a4918-44ba-11e6-bf12-42010af0040b:1-5")); // equivalent
     }
 
     @Test
     public void shouldConsiderPositionsWithSameGtidSetsAndSnapshotAsSame() {
-        assertPositionWithGtids("IdA:1-5", true).isAtOrBefore(positionWithGtids("IdA:1-5", true)); // same, single
-        assertPositionWithGtids("IdA:1-5,IdB:1-20", true).isAtOrBefore(positionWithGtids("IdA:1-5,IdB:1-20", true)); // same,
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5", true).isAtOrBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5", true)); // same, single
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20", true).isAtOrBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20", true)); // same,
                                                                                                                      // multiple
-        assertPositionWithGtids("IdA:1-5,IdB:1-20", true).isAtOrBefore(positionWithGtids("IdB:1-20,IdA:1-5", true)); // equivalent
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20", true).isAtOrBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040c:1-20,4d1a4918-44ba-11e6-bf12-42010af0040b:1-5", true)); // equivalent
     }
 
     @Test
     public void shouldOrderPositionWithGtidAndSnapshotBeforePositionWithSameGtidButNoSnapshot() {
-        assertPositionWithGtids("IdA:1-5", true).isAtOrBefore(positionWithGtids("IdA:1-5")); // same, single
-        assertPositionWithGtids("IdA:1-5,IdB:1-20", true).isAtOrBefore(positionWithGtids("IdA:1-5,IdB:1-20")); // same, multiple
-        assertPositionWithGtids("IdA:1-5,IdB:1-20", true).isAtOrBefore(positionWithGtids("IdB:1-20,IdA:1-5")); // equivalent
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5", true).isAtOrBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5")); // same, single
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20", true).isAtOrBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20")); // same, multiple
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20", true).isAtOrBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040c:1-20,4d1a4918-44ba-11e6-bf12-42010af0040b:1-5")); // equivalent
     }
 
     @Test
     public void shouldOrderPositionWithoutGtidAndSnapshotAfterPositionWithSameGtidAndSnapshot() {
-        assertPositionWithGtids("IdA:1-5", false).isAfter(positionWithGtids("IdA:1-5", true)); // same, single
-        assertPositionWithGtids("IdA:1-5,IdB:1-20", false).isAfter(positionWithGtids("IdA:1-5,IdB:1-20", true)); // same, multiple
-        assertPositionWithGtids("IdA:1-5,IdB:1-20", false).isAfter(positionWithGtids("IdB:1-20,IdA:1-5", true)); // equivalent
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5", false).isAfter(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5", true)); // same, single
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20", false).isAfter(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20", true)); // same, multiple
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20", false).isAfter(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040c:1-20,4d1a4918-44ba-11e6-bf12-42010af0040b:1-5", true)); // equivalent
     }
 
     @Test
     public void shouldOrderPositionWithGtidsAsBeforePositionWithExtraServerUuidInGtids() {
-        assertPositionWithGtids("IdA:1-5").isBefore(positionWithGtids("IdA:1-5,IdB:1-20"));
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5").isBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5,4d1a4918-44ba-11e6-bf12-42010af0040c:1-20"));
     }
 
     @Test
     public void shouldOrderPositionsWithSameServerButLowerUpperLimitAsBeforePositionWithSameServerUuidInGtids() {
-        assertPositionWithGtids("IdA:1-5").isBefore(positionWithGtids("IdA:1-6"));
-        assertPositionWithGtids("IdA:1-5:7-9").isBefore(positionWithGtids("IdA:1-10"));
-        assertPositionWithGtids("IdA:2-5:8-9").isBefore(positionWithGtids("IdA:1-10"));
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5").isBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-6"));
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5:7-9").isBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-10"));
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:2-5:8-9").isBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-10"));
     }
 
     @Test
     public void shouldOrderPositionWithoutGtidAsBeforePositionWithGtid() {
-        assertPositionWithoutGtids("filename.01", Integer.MAX_VALUE, 0, 0).isBefore(positionWithGtids("IdA:1-5"));
+        assertPositionWithoutGtids("filename.01", Integer.MAX_VALUE, 0, 0).isBefore(positionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5"));
     }
 
     @Test
     public void shouldOrderPositionWithGtidAsAfterPositionWithoutGtid() {
-        assertPositionWithGtids("IdA:1-5").isAfter(positionWithoutGtids("filename.01", 0, 0, 0));
+        assertPositionWithGtids("4d1a4918-44ba-11e6-bf12-42010af0040b:1-5").isAfter(positionWithoutGtids("filename.01", 0, 0, 0));
     }
 
     @Test

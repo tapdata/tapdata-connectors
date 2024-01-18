@@ -3,7 +3,10 @@
 	"name": "Mariadb",
 	"icon": "icons/mariadb.png",
 	"id": "mariadb",
-	"doc": "${doc}"
+	"doc": "${doc}",
+	"tags": [
+		"Database", "ssl"
+	]
   },
   "configOptions": {
 	"capabilities":[

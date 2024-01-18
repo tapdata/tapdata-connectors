@@ -553,8 +553,9 @@ public class MySqlStreamingChangeEventSource implements StreamingChangeEventSour
         }
         if (upperCasedStatementBegin.equals("INSERT ") || upperCasedStatementBegin.equals("UPDATE ") || upperCasedStatementBegin.equals("DELETE ")) {
             if (eventDeserializationFailureHandlingMode == EventProcessingFailureHandlingMode.FAIL) {
-                throw new DebeziumException(
-                        "Received DML '" + sql + "' for processing, binlog probably contains events generated with statement or mixed based replication format");
+                return;
+//                throw new DebeziumException(
+//                        "Received DML '" + sql + "' for processing, binlog probably contains events generated with statement or mixed based replication format");
             }
             else if (eventDeserializationFailureHandlingMode == EventProcessingFailureHandlingMode.WARN) {
                 LOGGER.warn("Warning only: Received DML '" + sql
