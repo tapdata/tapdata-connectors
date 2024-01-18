@@ -104,7 +104,7 @@ jobs:
 
   Scan-Connectors:
     runs-on: office-scan
-    timeout-minutes: 30
+    timeout-minutes: 50
     needs:
       - Sync-Code-to-Office
       - Get-Stable-Branch
