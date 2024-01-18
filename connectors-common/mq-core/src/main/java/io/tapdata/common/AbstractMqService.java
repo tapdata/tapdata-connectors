@@ -129,7 +129,7 @@ public abstract class AbstractMqService implements MqService {
             executorService.shutdown();
             Thread.sleep(2000);
         } catch (Exception e) {
-            TapLogger.error(TAG, "close service error", e);
+            TapLogger.error(TAG, "close service error message {} ", e.getMessage());
         }
     }
 

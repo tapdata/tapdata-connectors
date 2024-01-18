@@ -197,14 +197,17 @@ public class MrsKafkaService extends AbstractMqService {
                 List<String> topics = new ArrayList<>(tables);
                 kafkaConsumer.subscribe(topics);
                 ConsumerRecords<byte[], byte[]> consumerRecords;
-                while (!(consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L))).isEmpty()) {
+                tapLogger.info("begin load {} record ",tables);
+                while (!(consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(5L))).isEmpty()) {
                     for (ConsumerRecord<byte[], byte[]> record : consumerRecords) {
+                        tapLogger.info("topic {} has record ",tables);
                         if (!topics.contains(record.topic())) {
                             continue;
                         }
                         Map<String, Object> messageBody;
                         try {
                             messageBody = jsonParser.fromJsonBytes(record.value(), Map.class);
+                            tapLogger.info("topic {} messageBody {} ",tables,messageBody);
                         } catch (Exception e) {
                             tapLogger.error("topic[{}] value [{}] can not parse to json, ignore...", record.topic(), record.value());
                             continue;
