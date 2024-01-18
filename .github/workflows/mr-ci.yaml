@@ -49,7 +49,7 @@ jobs:
         with:
           repository: 'tapdata/tapdata'
           token: ${{ secrets.TAPDATA_ENT_CICD_TOKEN }}
-          ref: ${{ inputs.tapdata-branch }}
+          ref: main
           path: tapdata
           fetch-depth: 0
       - name: Set Tag
