@@ -678,7 +678,7 @@
       "justStringTooltip": "CSV defaults to fully converting to strings. If each column of data is well organized, especially in numerical and time formats, and does not contain any strings, it can be turned off (reload the model to see the effect)",
       "fileEncodingTooltip": "When there is Chinese garbled code when loading the model or data, pay special attention to whether to choose GBK or UTF-8",
       "writeFilePathTooltip": "The path to the file written when CSV is written as the target",
-      "fileNameExpressionTooltip": "When CSV is used as the target for writing, it is allowed to write to multiple files simultaneously. The file content can be categorized and split using field values and date formats, and saved with corresponding file names. For example: tap_\\${record. id}_\\${date:yyyyMMdd}.csv ",
+      "fileNameExpressionTooltip": "When CSV is used as the target for writing, it is allowed to write to multiple files simultaneously. The file content can be categorized and split using field values and date formats, and saved with corresponding file names. For example: tap_\\${record.id}_\\${date:yyyyMMdd}.csv ",
       "offStandardTooltip": "Non standard CSV format text files that can be customized to collect file content through regular expression matching and used in conjunction with line expressions",
       "lineExpressionTooltip": "Regular expressions that can match each column of fields. When unfamiliar with usage, file data demos can be provided for customer service assistance",
       "separatorTooltip": "Column spacing character (single character), if preventing tab (TAB) from being filtered, can be enclosed in []",

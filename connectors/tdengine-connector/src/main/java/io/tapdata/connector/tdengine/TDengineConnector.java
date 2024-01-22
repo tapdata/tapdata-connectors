@@ -58,6 +58,7 @@ public class TDengineConnector extends ConnectorBase {
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Exception {
         tdengineConfig = (TDengineConfig) new TDengineConfig().load(connectionContext.getConnectionConfig());
+        isConnectorStarted(connectionContext, connectorContext -> tdengineConfig.load(connectorContext.getNodeConfig()));
         tdengineJdbcContext = new TDengineJdbcContext(tdengineConfig);
         this.connectionTimezone = connectionContext.getConnectionConfig().getString("timezone");
         if ("Database Timezone".equals(this.connectionTimezone) || StringUtils.isBlank(this.connectionTimezone)) {
@@ -167,14 +168,28 @@ public class TDengineConnector extends ConnectorBase {
             return createTableOptions;
         }
         String timestamp = getTimestampColumn(tapTable);
-        String sql = "CREATE TABLE IF NOT EXISTS `" + tdengineConfig.getDatabase() + "`.`" + tapTable.getId() + "` (" + TDengineSqlMaker.buildColumnDefinition(tapTable, timestamp);
+        String sql = "CREATE " + (tdengineConfig.getSupportSuperTable() ? "S" : "") + "TABLE IF NOT EXISTS `"
+                + tdengineConfig.getDatabase() + "`.`" + tapTable.getId() + "` (" +
+                TDengineSqlMaker.buildColumnDefinition(tapTable, timestamp, tdengineConfig.getSupportSuperTable() ? tdengineConfig.getSuperTableTags() : Collections.emptyList());
         sql += ")";
+        if (tdengineConfig.getSupportSuperTable()) {
+            sql += " TAGS (" + tdengineConfig.getSuperTableTags().stream().map(v -> {
+                StringBuilder builder = new StringBuilder();
+                TapField tapField = tapTable.getNameFieldMap().get(v);
+                //ignore those which has no dataType
+                if (tapField.getDataType() == null) {
+                    return "";
+                }
+                builder.append('`').append(tapField.getName()).append("` ").append(tapField.getDataType()).append(' ');
+                return builder.toString();
+            }).collect(Collectors.joining(", ")) + ")";
+        }
         try {
             List<String> sqls = TapSimplify.list();
             sqls.add(sql);
             //comment on table and column
             if (EmptyKit.isNotNull(tapTable.getComment())) {
-                sqls.add("COMMENT '" + tapTable.getComment() + "'");
+                sqls.add(" COMMENT '" + tapTable.getComment() + "'");
             }
             tdengineJdbcContext.batchExecute(sqls);
         } catch (Throwable e) {
@@ -188,7 +203,7 @@ public class TDengineConnector extends ConnectorBase {
     private void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws Throwable {
         String tableId = tapClearTableEvent.getTableId();
         if (tdengineJdbcContext.tableExists(tableId)) {
-            String sql = String.format("DELETE FROM %s.%s", tdengineConfig.getDatabase(), tableId);
+            String sql = String.format("DELETE FROM `%s`.`%s`", tdengineConfig.getDatabase(), tableId);
             tdengineJdbcContext.execute(sql);
         } else {
             TapLogger.warn(TAG, "Table \"{}.{}\" not exists, will skip clear table", tdengineConfig.getDatabase(), tableId);
@@ -197,7 +212,7 @@ public class TDengineConnector extends ConnectorBase {
 
     private void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws Throwable {
         String tableId = tapDropTableEvent.getTableId();
-        String sql = String.format("DROP TABLE IF EXISTS %s.%s", tdengineConfig.getDatabase(), tableId);
+        String sql = String.format("DROP TABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId);
         tdengineJdbcContext.execute(sql);
     }
 
@@ -211,10 +226,15 @@ public class TDengineConnector extends ConnectorBase {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
         String timestamp = getTimestampColumn(tapTable);
-        new TDengineRecordWriter(tdengineJdbcContext, tapTable, timestamp)
-                .setInsertPolicy(insertDmlPolicy)
-                .setUpdatePolicy(updateDmlPolicy)
-                .write(tapRecordEvents, consumer);
+        if (tdengineConfig.getSupportSuperTable()) {
+            new TDengineSuperRecordWriter(tdengineJdbcContext, tapTable)
+                    .write(tapRecordEvents, consumer, this::isAlive);
+        } else {
+            new TDengineRecordWriter(tdengineJdbcContext, tapTable, timestamp)
+                    .setInsertPolicy(insertDmlPolicy)
+                    .setUpdatePolicy(updateDmlPolicy)
+                    .write(tapRecordEvents, consumer);
+        }
     }
 
     private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offset, int batchSize, BiConsumer<List<TapEvent>, Object> consumer) throws Throwable {
