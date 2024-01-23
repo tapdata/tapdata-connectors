@@ -291,7 +291,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         new ClickhouseRecordWriter(clickhouseJdbcContext, tapTable)
                 .setInsertPolicy(insertDmlPolicy)
                 .setUpdatePolicy(updateDmlPolicy)
-                .setTapLogger(tapLogger)
+                .setTapLogger(tapConnectorContext.getLog())
                 .write(tapRecordEvents, consumer, this::isAlive);
     }
 
@@ -303,10 +303,10 @@ public class ClickhouseConnector extends CommonDbConnector {
             executorService = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
             executorService.submit(() -> {
                 while (isAlive()) {
-                    TapSimplify.sleep(1000);
                     if (System.currentTimeMillis() - lastMergeTime > 1000L * 60 * clickhouseConfig.getMergeMinutes()) {
                         mergeWriteRecordTables(tapConnectorContext);
                     }
+                    TapSimplify.sleep(1000);
                 }
             });
         }
@@ -314,12 +314,12 @@ public class ClickhouseConnector extends CommonDbConnector {
 
     private void mergeWriteRecordTables(TapConnectorContext connectorContext) {
         List<String> sqlList = tapTableMap.values().stream().map(v -> "OPTIMIZE TABLE `" + clickhouseConfig.getDatabase() + "`.`" + v.getId() + "` FINAL").collect(Collectors.toList());
-        try {
-            tapLogger.info("Clickhouse Optimize Table start, tables: {}", toJson(tapTableMap.keySet()));
+        try(ClickhouseJdbcContext clickhouseJdbcContext = new ClickhouseJdbcContext(clickhouseConfig)) {
+            connectorContext.getLog().info("Clickhouse Optimize Table start, tables: {}", toJson(tapTableMap.keySet()));
             clickhouseJdbcContext.batchExecute(sqlList);
-            tapLogger.info("Clickhouse Optimize Table end");
+            connectorContext.getLog().info("Clickhouse Optimize Table end");
         } catch (Throwable e) {
-            tapLogger.warn("Clickhouse Optimize Table failed", e);
+            connectorContext.getLog().warn("Clickhouse Optimize Table failed, error message: {}", e.getMessage(), e);
         }
         lastMergeTime = System.currentTimeMillis();
         connectorContext.getStateMap().put("lastMergeTime", lastMergeTime);
