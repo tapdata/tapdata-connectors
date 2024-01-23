@@ -379,15 +379,7 @@ public class MongodbMergeOperate {
 		final MergeBundle.EventOperation operation = mergeBundle.getOperation();
 		Map<String, Object> before = mergeBundle.getBefore();
 		Map<String, Object> after = mergeBundle.getAfter();
-		Map<String, Object> filterMap = new HashMap<>(null != after ? after : before);
-		if (null != before) {
-			filterMap.putAll(before);
-		}
-		if (MergeBundle.EventOperation.INSERT == operation || MergeBundle.EventOperation.UPDATE == operation) {
-			filterMap = after;
-		} else {
-			filterMap = before;
-		}
+		Map<String, Object> filterMap = buildFilterMap(operation, after, before);
 		Document filter = filter(
 				filterMap,
 				currentProperty.getJoinKeys()
@@ -500,12 +492,15 @@ public class MongodbMergeOperate {
 	}
 
 	public static void updateIntoArrayMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult) {
-		final String targetPath = currentProperty.getTargetPath();
-		final boolean array = currentProperty.getIsArray();
-		final MergeBundle.EventOperation operation = mergeBundle.getOperation();
-		final List<String> arrayKeys = currentProperty.getArrayKeys();
+		String targetPath = currentProperty.getTargetPath();
+		boolean array = currentProperty.getIsArray();
+		Map<String, Object> before = mergeBundle.getBefore();
+		Map<String, Object> after = mergeBundle.getAfter();
+		Map<String, Object> removefields = mergeBundle.getRemovefields();
+		MergeBundle.EventOperation operation = mergeBundle.getOperation();
+		List<String> arrayKeys = currentProperty.getArrayKeys();
 		if (array) {
-			final List<Document> arrayFilter;
+			List<Document> arrayFilter;
 			if (operation == MergeBundle.EventOperation.UPDATE) {
 				arrayFilter = arrayFilter(
 						MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
@@ -521,14 +516,12 @@ public class MongodbMergeOperate {
 			}
 			mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
 		} else {
-			final Document filter = filter(
-					MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
-					currentProperty.getJoinKeys()
-			);
+			Map<String, Object> filterMap = buildFilterMap(operation, after, before);
+			Document filter = filter(filterMap, currentProperty.getJoinKeys());
 			mergeResult.getFilter().putAll(filter);
 
 			if (operation == MergeBundle.EventOperation.UPDATE) {
-				final List<Document> arrayFilter = arrayFilterForArrayMerge(
+				List<Document> arrayFilter = arrayFilterForArrayMerge(
 						MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
 						currentProperty.getArrayKeys(),
 						currentProperty.getTargetPath(),
@@ -538,8 +531,6 @@ public class MongodbMergeOperate {
 			}
 		}
 
-		Map<String, Object> after = mergeBundle.getAfter();
-		Map<String, Object> removefields = mergeBundle.getRemovefields();
 		Document updateOpDoc = new Document();
 		Document unsetOpDoc = new Document();
 
@@ -630,6 +621,16 @@ public class MongodbMergeOperate {
 				}
 				break;
 		}
+	}
+
+	private static Map<String, Object> buildFilterMap(MergeBundle.EventOperation operation, Map<String, Object> after, Map<String, Object> before) {
+		Map<String, Object> filterMap;
+		if (MergeBundle.EventOperation.INSERT == operation || MergeBundle.EventOperation.UPDATE == operation) {
+			filterMap = new HashMap<>(after);
+		} else {
+			filterMap = new HashMap<>(before);
+		}
+		return filterMap;
 	}
 
 	private static Document buildUnsetDocument(Set<String> sharedJoinKeys, Map<String, Object> data, String targetPath, boolean isArray, boolean firstMergeResult) {
