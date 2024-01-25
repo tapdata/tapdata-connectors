@@ -21,10 +21,7 @@ import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.commons.collections4.MapUtils;
-import org.bson.BsonDocument;
-import org.bson.BsonDocumentReader;
-import org.bson.BsonTimestamp;
-import org.bson.Document;
+import org.bson.*;
 import org.bson.codecs.DecoderContext;
 import org.bson.codecs.DocumentCodec;
 import org.bson.conversions.Bson;
@@ -70,6 +67,15 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
 	@Override
 	public void read(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
+		if(isPreImage){
+			for(String tableName : tableList){
+				BsonDocument bsonDocument = new BsonDocument();
+				bsonDocument.put("collMod",new BsonString(tableName));
+				bsonDocument.put("changeStreamPreAndPostImages",new BsonDocument("enabled",new BsonBoolean(true)));
+				Document result = mongoDatabase.runCommand(bsonDocument);
+				if(!result.containsKey("ok"))TapLogger.warn(TAG, "{} failed to enable changeStreamPreAndPostImages",tableName);
+			}
+		}
 		List<Bson> pipeline = singletonList(Aggregates.match(
 			Filters.in("ns.coll", tableList)
 		));
