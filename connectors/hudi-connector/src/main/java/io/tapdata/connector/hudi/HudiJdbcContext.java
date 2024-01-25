@@ -14,6 +14,7 @@ import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
@@ -28,13 +29,13 @@ import static io.tapdata.base.ConnectorBase.list;
 public class HudiJdbcContext extends HiveJdbcContext {
     private final static String HUDI_ALL_TABLE = "show tables";
     public static final String CREATE_TABLE_SQL = "CREATE TABLE IF NOT EXISTS %s ( %s ) %s";
+    private static final String GET_TABLE_INFO_SQL = "SELECT TABLE_ROWS,DATA_LENGTH  FROM information_schema.tables WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='%s'";
 
     public HudiJdbcContext(HiveConfig config) {
         super(config);
     }
     public Connection getConnection() throws SQLException {
-        Connection connection = createConnectionFactory();
-        return connection;
+        return createConnectionFactory();
     }
 
     private Connection createConnectionFactory() throws SQLException {
@@ -123,4 +124,16 @@ public class HudiJdbcContext extends HiveJdbcContext {
         }
     }
 
+    public DataMap getTableInfo(String tableName) throws SQLException {
+        DataMap dataMap = DataMap.create();
+        List<String> list = new ArrayList<>();
+        list.add("TABLE_ROWS");
+        list.add("DATA_LENGTH");
+        query(String.format(GET_TABLE_INFO_SQL, getConfig().getDatabase(), tableName), resultSet -> {
+            while (resultSet.next()) {
+                dataMap.putAll(DbKit.getRowFromResultSet(resultSet, list));
+            }
+        });
+        return dataMap;
+    }
 }

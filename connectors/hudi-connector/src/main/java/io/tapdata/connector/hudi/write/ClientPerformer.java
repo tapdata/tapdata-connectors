@@ -35,7 +35,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -47,23 +46,22 @@ import static org.apache.hudi.config.HoodieIndexConfig.BLOOM_INDEX_FILTER_DYNAMI
 public class ClientPerformer implements AutoCloseable {
     private FileSystem fs;
     private String database;
-    private String tableId;
-    private String tablePath;
+    private final String tableId;
+    private final String tablePath;
     private Path path;
     private HoodieJavaWriteClient<HoodieRecordPayload> client;
-    private Set<String> primaryKeys;
+    private final Set<String> primaryKeys;
     private Set<String> preCombineFields;
     private Set<String> orderingFields;
-    private Set<String> partitionKeys;
-    private Log log;
+    private final Set<String> partitionKeys;
+    private final Log log;
     private long timestamp;
-    private boolean usage;
     private Schema schema;
-    private TapTable tapTable;
-    private Configuration hadoopConf;
-    private WriteOperationType operationType;
+    private final TapTable tapTable;
+    private final Configuration hadoopConf;
+    private final WriteOperationType operationType;
     private HudiConfig config;
-    private String tableType;
+    private final String tableType;
 
     //@TODO preCombineField, orderingField
     private String preCombineField = "id";
@@ -165,11 +163,7 @@ public class ClientPerformer implements AutoCloseable {
     }
 
     public void updateTimestamp() {
-        this.timestamp = new Date().getTime();
-    }
-
-    public void releaseUsage() {
-        this.usage = false;
+        this.timestamp = System.currentTimeMillis();
     }
 
     public HoodieJavaWriteClient<HoodieRecordPayload> getClient() {
@@ -265,6 +259,13 @@ public class ClientPerformer implements AutoCloseable {
         return new HashSet<>();
     }
 
+    public Log getLog() {
+        return log;
+    }
+
+    public TapTable getTapTable() {
+        return tapTable;
+    }
     static class Param {
         Configuration hadoopConf;
         String database;

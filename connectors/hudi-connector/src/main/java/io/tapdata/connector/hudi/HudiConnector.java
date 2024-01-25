@@ -22,6 +22,7 @@ import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapMapValue;
 import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
+import io.tapdata.entity.schema.value.TapValue;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
@@ -32,6 +33,7 @@ import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
+import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.hadoop.fs.FileSystem;
@@ -51,6 +53,7 @@ import java.util.stream.Collectors;
 
 @TapConnectorClass("spec_hudi.json")
 public class HudiConnector extends HiveConnector {
+    private static final String HU_DI_LIB_ID_TAG = "hudi-lib-id";
     private HudiConfig hudiConfig;
     private HudiJdbcContext hudiJdbcContext;
     private final Map<String, HuDiWriteBySparkClient> writeMap = new ConcurrentHashMap<>();
@@ -70,7 +73,7 @@ public class HudiConnector extends HiveConnector {
                 .load(connectionContext.getConnectionConfig())
                 .authenticate();
         if (connectionContext instanceof TapConnectorContext) {
-            ((TapConnectorContext) connectionContext).getStateMap().put("hudi-lib-id", id);
+            ((TapConnectorContext) connectionContext).getStateMap().put(HU_DI_LIB_ID_TAG, id);
         }
         hiveJdbcContext = hudiJdbcContext = new HudiJdbcContext(hudiConfig);
         commonDbConfig = hiveConfig;
@@ -88,58 +91,78 @@ public class HudiConnector extends HiveConnector {
 
 
     private void release(TapConnectorContext connectorContext) {
-        Object id = connectorContext.getStateMap().get("hudi-lib-id");
+        Object id = connectorContext.getStateMap().get(HU_DI_LIB_ID_TAG);
         if (null != id) {
-            FileUtil.release(FileUtil.storeDir("hudi" + String.valueOf(id)), connectorContext.getLog());
+            FileUtil.release(FileUtil.storeDir("hudi" + id), connectorContext.getLog());
         }
+    }
+
+    Object registerString(TapValue<?, ?> value) {
+        if (value != null && value.getValue() != null) return toJson(value.getValue());
+        return "null";
     }
 
     @Override
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
-        codecRegistry.registerFromTapValue(TapRawValue.class, "string", tapRawValue -> {
-            if (tapRawValue != null && tapRawValue.getValue() != null) return toJson(tapRawValue.getValue());
-            return "null";
-        });
-        codecRegistry.registerFromTapValue(TapMapValue.class, "string", tapMapValue -> {
-            if (tapMapValue != null && tapMapValue.getValue() != null) return toJson(tapMapValue.getValue());
-            return "null";
-        });
-        codecRegistry.registerFromTapValue(TapArrayValue.class, "string", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) return toJson(tapValue.getValue());
-            return "null";
-        });
-        codecRegistry.registerFromTapValue(TapBinaryValue.class, "string", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null)
-                return new String(Base64.encodeBase64(tapValue.getValue()));
-            return null;
-        });
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, "timestamp", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) {
-                return tapValue.getValue().toLong();
-            }
-            return null;
-        });
-        codecRegistry.registerFromTapValue(TapTimeValue.class, "timestamp", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) {
-                return tapValue.getValue().toLong();
-            }
-            return null;
-        });
-        codecRegistry.registerFromTapValue(TapDateValue.class, "timestamp", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) {
-                return tapValue.getValue().toLong();
-            }
-            return null;
-        });
+        codecRegistry.registerFromTapValue(TapRawValue.class, "string", this::registerString)
+                     .registerFromTapValue(TapMapValue.class, "string", this::registerString)
+                     .registerFromTapValue(TapArrayValue.class, "string", this::registerString)
+                     .registerFromTapValue(TapBinaryValue.class, "string", tapValue -> {
+                         if (tapValue != null && tapValue.getValue() != null)
+                            return new String(Base64.encodeBase64(tapValue.getValue()));
+                         return null;
+                     }).registerFromTapValue(TapDateTimeValue.class, "timestamp", tapValue -> {
+                         if (tapValue != null && tapValue.getValue() != null) {
+                             return tapValue.getValue().toLong();
+                         }
+                         return null;
+                     }).registerFromTapValue(TapTimeValue.class, "timestamp", tapValue -> {
+                         if (tapValue != null && tapValue.getValue() != null) {
+                             return tapValue.getValue().toLong();
+                         }
+                         return null;
+                     }).registerFromTapValue(TapDateValue.class, "timestamp", tapValue -> {
+                         if (tapValue != null && tapValue.getValue() != null) {
+                             return tapValue.getValue().toLong();
+                         }
+                         return null;
+                     });
 
-        connectorFunctions.supportErrorHandleFunction(this::errorHandle);
+        connectorFunctions.supportErrorHandleFunction(this::errorHandle)
+                          .supportReleaseExternalFunction(this::release);
+
+        //source
+        connectorFunctions
+                        //.supportBatchRead(this::batchReadV3)
+                        //.supportBatchCount(this::batchCount)
+                        //.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffsetV2)
+                        //.supportGetTableNamesFunction(this::getTableNames)
+                        //.supportGetTableInfoFunction(this::getTableInfo)
+                          .supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> hiveJdbcContext.getConnection(), this::isAlive, c));
+
         //target
-        connectorFunctions.supportCreateTableV2(this::createTableV2);
-        connectorFunctions.supportDropTable(this::dropTable);
-        connectorFunctions.supportClearTable(this::clearTable);
-        connectorFunctions.supportWriteRecord(this::writeRecord);
-        connectorFunctions.supportReleaseExternalFunction(this::release);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> hiveJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportCreateTableV2(this::createTableV2)
+                          .supportDropTable(this::dropTable)
+                          .supportClearTable(this::clearTable)
+                          .supportWriteRecord(this::writeRecord)
+                          //.supportCreateIndex(this::createIndex)
+                          //.supportNewFieldFunction(this::fieldDDLHandler)
+                          //.supportAlterFieldNameFunction(this::fieldDDLHandler)
+                          //.supportAlterFieldAttributesFunction(this::fieldDDLHandler)
+                          //.supportDropFieldFunction(this::fieldDDLHandler)
+        ;
+    }
+
+    private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
+        TableInfo tableInfo = TableInfo.create();
+        try {
+            DataMap dataMap = hudiJdbcContext.getTableInfo(tableName);
+            tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("TABLE_ROWS")));
+            tableInfo.setStorageSize(Long.valueOf(dataMap.getString("DATA_LENGTH")));
+        } catch (SQLException e) {
+            tapConnectorContext.getLog().error("Execute getTableInfo failed, error: " + e.getMessage(), e);
+        }
+        return tableInfo;
     }
 
     @Override
@@ -212,7 +235,7 @@ public class HudiConnector extends HiveConnector {
 
     public void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) {
         String tableId = tapDropTableEvent.getTableId();
-        cleanHdfsPath(tableId);
+        cleanHDFSPath(tableId);
         try {
             jdbcContext.execute("DROP TABLE IF EXISTS " + formatTable(hudiConfig.getDatabase(), tableId));
         } catch (SQLException e) {
@@ -226,7 +249,7 @@ public class HudiConnector extends HiveConnector {
         }
     }
 
-    private void cleanHdfsPath(String tableId) {
+    private void cleanHDFSPath(String tableId) {
         ClientHandler clientHandler = new ClientHandler(hudiConfig, hudiJdbcContext);
         String tablePath = null;
         try {
@@ -242,13 +265,13 @@ public class HudiConnector extends HiveConnector {
                 fs.delete(path, true);
             }
         } catch (IOException e) {
-            throw new RuntimeException("Clean hdfs files failed, file path: " + tablePath + ", " + e.getMessage());
+            throw new RuntimeException("Clean HDFS files failed, file path: " + tablePath + ", " + e.getMessage());
         }
     }
 
     public void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) {
         String tableId = tapClearTableEvent.getTableId();
-        cleanHdfsPath(tableId);
+        cleanHDFSPath(tableId);
         try {
             if (hudiJdbcContext.tableIfExists(tableId)) {
                 hiveJdbcContext.execute("TRUNCATE TABLE " + formatTable(hudiConfig.getDatabase(), tapClearTableEvent.getTableId()));
