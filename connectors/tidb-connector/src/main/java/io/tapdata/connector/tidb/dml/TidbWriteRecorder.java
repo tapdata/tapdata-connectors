@@ -9,6 +9,7 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -56,6 +57,40 @@ public class TidbWriteRecorder extends NormalWriteRecorder {
         return "INSERT IGNORE INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
                 + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
                 "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ")";
+    }
+
+    protected void insertUpdate(Map<String, Object> after, Map<String, Object> before, WriteListResult<TapRecordEvent> listResult) throws SQLException {
+        Map<String, Object> all = new HashMap<>(before);
+        all.putAll(after);
+        String preparedStatementKey = String.join(",", after.keySet());
+        if (preparedStatementKey.equals(this.preparedStatementKey)) {
+            preparedStatement = preparedStatementMap.get(preparedStatementKey);
+        } else {
+            if (EmptyKit.isNull(this.preparedStatementKey)) {
+                preparedStatement = connection.prepareStatement(getInsertUpdateSql(after, before));
+                preparedStatementMap.put(preparedStatementKey, preparedStatement);
+            } else {
+                executeBatch(listResult);
+                preparedStatement = preparedStatementMap.get(preparedStatementKey);
+                if (EmptyKit.isNull(preparedStatement)) {
+                    preparedStatement = connection.prepareStatement(getInsertUpdateSql(after, before));
+                    preparedStatementMap.put(preparedStatementKey, preparedStatement);
+                }
+            }
+            this.preparedStatementKey = preparedStatementKey;
+        }
+        preparedStatement.clearParameters();
+        int pos = 1;
+        for (String key : allColumn) {
+            preparedStatement.setObject(pos++, filterValue(all.get(key), columnTypeMap.get(key)));
+        }
+    }
+
+    protected String getInsertUpdateSql(Map<String, Object> after, Map<String, Object> before) {
+        return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
+                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
+                "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ON DUPLICATE KEY UPDATE "
+                + after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=values(" + escapeChar + k + escapeChar + ")").collect(Collectors.joining(", "));
     }
 
 }
