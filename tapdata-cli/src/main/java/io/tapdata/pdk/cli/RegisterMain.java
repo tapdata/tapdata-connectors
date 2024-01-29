@@ -74,7 +74,7 @@ public class RegisterMain {
 		ZohoCRM(BASE_PATH + "connectors/dist/zoho-crm-connector-v1.0-SNAPSHOT.jar", "all", "zoho-crm"),
 		GitHubCRM(BASE_PATH + "connectors/dist/github-connector-v1.0-SNAPSHOT.jar", "all", "github"),
 		LarkTask(BASE_PATH + "connectors/dist/lark-task-connector-v1.0-SNAPSHOT.jar", "all", "lark-task"),
-		OpenGauss(BASE_PATH + "connectors/dist/openGauss-connector-v1.0-SNAPSHOT.jar", "all", "open-gauss", "basic", "jdbc"),
+		//OpenGauss(BASE_PATH + "connectors/dist/openGauss-connector-v1.0-SNAPSHOT.jar", "all", "open-gauss", "basic", "jdbc"),
 		Salesforce(BASE_PATH + "connectors/dist/salesforce-connector-v1.0-SNAPSHOT.jar", "all", "salesforce"),
 		HubSpot(BASE_PATH + "connectors/dist/hubspot-connector-v1.0-SNAPSHOT.jar", "all", "hubspot"),
 		Hive3(BASE_PATH + "connectors/dist/hive3-connector-v1.0-SNAPSHOT.jar", "all", "hive3"),
@@ -90,8 +90,9 @@ public class RegisterMain {
         Temu(BASE_PATH + "connectors/dist/temu-connector-v1.0-SNAPSHOT.jar", "all", "temu"),
         GreenPlum(BASE_PATH + "connectors/dist/greenplum-connector-v1.0-SNAPSHOT.jar", "all", "greenplum", "basic", "jdbc"),
 		LarkBitable(BASE_PATH + "connectors/dist/lark-bitable-connector-v1.0-SNAPSHOT.jar", "all", "lark-bitable"),
-		AzureCosmosDB(BASE_PATH + "connectors/dist/azure-cosmosdb-connector-v1.0-SNAPSHOT.jar","all","azure-cosmosdb")
+		AzureCosmosDB(BASE_PATH + "connectors/dist/azure-cosmosdb-connector-v1.0-SNAPSHOT.jar","all","azure-cosmosdb"),
 		HuDi(BASE_PATH + "connectors/dist/hudi-connector-v1.0-SNAPSHOT.jar", "all", "hudi"),
+		OpenGaussDB(BASE_PATH + "connectors/dist/open-gaussdb-connector-v1.0-SNAPSHOT.jar", "all", "huawei-gauss-db")
 		;
 
 		private final String path;
