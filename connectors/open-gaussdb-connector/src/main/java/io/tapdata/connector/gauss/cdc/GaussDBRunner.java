@@ -1,18 +1,17 @@
 package io.tapdata.connector.gauss.cdc;
 
 import com.huawei.opengauss.jdbc.PGProperty;
+import com.huawei.opengauss.jdbc.core.v3.replication.V3PGReplicationStream;
 import com.huawei.opengauss.jdbc.jdbc.PgConnection;
 import com.huawei.opengauss.jdbc.replication.PGReplicationStream;
 import com.huawei.opengauss.jdbc.replication.fluent.logical.ChainedLogicalStreamBuilder;
-import io.debezium.embedded.EmbeddedEngine;
+import com.huawei.opengauss.jdbc.util.HostSpec;
 import io.debezium.engine.DebeziumEngine;
 import io.tapdata.connector.gauss.cdc.logic.event.EventFactory;
-import io.tapdata.connector.gauss.cdc.logic.event.LogicReplicationEventFactoryImpl;
+import io.tapdata.connector.gauss.cdc.logic.event.transcation.complex.LogicReplicationComplexImpl;
+import io.tapdata.connector.gauss.cdc.logic.event.transcation.discrete.LogicReplicationDiscreteImpl;
 import io.tapdata.connector.gauss.core.GaussDBConfig;
-import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.cdc.DebeziumCdcRunner;
-import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
-import io.tapdata.connector.postgres.cdc.config.PostgresDebeziumConfig;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffsetStorage;
 import io.tapdata.entity.error.CoreException;
@@ -23,7 +22,6 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
@@ -31,9 +29,7 @@ import io.tapdata.kit.NumberKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
-import org.codehaus.plexus.util.StringUtils;
 
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.sql.DriverManager;
@@ -41,7 +37,6 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -62,7 +57,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
     public GaussDBRunner(GaussDBConfig config, Log log) throws SQLException {
         this.log = log;
         this.gaussDBConfig = config;
-        jdbcURL = String.format("jdbc:opengauss://%s:%d/%s",
+        jdbcURL = String.format("jdbc:opengauss://%s:%s/%s",
                 gaussDBConfig.getHost(),
                 gaussDBConfig.getHaPort(),
                 gaussDBConfig.getDatabase());
@@ -108,9 +103,14 @@ public class GaussDBRunner extends DebeziumCdcRunner {
         PGProperty.SSL.set(properties, "false");
 
         // 自定义
-        PGProperty.LOGGER.set(properties, "Slf4JLogger");
-        PGProperty.SSL.set(properties, true);
-        PGProperty.SSL_FACTORY.set(properties, "com.huawei.opengauss.jdbc.ssl.NonValidatingFactory");
+        //PGProperty.LOGGER.set(properties, "Slf4JLogger");
+        //PGProperty.SSL.set(properties, "false");
+        //try {
+        //    Class.forName("com.huawei.opengauss.jdbc.ssl.NonValidatingFactory");
+        //} catch (Exception e) {
+        //
+        //}
+        //PGProperty.SSL_FACTORY.set(properties, "com.huawei.opengauss.jdbc.ssl.NonValidatingFactory");
         conn = (PgConnection) DriverManager.getConnection(jdbcURL, properties);
         ChainedLogicalStreamBuilder streamBuilder = conn.getReplicationAPI()
                 .replicationStream()
@@ -123,20 +123,19 @@ public class GaussDBRunner extends DebeziumCdcRunner {
         if (null != whiteTableList) {
             streamBuilder.withSlotOption("white-table-list", whiteTableList); //白名单列表
         }
-
-        eventFactory = LogicReplicationEventFactoryImpl.instance(consumer);
-
         //build PGReplicationStream
         stream = streamBuilder.withSlotOption("standby-connection", true) //强制备机解码
-                .withSlotOption("decode-style", "t") //解码格式
+                .withSlotOption("decode-style", "b") //解码格式
                 .withSlotOption("sending-batch", 1) //批量发送解码结果
                 .withSlotOption("max-txn-in-memory", 100) //单个解码事务落盘内存阈值为100MB
                 .withSlotOption("max-reorderbuffer-in-memory", 50) //正在处理的解码事务落盘内存阈值为
-                .withSlotOption("exclude-users", "userA") //不返回用户userA执行事务的逻辑日志
+                //.withSlotOption("exclude-users", "userA") //不返回用户userA执行事务的逻辑日志
                 .withSlotOption("include-user", true) //事务BEGIN逻辑日志携带用户名字
                 .withSlotOption("enable-heartbeat", true) // 开启心跳日志
+                .withSlotOption("include-xids", true)
+                .withSlotOption("include-timestamp", true)
                 .start();
-
+        eventFactory = LogicReplicationDiscreteImpl.instance(consumer, 100, null);
     }
 
     /**
@@ -157,14 +156,6 @@ public class GaussDBRunner extends DebeziumCdcRunner {
                     continue;
                 }
                 eventFactory.emit(byteBuffer);
-                int offset = byteBuffer.arrayOffset();
-                byte[] source = byteBuffer.array();
-                int length = source.length - offset;
-                String s = new String(source, offset, length);
-                if (!s.contains("HeartBeat: ")) {
-                    System.out.println("-------> " + s);
-                }
-
                 //如果需要flush lsn，根据业务实际情况调用以下接口
                 //LogSequenceNumber lastRecv = stream.getLastReceiveLSN();
                 //stream.setFlushedLSN(lastRecv);

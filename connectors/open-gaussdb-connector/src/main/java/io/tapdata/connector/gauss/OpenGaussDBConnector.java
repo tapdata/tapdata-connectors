@@ -2,16 +2,20 @@ package io.tapdata.connector.gauss;
 
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
+import io.tapdata.connector.gauss.cdc.GaussDBRunner;
+import io.tapdata.connector.gauss.core.GaussColumn;
 import io.tapdata.connector.gauss.core.GaussDBConfig;
+import io.tapdata.connector.gauss.core.GaussDBJdbcContext;
+import io.tapdata.connector.gauss.util.TimeUtil;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.PostgresSqlMaker;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
-import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
@@ -20,7 +24,9 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
@@ -51,12 +57,15 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * @author Gavin'Xiao
@@ -66,20 +75,20 @@ import java.util.function.Consumer;
 @TapConnectorClass("spec_gauss_db.json")
 public class OpenGaussDBConnector extends CommonDbConnector {
     protected GaussDBConfig gaussDBConfig;
-    protected PostgresJdbcContext postgresJdbcContext;
+    protected GaussDBJdbcContext gaussJdbcContext;
     private GaussDBTest gaussDBTest;
-    private PostgresCdcRunner cdcRunner; //only when task start-pause this variable can be shared
+    private GaussDBRunner cdcRunner; //only when task start-pause this variable can be shared
     private Object slotName; //must be stored in stateMap
     protected String postgresVersion;
     protected Map<String, Boolean> writtenTableMap = new ConcurrentHashMap<>();
 
     @Override
-    public void onStart(TapConnectionContext connectorContext) {
+    public void onStart(TapConnectionContext connectorContext) throws ClassNotFoundException {
         initConnection(connectorContext);
     }
 
     protected TapField makeTapField(DataMap dataMap) {
-        return new PostgresColumn(dataMap).getTapField();
+        return new GaussColumn(dataMap).getTapField();
     }
 
     @Override
@@ -109,7 +118,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 // source
                 .supportBatchCount(this::batchCount)
                 .supportBatchRead(this::batchReadWithoutOffset)
-                //.supportStreamRead(this::streamRead)
+                .supportStreamRead(this::streamRead)
                 .supportTimestampToStreamOffset(this::timestampToStreamOffset)
                 // query
                 .supportQueryByFilter(this::queryByFilter)
@@ -120,7 +129,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 .supportAlterFieldAttributesFunction(this::fieldDDLHandler)
                 .supportDropFieldFunction(this::fieldDDLHandler)
                 .supportGetTableNamesFunction(this::getTableNames)
-                .supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> postgresJdbcContext.getConnection(), this::isAlive, c))
+                .supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> gaussJdbcContext.getConnection(), this::isAlive, c))
                 .supportRunRawCommandFunction(this::runRawCommand)
                 .supportCountRawCommandFunction(this::countRawCommand)
                 .supportCountByPartitionFilterFunction(this::countByAdvanceFilter)
@@ -171,6 +180,46 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                     pgInterval.getSeconds() + "S";
             return new TapStringValue(interval);
         })
+        .registerToTapValue(byte[].class, (value, tapType) -> {
+            byte[] bytes = (byte[])value;
+            if (bytes.length == 0) return new TapStringValue("");
+            byte type = tapType.getType();
+            String dataValue = new String(bytes);
+            switch (type) {
+                case TapType.TYPE_DATETIME:
+                    DateTime dateTime = new DateTime(TimeUtil.parseDate(dataValue, "yyyy-MM-dd hh:mm:ss.ssssss"));
+                    return new TapDateValue(dateTime);
+                case TapType.TYPE_DATE:
+                    DateTime date = new DateTime(TimeUtil.parseDate(dataValue, "yyyy-MM-dd"));
+                    return new TapDateValue(date);
+                case TapType.TYPE_ARRAY:
+                    break;
+                case TapType.TYPE_MAP:
+                    break;
+                case TapType.TYPE_BOOLEAN:
+                    return new TapBooleanValue(Boolean.parseBoolean(dataValue));
+                case TapType.TYPE_YEAR:
+                    DateTime year = new DateTime(TimeUtil.parseDate(dataValue, "yyyy"));
+                    return new TapYearValue(year);
+                case TapType.TYPE_TIME:
+                    DateTime time = new DateTime(TimeUtil.parseDate(dataValue, "hh:mm:ss"));
+                    return new TapTimeValue(time);
+                case TapType.TYPE_RAW:
+                    break;
+                case TapType.TYPE_NUMBER:
+                    TapNumberValue numberValue = new TapNumberValue();
+                    numberValue.setValue(Double.parseDouble(dataValue));
+                    numberValue.setOriginValue(dataValue);
+                    return numberValue;
+                case TapType.TYPE_BINARY:
+                    break;
+                case TapType.TYPE_STRING:
+                    return new TapStringValue(dataValue);
+                default:
+                    throw new CoreException("Unknow data type");
+            }
+            return new TapStringValue(dataValue);
+        })
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
         .registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime())
         .registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp())
@@ -182,6 +231,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     private void onDestroy(TapConnectorContext connectorContext) throws Throwable {
         try {
             onStart(connectorContext);
+            connectorContext.getStateMap().remove("tapdata_pg_slot");
             if (EmptyKit.isNotNull(cdcRunner)) {
                 cdcRunner.closeCdcRunner();
                 cdcRunner = null;
@@ -190,15 +240,16 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 clearSlot();
             }
         } finally {
+            slotName = null;
             onStop(connectorContext);
         }
     }
 
     //clear postgres slot
     private void clearSlot() throws Throwable {
-        postgresJdbcContext.queryWithNext("SELECT COUNT(*) FROM pg_replication_slots WHERE slot_name='" + slotName + "' AND active='false'", resultSet -> {
+        gaussJdbcContext.queryWithNext("SELECT COUNT(*) FROM pg_replication_slots WHERE slot_name='" + slotName + "' AND active='false'", resultSet -> {
             if (resultSet.getInt(1) > 0) {
-                postgresJdbcContext.execute("SELECT pg_drop_replication_slot('" + slotName + "')");
+                gaussJdbcContext.execute("SELECT pg_drop_replication_slot('" + slotName + "')");
             }
         });
     }
@@ -208,12 +259,12 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             // https://support.huaweicloud.com/intl/zh-cn/centralized-devg-v2-gaussdb/devg_03_1324.html
             //逻辑复制槽名称必须小于64个字符
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
-            postgresJdbcContext.execute("SELECT pg_create_logical_replication_slot('" + slotName + "','" + gaussDBConfig.getLogPluginName() + "')");
+            gaussJdbcContext.execute("SELECT pg_create_logical_replication_slot('" + slotName + "','mppdb_decoding')");
             tapLogger.info("new logical replication slot created, slotName:{}", slotName);
             connectorContext.getStateMap().put("tapdata_pg_slot", slotName);
         } else if (needCheck) {
             AtomicBoolean existSlot = new AtomicBoolean(true);
-            postgresJdbcContext.queryWithNext("SELECT COUNT(*) FROM pg_replication_slots WHERE slot_name='" + slotName + "'", resultSet -> {
+            gaussJdbcContext.queryWithNext("SELECT COUNT(*) FROM pg_replication_slots WHERE slot_name='" + slotName + "'", resultSet -> {
                 if (resultSet.getInt(1) <= 0) {
                     existSlot.set(false);
                 }
@@ -250,7 +301,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         List<String> noPrimaryOrFull = new ArrayList<>(); //无主键表且identity不为full
         List<String> primaryNotDefaultOrFull = new ArrayList<>(); //有主键表但identity不为full也不为default
         try {
-            postgresJdbcContext.query(String.format(PG_REPLICATE_IDENTITY, gaussDBConfig.getSchema(), StringKit.joinString(tableList, "'", ",")), resultSet -> {
+            gaussJdbcContext.query(String.format(PG_REPLICATE_IDENTITY, gaussDBConfig.getSchema(), StringKit.joinString(tableList, "'", ",")), resultSet -> {
                 while (resultSet.next()) {
                     if (!hasPrimary.contains(resultSet.getString("relname")) && !"f".equals(resultSet.getString("relreplident"))) {
                         noPrimaryOrFull.add(resultSet.getString("relname"));
@@ -279,7 +330,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             }
         });
         EmptyKit.closeQuietly(gaussDBTest);
-        EmptyKit.closeQuietly(postgresJdbcContext);
+        EmptyKit.closeQuietly(gaussJdbcContext);
     }
 
     //initialize jdbc context, slot name, version
@@ -287,15 +338,15 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         gaussDBConfig = (GaussDBConfig) new GaussDBConfig().load(connectionContext.getConnectionConfig());
         gaussDBTest = new GaussDBTest(gaussDBConfig, testItem -> {
         }).initContext();
-        postgresJdbcContext = new PostgresJdbcContext(gaussDBConfig);
+        gaussJdbcContext = new GaussDBJdbcContext(gaussDBConfig);
         commonDbConfig = gaussDBConfig;
-        jdbcContext = postgresJdbcContext;
+        jdbcContext = gaussJdbcContext;
         isConnectorStarted(connectionContext, tapConnectorContext -> {
             slotName = tapConnectorContext.getStateMap().get("tapdata_pg_slot");
             gaussDBConfig.load(tapConnectorContext.getNodeConfig());
         });
         commonSqlMaker = new PostgresSqlMaker().closeNotNull(gaussDBConfig.getCloseNotNull());
-        postgresVersion = postgresJdbcContext.queryVersion();
+        postgresVersion = gaussJdbcContext.queryVersion();
         ddlSqlGenerator = new PostgresDDLSqlGenerator();
         tapLogger = connectionContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();
@@ -341,17 +392,17 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             if (transactionConnectionMap.containsKey(threadName)) {
                 connection = transactionConnectionMap.get(threadName);
             } else {
-                connection = postgresJdbcContext.getConnection();
+                connection = gaussJdbcContext.getConnection();
                 transactionConnectionMap.put(threadName, connection);
             }
-            new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
+            new PostgresRecordWriter(gaussJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
                     .setTapLogger(tapLogger)
                     .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
 
         } else {
-            new PostgresRecordWriter(postgresJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
+            new PostgresRecordWriter(gaussJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
                     .setTapLogger(tapLogger)
@@ -360,10 +411,29 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+        nodeContext.getConnectionConfig().put("host", "1.94.122.172");
+        nodeContext.getConnectionConfig().put("port", 8001);
+        nodeContext.getConnectionConfig().put("haPort", 8001);
+        Class.forName("com.huawei.opengauss.jdbc.Driver");
+        nodeContext.getConnectionConfig().put("logPluginName", "mppdb_decoding");
+        nodeContext.getConnectionConfig().put("database", "postgres");
+        nodeContext.getConnectionConfig().put("schema", "public");
+        nodeContext.getConnectionConfig().put("timezone", "+8:00");
+        nodeContext.getConnectionConfig().put("extParams", "");
+        List<String> tables = new ArrayList<>();
+        String schema = (String)nodeContext.getConnectionConfig().get("schema");
+        if (null != tableList && !tableList.isEmpty()) {
+            for (String s : tableList) {
+                tables.add(String.format("%s.%s", schema, s));
+            }
+        }
+        cdcRunner = new GaussDBRunner((GaussDBConfig) new GaussDBConfig().load(nodeContext.getConnectionConfig()), nodeContext.getLog());
         testReplicateIdentity(nodeContext.getTableMap());
         buildSlot(nodeContext, true);
-        cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
+        cdcRunner.useSlot(slotName.toString())
+                .watch(tables)
+                //.offset(offsetState)
+                .registerConsumer(consumer, recordSize);
         cdcRunner.startCdcRunner();
         if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
             Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
@@ -390,11 +460,10 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     }
 
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
-        DataMap dataMap = postgresJdbcContext.getTableInfo(tableName);
+        DataMap dataMap = gaussJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("size")));
         tableInfo.setStorageSize(new BigDecimal(dataMap.getString("rowcount")).longValue());
         return tableInfo;
     }
-
 }
