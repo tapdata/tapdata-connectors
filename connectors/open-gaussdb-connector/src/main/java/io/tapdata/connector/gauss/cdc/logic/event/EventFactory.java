@@ -7,4 +7,6 @@ public abstract class EventFactory<T> {
     public abstract void emit(T logEvent);
 
     protected abstract void process();
+
+    protected abstract void accept();
 }

@@ -1,6 +1,10 @@
 package io.tapdata.connector.gauss.cdc.logic.event;
 
-import java.nio.ByteBuffer;
+import io.tapdata.entity.event.TapEvent;
 
-public interface DDLEvent extends Event {
+/**
+ * @deprecated HuaWei logic replication not support ddl
+ * */
+public interface DDLEvent<T> extends Event<TapEvent> {
+
 }
