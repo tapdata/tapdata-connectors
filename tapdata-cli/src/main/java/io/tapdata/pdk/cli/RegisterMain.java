@@ -134,6 +134,7 @@ public class RegisterMain {
 		String server = System.getProperty("server", "http://localhost:3000");
 		//String server = System.getProperty("server", "http://192.168.1.189:30205");
 		Collections.addAll(postList, "register", "-a", "3324cfdf-7d3e-4792-bd32-571638d4562f", "-ak", "", "-sk", "", "-t", server);
+
 		String[] tags = System.getProperty("tags", "all").split(",");
 		ConnectorEnums.addByTags(postList, tags);
 		Main.registerCommands().execute(postList.toArray(new String[0]));
