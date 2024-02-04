@@ -2,14 +2,16 @@
 ### Database version 
   HuaWei Open GaussDB Standby 8.1 postgres version 9.2
 ### **1. Necessary inspections**
-    Before using CDC, you need to configure your user machine (the machine where the Agent is currently deployed) in pg_hba.conf of each DN node:
+
+Before using CDC, you need to configure your user machine (the machine where the Agent is currently deployed) in pg_hba.conf of each DN node:
 ```text
     # Prerequisite: Add the JDBC user machine IP to the database whitelist, Add the following content to pg_hba.conf, and then restart the database:
     # Assuming the JDBC user IP is 10.10.10.10
     host all all 10.10.10.10/32 sha256
     host replication all 10.10.10.10/32 sha256
 ```
-    After configuration, the database needs to be restarted
+After configuration, the database needs to be restarted
+
 ### Data source parameters
 1. Database IP
 2. Port

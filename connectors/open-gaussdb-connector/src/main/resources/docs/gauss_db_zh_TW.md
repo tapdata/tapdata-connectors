@@ -2,14 +2,16 @@
 ### 資料庫版本
   HuaWei Open GaussDB 主備8.1 postgres版本9.2
 ### **1. 必要的檢查**
-    使用CDC前需要在各DN節點的 pg_hba.conf 中配寘你的用戶機器（當前部署Agent的機器）：
+
+使用CDC前需要在各DN節點的 pg_hba.conf 中配寘你的用戶機器（當前部署Agent的機器）：
 ```text
     # 前提條件：添加JDBC用戶機器IP到資料庫白名單裏，在pg_ hba.conf添加以下內容，然後重啓資料庫即可：
     # 假設JDBC用戶IP為10.10.10.10
     host all all 10.10.10.10/32 sha256
     host replication all 10.10.10.10/32 sha256
 ```
-    配寘完後需重啓資料庫
+配寘完後需重啓資料庫
+    
 ### 資料來源參數
 1. 資料庫IP
 2. 埠
