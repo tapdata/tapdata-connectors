@@ -14,7 +14,7 @@ public class DeleteField implements DDLEvent<TapEvent> {
     }
 
     @Override
-    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent) {
+    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, AnalyzeParam param) {
         return null;
     }
 }

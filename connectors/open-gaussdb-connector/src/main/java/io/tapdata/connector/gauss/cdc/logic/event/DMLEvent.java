@@ -10,7 +10,7 @@ import java.util.Map;
 public interface DMLEvent extends Event<TapEvent> {
 
     @Override
-    public default Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent) {
+    public default Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, AnalyzeParam param) {
         CollectEntity instance = CollectEntity.instance();
         byte[] bOrA = null;
         int bOrACount = 2;
@@ -27,7 +27,7 @@ public interface DMLEvent extends Event<TapEvent> {
             switch (bOrAChar.toUpperCase()) {
                 case "N" :
                 case "O" :
-                    collectAttr(logEvent, kvMap, kTypeMap);
+                    collectAttr(logEvent, kvMap, kTypeMap, param);
                     if (bOrACount > 1) {
                         bOrACount--;
                     } else {
@@ -59,24 +59,37 @@ public interface DMLEvent extends Event<TapEvent> {
 
     public Event.EventEntity<TapEvent> collect(CollectEntity entity);
 
-    public default void collectAttr(ByteBuffer logEvent, Map<String, Object> kvMap, Map<String, Integer> kTypeMap) {
+    public default void collectAttr(ByteBuffer logEvent, Map<String, Object> kvMap, Map<String, Integer> kTypeMap, AnalyzeParam param) {
         byte[] attrNum = LogicUtil.read(logEvent, 2);
         int attrNums = LogicUtil.bytesToInt(attrNum, 32);
         for (int index = 0; index < attrNums; index++) {
             byte[] attrName = LogicUtil.read(logEvent, 2, 32);
             byte[] oid = LogicUtil.read(logEvent, 4);
-            byte[] value = LogicUtil.read(logEvent, 4, 32);
-            if (0 == value.length) {
-                value = "".getBytes();
-            }
-            String v = new String(value);
-            if ("0xFFFFFFFF".equalsIgnoreCase(v)) {
-                v = null;
-                value = null;
-            }
+            byte[] value = LogicUtil.readValue(logEvent, 4, 32);
             String fieldName = new String(attrName);
-            kvMap.put(fieldName, value);
-            kTypeMap.put(fieldName, LogicUtil.bytesToInt(oid, 32));
+            if (fieldName.startsWith("\"")) {
+                fieldName = fieldName.substring(1);
+            }
+            if (fieldName.endsWith("\"")) {
+                fieldName = fieldName.substring(0, fieldName.length() -1);
+            }
+            int typeId = LogicUtil.bytesToInt(oid, 32);
+//            PostgresType postgresType = param.getRegistry().get(typeId);
+//            if (null != value) {
+//                Object val = PgOutputReplicationMessage.getValue(
+//                        fieldName,
+//                        postgresType,
+//                        "",
+//                        new String(value),
+//                        null,
+//                        false,
+//                        null
+//                );
+//                kvMap.put(fieldName, val);
+//            } else {
+                kvMap.put(fieldName, value);
+//            }
+            kTypeMap.put(fieldName, typeId);
         }
     }
 }

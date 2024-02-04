@@ -1,28 +1,19 @@
 package io.tapdata.connector.gauss.cdc;
 
 import com.huawei.opengauss.jdbc.PGProperty;
-import com.huawei.opengauss.jdbc.core.v3.replication.V3PGReplicationStream;
 import com.huawei.opengauss.jdbc.jdbc.PgConnection;
+import com.huawei.opengauss.jdbc.replication.LogSequenceNumber;
 import com.huawei.opengauss.jdbc.replication.PGReplicationStream;
 import com.huawei.opengauss.jdbc.replication.fluent.logical.ChainedLogicalStreamBuilder;
-import com.huawei.opengauss.jdbc.util.HostSpec;
+import io.debezium.connector.postgresql.TypeRegistry;
 import io.debezium.engine.DebeziumEngine;
 import io.tapdata.connector.gauss.cdc.logic.event.EventFactory;
-import io.tapdata.connector.gauss.cdc.logic.event.transcation.complex.LogicReplicationComplexImpl;
 import io.tapdata.connector.gauss.cdc.logic.event.transcation.discrete.LogicReplicationDiscreteImpl;
 import io.tapdata.connector.gauss.core.GaussDBConfig;
+import io.tapdata.connector.gauss.enums.CdcConstant;
 import io.tapdata.connector.postgres.cdc.DebeziumCdcRunner;
-import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
-import io.tapdata.connector.postgres.cdc.offset.PostgresOffsetStorage;
 import io.tapdata.entity.error.CoreException;
-import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.event.control.HeartbeatEvent;
-import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
-import io.tapdata.entity.event.dml.TapInsertRecordEvent;
-import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.NumberKit;
@@ -37,34 +28,55 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 public class GaussDBRunner extends DebeziumCdcRunner {
+    public static Map<String, CdcOffset> offsetMap = new ConcurrentHashMap<>(); //one slot one key
     private final GaussDBConfig gaussDBConfig;
-    private PostgresOffset postgresOffset;
+    private CdcOffset offset;
     private int recordSize;
     private StreamReadConsumer consumer;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     //protected final TimeZone timeZone;
     private final String jdbcURL;
-    final Log log;
-    PGReplicationStream stream;
-    PgConnection conn;
-    String whiteTableList;
-    EventFactory<ByteBuffer> eventFactory;
+    private final Log log;
+    private PGReplicationStream stream;
+    private PgConnection conn;
+    private String whiteTableList;
+    private EventFactory<ByteBuffer> eventFactory;
+    private TypeRegistry typeRegistry;
+    private long waitTime;
+    private Supplier<Boolean> supplier;
 
     public GaussDBRunner(GaussDBConfig config, Log log) throws SQLException {
         this.log = log;
         this.gaussDBConfig = config;
         jdbcURL = String.format("jdbc:opengauss://%s:%s/%s",
-                gaussDBConfig.getHost(),
+                gaussDBConfig.getHaHost(),
                 gaussDBConfig.getHaPort(),
                 gaussDBConfig.getDatabase());
     }
 
+
+
+    public GaussDBRunner supplierIsAlive(Supplier<Boolean> supplier) {
+        this.supplier = supplier;
+        return this;
+    }
+
     public GaussDBRunner useSlot(String slotName) {
         this.runnerName = slotName;
+        return this;
+    }
+
+    public GaussDBRunner waitTime(long waitTime) {
+        if (waitTime < CdcConstant.CDC_FLUSH_LOGIC_LSN_MIN || waitTime > CdcConstant.CDC_FLUSH_LOGIC_LSN_MAX) {
+            waitTime = CdcConstant.CDC_FLUSH_LOGIC_LSN_DEFAULT;
+        }
+        this.waitTime = waitTime;
         return this;
     }
 
@@ -76,12 +88,12 @@ public class GaussDBRunner extends DebeziumCdcRunner {
     }
 
     public GaussDBRunner offset(Object offsetState) {
-        if (EmptyKit.isNull(offsetState)) {
-            postgresOffset = new PostgresOffset();
+        if (EmptyKit.isNull(offsetState) || !(offsetState instanceof CdcOffset)) {
+            offset = new CdcOffset();
         } else {
-            this.postgresOffset = (PostgresOffset) offsetState;
+            this.offset = (CdcOffset) offsetState;
         }
-        PostgresOffsetStorage.postgresOffsetMap.put(runnerName, postgresOffset);
+        offsetMap.put(runnerName, offset);
         return this;
     }
 
@@ -112,6 +124,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
         //}
         //PGProperty.SSL_FACTORY.set(properties, "com.huawei.opengauss.jdbc.ssl.NonValidatingFactory");
         conn = (PgConnection) DriverManager.getConnection(jdbcURL, properties);
+        log.info("Replication connection init completed");
         ChainedLogicalStreamBuilder streamBuilder = conn.getReplicationAPI()
                 .replicationStream()
                 .logical()
@@ -120,8 +133,17 @@ public class GaussDBRunner extends DebeziumCdcRunner {
                 .withSlotOption("skip-empty-xacts", true)
                 //.withStartPosition(null)
                 .withSlotOption("parallel-decode-num", 10);//解码线程并行度
-        if (null != whiteTableList) {
+        if (null != offset.getLsn()) {
+            Object lsn = offset.getLsn();
+            if (lsn instanceof Number) {
+                streamBuilder.withStartPosition(LogSequenceNumber.valueOf(((Number)lsn).longValue()));
+            } else if (lsn instanceof LogSequenceNumber) {
+                streamBuilder.withStartPosition((LogSequenceNumber)lsn);
+            }
+        }
+        if (null != whiteTableList && !whiteTableList.isEmpty()) {
             streamBuilder.withSlotOption("white-table-list", whiteTableList); //白名单列表
+            log.info("Tables: {} will be monitored in cdc white table list", whiteTableList);
         }
         //build PGReplicationStream
         stream = streamBuilder.withSlotOption("standby-connection", true) //强制备机解码
@@ -135,7 +157,10 @@ public class GaussDBRunner extends DebeziumCdcRunner {
                 .withSlotOption("include-xids", true)
                 .withSlotOption("include-timestamp", true)
                 .start();
-        eventFactory = LogicReplicationDiscreteImpl.instance(consumer, 100, null);
+        log.info("GaussDB logic replication stream init completed");
+        //typeRegistry = new TypeRegistry(new PostgresConnection(Configuration.from(gaussDBConfig.getProperties()), true));
+        eventFactory = LogicReplicationDiscreteImpl.instance(consumer, 100, offset, typeRegistry, supplier);
+        log.info("GaussDB logic log parser init completed");
     }
 
     /**
@@ -147,23 +172,32 @@ public class GaussDBRunner extends DebeziumCdcRunner {
             throw new CoreException("CDC consumer can not be empty");
         }
         consumer.streamReadStarted();
+        long cdcInitTime = System.currentTimeMillis();
         try {
-            while (!Thread.interrupted()) {
+            while (null != supplier && supplier.get()) {
                 ByteBuffer byteBuffer = stream.readPending();
-
-                if (byteBuffer == null) {
-                    TimeUnit.MILLISECONDS.sleep(5L);
+                if (null == byteBuffer) {
+                    try {
+                        TimeUnit.MILLISECONDS.sleep(5L);
+                    } catch (Exception ignore) {
+                        //
+                    }
                     continue;
                 }
                 eventFactory.emit(byteBuffer);
                 //如果需要flush lsn，根据业务实际情况调用以下接口
-                //LogSequenceNumber lastRecv = stream.getLastReceiveLSN();
-                //stream.setFlushedLSN(lastRecv);
-                //stream.forceUpdateStatus();
+                long now = System.currentTimeMillis();
+                if (now - cdcInitTime >= waitTime) {
+                    LogSequenceNumber lastRecv = stream.getLastReceiveLSN();
+                    stream.setFlushedLSN(lastRecv);
+                    stream.forceUpdateStatus();
+                    log.debug("Pushed a log sequence: [{}], time: {}", lastRecv.asString(), now);
+                    cdcInitTime = now;
+                }
             }
         } catch (Exception e) {
-            //@todo
-            e.printStackTrace();
+            log.warn("Cdc stop whit an error: {}", e.getMessage());
+            this.getThrowable().set(e);
         } finally {
             consumer.streamReadEnded();
             closeCdcRunner();
@@ -176,7 +210,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
 
     @Override
     public boolean isRunning() {
-        return null != engine && engine.isRunning();
+        return null != supplier && supplier.get();
     }
 
     /**
@@ -185,24 +219,19 @@ public class GaussDBRunner extends DebeziumCdcRunner {
     @Override
     public void closeCdcRunner() {
         try {
-            super.closeCdcRunner();
+            if (null != stream) stream.close();
         } catch (Exception e) {
-
+            log.warn("Close gauss db logic replication stream fail, message: {}", e.getMessage());
         }
         try {
-            conn.close();
+            if (null != conn) conn.close();
         } catch (Exception e) {
-
+            log.warn("Close replication jdbc connection fail, message: {}", e.getMessage());
         }
         try {
-            stream.close();
+            if (null != engine) engine.close();
         } catch (Exception e) {
-
-        }
-        try {
-            engine.close();
-        } catch (Exception e) {
-
+            log.warn("Close cdc engine fail, message: {}", e.getMessage());
         }
     }
 
@@ -214,57 +243,6 @@ public class GaussDBRunner extends DebeziumCdcRunner {
     @Override
     public void consumeRecords(List<SourceRecord> sourceRecords, DebeziumEngine.RecordCommitter<SourceRecord> committer) {
         super.consumeRecords(sourceRecords, committer);
-        List<TapEvent> eventList = TapSimplify.list();
-        Map<String, ?> offset = null;
-        for (SourceRecord sr : sourceRecords) {
-            offset = sr.sourceOffset();
-            // PG use micros to indicate the time but in pdk api we use millis
-            Long referenceTime = (Long) offset.get("ts_usec") / 1000;
-            Struct struct = ((Struct) sr.value());
-            if (struct == null) {
-                continue;
-            }
-            if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
-                eventList.add(new HeartbeatEvent().init().referenceTime(((Struct)sr.value()).getInt64("ts_ms")));
-                continue;
-            }
-            String op = struct.getString("op");
-            String lsn = String.valueOf(offset.get("lsn"));
-            String table = struct.getStruct("source").getString("table");
-            Struct after = struct.getStruct("after");
-            Struct before = struct.getStruct("before");
-            TapRecordEvent event = null;
-            switch (op) { //snapshot.mode = 'never'
-                case "c": //after running --insert
-                case "r": //after slot but before running --read
-                    event = new TapInsertRecordEvent().init().table(table).after(getMapFromStruct(after));
-                    break;
-                case "d": //after running --delete
-                    event = new TapDeleteRecordEvent().init().table(table).before(getMapFromStruct(before));
-                    break;
-                case "u": //after running --update
-                    event = new TapUpdateRecordEvent().init().table(table).after(getMapFromStruct(after)).before(getMapFromStruct(before));
-                    break;
-                default:
-                    break;
-            }
-            if (EmptyKit.isNotNull(event)) {
-                event.setReferenceTime(referenceTime);
-                event.setExactlyOnceId(lsn);
-            }
-            eventList.add(event);
-            if (eventList.size() >= recordSize) {
-                postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
-                consumer.accept(eventList, postgresOffset);
-                PostgresOffsetStorage.postgresOffsetMap.put(runnerName, postgresOffset);
-                eventList = TapSimplify.list();
-            }
-        }
-        if (EmptyKit.isNotEmpty(eventList)) {
-            postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
-            consumer.accept(eventList, postgresOffset);
-            PostgresOffsetStorage.postgresOffsetMap.put(runnerName, postgresOffset);
-        }
     }
 
     private DataMap getMapFromStruct(Struct struct) {

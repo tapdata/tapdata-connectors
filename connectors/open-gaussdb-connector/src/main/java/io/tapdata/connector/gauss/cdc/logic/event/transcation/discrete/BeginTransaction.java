@@ -5,8 +5,6 @@ import io.tapdata.connector.gauss.cdc.logic.event.LogicUtil;
 import io.tapdata.connector.gauss.cdc.logic.param.EventParam;
 import io.tapdata.connector.gauss.util.TimeUtil;
 import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.util.DateUtil;
 
 import java.nio.ByteBuffer;
 
@@ -29,7 +27,7 @@ public class BeginTransaction implements Event<TapEvent> {
     }
 
     @Override
-    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent) {
+    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, AnalyzeParam param) {
         byte[] csn = LogicUtil.read(logEvent, 8);
         byte[] firstLsn = LogicUtil.read(logEvent, 8);
         byte[] commitTimeTag = LogicUtil.read(logEvent, 1);
@@ -47,10 +45,7 @@ public class BeginTransaction implements Event<TapEvent> {
         byte[] endTag = LogicUtil.read(logEvent, 1);
         long csnNumber = LogicUtil.bytesToLong(csn);
         long lsnNumber = LogicUtil.bytesToLong(firstLsn);
-        System.out.println(new String(commitTime));
-        long timestamp = null == commitTime ? 0 :
-                TimeUtil.parseTimestamp(new String(commitTime), "yyyy-MM-dd hh:mm:ss.ssssssXXX", 0);
-        System.out.println("Begin: " + timestamp);
+        long timestamp = null == commitTime ? 0 : TimeUtil.parseTimestamp(new String(commitTime), 3);
         return new EventEntity<>(null, "", timestamp, csnNumber, lsnNumber);
     }
 }

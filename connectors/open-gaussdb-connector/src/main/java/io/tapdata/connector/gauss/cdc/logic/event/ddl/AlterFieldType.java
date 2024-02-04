@@ -15,7 +15,7 @@ public class AlterFieldType implements DDLEvent {
     }
 
     @Override
-    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent) {
+    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, AnalyzeParam param) {
         return null;
     }
 }

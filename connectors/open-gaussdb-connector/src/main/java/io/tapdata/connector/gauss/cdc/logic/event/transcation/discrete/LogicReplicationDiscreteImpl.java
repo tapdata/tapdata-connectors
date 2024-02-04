@@ -1,7 +1,8 @@
 package io.tapdata.connector.gauss.cdc.logic.event.transcation.discrete;
 
-import com.huawei.opengauss.jdbc.replication.LogSequenceNumber;
+import io.debezium.connector.postgresql.TypeRegistry;
 import io.tapdata.connector.gauss.cdc.CdcOffset;
+import io.tapdata.connector.gauss.cdc.logic.AnalyzeLog;
 import io.tapdata.connector.gauss.cdc.logic.event.Event;
 import io.tapdata.connector.gauss.cdc.logic.event.EventFactory;
 import io.tapdata.connector.gauss.cdc.logic.event.LogicUtil;
@@ -11,51 +12,64 @@ import io.tapdata.connector.gauss.cdc.logic.event.dml.UpdateEvent;
 import io.tapdata.connector.gauss.cdc.logic.event.other.HeartBeatEvent;
 import io.tapdata.connector.gauss.enums.CdcConstant;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
+
+import static io.tapdata.base.ConnectorBase.list;
 
 public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
-    String sid;
-    long sStartTime;
-    final StreamReadConsumer eventAccept;
-    final int batchSize;
-    final CdcOffset offset;
-    int transactionIndex = 0;
+    private final StreamReadConsumer eventAccept;
+    private final int batchSize;
+    private final CdcOffset offset;
+    private int transactionIndex = 0;
+    private TypeRegistry typeRegistry;
+    private AnalyzeLog.AnalyzeParam param;
+    private Supplier<Boolean> supplier;
 
-    private LogicReplicationDiscreteImpl(StreamReadConsumer consumer, int batchSize, CdcOffset offset) {
+    private LogicReplicationDiscreteImpl(StreamReadConsumer consumer, int batchSize, CdcOffset offset, TypeRegistry typeRegistry, Supplier<Boolean> supplier) {
         this.eventAccept = consumer;
         if (batchSize > CdcConstant.CDC_MAX_BATCH_SIZE || batchSize <= CdcConstant.CDC_MIN_BATCH_SIZE) batchSize = CdcConstant.CDC_DEFAULT_BATCH_SIZE;
         this.batchSize = batchSize;
         if (null == offset) offset = new CdcOffset();
         this.offset = offset;
+        this.typeRegistry = typeRegistry;
+        param = new AnalyzeLog.AnalyzeParam(typeRegistry);
+        this.supplier = supplier;
     }
 
-    public static EventFactory<ByteBuffer> instance(StreamReadConsumer consumer, int batchSize, CdcOffset offset) {
-        return new LogicReplicationDiscreteImpl(consumer, batchSize, offset);
+    public static EventFactory<ByteBuffer> instance(StreamReadConsumer consumer, int batchSize, CdcOffset offset, TypeRegistry typeRegistry, Supplier<Boolean> supplier) {
+        return new LogicReplicationDiscreteImpl(consumer, batchSize, offset, typeRegistry, supplier);
     }
+
+    private boolean hasNext(ByteBuffer buffer) {
+        return null != supplier && supplier.get() && buffer.hasRemaining();
+    }
+
 
     @Override
     public void emit(ByteBuffer logEvent) {
         List<TapEvent> eventList = new ArrayList<>();
         try {
-            while (logEvent.hasRemaining()) {
+            while (hasNext(logEvent)) {
                 byte[] pOrT = LogicUtil.read(logEvent, CdcConstant.BYTES_COUNT_BUFF_START);
                 byte[] lsn = LogicUtil.read(logEvent, CdcConstant.BYTES_COUNT_LSN);
-                LogSequenceNumber sequenceNumber = LogSequenceNumber.valueOf(LogicUtil.bytesToLong(lsn));
-                offset.setLsn(sequenceNumber);
                 byte[] type = LogicUtil.read(logEvent, CdcConstant.BYTES_COUNT_EVENT_TYPE);
                 String transactionType = new String(type);
-                if (transactionType.equalsIgnoreCase(CdcConstant.HEART_TAG)) {
-                    break;
-                }
-                Event.EventEntity<TapEvent> eventEntity = redirect(logEvent, transactionType);
+                Event.EventEntity<TapEvent> eventEntity = redirect(logEvent, transactionType.toUpperCase());
                 if (null == eventEntity) continue;
                 TapEvent event = eventEntity.event();
                 if (null == event) continue;
+                if (event instanceof HeartbeatEvent) {
+                    eventAccept.accept(list(event), offset);
+                    break;
+                }
+                offset.setLsn(LogicUtil.bytesToLong(lsn));
                 if (event instanceof TapRecordEvent) {
                     ((TapRecordEvent)event).setReferenceTime(offset.getTransactionTimestamp());
                 }
@@ -65,14 +79,6 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
                     eventAccept.accept(eventList, offset);
                     eventList = new ArrayList<>();
                 }
-                //event.add(eventEntity.event());
-                //@todo 提交事物
-                //if (redirect instanceof CommitTransaction) {
-                //    accept();
-                //}
-                //@todo 事物事件超出预期
-                //@todo 事物数太多
-                //@todo 事物回滚
             }
         } finally {
             if (!eventList.isEmpty()) {
@@ -90,32 +96,31 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
     private Event.EventEntity<TapEvent> redirect(ByteBuffer logEvent, String type) {
         Event.EventEntity<TapEvent> event = null;
         switch (type) {
-            case "B":
+            case CdcConstant.BEGIN_TAG:
                 offset.withXidIndex(-1);
-                event = BeginTransaction.instance().analyze(logEvent);
+                event = BeginTransaction.instance().analyze(logEvent, param);
                 offset.setLsn(event.csn());
                 offset.withTransactionTimestamp(event.timestamp());
                 break;
-            case "I":
-                event = InsertEvent.instance().analyze(logEvent);
+            case CdcConstant.INSERT_TAG:
+                event = InsertEvent.instance().analyze(logEvent, param);
                 advanceTransactionOffset();
                 break;
-            case "U":
-                event = UpdateEvent.instance().analyze(logEvent);
+            case CdcConstant.UPDATE_TAG:
+                event = UpdateEvent.instance().analyze(logEvent, param);
                 advanceTransactionOffset();
                 break;
-            case "D":
-                event = DeleteEvent.instance().analyze(logEvent);
+            case CdcConstant.DELETE_TAG:
+                event = DeleteEvent.instance().analyze(logEvent, param);
                 advanceTransactionOffset();
                 break;
-            case "C":
+            case CdcConstant.COMMIT_TAG:
                 transactionIndex = 0;
-                event = CommitTransaction.instance().analyze(logEvent);
+                event = CommitTransaction.instance().analyze(logEvent, param);
                 offset.withXidIndex(0);
                 break;
-            case CdcConstant.HEART_TAG_LOW:
             case CdcConstant.HEART_TAG:
-                event = HeartBeatEvent.instance().analyze(logEvent);
+                event = HeartBeatEvent.instance().analyze(logEvent, param);
                 break;
         }
         return event;

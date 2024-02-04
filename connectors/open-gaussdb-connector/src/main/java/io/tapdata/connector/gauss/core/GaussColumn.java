@@ -5,7 +5,7 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.utils.DataMap;
 
 public class GaussColumn extends PostgresColumn {
-    int columnTypeOid;
+    private int columnTypeOid;
     public GaussColumn() {
         super();
     }
@@ -17,7 +17,7 @@ public class GaussColumn extends PostgresColumn {
     @Override
     public TapField getTapField() {
         String remarksTemp = "Type oid[" + columnTypeOid + "] " + (null == this.remarks ? "" : this.remarks);
-        return new TapField(this.columnName, this.dataType)
+        return new TapField(this.columnName, this.dataType.toUpperCase())
                 .nullable(this.isNullable())
                 .defaultValue(columnDefaultValue)
                 .comment(remarksTemp);
