@@ -27,7 +27,12 @@
 <!--            <version>1.5.4.Final</version>-->
 <!--            <scope>test</scope>-->
 <!--        </dependency>-->
-
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>8.0.21</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>hw-open-gaussdb</artifactId>

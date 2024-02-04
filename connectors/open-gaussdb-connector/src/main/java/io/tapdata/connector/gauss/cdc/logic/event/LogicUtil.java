@@ -1,13 +1,20 @@
 package io.tapdata.connector.gauss.cdc.logic.event;
 
+import io.tapdata.connector.gauss.enums.CdcConstant;
+
 import java.nio.ByteBuffer;
 
 public class LogicUtil {
+    public static void main(String[] args) {
+        byte[] b= new byte[]{-1,-1,-1,-1};
+        System.out.println(bytesToInt(b, 32));
+    }
     public static int bytesToInt(byte[] src, int offset) {
-        int ans=0;
+        int ans = 0;
         for(int i = 0; i < src.length; i++){
             ans <<= offset;
-            ans |= (src[src.length - i - 1] & 0xff);
+            ans |= (src[src.length - i - 1]);
+            //ans |= (src[src.length - i - 1] & 0xff);
         }
         return ans;
     }
@@ -49,6 +56,14 @@ public class LogicUtil {
     public static byte[] read(ByteBuffer buffer, int lengthByteSize, int bitOffset) {
         byte[] lengthBytes = read(buffer, lengthByteSize);
         int readSize = bytesToInt(lengthBytes, bitOffset);
+        return read(buffer, readSize);
+    }
+
+    public static byte[] readValue(ByteBuffer buffer, int lengthByteSize, int bitOffset) {
+        byte[] lengthBytes = read(buffer, lengthByteSize);
+        int readSize = bytesToInt(lengthBytes, bitOffset);
+        if (CdcConstant.BYTES_VALUE_OF_NULL == readSize) return null;
+        if (CdcConstant.BYTES_VALUE_OF_EMPTY_CHAR == readSize) return "".getBytes();
         return read(buffer, readSize);
     }
 }

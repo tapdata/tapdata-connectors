@@ -242,15 +242,7 @@
     "node": {
       "type": "object",
       "properties": {
-        "flushLsn": {
-          "required": true,
-          "type": "string",
-          "default": 10,
-          "title": "${flushLsn}",
-          "x-decorator": "FormItem",
-          "x-component": "InputNumber",
-          "x-index": 10
-        }
+
       }
     }
   },
@@ -268,9 +260,7 @@
       "haHost": "haHost",
       "haPort": "haPort",
       "logPluginName": "logPluginName",
-      "timezone": "timezone",
-
-      "flushLsn": "flushLsn"
+      "timezone": "timezone"
     },
     "zh_CN": {
       "doc": "docs/gauss_db_zh_CN.md",
@@ -284,9 +274,7 @@
       "haHost": "haHost",
       "haPort": "haPort",
       "logPluginName": "logPluginName",
-      "timezone": "timezone",
-
-      "flushLsn": "flushLsn"
+      "timezone": "timezone"
     },
     "zh_TW": {
       "doc": "docs/gauss_db_zh_TW.md",
@@ -300,9 +288,7 @@
       "haHost": "haHost",
       "haPort": "haPort",
       "logPluginName": "logPluginName",
-      "timezone": "timezone",
-
-      "flushLsn": "flushLsn"
+      "timezone": "timezone"
     }
   },
   "dataTypes": {
@@ -367,11 +353,6 @@
     },
     "clob": {
       "to": "TapString",
-      "byte": 35184372088831,
-      "fixed": false
-    },
-    "blob": {
-      "to": "TapBinary",
       "byte": 35184372088831,
       "fixed": false
     },
@@ -493,7 +474,7 @@
         170141183460469231731687303715884105727
       ]
     },
-    "numeric[($precision,$scale)]": {
+    "numeric[($precision[,$scale])]": {
       "to": "TapNumber",
       "precision": [
         1,
@@ -506,7 +487,7 @@
       "defaultPrecision": 147445,
       "defaultScale": 16383
     },
-    "decimal[($precision,$scale)]": {
+    "decimal[($precision[,$scale])]": {
       "to": "TapNumber",
       "precision": [
         1,
@@ -521,7 +502,7 @@
       "fixed": true,
       "queryOnly": true
     },
-    "number[($precision,$scale)]": {
+    "number[($precision[,$scale])]": {
       "to": "TapNumber",
       "precision": [
         1,
@@ -652,20 +633,19 @@
       ],
       "fixed": false
     },
-    "dec[($precision,$scale)]": {
+    "dec[($precision[,$scale])]": {
       "to": "TapNumber",
       "precision": [
         1,
         1000
       ],
-      "scale": [
+      "$scale": [
         0,
         1000
       ],
       "defaultPrecision": 147445,
       "defaultScale": 16383,
-      "fixed": false,
-      "queryOnly": true
+      "fixed": false
     },
     "money": {
       "to": "TapNumber",

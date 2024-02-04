@@ -1,9 +1,9 @@
 package io.tapdata.connector.gauss.cdc;
 
 public class CdcOffset {
-    int xidIndex;
-    Object lsn;
-    long transactionTimestamp;
+    private int xidIndex;
+    private Long lsn;
+    private long transactionTimestamp;
     public CdcOffset() {
 
     }
@@ -11,7 +11,7 @@ public class CdcOffset {
         this.xidIndex = xidIndex;
         return this;
     }
-    public CdcOffset withLsn(Object lsn) {
+    public CdcOffset withLsn(Long lsn) {
         this.lsn = lsn;
         return this;
     }
@@ -32,7 +32,7 @@ public class CdcOffset {
         return lsn;
     }
 
-    public void setLsn(Object lsn) {
+    public void setLsn(Long lsn) {
         this.lsn = lsn;
     }
 

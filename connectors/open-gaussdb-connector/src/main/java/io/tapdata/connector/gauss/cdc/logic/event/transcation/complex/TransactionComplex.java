@@ -14,7 +14,7 @@ public class TransactionComplex implements Event<List<TapRecordEvent>> {
     }
 
     @Override
-    public Event.EventEntity<List<TapRecordEvent>> analyze(ByteBuffer logEvent) {
+    public Event.EventEntity<List<TapRecordEvent>> analyze(ByteBuffer logEvent, AnalyzeParam param) {
         return null;
     }
 }
