@@ -1,44 +1,39 @@
 ## **Connection Configuration Help**
-
-### **1. Prerequisite description of file data source**
-- Because of the particularity of file data source, connection configuration mainly includes file protocol specific configuration and file path. The connection failed to load the data model. The model can only be loaded after the required parameters corresponding to the file type have been configured in the task node. At present, one connection configuration only corresponds to one model.
-- Incremental reading of file data source is through file wildcard scanning. Only new files or modifications of original files can be sensed. The scanning cycle is 1 minute by default. The data synchronization of deleting files and deleting file contents is not supported, and the involved files are added in full every time, and the purpose of modification is achieved by updating the condition field.
-
-### **2. Supporting file protocol**
-The following file protocol path delimiters use "/"
-#### **LOCAL**
-Local represents the file of the operating system where the local (engine) is located
-#### **FTP**
-FTP (File Transfer Protocol) can set the file server encoding.
-#### **SFTP**
-SFTP (Secure Encrypted File Transfer Protocol) can set the file server encoding. Linux system is enabled by default
-#### **SMB**
-SMB (File Sharing Protocol) Network file sharing protocol supported by Windows system, compatible with 1. x, 2. x, 3. x.
-- Special note: When accessing a file share, select the shared directory first, and then fill in the path. (shared directory/file path)
-#### **S3FS**
-S3FS (file system following S3 protocol)
-
-### **3. General parameters of task node**
-#### **Model**
-The name of the logical model built by the file selected by the task node
-#### **Inclusion and exclusion wildcard (White&Black)**
-Generic matching is only for * fuzzy matching and does not support regular expressions. Include Null indicates all files, and Exclude Null indicates no exclusion. The scanning file logic is to filter out the matched files from the matched files. The recursive switch indicates whether to traverse subdirectories.
-
-### **4. CSV file configuration and usage**
-CSV file data source supports large files. If multiple file headers are inconsistent, the union will be taken as the model.
-#### **CSV file separator**
-They are usually commas. There are also some special CSV files.
-#### **CSV file encoding**
-If there is Chinese in the CSV file, you need to pay attention to the encoding method of the file content. For example, UTF-8 is the default in Linux, and GBK is the default in Windows.
-#### **CSV header and data row**
-The CSV file can be configured with a row as the header, or you can specify the header (comma separated). When the header line is 0, there is no header line in the CSV file. If the header is empty at the same time, it will be automatically named as Column1, Column2.
-#### **Convert string**
-When the content of the CSV file is regular, and you want to automatically convert the corresponding number, date, time, and Boolean type, you can turn off this switch. If the file contents are messy, it is recommended to convert them all to strings to avoid synchronization failure.
-
-### **5. CSV file data type support**
-- STRING
-- TEXT
-- INTEGER
-- NUMBER
-- BOOLEAN
-- DATETIME
+### Database version 
+  HuaWei Open GaussDB Standby 8.1 postgres version 9.2
+### **1. Necessary inspections**
+    Before using CDC, you need to configure your user machine (the machine where the Agent is currently deployed) in pg_hba.conf of each DN node:
+```text
+    # Prerequisite: Add the JDBC user machine IP to the database whitelist, Add the following content to pg_hba.conf, and then restart the database:
+    # Assuming the JDBC user IP is 10.10.10.10
+    host all all 10.10.10.10/32 sha256
+    host replication all 10.10.10.10/32 sha256
+```
+    After configuration, the database needs to be restarted
+### Data source parameters
+1. Database IP
+2. Port
+3. Database Name
+4. Schema Name
+5. Database Username
+6. Database Password
+7. Logic replicate IP, The IP of the main DN
+8. Logical replication port, usually the port of the main DN+1, which defaults to 8001
+9. Log plugin, using mppdb_decoding by default
+10. Timezone
+    
+### About CDC Logic replicate
+1. DDL statement decoding is not supported, and executing specific DDL statements (such as regular table truncate or partitioned table exchange) may cause decoding data loss.
+2. Decoding of column storage and data page copying is not supported.
+3. The size of a single tuple should not exceed 1GB. Considering that the decoding result may be larger than the inserted data, it is recommended that the size of a single tuple should not exceed 500MB
+4. The data types that GaussDB supports decoding are:
+```text
+    INTEGER、BIGINT、SMALLINT、TINYINT、SERIAL、SMALLSERIAL、BIGSERIAL、
+    FLOAT、DOUBLE PRECISION、
+    DATE、TIME[WITHOUT TIME ZONE]、TIMESTAMP[WITHOUT TIME ZONE]、
+    CHAR(n)、VARCHAR(n)、TEXT。
+```
+5. Copying interval partition tables is not supported.
+6. Global temporary tables are not supported.
+7. After executing a DDL statement in a transaction, the DDL statement and subsequent statements will not be decoded.
+8. To parse the UPDATE and Delete statements of a certain Astrore table, it is necessary to configure the REPLICA Identity property for this table. When this table does not have a primary key, it needs to be configured as Full
