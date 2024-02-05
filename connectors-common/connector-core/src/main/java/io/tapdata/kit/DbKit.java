@@ -130,7 +130,10 @@ public class DbKit {
     }
 
     public static String clobToString(Clob clob) {
-        String re = "";
+        if (clob == null) {
+            return null;
+        }
+        String re;
         try (Reader is = clob.getCharacterStream(); BufferedReader br = new BufferedReader(is)) {
             String s = br.readLine();
             StringBuilder sb = new StringBuilder();
