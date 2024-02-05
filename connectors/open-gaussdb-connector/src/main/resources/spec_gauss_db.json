@@ -824,32 +824,28 @@
       "byte": 16383
     },
     "point": {
-      "to": "TapBinary",
-      "byte": 16,
-      "queryOnly": true
+      "to": "TapString",
+      "byte": "1m"
     },
     "lseg": {
-      "to": "TapBinary",
-      "byte": 32,
-      "queryOnly": true
+      "to": "TapString",
+      "byte": "1m"
     },
     "box": {
-      "to": "TapBinary",
-      "byte": 32,
-      "queryOnly": true
+      "to": "TapString",
+      "byte": "1m"
     },
     "path": {
-      "to": "TapBinary",
-      "queryOnly": true
+      "to": "TapString",
+      "byte": "1m"
     },
     "polygon": {
-      "to": "TapBinary",
-      "queryOnly": true
+      "to": "TapString",
+      "byte": "1m"
     },
     "circle": {
-      "to": "TapBinary",
-      "byte": 24,
-      "queryOnly": true
+      "to": "TapString",
+      "byte": "1m"
     },
     "tsvector": {
       "to": "TapBinary",
@@ -894,12 +890,12 @@
       "queryOnly": true
     },
     "json": {
-      "to": "TapMap",
+      "to": "TapString",
       "byte": "4g",
       "pkEnablement": false
     },
     "jsonb": {
-      "to": "TapMap",
+      "to": "TapString",
       "byte": "4g",
       "pkEnablement": false,
       "queryOnly": true
@@ -907,6 +903,43 @@
     "hll": {
       "to": "TapString",
       "byte": "16k",
+      "queryOnly": true
+    },
+    "xml": {
+      "to": "TapString",
+      "byte": "1g",
+      "queryOnly": true
+    },
+    "xmltype": {
+      "to": "TapString",
+      "byte": "1g",
+      "queryOnly": true
+    },
+    "hash16": {
+      "to": "TapNumber",
+      "bit": 64,
+      "precision": 10,
+      "value": [
+        0,
+        18446744073709551615
+      ],
+      "queryOnly": true
+    },
+    "hash32": {
+      "to": "TapArray",
+      "bit": 128,
+      "queryOnly": true
+    },
+    "set": {
+      "to": "TapArray",
+      "queryOnly": true
+    },
+    "aclitem": {
+      "to": "TapString",
+      "queryOnly": true
+    },
+    "aclitem[]": {
+      "to": "TapString",
       "queryOnly": true
     }
   }
