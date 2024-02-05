@@ -148,16 +148,16 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
 
     protected int doUpdateOne(TapConnectorContext tapConnectorContext, TapTable tapTable, TapRecordEvent tapRecordEvent) throws Throwable {
         String updateDmlPolicy = getDmlUpdatePolicy(tapConnectorContext);
-        //如果写入策略不需要全字段，省流
-        if (!ConnectionOptions.DML_UPDATE_POLICY_INSERT_ON_NON_EXISTS.equals(updateDmlPolicy)) {
-            TapUpdateRecordEvent tapUpdateRecordEvent = (TapUpdateRecordEvent) tapRecordEvent;
-            Map<String, Object> before = tapUpdateRecordEvent.getBefore();
-            Map<String, Object> after = tapUpdateRecordEvent.getAfter();
-            Collection<String> allColumn = tapTable.getNameFieldMap().keySet();
-            Collection<String> pks = tapTable.primaryKeys(true);
-            tapUpdateRecordEvent.setBefore(DbKit.getBeforeForUpdate(after, before, allColumn, pks));
-            tapUpdateRecordEvent.setAfter(DbKit.getAfterForUpdate(after, before, allColumn, pks));
-        }
+//        //如果写入策略不需要全字段，省流
+//        if (!ConnectionOptions.DML_UPDATE_POLICY_INSERT_ON_NON_EXISTS.equals(updateDmlPolicy)) {
+//            TapUpdateRecordEvent tapUpdateRecordEvent = (TapUpdateRecordEvent) tapRecordEvent;
+//            Map<String, Object> before = tapUpdateRecordEvent.getBefore();
+//            Map<String, Object> after = tapUpdateRecordEvent.getAfter();
+//            Collection<String> allColumn = tapTable.getNameFieldMap().keySet();
+//            Collection<String> pks = tapTable.primaryKeys(true);
+//            tapUpdateRecordEvent.setBefore(DbKit.getBeforeForUpdate(after, before, allColumn, pks));
+//            tapUpdateRecordEvent.setAfter(DbKit.getAfterForUpdate(after, before, allColumn, pks));
+//        }
         PreparedStatement updatePreparedStatement = getUpdatePreparedStatement(tapConnectorContext, tapTable, tapRecordEvent);
         int parameterIndex = setPreparedStatementValues(tapConnectorContext, tapTable, tapRecordEvent, updatePreparedStatement);
         setPreparedStatementWhere(tapTable, tapRecordEvent, updatePreparedStatement, parameterIndex);
