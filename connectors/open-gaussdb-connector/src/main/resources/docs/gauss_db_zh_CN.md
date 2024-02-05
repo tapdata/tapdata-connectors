@@ -2,8 +2,18 @@
 ### 数据库版本 
   HuaWei Open GaussDB 主备8.1 postgres版本9.2
 ### **1. 必要的检查**
+1. 开启逻辑复制
 
-使用CDC前需要在各DN节点的 pg_hba.conf 中配置你的用户机器（当前部署Agent的机器）：
+- 逻辑日志目前从DN中抽取，如果进行逻辑复制，应使用SSL连接，因此需要保证相应DN上的GUC参数ssl设置为on
+
+2. 设置GUC参数
+
+- 设置GUC参数wal_level为logical
+
+- 设置GUC参数max_replication_slots >= 每个节点所需的（物理流复制槽数+备份槽数+逻辑复制槽数）
+    資料庫預設值為20，如需設定，建议参考值设置为使用此连接作为源的的任务任务数+1
+    
+3. 使用CDC前需要在各DN节点的 pg_hba.conf 中配置你的用户机器（当前部署Agent的机器）：
 ```text
     # 前提条件:添加JDBC用户机器IP到数据库白名单里，在pg_hba.conf添加以下内容，然后重启数据库即可:
     # 假设JDBC用户IP为10.10.10.10
@@ -41,3 +51,25 @@
 6. 不支持全局临时表。
 7. 在事务中执行DDL语句后，该DDL语句与之后的语句不会被解码。
 8. 为解析某个astore表的UPDATE和DELETE语句，需为此表配置REPLICA IDENITY属性，在此表无主键时需要配置为FULL
+
+### 异常处理
+1. 增量启动失败
+    - 复制槽连接失败，相关错误如下：
+      ```text
+      com.huawei.opengauss.jdbc.util.PSQLException: 
+        [192.168.*.*:5***5/1.9*.1*2.1*2:8001] 
+        FATAL: no pg_hba.conf entry for replication connection from host "1*.1**.2*5.1*0",
+        user "r**t", SSL off
+      ```
+      
+      错误原因： 访问机器不在DN节点的白名单列表
+      
+      解决方法：
+        在各DN节点的 pg_hba.conf 中配置你的用户机器（当前部署Agent的机器）：
+        ```text
+        # 添加JDBC用户机器IP到数据库白名单里，在pg_hba.conf添加以下内容
+        # 假设JDBC用户IP为10.10.10.10
+          host all all 10.10.10.10/32 sha256
+          host replication all 10.10.10.10/32 sha256
+        # 然后重启数据库即可
+        ```

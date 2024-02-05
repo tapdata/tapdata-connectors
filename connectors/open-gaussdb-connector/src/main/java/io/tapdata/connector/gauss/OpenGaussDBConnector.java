@@ -15,6 +15,7 @@ import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
@@ -153,14 +154,31 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             } catch (SQLException e) {
                 throw new RuntimeException(e);
             }
+        }).registerToTapValue(com.huawei.opengauss.jdbc.jdbc.PgArray.class, (value, tapType) -> {
+            PgArray pgArray = (PgArray) value;
+            try (ResultSet resultSet = pgArray.getResultSet()) {
+                return new TapArrayValue(DbKit.getDataArrayByColumnName(resultSet, "VALUE"));
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
         }).registerToTapValue(PgSQLXML.class, (value, tapType) -> {
             try {
                 return new TapStringValue(((PgSQLXML) value).getString());
             } catch (SQLException e) {
                 throw new RuntimeException(e);
             }
-        })
-        .registerToTapValue(PGbox.class, (value, tapType) -> new TapStringValue(value.toString()))
+        }).registerToTapValue(com.huawei.opengauss.jdbc.jdbc.PgSQLXML.class, (value, tapType) -> {
+            com.huawei.opengauss.jdbc.jdbc.PgSQLXML xml = (com.huawei.opengauss.jdbc.jdbc.PgSQLXML)value;
+            try {
+                TapStringValue tapStringValue = new TapStringValue(xml.getString());
+                tapStringValue.setOriginValue(value);
+                return tapStringValue;
+            } catch (Exception e) {
+                TapStringValue tapStringValue = new TapStringValue(null);
+                tapStringValue.setOriginValue(value);
+                return tapStringValue;
+            }
+        }).registerToTapValue(PGbox.class, (value, tapType) -> new TapStringValue(value.toString()))
         .registerToTapValue(PGClob.class, (value, tapType) -> {
             if (value instanceof PGClob) {
                 PGClob clob = (PGClob) value;
@@ -174,16 +192,34 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 }
             }
             return new TapStringValue(null);
-        })
+        }).registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGbox.class, (value, tapType) -> new TapStringValue(value.toString()))
         .registerToTapValue(PGcircle.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGcircle.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGline.class, (value, tapType) -> new TapStringValue(value.toString()))
         .registerToTapValue(PGline.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGlseg.class, (value, tapType) -> new TapStringValue(value.toString()))
         .registerToTapValue(PGlseg.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpath.class, (value, tapType) -> new TapStringValue(value.toString()))
         .registerToTapValue(PGpath.class, (value, tapType) -> new TapStringValue(value.toString()))
         .registerToTapValue(PGobject.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.util.PGobject.class, (value, tapType) -> new TapStringValue(value.toString()))
         .registerToTapValue(PGpoint.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpoint.class, (value, tapType) -> new TapStringValue(value.toString()))
         .registerToTapValue(PGpolygon.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpolygon.class, (value, tapType) -> new TapStringValue(value.toString()))
         .registerToTapValue(UUID.class, (value, tapType) -> new TapStringValue(value.toString()))
         .registerToTapValue(PGInterval.class, (value, tapType) -> {
+            //P1Y1M1DT12H12M12.312312S
+            PGInterval pgInterval = (PGInterval) value;
+            String interval = "P" + pgInterval.getYears() + "Y" +
+                    pgInterval.getMonths() + "M" +
+                    pgInterval.getDays() + "DT" +
+                    pgInterval.getHours() + "H" +
+                    pgInterval.getMinutes() + "M" +
+                    pgInterval.getSeconds() + "S";
+            return new TapStringValue(interval);
+        })
+        .registerToTapValue(com.huawei.opengauss.jdbc.util.PGInterval.class, (value, tapType) -> {
             //P1Y1M1DT12H12M12.312312S
             PGInterval pgInterval = (PGInterval) value;
             String interval = "P" + pgInterval.getYears() + "Y" +
@@ -267,7 +303,26 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         .registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime())
         .registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp())
         .registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate())
-        .registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
+        .registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"))
+        .registerFromTapValue(TapStringValue.class, "xml", value -> {
+            return value.getOriginValue();
+//            if (null == value || null == value.getValue() ||  "".equals(value.getValue())) return value;
+//            return " xmlparse(DOCUMENT '" + value.getValue() + "' wellformed) ";wellformed
+        }).registerFromTapValue(TapStringValue.class, "xmltype", value -> {
+//            if (null == value || null == value.getValue() ||  "".equals(value.getValue())) return value;
+//            return " xmltype.('" + value.getValue() + "') ";
+            return value.getOriginValue();
+        }).registerFromTapValue(TapStringValue.class, "json", value -> {
+            try {
+                PGobject pGobject = new PGobject();
+                pGobject.setType("json");
+                pGobject.setValue(value.getValue());
+                return pGobject;
+            } catch (Exception e) {
+                return null;
+            }
+        })
+        ;
     }
 
     //clear resource outer and jdbc context
@@ -282,6 +337,9 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             if (EmptyKit.isNotNull(slotName)) {
                 clearSlot();
             }
+        } catch (Exception e) {
+            connectorContext.getLog().error("Connection reset fail, error message: {}", e.getMessage());
+            throw e;
         } finally {
             slotName = null;
             onStop(connectorContext);
@@ -390,8 +448,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     //initialize jdbc context, slot name, version
     private void initConnection(TapConnectionContext connectionContext) {
         gaussDBConfig = (GaussDBConfig) new GaussDBConfig().load(connectionContext.getConnectionConfig());
-        gaussDBTest = new GaussDBTest(gaussDBConfig, testItem -> {
-        }).initContext();
+        gaussDBTest = new GaussDBTest(gaussDBConfig, testItem -> { }).initContext();
         gaussJdbcContext = new GaussDBJdbcContext(gaussDBConfig);
         commonDbConfig = gaussDBConfig;
         jdbcContext = gaussJdbcContext;
