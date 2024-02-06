@@ -201,7 +201,7 @@ public class ElasticsearchConnector extends ConnectorBase {
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
-        new ElasticsearchRecordWriter(elasticsearchHttpContext, tapTable).write(tapRecordEvents, writeListResultConsumer);
+        new ElasticsearchRecordWriter(elasticsearchHttpContext, tapTable).log(connectorContext.getLog()).write(tapRecordEvents, writeListResultConsumer);
     }
 
     private void createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {

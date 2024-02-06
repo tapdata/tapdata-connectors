@@ -40,7 +40,7 @@ public class MysqlConnectionTest extends CommonDbTest {
         super(mysqlConfig, consumer);
         jdbcContext = new MysqlJdbcContextV2(mysqlConfig);
         if (!ConnectionTypeEnum.SOURCE.getType().equals(commonDbConfig.get__connectionType())) {
-            testFunctionMap.put("testCreateTablePrivilege", this::testCreateTablePrivilege);
+//            testFunctionMap.put("testCreateTablePrivilege", this::testCreateTablePrivilege);
             testFunctionMap.put("testWritePrivilege", this::testWritePrivilege);
         }
         if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {

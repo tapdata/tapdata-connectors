@@ -25,6 +25,9 @@
       },
       {
         "id": "api_server_supported"
+      },
+      {
+        "id": "source_incremental_update_event_have_before"
       }
     ],
     "supportDDL": {

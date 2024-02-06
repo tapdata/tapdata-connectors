@@ -54,7 +54,7 @@
         <dependency>
             <groupId>com.moilioncircle</groupId>
             <artifactId>redis-replicator</artifactId>
-            <version>3.8.0</version>
+            <version>3.8.1</version>
         </dependency>
     </dependencies>
 
@@ -109,6 +109,7 @@
                                     <excludes>
                                         <exclude>com/moilioncircle/redis/replicator/Configuration</exclude>
                                         <exclude>com/moilioncircle/redis/replicator/RedisSocketReplicator</exclude>
+                                        <exclude>com/moilioncircle/redis/replicator/cmd/ReplyParser</exclude>
                                     </excludes>
                                 </filter>
                             </filters>

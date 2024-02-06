@@ -8,6 +8,7 @@ import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffsetStorage;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -27,6 +28,7 @@ import java.nio.ByteBuffer;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -102,8 +104,8 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 //                .using(this.getClass().getClassLoader())
 //                .using(Clock.SYSTEM)
 //                .notifying(this::consumeRecord)
-//                .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
-//                        numberOfMessagesSinceLastCommit >= 1000 || timeSinceLastCommit.getSeconds() >= 60)
+                .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
+                        numberOfMessagesSinceLastCommit >= recordSize || timeSinceLastCommit.getSeconds() >= 5)
                 .notifying(this::consumeRecords).using((result, message, throwable) -> {
                     if (result) {
                         if (StringUtils.isNotBlank(message)) {
@@ -138,6 +140,10 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             Long referenceTime = (Long) offset.get("ts_usec") / 1000;
             Struct struct = ((Struct) sr.value());
             if (struct == null) {
+                continue;
+            }
+            if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
+                eventList.add(new HeartbeatEvent().init().referenceTime(((Struct)sr.value()).getInt64("ts_ms")));
                 continue;
             }
             String op = struct.getString("op");

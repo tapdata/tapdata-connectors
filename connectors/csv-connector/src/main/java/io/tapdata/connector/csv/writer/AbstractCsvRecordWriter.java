@@ -49,7 +49,7 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
                 delete++;
             }
         }
-        lastWriteMap.put(uniquePath, System.currentTimeMillis());
+        lastWriteMap.put(skipPoints(uniquePath), System.currentTimeMillis());
         csvFileWriter.flush();
         kvMap.put("tapdata_file_last_write", lastWriteMap);
         writeListResultConsumer.accept(listResult
@@ -69,27 +69,27 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
                 String filePath = getFileNameFromValue(fileNameExpression, tapInsertRecordEvent.getAfter());
                 CsvFileWriter csvFileWriter = getCsvFileWriterAndInit(filePath);
                 csvFileWriter.getCsvWriter().writeNext(getStringArray(tapInsertRecordEvent.getAfter(), fieldList, "i"));
-                lastWriteMap.put(filePath, System.currentTimeMillis());
+                lastWriteMap.put(skipPoints(filePath), System.currentTimeMillis());
                 insert++;
             } else if (recordEvent instanceof TapUpdateRecordEvent) {
                 TapUpdateRecordEvent tapUpdateRecordEvent = (TapUpdateRecordEvent) recordEvent;
                 String filePath = getFileNameFromValue(fileNameExpression, tapUpdateRecordEvent.getAfter());
                 CsvFileWriter csvFileWriter = getCsvFileWriterAndInit(filePath);
                 csvFileWriter.getCsvWriter().writeNext(getStringArray(tapUpdateRecordEvent.getAfter(), fieldList, "u"));
-                lastWriteMap.put(filePath, System.currentTimeMillis());
+                lastWriteMap.put(skipPoints(filePath), System.currentTimeMillis());
                 update++;
             } else {
                 TapDeleteRecordEvent tapDeleteRecordEvent = (TapDeleteRecordEvent) recordEvent;
                 String filePath = getFileNameFromValue(fileNameExpression, tapDeleteRecordEvent.getBefore());
                 CsvFileWriter csvFileWriter = getCsvFileWriterAndInit(filePath);
                 csvFileWriter.getCsvWriter().writeNext(getStringArray(tapDeleteRecordEvent.getBefore(), fieldList, "d"));
-                lastWriteMap.put(filePath, System.currentTimeMillis());
+                lastWriteMap.put(skipPoints(filePath), System.currentTimeMillis());
                 delete++;
             }
         }
         fileWriterMap.forEach((k, v) -> {
             v.flush();
-            if (System.currentTimeMillis() - lastWriteMap.get(k) > 3 * 60 * 1000) {
+            if (System.currentTimeMillis() - lastWriteMap.get(skipPoints(k)) > 3 * 60 * 1000) {
                 v.close();
             }
         });
@@ -111,7 +111,7 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
                 } else {
                     csvFileWriter = new CsvFileWriter(storage, getNewCacheFileName(csvFileWriter.getPath()), fileConfig.getFileEncoding());
                     csvFileWriter.setRule(csvConfig.getSeparator().replaceAll("\\[", "").replaceAll("]", "").charAt(0),
-                            csvConfig.getQuoteChar().charAt(0), csvConfig.getLineEnd());
+                            EmptyKit.isBlank(csvConfig.getQuoteChar()) ? '\0' : csvConfig.getQuoteChar().charAt(0), csvConfig.getLineEnd());
                     csvFileWriter.init();
                     fileWriterMap.put(uniquePath, csvFileWriter);
                 }
@@ -119,11 +119,11 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
         } else {
             csvFileWriter = new CsvFileWriter(storage, uniquePath, fileConfig.getFileEncoding());
             csvFileWriter.setRule(csvConfig.getSeparator().replaceAll("\\[", "").replaceAll("]", "").charAt(0),
-                    csvConfig.getQuoteChar().charAt(0), csvConfig.getLineEnd());
+                    EmptyKit.isBlank(csvConfig.getQuoteChar()) ? '\0' : csvConfig.getQuoteChar().charAt(0), csvConfig.getLineEnd());
             csvFileWriter.init();
             fileWriterMap.put(uniquePath, csvFileWriter);
         }
-        if (!lastWriteMap.containsKey(uniquePath) || EmptyKit.isNull(lastWriteMap.get(uniquePath))) {
+        if (!lastWriteMap.containsKey(skipPoints(uniquePath)) || EmptyKit.isNull(lastWriteMap.get(skipPoints(uniquePath)))) {
             for (int i = 0; i < fileConfig.getHeaderLine() - 1; i++) {
                 csvFileWriter.getCsvWriter().writeNext(null);
             }
@@ -132,7 +132,7 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
             } else {
                 csvFileWriter.getCsvWriter().writeNext(fileConfig.getHeader().split(","));
             }
-            lastWriteMap.put(uniquePath, System.currentTimeMillis());
+            lastWriteMap.put(skipPoints(uniquePath), System.currentTimeMillis());
         }
         return csvFileWriter;
     }
@@ -173,6 +173,14 @@ public abstract class AbstractCsvRecordWriter extends AbstractFileRecordWriter {
                     }
                 });
             }
+        }
+    }
+
+    private String skipPoints(String str) {
+        try {
+            return str.replace(".", "_");
+        } catch (Exception e) {
+            return str;
         }
     }
 }

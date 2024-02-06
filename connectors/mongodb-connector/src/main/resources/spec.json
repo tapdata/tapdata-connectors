@@ -1,452 +1,410 @@
 {
-  "properties": {
-    "name": "MongoDB",
-    "icon": "icons/mongodb.png",
-    "doc": "${doc}",
-    "tags": [
-      "schema-free",
-      "Database"
-    ],
-    "id": "mongodb",
-    "authentication": "Alpha"
-  },
-  "configOptions": {
-    "capabilities": [
-      {
-        "id": "master_slave_merge"
-      },
-      {
-        "id": "dynamic_schema"
-      },
-      {
-        "id": "dml_insert_policy",
-        "alternatives": [
-          "update_on_exists",
-          "ignore_on_exists"
-        ]
-      },
-      {
-        "id": "dml_update_policy",
-        "alternatives": [
-          "ignore_on_nonexists",
-          "insert_on_nonexists",
-          "log_on_nonexists"
-        ]
-      },
-      {
-        "id": "api_server_supported"
-      }
-    ],
-    "connection": {
-      "type": "object",
-      "properties": {
-        "isUri": {
-          "type": "boolean",
-          "title": "${isUri}",
-          "x-decorator": "FormItem",
-          "x-decorator-props": {
-            "feedbackLayout": "none"
-          },
-          "x-component": "Radio.Group",
-          "x-component-props": {
-            "optionType": "button"
-          },
-          "enum": [
-            {
-              "label": "${dataForm_form_options_URIMode}",
-              "value": true,
-              "disabled": false
-            },
-            {
-              "label": "${dataForm_form_options_standardMode}",
-              "value": false,
-              "disabled": false
-            }
-          ],
-          "default": true,
-          "x-reactions": [
-            {
-              "target": "*(host,database,user,password,additionalString)",
-              "fulfill": {
-                "state": {
-                  "visible": "{{$self.value===false}}"
-                }
-              }
-            },
-            {
-              "target": "*(uri,uriTips)",
-              "fulfill": {
-                "state": {
-                  "visible": "{{$self.value!==false}}"
-                }
-              }
-            }
-          ],
-          "required": true,
-          "x-index": 10
-        },
-        "isUrlTips1": {
-          "type": "void",
-          "title": " ",
-          "x-decorator": "FormItem",
-          "x-decorator-props": {
-            "colon": false
-          },
-          "x-component": "Text",
-          "x-component-props": {
-            "icon": "info",
-            "content": "${isUrlTips1}"
-          },
-          "x-reactions": {
-            "dependencies": [
-              "isUri"
-            ],
-            "fulfill": {
-              "schema": {
-                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
-              }
-            }
-          },
-          "x-index": 18
-        },
-        "isUrlTips2": {
-          "type": "void",
-          "title": " ",
-          "x-decorator": "FormItem",
-          "x-component": "Text",
-          "x-decorator-props": {
-            "colon": false
-          },
-          "x-component-props": {
-            "icon": "info",
-            "content": "${isUrlTips2}"
-          },
-          "x-reactions": {
-            "dependencies": [
-              "isUri"
-            ],
-            "fulfill": {
-              "schema": {
-                "x-decorator-props.style.display": "{{$deps[0]===false ? null:\"none\"}}"
-              }
-            }
-          },
-          "x-index": 19
-        },
-        "uri": {
-          "type": "string",
-          "title": "${dataForm_form_databaseUri}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "apiServerKey": "database_uri",
-          "required": true,
-          "x-index": 20
-        },
-        "uriTips": {
-          "type": "void",
-          "title": " ",
-          "x-decorator": "FormItem",
-          "x-decorator-props": {
-            "colon": false
-          },
-          "x-component": "Text",
-          "x-component-props": {
-            "content": "${uriTips}"
-          },
-          "x-index": 21
-        },
-        "host": {
-          "type": "string",
-          "title": "${dataForm_form_host}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "x-component-props": {
-            "placeholder": "${connection_form_database_host_placeholder}"
-          },
-          "required": true,
-          "x-index": 30
-        },
-        "database": {
-          "type": "string",
-          "title": "${dataForm_form_databaseName}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "required": true,
-          "x-index": 40
-        },
-        "user": {
-          "type": "string",
-          "title": "${dataForm_form_userName}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "x-index": 50
-        },
-        "password": {
-          "type": "string",
-          "title": "${dataForm_form_password}",
-          "x-decorator": "FormItem",
-          "x-component": "Password",
-          "x-index": 60
-        },
-        "additionalString": {
-          "type": "string",
-          "title": "${dataForm_form_additionalString}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "x-index": 70
-        },
-        "OPTIONAL_FIELDS": {
-          "type": "void",
-          "properties": {
-            "schemaLimit": {
-              "title": "${schemaLimit}",
-              "type": "string",
-              "default": 1024,
-              "x-decorator": "FormItem",
-              "x-component": "InputNumber"
-            },
-            "ssl": {
-              "type": "boolean",
-              "title": "${dataForm_form_ssl}",
-              "x-decorator": "FormItem",
-              "x-component": "Radio.Group",
-              "x-component-props": {
-                "optionType": "button"
-              },
-              "default": false,
-              "x-index": 80,
-              "enum": [
-                {
-                  "label": "${dataForm_form_options_sslTSL}",
-                  "value": true
-                },
-                {
-                  "label": "${dataForm_form_options_sslTop}",
-                  "value": false
-                }
-              ],
-              "x-reactions": [
-                {
-                  "target": "*(sslKey,sslPass,sslValidate)",
-                  "fulfill": {
-                    "state": {
-                      "visible": "{{$self.value===true}}"
-                    }
-                  }
-                }
-              ]
-            },
-            "ssl_tips1": {
-              "type": "void",
-              "title": " ",
-              "x-decorator": "FormItem",
-              "x-decorator-props": {
-                "colon": false
-              },
-              "x-component": "Text",
-              "x-component-props": {
-                "content": "${ssl_tips1}"
-              },
-              "x-reactions": {
-                "dependencies": [
-                  "ssl"
-                ],
-                "fulfill": {
-                  "schema": {
-                    "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
-                  }
-                }
-              },
-              "x-index": 81
-            },
-            "ssl_tips2": {
-              "type": "void",
-              "title": " ",
-              "x-decorator": "FormItem",
-              "x-decorator-props": {
-                "colon": false
-              },
-              "x-component": "Text",
-              "x-component-props": {
-                "content": "${ssl_tips2}"
-              },
-              "x-reactions": {
-                "dependencies": [
-                  "ssl"
-                ],
-                "fulfill": {
-                  "schema": {
-                    "x-decorator-props.style.display": "{{$deps[0]===false ? null:\"none\"}}"
-                  }
-                }
-              },
-              "x-index": 82
-            },
-            "sslKey": {
-              "type": "string",
-              "title": "${dataForm_form_sslKey}",
-              "x-decorator": "FormItem",
-              "x-component": "TextFileReader",
-              "fileNameField": "sslKeyFile",
-              "required": true,
-              "x-index": 90
-            },
-            "sslPass": {
-              "type": "string",
-              "title": "${dataForm_form_sslPass}",
-              "x-decorator": "FormItem",
-              "x-component": "Password",
-              "x-index": 100
-            },
-            "sslValidate": {
-              "type": "boolean",
-              "title": "${dataForm_form_sslValidate}",
-              "x-decorator": "FormItem",
-              "x-component": "Switch",
-              "show": false,
-              "x-reactions": [
-                {
-                  "target": "sslCA",
-                  "fulfill": {
-                    "state": {
-                      "visible": "{{$self.value===true}}"
-                    }
-                  }
-                }
-              ],
-              "x-index": 110
-            },
-            "sslCA": {
-              "type": "string",
-              "title": "${dataForm_form_sslCA}",
-              "x-decorator": "FormItem",
-              "x-component": "TextFileReader",
-              "fileNameField": "sslCAFile",
-              "required": true,
-              "x-index": 120
-            },
-            "mongodbLoadSchemaSampleSize": {
-              "title": "${load_schema_sample_size}",
-              "type": "string",
-              "default": 1000,
-              "x-decorator": "FormItem",
-              "x-component": "InputNumber",
-              "x-index": 130
-            }
-          }
-        }
-      }
-    },
-    "node": {
-      "properties": {
-        "syncIndex": {
-          "title": "${syncIndex}",
-          "type": "boolean",
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "layout": "horizontal",
-            "tooltip": "${syncIndexTip}"
-          },
-          "default": false,
-          "x-reactions": {
-            "dependencies": [
-              "$inputs"
-            ],
-            "fulfill": {
-              "state": {
-                "visible": "{{$deps[0].length>0}}"
-              }
-            }
-          },
-          "x-index": 1
-        },
-        "enableSaveDeleteData": {
-          "title": "${saveData}",
-          "type": "boolean",
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "layout": "horizontal"
-          },
-          "default": false,
-          "x-reactions": {
-            "dependencies": [
-              "$inputs"
-            ],
-            "fulfill": {
-              "state": {
-                "visible": "{{$deps[0].length>0}}"
-              }
-            }
-          },
-          "x-index": 2
-        },
-        "enableFillingModifiedData": {
-          "title": "${FillingModifiedData}",
-          "type": "boolean",
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "layout": "horizontal"
-          },
-          "default": true,
-          "x-reactions": {
-            "dependencies": [
-              "$inputs"
-            ],
-            "fulfill": {
-              "state": {
-                "visible": "{{!$deps[0].length}}"
-              }
-            }
-          },
-          "x-index": 3
-        },
-        "noCursorTimeout": {
-          "title": "${noCursorTimeout}",
-          "type": "boolean",
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "layout": "horizontal"
-          },
-          "default": false,
-          "x-reactions": {
-            "dependencies": [
-              "$outputs"
-            ],
-            "fulfill": {
-              "state": {
-                "visible": "{{$deps[0].length>0}}"
-              }
-            }
-          },
-          "x-index": 4
-        },
-        "skipDeletedEventsOnFilling": {
-          "title": "${skipDeletedEventsOnFilling}",
-          "type": "boolean",
-          "x-component": "Switch",
-          "x-decorator": "FormItem",
-          "x-decorator-props": {
-            "layout": "horizontal",
-            "tooltip": "${skipDeletedEventsOnFillingTips}"
-          },
-          "default": true,
-          "x-reactions": {
-            "dependencies": [
-              "$outputs",
-              ".enableFillingModifiedData"
-            ],
-            "fulfill": {
-              "state": {
-                "visible": "{{$deps[0].length>0 && $deps[1]}}"
-              }
-            }
-          },
-          "x-index": 5
-        },
+	"properties": {
+		"name": "MongoDB",
+		"icon": "icons/mongodb.png",
+		"doc" : "${doc}",
+		"tags" : ["schema-free","Database"],
+		"id": "mongodb",
+		"authentication": "Alpha"
+	},
+	"configOptions": {
+		"capabilities": [
+			{
+				"id": "master_slave_merge"
+			},
+			{
+				"id": "dynamic_schema"
+			},
+			{
+				"id": "dml_insert_policy",
+				"alternatives": ["update_on_exists", "ignore_on_exists"]
+			},
+			{
+				"id": "dml_update_policy",
+				"alternatives": ["ignore_on_nonexists", "insert_on_nonexists", "log_on_nonexists"]
+			},
+			{
+				"id": "api_server_supported"
+			}
+		],
+		"connection": {
+			"type": "object",
+			"properties": {
+				"isUri": {
+					"type": "boolean",
+					"title": "${isUri}",
+					"x-decorator": "FormItem",
+					"x-decorator-props": { "feedbackLayout": "none" },
+					"x-component": "Radio.Group",
+					"x-component-props": {
+						"optionType": "button"
+					},
+					"enum": [
+						{
+							"label": "${dataForm_form_options_URIMode}",
+							"value": true,
+							"disabled": false
+						},
+						{
+							"label": "${dataForm_form_options_standardMode}",
+							"value": false,
+							"disabled": false
+						}
+					],
+					"default": true,
+					"x-reactions": [
+						{
+							"target": "*(host,database,user,password,additionalString)",
+							"fulfill": {
+								"state": {
+									"visible": "{{$self.value===false}}"
+								}
+							}
+						},
+						{
+							"target": "*(uri,uriTips)",
+							"fulfill": {
+								"state": {
+									"visible": "{{$self.value!==false}}"
+								}
+							}
+						}
+					],
+					"required": true,
+					"x-index": 10
+				},
+				"isUrlTips1": {
+					"type": "void",
+					"title": " ",
+					"x-decorator": "FormItem",
+					"x-decorator-props": { "colon": false },
+					"x-component": "Text",
+					"x-component-props": { "icon": "info", "content": "${isUrlTips1}" },
+					"x-reactions": {
+						"dependencies": ["isUri"],
+						"fulfill": { "schema": { "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}" } }
+					},
+					"x-index": 18
+				},
+				"isUrlTips2": {
+					"type": "void",
+					"title": " ",
+					"x-decorator": "FormItem",
+					"x-component": "Text",
+					"x-decorator-props": { "colon": false },
+					"x-component-props": { "icon": "info", "content": "${isUrlTips2}" },
+					"x-reactions": {
+						"dependencies": ["isUri"],
+						"fulfill": { "schema": { "x-decorator-props.style.display": "{{$deps[0]===false ? null:\"none\"}}" } }
+					},
+					"x-index": 19
+				},
+				"uri": {
+					"type": "string",
+					"title": "${dataForm_form_databaseUri}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"apiServerKey": "database_uri",
+					"required": true,
+					"x-index": 20
+				},
+				"uriTips": {
+					"type": "void",
+					"title": " ",
+					"x-decorator": "FormItem",
+					"x-decorator-props": { "colon": false },
+					"x-component": "Text",
+					"x-component-props": { "content": "${uriTips}" },
+					"x-index": 21
+				},
+				"host": {
+					"type": "string",
+					"title": "${dataForm_form_host}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"x-component-props": {
+						"placeholder": "${connection_form_database_host_placeholder}"
+					},
+					"required": true,
+					"x-index": 30
+				},
+				"database": {
+					"type": "string",
+					"title": "${dataForm_form_databaseName}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"required": true,
+					"x-index": 40
+				},
+				"user": {
+					"type": "string",
+					"title": "${dataForm_form_userName}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"x-index": 50
+				},
+				"password": {
+					"type": "string",
+					"title": "${dataForm_form_password}",
+					"x-decorator": "FormItem",
+					"x-component": "Password",
+					"x-index": 60
+				},
+				"additionalString": {
+					"type": "string",
+					"title": "${dataForm_form_additionalString}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"x-index": 70
+				},
+				"OPTIONAL_FIELDS": {
+					"type": "void",
+					"properties": {
+						"schemaLimit": {
+							"title": "${schemaLimit}",
+							"type": "string",
+							"default": 1024,
+							"x-decorator": "FormItem",
+							"x-component": "InputNumber"
+						},
+						"ssl": {
+							"type": "boolean",
+							"title": "${dataForm_form_ssl}",
+							"x-decorator": "FormItem",
+							"x-component": "Radio.Group",
+							"x-component-props": {
+								"optionType": "button"
+							},
+							"default": false,
+							"x-index": 80,
+							"enum": [
+								{
+									"label": "${dataForm_form_options_sslTSL}",
+									"value": true
+								},
+								{
+									"label": "${dataForm_form_options_sslTop}",
+									"value": false
+								}
+							],
+							"x-reactions": [
+								{
+									"target": "*(sslKey,sslPass,sslValidate)",
+									"fulfill": {
+										"state": {
+											"visible": "{{$self.value===true}}"
+										}
+									}
+								}
+							]
+						},
+						"ssl_tips1": {
+							"type": "void",
+							"title": " ",
+							"x-decorator": "FormItem",
+							"x-decorator-props": { "colon": false },
+							"x-component": "Text",
+							"x-component-props": { "content": "${ssl_tips1}" },
+							"x-reactions": {
+								"dependencies": ["ssl"],
+								"fulfill": { "schema": { "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}" } }
+							},
+							"x-index": 81
+						},
+						"ssl_tips2": {
+							"type": "void",
+							"title": " ",
+							"x-decorator": "FormItem",
+							"x-decorator-props": { "colon": false },
+							"x-component": "Text",
+							"x-component-props": { "content": "${ssl_tips2}" },
+							"x-reactions": {
+								"dependencies": ["ssl"],
+								"fulfill": { "schema": { "x-decorator-props.style.display": "{{$deps[0]===false ? null:\"none\"}}" } }
+							},
+							"x-index": 82
+						},
+						"sslKey": {
+							"type": "string",
+							"title": "${dataForm_form_sslKey}",
+							"x-decorator": "FormItem",
+							"x-component": "TextFileReader",
+							"fileNameField": "sslKeyFile",
+							"required": true,
+							"x-index": 90
+						},
+						"sslPass": {
+							"type": "string",
+							"title": "${dataForm_form_sslPass}",
+							"x-decorator": "FormItem",
+							"x-component": "Password",
+							"x-index": 100
+						},
+						"sslValidate": {
+							"type": "boolean",
+							"title": "${dataForm_form_sslValidate}",
+							"x-decorator": "FormItem",
+							"x-component": "Switch",
+							"show": false,
+							"x-reactions": [
+								{
+									"target": "sslCA",
+									"fulfill": {
+										"state": {
+											"visible": "{{$self.value===true}}"
+										}
+									}
+								}
+							],
+							"x-index": 110
+						},
+						"sslCA": {
+							"type": "string",
+							"title": "${dataForm_form_sslCA}",
+							"x-decorator": "FormItem",
+							"x-component": "TextFileReader",
+							"fileNameField": "sslCAFile",
+							"required": true,
+							"x-index": 120
+						},
+						"mongodbLoadSchemaSampleSize": {
+							"title": "${load_schema_sample_size}",
+							"type": "string",
+							"default": 1000,
+							"x-decorator": "FormItem",
+							"x-component": "InputNumber",
+							"x-index": 130
+						}
+					}
+				}
+			}
+		},
+		"node":{
+			"properties": {
+				"syncIndex": {
+					"title": "${syncIndex}",
+					"type": "boolean",
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"x-decorator-props": {
+						"layout": "horizontal"
+					},
+					"default": false,
+					"x-reactions": {
+						"dependencies": [
+							"$inputs"
+						],
+						"fulfill": {
+							"state": {
+								"visible": "{{$deps[0].length>0}}"
+							}
+						}
+					}, "x-index": 1
+				},
+				"enableSaveDeleteData": {
+					"title": "${saveData}",
+					"type": "boolean",
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"x-decorator-props": {
+						"layout": "horizontal"
+					},
+					"default": false,
+					"x-reactions": {
+						"dependencies": [
+							"$inputs"
+						],
+						"fulfill": {
+							"state": {
+								"visible": "{{$deps[0].length>0}}"
+							}
+						}
+					}, "x-index": 2
+				},
+				"enableFillingModifiedData": {
+					"title": "${FillingModifiedData}",
+					"type": "boolean",
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"x-decorator-props": {
+						"layout": "horizontal"
+					},
+					"default": true,
+					"x-reactions": {
+						"dependencies": [
+							"$inputs"
+						],
+						"fulfill": {
+							"state": {
+								"visible": "{{!$deps[0].length}}"
+							}
+						}
+					}, "x-index": 3
+				},
+				"noCursorTimeout": {
+					"title": "${noCursorTimeout}",
+					"type": "boolean",
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"x-decorator-props": {
+						"layout": "horizontal"
+					},
+					"default": false,
+					"x-reactions": {
+						"dependencies": [
+							"$outputs"
+						],
+						"fulfill": {
+							"state": {
+								"visible": "{{$deps[0].length>0}}"
+							}
+						}
+					}, "x-index": 4
+				},
+				"skipDeletedEventsOnFilling": {
+					"title": "${skipDeletedEventsOnFilling}",
+					"type": "boolean",
+					"x-component": "Switch",
+					"x-decorator": "FormItem",
+					"x-decorator-props": {
+						"layout": "horizontal",
+						"tooltip": "${skipDeletedEventsOnFillingTips}"
+					},
+					"default": true,
+					"x-reactions": {
+						"dependencies": [
+							"$outputs", ".enableFillingModifiedData"
+						],
+						"fulfill": {
+							"state": {
+								"visible": "{{$deps[0].length>0 && $deps[1]}}"
+							}
+						}
+					},
+					"x-index": 5
+				},
+				"preImage": {
+					"title": "${preImage}",
+					"type": "boolean",
+					"x-component": "Switch",
+					"x-decorator": "FormItem",
+					"x-decorator-props": {
+						"layout": "horizontal",
+						"tooltip": "${preImageTips}"
+					},
+					"default": false,
+					"x-reactions": {
+						"dependencies": [
+							"$outputs"
+						],
+						"fulfill": {
+							"state": {
+								"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0 && $deps[1]}}"
+							}
+						}
+					},
+					"x-index": 6
+				},
         "shardCollection": {
           "type": "boolean",
           "title": "${node_shard_collection}",
@@ -469,14 +427,37 @@
             }
           },
           "x-index": 79
-        }
+        },
+				"timeSeriesCollection": {
+					"type": "boolean",
+					"title": "${timeSeriesCollection}",
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"default": false,
+					"x-decorator-props": {
+						"layout": "horizontal",
+						"colon": false,
+						"tooltip": "${timeSeriesCollectionTip}"
+					},
+					"x-reactions": {
+						"dependencies": [
+							"$inputs"
+						],
+						"fulfill": {
+							"state": {
+								"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 5 && $deps[0].length>0}}"
+							}
+						}
+					},
+					"x-index": 80
+				}
       }
     }
   },
   "messages": {
     "default": "en_US",
     "en_US": {
-      "load_schema_sample_size": "Number of sampling records (rows) for Mongodb loading model",
+	  "load_schema_sample_size": "Number of sampling records (rows) for Mongodb loading model",
       "doc": "docs/mongodb_en_US.md",
       "isUri": "Connection method",
       "isUrlTips1": "Configure MongoDB database in URI mode. Batch input is supported",
@@ -503,16 +484,19 @@
       "saveData": "Save Delete Data",
       "FillingModifiedData": "Filling Modified Data",
       "skipDeletedEventsOnFilling": "Skip Deleted Events On Filling",
-      "skipDeletedEventsOnFillingTips": "The following conditions can cause delta exceptions when shutting down:\n1. Tasks use non-_id to make business judgments;\n2. Change the source field type to subdocument and modify the corresponding attributes;\n3. The source changes the field type to an embedded array and has a 'pull' operation;",
-      "noCursorTimeout": "No Cursor Timeout",
-      "syncIndex": "Sync Index",
-      "syncIndexTip": "Enabling this capability will automatically synchronize the source index to the target. This action may impact the target database, so please enable it with caution.",
-      "schemaLimit": "Fields Load Limit For Each Collection",
+			"skipDeletedEventsOnFillingTips": "The following conditions can cause delta exceptions when shutting down:\n1. Tasks use non-_id to make business judgments;\n2. Change the source field type to subdocument and modify the corresponding attributes;\n3. The source changes the field type to an embedded array and has a 'pull' operation;",
+			"noCursorTimeout": "No Cursor Timeout",
+			"syncIndex": "Sync Index",
+			"schemaLimit": "Fields Load Limit For Each Collection",
       "node_shard_collection": " Synchronize Partition Properties ",
-      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster "
+      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster ",
+		"timeSeriesCollection" : "Synchronize Time Series Collections",
+		"timeSeriesCollectionTip": "When the source table is a TimeSeries collection, it is synchronized to a TimeSeries collection. Only the source table is supported from MongoDB to MongoDB, and the version is MongoDB5.0 or above.",
+		"preImage": "Document Preimages",
+		"preImageTips": "Enable the preimage function:\\n1. Only MongoDB6.0 and above support enabling it;\\n2. Confirm that the collection has enabled changeStreamPreAndPostImages;\\n3. Confirm the expiration time of the preimage"
     },
     "zh_CN": {
-      "load_schema_sample_size": "Mongodb加载模型采样记录数(行)",
+	  "load_schema_sample_size": "Mongodb加载模型采样记录数(行)",
       "doc": "docs/mongodb_zh_CN.md",
       "isUri": "连接方式",
       "isUrlTips1": "以URI方式配置MongoDB数据库，支持批量输入",
@@ -539,153 +523,160 @@
       "saveData": "保存删除数据",
       "FillingModifiedData": "补充更新数据的完整字段",
       "skipDeletedEventsOnFilling": "补充时跳过已删除的事件",
-      "skipDeletedEventsOnFillingTips": "关闭时以下情况会导致增量异常：\n1. 任务使用非 _id 做业务判断；\n2. 源变更字段类型为子文档，并修改对应属性；\n3. 源变更字段类型为内嵌数组，并有 'pull' 操作；",
-      "noCursorTimeout": "禁用游标超时",
-      "syncIndex": "同步索引",
-      "syncIndexTip": "开启该能力后，会自动将源的索引同步到目标，该行为可能会对目标数据库造成影响，请谨慎开启",
-      "schemaLimit": "每张表加载的字段数限制",
+			"skipDeletedEventsOnFillingTips": "关闭时以下情况会导致增量异常：\n1. 任务使用非 _id 做业务判断；\n2. 源变更字段类型为子文档，并修改对应属性；\n3. 源变更字段类型为内嵌数组，并有 'pull' 操作；",
+			"noCursorTimeout": "禁用游标超时",
+			"syncIndex": "同步索引",
+			"schemaLimit": "每张表加载的字段数限制",
       "node_shard_collection": "同步分区属性",
-      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效"
-    },
-    "zh_TW": {
-      "load_schema_sample_size": "Mongodb加載模型採樣記錄數（行）",
-      "doc": "docs/mongodb_zh_TW.md",
-      "isUri": "連接方式",
-      "isUrlTips1": "以URI方式配置MongoDB數據庫，支持批量輸入",
-      "isUrlTips2": "Tapdata 將連接奧網絡中的單獨服務器，該服務器提供到數據庫的TSL/SSL通道。如果您的數據庫位於不可訪問的子網中，則可嘗試使用此方法",
-      "uriTips": "MongoDB 數據庫連接 URI 示範 :\nURI中的用戶名和密碼必須做 url encode 編碼後在拼接到連接串中\n副本集 : mongodb://192.168.0.100:27017/mydb?replicaSet=xxx\n啟用認證的副本集 : mongodb://admin:password@192.168.0.100:27017/mydb?replicaSet=xxx&authSource=admin\n多節點副本集 : mongodb://192.168.0.1:27017,192.168.0.2:27017,192.168.0.3:27017/mydb?replicaSet=xxx\n分片集 : mongodb://192.168.0.100:27017/mydb\n多個mongos : mongodb://192.168.0.1:27017,192.168.0.2:27017,192.168.0.3:27017/mydb",
-      "dataForm_form_options_URIMode": "URI模式",
-      "dataForm_form_options_standardMode": "標準模式",
-      "dataForm_form_databaseUri": "數據庫 URI",
-      "dataForm_form_host": "數據庫地址",
-      "connection_form_database_host_placeholder": "請輸入數據庫地址",
-      "dataForm_form_databaseName": "數據庫名稱",
-      "dataForm_form_userName": "賬號",
-      "dataForm_form_password": "密碼",
-      "dataForm_form_additionalString": "其他連接串參數",
-      "dataForm_form_ssl": "使用 TLS/SSL 連接",
-      "ssl_tips1": "Tapdata 將連接奧網絡中的單獨服務器，該服務器提供到數據庫的TSL/SSL通道。如果您的數據庫位於不可訪問的子網中，則可嘗試使用此方法",
-      "ssl_tips2": "Tapdata 將直接連接到數據庫，您可以要創建一個安全規則以允許系統訪問，這是簡單直接的方法",
-      "dataForm_form_options_sslTSL": "TSL/SSL連接",
-      "dataForm_form_options_sslTop": "直接連接",
-      "dataForm_form_sslKey": "客戶端私鑰",
-      "dataForm_form_sslPass": "私鑰密碼",
-      "dataForm_form_sslValidate": "驗證服務端證書",
-      "dataForm_form_sslCA": "證書頒發機構",
-      "saveData": "保存刪除數據",
-      "FillingModifiedData": "補充更新數據的完整字段",
-      "skipDeletedEventsOnFilling": "補充時跳過已刪除的事件",
-      "skipDeletedEventsOnFillingTips": "關閉時以下情況會導致增量異常：\n1. 任務使用非 _id 做業務判斷；\n2. 來源變更欄位類型為子文檔，並修改對應屬性；\n3. 來源變更欄位類型為內嵌數組，並有 'pull' 操作；",
-      "noCursorTimeout": "禁用游標超時",
-      "syncIndex": "同步索引",
-      "syncIndexTip": "開啓該能力後，會自動將源的索引同步到目標，該行為可能會對目標數據庫造成影響，請謹慎開啓",
-      "schemaLimit": "每张表加載的字段數限制",
+      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效",
+		"preImage": "文档原像",
+		"preImageTips": "启用原像功能：\n1. 只有MongoDB6.0及以上才支持开启；\n2.确认集合已开启changeStreamPreAndPostImages；\n3.确认原像的过期时间",
+		"timeSeriesCollection": "时间序列集合属性",
+		"timeSeriesCollectionTip": "源表为TimeSeries集合时同步为TimeSeries集合，仅支持源表为MongoDB到MongoDB，且版本为MongoDB5.0以上"
+		},
+		"zh_TW": {
+			"load_schema_sample_size": "Mongodb加載模型採樣記錄數（行）",
+			"doc": "docs/mongodb_zh_TW.md",
+			"isUri": "連接方式",
+			"isUrlTips1": "以URI方式配置MongoDB數據庫，支持批量輸入",
+			"isUrlTips2": "Tapdata 將連接奧網絡中的單獨服務器，該服務器提供到數據庫的TSL/SSL通道。如果您的數據庫位於不可訪問的子網中，則可嘗試使用此方法",
+			"uriTips": "MongoDB 數據庫連接 URI 示範 :\nURI中的用戶名和密碼必須做 url encode 編碼後在拼接到連接串中\n副本集 : mongodb://192.168.0.100:27017/mydb?replicaSet=xxx\n啟用認證的副本集 : mongodb://admin:password@192.168.0.100:27017/mydb?replicaSet=xxx&authSource=admin\n多節點副本集 : mongodb://192.168.0.1:27017,192.168.0.2:27017,192.168.0.3:27017/mydb?replicaSet=xxx\n分片集 : mongodb://192.168.0.100:27017/mydb\n多個mongos : mongodb://192.168.0.1:27017,192.168.0.2:27017,192.168.0.3:27017/mydb",
+			"dataForm_form_options_URIMode": "URI模式",
+			"dataForm_form_options_standardMode": "標準模式",
+			"dataForm_form_databaseUri": "數據庫 URI",
+			"dataForm_form_host": "數據庫地址",
+			"connection_form_database_host_placeholder": "請輸入數據庫地址",
+			"dataForm_form_databaseName": "數據庫名稱",
+			"dataForm_form_userName": "賬號",
+			"dataForm_form_password": "密碼",
+			"dataForm_form_additionalString": "其他連接串參數",
+			"dataForm_form_ssl": "使用 TLS/SSL 連接",
+			"ssl_tips1": "Tapdata 將連接奧網絡中的單獨服務器，該服務器提供到數據庫的TSL/SSL通道。如果您的數據庫位於不可訪問的子網中，則可嘗試使用此方法",
+			"ssl_tips2": "Tapdata 將直接連接到數據庫，您可以要創建一個安全規則以允許系統訪問，這是簡單直接的方法",
+			"dataForm_form_options_sslTSL": "TSL/SSL連接",
+			"dataForm_form_options_sslTop": "直接連接",
+			"dataForm_form_sslKey": "客戶端私鑰",
+			"dataForm_form_sslPass": "私鑰密碼",
+			"dataForm_form_sslValidate": "驗證服務端證書",
+			"dataForm_form_sslCA": "證書頒發機構",
+			"saveData": "保存刪除數據",
+			"FillingModifiedData": "補充更新數據的完整字段",
+			"skipDeletedEventsOnFilling": "補充時跳過已刪除的事件",
+			"skipDeletedEventsOnFillingTips": "關閉時以下情況會導致增量異常：\n1. 任務使用非 _id 做業務判斷；\n2. 來源變更欄位類型為子文檔，並修改對應屬性；\n3. 來源變更欄位類型為內嵌數組，並有 'pull' 操作；",
+			"noCursorTimeout": "禁用游標超時",
+			"syncIndex": "同步索引",
+			"schemaLimit": "每张表加載的字段數限制",
       "node_shard_collection": "同步分區内容",
-      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效"
-    }
-  },
-  "dataTypes": {
-    "DOUBLE": {
-      "to": "TapNumber",
-      "value": [
-        "-1.7976931348623157E+308",
-        "1.7976931348623157E+308"
-      ],
-      "preferPrecision": 20,
-      "preferScale": 8,
-      "scale": 17,
-      "precision": 309,
-      "fixed": true
-    },
-    "STRING[($byte)]": {
-      "to": "TapString",
-      "preferByte": "100",
-      "byte": "16m"
-    },
-    "DOCUMENT": {
-      "to": "TapMap",
-      "byte": "16m"
-    },
-    "ARRAY": {
-      "to": "TapArray",
-      "byte": "16m"
-    },
-    "BINARY": {
-      "to": "TapBinary",
-      "byte": "16m"
-    },
-    "OBJECT_ID": {
-      "to": "TapString",
-      "byte": "24",
-      "queryOnly": true
-    },
-    "BOOLEAN": {
-      "to": "TapBoolean"
-    },
-    "DATE_TIME": {
-      "to": "TapDateTime",
-      "range": [
-        "1000-01-01T00:00:00.001Z",
-        "9999-12-31T23:59:59.999Z"
-      ],
-      "pattern": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
-      "fraction": [
-        0,
-        3
-      ],
-      "defaultFraction": 3
-    },
-    "JAVASCRIPT": {
-      "to": "TapString",
-      "byte": "16m",
-      "queryOnly": true
-    },
-    "SYMBOL": {
-      "to": "TapString",
-      "byte": "16m",
-      "queryOnly": true
-    },
-    "INT32": {
-      "to": "TapNumber",
-      "bit": 32,
-      "precision": 10,
-      "value": [
-        -2147483648,
-        2147483647
-      ]
-    },
-    "TIMESTAMP": {
-      "to": "TapString",
-      "queryOnly": true
-    },
-    "INT64": {
-      "to": "TapNumber",
-      "bit": 64,
-      "value": [
-        -9223372036854775808,
-        9223372036854775807
-      ]
-    },
-    "DECIMAL128": {
-      "to": "TapNumber",
-      "value": [
-        -1E+6145,
-        1E+6145
-      ],
-      "scale": 1000
-    },
-    "MIN_KEY": {
-      "to": "TapString",
-      "byte": "16m",
-      "queryOnly": true
-    },
-    "MAX_KEY": {
-      "to": "TapString",
-      "byte": "16m",
-      "queryOnly": true
-    },
-    "NULL": {
-      "to": "TapString"
-    }
-  }
+      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效",
+			"preImage": "文檔原像",
+			"preImageTips": "啟用原像功能：\n1. 只有MongoDB6.0以上才支援開啟；\n2.確認集合已開啟changeStreamPreAndPostImages；\n3.確認原像的過期時間",
+			"timeSeriesCollection": "時間序列集合屬性",
+			"timeSeriesCollectionTip": "源表為TimeSeries集合時同步為TimeSeries集合，僅支持源表為MongoDB到MongoDB，且版本為MongoDB5.0以上"
+
+		}
+	},
+	"dataTypes": {
+		"DOUBLE": {
+			"to": "TapNumber",
+			"value": [
+				"-1.7976931348623157E+308",
+				"1.7976931348623157E+308"
+			],
+			"preferPrecision": 20,
+			"preferScale": 8,
+			"scale": 17,
+			"precision": 309,
+			"fixed": true
+		},
+		"STRING[($byte)]": {
+			"to": "TapString",
+			"preferByte": "100",
+			"byte": "16m"
+		},
+		"DOCUMENT": {
+			"to": "TapMap",
+			"byte": "16m"
+		},
+		"ARRAY": {
+			"to": "TapArray",
+			"byte": "16m"
+		},
+		"BINARY": {
+			"to": "TapBinary",
+			"byte": "16m"
+		},
+		"OBJECT_ID": {
+			"to": "TapString",
+			"byte": "24",
+			"queryOnly": true
+		},
+		"BOOLEAN": {
+			"to": "TapBoolean"
+		},
+		"DATE_TIME": {
+			"to": "TapDateTime",
+			"range": [
+				"1000-01-01T00:00:00.001Z",
+				"9999-12-31T23:59:59.999Z"
+			],
+			"pattern": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+			"fraction": [
+				0,
+				3
+			],
+			"defaultFraction": 3
+		},
+		"JAVASCRIPT": {
+			"to": "TapString",
+			"byte": "16m",
+			"queryOnly": true
+		},
+		"SYMBOL": {
+			"to": "TapString",
+			"byte": "16m",
+			"queryOnly": true
+		},
+		"INT32": {
+			"to": "TapNumber",
+			"bit": 32,
+			"precision": 10,
+			"value": [
+				-2147483648,
+				2147483647
+			]
+		},
+		"TIMESTAMP": {
+			"to": "TapString",
+			"queryOnly": true
+		},
+		"INT64": {
+			"to": "TapNumber",
+			"bit": 64,
+			"value": [
+				-9223372036854775808,
+				9223372036854775807
+			]
+		},
+		"DECIMAL128": {
+			"to": "TapNumber",
+			"value": [
+				-1E+6145,
+				1E+6145
+			],
+			"scale": 1000
+		},
+		"MIN_KEY": {
+			"to": "TapString",
+			"byte": "16m",
+			"queryOnly": true
+		},
+		"MAX_KEY": {
+			"to": "TapString",
+			"byte": "16m",
+			"queryOnly": true
+		},
+		"NULL": {
+			"to": "TapString"
+		}
+	}
 }

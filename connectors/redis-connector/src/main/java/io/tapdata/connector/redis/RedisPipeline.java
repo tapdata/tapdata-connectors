@@ -1586,7 +1586,7 @@ public class RedisPipeline implements PipelineCommands, Closeable {
 
     @Override
     public Response<String> setex(String s, long l, String s1) {
-        return null;
+        return pipelineCommands.setex(s, l, s1);
     }
 
     @Override

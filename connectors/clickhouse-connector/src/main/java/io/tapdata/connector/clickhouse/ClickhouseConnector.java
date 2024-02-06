@@ -219,6 +219,15 @@ public class ClickhouseConnector extends CommonDbConnector {
 
     }
 
+    protected void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) throws SQLException {
+        List<String> sqlList = fieldDDLHandlers.handle(tapFieldBaseEvent, tapConnectorContext);
+        if (null == sqlList) {
+            return;
+        }
+        sqlList.add("OPTIMIZE TABLE `" + clickhouseConfig.getDatabase() + "`.`" + tapFieldBaseEvent.getTableId() + "` FINAL");
+        jdbcContext.batchExecute(sqlList);
+    }
+
     protected CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws SQLException {
         TapTable tapTable = tapCreateTableEvent.getTable();
         CreateTableOptions createTableOptions = new CreateTableOptions();

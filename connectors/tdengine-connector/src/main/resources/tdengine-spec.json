@@ -46,18 +46,10 @@
           "x-component": "InputNumber",
           "apiServerKey": "database_port",
           "x-index": 2,
+          "default": 6041,
           "required": true
         },
         "database": {
-          "type": "string",
-          "title": "${database}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "apiServerKey": "database_name",
-          "x-index": 3,
-          "required": true
-        },
-        "schema": {
           "type": "string",
           "title": "${database}",
           "x-decorator": "FormItem",
@@ -72,7 +64,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_username",
-          "x-index": 4,
+          "x-index": 5,
           "required": true
         },
         "password": {
@@ -81,7 +73,34 @@
           "x-decorator": "FormItem",
           "x-component": "Password",
           "apiServerKey": "database_password",
-          "x-index": 5
+          "x-index": 6
+        },
+        "supportWebSocket": {
+          "type": "boolean",
+          "title": "${supportWebSocket}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "target": "*(originPort)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===false}}"
+                }
+              }
+            }
+          ],
+          "x-index": 7
+        },
+        "originPort": {
+          "type": "string",
+          "title": "${originPort}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "default": 6030,
+          "x-index": 8,
+          "required": true
         },
         "extParams": {
           "type": "string",
@@ -89,7 +108,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "extParams",
-          "x-index": 6
+          "x-index": 9
         },
         "timezone": {
           "type": "string",
@@ -97,7 +116,7 @@
           "default": "",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "x-index": 7,
+          "x-index": 10,
           "enum": [
             {
               "label": "Database Timezone",
@@ -214,14 +233,99 @@
     "node": {
       "type": "object",
       "properties": {
-        "timestamp": {
-          "required": true,
+        "supportSuperTable": {
+          "type": "boolean",
+          "title": "${supportSuperTable}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", "type"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] !== 'database' ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ],
+          "x-index": 1
+        },
+        "superTableTags": {
           "type": "string",
-          "title": "${timestamp}",
-          "default": "created_date",
+          "title": "${superTableTags}",
+          "x-decorator": "FormItem",
+          "x-component": "FieldSelect",
+          "x-component-props": {
+            "allowCreate": true,
+            "multiple": true,
+            "filterable": true
+          },
+          "x-decorator-props": {
+            "tooltip": "${superTableTagsTooltip}"
+          },
+          "x-reactions": ["{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
+            {
+              "dependencies": [".supportSuperTable"],
+              "fulfill": {
+                "state": {
+                  "visible": "{{$deps[0] === true}}"
+                }
+              }
+            }
+          ],
+          "index": 2
+        },
+        "subTableNameType": {
+          "type": "string",
+          "title": "${subTableNameType}",
+          "default": "AutoHash",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-decorator-props": {
+            "tooltip": "${subTableNameTypeTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": [".supportSuperTable"],
+              "fulfill": {
+                "state": {
+                  "visible": "{{$deps[0] === true}}"
+                }
+              }
+            }
+          ],
+          "x-index": 3,
+          "enum": [
+            {
+              "label": "AutoHash",
+              "value": "AutoHash"
+            },
+            {
+              "label": "Customized",
+              "value": "Customized"
+            }
+          ]
+        },
+        "subTableSuffix": {
+          "type": "string",
+          "title": "${subTableSuffix}",
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "apiServerKey": "node_timestamp"
+          "x-index": 4,
+          "x-decorator-props": {
+            "tooltip": "${subTableSuffixTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": [".subTableNameType"],
+              "fulfill": {
+                "state": {
+                  "visible": "{{$deps[0] === 'Customized'}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -234,9 +338,17 @@
       "database": "database",
       "username": "username",
       "password": "password",
+      "supportWebSocket": "Support WebSocket",
+      "originPort": "JDBC Original Port",
       "extParams": "Connection Parameter String",
       "timezone": "timezone",
-      "timestamp": "timestamp field",
+      "supportSuperTable": "Support Super Table",
+      "superTableTags": "Super Table Tags",
+      "superTableTagsTooltip": "Super Table Tags, used to create super table, select the field as TAGS",
+      "subTableNameType": "Sub Table Name Type",
+      "subTableNameTypeTooltip": "When writing data, sub-tables will be automatically generated according to the content of different TAGS data. Currently, automatic Hash and custom are supported",
+      "subTableSuffix": "Sub Table Name Suffix",
+      "subTableSuffixTooltip": "The format of the custom suffix, for example: _\\${column1Name}_\\${column2Name}",
       "doc": "docs/tdengine_en_US.md"
     },
     "zh_CN": {
@@ -245,9 +357,17 @@
       "database": "数据库",
       "username": "账号",
       "password": "密码",
+      "supportWebSocket": "支持 WebSocket",
+      "originPort": "JDBC原始端口",
       "extParams": "连接参数",
       "timezone": "时区",
-      "timestamp": "时间戳字段",
+      "supportSuperTable": "使用超级表",
+      "superTableTags": "超级表标签",
+      "superTableTagsTooltip": "超级表标签，用于创建超级表，选择作为TAGS的字段",
+      "subTableNameType": "子表命名类型",
+      "subTableNameTypeTooltip": "写入数据时会按不同的TAGS数据内容，自动化生成子表，目前支持自动Hash和自定义",
+      "subTableSuffix": "子表名自定义后缀",
+      "subTableSuffixTooltip": "自定义后缀的格式，例如：_\\${column1Name}_\\${column2Name}",
       "doc": "docs/tdengine_zh_CN.md"
     },
     "zh_TW": {
@@ -256,9 +376,17 @@
       "database": "數據庫",
       "username": "賬號",
       "password": "密碼",
+      "supportWebSocket": "支持 WebSocket",
+      "originPort": "JDBC原始端口",
       "extParams": "連接參數",
       "timezone": "時區",
-      "timestamp": "時間戳字段",
+      "supportSuperTable": "使用超級表",
+      "superTableTags": "超級表標籤",
+      "superTableTagsTooltip": "超級表標籤，用於創建超級表，選擇作為TAGS的字段",
+      "subTableNameType": "子表命名類型",
+      "subTableNameTypeTooltip": "寫入數據時會按不同的TAGS數據內容，自動化生成子表，目前支持自動Hash和自定義",
+      "subTableSuffix": "子表名自定義後綴",
+      "subTableSuffixTooltip": "自定義後綴的格式，例如：_\\${column1Name}_\\${column2Name}",
       "doc": "docs/tdengine_zh_TW.md"
     }
   },
