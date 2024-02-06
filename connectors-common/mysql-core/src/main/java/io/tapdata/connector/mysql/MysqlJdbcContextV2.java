@@ -19,6 +19,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.TimeZone;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class MysqlJdbcContextV2 extends JdbcContext {
@@ -52,6 +53,12 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         } else {
             return TimeZone.getTimeZone(ZoneId.of(decimalFormat.format(timeOffset.get()) + ":00"));
         }
+    }
+
+    public long queryTimestamp() throws SQLException {
+        AtomicLong timestamp = new AtomicLong();
+        queryWithNext(MYSQL_TIMESTAMP, resultSet -> timestamp.set(resultSet.getLong(1)));
+        return timestamp.get();
     }
 
     @Override
@@ -219,6 +226,8 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "\tSEQ_IN_INDEX";
 
     private final static String MYSQL_VERSION = "SELECT VERSION()";
+
+    private final static String MYSQL_TIMESTAMP = "SELECT REPLACE(UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3)),'.','')";
 
     private final static String MYSQL_TIMEZONE = "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()) as timeoffset";
 

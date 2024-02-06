@@ -145,6 +145,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportTransactionBeginFunction(this::begin);
         connectorFunctions.supportTransactionCommitFunction(this::commit);
         connectorFunctions.supportTransactionRollbackFunction(this::rollback);
+        connectorFunctions.supportGetCurrentTimestampFunction(this::now);
     }
 
     private void rollback(TapConnectorContext tapConnectorContext) {
@@ -156,6 +157,9 @@ public class MysqlConnector extends CommonDbConnector {
     private void begin(TapConnectorContext tapConnectorContext) {
     }
 
+    private long now(TapConnectorContext tapConnectorContext) throws SQLException {
+        return mysqlJdbcContext.queryTimestamp();
+    }
     private void getReadPartitions(TapConnectorContext connectorContext, TapTable table, GetReadPartitionOptions options) throws Throwable {
         DatabaseReadPartitionSplitter.calculateDatabaseReadPartitions(connectorContext, table, options)
                 .queryFieldMinMaxValue(this::minMaxValue)
