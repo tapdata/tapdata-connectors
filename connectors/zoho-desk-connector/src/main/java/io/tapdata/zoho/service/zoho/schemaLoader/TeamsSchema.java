@@ -2,6 +2,7 @@ package io.tapdata.zoho.service.zoho.schemaLoader;
 
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -54,7 +55,11 @@ public class TeamsSchema extends Schema implements SchemaLoader {
             if (!isAlive()) break;
             Map<String, Object> oneProduct = connectionMode.attributeAssignment(product,tableName,teamsOpenApi);
             if (Checker.isEmpty(oneProduct) || oneProduct.isEmpty()) continue;
-            events.add(( TapSimplify.insertRecordEvent(oneProduct, tableName).referenceTime(System.currentTimeMillis()) ));
+            TapInsertRecordEvent tapInsertRecordEvent = TapSimplify.insertRecordEvent(oneProduct, tableName);
+            if (!isBatchRead) {
+                tapInsertRecordEvent.referenceTime(System.currentTimeMillis());
+            }
+            events.add(tapInsertRecordEvent);
             if (events.size() != readSize) continue;
             consumer.accept(events, offsetState);
             events = new ArrayList<>();

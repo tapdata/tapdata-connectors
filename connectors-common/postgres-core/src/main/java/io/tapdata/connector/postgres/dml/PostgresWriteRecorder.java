@@ -11,6 +11,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class PostgresWriteRecorder extends NormalWriteRecorder {
@@ -81,6 +82,9 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
     protected Object filterValue(Object value, String dataType) {
         if (EmptyKit.isNull(value)) {
             return null;
+        }
+        if ("uuid".equalsIgnoreCase(dataType)) {
+            return value instanceof UUID ? value : UUID.fromString(String.valueOf(value));
         }
         if (value instanceof String) {
             return ((String) value).replace("\u0000", "");
