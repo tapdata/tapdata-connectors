@@ -5,7 +5,7 @@ concurrency:
 
 on:
   push:
-    branches: [ "main", "develop", "release-v*.*", "main-update-mrci" ]
+    branches: [ "main", "develop", "release-v*.*" ]
   pull_request:
     branches: [ "main", "develop", "release-v*.*" ]
   workflow_dispatch:
