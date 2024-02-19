@@ -358,6 +358,11 @@ public class DateUtil {
         return parseInstant(dateString, dateFormat);
     }
 
+    public static Object parseInstant(String dateString, Map<String, String> dateFormatMap) {
+        String dateFormat = determineDateFormat(dateString, dateFormatMap);
+        return parseInstant(dateString, dateFormat);
+    }
+
     public static Object parseInstant(String dateString, String dateFormat) {
         if (EmptyKit.isNull(dateFormat)) {
             return dateString;
@@ -524,6 +529,29 @@ public class DateUtil {
             }
         }
         return null; // Unknown format.
+    }
+
+    public static String determineDateFormat(String dateString, Map<String, String> dataFormatMap) {
+        for (String regexp : dataFormatMap.keySet()) {
+            if (dateString.matches(regexp)) {
+                return dataFormatMap.get(regexp);
+            }
+        }
+        return null; // Unknown format.
+    }
+
+    public static void mergeDateFormat(String dateString, Map<String, String> dataFormatMap) {
+        for (String regexp : dataFormatMap.keySet()) {
+            if (dateString.matches(regexp)) {
+                return;
+            }
+        }
+        for (String regexp : DATE_FORMAT_REGEXPS.keySet()) {
+            if (dateString.matches(regexp)) {
+                dataFormatMap.put(regexp, DATE_FORMAT_REGEXPS.get(regexp));
+                return;
+            }
+        }
     }
 
     // Changers -----------------------------------------------------------------------------------
