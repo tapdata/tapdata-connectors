@@ -1,11 +1,13 @@
 package io.tapdata.connector.gauss.cdc.logic.event;
 
 import io.tapdata.connector.gauss.cdc.logic.event.dml.CollectEntity;
+import io.tapdata.connector.gauss.entity.IllegalDataLengthException;
 import io.tapdata.entity.event.TapEvent;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.StringJoiner;
 
 public interface DMLEvent extends Event<TapEvent> {
 
@@ -61,35 +63,32 @@ public interface DMLEvent extends Event<TapEvent> {
 
     public default void collectAttr(ByteBuffer logEvent, Map<String, Object> kvMap, Map<String, Integer> kTypeMap, AnalyzeParam param) {
         byte[] attrNum = LogicUtil.read(logEvent, 2);
-        int attrNums = LogicUtil.bytesToInt(attrNum, 32);
-        for (int index = 0; index < attrNums; index++) {
-            byte[] attrName = LogicUtil.read(logEvent, 2, 32);
-            byte[] oid = LogicUtil.read(logEvent, 4);
-            byte[] value = LogicUtil.readValue(logEvent, 4, 32);
-            String fieldName = new String(attrName);
-            if (fieldName.startsWith("\"")) {
-                fieldName = fieldName.substring(1);
+        int attrNums = LogicUtil.bytesToInt(attrNum);//, 32);
+        Map<String, Object> temp = new HashMap<>();
+        try {
+            for (int index = 0; index < attrNums; index++) {
+                    byte[] attrName = LogicUtil.read(logEvent, 2, 32);
+                    byte[] oid = LogicUtil.read(logEvent, 4);
+                    byte[] value = LogicUtil.readValue(logEvent, 4, 32);
+                    String fieldName = new String(attrName);
+                    if (fieldName.startsWith("\"")) {
+                        fieldName = fieldName.substring(1);
+                    }
+                    if (fieldName.endsWith("\"")) {
+                        fieldName = fieldName.substring(0, fieldName.length() -1);
+                    }
+                    int typeId = LogicUtil.bytesToInt(oid);//, 32);
+                    temp.put(fieldName, value);
+                    kTypeMap.put(fieldName, typeId);
             }
-            if (fieldName.endsWith("\"")) {
-                fieldName = fieldName.substring(0, fieldName.length() -1);
-            }
-            int typeId = LogicUtil.bytesToInt(oid, 32);
-//            PostgresType postgresType = param.getRegistry().get(typeId);
-//            if (null != value) {
-//                Object val = PgOutputReplicationMessage.getValue(
-//                        fieldName,
-//                        postgresType,
-//                        "",
-//                        new String(value),
-//                        null,
-//                        false,
-//                        null
-//                );
-//                kvMap.put(fieldName, val);
-//            } else {
-                kvMap.put(fieldName, value);
-//            }
-            kTypeMap.put(fieldName, typeId);
+            kvMap.putAll(temp);
+        } catch (IllegalDataLengthException e) {
+            StringJoiner j = new StringJoiner(", ");
+            temp.forEach((k,v)->{
+                j.add(k+":"+ (v == null ? "null" : new String((byte[])v)));
+            });
+            System.out.println(j.toString());
+            throw new IllegalDataLengthException(e.getMessage() + "[" + j.toString() + "] ");
         }
     }
 }

@@ -825,27 +825,33 @@
     },
     "point": {
       "to": "TapString",
-      "byte": "1m"
+      "byte": "1m",
+      "queryOnly": true
     },
     "lseg": {
       "to": "TapString",
-      "byte": "1m"
+      "byte": "1m",
+      "queryOnly": true
     },
     "box": {
       "to": "TapString",
-      "byte": "1m"
+      "byte": "1m",
+      "queryOnly": true
     },
     "path": {
       "to": "TapString",
-      "byte": "1m"
+      "byte": "1m",
+      "queryOnly": true
     },
     "polygon": {
       "to": "TapString",
-      "byte": "1m"
+      "byte": "1m",
+      "queryOnly": true
     },
     "circle": {
       "to": "TapString",
-      "byte": "1m"
+      "byte": "1m",
+      "queryOnly": true
     },
     "tsvector": {
       "to": "TapBinary",
@@ -890,12 +896,12 @@
       "queryOnly": true
     },
     "json": {
-      "to": "TapString",
+      "to": "TapMap",
       "byte": "4g",
       "pkEnablement": false
     },
     "jsonb": {
-      "to": "TapString",
+      "to": "TapMap",
       "byte": "4g",
       "pkEnablement": false,
       "queryOnly": true
