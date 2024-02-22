@@ -43,8 +43,8 @@ public class BeginTransaction implements Event<TapEvent> {
             user = LogicUtil.read(logEvent, 4, 32);
         }
         byte[] endTag = LogicUtil.read(logEvent, 1);
-        long csnNumber = LogicUtil.bytesToLong(csn);
-        long lsnNumber = LogicUtil.bytesToLong(firstLsn);
+        long csnNumber = LogicUtil.byteToLong(csn);
+        long lsnNumber = LogicUtil.byteToLong(firstLsn);
         long timestamp = null == commitTime ? 0 : TimeUtil.parseTimestamp(new String(commitTime), 3);
         return new EventEntity<>(null, "", timestamp, csnNumber, lsnNumber);
     }

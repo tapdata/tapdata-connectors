@@ -10,10 +10,12 @@ import io.tapdata.connector.gauss.cdc.logic.event.dml.DeleteEvent;
 import io.tapdata.connector.gauss.cdc.logic.event.dml.InsertEvent;
 import io.tapdata.connector.gauss.cdc.logic.event.dml.UpdateEvent;
 import io.tapdata.connector.gauss.cdc.logic.event.other.HeartBeatEvent;
+import io.tapdata.connector.gauss.entity.IllegalDataLengthException;
 import io.tapdata.connector.gauss.enums.CdcConstant;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 
 import java.nio.ByteBuffer;
@@ -53,7 +55,7 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
 
 
     @Override
-    public void emit(ByteBuffer logEvent) {
+    public void emit(ByteBuffer logEvent, Log log) {
         List<TapEvent> eventList = new ArrayList<>();
         try {
             while (hasNext(logEvent)) {
@@ -69,7 +71,7 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
                     eventAccept.accept(list(event), offset);
                     break;
                 }
-                offset.setLsn(LogicUtil.bytesToLong(lsn));
+                offset.setLsn(LogicUtil.byteToLong(lsn));
                 if (event instanceof TapRecordEvent) {
                     ((TapRecordEvent)event).setReferenceTime(offset.getTransactionTimestamp());
                 }
@@ -80,6 +82,12 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
                     eventList = new ArrayList<>();
                 }
             }
+        } catch (Exception e) {
+            if (e instanceof IllegalDataLengthException) {
+                log.warn(e.getMessage() + ", fail to read value from byte array: " + new String(logEvent.array()));
+                return;
+            }
+            throw e;
         } finally {
             if (!eventList.isEmpty()) {
                 eventAccept.accept(eventList, offset);

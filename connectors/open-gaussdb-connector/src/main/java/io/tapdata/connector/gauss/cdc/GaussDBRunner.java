@@ -184,7 +184,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
                     }
                     continue;
                 }
-                eventFactory.emit(byteBuffer);
+                eventFactory.emit(byteBuffer, log);
                 //如果需要flush lsn，根据业务实际情况调用以下接口
                 long now = System.currentTimeMillis();
                 if (now - cdcInitTime >= waitTime) {

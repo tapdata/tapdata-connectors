@@ -42,6 +42,6 @@ public class CommitTransaction implements Event<TapEvent> {
         }
         byte[] nextTag = LogicUtil.read(logEvent, 1);
         long timestampValue = null == timestamp ? 0 : TimeUtil.parseTimestamp(new String(timestamp), 3);
-        return new EventEntity<>(null, null == xid ? "0" : "" + LogicUtil.bytesToInt(xid, 64), timestampValue, 0, 0);
+        return new EventEntity<>(null, null == xid ? "0" : "" + LogicUtil.byteToLong(xid)/* 64bit*/, timestampValue, 0, 0);
     }
 }

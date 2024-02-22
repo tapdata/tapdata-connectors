@@ -15,7 +15,6 @@ import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.entity.codec.TapCodecsRegistry;
-import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
@@ -108,7 +107,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         functions.supportErrorHandleFunction(this::errorHandle)
                 //need to clear resource outer
                 .supportReleaseExternalFunction(this::onDestroy)
-                // target
+                //target
                 .supportWriteRecord(this::writeRecord)
                 .supportCreateTableV2(this::createTableV2)
                 .supportClearTable(this::clearTable)
@@ -116,15 +115,15 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 .supportCreateIndex(this::createIndex)
                 .supportQueryIndexes(this::queryIndexes)
                 .supportDeleteIndex(this::dropIndexes)
-                // source
+                //source
                 .supportBatchCount(this::batchCount)
                 .supportBatchRead(this::batchReadWithoutOffset)
                 .supportStreamRead(this::streamRead)
                 .supportTimestampToStreamOffset(this::timestampToStreamOffset)
-                // query
+                //query
                 .supportQueryByFilter(this::queryByFilter)
                 .supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset)
-                // ddl
+                //ddl
                 .supportNewFieldFunction(this::fieldDDLHandler)
                 .supportAlterFieldNameFunction(this::fieldDDLHandler)
                 .supportAlterFieldAttributesFunction(this::fieldDDLHandler)
@@ -141,10 +140,10 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         codec.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null) return toJson(tapRawValue.getValue());
             return "null";
-        }).registerFromTapValue(TapMapValue.class, "text", tapMapValue -> {
+        }).registerFromTapValue(TapMapValue.class, "json", tapMapValue -> {
             if (tapMapValue != null && tapMapValue.getValue() != null) return toJson(tapMapValue.getValue());
             return "null";
-        }).registerFromTapValue(TapArrayValue.class, "text", tapValue -> {
+        }).registerFromTapValue(TapArrayValue.class, "json", tapValue -> {
             if (tapValue != null && tapValue.getValue() != null) return toJson(tapValue.getValue());
             return "null";
         }).registerToTapValue(PgArray.class, (value, tapType) -> {
@@ -218,8 +217,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                     pgInterval.getMinutes() + "M" +
                     pgInterval.getSeconds() + "S";
             return new TapStringValue(interval);
-        })
-        .registerToTapValue(com.huawei.opengauss.jdbc.util.PGInterval.class, (value, tapType) -> {
+        }).registerToTapValue(com.huawei.opengauss.jdbc.util.PGInterval.class, (value, tapType) -> {
             //P1Y1M1DT12H12M12.312312S
             PGInterval pgInterval = (PGInterval) value;
             String interval = "P" + pgInterval.getYears() + "Y" +
@@ -229,8 +227,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                     pgInterval.getMinutes() + "M" +
                     pgInterval.getSeconds() + "S";
             return new TapStringValue(interval);
-        })
-        .registerToTapValue(byte[].class, (value, tapType) -> {
+        }).registerToTapValue(byte[].class, (value, tapType) -> {
             byte[] bytes = (byte[])value;
             if (bytes.length == 0) return new TapStringValue("");
             byte type = tapType.getType();
@@ -299,29 +296,11 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                     return new TapRawValue(value);
             }
         })
-        //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
+        //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object
         .registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime())
         .registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp())
         .registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate())
         .registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"))
-        .registerFromTapValue(TapStringValue.class, "xml", value -> {
-            return value.getOriginValue();
-//            if (null == value || null == value.getValue() ||  "".equals(value.getValue())) return value;
-//            return " xmlparse(DOCUMENT '" + value.getValue() + "' wellformed) ";wellformed
-        }).registerFromTapValue(TapStringValue.class, "xmltype", value -> {
-//            if (null == value || null == value.getValue() ||  "".equals(value.getValue())) return value;
-//            return " xmltype.('" + value.getValue() + "') ";
-            return value.getOriginValue();
-        }).registerFromTapValue(TapStringValue.class, "json", value -> {
-            try {
-                PGobject pGobject = new PGobject();
-                pGobject.setType("json");
-                pGobject.setValue(value.getValue());
-                return pGobject;
-            } catch (Exception e) {
-                return null;
-            }
-        })
         ;
     }
 
@@ -509,14 +488,13 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             new PostgresRecordWriter(gaussJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(tapLogger)
+                    .setTapLogger(connectorContext.getLog())
                     .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
-
         } else {
             new PostgresRecordWriter(gaussJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(tapLogger)
+                    .setTapLogger(connectorContext.getLog())
                     .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
         }
     }
