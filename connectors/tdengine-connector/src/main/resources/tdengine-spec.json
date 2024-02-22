@@ -75,6 +75,19 @@
           "apiServerKey": "database_password",
           "x-index": 6
         },
+        "loadTableOptions": {
+          "type": "array",
+          "title": "${loadTableOptions}",
+          "x-decorator": "FormItem",
+          "x-component": "Checkbox.Group",
+          "default": ["NORMAL_TABLE", "SUPER_TABLE", "CHILD_TABLE"],
+          "enum": [
+            { "label": "${normalTable}", "value": "NORMAL_TABLE" },
+            { "label": "${superTable}", "value": "SUPER_TABLE" },
+            { "label": "${childTable}", "value": "CHILD_TABLE" }
+          ],
+          "x-index": 7
+        },
         "supportWebSocket": {
           "type": "boolean",
           "title": "${supportWebSocket}",
@@ -91,7 +104,7 @@
               }
             }
           ],
-          "x-index": 7
+          "x-index": 8
         },
         "originPort": {
           "type": "string",
@@ -99,7 +112,7 @@
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "default": 6030,
-          "x-index": 8,
+          "x-index": 9,
           "required": true
         },
         "extParams": {
@@ -108,7 +121,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "extParams",
-          "x-index": 9
+          "x-index": 10
         },
         "timezone": {
           "type": "string",
@@ -116,7 +129,7 @@
           "default": "",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "x-index": 10,
+          "x-index": 11,
           "enum": [
             {
               "label": "Database Timezone",
@@ -338,6 +351,10 @@
       "database": "database",
       "username": "username",
       "password": "password",
+      "loadTableOptions": "Load Table Options",
+      "normalTable": "Normal Table",
+      "superTable": "Super Table",
+      "childTable": "Child Table",
       "supportWebSocket": "Support WebSocket",
       "originPort": "JDBC Original Port",
       "extParams": "Connection Parameter String",
@@ -347,8 +364,8 @@
       "superTableTagsTooltip": "Super Table Tags, used to create super table, select the field as TAGS",
       "subTableNameType": "Sub Table Name Type",
       "subTableNameTypeTooltip": "When writing data, sub-tables will be automatically generated according to the content of different TAGS data. Currently, automatic Hash and custom are supported",
-      "subTableSuffix": "Sub Table Name Suffix",
-      "subTableSuffixTooltip": "The format of the custom suffix, for example: _\\${column1Name}_\\${column2Name}",
+      "subTableSuffix": "Sub Table Name Custom Format",
+      "subTableSuffixTooltip": "The format of the sub table name, for example: \\${superTableName}_\\${column1Name}_\\${column2Name}",
       "doc": "docs/tdengine_en_US.md"
     },
     "zh_CN": {
@@ -357,6 +374,10 @@
       "database": "数据库",
       "username": "账号",
       "password": "密码",
+      "loadTableOptions": "加载表选项",
+      "normalTable": "普通表",
+      "superTable": "超级表",
+      "childTable": "子表",
       "supportWebSocket": "支持 WebSocket",
       "originPort": "JDBC原始端口",
       "extParams": "连接参数",
@@ -366,8 +387,8 @@
       "superTableTagsTooltip": "超级表标签，用于创建超级表，选择作为TAGS的字段",
       "subTableNameType": "子表命名类型",
       "subTableNameTypeTooltip": "写入数据时会按不同的TAGS数据内容，自动化生成子表，目前支持自动Hash和自定义",
-      "subTableSuffix": "子表名自定义后缀",
-      "subTableSuffixTooltip": "自定义后缀的格式，例如：_\\${column1Name}_\\${column2Name}",
+      "subTableSuffix": "子表名自定义格式",
+      "subTableSuffixTooltip": "子表名的格式，例如：\\${superTableName}_\\${column1Name}_\\${column2Name}",
       "doc": "docs/tdengine_zh_CN.md"
     },
     "zh_TW": {
@@ -376,6 +397,10 @@
       "database": "數據庫",
       "username": "賬號",
       "password": "密碼",
+      "loadTableOptions": "加載表選項",
+      "normalTable": "普通表",
+      "superTable": "超級表",
+      "childTable": "子表",
       "supportWebSocket": "支持 WebSocket",
       "originPort": "JDBC原始端口",
       "extParams": "連接參數",
@@ -385,8 +410,8 @@
       "superTableTagsTooltip": "超級表標籤，用於創建超級表，選擇作為TAGS的字段",
       "subTableNameType": "子表命名類型",
       "subTableNameTypeTooltip": "寫入數據時會按不同的TAGS數據內容，自動化生成子表，目前支持自動Hash和自定義",
-      "subTableSuffix": "子表名自定義後綴",
-      "subTableSuffixTooltip": "自定義後綴的格式，例如：_\\${column1Name}_\\${column2Name}",
+      "subTableSuffix": "子表名自定義格式",
+      "subTableSuffixTooltip": "子表名的格式，例如：\\${superTableName}_\\${column1Name}_\\${column2Name}",
       "doc": "docs/tdengine_zh_TW.md"
     }
   },

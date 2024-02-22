@@ -2,14 +2,10 @@ package io.tapdata.connector.kafka;
 
 import com.google.common.collect.Lists;
 import io.tapdata.common.constant.MqOp;
-import io.tapdata.connector.kafka.admin.Admin;
-import io.tapdata.connector.kafka.admin.DefaultAdmin;
-import io.tapdata.connector.kafka.config.AdminConfiguration;
 import io.tapdata.connector.kafka.config.KafkaConfig;
-import io.tapdata.connector.kafka.config.ProducerConfiguration;
 import io.tapdata.connector.kafka.config.SchemaConfiguration;
-import io.tapdata.connector.kafka.util.SchemaRegisterUtil;
 import io.tapdata.connector.kafka.util.Krb5Util;
+import io.tapdata.connector.kafka.util.SchemaRegisterUtil;
 import io.tapdata.constant.MqTestItem;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
@@ -22,10 +18,7 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
-import io.tapdata.entity.utils.InstanceFactory;
-import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -36,9 +29,9 @@ import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.kafka.clients.CommonClientConfigs;
-import org.apache.kafka.clients.producer.*;
-import org.apache.kafka.common.config.SaslConfigs;
+import org.apache.kafka.clients.producer.Callback;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerRecord;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -46,12 +39,13 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 import static io.tapdata.base.ConnectorBase.table;
 import static io.tapdata.connector.kafka.util.SchemaRegisterUtil.parseJsonArray;
@@ -66,8 +60,6 @@ public class KafkaSRService extends KafkaService {
     private KafkaProducer<String, GenericRecord> kafkaProducer;
     private TapConnectionContext tapConnectionContext;
     private Boolean isBasicAuth;
-
-    private final KafkaExceptionCollector kafkaExceptionCollector = new KafkaExceptionCollector();
 
     public KafkaSRService() {
         super();
@@ -252,10 +244,6 @@ public class KafkaSRService extends KafkaService {
                 Callback callback = (metadata, exception) -> {
                     try {
                         if (EmptyKit.isNotNull(exception)) {
-                            kafkaExceptionCollector.collectTerminateByServer(exception);
-                            kafkaExceptionCollector.collectUserPwdInvalid(mqConfig.getMqUsername(), exception);
-                            kafkaExceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), exception);
-                            kafkaExceptionCollector.collectWriteLength(null,null,event,exception);
                             listResult.addError(event, exception);
                         }
                         switch (finalMqOp) {
