@@ -67,11 +67,13 @@ public class TDengineSuperRecordWriter {
     }
 
     private String getSubTableName(List<String> tags, TapInsertRecordEvent tapRecordEvent) {
-        StringBuilder subTableName = new StringBuilder(tapTable.getId() + "_");
+        StringBuilder subTableName = new StringBuilder();
         if ("AutoHash".equals(tDengineConfig.getSubTableNameType())) {
+            subTableName.append(tapTable.getId()).append("_");
             subTableName.append(StringKit.md5(tags.stream().map(tag -> String.valueOf(tapRecordEvent.getAfter().get(tag))).collect(Collectors.joining(","))));
         } else {
             String key = tDengineConfig.getSubTableSuffix();
+            key = key.replaceAll("\\$\\{superTableName}", tapTable.getId());
             for (String column : tags) {
                 key = key.replaceAll("\\$\\{" + column + "}", String.valueOf(tapRecordEvent.getAfter().get(column)));
             }
