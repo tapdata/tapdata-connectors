@@ -37,6 +37,8 @@ public class TapEventBuilder {
     private DummyOffset offset;
 
     private final Consumer<Map<String, Object>> heartbeatSetter;
+    private Map<String, String> cacheRString = new HashMap<>();
+	private Map<String, Double> cacheRNumber = new HashMap<>();
 
     public TapEventBuilder() {
         this((data) -> {});
@@ -137,23 +139,27 @@ public class TapEventBuilder {
         } else {
             String ftype = field.getDataType();
             if (ftype.startsWith("rnumber")) {
-                if (ftype.endsWith(")")) {
-                    try {
-                        return Math.random() * Long.parseLong(ftype.substring(8, ftype.length() - 1));
-                    } catch (NumberFormatException e) {
-                        e.printStackTrace();
+                Double rNumberValue = cacheRNumber.get(ftype);
+                if (null == rNumberValue) {
+                    if (ftype.endsWith(")")) {
+                        rNumberValue = Math.random() * Long.parseLong(ftype.substring(8, ftype.length() - 1));
+                    } else {
+                        rNumberValue = Math.random() * 4;
                     }
+                    cacheRNumber.put(ftype, rNumberValue);
                 }
-                return Math.random() * 4;
+				return rNumberValue;
             } else if (ftype.startsWith("rstring")) {
-                if (ftype.endsWith(")")) {
-                    try {
-                        return randomString(Integer.parseInt(ftype.substring(8, ftype.length() - 1)));
-                    } catch (NumberFormatException e) {
-                        e.printStackTrace();
+                String rStringValue = cacheRString.get(ftype);
+                if (null == rStringValue) {
+                    if (ftype.endsWith(")")) {
+                        rStringValue = randomString(Integer.parseInt(ftype.substring(8, ftype.length() - 1)));
+                    } else {
+                        rStringValue = randomString(8);
                     }
+                    cacheRString.put(ftype, rStringValue);
                 }
-                return randomString(8);
+                return rStringValue;
             } else if (ftype.startsWith("serial")) {
                 if (RecordOperators.Insert == op) {
                     if (null == serial) {
