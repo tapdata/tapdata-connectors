@@ -11,6 +11,7 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
 
+import java.security.SecureRandom;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HashMap;
@@ -142,10 +143,11 @@ public class TapEventBuilder {
             if (ftype.startsWith("rnumber")) {
                 Double rNumberValue = cacheRNumber.get(ftype);
                 if (null == rNumberValue) {
+                    SecureRandom secureRandom = new SecureRandom();
                     if (ftype.endsWith(")")) {
-                        rNumberValue = Math.random() * Long.parseLong(ftype.substring(8, ftype.length() - 1));
+                        rNumberValue = secureRandom.nextDouble() * Long.parseLong(ftype.substring(8, ftype.length() - 1));
                     } else {
-                        rNumberValue = Math.random() * 4;
+                        rNumberValue = secureRandom.nextDouble() * 4;
                     }
                     cacheRNumber.put(ftype, rNumberValue);
                 }
@@ -189,8 +191,9 @@ public class TapEventBuilder {
      */
     private String randomString(int length) {
         StringBuilder buf = new StringBuilder();
+        SecureRandom secureRandom = new SecureRandom();
         for (int i = length; i > 0; i--) {
-            buf.append(RANDOM_CHARS[(int) (Math.random() * RANDOM_CHARS_LENGTH)]);
+            buf.append(RANDOM_CHARS[secureRandom.nextInt(RANDOM_CHARS_LENGTH)]);
         }
         return buf.toString();
     }
