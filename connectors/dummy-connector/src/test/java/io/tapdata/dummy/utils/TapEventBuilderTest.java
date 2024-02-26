@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @create 2024-02-23 18:53
  **/
 @DisplayName("TapEventBuilder class test")
-public class TapEventBuilderTest {
+class TapEventBuilderTest {
 
 	private TapEventBuilder tapEventBuilder;
 

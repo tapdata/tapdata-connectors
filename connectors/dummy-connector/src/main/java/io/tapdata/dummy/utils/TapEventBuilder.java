@@ -28,6 +28,7 @@ import java.util.function.Consumer;
  */
 public class TapEventBuilder {
 
+    public static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final char[] RANDOM_CHARS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".toCharArray();
     private static final int RANDOM_CHARS_LENGTH = RANDOM_CHARS.length;
     public static final int DEFAULT_RANDOM_STRING_LENGTH = 8;
@@ -143,11 +144,10 @@ public class TapEventBuilder {
             if (ftype.startsWith("rnumber")) {
                 Double rNumberValue = cacheRNumber.get(ftype);
                 if (null == rNumberValue) {
-                    SecureRandom secureRandom = new SecureRandom();
                     if (ftype.endsWith(")")) {
-                        rNumberValue = secureRandom.nextDouble() * Long.parseLong(ftype.substring(8, ftype.length() - 1));
+                        rNumberValue = SECURE_RANDOM.nextDouble() * Long.parseLong(ftype.substring(8, ftype.length() - 1));
                     } else {
-                        rNumberValue = secureRandom.nextDouble() * 4;
+                        rNumberValue = SECURE_RANDOM.nextDouble() * 4;
                     }
                     cacheRNumber.put(ftype, rNumberValue);
                 }
@@ -177,7 +177,7 @@ public class TapEventBuilder {
                     }
                     return serial.getAndAdd(serialStep);
                 }
-                return (int) (Math.random() * serial.get()) - serial.get() % serialStep;
+                return (int) (SECURE_RANDOM.nextDouble() * serial.get()) - serial.get() % serialStep;
             }
         }
         return field.getDefaultValue();
@@ -191,9 +191,8 @@ public class TapEventBuilder {
      */
     private String randomString(int length) {
         StringBuilder buf = new StringBuilder();
-        SecureRandom secureRandom = new SecureRandom();
         for (int i = length; i > 0; i--) {
-            buf.append(RANDOM_CHARS[secureRandom.nextInt(RANDOM_CHARS_LENGTH)]);
+            buf.append(RANDOM_CHARS[SECURE_RANDOM.nextInt(RANDOM_CHARS_LENGTH)]);
         }
         return buf.toString();
     }
