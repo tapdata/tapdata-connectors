@@ -29,6 +29,7 @@ public class TapEventBuilder {
 
     private static final char[] RANDOM_CHARS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".toCharArray();
     private static final int RANDOM_CHARS_LENGTH = RANDOM_CHARS.length;
+    public static final int DEFAULT_RANDOM_STRING_LENGTH = 8;
 
     private final AtomicLong eventIndex = new AtomicLong(0);
     private AtomicLong serial;
@@ -155,7 +156,7 @@ public class TapEventBuilder {
                     if (ftype.endsWith(")")) {
                         rStringValue = randomString(Integer.parseInt(ftype.substring(8, ftype.length() - 1)));
                     } else {
-                        rStringValue = randomString(8);
+                        rStringValue = randomString(DEFAULT_RANDOM_STRING_LENGTH);
                     }
                     cacheRString.put(ftype, rStringValue);
                 }

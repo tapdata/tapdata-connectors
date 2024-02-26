@@ -76,8 +76,9 @@ public class TapEventBuilderTest {
 		@DisplayName("Test generate insert record event: rnumber type")
 		void testRNumber() {
 			TapTable table = new TapTable("dummy_test")
-					.add(new TapField("id", "rnumber"))
-					.add(new TapField("num1", "rnumber(10)"));
+					.add(new TapField("num", "rnumber"))
+					.add(new TapField("num_1", "rnumber"))
+					.add(new TapField("num10", "rnumber(10)"));
 
 			TapInsertRecordEvent tapInsertRecordEvent = tapEventBuilder.generateInsertRecordEvent(table);
 
@@ -85,12 +86,16 @@ public class TapEventBuilderTest {
 			Map<String, Object> after = tapInsertRecordEvent.getAfter();
 			assertNotNull(after);
 			assertEquals(table.getNameFieldMap().size(), after.size());
-			assertTrue(after.containsKey("id"));
-			assertNotNull(after.get("id"));
-			assertInstanceOf(Double.class, after.get("id"));
-			assertTrue(after.containsKey("num1"));
-			assertNotNull(after.get("num1"));
-			assertInstanceOf(Double.class, after.get("num1"));
+			assertTrue(after.containsKey("num"));
+			assertNotNull(after.get("num"));
+			assertInstanceOf(Double.class, after.get("num"));
+			assertTrue(after.containsKey("num_1"));
+			assertNotNull(after.get("num_1"));
+			assertInstanceOf(Double.class, after.get("num_1"));
+			assertEquals(after.get("num"), after.get("num_1"));
+			assertTrue(after.containsKey("num10"));
+			assertNotNull(after.get("num10"));
+			assertInstanceOf(Double.class, after.get("num10"));
 		}
 
 		@Test
@@ -98,6 +103,7 @@ public class TapEventBuilderTest {
 		void testRString() {
 			TapTable table = new TapTable("dummy_test")
 					.add(new TapField("str", "rstring"))
+					.add(new TapField("str_1", "rstring"))
 					.add(new TapField("str1", "rstring(1)"));
 
 			TapInsertRecordEvent tapInsertRecordEvent = tapEventBuilder.generateInsertRecordEvent(table);
@@ -109,9 +115,15 @@ public class TapEventBuilderTest {
 			assertTrue(after.containsKey("str"));
 			assertNotNull(after.get("str"));
 			assertInstanceOf(String.class, after.get("str"));
+			assertEquals(TapEventBuilder.DEFAULT_RANDOM_STRING_LENGTH, after.get("str").toString().length());
+			assertTrue(after.containsKey("str_1"));
+			assertNotNull(after.get("str_1"));
+			assertInstanceOf(String.class, after.get("str_1"));
+			assertEquals(after.get("str"), after.get("str_1"));
 			assertTrue(after.containsKey("str1"));
 			assertNotNull(after.get("str1"));
 			assertInstanceOf(String.class, after.get("str1"));
+			assertEquals(1, after.get("str1").toString().length());
 		}
 
 		@Test
