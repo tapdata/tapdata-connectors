@@ -66,7 +66,7 @@ public class TDengineSuperRecordWriter {
         }
     }
 
-    private String getSubTableName(List<String> tags, TapInsertRecordEvent tapRecordEvent) {
+    protected String getSubTableName(List<String> tags, TapInsertRecordEvent tapRecordEvent) {
         StringBuilder subTableName = new StringBuilder();
         if ("AutoHash".equals(tDengineConfig.getSubTableNameType())) {
             subTableName.append(tapTable.getId()).append("_");
