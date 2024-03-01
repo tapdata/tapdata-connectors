@@ -60,6 +60,8 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
         try {
             while (hasNext(logEvent)) {
                 byte[] pOrT = LogicUtil.read(logEvent, CdcConstant.BYTES_COUNT_BUFF_START);
+                int allLength = LogicUtil.bytesToInt(pOrT);
+                if (allLength <= 0) continue;
                 byte[] lsn = LogicUtil.read(logEvent, CdcConstant.BYTES_COUNT_LSN);
                 byte[] type = LogicUtil.read(logEvent, CdcConstant.BYTES_COUNT_EVENT_TYPE);
                 String transactionType = new String(type);
