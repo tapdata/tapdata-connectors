@@ -105,6 +105,10 @@ public class GaussDBRunner extends DebeziumCdcRunner {
         this.recordSize = recordSize;
         this.consumer = consumer;
         Properties properties = new Properties();
+
+        //传递连接配置属性
+        properties.putAll(gaussDBConfig.getProperties());
+
         PGProperty.USER.set(properties, gaussDBConfig.getUser());
         PGProperty.PASSWORD.set(properties, gaussDBConfig.getPassword());
         // 对于逻辑复制，以下三个属性是必须配置项
@@ -112,16 +116,9 @@ public class GaussDBRunner extends DebeziumCdcRunner {
         PGProperty.ASSUME_MIN_SERVER_VERSION.set(properties, "9.4");
         PGProperty.PREFER_QUERY_MODE.set(properties, "simple");
         PGProperty.CURRENT_SCHEMA.set(properties, gaussDBConfig.getSchema());
-        PGProperty.SSL.set(properties, "false");
-
-        // 自定义
-        //PGProperty.LOGGER.set(properties, "Slf4JLogger");
-        //PGProperty.SSL.set(properties, "false");
-        //try {
-        //    Class.forName("com.huawei.opengauss.jdbc.ssl.NonValidatingFactory");
-        //} catch (Exception e) {
-        //
-        //}
+        if (!PGProperty.SSL.getBoolean(properties)) {
+            PGProperty.SSL.set(properties, "false");
+        }
         //PGProperty.SSL_FACTORY.set(properties, "com.huawei.opengauss.jdbc.ssl.NonValidatingFactory");
         conn = (PgConnection) DriverManager.getConnection(jdbcURL, properties);
         log.info("Replication connection init completed");
