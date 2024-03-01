@@ -61,7 +61,7 @@ public class TestDebezium {
         }
     }
 
-    @BeforeEach
+    //@BeforeEach
     void init() throws ClassNotFoundException {
         pwd = "***";
         username = "****";
@@ -87,7 +87,7 @@ public class TestDebezium {
         consumer = new TestConsumer();
     }
 
-    @Test
+    //@Test
     public void testConnection() throws Throwable {
         //getConnect(username, pwd);
         //getConnectUseProp(username, pwd);

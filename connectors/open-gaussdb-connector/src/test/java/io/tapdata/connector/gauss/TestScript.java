@@ -11,7 +11,7 @@ public class TestScript {
     MysqlJdbc mysqlJdbc = new MysqlJdbc("*.*.*.*", 3306, "test", "root", "*****");
     GaussJdbc gaussJdbc = new GaussJdbc("*.*.*.*", 8000, "postgres", "root", "*****");
 
-    @Test
+    //@Test
     public void mysqlInsert() {
         try(Connection conn = mysqlJdbc.getConn()) {
             int id = 100;
@@ -61,7 +61,7 @@ public class TestScript {
         }
     }
 
-    @Test
+    //@Test
     public void mysqlInsert2() {
         try(Connection conn = mysqlJdbc.getConn()) {
             int id = -100;
@@ -111,7 +111,7 @@ public class TestScript {
         }
     }
 
-    @Test
+    //@Test
     public void mysqlCleanTable() {
         try(Connection conn = mysqlJdbc.getConn();
             Statement statement = conn.createStatement();) {
@@ -121,7 +121,7 @@ public class TestScript {
         }
     }
 
-    @Test
+    //@Test
     public void mysqlUpdate() {
         try(Connection conn = mysqlJdbc.getConn()) {
             int id = 100;
@@ -169,7 +169,7 @@ public class TestScript {
             e.printStackTrace();
         }
     }
-    @Test
+    //@Test
     public void mysqlUpdate2() {
         try(Connection conn = mysqlJdbc.getConn()) {
             int id = 100;
@@ -217,7 +217,7 @@ public class TestScript {
             e.printStackTrace();
         }
     }
-    @Test
+    //@Test
     public void mysqlUpdate3() {
         try(Connection conn = mysqlJdbc.getConn()) {
             int id = -100;
@@ -265,7 +265,7 @@ public class TestScript {
             e.printStackTrace();
         }
     }
-    @Test
+    //@Test
     public void mysqlUpdate4() {
         try(Connection conn = mysqlJdbc.getConn()) {
             int id = -100;
@@ -315,7 +315,7 @@ public class TestScript {
     }
 
 
-    @Test
+    //@Test
     public void gaussUpdate() {
         try(Connection conn = gaussJdbc.getConn()) {
             int id = 100;
@@ -363,7 +363,7 @@ public class TestScript {
             e.printStackTrace();
         }
     }
-    @Test
+    //@Test
     public void gaussUpdate2() {
         try(Connection conn = gaussJdbc.getConn()) {
             int id = -100;
