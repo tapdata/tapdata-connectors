@@ -11,6 +11,7 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
 
+import java.security.SecureRandom;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.HashMap;
@@ -27,8 +28,10 @@ import java.util.function.Consumer;
  */
 public class TapEventBuilder {
 
+    public static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final char[] RANDOM_CHARS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".toCharArray();
     private static final int RANDOM_CHARS_LENGTH = RANDOM_CHARS.length;
+    public static final int DEFAULT_RANDOM_STRING_LENGTH = 8;
 
     private final AtomicLong eventIndex = new AtomicLong(0);
     private AtomicLong serial;
@@ -37,6 +40,8 @@ public class TapEventBuilder {
     private DummyOffset offset;
 
     private final Consumer<Map<String, Object>> heartbeatSetter;
+    private Map<String, String> cacheRString = new HashMap<>();
+	private Map<String, Double> cacheRNumber = new HashMap<>();
 
     public TapEventBuilder() {
         this((data) -> {});
@@ -137,23 +142,27 @@ public class TapEventBuilder {
         } else {
             String ftype = field.getDataType();
             if (ftype.startsWith("rnumber")) {
-                if (ftype.endsWith(")")) {
-                    try {
-                        return Math.random() * Long.parseLong(ftype.substring(8, ftype.length() - 1));
-                    } catch (NumberFormatException e) {
-                        e.printStackTrace();
+                Double rNumberValue = cacheRNumber.get(ftype);
+                if (null == rNumberValue) {
+                    if (ftype.endsWith(")")) {
+                        rNumberValue = SECURE_RANDOM.nextDouble() * Long.parseLong(ftype.substring(8, ftype.length() - 1));
+                    } else {
+                        rNumberValue = SECURE_RANDOM.nextDouble() * 4;
                     }
+                    cacheRNumber.put(ftype, rNumberValue);
                 }
-                return Math.random() * 4;
+				return rNumberValue;
             } else if (ftype.startsWith("rstring")) {
-                if (ftype.endsWith(")")) {
-                    try {
-                        return randomString(Integer.parseInt(ftype.substring(8, ftype.length() - 1)));
-                    } catch (NumberFormatException e) {
-                        e.printStackTrace();
+                String rStringValue = cacheRString.get(ftype);
+                if (null == rStringValue) {
+                    if (ftype.endsWith(")")) {
+                        rStringValue = randomString(Integer.parseInt(ftype.substring(8, ftype.length() - 1)));
+                    } else {
+                        rStringValue = randomString(DEFAULT_RANDOM_STRING_LENGTH);
                     }
+                    cacheRString.put(ftype, rStringValue);
                 }
-                return randomString(8);
+                return rStringValue;
             } else if (ftype.startsWith("serial")) {
                 if (RecordOperators.Insert == op) {
                     if (null == serial) {
@@ -168,7 +177,7 @@ public class TapEventBuilder {
                     }
                     return serial.getAndAdd(serialStep);
                 }
-                return (int) (Math.random() * serial.get()) - serial.get() % serialStep;
+                return (int) (SECURE_RANDOM.nextDouble() * serial.get()) - serial.get() % serialStep;
             }
         }
         return field.getDefaultValue();
@@ -183,7 +192,7 @@ public class TapEventBuilder {
     private String randomString(int length) {
         StringBuilder buf = new StringBuilder();
         for (int i = length; i > 0; i--) {
-            buf.append(RANDOM_CHARS[(int) (Math.random() * RANDOM_CHARS_LENGTH)]);
+            buf.append(RANDOM_CHARS[SECURE_RANDOM.nextInt(RANDOM_CHARS_LENGTH)]);
         }
         return buf.toString();
     }
