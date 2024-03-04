@@ -3,10 +3,11 @@ package io.tapdata.connector.gauss.cdc;
 import com.huawei.opengauss.jdbc.PGProperty;
 import com.huawei.opengauss.jdbc.jdbc.PgConnection;
 import com.huawei.opengauss.jdbc.replication.LogSequenceNumber;
+import com.huawei.opengauss.jdbc.replication.PGReplicationConnection;
 import com.huawei.opengauss.jdbc.replication.PGReplicationStream;
+import com.huawei.opengauss.jdbc.replication.fluent.ChainedStreamBuilder;
 import com.huawei.opengauss.jdbc.replication.fluent.logical.ChainedLogicalStreamBuilder;
-import io.debezium.connector.postgresql.TypeRegistry;
-import io.debezium.engine.DebeziumEngine;
+import io.debezium.embedded.EmbeddedEngine;
 import io.tapdata.connector.gauss.cdc.logic.event.EventFactory;
 import io.tapdata.connector.gauss.cdc.logic.event.transcation.discrete.LogicReplicationDiscreteImpl;
 import io.tapdata.connector.gauss.core.GaussDBConfig;
@@ -14,14 +15,9 @@ import io.tapdata.connector.gauss.enums.CdcConstant;
 import io.tapdata.connector.postgres.cdc.DebeziumCdcRunner;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.NumberKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
-import org.apache.kafka.connect.data.Struct;
-import org.apache.kafka.connect.source.SourceRecord;
 
-import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -34,33 +30,246 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 public class GaussDBRunner extends DebeziumCdcRunner {
-    public static Map<String, CdcOffset> offsetMap = new ConcurrentHashMap<>(); //one slot one key
-    private final GaussDBConfig gaussDBConfig;
-    private CdcOffset offset;
+    protected static Map<String, CdcOffset> offsetMap = new ConcurrentHashMap<>(); //one slot one key
+    protected GaussDBConfig gaussDBConfig;
+    protected CdcOffset offset;
     private int recordSize;
-    private StreamReadConsumer consumer;
-    private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
+    protected StreamReadConsumer consumer;
+    protected final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     //protected final TimeZone timeZone;
-    private final String jdbcURL;
-    private final Log log;
-    private PGReplicationStream stream;
-    private PgConnection conn;
-    private String whiteTableList;
-    private EventFactory<ByteBuffer> eventFactory;
-    private TypeRegistry typeRegistry;
-    private long waitTime;
-    private Supplier<Boolean> supplier;
+    protected String jdbcURL;
+    protected Log log;
+    protected PGReplicationStream stream;
+    protected PgConnection conn;
+    protected String whiteTableList;
+    protected EventFactory<ByteBuffer> eventFactory;
+    protected long waitTime;
+    protected Supplier<Boolean> supplier;
 
-    public GaussDBRunner(GaussDBConfig config, Log log) throws SQLException {
+    public GaussDBRunner init(GaussDBConfig config, Log log) {
+        if (null == config) {
+            throw new CoreException("Failed init GaussDB cdc runner, message: GaussDB config must not be empty");
+        }
         this.log = log;
         this.gaussDBConfig = config;
-        jdbcURL = String.format("jdbc:opengauss://%s:%s/%s",
-                gaussDBConfig.getHaHost(),
-                gaussDBConfig.getHaPort(),
-                gaussDBConfig.getDatabase());
+        final String haHost = config.getHaHost();
+        final int haPort = config.getHaPort();
+        final String database = config.getDatabase();
+        this.jdbcURL = String.format("jdbc:opengauss://%s:%s/%s", haHost, haPort, database);
+        return this;
     }
 
+    public void registerConsumer(StreamReadConsumer consumer, int recordSize) throws SQLException {
+        this.recordSize = recordSize;
+        this.consumer = consumer;
+        Properties properties = initProperties();
+        this.conn = initCdcConnection(properties);
+        this.log.info("Replication connection init completed");
+        ChainedLogicalStreamBuilder streamBuilder = initChainedLogicalStreamBuilder();
+        initCdcOffset(streamBuilder);
+        initWhiteTableList(streamBuilder);
+        this.stream = initPGReplicationStream(streamBuilder);
+        this.log.info("GaussDB logic replication stream init completed");
+        this.eventFactory = initEventFactory();
+        this.log.info("GaussDB logic log parser init completed");
+    }
 
+    /**
+     * start cdc sync
+     */
+    @Override
+    public void startCdcRunner() {
+        if (null == consumer) {
+            throw new CoreException("CDC consumer can not be empty");
+        }
+        consumer.streamReadStarted();
+        long cdcInitTime = System.currentTimeMillis();
+        try {
+            while (null != supplier && supplier.get()) {
+                ByteBuffer byteBuffer = stream.readPending();
+                if (verifyByteBuffer(byteBuffer)) {
+                    eventFactory.emit(byteBuffer, log);
+                    cdcInitTime = flushLsn(cdcInitTime);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("CDC stop with an error: {}", e.getMessage());
+            this.getThrowable().set(e);
+        } finally {
+            consumer.streamReadEnded();
+            closeCdcRunner();
+        }
+    }
+
+    protected boolean verifyByteBuffer(ByteBuffer byteBuffer) {
+        if (null == byteBuffer) {
+            try {
+                sleep(5L);
+            } catch (Exception ignore) {
+                //
+            }
+            return false;
+        }
+        return true;
+    }
+
+    protected void sleep(long time) throws InterruptedException {
+        TimeUnit.MILLISECONDS.sleep(time);
+    }
+
+    protected long flushLsn(long cdcInitTime) throws SQLException {
+        //如果需要flush lsn，根据业务实际情况调用以下接口
+        long now = System.currentTimeMillis();
+        long valueTime = now - cdcInitTime;
+        if (valueTime >= waitTime) {
+            LogSequenceNumber lastRecv = stream.getLastReceiveLSN();
+            stream.setFlushedLSN(lastRecv);
+            stream.forceUpdateStatus();
+            log.debug("Pushed a log sequence: [{}], time: {}", lastRecv.asString(), now);
+            cdcInitTime = now;
+        }
+        return cdcInitTime;
+    }
+
+    @Override
+    public boolean isRunning() {
+        return null != supplier && Boolean.TRUE.equals(supplier.get());
+    }
+
+    /**
+     * close cdc sync
+     */
+    @Override
+    public void closeCdcRunner() {
+        try {
+            if (null != stream) stream.close();
+        } catch (Exception e) {
+            log.warn("Close gauss db logic replication stream fail, message: {}", e.getMessage());
+        }
+        try {
+            if (null != conn) conn.close();
+        } catch (Exception e) {
+            log.warn("Close replication jdbc connection fail, message: {}", e.getMessage());
+        }
+        EmbeddedEngine engine = getEngine();
+        try {
+            if (null != engine) engine.close();
+        } catch (Exception e) {
+            log.warn("Close cdc engine fail, message: {}", e.getMessage());
+        }
+        offsetMap.remove(getRunnerName());
+    }
+
+    public EmbeddedEngine getEngine() {
+        return engine;
+    }
+
+    @Override
+    public void run() {
+        startCdcRunner();
+    }
+
+    protected Properties initProperties() {
+        if (null == gaussDBConfig) {
+            throw new CoreException("Can not init cdc connection properties, message: GaussDB config can not be empty");
+        }
+        Properties properties = new Properties();
+        //传递连接配置属性
+        Properties dbConfigProperties = gaussDBConfig.getProperties();
+        if (null != dbConfigProperties && !dbConfigProperties.isEmpty()) {
+            properties.putAll(dbConfigProperties);
+        }
+
+        String user = gaussDBConfig.getUser();
+        PGProperty.USER.set(properties, user);
+        String password = gaussDBConfig.getPassword();
+        PGProperty.PASSWORD.set(properties, password);
+        // 对于逻辑复制，以下三个属性是必须配置项
+        PGProperty.REPLICATION.set(properties, "database");
+        PGProperty.ASSUME_MIN_SERVER_VERSION.set(properties, "9.4");
+        PGProperty.PREFER_QUERY_MODE.set(properties, "simple");
+        String schema = gaussDBConfig.getSchema();
+        PGProperty.CURRENT_SCHEMA.set(properties, schema);
+        if (!PGProperty.SSL.getBoolean(properties)) {
+            PGProperty.SSL.set(properties, "false");
+        }
+        //PGProperty.SSL_FACTORY.set(properties, "com.huawei.opengauss.jdbc.ssl.NonValidatingFactory");
+        return properties;
+    }
+
+    protected PgConnection initCdcConnection(Properties properties) throws SQLException {
+        if (null == jdbcURL) {
+            throw new CoreException("Failed connect jdbc, message: jdbc url is empty");
+        }
+        if (null == properties || properties.isEmpty()) {
+            throw new CoreException("Failed connect jdbc, message: jdbc properties is empty");
+        }
+        return (PgConnection) DriverManager.getConnection(jdbcURL, properties);
+    }
+
+    protected ChainedLogicalStreamBuilder initChainedLogicalStreamBuilder() {
+        if (null == conn) {
+            throw new CoreException("Failed start ChainedLogicalStream, message: GaussDB connection is empty");
+        }
+        PGReplicationConnection api = conn.getReplicationAPI();
+        ChainedStreamBuilder streamBuilder = api.replicationStream();
+        ChainedLogicalStreamBuilder logical = streamBuilder.logical();
+        return logical.withSlotName(runnerName)
+                .withSlotOption("include-xids", false)
+                .withSlotOption("skip-empty-xacts", true)
+                //.withStartPosition(null)
+                .withSlotOption("parallel-decode-num", 10);//解码线程并行度
+    }
+
+    protected void initCdcOffset(ChainedLogicalStreamBuilder streamBuilder) {
+        if (null == streamBuilder) return;
+        if (null == offset) {
+            return;
+        }
+        Object lsn = offset.getLsn();
+        if (null == lsn) {
+            return;
+        }
+        if (lsn instanceof LogSequenceNumber) {
+            streamBuilder.withStartPosition((LogSequenceNumber)lsn);
+            return;
+        }
+        if (lsn instanceof Number) {
+            long longValue = ((Number) lsn).longValue();
+            LogSequenceNumber logSequenceNumber = LogSequenceNumber.valueOf(longValue);
+            streamBuilder.withStartPosition(logSequenceNumber);
+        }
+    }
+
+    protected void initWhiteTableList(ChainedLogicalStreamBuilder streamBuilder) {
+        if (null == streamBuilder) return;
+        if (null != whiteTableList && !whiteTableList.isEmpty()) {
+            streamBuilder.withSlotOption("white-table-list", whiteTableList); //白名单列表
+            log.info("Tables: {} will be monitored in cdc white table list", whiteTableList);
+        }
+    }
+
+    protected PGReplicationStream initPGReplicationStream(ChainedLogicalStreamBuilder streamBuilder) throws SQLException {
+        if (null == streamBuilder) {
+            throw new CoreException("Can not init GaussDB Replication Stream, message: Chained Logical Stream is empty");
+        }
+        streamBuilder = streamBuilder.withSlotOption("standby-connection", true);//强制备机解码
+        streamBuilder = streamBuilder.withSlotOption("decode-style", "b");//解码格式
+        streamBuilder = streamBuilder.withSlotOption("sending-batch", 1);//批量发送解码结果
+        streamBuilder = streamBuilder.withSlotOption("max-txn-in-memory", 100); //单个解码事务落盘内存阈值为100MB
+        streamBuilder = streamBuilder.withSlotOption("max-reorderbuffer-in-memory", 50); //正在处理的解码事务落盘内存阈值为
+        //streamBuilder = streamBuilder.withSlotOption("exclude-users", "userA") //不返回用户userA执行事务的逻辑日志
+        streamBuilder = streamBuilder.withSlotOption("include-user", true); //事务BEGIN逻辑日志携带用户名字
+        streamBuilder = streamBuilder.withSlotOption("enable-heartbeat", true); // 开启心跳日志
+        streamBuilder = streamBuilder.withSlotOption("include-xids", true);
+        streamBuilder = streamBuilder.withSlotOption("include-timestamp", true);
+        PGReplicationStream start = streamBuilder.start();
+        return start;
+    }
+
+    protected EventFactory<ByteBuffer> initEventFactory() {
+        return LogicReplicationDiscreteImpl.instance(consumer, 100, offset, supplier);
+    }
 
     public GaussDBRunner supplierIsAlive(Supplier<Boolean> supplier) {
         this.supplier = supplier;
@@ -89,174 +298,16 @@ public class GaussDBRunner extends DebeziumCdcRunner {
 
     public GaussDBRunner offset(Object offsetState) {
         if (EmptyKit.isNull(offsetState) || !(offsetState instanceof CdcOffset)) {
-            offset = new CdcOffset();
+            this.offset = new CdcOffset();
         } else {
             this.offset = (CdcOffset) offsetState;
         }
-        offsetMap.put(runnerName, offset);
+        offsetMap.put(getRunnerName(), offset);
         return this;
     }
 
     public AtomicReference<Throwable> getThrowable() {
         return throwableAtomicReference;
-    }
-
-    public void registerConsumer(StreamReadConsumer consumer, int recordSize) throws SQLException {
-        this.recordSize = recordSize;
-        this.consumer = consumer;
-        Properties properties = new Properties();
-
-        //传递连接配置属性
-        properties.putAll(gaussDBConfig.getProperties());
-
-        PGProperty.USER.set(properties, gaussDBConfig.getUser());
-        PGProperty.PASSWORD.set(properties, gaussDBConfig.getPassword());
-        // 对于逻辑复制，以下三个属性是必须配置项
-        PGProperty.REPLICATION.set(properties, "database");
-        PGProperty.ASSUME_MIN_SERVER_VERSION.set(properties, "9.4");
-        PGProperty.PREFER_QUERY_MODE.set(properties, "simple");
-        PGProperty.CURRENT_SCHEMA.set(properties, gaussDBConfig.getSchema());
-        if (!PGProperty.SSL.getBoolean(properties)) {
-            PGProperty.SSL.set(properties, "false");
-        }
-        //PGProperty.SSL_FACTORY.set(properties, "com.huawei.opengauss.jdbc.ssl.NonValidatingFactory");
-        conn = (PgConnection) DriverManager.getConnection(jdbcURL, properties);
-        log.info("Replication connection init completed");
-        ChainedLogicalStreamBuilder streamBuilder = conn.getReplicationAPI()
-                .replicationStream()
-                .logical()
-                .withSlotName(runnerName)
-                .withSlotOption("include-xids", false)
-                .withSlotOption("skip-empty-xacts", true)
-                //.withStartPosition(null)
-                .withSlotOption("parallel-decode-num", 10);//解码线程并行度
-        if (null != offset.getLsn()) {
-            Object lsn = offset.getLsn();
-            if (lsn instanceof Number) {
-                streamBuilder.withStartPosition(LogSequenceNumber.valueOf(((Number)lsn).longValue()));
-            } else if (lsn instanceof LogSequenceNumber) {
-                streamBuilder.withStartPosition((LogSequenceNumber)lsn);
-            }
-        }
-        if (null != whiteTableList && !whiteTableList.isEmpty()) {
-            streamBuilder.withSlotOption("white-table-list", whiteTableList); //白名单列表
-            log.info("Tables: {} will be monitored in cdc white table list", whiteTableList);
-        }
-        //build PGReplicationStream
-        stream = streamBuilder.withSlotOption("standby-connection", true) //强制备机解码
-                .withSlotOption("decode-style", "b") //解码格式
-                .withSlotOption("sending-batch", 1) //批量发送解码结果
-                .withSlotOption("max-txn-in-memory", 100) //单个解码事务落盘内存阈值为100MB
-                .withSlotOption("max-reorderbuffer-in-memory", 50) //正在处理的解码事务落盘内存阈值为
-                //.withSlotOption("exclude-users", "userA") //不返回用户userA执行事务的逻辑日志
-                .withSlotOption("include-user", true) //事务BEGIN逻辑日志携带用户名字
-                .withSlotOption("enable-heartbeat", true) // 开启心跳日志
-                .withSlotOption("include-xids", true)
-                .withSlotOption("include-timestamp", true)
-                .start();
-        log.info("GaussDB logic replication stream init completed");
-        //typeRegistry = new TypeRegistry(new PostgresConnection(Configuration.from(gaussDBConfig.getProperties()), true));
-        eventFactory = LogicReplicationDiscreteImpl.instance(consumer, 100, offset, typeRegistry, supplier);
-        log.info("GaussDB logic log parser init completed");
-    }
-
-    /**
-     * start cdc sync
-     */
-    @Override
-    public void startCdcRunner() {
-        if (null == consumer) {
-            throw new CoreException("CDC consumer can not be empty");
-        }
-        consumer.streamReadStarted();
-        long cdcInitTime = System.currentTimeMillis();
-        try {
-            while (null != supplier && supplier.get()) {
-                ByteBuffer byteBuffer = stream.readPending();
-                if (null == byteBuffer) {
-                    try {
-                        TimeUnit.MILLISECONDS.sleep(5L);
-                    } catch (Exception ignore) {
-                        //
-                    }
-                    continue;
-                }
-                eventFactory.emit(byteBuffer, log);
-                //如果需要flush lsn，根据业务实际情况调用以下接口
-                long now = System.currentTimeMillis();
-                if (now - cdcInitTime >= waitTime) {
-                    LogSequenceNumber lastRecv = stream.getLastReceiveLSN();
-                    stream.setFlushedLSN(lastRecv);
-                    stream.forceUpdateStatus();
-                    log.debug("Pushed a log sequence: [{}], time: {}", lastRecv.asString(), now);
-                    cdcInitTime = now;
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Cdc stop whit an error: {}", e.getMessage());
-            this.getThrowable().set(e);
-        } finally {
-            consumer.streamReadEnded();
-            closeCdcRunner();
-        }
-    }
-
-    public void stopCdcRunner() {
-        super.startCdcRunner();
-    }
-
-    @Override
-    public boolean isRunning() {
-        return null != supplier && supplier.get();
-    }
-
-    /**
-     * close cdc sync
-     */
-    @Override
-    public void closeCdcRunner() {
-        try {
-            if (null != stream) stream.close();
-        } catch (Exception e) {
-            log.warn("Close gauss db logic replication stream fail, message: {}", e.getMessage());
-        }
-        try {
-            if (null != conn) conn.close();
-        } catch (Exception e) {
-            log.warn("Close replication jdbc connection fail, message: {}", e.getMessage());
-        }
-        try {
-            if (null != engine) engine.close();
-        } catch (Exception e) {
-            log.warn("Close cdc engine fail, message: {}", e.getMessage());
-        }
-    }
-
-    @Override
-    public void run() {
-        startCdcRunner();
-    }
-
-    @Override
-    public void consumeRecords(List<SourceRecord> sourceRecords, DebeziumEngine.RecordCommitter<SourceRecord> committer) {
-        super.consumeRecords(sourceRecords, committer);
-    }
-
-    private DataMap getMapFromStruct(Struct struct) {
-        DataMap dataMap = new DataMap();
-        if (EmptyKit.isNull(struct)) {
-            return dataMap;
-        }
-        struct.schema().fields().forEach(field -> {
-            Object obj = struct.getWithoutDefault(field.name());
-            if (obj instanceof ByteBuffer) {
-                obj = struct.getBytes(field.name());
-            } else if (obj instanceof Struct) {
-                obj = BigDecimal.valueOf(NumberKit.bytes2long(((Struct) obj).getBytes("value")), (int) ((Struct) obj).get("scale"));
-            }
-            dataMap.put(field.name(), obj);
-        });
-        return dataMap;
     }
 }
 

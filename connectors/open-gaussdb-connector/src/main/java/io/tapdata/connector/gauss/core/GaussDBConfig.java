@@ -3,11 +3,14 @@ package io.tapdata.connector.gauss.core;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 
 public class GaussDBConfig extends PostgresConfig {
+    protected static final String dbType = "opengauss";
+    protected static final String jdbcDriver = "com.huawei.opengauss.jdbc.Driver";
     private int haPort;
     private String haHost;
+
     public GaussDBConfig() {
-        setDbType("opengauss");
-        setJdbcDriver("com.huawei.opengauss.jdbc.Driver");
+        setDbType(dbType);
+        setJdbcDriver(jdbcDriver);
     }
 
     public int getHaPort() {

@@ -2,6 +2,7 @@ package io.tapdata.connector.gauss.cdc.logic.event;
 
 import io.tapdata.connector.gauss.cdc.logic.event.dml.CollectEntity;
 import io.tapdata.connector.gauss.entity.IllegalDataLengthException;
+import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.entity.event.TapEvent;
 
 import java.nio.ByteBuffer;
@@ -87,7 +88,6 @@ public interface DMLEvent extends Event<TapEvent> {
             temp.forEach((k,v)->{
                 j.add(k+":"+ (v == null ? "null" : new String((byte[])v)));
             });
-            System.out.println(j.toString());
             throw new IllegalDataLengthException(e.getMessage() + "[" + j.toString() + "] ");
         }
     }

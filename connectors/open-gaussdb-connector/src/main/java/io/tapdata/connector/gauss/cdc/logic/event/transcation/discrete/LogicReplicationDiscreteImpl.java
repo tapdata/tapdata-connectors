@@ -1,11 +1,10 @@
 package io.tapdata.connector.gauss.cdc.logic.event.transcation.discrete;
 
-import io.debezium.connector.postgresql.TypeRegistry;
 import io.tapdata.connector.gauss.cdc.CdcOffset;
 import io.tapdata.connector.gauss.cdc.logic.AnalyzeLog;
 import io.tapdata.connector.gauss.cdc.logic.event.Event;
 import io.tapdata.connector.gauss.cdc.logic.event.EventFactory;
-import io.tapdata.connector.gauss.cdc.logic.event.LogicUtil;
+import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.connector.gauss.cdc.logic.event.dml.DeleteEvent;
 import io.tapdata.connector.gauss.cdc.logic.event.dml.InsertEvent;
 import io.tapdata.connector.gauss.cdc.logic.event.dml.UpdateEvent;
@@ -26,30 +25,28 @@ import java.util.function.Supplier;
 import static io.tapdata.base.ConnectorBase.list;
 
 public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
-    private final StreamReadConsumer eventAccept;
-    private final int batchSize;
-    private final CdcOffset offset;
-    private int transactionIndex = 0;
-    private TypeRegistry typeRegistry;
-    private AnalyzeLog.AnalyzeParam param;
-    private Supplier<Boolean> supplier;
+    protected final StreamReadConsumer eventAccept;
+    protected final int batchSize;
+    protected final CdcOffset offset;
+    protected int transactionIndex = 0;
+    protected AnalyzeLog.AnalyzeParam param;
+    protected Supplier<Boolean> supplier;
 
-    private LogicReplicationDiscreteImpl(StreamReadConsumer consumer, int batchSize, CdcOffset offset, TypeRegistry typeRegistry, Supplier<Boolean> supplier) {
+    private LogicReplicationDiscreteImpl(StreamReadConsumer consumer, int batchSize, CdcOffset offset, Supplier<Boolean> supplier) {
         this.eventAccept = consumer;
         if (batchSize > CdcConstant.CDC_MAX_BATCH_SIZE || batchSize <= CdcConstant.CDC_MIN_BATCH_SIZE) batchSize = CdcConstant.CDC_DEFAULT_BATCH_SIZE;
         this.batchSize = batchSize;
         if (null == offset) offset = new CdcOffset();
         this.offset = offset;
-        this.typeRegistry = typeRegistry;
-        param = new AnalyzeLog.AnalyzeParam(typeRegistry);
+        param = new AnalyzeLog.AnalyzeParam();
         this.supplier = supplier;
     }
 
-    public static EventFactory<ByteBuffer> instance(StreamReadConsumer consumer, int batchSize, CdcOffset offset, TypeRegistry typeRegistry, Supplier<Boolean> supplier) {
-        return new LogicReplicationDiscreteImpl(consumer, batchSize, offset, typeRegistry, supplier);
+    public static EventFactory<ByteBuffer> instance(StreamReadConsumer consumer, int batchSize, CdcOffset offset, Supplier<Boolean> supplier) {
+        return new LogicReplicationDiscreteImpl(consumer, batchSize, offset, supplier);
     }
 
-    private boolean hasNext(ByteBuffer buffer) {
+    protected boolean hasNext(ByteBuffer buffer) {
         return null != supplier && supplier.get() && buffer.hasRemaining();
     }
 
@@ -103,7 +100,7 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
 
     }
 
-    private Event.EventEntity<TapEvent> redirect(ByteBuffer logEvent, String type) {
+    protected Event.EventEntity<TapEvent> redirect(ByteBuffer logEvent, String type) {
         Event.EventEntity<TapEvent> event = null;
         switch (type) {
             case CdcConstant.BEGIN_TAG:
@@ -140,7 +137,7 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
     protected void accept() {
     }
 
-    private boolean advanceTransactionOffset() {
+    protected boolean advanceTransactionOffset() {
         transactionIndex++;
         if (offset.getXidIndex() <= transactionIndex) {
             offset.withXidIndex(transactionIndex);

@@ -9,7 +9,7 @@ import java.nio.ByteBuffer;
 
 
 public class UpdateEvent implements DMLEvent {
-    private static UpdateEvent instance;
+    protected static UpdateEvent instance;
     private UpdateEvent() {
 
     }
@@ -33,6 +33,6 @@ public class UpdateEvent implements DMLEvent {
         e.after(entity.getAfter());
         e.before(entity.getBefore());
         //tapInsertRecordEvent.referenceTime();
-        return new EventEntity<TapEvent>(e, "", 0, 0, 0);
+        return new EventEntity<>(e, "", 0, 0, 0);
     }
 }

@@ -8,7 +8,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import java.nio.ByteBuffer;
 
 public class InsertEvent implements DMLEvent {
-    private static InsertEvent instance;
+    protected static InsertEvent instance;
     private InsertEvent() {
 
     }
@@ -31,6 +31,6 @@ public class InsertEvent implements DMLEvent {
         tapInsertRecordEvent.table(entity.getTable());
         tapInsertRecordEvent.after(entity.getAfter());
         //tapInsertRecordEvent.referenceTime();
-        return new EventEntity<TapEvent>(tapInsertRecordEvent, "", 0, 0, 0);
+        return new EventEntity<>(tapInsertRecordEvent, "", 0, 0, 0);
     }
 }

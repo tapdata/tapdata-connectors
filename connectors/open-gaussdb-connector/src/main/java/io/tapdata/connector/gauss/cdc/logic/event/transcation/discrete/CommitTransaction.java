@@ -1,7 +1,7 @@
 package io.tapdata.connector.gauss.cdc.logic.event.transcation.discrete;
 
 import io.tapdata.connector.gauss.cdc.logic.event.Event;
-import io.tapdata.connector.gauss.cdc.logic.event.LogicUtil;
+import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.connector.gauss.cdc.logic.param.EventParam;
 import io.tapdata.connector.gauss.util.TimeUtil;
 import io.tapdata.entity.event.TapEvent;
@@ -9,7 +9,7 @@ import io.tapdata.entity.event.TapEvent;
 import java.nio.ByteBuffer;
 
 public class CommitTransaction implements Event<TapEvent> {
-    private static CommitTransaction instance;
+    protected static CommitTransaction instance;
     private CommitTransaction() {
 
     }

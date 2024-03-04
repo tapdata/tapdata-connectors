@@ -9,11 +9,6 @@ import java.util.Arrays;
 public interface Event<E> extends AnalyzeLog<E> {
     EventEntity<E> process(ByteBuffer logEvent, EventParam processParam);
 
-    public static Event redirect(ByteBuffer logEvent) {
-        System.out.println("EVENT: " + Arrays.toString(logEvent.array()));
-        return null;
-    }
-
     public static class EventEntity<E> {
         private final E event;
         private final String xid;
@@ -46,7 +41,5 @@ public interface Event<E> extends AnalyzeLog<E> {
         public long lsn() {
             return lsn;
         }
-
-
     }
 }

@@ -58,18 +58,6 @@ public class CollectEntity {
         return this;
     }
 
-    public void setBefore(Map<String, Object> before) {
-        this.before = before;
-    }
-
-    public void setAfter(Map<String, Object> after) {
-        this.after = after;
-    }
-
-    public void setFieldType(Map<String, Integer> fieldType) {
-        this.fieldType = fieldType;
-    }
-
     public void setSchema(String schema) {
         this.schema = schema;
     }

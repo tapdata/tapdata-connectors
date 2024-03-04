@@ -28,6 +28,7 @@ import io.tapdata.entity.schema.type.TapDateTime;
 import io.tapdata.entity.schema.type.TapNumber;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
@@ -65,7 +66,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * @author Gavin'Xiao
@@ -76,19 +79,19 @@ import java.util.function.Consumer;
 public class OpenGaussDBConnector extends CommonDbConnector {
     protected GaussDBConfig gaussDBConfig;
     protected GaussDBJdbcContext gaussJdbcContext;
-    private GaussDBTest gaussDBTest;
-    private GaussDBRunner cdcRunner; //only when task start-pause this variable can be shared
-    private Object slotName; //must be stored in stateMap
+    protected GaussDBTest gaussDBTest;
+    protected GaussDBRunner cdcRunner; //only when task start-pause this variable can be shared
+    protected Object slotName; //must be stored in stateMap
     protected String postgresVersion;
     protected Map<String, Boolean> writtenTableMap = new ConcurrentHashMap<>();
 
     @Override
-    public void onStart(TapConnectionContext connectorContext) throws ClassNotFoundException {
+    public void onStart(TapConnectionContext connectorContext) {
         initConnection(connectorContext);
     }
 
     protected TapField makeTapField(DataMap dataMap) {
-        return new GaussColumn(dataMap).getTapField();
+        return new GaussColumn().init(dataMap).getTapField();
     }
 
     @Override
@@ -305,7 +308,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     }
 
     //clear resource outer and jdbc context
-    private void onDestroy(TapConnectorContext connectorContext) throws Throwable {
+    protected void onDestroy(TapConnectorContext connectorContext) throws Throwable {
         try {
             onStart(connectorContext);
             connectorContext.getStateMap().remove(CdcConstant.GAUSS_DB_SLOT_TAG);
@@ -326,7 +329,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     }
 
     //clear postgres slot
-    private void clearSlot() throws Throwable {
+    protected void clearSlot() throws Throwable {
         gaussJdbcContext.queryWithNext("SELECT COUNT(*) FROM pg_replication_slots WHERE slot_name='" + slotName + "' AND active='false'", resultSet -> {
             if (resultSet.getInt(1) > 0) {
                 gaussJdbcContext.execute("SELECT pg_drop_replication_slot('" + slotName + "')");
@@ -334,7 +337,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         });
     }
 
-    private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
+    protected void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
         if (EmptyKit.isNull(slotName)) {
             // https://support.huaweicloud.com/intl/zh-cn/centralized-devg-v2-gaussdb/devg_03_1324.html
             //逻辑复制槽名称必须小于64个字符
@@ -368,10 +371,10 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         }
     }
 
-    private static final String PG_REPLICATE_IDENTITY = "select relname, relreplident from pg_class\n" +
+    protected static final String PG_REPLICATE_IDENTITY = "select relname, relreplident from pg_class\n" +
             "where relnamespace=(select oid from pg_namespace where nspname='%s') and relname in (%s)";
 
-    private void testReplicateIdentity(KVReadOnlyMap<TapTable> tableMap) {
+    protected void testReplicateIdentity(KVReadOnlyMap<TapTable> tableMap) {
         if ("pgoutput".equals(gaussDBConfig.getLogPluginName())) {
             tapLogger.warn("The pgoutput plugin may cause before of data loss, if you need, please use another plugin instead, such as wal2json");
             return;
@@ -425,7 +428,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     }
 
     //initialize jdbc context, slot name, version
-    private void initConnection(TapConnectionContext connectionContext) {
+    protected void initConnection(TapConnectionContext connectionContext) {
         gaussDBConfig = (GaussDBConfig) new GaussDBConfig().load(connectionContext.getConnectionConfig());
         gaussDBTest = new GaussDBTest(gaussDBConfig, testItem -> { }).initContext();
         gaussJdbcContext = new GaussDBJdbcContext(gaussDBConfig);
@@ -499,7 +502,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         }
     }
 
-    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+    protected void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         List<String> tables = new ArrayList<>();
         String schema = (String)nodeContext.getConnectionConfig().get("schema");
         if (null != tableList && !tableList.isEmpty()) {
@@ -507,7 +510,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 tables.add(String.format("%s.%s", schema, s));
             }
         }
-        cdcRunner = new GaussDBRunner((GaussDBConfig) new GaussDBConfig().load(nodeContext.getConnectionConfig()), nodeContext.getLog());
+        cdcRunner = new GaussDBRunner().init((GaussDBConfig) new GaussDBConfig().load(nodeContext.getConnectionConfig()), nodeContext.getLog());
         testReplicateIdentity(nodeContext.getTableMap());
         buildSlot(nodeContext, true);
         cdcRunner.useSlot(slotName.toString())
@@ -529,7 +532,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         }
     }
 
-    private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
+    protected Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if (EmptyKit.isNotNull(offsetStartTime)) {
             tapLogger.warn("Postgres specified time start increment is not supported, use the current time as the start increment");
         }
@@ -548,5 +551,41 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("size")));
         tableInfo.setStorageSize(new BigDecimal(dataMap.getString("rowcount")).longValue());
         return tableInfo;
+    }
+
+    @Override
+    protected void singleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
+        List<TapTable> tapTableList = TapSimplify.list();
+        List<String> subTableNames = subList.stream().map(v -> v.getString("tableName")).collect(Collectors.toList());
+        List<DataMap> columnList = jdbcContext.queryAllColumns(subTableNames);
+        List<DataMap> indexList = jdbcContext.queryAllIndexes(subTableNames);
+        subList.forEach(subTable -> {
+            //2、table name/comment
+            String table = subTable.getString("tableName");
+            TapTable tapTable = table(table);
+            tapTable.setComment(subTable.getString("tableComment"));
+            //3、primary key and table index
+            List<String> primaryKey = TapSimplify.list();
+            List<TapIndex> tapIndexList = TapSimplify.list();
+            makePrimaryKeyAndIndex(indexList, table, primaryKey, tapIndexList);
+            //4、table columns info
+            AtomicInteger keyPos = new AtomicInteger(0);
+            columnList.stream().filter(col -> table.equals(col.getString("tableName")))
+                    .forEach(col -> {
+                        TapField tapField = makeTapField(col);
+                        if (null != tapField) {
+                            tapField.setPos(keyPos.incrementAndGet());
+                            tapField.setPrimaryKey(primaryKey.contains(tapField.getName()));
+                            tapField.setPrimaryKeyPos(primaryKey.indexOf(tapField.getName()) + 1);
+                            if (tapField.getPrimaryKey()) {
+                                tapField.setNullable(false);
+                            }
+                            tapTable.add(tapField);
+                        }
+                    });
+            tapTable.setIndexList(tapIndexList);
+            tapTableList.add(tapTable);
+        });
+        syncSchemaSubmit(tapTableList, consumer);
     }
 }

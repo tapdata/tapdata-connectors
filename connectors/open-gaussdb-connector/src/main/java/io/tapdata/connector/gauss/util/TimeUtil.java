@@ -5,14 +5,18 @@ import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.TemporalAccessor;
 import java.util.Date;
 
 public class TimeUtil {
     public static final String DATE_TIME_FORMAT = "yyyy-MM-dd HH:mm:ss";
     public static Date parseDate(String dateStr, String format) {
+        if (null == dateStr) {
+            return null;
+        }
+        if (null == format) {
+            return null;
+        }
         java.util.Date date = null;
         SimpleDateFormat srtFormat = new SimpleDateFormat(format);
         try {
@@ -97,31 +101,6 @@ public class TimeUtil {
         return null == date ? defaultTime : date.getTime();
     }
 
-    public static long parseTimestampWitTimeZone(String dateTimeString) {
-        DateTimeFormatter formatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
-        ZonedDateTime zonedDateTime = ZonedDateTime.parse(dateTimeString, formatter);
-        return zonedDateTime.toInstant().toEpochMilli();
-    }
-
-    public static void main(String[] args) {
-        long timestamp = TimeUtil.parseTimestamp(
-                "2024-01-27 03:02:04",//.130667+08
-                "yyyy-MM-dd hh:mm:ss",
-                0);
-        long t = parseTimestamp("2024-01-27 03:02:04.130667+08", 3);
-        System.out.println(t);
-        s(t);
-        System.out.println(timestamp);
-        s(timestamp);
-    }
-
-    public static void s(long l) {
-        SimpleDateFormat srtFormat = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss.SSS");
-        //日期转字符串
-        Date date = new Date(l);
-        String dateStr = srtFormat.format(date);
-        System.out.println("日期转字符串：" + dateStr);
-    }
 
     public static long parseTimestamp(String dateStr, int fix) {
         int fixValue = 1;
@@ -144,10 +123,10 @@ public class TimeUtil {
         return timestamp;
     }
 
-    private static long parseTimestamp(String[] split1, long timestamp, int fixValue, boolean add) {
+    protected static long parseTimestamp(String[] split1, long timestamp, int fixValue, boolean add) {
         if (split1.length <= 0) return timestamp;
-        long m = Long.parseLong(split1[0])/fixValue;
-        timestamp+=m;
+        long m = Long.parseLong(split1[0]) / fixValue;
+        timestamp += m;
         if (split1.length <= 1) return timestamp;
         int h = Integer.parseInt(split1[1]);
         int value = h * 60 * 60 * 1000;

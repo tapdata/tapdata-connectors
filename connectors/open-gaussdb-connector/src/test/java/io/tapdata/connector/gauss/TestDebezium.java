@@ -91,7 +91,7 @@ public class TestDebezium {
     public void testConnection() throws Throwable {
         //getConnect(username, pwd);
         //getConnectUseProp(username, pwd);
-        cdcRunner = new GaussDBRunner(postgresConfig, new TapLog());
+        cdcRunner = new GaussDBRunner().init(postgresConfig, new TapLog());
         //testReplicateIdentity(nodeContext.getTableMap());
         //buildSlot(connectionContext, true);
         slotName = "slot1";//"tapdata_cdc_9d1b7907_e5e7_462a_9a8a_7e5485840466";//"slot1";

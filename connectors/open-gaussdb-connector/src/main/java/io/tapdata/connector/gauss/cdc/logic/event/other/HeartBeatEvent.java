@@ -1,7 +1,7 @@
 package io.tapdata.connector.gauss.cdc.logic.event.other;
 
 import io.tapdata.connector.gauss.cdc.logic.event.Event;
-import io.tapdata.connector.gauss.cdc.logic.event.LogicUtil;
+import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.connector.gauss.cdc.logic.param.EventParam;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
@@ -9,7 +9,7 @@ import io.tapdata.entity.event.control.HeartbeatEvent;
 import java.nio.ByteBuffer;
 
 public class HeartBeatEvent implements Event<TapEvent> {
-    private static HeartBeatEvent instance;
+    protected static HeartBeatEvent instance;
     private HeartBeatEvent() {
 
     }

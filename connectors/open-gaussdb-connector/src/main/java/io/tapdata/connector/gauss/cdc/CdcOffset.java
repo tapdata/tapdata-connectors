@@ -4,28 +4,22 @@ public class CdcOffset {
     private int xidIndex;
     private Long lsn;
     private long transactionTimestamp;
-    public CdcOffset() {
 
-    }
     public CdcOffset withXidIndex(int xidIndex) {
-        this.xidIndex = xidIndex;
-        return this;
-    }
-    public CdcOffset withLsn(Long lsn) {
-        this.lsn = lsn;
+        setXidIndex(xidIndex);
         return this;
     }
     public CdcOffset withTransactionTimestamp(long transactionTimestamp) {
-        this.transactionTimestamp = transactionTimestamp;
+        setTransactionTimestamp(transactionTimestamp);
         return this;
-    }
-
-    public int getXidIndex() {
-        return xidIndex;
     }
 
     public void setXidIndex(int xidIndex) {
         this.xidIndex = xidIndex;
+    }
+
+    public int getXidIndex() {
+        return xidIndex;
     }
 
     public Object getLsn() {

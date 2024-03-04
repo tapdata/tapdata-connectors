@@ -8,7 +8,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import java.nio.ByteBuffer;
 
 public class DeleteEvent implements DMLEvent {
-    private static DeleteEvent instance;
+    protected static DeleteEvent instance;
     private DeleteEvent() {
 
     }
@@ -31,6 +31,6 @@ public class DeleteEvent implements DMLEvent {
         e.table(entity.getTable());
         e.before(entity.getBefore());
         //tapInsertRecordEvent.referenceTime();
-        return new EventEntity<TapEvent>(e, "", 0, 0, 0);
+        return new EventEntity<>(e, "", 0, 0, 0);
     }
 }
