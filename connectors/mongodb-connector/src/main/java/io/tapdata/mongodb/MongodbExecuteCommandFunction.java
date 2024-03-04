@@ -4,15 +4,22 @@ import com.mongodb.client.*;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;
 import org.apache.commons.collections4.MapUtils;
 import org.bson.Document;
+import org.bson.json.JsonWriterSettings;
 
 import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public class MongodbExecuteCommandFunction {
+  private Log log;
+
+  public void setLog(Log log) {
+    this.log = log;
+  }
 
   public long execute(Map<String, Object> executeObj, MongoClient mongoClient) {
 
@@ -158,19 +165,31 @@ public class MongodbExecuteCommandFunction {
     consumer(aggregateIterable, consumer, batchSize, aliveSupplier);
   }
 
-  private static AggregateIterable<Document> getAggregateIterable(Map<String, Object> executeObj, MongoClient mongoClient) {
+  private AggregateIterable<Document> getAggregateIterable(Map<String, Object> executeObj, MongoClient mongoClient) {
     ExecuteObject executeObject = new ExecuteObject(executeObj);
     String database = executeObject.getDatabase();
     String collection = executeObject.getCollection();
-    if (collection == null || "".equals(collection)) {
-      throw new RuntimeException(String.format("Process execute %s failed, collection Name cannot be blank", executeObject));
+    if (collection == null || collection.isEmpty()) {
+      throw new RuntimeException(String.format("Process execute %s failed, collection name cannot be blank", executeObject));
     }
     List<Document> pipelines = executeObject.getPipeline();
-    if (pipelines.size() == 0) {
+    if (pipelines.isEmpty()) {
       throw new RuntimeException(String.format("Process execute %s failed, pipeline cannot be blank", executeObject));
     }
+    boolean allowDiskUse = true;
 
-    return mongoClient.getDatabase(database).getCollection(collection).aggregate(pipelines).allowDiskUse(true);
+    try {
+      if (null != log) {
+        List<String> pipelineStrings = new ArrayList<>();
+        pipelines.forEach(pipeline -> pipelineStrings.add(pipeline.toJson()));
+        String pipelineString = "[" + String.join("\n,", pipelineStrings) + "]";
+        log.info("Will run aggregate, database: {}, collection: {}, allow disk use: {}, pipelines: {}", database, collection, allowDiskUse, pipelineString);
+      }
+    } catch (Exception e) {
+      // ignored
+    }
+
+    return mongoClient.getDatabase(database).getCollection(collection).aggregate(pipelines).allowDiskUse(allowDiskUse);
   }
 
   public Object aggregate(Map<String, Object> executeObj, MongoClient mongoClient) {
