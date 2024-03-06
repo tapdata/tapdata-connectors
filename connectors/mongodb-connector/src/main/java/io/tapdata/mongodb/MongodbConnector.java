@@ -780,6 +780,7 @@ public class MongodbConnector extends ConnectorBase {
 		try {
 			Map<String, Object> executeObj = tapExecuteCommand.getParams();
 			String command = tapExecuteCommand.getCommand();
+			tapConnectorContext.getLog();
 			if (MapUtils.isNotEmpty(executeObj) && StringUtils.isEmpty((CharSequence) executeObj.get("database"))) {
 				executeObj.put("database", mongoConfig.getDatabase());
 			}
@@ -1142,6 +1143,7 @@ public class MongodbConnector extends ConnectorBase {
 			}
 		}
 		exceptionCollector = new MongodbExceptionCollector();
+		mongodbExecuteCommandFunction.setLog(connectionContext.getLog());
 	}
 
 	private void dropTable(TapConnectorContext connectorContext, TapDropTableEvent dropTableEvent) throws Throwable {
