@@ -20,7 +20,8 @@ public interface DMLEvent extends Event<TapEvent> {
         byte[] hasNextTag = null;
         byte[] schema = LogicUtil.read(logEvent, 2, 32);
         byte[] table = LogicUtil.read(logEvent, 2, 32);
-        instance.withSchema(new String(schema)).withTable(new String(table));
+        instance.withSchema(new String(schema))
+                .withTable(new String(table));
         while (logEvent.hasRemaining()) {
             bOrA = LogicUtil.read(logEvent, 1);
             String bOrAChar = new String(bOrA);
@@ -86,7 +87,13 @@ public interface DMLEvent extends Event<TapEvent> {
         } catch (IllegalDataLengthException e) {
             StringJoiner j = new StringJoiner(", ");
             temp.forEach((k,v)->{
-                j.add(k+":"+ (v == null ? "null" : new String((byte[])v)));
+                String value;
+                if (null == v) {
+                    value = "null";
+                } else {
+                    value = new String((byte[])v);
+                }
+                j.add(k + ":" + value);
             });
             throw new IllegalDataLengthException(e.getMessage() + "[" + j.toString() + "] ");
         }

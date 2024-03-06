@@ -38,4 +38,8 @@ public class GaussColumn extends PostgresColumn {
         }
         return this;
     }
+
+    public static GaussColumn instance() {
+        return new GaussColumn();
+    }
 }

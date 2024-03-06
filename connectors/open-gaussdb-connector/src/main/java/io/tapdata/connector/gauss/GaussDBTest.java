@@ -38,9 +38,18 @@ public class GaussDBTest extends CommonDbTest {
         super();
     }
 
-    public GaussDBTest(GaussDBConfig gaussDBConfig, Consumer<TestItem> consumer) {
-        super(gaussDBConfig, consumer);
+    public static GaussDBTest instance(GaussDBConfig gaussDBConfig, Consumer<TestItem> consumer) {
+        return new GaussDBTest(gaussDBConfig, consumer).init();
+    }
+
+    protected GaussDBTest init() {
         testFunctionMap().remove("testStreamRead");
+        testFunctionMap().put("testConnectorVersion", this::testConnectorVersion);
+        return this;
+    }
+
+    private GaussDBTest(GaussDBConfig gaussDBConfig, Consumer<TestItem> consumer) {
+        super(gaussDBConfig, consumer);
     }
 
     protected Map<String, Supplier<Boolean>> testFunctionMap() {
@@ -64,7 +73,10 @@ public class GaussDBTest extends CommonDbTest {
         return this;
     }
 
-
+    public Boolean testConnectorVersion() {
+        consumer().accept(testItem("Connector Version", TestItem.RESULT_SUCCESSFULLY, "v1.1.0"));
+        return true;
+    }
 
     @Override
     protected List<String> supportVersions() {

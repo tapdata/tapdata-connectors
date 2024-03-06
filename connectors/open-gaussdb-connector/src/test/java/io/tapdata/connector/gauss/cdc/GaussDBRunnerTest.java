@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -478,14 +479,14 @@ public class GaussDBRunnerTest {
             when(streamBuilder.start()).thenReturn(start);
         }
 
-        void assertVerify(int times) throws SQLException {
+        void assertVerify(int times, boolean isCloud) throws SQLException {
             verify(streamBuilder, times(times)).withSlotOption("standby-connection", true);
             verify(streamBuilder, times(times)).withSlotOption("decode-style", "b");
             verify(streamBuilder, times(times)).withSlotOption("sending-batch", 1);
             verify(streamBuilder, times(times)).withSlotOption("max-txn-in-memory", 100);
             verify(streamBuilder, times(times)).withSlotOption("max-reorderbuffer-in-memory", 50);
             verify(streamBuilder, times(times)).withSlotOption("include-user", true);
-            verify(streamBuilder, times(times)).withSlotOption("enable-heartbeat", true);
+            verify(streamBuilder, times(isCloud ? 0 : times)).withSlotOption("enable-heartbeat", true);
             verify(streamBuilder, times(times)).withSlotOption("include-xids", true);
             verify(streamBuilder, times(times)).withSlotOption("include-timestamp", true);
             verify(streamBuilder, times(times)).start();
@@ -493,23 +494,34 @@ public class GaussDBRunnerTest {
 
         @Test
         void testNullChainedLogicalStreamBuilder() throws SQLException {
-            when(runner.initPGReplicationStream(null)).thenCallRealMethod();
+            when(runner.initPGReplicationStream(null, false)).thenCallRealMethod();
             Assertions.assertThrows(CoreException.class, () -> {
                 try {
-                    runner.initPGReplicationStream(null);
+                    runner.initPGReplicationStream(null, false);
                 } finally {
-                    assertVerify(0);
+                    assertVerify(0, false);
                 }
             });
         }
 
         @Test
         void testNormal() throws SQLException {
-            when(runner.initPGReplicationStream(streamBuilder)).thenCallRealMethod();
+            when(runner.initPGReplicationStream(streamBuilder, false)).thenCallRealMethod();
             Assertions.assertDoesNotThrow(() -> {
-                PGReplicationStream stream = runner.initPGReplicationStream(streamBuilder);
+                PGReplicationStream stream = runner.initPGReplicationStream(streamBuilder, false);
                 Assertions.assertNotNull(stream);
-                assertVerify(1);
+                assertVerify(1, false);
+            });
+        }
+
+
+        @Test
+        void testIsCloudGaussDBNormal() throws SQLException {
+            when(runner.initPGReplicationStream(streamBuilder, true)).thenCallRealMethod();
+            Assertions.assertDoesNotThrow(() -> {
+                PGReplicationStream stream = runner.initPGReplicationStream(streamBuilder, true);
+                Assertions.assertNotNull(stream);
+                assertVerify(1, true);
             });
         }
     }
@@ -723,9 +735,104 @@ public class GaussDBRunnerTest {
         void testNormal() throws SQLException {
             runner.log = mock(Log.class);
             doNothing().when(runner.log).info(anyString());
-
             StreamReadConsumer consumer = mock(StreamReadConsumer.class);
             int recordSize = 100;
+            PgConnection conn = mock(PgConnection.class);
+            EventFactory<ByteBuffer> eventFactory = mock(EventFactory.class);
+            when(runner.initEventFactory()).thenReturn(eventFactory);
+            doCallRealMethod().when(runner).registerConsumer(consumer, recordSize);
+            doNothing().when(runner).setPGReplicationStream(false);
+            doNothing().when(runner).setPGReplicationStream(true);
+            runner.conn = conn;
+            runner.registerConsumer(consumer, recordSize);
+            verify(runner, times(1)).setPGReplicationStream(false);
+            verify(runner, times(0)).setPGReplicationStream(true);
+            verify(conn, times(0)).close();
+            verify(runner, times(1)).initEventFactory();
+            verify(runner.log, times(2)).info(anyString());
+        }
+
+        /**
+         * not Cloud gaussdb support: enabled-heartbeat=true
+         * */
+        @Test
+        void testNotCloudGaussDB() throws SQLException {
+            runner.log = mock(Log.class);
+            doNothing().when(runner.log).info(anyString());
+            StreamReadConsumer consumer = mock(StreamReadConsumer.class);
+            int recordSize = 100;
+            PgConnection conn = mock(PgConnection.class);
+            EventFactory<ByteBuffer> eventFactory = mock(EventFactory.class);
+            when(runner.initEventFactory()).thenReturn(eventFactory);
+            doCallRealMethod().when(runner).registerConsumer(consumer, recordSize);
+            doNothing().when(runner).setPGReplicationStream(false);
+            doNothing().when(runner).setPGReplicationStream(true);
+            runner.conn = conn;
+            runner.registerConsumer(consumer, recordSize);
+            verify(runner, times(1)).setPGReplicationStream(false);
+            verify(runner, times(0)).setPGReplicationStream(true);
+            verify(conn, times(0)).close();
+            verify(runner, times(1)).initEventFactory();
+            verify(runner.log, times(2)).info(anyString());
+        }
+
+        /**
+         * is Cloud gaussdb not support: enabled-heartbeat=true
+         * */
+        @Test
+        void testCloudGaussDB() throws SQLException {
+            runner.log = mock(Log.class);
+            doNothing().when(runner.log).info(anyString());
+            StreamReadConsumer consumer = mock(StreamReadConsumer.class);
+            int recordSize = 100;
+            PgConnection conn = mock(PgConnection.class);
+            EventFactory<ByteBuffer> eventFactory = mock(EventFactory.class);
+            when(runner.initEventFactory()).thenReturn(eventFactory);
+            doCallRealMethod().when(runner).registerConsumer(consumer, recordSize);
+            doAnswer(w -> {
+                throw new SQLException("IS Cloud, Not Support enabled-heartbeat");
+            }).when(runner).setPGReplicationStream(false);
+            doNothing().when(runner).setPGReplicationStream(true);
+            runner.conn = conn;
+            runner.registerConsumer(consumer, recordSize);
+            verify(runner, times(1)).setPGReplicationStream(false);
+            verify(runner, times(1)).setPGReplicationStream(true);
+            verify(conn, times(1)).close();
+            verify(runner, times(1)).initEventFactory();
+            verify(runner.log, times(2)).info(anyString());
+        }
+        /**
+         * is Cloud gaussdb not support: enabled-heartbeat=true
+         * */
+        @Test
+        void testCloudGaussDBButConnectionIsNull() throws SQLException {
+            runner.log = mock(Log.class);
+            doNothing().when(runner.log).info(anyString());
+            StreamReadConsumer consumer = mock(StreamReadConsumer.class);
+            int recordSize = 100;
+            PgConnection conn = mock(PgConnection.class);
+            EventFactory<ByteBuffer> eventFactory = mock(EventFactory.class);
+            when(runner.initEventFactory()).thenReturn(eventFactory);
+            doCallRealMethod().when(runner).registerConsumer(consumer, recordSize);
+            doAnswer(w -> {
+                throw new SQLException("IS Cloud, Not Support enabled-heartbeat");
+            }).when(runner).setPGReplicationStream(false);
+            doNothing().when(runner).setPGReplicationStream(true);
+            runner.registerConsumer(consumer, recordSize);
+            verify(runner, times(1)).setPGReplicationStream(false);
+            verify(runner, times(1)).setPGReplicationStream(true);
+            verify(conn, times(0)).close();
+            verify(runner, times(1)).initEventFactory();
+            verify(runner.log, times(2)).info(anyString());
+        }
+    }
+
+    @Nested
+    class SetPGReplicationStreamTest {
+        @Test
+        void testNormal() throws SQLException {
+            runner.log = mock(Log.class);
+            doNothing().when(runner.log).info(anyString());
 
             Properties properties = mock(Properties.class);
             when(runner.initProperties()).thenReturn(properties);
@@ -739,23 +846,19 @@ public class GaussDBRunnerTest {
             doNothing().when(runner).initCdcOffset(streamBuilder);
 
             PGReplicationStream stream = mock(PGReplicationStream.class);
-            when(runner.initPGReplicationStream(streamBuilder)).thenReturn(stream);
+            when(runner.initPGReplicationStream(streamBuilder, true)).thenReturn(stream);
 
-            EventFactory<ByteBuffer> eventFactory = mock(EventFactory.class);
-            when(runner.initEventFactory()).thenReturn(eventFactory);
+            doCallRealMethod().when(runner).setPGReplicationStream(anyBoolean());
 
-            doCallRealMethod().when(runner).registerConsumer(consumer, recordSize);
-
-            runner.registerConsumer(consumer, recordSize);
+            runner.setPGReplicationStream(true);
 
             verify(runner, times(1)).initProperties();
             verify(runner, times(1)).initCdcConnection(properties);
             verify(runner, times(1)).initChainedLogicalStreamBuilder();
             verify(runner, times(1)).initCdcOffset(streamBuilder);
             verify(runner, times(1)).initWhiteTableList(streamBuilder);
-            verify(runner, times(1)).initPGReplicationStream(streamBuilder);
-            verify(runner, times(1)).initEventFactory();
-            verify(runner.log, times(3)).info(anyString());
+            verify(runner, times(1)).initPGReplicationStream(streamBuilder, true);
+            verify(runner.log, times(1)).info(anyString());
         }
     }
 

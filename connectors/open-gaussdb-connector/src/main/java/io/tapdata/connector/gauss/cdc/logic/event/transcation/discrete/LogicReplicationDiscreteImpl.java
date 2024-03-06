@@ -25,20 +25,24 @@ import java.util.function.Supplier;
 import static io.tapdata.base.ConnectorBase.list;
 
 public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
-    protected final StreamReadConsumer eventAccept;
-    protected final int batchSize;
-    protected final CdcOffset offset;
+    protected StreamReadConsumer eventAccept;
+    protected int batchSize;
+    protected CdcOffset offset;
     protected int transactionIndex = 0;
     protected AnalyzeLog.AnalyzeParam param;
     protected Supplier<Boolean> supplier;
 
     private LogicReplicationDiscreteImpl(StreamReadConsumer consumer, int batchSize, CdcOffset offset, Supplier<Boolean> supplier) {
         this.eventAccept = consumer;
-        if (batchSize > CdcConstant.CDC_MAX_BATCH_SIZE || batchSize <= CdcConstant.CDC_MIN_BATCH_SIZE) batchSize = CdcConstant.CDC_DEFAULT_BATCH_SIZE;
+        if (batchSize > CdcConstant.CDC_MAX_BATCH_SIZE || batchSize <= CdcConstant.CDC_MIN_BATCH_SIZE) {
+            batchSize = CdcConstant.CDC_DEFAULT_BATCH_SIZE;
+        }
         this.batchSize = batchSize;
-        if (null == offset) offset = new CdcOffset();
+        if (null == offset) {
+            offset = new CdcOffset();
+        }
         this.offset = offset;
-        param = new AnalyzeLog.AnalyzeParam();
+        this.param = new AnalyzeLog.AnalyzeParam();
         this.supplier = supplier;
     }
 
@@ -47,12 +51,13 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
     }
 
     protected boolean hasNext(ByteBuffer buffer) {
-        return null != supplier && supplier.get() && buffer.hasRemaining();
+        return null != supplier && supplier.get() && null != buffer && buffer.hasRemaining();
     }
 
 
     @Override
     public void emit(ByteBuffer logEvent, Log log) {
+        if (null == logEvent) return;
         List<TapEvent> eventList = new ArrayList<>();
         try {
             while (hasNext(logEvent)) {
@@ -83,7 +88,7 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
             }
         } catch (Exception e) {
             if (e instanceof IllegalDataLengthException) {
-                log.warn(e.getMessage() + ", fail to read value from byte array: " + new String(logEvent.array()));
+                log.warn("{}, fail to read value from byte array: {}", e.getMessage(), new String(logEvent.array()));
                 return;
             }
             throw e;
@@ -101,6 +106,12 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
     }
 
     protected Event.EventEntity<TapEvent> redirect(ByteBuffer logEvent, String type) {
+        if (null == logEvent) {
+            return null;
+        }
+        if (null == type) {
+            return null;
+        }
         Event.EventEntity<TapEvent> event = null;
         switch (type) {
             case CdcConstant.BEGIN_TAG:

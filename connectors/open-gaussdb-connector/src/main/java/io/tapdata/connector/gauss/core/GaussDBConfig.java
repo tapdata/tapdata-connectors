@@ -28,4 +28,8 @@ public class GaussDBConfig extends PostgresConfig {
     public void setHaHost(String haHost) {
         this.haHost = haHost;
     }
+
+    public static GaussDBConfig instance() {
+        return new GaussDBConfig();
+    }
 }

@@ -39,6 +39,10 @@ public class GaussDBJdbcContext extends PostgresJdbcContext {
         super(config);
     }
 
+    public static GaussDBJdbcContext instance(PostgresConfig config) {
+        return new GaussDBJdbcContext(config);
+    }
+
     @Override
     protected String queryAllColumnsSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";

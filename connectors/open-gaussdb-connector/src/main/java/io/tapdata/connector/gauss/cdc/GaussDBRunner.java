@@ -14,6 +14,7 @@ import io.tapdata.connector.gauss.core.GaussDBConfig;
 import io.tapdata.connector.gauss.enums.CdcConstant;
 import io.tapdata.connector.postgres.cdc.DebeziumCdcRunner;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -28,6 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+
+import static io.tapdata.base.ConnectorBase.list;
 
 public class GaussDBRunner extends DebeziumCdcRunner {
     protected static Map<String, CdcOffset> offsetMap = new ConcurrentHashMap<>(); //one slot one key
@@ -62,16 +65,27 @@ public class GaussDBRunner extends DebeziumCdcRunner {
     public void registerConsumer(StreamReadConsumer consumer, int recordSize) throws SQLException {
         this.recordSize = recordSize;
         this.consumer = consumer;
+        try {
+            setPGReplicationStream(false);
+        } catch (Exception e) {
+            if (null != this.conn) {
+                this.conn.close();
+            }
+            setPGReplicationStream(true);
+        }
+        this.log.info("GaussDB logic replication stream init completed");
+        this.eventFactory = initEventFactory();
+        this.log.info("GaussDB logic log parser init completed");
+    }
+
+    protected void setPGReplicationStream(boolean isCloud) throws SQLException {
         Properties properties = initProperties();
         this.conn = initCdcConnection(properties);
         this.log.info("Replication connection init completed");
         ChainedLogicalStreamBuilder streamBuilder = initChainedLogicalStreamBuilder();
         initCdcOffset(streamBuilder);
         initWhiteTableList(streamBuilder);
-        this.stream = initPGReplicationStream(streamBuilder);
-        this.log.info("GaussDB logic replication stream init completed");
-        this.eventFactory = initEventFactory();
-        this.log.info("GaussDB logic log parser init completed");
+        this.stream = initPGReplicationStream(streamBuilder, isCloud);
     }
 
     /**
@@ -90,6 +104,12 @@ public class GaussDBRunner extends DebeziumCdcRunner {
                 if (verifyByteBuffer(byteBuffer)) {
                     eventFactory.emit(byteBuffer, log);
                     cdcInitTime = flushLsn(cdcInitTime);
+
+                    HeartbeatEvent event = new HeartbeatEvent();
+                    long now = System.currentTimeMillis();
+                    event.referenceTime(now);
+                    event.setTime(now);
+                    consumer.accept(list(event), offset);
                 }
             }
         } catch (Exception e) {
@@ -249,7 +269,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
         }
     }
 
-    protected PGReplicationStream initPGReplicationStream(ChainedLogicalStreamBuilder streamBuilder) throws SQLException {
+    protected PGReplicationStream initPGReplicationStream(ChainedLogicalStreamBuilder streamBuilder, boolean isCloud) throws SQLException {
         if (null == streamBuilder) {
             throw new CoreException("Can not init GaussDB Replication Stream, message: Chained Logical Stream is empty");
         }
@@ -260,7 +280,12 @@ public class GaussDBRunner extends DebeziumCdcRunner {
         streamBuilder = streamBuilder.withSlotOption("max-reorderbuffer-in-memory", 50); //正在处理的解码事务落盘内存阈值为
         //streamBuilder = streamBuilder.withSlotOption("exclude-users", "userA") //不返回用户userA执行事务的逻辑日志
         streamBuilder = streamBuilder.withSlotOption("include-user", true); //事务BEGIN逻辑日志携带用户名字
-        streamBuilder = streamBuilder.withSlotOption("enable-heartbeat", true); // 开启心跳日志
+
+        //云数据库不支持
+        if (!isCloud) {
+            streamBuilder = streamBuilder.withSlotOption("enable-heartbeat", true); // 开启心跳日志
+        }
+
         streamBuilder = streamBuilder.withSlotOption("include-xids", true);
         streamBuilder = streamBuilder.withSlotOption("include-timestamp", true);
         PGReplicationStream start = streamBuilder.start();
