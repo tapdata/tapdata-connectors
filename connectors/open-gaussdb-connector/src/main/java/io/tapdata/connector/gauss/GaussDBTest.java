@@ -34,12 +34,17 @@ public class GaussDBTest extends CommonDbTest {
     protected final static String PG_TABLE_SELECT_NUM = "SELECT count(*) FROM information_schema.table_privileges " +
             "WHERE grantee='%s' AND table_catalog='%s' AND table_schema='%s' AND privilege_type='SELECT'";
 
+    interface TestAccept {
+        void accept(GaussDBTest test) throws Throwable;
+    }
     public GaussDBTest() {
         super();
     }
 
-    public static GaussDBTest instance(GaussDBConfig gaussDBConfig, Consumer<TestItem> consumer) {
-        return new GaussDBTest(gaussDBConfig, consumer).init();
+    public static void instance(GaussDBConfig gaussDBConfig, Consumer<TestItem> consumer, TestAccept accept) throws Throwable {
+        try (GaussDBTest test = new GaussDBTest(gaussDBConfig, consumer).init().initContext()) {
+            accept.accept(test);
+        }
     }
 
     protected GaussDBTest init() {

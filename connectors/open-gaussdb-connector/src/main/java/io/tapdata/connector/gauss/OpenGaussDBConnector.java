@@ -2,6 +2,7 @@ package io.tapdata.connector.gauss;
 
 import com.huawei.opengauss.jdbc.core.types.PGClob;
 import io.tapdata.common.CommonDbConnector;
+import io.tapdata.common.CommonDbTest;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.gauss.cdc.CdcOffset;
@@ -49,6 +50,7 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
+import net.bytebuddy.implementation.bytecode.Throw;
 import org.postgresql.geometric.*;
 import org.postgresql.jdbc.PgArray;
 import org.postgresql.jdbc.PgSQLXML;
@@ -104,14 +106,12 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     }
 
     @Override
-    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
+    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer)  throws Throwable {
         gaussDBConfig = (GaussDBConfig) GaussDBConfig.instance().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(gaussDBConfig.getConnectionString());
-        try (GaussDBTest gaussDBTest = GaussDBTest.instance(gaussDBConfig, consumer).initContext()) {
-            gaussDBTest.testOneByOne();
-            return connectionOptions;
-        }
+        GaussDBTest.instance(gaussDBConfig, consumer, CommonDbTest::testOneByOne);
+        return connectionOptions;
     }
 
 
@@ -377,13 +377,13 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         }
         //test streamRead log plugin
         Consumer<TestItem> consumer = testItem -> { };
-        try(GaussDBTest gaussDBTest = GaussDBTest.instance(gaussDBConfig, consumer).initContext()){
+        GaussDBTest.instance(gaussDBConfig, consumer, gaussDBTest -> {
             boolean canCdc = Boolean.TRUE.equals(gaussDBTest.testStreamRead());
             if (canCdc) {
                 testReplicateIdentity(connectorContext.getTableMap(), log);
                 buildSlot(connectorContext, false);
             }
-        }
+        });
         return new CdcOffset();
     }
 

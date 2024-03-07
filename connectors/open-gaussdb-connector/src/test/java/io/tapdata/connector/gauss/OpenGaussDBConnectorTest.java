@@ -132,7 +132,7 @@ public class OpenGaussDBConnectorTest {
         GaussDBTest gaussDBTest;
         Consumer<TestItem> consumer;
         @BeforeEach
-        void init() {
+        void init() throws Throwable {
             dataMap = mock(DataMap.class);
             gaussDBConfig = mock(GaussDBConfig.class);
 
@@ -144,9 +144,6 @@ public class OpenGaussDBConnectorTest {
 
             consumer = mock(Consumer.class);
             gaussDBTest = mock(GaussDBTest.class);
-            when(gaussDBTest.initContext()).thenReturn(gaussDBTest);
-            when(gaussDBTest.testOneByOne()).thenReturn(true);
-            doNothing().when(gaussDBTest).close();
 
             when(connector.connectionTest(connectionContext, consumer)).thenCallRealMethod();
         }
@@ -160,8 +157,8 @@ public class OpenGaussDBConnectorTest {
                     gc.when(GaussDBConfig::instance).thenReturn(gaussDBConfig);
                     co.when(ConnectionOptions::create).thenReturn(connectionOptions);
                     gt.when(() -> {
-                        GaussDBTest.instance(gaussDBConfig, consumer);
-                    }).thenReturn(gaussDBTest);
+                        GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class), any(GaussDBTest.TestAccept.class));
+                    }).thenAnswer(a -> null);
                     ConnectionOptions cop = connector.connectionTest(connectionContext, consumer);
                     Assertions.assertEquals(connectionOptions, cop);
                 } finally {
@@ -169,9 +166,6 @@ public class OpenGaussDBConnectorTest {
                     verify(gaussDBConfig, times(1)).load(dataMap);
                     verify(connectionContext, times(1)).getConnectionConfig();
                     verify(connectionOptions, times(1)).connectionString(anyString());
-                    verify(gaussDBTest, times(1)).initContext();
-                    verify(gaussDBTest, times(1)).testOneByOne();
-                    verify(gaussDBTest, times(1)).close();
                 }
             });
         }
@@ -1399,7 +1393,6 @@ public class OpenGaussDBConnectorTest {
             map = mock(KVReadOnlyMap.class);
             when(connectorContext.getLog()).thenReturn(log);
             doNothing().when(log).warn(anyString());
-            when(gaussDBTest.initContext()).thenReturn(gaussDBTest);
             gaussDBConfig = mock(GaussDBConfig.class);
             connector.gaussDBConfig = gaussDBConfig;
 
@@ -1417,17 +1410,18 @@ public class OpenGaussDBConnectorTest {
             when(gaussDBTest.testStreamRead()).thenReturn(true);
             Assertions.assertDoesNotThrow(() -> {
                 try (MockedStatic<GaussDBTest> gt = mockStatic(GaussDBTest.class)) {
-                    gt.when(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class))).then(a -> {
+                    gt.when(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class), any(GaussDBTest.TestAccept.class))).then(a -> {
                         Consumer consumer = a.getArgument(1, Consumer.class);
                         consumer.accept(mock(TestItem.class));
+                        GaussDBTest.TestAccept accept = a.getArgument(2, GaussDBTest.TestAccept.class);
+                        accept.accept(gaussDBTest);
                         return gaussDBTest;
                     });
                     Object offset = connector.timestampToStreamOffset(connectorContext, 100L);
-                    gt.verify(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class)), times(1));
+                    gt.verify(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class), any(GaussDBTest.TestAccept.class)), times(1));
                     Assertions.assertNotNull(offset);
                     Assertions.assertEquals(CdcOffset.class.getName(), offset.getClass().getName());
                 } finally {
-                    verify(gaussDBTest, times(1)).initContext();
                     verify(connectorContext, times(1)).getLog();
                     verify(connectorContext, times(1)).getTableMap();
                     verify(log, times(1)).warn(anyString());
@@ -1443,17 +1437,18 @@ public class OpenGaussDBConnectorTest {
             when(gaussDBTest.testStreamRead()).thenReturn(true);
             Assertions.assertDoesNotThrow(() -> {
                 try (MockedStatic<GaussDBTest> gt = mockStatic(GaussDBTest.class)) {
-                    gt.when(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class))).then(a -> {
+                    gt.when(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class), any(GaussDBTest.TestAccept.class))).then(a -> {
                         Consumer consumer = a.getArgument(1, Consumer.class);
                         consumer.accept(mock(TestItem.class));
+                        GaussDBTest.TestAccept accept = a.getArgument(2, GaussDBTest.TestAccept.class);
+                        accept.accept(gaussDBTest);
                         return gaussDBTest;
                     });
                     Object offset = connector.timestampToStreamOffset(connectorContext, null);
-                    gt.verify(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class)), times(1));
+                    gt.verify(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class), any(GaussDBTest.TestAccept.class)), times(1));
                     Assertions.assertNotNull(offset);
                     Assertions.assertEquals(CdcOffset.class.getName(), offset.getClass().getName());
                 } finally {
-                    verify(gaussDBTest, times(1)).initContext();
                     verify(connectorContext, times(1)).getLog();
                     verify(connectorContext, times(1)).getTableMap();
                     verify(log, times(0)).warn(anyString());
@@ -1469,17 +1464,18 @@ public class OpenGaussDBConnectorTest {
             when(gaussDBTest.testStreamRead()).thenReturn(false);
             Assertions.assertDoesNotThrow(() -> {
                 try (MockedStatic<GaussDBTest> gt = mockStatic(GaussDBTest.class)) {
-                    gt.when(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class))).then(a -> {
+                    gt.when(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class), any(GaussDBTest.TestAccept.class))).then(a -> {
                         Consumer consumer = a.getArgument(1, Consumer.class);
                         consumer.accept(mock(TestItem.class));
+                        GaussDBTest.TestAccept accept = a.getArgument(2, GaussDBTest.TestAccept.class);
+                        accept.accept(gaussDBTest);
                         return gaussDBTest;
                     });
                     Object offset = connector.timestampToStreamOffset(connectorContext, null);
-                    gt.verify(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class)), times(1));
+                    gt.verify(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class), any(GaussDBTest.TestAccept.class)), times(1));
                     Assertions.assertNotNull(offset);
                     Assertions.assertEquals(CdcOffset.class.getName(), offset.getClass().getName());
                 } finally {
-                    verify(gaussDBTest, times(1)).initContext();
                     verify(connectorContext, times(1)).getLog();
                     verify(connectorContext, times(0)).getTableMap();
                     verify(log, times(0)).warn(anyString());
