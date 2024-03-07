@@ -441,13 +441,14 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         }
         throw last;
     }
+
     protected ExceptionCollector getExceptionCollector() {
         return exceptionCollector;
     }
 
     protected List<String> cdcTables(TapConnectorContext nodeContext, List<String> tableList) {
         List<String> tables = new ArrayList<>();
-        String schema = (String)nodeContext.getConnectionConfig().get("schema");
+        String schema = (String) nodeContext.getConnectionConfig().get("schema");
         if (null != tableList && !tableList.isEmpty()) {
             for (String s : tableList) {
                 tables.add(String.format("%s.%s", schema, s));
@@ -455,43 +456,6 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         }
         return tables;
     }
-
-    @Override
-    protected void singleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
-        List<TapTable> tapTableList = TapSimplify.list();
-        List<String> subTableNames = subList.stream().map(v -> v.getString("tableName")).collect(Collectors.toList());
-        List<DataMap> columnList = jdbcContext.queryAllColumns(subTableNames);
-        List<DataMap> indexList = jdbcContext.queryAllIndexes(subTableNames);
-        subList.forEach(subTable -> {
-            //2、table name/comment
-            String table = subTable.getString("tableName");
-            TapTable tapTable = table(table);
-            tapTable.setComment(subTable.getString("tableComment"));
-            //3、primary key and table index
-            List<String> primaryKey = TapSimplify.list();
-            List<TapIndex> tapIndexList = TapSimplify.list();
-            makePrimaryKeyAndIndex(indexList, table, primaryKey, tapIndexList);
-            //4、table columns info
-            AtomicInteger keyPos = new AtomicInteger(0);
-            columnList.stream().filter(col -> table.equals(col.getString("tableName")))
-                    .forEach(col -> {
-                        TapField tapField = makeTapField(col);
-                        if (null != tapField) {
-                            tapField.setPos(keyPos.incrementAndGet());
-                            tapField.setPrimaryKey(primaryKey.contains(tapField.getName()));
-                            tapField.setPrimaryKeyPos(primaryKey.indexOf(tapField.getName()) + 1);
-                            if (tapField.getPrimaryKey()) {
-                                tapField.setNullable(false);
-                            }
-                            tapTable.add(tapField);
-                        }
-                    });
-            tapTable.setIndexList(tapIndexList);
-            tapTableList.add(tapTable);
-        });
-        syncSchemaSubmit(tapTableList, consumer);
-    }
-
 
     @Override
     public void registerCapabilities(ConnectorFunctions functions, TapCodecsRegistry codec) {

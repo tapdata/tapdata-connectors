@@ -1689,22 +1689,75 @@ public class OpenGaussDBConnectorTest {
             });
         }
 
-//        @Test
-//        void testLastThrowableIsSQLException() {
-//            connector.cdcRunner = cdcRunner;
-//            Assertions.assertThrows(SQLException.class, () -> {
-//                assertVerify(mock(SQLException.class), 1,1,1,
-//                        1,1,1,1);
-//            });
-//        }
+        @Test
+        void testLastThrowableIsSQLException() {
+            connector.cdcRunner = cdcRunner;
+            last = new SQLException("sql-exception");
+            Assertions.assertThrows(SQLException.class, () -> {
+                assertVerify(last, 1,1,1,
+                        1,1,1,1);
+            });
+        }
 
         @Test
         void testLastThrowableNotSQLException() {
             connector.cdcRunner = cdcRunner;
+            last = mock(Exception.class);
             Assertions.assertThrows(Exception.class, () -> {
-                assertVerify(mock(Exception.class), 1,1,1,
+                assertVerify(last, 1,1,1,
                         0,0,0,0);
             });
+        }
+    }
+
+    @Nested
+    class GetExceptionCollectorTest {
+        @Test
+        void testNormal() {
+            when(connector.getExceptionCollector()).thenCallRealMethod();
+            Assertions.assertNull(connector.getExceptionCollector());
+        }
+    }
+
+    @Nested
+    class CdcTablesTest {
+        List<String> tableList;
+        DataMap connectionConfig;
+        @BeforeEach
+        void init() {
+            tableList = new ArrayList<>();
+            connectionConfig = mock(DataMap.class);
+            when(connectorContext.getConnectionConfig()).thenReturn(connectionConfig);
+            when(connectionConfig.get("schema")).thenReturn("schema");
+
+            when(connector.cdcTables(connectorContext, null)).thenCallRealMethod();
+            when(connector.cdcTables(connectorContext, tableList)).thenCallRealMethod();
+        }
+        @Test
+        void testNullTableList() {
+            List<String> list = connector.cdcTables(connectorContext, null);
+            Assertions.assertNotNull(list);
+            Assertions.assertEquals(0, list.size());
+            verify(connectorContext, times(1)).getConnectionConfig();
+            verify(connectionConfig, times(1)).get("schema");
+        }
+        @Test
+        void testEmptyTableList() {
+            List<String> list = connector.cdcTables(connectorContext, tableList);
+            Assertions.assertNotNull(list);
+            Assertions.assertEquals(0, list.size());
+            verify(connectorContext, times(1)).getConnectionConfig();
+            verify(connectionConfig, times(1)).get("schema");
+        }
+        @Test
+        void testNormalTableList() {
+            tableList.add("table");
+            List<String> list = connector.cdcTables(connectorContext, tableList);
+            Assertions.assertNotNull(list);
+            Assertions.assertEquals(1, list.size());
+            Assertions.assertEquals("schema.table", list.get(0));
+            verify(connectorContext, times(1)).getConnectionConfig();
+            verify(connectionConfig, times(1)).get("schema");
         }
     }
 }
