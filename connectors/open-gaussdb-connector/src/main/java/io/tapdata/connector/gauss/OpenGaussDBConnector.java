@@ -3,17 +3,18 @@ package io.tapdata.connector.gauss;
 import com.huawei.opengauss.jdbc.core.types.PGClob;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
+import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.gauss.cdc.CdcOffset;
 import io.tapdata.connector.gauss.cdc.GaussDBRunner;
 import io.tapdata.connector.gauss.core.GaussColumn;
 import io.tapdata.connector.gauss.core.GaussDBConfig;
+import io.tapdata.connector.gauss.core.GaussDBDDLSqlGenerator;
+import io.tapdata.connector.gauss.core.GaussDBExceptionCollector;
 import io.tapdata.connector.gauss.core.GaussDBJdbcContext;
+import io.tapdata.connector.gauss.core.GaussDBRecordWriter;
+import io.tapdata.connector.gauss.core.GaussDBSqlMaker;
 import io.tapdata.connector.gauss.enums.CdcConstant;
 import io.tapdata.connector.gauss.util.TimeUtil;
-import io.tapdata.connector.postgres.PostgresSqlMaker;
-import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
-import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
-import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
@@ -44,6 +45,7 @@ import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
+import io.tapdata.pdk.apis.entity.ConnectorCapabilities;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
@@ -68,6 +70,7 @@ import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -82,6 +85,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     protected static final String DROP_SLOT_SQL = "SELECT pg_drop_replication_slot('%s')";
     protected static final String CREATE_SLOT_SQL = "SELECT pg_create_logical_replication_slot('%s','%s')";
     protected static final String SELECT_SLOT_COUNT_SQL = "SELECT COUNT(*) FROM pg_replication_slots WHERE slot_name='%s'";
+    protected static final String OPEN_IDENTITY_SQL = "ALTER TABLE \"%s\".\"%s\" REPLICA IDENTITY FULL";
 
     protected static final String PG_REPLICATE_IDENTITY = "select relname, relreplident from pg_class\n" +
             "where relnamespace=(select oid from pg_namespace where nspname='%s') and relname in (%s)";
@@ -91,7 +95,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     protected GaussDBTest gaussDBTest;
     protected GaussDBRunner cdcRunner; //only when task start-pause this variable can be shared
     protected Object slotName; //must be stored in stateMap
-    protected String postgresVersion;
+    protected String gaussDBVersion;
     protected Map<String, Boolean> writtenTableMap = new ConcurrentHashMap<>();
 
     @Override
@@ -252,7 +256,8 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     //initialize jdbc context, slot name, version
     protected void initConnection(TapConnectionContext connectionContext) {
         gaussDBConfig = (GaussDBConfig) GaussDBConfig.instance().load(connectionContext.getConnectionConfig());
-        gaussDBTest = GaussDBTest.instance(gaussDBConfig, testItem -> { }).initContext();
+        Consumer<TestItem> consumer = testItem -> { };
+        gaussDBTest = GaussDBTest.instance(gaussDBConfig, consumer).initContext();
         gaussJdbcContext = GaussDBJdbcContext.instance(gaussDBConfig);
         commonDbConfig = gaussDBConfig;
         jdbcContext = gaussJdbcContext;
@@ -260,103 +265,121 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             slotName = tapConnectorContext.getStateMap().get(CdcConstant.GAUSS_DB_SLOT_TAG);
             gaussDBConfig.load(tapConnectorContext.getNodeConfig());
         });
-        commonSqlMaker = new PostgresSqlMaker().closeNotNull(gaussDBConfig.getCloseNotNull());
-        postgresVersion = gaussJdbcContext.queryVersion();
-        ddlSqlGenerator = new PostgresDDLSqlGenerator();
+        commonSqlMaker = GaussDBSqlMaker.instance().closeNotNull(gaussDBConfig.getCloseNotNull());
+        gaussDBVersion = gaussJdbcContext.queryVersion();
+        ddlSqlGenerator = GaussDBDDLSqlGenerator.instance();
         tapLogger = connectionContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();
         fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
-        exceptionCollector = new PostgresExceptionCollector();
+        exceptionCollector = GaussDBExceptionCollector.instance();
     }
 
-    private void openIdentity(TapTable tapTable) throws SQLException {
-        if (EmptyKit.isEmpty(tapTable.primaryKeys())
-                && (EmptyKit.isEmpty(tapTable.getIndexList()) || tapTable.getIndexList().stream().noneMatch(TapIndex::isUnique))) {
-            jdbcContext.execute("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" REPLICA IDENTITY FULL");
+    public void isConnectorStarted(TapConnectionContext connectionContext, Consumer<TapConnectorContext> contextConsumer) {
+        if (connectionContext instanceof TapConnectorContext && contextConsumer != null) {
+            contextConsumer.accept((TapConnectorContext) connectionContext);
+        }
+    }
+
+    protected void openIdentity(TapTable tapTable) throws SQLException {
+        if (null == tapTable) {
+            return;
+        }
+        Collection<String> primaryKeys = tapTable.primaryKeys();
+        boolean notHasPrimaryKeys = null == primaryKeys || primaryKeys.isEmpty();
+        List<TapIndex> indexList = tapTable.getIndexList();
+        boolean notHasIndex = null == indexList || indexList.isEmpty();
+        if (notHasPrimaryKeys && notHasIndex
+                || (null == indexList || indexList.stream().noneMatch(TapIndex::isUnique))) {
+            final String sql = String.format(OPEN_IDENTITY_SQL, gaussDBConfig.getSchema(), tapTable.getId());
+            gaussJdbcContext.execute(sql);
         }
     }
 
     protected boolean makeSureHasUnique(TapTable tapTable) throws SQLException {
-        return jdbcContext.queryAllIndexes(Collections.singletonList(tapTable.getId())).stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
+        return gaussJdbcContext.queryAllIndexes(Collections.singletonList(tapTable.getId()))
+                .stream()
+                .anyMatch(v -> "1".equals(v.getString("isUnique")));
     }
 
+    protected boolean isTransaction() {
+        return isTransaction;
+    }
     //write records as all events, prepared
     protected void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws SQLException {
-        boolean hasUniqueIndex;
-        if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
-            openIdentity(tapTable);
-            hasUniqueIndex = makeSureHasUnique(tapTable);
-            writtenTableMap.put(tapTable.getId(), hasUniqueIndex);
+        boolean hasUniqueIndex = hasUniqueIndex(tapTable);
+        ConnectorCapabilities capabilities = connectorContext.getConnectorCapabilities();
+        String insertDmlPolicy = initInsertDmlPolicy(capabilities);
+        String updateDmlPolicy = initUpdateDmlPolicy(capabilities);
+        String version = gaussDBVersion(hasUniqueIndex);
+        GaussDBRecordWriter writer = isTransaction() ?
+                GaussDBRecordWriter.instance(gaussJdbcContext, initConnectionIsTransaction(), tapTable, version) :
+                GaussDBRecordWriter.instance(gaussJdbcContext, tapTable, version);
+        writer.setInsertPolicy(insertDmlPolicy)
+                .setUpdatePolicy(updateDmlPolicy)
+                .setTapLogger(connectorContext.getLog())
+                .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
+    }
+
+    protected String gaussDBVersion(boolean hasUniqueIndex) {
+        return hasUniqueIndex ? gaussDBVersion : "90500";
+    }
+
+    protected Connection initConnectionIsTransaction() throws SQLException {
+        String threadName = Thread.currentThread().getName();
+        Connection connection;
+        Map<String, Connection> connectionMap = transactionConnectionMap();
+        if (connectionMap.containsKey(threadName)) {
+            connection = connectionMap.get(threadName);
         } else {
-            hasUniqueIndex = writtenTableMap.get(tapTable.getId());
+            connection = gaussJdbcContext.getConnection();
+            connectionMap.put(threadName, connection);
         }
-        String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
+        return connection;
+    }
+
+    protected Map<String, Connection> transactionConnectionMap() {
+        return transactionConnectionMap;
+    }
+
+    protected String initInsertDmlPolicy(ConnectorCapabilities capabilities){
+        if (null == capabilities) {
+            return ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
+        }
+        String insertDmlPolicy = capabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
             insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
         }
-        String updateDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
+        return insertDmlPolicy;
+    }
+
+    protected String initUpdateDmlPolicy(ConnectorCapabilities capabilities) {
+        if (null == capabilities) {
+            return ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
+        }
+        String updateDmlPolicy = capabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
         if (updateDmlPolicy == null) {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
-        if (isTransaction) {
-            String threadName = Thread.currentThread().getName();
-            Connection connection;
-            if (transactionConnectionMap.containsKey(threadName)) {
-                connection = transactionConnectionMap.get(threadName);
-            } else {
-                connection = gaussJdbcContext.getConnection();
-                transactionConnectionMap.put(threadName, connection);
-            }
-            new PostgresRecordWriter(gaussJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
-                    .setInsertPolicy(insertDmlPolicy)
-                    .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(connectorContext.getLog())
-                    .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
-        } else {
-            new PostgresRecordWriter(gaussJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
-                    .setInsertPolicy(insertDmlPolicy)
-                    .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(connectorContext.getLog())
-                    .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
-        }
+        return updateDmlPolicy;
     }
 
-    protected void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        List<String> tables = new ArrayList<>();
-        String schema = (String)nodeContext.getConnectionConfig().get("schema");
-        if (null != tableList && !tableList.isEmpty()) {
-            for (String s : tableList) {
-                tables.add(String.format("%s.%s", schema, s));
-            }
+    protected boolean hasUniqueIndex(TapTable tapTable) throws SQLException {
+        String tableId = tapTable.getId();
+        Boolean hasUniqueIndex = writtenTableMap.get(tableId);
+        if (null == hasUniqueIndex) {
+            openIdentity(tapTable);
+            hasUniqueIndex = makeSureHasUnique(tapTable);
+            writtenTableMap.put(tableId, hasUniqueIndex);
         }
-        cdcRunner = new GaussDBRunner().init((GaussDBConfig) new GaussDBConfig().load(nodeContext.getConnectionConfig()), nodeContext.getLog());
-        testReplicateIdentity(nodeContext.getTableMap(), nodeContext.getLog());
-        buildSlot(nodeContext, true);
-        cdcRunner.useSlot(slotName.toString())
-                .watch(tables)
-                .supplierIsAlive(this::isAlive)
-                .offset(offsetState)
-                .waitTime(Optional.ofNullable(nodeContext.getNodeConfig().getInteger("flushLsn"))
-                        .orElse(0) * 60 * 1000)
-                .registerConsumer(consumer, recordSize);
-        cdcRunner.startCdcRunner();
-        if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
-            Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
-            if (throwable instanceof SQLException) {
-                exceptionCollector.collectTerminateByServer(throwable);
-                exceptionCollector.collectCdcConfigInvalid(throwable);
-                exceptionCollector.revealException(throwable);
-            }
-            throw throwable;
-        }
+        return hasUniqueIndex;
     }
 
     protected Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         Log log = connectorContext.getLog();
-        if (EmptyKit.isNotNull(offsetStartTime)) {
+        if (null != offsetStartTime) {
             log.warn("Postgres specified time start increment is not supported, use the current time as the start increment");
         }
         //test streamRead log plugin
@@ -374,6 +397,63 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("size")));
         tableInfo.setStorageSize(new BigDecimal(dataMap.getString("rowcount")).longValue());
         return tableInfo;
+    }
+
+    protected void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+        List<String> tables = cdcTables(nodeContext, tableList);
+        Log log = nodeContext.getLog();
+        cdcRunner = GaussDBRunner.instance().init(gaussDBConfig, log);
+        testReplicateIdentity(nodeContext.getTableMap(), log);
+        buildSlot(nodeContext, true);
+        Integer lsn = nodeContext.getNodeConfig().getInteger("flushLsn");
+        long flushLsn = (null == lsn ? 0 : lsn) * 60 * 1000;
+        cdcRunner.useSlot(slotName.toString());
+        cdcRunner.watch(tables);
+        cdcRunner.supplierIsAlive(this::isAlive);
+        cdcRunner.offset(offsetState);
+        cdcRunner.waitTime(flushLsn);
+        cdcRunner.registerConsumer(consumer, recordSize);
+        cdcRunner.startCdcRunner();
+        checkThrowable();
+    }
+
+    protected void checkThrowable() throws Throwable {
+        if (null == cdcRunner) {
+            return;
+        }
+        AtomicReference<Throwable> runnerThrowable = cdcRunner.getThrowable();
+        if (null == runnerThrowable) {
+            return;
+        }
+        Throwable throwable = runnerThrowable.get();
+        if (null == throwable) {
+            return;
+        }
+        Throwable last = ErrorKit.getLastCause(throwable);
+        if (null == last) {
+            return;
+        }
+        if (last instanceof SQLException) {
+            ExceptionCollector collector = getExceptionCollector();
+            collector.collectTerminateByServer(last);
+            collector.collectCdcConfigInvalid(last);
+            collector.revealException(last);
+        }
+        throw last;
+    }
+    protected ExceptionCollector getExceptionCollector() {
+        return exceptionCollector;
+    }
+
+    protected List<String> cdcTables(TapConnectorContext nodeContext, List<String> tableList) {
+        List<String> tables = new ArrayList<>();
+        String schema = (String)nodeContext.getConnectionConfig().get("schema");
+        if (null != tableList && !tableList.isEmpty()) {
+            for (String s : tableList) {
+                tables.add(String.format("%s.%s", schema, s));
+            }
+        }
+        return tables;
     }
 
     @Override

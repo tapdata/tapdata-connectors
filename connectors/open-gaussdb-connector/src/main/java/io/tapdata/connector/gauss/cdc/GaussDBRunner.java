@@ -48,6 +48,9 @@ public class GaussDBRunner extends DebeziumCdcRunner {
     protected EventFactory<ByteBuffer> eventFactory;
     protected long waitTime;
     protected Supplier<Boolean> supplier;
+    public static GaussDBRunner instance() {
+        return new GaussDBRunner();
+    }
 
     public GaussDBRunner init(GaussDBConfig config, Log log) {
         if (null == config) {
