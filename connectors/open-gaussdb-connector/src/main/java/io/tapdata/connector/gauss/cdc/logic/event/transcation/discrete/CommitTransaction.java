@@ -9,17 +9,11 @@ import io.tapdata.entity.event.TapEvent;
 import java.nio.ByteBuffer;
 
 public class CommitTransaction implements Event<TapEvent> {
-    protected static CommitTransaction instance;
     private CommitTransaction() {
 
     }
     public static CommitTransaction instance() {
-        if (null == instance) {
-            synchronized (CommitTransaction.class) {
-                if (null == instance) instance = new CommitTransaction();
-            }
-        }
-        return instance;
+        return new CommitTransaction();
     }
     @Override
     public EventEntity<TapEvent> process(ByteBuffer logEvent, EventParam processParam) {

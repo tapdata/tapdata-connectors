@@ -9,17 +9,11 @@ import io.tapdata.entity.event.TapEvent;
 import java.nio.ByteBuffer;
 
 public class BeginTransaction implements Event<TapEvent> {
-    protected static BeginTransaction instance;
     private BeginTransaction() {
 
     }
     public static BeginTransaction instance() {
-        if (null == instance) {
-            synchronized (BeginTransaction.class) {
-                if (null == instance) instance = new BeginTransaction();
-            }
-        }
-        return instance;
+        return new BeginTransaction();
     }
     @Override
     public EventEntity<TapEvent> process(ByteBuffer logEvent, EventParam processParam) {

@@ -43,7 +43,6 @@ public class CommitTransactionTest {
         }
         @Test
         void testNotNull() {
-            CommitTransaction.instance = mock(CommitTransaction.class);
             try (MockedStatic<CommitTransaction> util = mockStatic(CommitTransaction.class)){
                 util.when(CommitTransaction::instance).thenCallRealMethod();
                 CommitTransaction instance = CommitTransaction.instance();

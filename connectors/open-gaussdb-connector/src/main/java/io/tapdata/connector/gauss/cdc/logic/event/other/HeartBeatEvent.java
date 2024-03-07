@@ -9,17 +9,11 @@ import io.tapdata.entity.event.control.HeartbeatEvent;
 import java.nio.ByteBuffer;
 
 public class HeartBeatEvent implements Event<TapEvent> {
-    protected static HeartBeatEvent instance;
     private HeartBeatEvent() {
 
     }
     public static HeartBeatEvent instance() {
-        if (null == instance) {
-            synchronized (HeartBeatEvent.class) {
-                if (null == instance) instance = new HeartBeatEvent();
-            }
-        }
-        return instance;
+        return new HeartBeatEvent();
     }
     @Override
     public EventEntity<TapEvent> process(ByteBuffer logEvent, EventParam processParam) {

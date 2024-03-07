@@ -9,17 +9,11 @@ import java.nio.ByteBuffer;
 
 
 public class UpdateEvent implements DMLEvent {
-    protected static UpdateEvent instance;
     private UpdateEvent() {
 
     }
     public static UpdateEvent instance() {
-        if (null == instance) {
-            synchronized (UpdateEvent.class) {
-                if (null == instance) instance = new UpdateEvent();
-            }
-        }
-        return instance;
+        return new UpdateEvent();
     }
     @Override
     public EventEntity<TapEvent> process(ByteBuffer logEvent, EventParam processParam) {

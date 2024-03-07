@@ -39,7 +39,6 @@ public class DeleteEventTest {
         }
         @Test
         void testNotNull() {
-            DeleteEvent.instance = mock(DeleteEvent.class);
             try (MockedStatic<DeleteEvent> util = mockStatic(DeleteEvent.class)){
                 util.when(DeleteEvent::instance).thenCallRealMethod();
                 DeleteEvent instance = DeleteEvent.instance();

@@ -39,7 +39,6 @@ public class UpdateEventTest {
         }
         @Test
         void testNotNull() {
-            UpdateEvent.instance = mock(UpdateEvent.class);
             try (MockedStatic<UpdateEvent> util = mockStatic(UpdateEvent.class)){
                 util.when(UpdateEvent::instance).thenCallRealMethod();
                 UpdateEvent instance = UpdateEvent.instance();

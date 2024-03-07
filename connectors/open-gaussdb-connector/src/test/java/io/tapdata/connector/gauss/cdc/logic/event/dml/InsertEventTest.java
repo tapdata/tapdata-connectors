@@ -39,7 +39,6 @@ public class InsertEventTest {
         }
         @Test
         void testNotNull() {
-            InsertEvent.instance = mock(InsertEvent.class);
             try (MockedStatic<InsertEvent> util = mockStatic(InsertEvent.class)){
                 util.when(InsertEvent::instance).thenCallRealMethod();
                 InsertEvent instance = InsertEvent.instance();

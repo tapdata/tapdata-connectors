@@ -8,17 +8,11 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import java.nio.ByteBuffer;
 
 public class InsertEvent implements DMLEvent {
-    protected static InsertEvent instance;
     private InsertEvent() {
 
     }
     public static InsertEvent instance() {
-        if (null == instance) {
-            synchronized (InsertEvent.class) {
-                if (null == instance) instance = new InsertEvent();
-            }
-        }
-        return instance;
+        return new InsertEvent();
     }
     @Override
     public EventEntity<TapEvent> process(ByteBuffer logEvent, EventParam processParam) {

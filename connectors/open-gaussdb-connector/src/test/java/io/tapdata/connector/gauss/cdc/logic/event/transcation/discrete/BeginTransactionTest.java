@@ -43,7 +43,6 @@ public class BeginTransactionTest {
         }
         @Test
         void testNotNull() {
-            BeginTransaction.instance = mock(BeginTransaction.class);
             try (MockedStatic<BeginTransaction> util = mockStatic(BeginTransaction.class)){
                 util.when(BeginTransaction::instance).thenCallRealMethod();
                 BeginTransaction instance = BeginTransaction.instance();

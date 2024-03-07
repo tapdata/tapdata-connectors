@@ -8,17 +8,11 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import java.nio.ByteBuffer;
 
 public class DeleteEvent implements DMLEvent {
-    protected static DeleteEvent instance;
     private DeleteEvent() {
 
     }
     public static DeleteEvent instance() {
-        if (null == instance) {
-            synchronized (DeleteEvent.class) {
-                if (null == instance) instance = new DeleteEvent();
-            }
-        }
-        return instance;
+        return new DeleteEvent();
     }
     @Override
     public EventEntity<TapEvent> process(ByteBuffer logEvent, EventParam processParam) {

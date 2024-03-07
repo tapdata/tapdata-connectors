@@ -41,7 +41,6 @@ public class HeartBeatEventTest {
         }
         @Test
         void testNotNull() {
-            HeartBeatEvent.instance = mock(HeartBeatEvent.class);
             try (MockedStatic<HeartBeatEvent> util = mockStatic(HeartBeatEvent.class)){
                 util.when(HeartBeatEvent::instance).thenCallRealMethod();
                 HeartBeatEvent instance = HeartBeatEvent.instance();
