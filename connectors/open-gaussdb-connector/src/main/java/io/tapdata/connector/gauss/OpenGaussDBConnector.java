@@ -30,7 +30,6 @@ import io.tapdata.entity.schema.type.TapDateTime;
 import io.tapdata.entity.schema.type.TapNumber;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
@@ -69,10 +68,8 @@ import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 /**
  * @author Gavin'Xiao
@@ -92,7 +89,6 @@ public class OpenGaussDBConnector extends CommonDbConnector {
 
     protected GaussDBConfig gaussDBConfig;
     protected GaussDBJdbcContext gaussJdbcContext;
-    protected GaussDBTest gaussDBTest;
     protected GaussDBRunner cdcRunner; //only when task start-pause this variable can be shared
     protected Object slotName; //must be stored in stateMap
     protected String gaussDBVersion;
@@ -249,15 +245,12 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         } catch (Exception e) {
             connectionContext.getLog().debug("An error when stop: {}", e.getMessage());
         }
-        EmptyKit.closeQuietly(gaussDBTest);
         EmptyKit.closeQuietly(gaussJdbcContext);
     }
 
     //initialize jdbc context, slot name, version
     protected void initConnection(TapConnectionContext connectionContext) {
         gaussDBConfig = (GaussDBConfig) GaussDBConfig.instance().load(connectionContext.getConnectionConfig());
-        Consumer<TestItem> consumer = testItem -> { };
-        gaussDBTest = GaussDBTest.instance(gaussDBConfig, consumer).initContext();
         gaussJdbcContext = GaussDBJdbcContext.instance(gaussDBConfig);
         commonDbConfig = gaussDBConfig;
         jdbcContext = gaussJdbcContext;
@@ -313,7 +306,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         ConnectorCapabilities capabilities = connectorContext.getConnectorCapabilities();
         String insertDmlPolicy = initInsertDmlPolicy(capabilities);
         String updateDmlPolicy = initUpdateDmlPolicy(capabilities);
-        String version = gaussDBVersion(hasUniqueIndex);
+        String version = getGaussDBVersion(hasUniqueIndex);
         GaussDBRecordWriter writer = isTransaction() ?
                 GaussDBRecordWriter.instance(gaussJdbcContext, initConnectionIsTransaction(), tapTable, version) :
                 GaussDBRecordWriter.instance(gaussJdbcContext, tapTable, version);
@@ -323,7 +316,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
     }
 
-    protected String gaussDBVersion(boolean hasUniqueIndex) {
+    protected String getGaussDBVersion(boolean hasUniqueIndex) {
         return hasUniqueIndex ? gaussDBVersion : "90500";
     }
 
@@ -383,10 +376,13 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             log.warn("Postgres specified time start increment is not supported, use the current time as the start increment");
         }
         //test streamRead log plugin
-        boolean canCdc = Boolean.TRUE.equals(gaussDBTest.testStreamRead());
-        if (canCdc) {
-            testReplicateIdentity(connectorContext.getTableMap(), log);
-            buildSlot(connectorContext, false);
+        Consumer<TestItem> consumer = testItem -> { };
+        try(GaussDBTest gaussDBTest = GaussDBTest.instance(gaussDBConfig, consumer).initContext()){
+            boolean canCdc = Boolean.TRUE.equals(gaussDBTest.testStreamRead());
+            if (canCdc) {
+                testReplicateIdentity(connectorContext.getTableMap(), log);
+                buildSlot(connectorContext, false);
+            }
         }
         return new CdcOffset();
     }
@@ -406,7 +402,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         testReplicateIdentity(nodeContext.getTableMap(), log);
         buildSlot(nodeContext, true);
         Integer lsn = nodeContext.getNodeConfig().getInteger("flushLsn");
-        long flushLsn = (null == lsn ? 0 : lsn) * 60 * 1000;
+        long flushLsn = (null == lsn ? 0L : lsn) * 60L * 1000L;
         cdcRunner.useSlot(slotName.toString());
         cdcRunner.watch(tables);
         cdcRunner.supplierIsAlive(this::isAlive);

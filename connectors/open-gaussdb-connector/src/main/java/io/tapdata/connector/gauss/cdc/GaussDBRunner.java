@@ -128,7 +128,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
         if (null == byteBuffer) {
             try {
                 sleep(5L);
-            } catch (Exception ignore) {
+            } catch (InterruptedException ignore) {
                 //
             }
             return false;

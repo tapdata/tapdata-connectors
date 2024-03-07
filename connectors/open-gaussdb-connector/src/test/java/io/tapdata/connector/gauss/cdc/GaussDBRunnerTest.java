@@ -81,15 +81,15 @@ public class GaussDBRunnerTest {
 
         @Test
         void testNullConfig() {
-            Assertions.assertThrows(CoreException.class, () -> {
-                try {
+            try {
+                Assertions.assertThrows(CoreException.class, () -> {
                     GaussDBRunner init = runner.init(null, log);
-                } finally {
-                    verify(config, times(0)).getHaPort();
-                    verify(config, times(0)).getHaHost();
-                    verify(config, times(0)).getDatabase();
-                }
-            });
+                });
+            } finally {
+                verify(config, times(0)).getHaPort();
+                verify(config, times(0)).getHaHost();
+                verify(config, times(0)).getDatabase();
+            }
         }
     }
 
@@ -155,8 +155,7 @@ public class GaussDBRunnerTest {
         @Test
         void testNullGaussDBConfig() {
             Assertions.assertThrows(CoreException.class, () -> {
-                Properties properties = runner.initProperties();
-                assertVerify(properties);
+                runner.initProperties();
             });
         }
 
@@ -495,13 +494,13 @@ public class GaussDBRunnerTest {
         @Test
         void testNullChainedLogicalStreamBuilder() throws SQLException {
             when(runner.initPGReplicationStream(null, false)).thenCallRealMethod();
-            Assertions.assertThrows(CoreException.class, () -> {
-                try {
+            try {
+                Assertions.assertThrows(CoreException.class, () -> {
                     runner.initPGReplicationStream(null, false);
-                } finally {
-                    assertVerify(0, false);
-                }
-            });
+                });
+            } finally {
+                assertVerify(0, false);
+            }
         }
 
         @Test
@@ -930,16 +929,16 @@ public class GaussDBRunnerTest {
             }).when(stream).forceUpdateStatus();
             waitTime = Long.MIN_VALUE;
             runner.waitTime = waitTime;
-            Assertions.assertThrows(SQLException.class, () -> {
-                try {
+            try {
+                Assertions.assertThrows(SQLException.class, () -> {
                     long flushLsn = runner.flushLsn(0);
-                } finally {
-                    verify(stream, times(1)).getLastReceiveLSN();
-                    verify(stream, times(1)).setFlushedLSN(lastRecv);
-                    verify(stream, times(1)).forceUpdateStatus();
-                    verify(log, times(0)).debug(anyString(), anyString(), anyLong());
-                }
-            });
+                });
+            } finally {
+                verify(stream, times(1)).getLastReceiveLSN();
+                verify(stream, times(1)).setFlushedLSN(lastRecv);
+                verify(stream, times(1)).forceUpdateStatus();
+                verify(log, times(0)).debug(anyString(), anyString(), anyLong());
+            }
         }
     }
 
@@ -1038,29 +1037,29 @@ public class GaussDBRunnerTest {
         }
 
         @Test
-        void testNullConsumer() {
+        void testNullConsumer() throws SQLException {
             runner.consumer = null;
             runner.supplier = supplier;
             runner.stream = stream;
             runner.log = log;
             runner.eventFactory = eventFactory;
-            Assertions.assertThrows(CoreException.class, () -> {
-                try {
+            try {
+                Assertions.assertThrows(CoreException.class, () -> {
                     runner.startCdcRunner();
-                } finally {
-                    verify(consumer, times(0)).streamReadStarted();
-                    verify(supplier, times(0)).get();
-                    verify(stream, times(0)).readPending();
-                    verify(runner, times(0)).verifyByteBuffer(byteBuffer);
-                    verify(eventFactory, times(0)).emit(byteBuffer, log);
-                    verify(runner, times(0)).flushLsn(anyLong());
-                    verify(log, times(0)).warn(anyString(), anyString());
-                    verify(runner, times(0)).getThrowable();
-                    verify(atomicReference, times(0)).set(any(Throwable.class));
-                    verify(consumer, times(0)).streamReadEnded();
-                    verify(runner, times(0)).closeCdcRunner();
-                }
-            });
+                });
+            } finally {
+                verify(consumer, times(0)).streamReadStarted();
+                verify(supplier, times(0)).get();
+                verify(stream, times(0)).readPending();
+                verify(runner, times(0)).verifyByteBuffer(byteBuffer);
+                verify(eventFactory, times(0)).emit(byteBuffer, log);
+                verify(runner, times(0)).flushLsn(anyLong());
+                verify(log, times(0)).warn(anyString(), anyString());
+                verify(runner, times(0)).getThrowable();
+                verify(atomicReference, times(0)).set(any(Throwable.class));
+                verify(consumer, times(0)).streamReadEnded();
+                verify(runner, times(0)).closeCdcRunner();
+            }
         }
 
         @Test
