@@ -129,6 +129,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
             try {
                 sleep(5L);
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 log.debug(e.getMessage());
             }
             return false;
