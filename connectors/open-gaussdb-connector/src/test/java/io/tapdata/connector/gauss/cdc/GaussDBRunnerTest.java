@@ -974,6 +974,8 @@ public class GaussDBRunnerTest {
 
         @Test
         void testException() throws InterruptedException {
+            runner.log = log;
+            doNothing().when(log).debug(anyString());
             doAnswer(w -> {
                 throw new InterruptedException("");
             }).when(runner).sleep(anyLong());
@@ -984,6 +986,7 @@ public class GaussDBRunnerTest {
                 } finally {
                     Assertions.assertFalse(bf);
                     verify(runner, times(1)).sleep(anyLong());
+                    verify(log, times(1)).debug(anyString());
                 }
             });
         }
