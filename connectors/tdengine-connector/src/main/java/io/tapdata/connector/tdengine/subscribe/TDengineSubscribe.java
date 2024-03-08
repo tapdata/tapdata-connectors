@@ -49,7 +49,7 @@ public class TDengineSubscribe {
         this.consumer = consumer;
     }
 
-    public void subscribe(Supplier<Boolean> isAlive, List<String> tableList, boolean needConsume) {
+    public void subscribe(Supplier<Boolean> isAlive) {
 
         try {
             CommonDbConfig config = tdengineJdbcContext.getConfig();
@@ -68,7 +68,7 @@ public class TDengineSubscribe {
             properties.setProperty(TMQConstants.MSG_WITH_TABLE_NAME, Boolean.TRUE.toString());
             properties.setProperty(TMQConstants.ENABLE_AUTO_COMMIT, Boolean.FALSE.toString());
             properties.setProperty(TMQConstants.GROUP_ID, "test_group_id");
-            properties.setProperty(TMQConstants.AUTO_OFFSET_RESET, "latest");
+            properties.setProperty(TMQConstants.AUTO_OFFSET_RESET, "earliest");
             properties.setProperty(TMQConstants.VALUE_DESERIALIZER,
                     "io.tapdata.connector.tdengine.subscribe.TDengineResultDeserializer");
 
@@ -76,11 +76,6 @@ public class TDengineSubscribe {
             // poll data
             try (TaosConsumer<Map<String, Object>> taosConsumer = new TaosConsumer<>(properties)) {
                 taosConsumer.subscribe(topicList);
-                if (!needConsume) {
-                    taosConsumer.poll(Duration.ofMillis(100));
-                    taosConsumer.commitSync();
-                    return;
-                }
                 consumer.streamReadStarted();
                 List<TapEvent> tapEvents = new ArrayList<>();
                 while (isAlive.get()) {

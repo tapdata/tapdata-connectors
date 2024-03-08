@@ -230,7 +230,7 @@ public class TDengineConnector extends CommonDbConnector {
         createTopic(tables, false);
         TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
         tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
-        tDengineSubscribe.subscribe(this::isAlive, tables, true);
+        tDengineSubscribe.subscribe(this::isAlive);
     }
 
     private Object timestampToStreamOffset(TapConnectorContext tapConnectorContext, Long startTime) throws Throwable {
@@ -244,8 +244,6 @@ public class TDengineConnector extends CommonDbConnector {
         }
         createTopic(tables, true);
         tapConnectorContext.getStateMap().put("tap_topic", tables);
-        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
-        tDengineSubscribe.subscribe(this::isAlive, tables, false);
         return new TDengineOffset();
     }
 
