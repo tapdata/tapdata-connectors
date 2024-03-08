@@ -15,6 +15,7 @@ import io.tapdata.connector.gauss.core.GaussDBJdbcContext;
 import io.tapdata.connector.gauss.core.GaussDBRecordWriter;
 import io.tapdata.connector.gauss.core.GaussDBSqlMaker;
 import io.tapdata.connector.gauss.enums.CdcConstant;
+import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.connector.gauss.util.TimeUtil;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
@@ -153,7 +154,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             //逻辑复制槽名称必须小于64个字符
             String plugin = Optional.ofNullable(connectorContext.getConnectionConfig().getString("logPluginName"))
                     .orElse(CdcConstant.GAUSS_DB_SLOT_DEFAULT_PLUGIN);
-            slotName = CdcConstant.GAUSS_DB_SLOT_SFF + UUID.randomUUID().toString().replaceAll("\\-", "_");
+            slotName = CdcConstant.GAUSS_DB_SLOT_SFF + LogicUtil.replaceAll(UUID.randomUUID().toString(),"-", "_");
             gaussJdbcContext.execute(String.format(CREATE_SLOT_SQL, slotName, plugin));
             connectorContext.getStateMap().put(CdcConstant.GAUSS_DB_SLOT_TAG, slotName);
             sleep(3000L);

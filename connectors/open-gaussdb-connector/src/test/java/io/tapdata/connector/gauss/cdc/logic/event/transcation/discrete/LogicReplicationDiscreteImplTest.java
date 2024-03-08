@@ -361,7 +361,7 @@ public class LogicReplicationDiscreteImplTest {
         @Test
         void testNormal() {
             doCallRealMethod().when(logic).process();
-            Assertions.assertDoesNotThrow(() -> {
+            Assertions.assertThrows(UnsupportedOperationException.class, () -> {
                 logic.process();
             });
         }
@@ -568,7 +568,7 @@ public class LogicReplicationDiscreteImplTest {
         @Test
         void testNormal() {
             doCallRealMethod().when(logic).accept();
-            Assertions.assertDoesNotThrow(logic::accept);
+            Assertions.assertThrows(UnsupportedOperationException.class, logic::accept);
         }
     }
 

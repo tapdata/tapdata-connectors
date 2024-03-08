@@ -181,4 +181,11 @@ public class LogicUtilTest {
             });
         }
     }
+
+    @Test
+    void testReplaceAll() {
+        Assertions.assertDoesNotThrow(() -> {
+            LogicUtil.replaceAll("xx-xx-xx", "-", "_");
+        });
+    }
 }

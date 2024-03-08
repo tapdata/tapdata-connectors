@@ -102,7 +102,7 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
 
     @Override
     protected void process() {
-
+        throw new UnsupportedOperationException();
     }
 
     protected Event.EventEntity<TapEvent> redirect(ByteBuffer logEvent, String type) {
@@ -140,12 +140,15 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
             case CdcConstant.HEART_TAG:
                 event = HeartBeatEvent.instance().analyze(logEvent, param);
                 break;
+            default:
+                return null;
         }
         return event;
     }
 
     @Override
     protected void accept() {
+        throw new UnsupportedOperationException();
     }
 
     protected boolean advanceTransactionOffset() {

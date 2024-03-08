@@ -1,5 +1,6 @@
 package io.tapdata.connector.gauss.core;
 
+import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.utils.DataMap;
@@ -14,8 +15,8 @@ public class GaussColumn extends PostgresColumn {
         if (null == columnName) return null;
         if (null == dataType) return null;
         String remarksTemp = "Type oid[" + columnTypeOid + "] " + (null == this.remarks ? "" : this.remarks);
-        return new TapField(this.columnName.replaceAll("\"",""),
-                this.dataType.toUpperCase().replaceAll("\"",""))
+        return new TapField(LogicUtil.replaceAll(this.columnName, "\"",""),
+                LogicUtil.replaceAll(this.dataType.toUpperCase(),"\"",""))
                 .nullable(this.isNullable())
                 .defaultValue(columnDefaultValue)
                 .comment(remarksTemp);
@@ -25,7 +26,7 @@ public class GaussColumn extends PostgresColumn {
         this.columnName = dataMap.getString("columnName");
         String dataType = dataMap.getString("dataType");
         if (null != dataType) {
-            this.dataType = dataType.replaceAll("\\[]", " array"); //'dataType' with precision and scale (postgres has its function)
+            this.dataType = LogicUtil.replaceAll(dataType,"[]", " array"); //'dataType' with precision and scale (postgres has its function)
         }
         this.nullable = dataMap.getString("nullable");
         this.remarks = dataMap.getString("columnComment");

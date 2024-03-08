@@ -60,4 +60,11 @@ public class LogicUtil {
         if (Objects.equals(CdcConstant.BYTES_VALUE_OF_EMPTY_CHAR, readSize)) return "".getBytes();
         return read(buffer, readSize);
     }
+
+    public static String replaceAll(String str, String old, String to) {
+        while (str.contains(old)) {
+            str = str.replace(old, to);
+        }
+        return str;
+    }
 }

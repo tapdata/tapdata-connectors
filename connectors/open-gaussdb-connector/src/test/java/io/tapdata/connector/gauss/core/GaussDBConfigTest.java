@@ -29,8 +29,8 @@ public class GaussDBConfigTest {
 
     @Test
     void testParams() {
-        Assertions.assertEquals("opengauss", GaussDBConfig.dbType);
-        Assertions.assertEquals("com.huawei.opengauss.jdbc.Driver", GaussDBConfig.jdbcDriver);
+        Assertions.assertEquals("opengauss", GaussDBConfig.DB_TYPE);
+        Assertions.assertEquals("com.huawei.opengauss.jdbc.Driver", GaussDBConfig.JDBC_DRIVER);
     }
 
     @Test
