@@ -15,7 +15,6 @@ import io.tapdata.mongodb.codecs.TapdataBigIntegerCodec;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.util.SSLUtil;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
-import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.commons.collections4.CollectionUtils;
 import org.bson.*;
 import org.bson.codecs.configuration.CodecRegistries;
@@ -566,7 +565,7 @@ public class MongodbUtil {
 	}
 
 	/**
-	 * @param throwable: db.test.find({}), db.getCollection('test').find({})
+	 * @param commandStr: db.test.find({}), db.getCollection('test').find({})
 	 * @return
 	 */
 

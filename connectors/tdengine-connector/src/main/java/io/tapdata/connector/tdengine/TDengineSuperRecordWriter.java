@@ -66,14 +66,16 @@ public class TDengineSuperRecordWriter {
         }
     }
 
-    private String getSubTableName(List<String> tags, TapInsertRecordEvent tapRecordEvent) {
-        StringBuilder subTableName = new StringBuilder(tapTable.getId() + "_");
+    protected String getSubTableName(List<String> tags, TapInsertRecordEvent tapRecordEvent) {
+        StringBuilder subTableName = new StringBuilder();
         if ("AutoHash".equals(tDengineConfig.getSubTableNameType())) {
+            subTableName.append(tapTable.getId()).append("_");
             subTableName.append(StringKit.md5(tags.stream().map(tag -> String.valueOf(tapRecordEvent.getAfter().get(tag))).collect(Collectors.joining(","))));
         } else {
             String key = tDengineConfig.getSubTableSuffix();
+            key = key.replace("${superTableName}", tapTable.getId());
             for (String column : tags) {
-                key = key.replaceAll("\\$\\{" + column + "}", String.valueOf(tapRecordEvent.getAfter().get(column)));
+                key = key.replace("${" + column + "}", String.valueOf(tapRecordEvent.getAfter().get(column)));
             }
             subTableName.append(key);
         }
@@ -85,7 +87,10 @@ public class TDengineSuperRecordWriter {
         if (null == obj) {
             result = "null";
         } else if (obj instanceof String) {
-            result = "'" + ((String) obj).replaceAll("\\\\", "\\\\\\\\").replaceAll("'", "\\\\'").replaceAll("\\(", "\\\\(").replaceAll("\\)", "\\\\)") + "'";
+            result = "'" + ((String) obj).replace("\\", "\\\\")
+                    .replace("'", "\\'")
+                    .replace("(", "\\(")
+                    .replace(")", "\\)") + "'";
         } else if (obj instanceof Number) {
             result = obj.toString();
         } else if (obj instanceof Date) {

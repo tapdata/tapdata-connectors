@@ -2,6 +2,7 @@ package io.tapdata.zoho.service.zoho.schemaLoader;
 
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -58,7 +59,7 @@ public class DepartmentsSchema extends Schema implements SchemaLoader {
                             if (Checker.isEmpty(offset)) offset = ZoHoOffset.create(new HashMap<>());
                             ((ZoHoOffset) offset).getTableUpdateTimeMap().put(table, referenceTime);
                         }
-                        events[0].add(TapSimplify.insertRecordEvent(department, table).referenceTime(referenceTime));
+                        events[0].add(TapSimplify.insertRecordEvent(department, table));
                         if (events[0].size() == batchCount) {
                             consumer.accept(events[0], offset);
                             events[0] = new ArrayList<>();

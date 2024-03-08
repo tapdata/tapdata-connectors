@@ -16,9 +16,11 @@ public class TDengineConfig extends CommonDbConfig implements Serializable {
     private List<String> superTableTags;
     private String subTableNameType = "AutoHash";
     private String subTableSuffix = "";
+    private List<String> loadTableOptions;
 
     //customize
     public TDengineConfig() {
+        setEscapeChar('`');
         setDbType("TAOS-RS");
         setJdbcDriver("com.taosdata.jdbc.rs.RestfulDriver");
     }
@@ -69,5 +71,13 @@ public class TDengineConfig extends CommonDbConfig implements Serializable {
 
     public void setSubTableSuffix(String subTableSuffix) {
         this.subTableSuffix = subTableSuffix;
+    }
+
+    public List<String> getLoadTableOptions() {
+        return loadTableOptions;
+    }
+
+    public void setLoadTableOptions(List<String> loadTableOptions) {
+        this.loadTableOptions = loadTableOptions;
     }
 }

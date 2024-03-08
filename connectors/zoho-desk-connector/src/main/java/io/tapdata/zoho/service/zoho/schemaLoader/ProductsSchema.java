@@ -3,6 +3,7 @@ package io.tapdata.zoho.service.zoho.schemaLoader;
 import cn.hutool.core.date.DateUtil;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -38,7 +39,7 @@ public class ProductsSchema extends Schema implements SchemaLoader {
         return 0;
     }
 
-    public void read(int readSize, Object offsetState, BiConsumer<List<TapEvent>, Object> consumer,boolean isStreamRead ){
+    public void read(int readSize, Object offsetState, BiConsumer<List<TapEvent>, Object> consumer,boolean isBatchRead ){
         final List<TapEvent>[] events = new List[]{new ArrayList<>()};
         int pageSize = Math.min(readSize, ProductsOpenApi.MAX_PAGE_LIMIT);
         int fromPageIndex = 1;//从第几个工单开始分页
@@ -51,7 +52,7 @@ public class ProductsSchema extends Schema implements SchemaLoader {
         String tableName =  Schemas.Products.getTableName();
         if (Checker.isEmpty(offsetState)) offsetState = ZoHoOffset.create(new HashMap<>());
         final Object offset = offsetState;
-        final String sortBy = !isStreamRead ? ProductsOpenApi.SortBy.CREATED_TIME.descSortBy(): ProductsOpenApi.SortBy.MODIFIED_TIME.descSortBy();
+        final String sortBy = !isBatchRead ? ProductsOpenApi.SortBy.CREATED_TIME.descSortBy(): ProductsOpenApi.SortBy.MODIFIED_TIME.descSortBy();
         while (isAlive()){
             List<Map<String, Object>> list = productsOpenApi.page(fromPageIndex, pageSize, sortBy);
             if (Checker.isNotEmpty(list) && !list.isEmpty()){
@@ -60,13 +61,17 @@ public class ProductsSchema extends Schema implements SchemaLoader {
                     if (!isAlive()) return;
                     Map<String, Object> oneProduct = connectionMode.attributeAssignment(product,tableName,productsOpenApi);
                     if (Checker.isNotEmpty(oneProduct) && !oneProduct.isEmpty()){
-                        Object modifiedTimeObj = isStreamRead?null:oneProduct.get("modifiedTime");//stream read is sort by "modifiedTime",batch read is sort by "createdTime"
+                        Object modifiedTimeObj = isBatchRead?null:oneProduct.get("modifiedTime");//stream read is sort by "modifiedTime",batch read is sort by "createdTime"
                         long referenceTime = System.currentTimeMillis();
                         if (Checker.isNotEmpty(modifiedTimeObj) && modifiedTimeObj instanceof String) {
                             referenceTime = this.parseZoHoDatetime((String) modifiedTimeObj);
                             ((ZoHoOffset) offset).getTableUpdateTimeMap().put(tableName, referenceTime);
                         }
-                        events[0].add(( TapSimplify.insertRecordEvent(oneProduct, tableName).referenceTime(referenceTime) ));
+                        TapInsertRecordEvent event = TapSimplify.insertRecordEvent(oneProduct, tableName);
+                        if (!isBatchRead) {
+                            event.referenceTime(System.currentTimeMillis());
+                        }
+                        events[0].add(event);
                         if (events[0].size() == readSize){
                             consumer.accept(events[0], offset);
                             events[0] = new ArrayList<>();

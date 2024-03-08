@@ -105,7 +105,7 @@ public class CommentsLoader extends CodingStarter implements CodingLoader<Commen
                 for (Map<String, Object> stringObjectMap : result) {
                     Object updatedAtObj = stringObjectMap.get("UpdatedAt");
                     Long updatedAt = Checker.isEmpty(updatedAtObj) ? System.currentTimeMillis() : (Long) updatedAtObj;
-                    events.add(TapSimplify.insertRecordEvent(stringObjectMap, "Comments").referenceTime(updatedAt));
+                    events.add(TapSimplify.insertRecordEvent(stringObjectMap, "Comments"));
                     CodingOffset codingOffset = (CodingOffset) offset;
                     Map<Object, Object> offset1 = codingOffset.offset();
                     if (Checker.isEmpty(offset1)) {
