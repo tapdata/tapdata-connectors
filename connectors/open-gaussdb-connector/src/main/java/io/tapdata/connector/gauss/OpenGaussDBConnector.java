@@ -529,46 +529,46 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 return tapStringValue;
             }
         }).registerToTapValue(PGbox.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(PGClob.class, (value, tapType) -> {
-                    if (value instanceof PGClob) {
-                        PGClob clob = (PGClob) value;
-                        try {
-                            long length = clob.length();
-                            if (length > 0) {
-                                return new TapStringValue(clob.getSubString(1, (int)length));
-                            }
-                        } catch (SQLException ignore) {
-
-                        }
+        .registerToTapValue(PGClob.class, (value, tapType) -> {
+            if (value instanceof PGClob) {
+                PGClob clob = (PGClob) value;
+                try {
+                    long length = clob.length();
+                    if (length > 0) {
+                        return new TapStringValue(clob.getSubString(1, (int)length));
                     }
-                    return new TapStringValue(null);
-                }).registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGbox.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(PGcircle.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGcircle.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGline.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(PGline.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGlseg.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(PGlseg.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpath.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(PGpath.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(PGobject.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(com.huawei.opengauss.jdbc.util.PGobject.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(PGpoint.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpoint.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(PGpolygon.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpolygon.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(UUID.class, (value, tapType) -> new TapStringValue(value.toString()))
-                .registerToTapValue(PGInterval.class, (value, tapType) -> {
-                    //P1Y1M1DT12H12M12.312312S
-                    PGInterval pgInterval = (PGInterval) value;
-                    String interval = "P" + pgInterval.getYears() + "Y" +
-                            pgInterval.getMonths() + "M" +
-                            pgInterval.getDays() + "DT" +
-                            pgInterval.getHours() + "H" +
-                            pgInterval.getMinutes() + "M" +
-                            pgInterval.getSeconds() + "S";
-                    return new TapStringValue(interval);
-                }).registerToTapValue(com.huawei.opengauss.jdbc.util.PGInterval.class, (value, tapType) -> {
+                } catch (SQLException ignore) {
+
+                }
+            }
+            return new TapStringValue(null);
+        }).registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGbox.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(PGcircle.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGcircle.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGline.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(PGline.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGlseg.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(PGlseg.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpath.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(PGpath.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(PGobject.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.util.PGobject.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(PGpoint.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpoint.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(PGpolygon.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpolygon.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(UUID.class, (value, tapType) -> new TapStringValue(value.toString()))
+        .registerToTapValue(PGInterval.class, (value, tapType) -> {
+            //P1Y1M1DT12H12M12.312312S
+            PGInterval pgInterval = (PGInterval) value;
+            String interval = "P" + pgInterval.getYears() + "Y" +
+                    pgInterval.getMonths() + "M" +
+                    pgInterval.getDays() + "DT" +
+                    pgInterval.getHours() + "H" +
+                    pgInterval.getMinutes() + "M" +
+                    pgInterval.getSeconds() + "S";
+            return new TapStringValue(interval);
+        }).registerToTapValue(com.huawei.opengauss.jdbc.util.PGInterval.class, (value, tapType) -> {
             //P1Y1M1DT12H12M12.312312S
             PGInterval pgInterval = (PGInterval) value;
             String interval = "P" + pgInterval.getYears() + "Y" +
@@ -647,11 +647,11 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                     return new TapRawValue(value);
             }
         })
-                //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object
-                .registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime())
-                .registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp())
-                .registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate())
-                .registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"))
+        //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object
+        .registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime())
+        .registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp())
+        .registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate())
+        .registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"))
         ;
     }
 }

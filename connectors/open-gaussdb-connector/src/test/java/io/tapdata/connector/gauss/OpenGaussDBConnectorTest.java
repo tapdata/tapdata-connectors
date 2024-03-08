@@ -72,6 +72,17 @@ public class OpenGaussDBConnectorTest {
     TapConnectorContext connectorContext;
     Log log;
 
+    @Test
+    void testParams() {
+        Assertions.assertEquals("SELECT COUNT(*) FROM pg_replication_slots WHERE slot_name='%s' AND active='false'", OpenGaussDBConnector.CLEAN_SLOT_SQL);
+        Assertions.assertEquals("SELECT pg_drop_replication_slot('%s')", OpenGaussDBConnector.DROP_SLOT_SQL);
+        Assertions.assertEquals("SELECT pg_create_logical_replication_slot('%s','%s')", OpenGaussDBConnector.CREATE_SLOT_SQL);
+        Assertions.assertEquals("SELECT COUNT(*) FROM pg_replication_slots WHERE slot_name='%s'", OpenGaussDBConnector.SELECT_SLOT_COUNT_SQL);
+        Assertions.assertEquals("ALTER TABLE \"%s\".\"%s\" REPLICA IDENTITY FULL", OpenGaussDBConnector.OPEN_IDENTITY_SQL);
+        Assertions.assertEquals("select relname, relreplident from pg_class\n" +
+                "where relnamespace=(select oid from pg_namespace where nspname='%s') and relname in (%s)", OpenGaussDBConnector.PG_REPLICATE_IDENTITY);
+    }
+
     @BeforeEach
     void init() {
         connector = mock(OpenGaussDBConnector.class);
@@ -401,7 +412,7 @@ public class OpenGaussDBConnectorTest {
         GaussDBConfig gaussDBConfig;
         GaussDBJdbcContext gaussJdbcContext;
         @BeforeEach
-        void init() {
+        void init() throws SQLException {
             tableMap = mock(KVReadOnlyMap.class);
             gaussDBConfig = mock(GaussDBConfig.class);
             when(gaussDBConfig.getSchema()).thenReturn("schema");
@@ -409,6 +420,7 @@ public class OpenGaussDBConnectorTest {
             gaussJdbcContext = mock(GaussDBJdbcContext.class);
 
             doNothing().when(connector).iteratorTableMap(any(KVReadOnlyMap.class), anyList(), anyList());
+            doNothing().when(connector).handleReplicateIdentity(any(ResultSet.class), anyList(), any(Log.class));
             connector.gaussDBConfig = gaussDBConfig;
             connector.gaussJdbcContext = gaussJdbcContext;
         }
@@ -431,7 +443,11 @@ public class OpenGaussDBConnectorTest {
 
         @Test
         void testNotNullKVReadOnlyMap() throws SQLException {
-            doNothing().when(gaussJdbcContext).query(anyString(), any(ResultSetConsumer.class));
+            doAnswer(a -> {
+                ResultSetConsumer argument = a.getArgument(1, ResultSetConsumer.class);
+                argument.accept(mock(ResultSet.class));
+                return null;
+            }).when(gaussJdbcContext).query(anyString(), any(ResultSetConsumer.class));
             doCallRealMethod().when(connector).testReplicateIdentity(tableMap, log);
             Assertions.assertDoesNotThrow(() -> {
                 try {
@@ -441,6 +457,7 @@ public class OpenGaussDBConnectorTest {
                     verify(gaussDBConfig, times(1)).getSchema();
                     verify(gaussJdbcContext, times(1)).query(anyString(), any(ResultSetConsumer.class));
                     verify(log, times(0)).debug(anyString(), anyString());
+                    verify(connector, times(1)).handleReplicateIdentity(any(ResultSet.class), anyList(), any(Log.class));
                 }
             });
         }
