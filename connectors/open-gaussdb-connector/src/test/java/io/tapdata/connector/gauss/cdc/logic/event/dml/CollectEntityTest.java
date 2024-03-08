@@ -96,13 +96,13 @@ public class CollectEntityTest {
     @Test
     void testWithSchema() {
         when(entity.withSchema("")).thenCallRealMethod();
-        entity.withSchema("");
+        Assertions.assertDoesNotThrow(() -> entity.withSchema(""));
     }
 
 
     @Test
     void testWithTable() {
         when(entity.withTable("")).thenCallRealMethod();
-        entity.withTable("");
+        Assertions.assertDoesNotThrow(() -> entity.withTable(""));
     }
 }

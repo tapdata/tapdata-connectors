@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.ThrowingSupplier;
 import org.mockito.MockedConstruction;
 
 import java.sql.ResultSet;
@@ -45,9 +46,9 @@ public class GaussDBTestTest {
         when(commonDbConfig.getSchema()).thenReturn("schema");
         //doNothing().when(consumer).accept(any(TestItem.class));
 
-        when(test.jdbcContext()).thenReturn(jdbcContext);
-        when(test.commonDbConfig()).thenReturn(commonDbConfig);
-        when(test.consumer()).thenReturn(consumer);
+        when(test.getJdbcContext()).thenReturn(jdbcContext);
+        when(test.getCommonDbConfig()).thenReturn(commonDbConfig);
+        when(test.getConsumer()).thenReturn(consumer);
         when(test.init()).thenReturn(test);
     }
 
@@ -59,8 +60,8 @@ public class GaussDBTestTest {
     }
 
     @Test
-    void testNew() {
-        new GaussDBTest();
+    void testCreateClass() {
+        Assertions.assertDoesNotThrow((ThrowingSupplier<GaussDBTest>) GaussDBTest::new);
     }
 
     @Test
@@ -84,20 +85,20 @@ public class GaussDBTestTest {
 
     @Test
     void testCommonDbConfig() {
-        when(test.commonDbConfig()).thenCallRealMethod();
-        Assertions.assertDoesNotThrow(() -> test.commonDbConfig());
+        when(test.getCommonDbConfig()).thenCallRealMethod();
+        Assertions.assertDoesNotThrow(() -> test.getCommonDbConfig());
     }
 
     @Test
     void testJdbcContext() {
-        when(test.jdbcContext()).thenCallRealMethod();
-        Assertions.assertDoesNotThrow(() -> test.jdbcContext());
+        when(test.getJdbcContext()).thenCallRealMethod();
+        Assertions.assertDoesNotThrow(() -> test.getJdbcContext());
     }
 
     @Test
     void testConsumer() {
-        when(test.consumer()).thenCallRealMethod();
-        Assertions.assertDoesNotThrow(() -> test.consumer());
+        when(test.getConsumer()).thenCallRealMethod();
+        Assertions.assertDoesNotThrow(() -> test.getConsumer());
     }
 
     @Test
@@ -150,14 +151,14 @@ public class GaussDBTestTest {
 
         void assertVerify(int tableCountTimes, boolean result) throws SQLException {
             Boolean testResult = test.testReadPrivilege();
-            verify(test, times(1)).jdbcContext();
+            verify(test, times(1)).getJdbcContext();
             verify(jdbcContext, times(1)).queryWithNext(anyString(), any(ResultSetConsumer.class));
-            verify(test, times(1)).commonDbConfig();
+            verify(test, times(1)).getCommonDbConfig();
             String database = verify(commonDbConfig, times(1)).getDatabase();
             String schema = verify(commonDbConfig, times(1)).getSchema();
             String user = verify(commonDbConfig, times(1)).getUser();
             verify(test, times(tableCountTimes)).tableCount();
-            verify(test, times(1)).consumer();
+            verify(test, times(1)).getConsumer();
             //verify(consumer, times(1)).accept(any(TestItem.class));
             Assertions.assertEquals(result, testResult);
         }
@@ -232,7 +233,7 @@ public class GaussDBTestTest {
 
         int assertVerify() throws SQLException {
             int count = test.tableCount();
-            verify(test, times(1)).jdbcContext();
+            verify(test, times(1)).getJdbcContext();
             verify(jdbcContext, times(1)).queryWithNext(anyString(), any(ResultSetConsumer.class));
             return count;
         }
@@ -270,10 +271,10 @@ public class GaussDBTestTest {
 
         void assertVerify(int isEmptyTimes, int batchExecuteTimes) throws SQLException {
             Boolean result = test.testWritePrivilege();
-            verify(test, times(1)).jdbcContext();
-            verify(test, times(1)).commonDbConfig();
+            verify(test, times(1)).getJdbcContext();
+            verify(test, times(1)).getCommonDbConfig();
             String schema = verify(commonDbConfig, times(1)).getSchema();
-            verify(test, times(1)).consumer();
+            verify(test, times(1)).getConsumer();
             //verify(consumer, times(1)).accept(any(TestItem.class));
             verify(jdbcContext, times(1)).queryAllTables(anyList());
             boolean empty = verify(tableList, times(isEmptyTimes)).isEmpty();
@@ -323,7 +324,7 @@ public class GaussDBTestTest {
     void testTestConnectorVersion() {
         Consumer<TestItem> c = mock(Consumer.class);
         when(test.testConnectorVersion()).thenCallRealMethod();
-        when(test.consumer()).thenReturn(c);
+        when(test.getConsumer()).thenReturn(c);
         doNothing().when(c).accept(any(TestItem.class));
         Assertions.assertTrue(test.testConnectorVersion());
         verify(c, times(1)).accept(any(TestItem.class));

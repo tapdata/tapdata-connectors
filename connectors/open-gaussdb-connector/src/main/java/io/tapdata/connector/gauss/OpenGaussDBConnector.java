@@ -136,7 +136,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     }
 
     //clear postgres slot
-    protected void clearSlot() throws Throwable {
+    protected void clearSlot() throws SQLException {
         gaussJdbcContext.queryWithNext(String.format(CLEAN_SLOT_SQL, slotName), this::clearSlot);
     }
 
@@ -146,14 +146,14 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         }
     }
 
-    protected void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
+    protected void buildSlot(TapConnectorContext connectorContext, boolean needCheck) throws SQLException {
         Log log = connectorContext.getLog();
         if (EmptyKit.isNull(slotName)) {
             // https://support.huaweicloud.com/intl/zh-cn/centralized-devg-v2-gaussdb/devg_03_1324.html
             //逻辑复制槽名称必须小于64个字符
             String plugin = Optional.ofNullable(connectorContext.getConnectionConfig().getString("logPluginName"))
                     .orElse(CdcConstant.GAUSS_DB_SLOT_DEFAULT_PLUGIN);
-            slotName = CdcConstant.GAUSS_DB_SLOT_SFF + UUID.randomUUID().toString().replaceAll("-", "_");
+            slotName = CdcConstant.GAUSS_DB_SLOT_SFF + UUID.randomUUID().toString().replaceAll("\\-", "_");
             gaussJdbcContext.execute(String.format(CREATE_SLOT_SQL, slotName, plugin));
             connectorContext.getStateMap().put(CdcConstant.GAUSS_DB_SLOT_TAG, slotName);
             sleep(3000L);

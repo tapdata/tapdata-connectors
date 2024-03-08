@@ -36,21 +36,21 @@ public class GaussDBConfigTest {
     @Test
     void testGetHaPort() {
         when(config.getHaPort()).thenCallRealMethod();
-        int haPort = config.getHaPort();
+        Assertions.assertDoesNotThrow(() -> config.getHaPort());
     }
     @Test
     void testSetHaPort() {
         doCallRealMethod().when(config).setHaPort(anyInt());
-        config.setHaPort(8000);
+        Assertions.assertDoesNotThrow(() -> config.setHaPort(8000));
     }
     @Test
     void testGetHaHost() {
         when(config.getHaHost()).thenCallRealMethod();
-        String haPort = config.getHaHost();
+        Assertions.assertDoesNotThrow(() -> config.getHaHost());
     }
     @Test
     void testSetHaHost() {
         doCallRealMethod().when(config).setHaHost(anyString());
-        config.setHaHost("8000");
+        Assertions.assertDoesNotThrow(() -> config.setHaHost("8000"));
     }
 }

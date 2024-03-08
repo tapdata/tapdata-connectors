@@ -21,8 +21,8 @@ import java.util.function.Supplier;
 import static io.tapdata.base.ConnectorBase.testItem;
 
 public class GaussDBTest extends CommonDbTest {
-    public final static String PG_TABLE_NUM = "SELECT COUNT(*) FROM pg_tables WHERE schemaname='%s'";
-    public final static String PG_TABLE_SELECT_NUM = "SELECT count(*) FROM information_schema.table_privileges " +
+    public static final String PG_TABLE_NUM = "SELECT COUNT(*) FROM pg_tables WHERE schemaname='%s'";
+    public static final String PG_TABLE_SELECT_NUM = "SELECT count(*) FROM information_schema.table_privileges " +
             "WHERE grantee='%s' AND table_catalog='%s' AND table_schema='%s' AND privilege_type='SELECT'";
 
 
@@ -50,25 +50,25 @@ public class GaussDBTest extends CommonDbTest {
         return testFunctionMap;
     }
 
-    protected GaussDBConfig commonDbConfig() {
+    protected GaussDBConfig getCommonDbConfig() {
         return (GaussDBConfig)commonDbConfig;
     }
 
-    protected JdbcContext jdbcContext() {
+    protected JdbcContext getJdbcContext() {
         return jdbcContext;
     }
 
-    protected Consumer<TestItem> consumer() {
+    protected Consumer<TestItem> getConsumer() {
         return consumer;
     }
 
     public GaussDBTest initContext() {
-        jdbcContext = new PostgresJdbcContext(commonDbConfig());
+        jdbcContext = new PostgresJdbcContext(getCommonDbConfig());
         return this;
     }
 
     public Boolean testConnectorVersion() {
-        consumer().accept(testItem("Connector Version", TestItem.RESULT_SUCCESSFULLY, "v1.1.0"));
+        getConsumer().accept(testItem("Connector Version", TestItem.RESULT_SUCCESSFULLY, "v1.1.0"));
         return true;
     }
 
@@ -80,36 +80,35 @@ public class GaussDBTest extends CommonDbTest {
     //Test number of tables and privileges
     public Boolean testReadPrivilege() {
         AtomicInteger tableSelectPrivileges = new AtomicInteger();
-        GaussDBConfig gaussDBConfig = commonDbConfig();
-        //ResultSetConsumer c = readConsumer(tableSelectPrivileges);
+        GaussDBConfig gaussDBConfig = getCommonDbConfig();
         try {
-            jdbcContext().queryWithNext(
+            getJdbcContext().queryWithNext(
                 String.format(PG_TABLE_SELECT_NUM, gaussDBConfig.getUser(), gaussDBConfig.getDatabase(), gaussDBConfig.getSchema()),
                     resultSet -> tableSelectPrivileges.set(resultSet.getInt(1))
             );
             if (tableSelectPrivileges.get() >= tableCount()) {
-                consumer().accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY, "All tables can be selected"));
+                getConsumer().accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY, "All tables can be selected"));
             } else {
-                consumer().accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
+                getConsumer().accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
                         "Current user may have no read privilege for some tables, Check it"));
             }
             return true;
-        } catch (Throwable e) {
-            consumer().accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_FAILED, e.getMessage()));
+        } catch (SQLException e) {
+            getConsumer().accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_FAILED, e.getMessage()));
             return false;
         }
     }
 
     protected int tableCount() throws SQLException {
         AtomicInteger tableCount = new AtomicInteger();
-        jdbcContext().queryWithNext(PG_TABLE_NUM, resultSet -> tableCount.set(resultSet.getInt(1)));
+        getJdbcContext().queryWithNext(PG_TABLE_NUM, resultSet -> tableCount.set(resultSet.getInt(1)));
         return tableCount.get();
     }
 
     @Override
     protected Boolean testWritePrivilege() {
-        JdbcContext jdbcContext = jdbcContext();
-        GaussDBConfig gaussDBConfig = commonDbConfig();
+        JdbcContext jdbcContext = getJdbcContext();
+        GaussDBConfig gaussDBConfig = getCommonDbConfig();
         String schema = gaussDBConfig.getSchema();
         List<String> sqlArray = new ArrayList<>();
         try {
@@ -128,9 +127,9 @@ public class GaussDBTest extends CommonDbTest {
             //drop
             sqlArray.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
             jdbcContext.batchExecute(sqlArray);
-            consumer().accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
+            getConsumer().accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer().accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, e.getMessage()));
+            getConsumer().accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, e.getMessage()));
         }
         return true;
     }
