@@ -27,6 +27,6 @@ public class UpdateEvent implements DMLEvent {
         e.after(entity.getAfter());
         e.before(entity.getBefore());
         //tapInsertRecordEvent.referenceTime();
-        return new EventEntity<>(e, "", 0, 0, 0);
+        return new EventEntity<TapEvent>().event(e).xid("").timestamp(0).lsn(0).csn(0);
     }
 }

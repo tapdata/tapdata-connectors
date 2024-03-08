@@ -3,11 +3,11 @@ package io.tapdata.connector.gauss.cdc.logic.event.dml;
 import java.util.Map;
 
 public class CollectEntity {
-    Map<String, Object> before;
-    Map<String, Object> after;
-    Map<String, Integer> fieldType;
-    String schema;
-    String table;
+    protected Map<String, Object> before;
+    protected Map<String, Object> after;
+    protected Map<String, Integer> fieldType;
+    protected String schema;
+    protected String table;
 
     public static CollectEntity instance() {
         return new CollectEntity();

@@ -1,14 +1,17 @@
 package io.tapdata.connector.gauss.core;
 
+import io.tapdata.connector.gauss.cdc.GaussDBRunner;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.utils.DataMap;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 public class GaussColumnTest {
@@ -20,6 +23,16 @@ public class GaussColumnTest {
         dataMap = mock(DataMap.class);
         when(gaussColumn.init(dataMap)).thenCallRealMethod();
     }
+
+
+    @Test
+    void testInstance() {
+        try (MockedStatic<GaussColumn> gr = mockStatic(GaussColumn.class)){
+            gr.when(GaussColumn::instance).thenCallRealMethod();
+            Assertions.assertNotNull(GaussColumn.instance());
+        }
+    }
+
     @Nested
     class GetTapFieldTest {
         @BeforeEach

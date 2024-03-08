@@ -40,6 +40,6 @@ public class BeginTransaction implements Event<TapEvent> {
         long csnNumber = LogicUtil.byteToLong(csn);
         long lsnNumber = LogicUtil.byteToLong(firstLsn);
         long timestamp = null == commitTime ? 0 : TimeUtil.parseTimestamp(new String(commitTime), 3);
-        return new EventEntity<>(null, "", timestamp, csnNumber, lsnNumber);
+        return new EventEntity<TapEvent>().event(null).xid("").timestamp(timestamp).lsn(lsnNumber).csn(csnNumber);
     }
 }

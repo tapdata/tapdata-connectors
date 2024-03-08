@@ -1,27 +1,37 @@
 package io.tapdata.connector.gauss.core;
 
 import io.tapdata.common.CommonDbConfig;
+import io.tapdata.connector.postgres.PostgresJdbcContext;
+import io.tapdata.connector.postgres.config.PostgresConfig;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 public class GaussDBJdbcContextTest {
     GaussDBJdbcContext context;
+    PostgresConfig config;
     @BeforeEach
     void init() {
+        config = mock(PostgresConfig.class);
         context = mock(GaussDBJdbcContext.class);
     }
+
     @Test
     void testParams() {
         Assertions.assertEquals("SELECT\n" +
@@ -51,6 +61,16 @@ public class GaussDBJdbcContextTest {
                 "  AND col.table_schema = '%s' %s\n" +
                 "ORDER BY col.table_name, col.ordinal_position", GaussDBJdbcContext.GAUSS_ALL_COLUMN);
     }
+
+    @Test
+    void testInstance() {
+        try (MockedStatic<GaussDBJdbcContext> gr = mockStatic(GaussDBJdbcContext.class);
+             MockedConstruction<GaussDBJdbcContext> construction = mockConstruction(GaussDBJdbcContext.class)){
+            gr.when(() -> GaussDBJdbcContext.instance(config)).thenCallRealMethod();
+            Assertions.assertNotNull(GaussDBJdbcContext.instance(config));
+        }
+    }
+
 
     @Nested
     class QueryAllColumnsSqlTest {

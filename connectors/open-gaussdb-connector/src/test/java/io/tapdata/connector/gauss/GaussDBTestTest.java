@@ -3,6 +3,7 @@ package io.tapdata.connector.gauss;
 import io.tapdata.common.JdbcContext;
 import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.connector.gauss.core.GaussDBConfig;
+import io.tapdata.connector.gauss.core.GaussDBJdbcContext;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.entity.TestItem;
 import org.junit.jupiter.api.Assertions;
@@ -13,11 +14,12 @@ import org.junit.jupiter.api.Test;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyList;
-import static org.mockito.Matchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
@@ -35,7 +37,7 @@ public class GaussDBTestTest {
     void init() {
         rs = mock(ResultSet.class);
         test = mock(GaussDBTest.class);
-        jdbcContext = mock(JdbcContext.class);
+        jdbcContext = mock(GaussDBJdbcContext.class);
         commonDbConfig = mock(GaussDBConfig.class);
         consumer = t -> {};
 
@@ -109,27 +111,28 @@ public class GaussDBTestTest {
 
     @Nested
     class TestReadPrivilegeTest {
+        //ResultSetConsumer c;
+        String sql;
         @BeforeEach
         void init() {
             when(test.testReadPrivilege()).thenCallRealMethod();
+            sql = String.format(GaussDBTest.PG_TABLE_SELECT_NUM, "user", "database", "schema");
+            //c = mock(ResultSetConsumer.class);
+            //when(test.readConsumer(any(AtomicInteger.class))).thenReturn(c);
         }
 
         void assertVerify(int tableCountTimes, boolean result) throws SQLException {
-            Boolean testResult = null;
-            try {
-                testResult = test.testReadPrivilege();
-            } finally {
-                verify(test, times(1)).jdbcContext();
-                verify(jdbcContext, times(1)).queryWithNext(anyString(), any(ResultSetConsumer.class));
-                verify(test, times(1)).commonDbConfig();
-                String database = verify(commonDbConfig, times(1)).getDatabase();
-                String schema = verify(commonDbConfig, times(1)).getSchema();
-                String user = verify(commonDbConfig, times(1)).getUser();
-                verify(test, times(tableCountTimes)).tableCount();
-                verify(test, times(1)).consumer();
-                //verify(consumer, times(1)).accept(any(TestItem.class));
-                Assertions.assertEquals(result, testResult);
-            }
+            Boolean testResult = test.testReadPrivilege();
+            verify(test, times(1)).jdbcContext();
+            verify(jdbcContext, times(1)).queryWithNext(anyString(), any(ResultSetConsumer.class));
+            verify(test, times(1)).commonDbConfig();
+            String database = verify(commonDbConfig, times(1)).getDatabase();
+            String schema = verify(commonDbConfig, times(1)).getSchema();
+            String user = verify(commonDbConfig, times(1)).getUser();
+            verify(test, times(tableCountTimes)).tableCount();
+            verify(test, times(1)).consumer();
+            //verify(consumer, times(1)).accept(any(TestItem.class));
+            Assertions.assertEquals(result, testResult);
         }
 
         @Test

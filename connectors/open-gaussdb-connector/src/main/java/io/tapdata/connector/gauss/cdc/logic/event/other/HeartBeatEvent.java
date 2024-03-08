@@ -30,6 +30,6 @@ public class HeartBeatEvent implements Event<TapEvent> {
         long time = System.currentTimeMillis();
         event.referenceTime(time);
         event.setTime(time);
-        return new EventEntity<>(event, "", time, 0, LogicUtil.byteToLong(lsn2));
+        return new EventEntity<TapEvent>().event(event).xid("").timestamp(0).lsn(LogicUtil.byteToLong(lsn2)).csn(0);
     }
 }

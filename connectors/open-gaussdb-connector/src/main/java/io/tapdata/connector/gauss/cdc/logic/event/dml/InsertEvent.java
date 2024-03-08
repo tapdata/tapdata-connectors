@@ -25,6 +25,6 @@ public class InsertEvent implements DMLEvent {
         tapInsertRecordEvent.table(entity.getTable());
         tapInsertRecordEvent.after(entity.getAfter());
         //tapInsertRecordEvent.referenceTime();
-        return new EventEntity<>(tapInsertRecordEvent, "", 0, 0, 0);
+        return new EventEntity<TapEvent>().event(tapInsertRecordEvent).xid("").timestamp(0).lsn(0).csn(0);
     }
 }

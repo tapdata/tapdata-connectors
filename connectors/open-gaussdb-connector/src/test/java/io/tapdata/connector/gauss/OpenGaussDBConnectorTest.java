@@ -84,6 +84,14 @@ public class OpenGaussDBConnectorTest {
                 "where relnamespace=(select oid from pg_namespace where nspname='%s') and relname in (%s)", OpenGaussDBConnector.PG_REPLICATE_IDENTITY);
     }
 
+    @Test
+    void testInstance() {
+        try (MockedStatic<GaussDBRunner> gr = mockStatic(GaussDBRunner.class)){
+            gr.when(GaussDBRunner::instance).thenCallRealMethod();
+            Assertions.assertNotNull(GaussDBRunner.instance());
+        }
+    }
+
     @BeforeEach
     void init() {
         connector = mock(OpenGaussDBConnector.class);

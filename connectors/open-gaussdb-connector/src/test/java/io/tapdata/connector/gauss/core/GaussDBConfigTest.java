@@ -3,11 +3,13 @@ package io.tapdata.connector.gauss.core;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 public class GaussDBConfigTest {
@@ -16,6 +18,15 @@ public class GaussDBConfigTest {
     void init() {
         config = mock(GaussDBConfig.class);
     }
+
+    @Test
+    void testInstance() {
+        try (MockedStatic<GaussDBConfig> gr = mockStatic(GaussDBConfig.class)){
+            gr.when(GaussDBConfig::instance).thenCallRealMethod();
+            Assertions.assertNotNull(GaussDBConfig.instance());
+        }
+    }
+
     @Test
     void testParams() {
         Assertions.assertEquals("opengauss", GaussDBConfig.dbType);
