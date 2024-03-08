@@ -34,8 +34,9 @@ public class TimeUtil {
             int zoneSplit = 0;
             if (dateStr.contains("+")) {
                 zoneSplit = dateStr.indexOf("+");
-            } else if (dateStr.contains("-")) {
-                zoneSplit = dateStr.indexOf("-");
+            } else {
+                String[] split = dateStr.split("\\.");
+                zoneSplit = split[1].indexOf("-") + split[0].length();
             }
 
             if (zoneSplit > 0) {
@@ -103,14 +104,18 @@ public class TimeUtil {
 
 
     public static long parseTimestamp(String dateStr, int fix) {
+        if (null == dateStr || "".equals(dateStr)) {
+            return 0;
+        }
         int fixValue = 1;
         for (int i = 0; i < fix; i++) {
-            fixValue*=10;
+            fixValue *= 10;
         }
         String[] split = dateStr.split("\\.");
-        if (split.length <= 0) split = new String[]{dateStr};
         long timestamp = TimeUtil.parseTimestamp(split[0], "yyyy-MM-dd hh:mm:ss", 0);
-        if (split.length <= 1) return timestamp;
+        if (split.length <= 1) {
+            return timestamp;
+        }
         String s1 = split[1];
         if (s1.contains("+")) {
             timestamp = parseTimestamp(s1.split("\\+"), timestamp, fixValue, true);

@@ -4,28 +4,27 @@ import io.tapdata.common.JdbcContext;
 import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.connector.gauss.core.GaussDBConfig;
 import io.tapdata.connector.gauss.core.GaussDBJdbcContext;
+import io.tapdata.connector.gauss.entity.TestAccept;
+import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.entity.TestItem;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedConstruction;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 public class GaussDBTestTest {
     GaussDBTest test;
@@ -59,29 +58,57 @@ public class GaussDBTestTest {
                 "WHERE grantee='%s' AND table_catalog='%s' AND table_schema='%s' AND privilege_type='SELECT'", GaussDBTest.PG_TABLE_SELECT_NUM);
     }
 
-    @Nested
-    class TestFunctionMapTest {
-
+    @Test
+    void testNew() {
+        new GaussDBTest();
     }
 
-    @Nested
-    class CommonDbConfigTest {
+    @Test
+    void testInstance() {
+        GaussDBConfig gaussDBConfig = new GaussDBConfig();
+        Consumer<TestItem> consumer = a -> {};
+        TestAccept accept = a -> {};
 
+        try (MockedConstruction<PostgresJdbcContext> f = mockConstruction(PostgresJdbcContext.class)) {
+            Assertions.assertDoesNotThrow(() -> {
+                GaussDBTest.instance(gaussDBConfig, consumer, accept);
+            });
+        }
     }
 
-    @Nested
-    class JdbcContextTest {
-
+    @Test
+    void testTestFunctionMap() {
+        when(test.testFunctionMap()).thenCallRealMethod();
+        Assertions.assertDoesNotThrow(() -> test.testFunctionMap());
     }
 
-    @Nested
-    class ConsumerTest {
-
+    @Test
+    void testCommonDbConfig() {
+        when(test.commonDbConfig()).thenCallRealMethod();
+        Assertions.assertDoesNotThrow(() -> test.commonDbConfig());
     }
 
-    @Nested
-    class InitContextTest {
+    @Test
+    void testJdbcContext() {
+        when(test.jdbcContext()).thenCallRealMethod();
+        Assertions.assertDoesNotThrow(() -> test.jdbcContext());
+    }
 
+    @Test
+    void testConsumer() {
+        when(test.consumer()).thenCallRealMethod();
+        Assertions.assertDoesNotThrow(() -> test.consumer());
+    }
+
+    @Test
+    void testInitContext() {
+        Map<String, Supplier<Boolean>> map = mock(Map.class);
+        when(map.remove("testStreamRead")).thenReturn(null);
+        when(map.put(anyString(), any(Supplier.class))).thenReturn(null);
+        when(test.testFunctionMap()).thenReturn(map);
+        when(test.init()).thenCallRealMethod();
+        GaussDBTest init = test.init();
+        Assertions.assertNotNull(init);
     }
 
     @Nested
@@ -178,6 +205,20 @@ public class GaussDBTestTest {
             Assertions.assertDoesNotThrow(() -> {
                 assertVerify(1, true);
             });
+        }
+        @Test
+        public void testTableSelectPrivilegesEqualTableCount1() throws SQLException {
+            when(test.tableCount()).thenReturn(-1);
+            when(rs.getInt(1)).thenReturn(1);
+            doAnswer(a -> {
+                ResultSetConsumer argument = a.getArgument(1, ResultSetConsumer.class);
+                argument.accept(rs);
+                return null;
+            }).when(jdbcContext).queryWithNext(anyString(), any(ResultSetConsumer.class));
+            Assertions.assertDoesNotThrow(() -> {
+                assertVerify(1, true);
+            });
+            verify(rs, times(1)).getInt(1);
         }
 
     }
@@ -276,5 +317,15 @@ public class GaussDBTestTest {
             }).when(jdbcContext).batchExecute(anyList());
             assertVerify(1,1);
         }
+    }
+
+    @Test
+    void testTestConnectorVersion() {
+        Consumer<TestItem> c = mock(Consumer.class);
+        when(test.testConnectorVersion()).thenCallRealMethod();
+        when(test.consumer()).thenReturn(c);
+        doNothing().when(c).accept(any(TestItem.class));
+        Assertions.assertTrue(test.testConnectorVersion());
+        verify(c, times(1)).accept(any(TestItem.class));
     }
 }

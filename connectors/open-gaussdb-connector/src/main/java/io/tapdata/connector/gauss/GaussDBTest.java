@@ -3,7 +3,6 @@ package io.tapdata.connector.gauss;
 import com.google.common.collect.Lists;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.common.JdbcContext;
-import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.connector.gauss.core.GaussDBConfig;
 import io.tapdata.connector.gauss.entity.TestAccept;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
@@ -78,9 +77,6 @@ public class GaussDBTest extends CommonDbTest {
         return Lists.newArrayList("9.2", "9.4", "9.5", "9.6", "1*");
     }
 
-    protected ResultSetConsumer readConsumer(AtomicInteger tableSelectPrivileges) {
-        return resultSet -> tableSelectPrivileges.set(resultSet.getInt(1));
-    }
     //Test number of tables and privileges
     public Boolean testReadPrivilege() {
         AtomicInteger tableSelectPrivileges = new AtomicInteger();
