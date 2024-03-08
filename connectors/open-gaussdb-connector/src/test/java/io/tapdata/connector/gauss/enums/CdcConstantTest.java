@@ -18,8 +18,8 @@ public class CdcConstantTest {
         Assertions.assertEquals(0, CdcConstant.CDC_MIN_BATCH_SIZE);
 
         Assertions.assertEquals(4, CdcConstant.BYTES_COUNT_BUFF_START);
-        Assertions.assertEquals(8, CdcConstant.BYTES_COUNT_BUFF_START);
-        Assertions.assertEquals(1, CdcConstant.BYTES_COUNT_LSN);
+        Assertions.assertEquals(8, CdcConstant.BYTES_COUNT_LSN);
+        Assertions.assertEquals(1, CdcConstant.BYTES_COUNT_EVENT_TYPE);
 
         Assertions.assertEquals(0xFFFFFFFF, CdcConstant.BYTES_VALUE_OF_NULL);
         Assertions.assertEquals(0, CdcConstant.BYTES_VALUE_OF_EMPTY_CHAR);

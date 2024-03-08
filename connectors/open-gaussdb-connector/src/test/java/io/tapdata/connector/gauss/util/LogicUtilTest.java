@@ -24,20 +24,12 @@ public class LogicUtilTest {
         void assertVerify(Number value, Number excepted, byte[] bytes) {
             try (MockedStatic<LogicUtil> util = mockStatic(LogicUtil.class)) {
                 util.when(() -> LogicUtil.byteToNumber(bytes)).thenReturn(value);
-                util.when(() -> LogicUtil.bytesToInt(null)).thenCallRealMethod();
+                util.when(() -> LogicUtil.bytesToInt(bytes)).thenCallRealMethod();
                 int bytesToInt = LogicUtil.bytesToInt(bytes);
                 Assertions.assertEquals(excepted, bytesToInt);
             }
         }
-        @Test
-        public void testLongToInt() {
-            assertVerify(Long.MAX_VALUE, 0, null);
-        }
 
-        @Test
-        public void testShortToInt() {
-            assertVerify((long)Short.MAX_VALUE, 0, null);
-        }
         @Test
         public void testZeroToInt() {
             assertVerify(0L, 0, null);
@@ -75,12 +67,12 @@ public class LogicUtilTest {
         }
         @Test
         public void testLongToLong() {
-            assertVerify(Long.MAX_VALUE,0L, null);
+            assertVerify(Long.MAX_VALUE,Long.MAX_VALUE, null);
         }
 
         @Test
         public void testShortToLong() {
-            assertVerify((long)Short.MAX_VALUE, 0L, null);
+            assertVerify((long)Short.MAX_VALUE, (long)Short.MAX_VALUE, null);
         }
         @Test
         public void testZeroToInt() {

@@ -1,28 +1,19 @@
 package io.tapdata.connector.gauss;
 
 import com.google.common.collect.Lists;
-import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.common.JdbcContext;
-import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.connector.gauss.core.GaussDBConfig;
+import io.tapdata.connector.gauss.entity.TestAccept;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
-import io.tapdata.connector.postgres.config.PostgresConfig;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.entity.TestItem;
-import org.postgresql.Driver;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -30,13 +21,11 @@ import java.util.function.Supplier;
 import static io.tapdata.base.ConnectorBase.testItem;
 
 public class GaussDBTest extends CommonDbTest {
-    protected final static String PG_TABLE_NUM = "SELECT COUNT(*) FROM pg_tables WHERE schemaname='%s'";
-    protected final static String PG_TABLE_SELECT_NUM = "SELECT count(*) FROM information_schema.table_privileges " +
+    public final static String PG_TABLE_NUM = "SELECT COUNT(*) FROM pg_tables WHERE schemaname='%s'";
+    public final static String PG_TABLE_SELECT_NUM = "SELECT count(*) FROM information_schema.table_privileges " +
             "WHERE grantee='%s' AND table_catalog='%s' AND table_schema='%s' AND privilege_type='SELECT'";
 
-    interface TestAccept {
-        void accept(GaussDBTest test) throws Throwable;
-    }
+
     public GaussDBTest() {
         super();
     }

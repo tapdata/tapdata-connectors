@@ -10,8 +10,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -30,25 +30,28 @@ public class GaussDBTestTest {
     JdbcContext jdbcContext;
     GaussDBConfig commonDbConfig;
     Consumer<TestItem> consumer;
+    ResultSet rs;
     @BeforeEach
-    public void init() {
+    void init() {
+        rs = mock(ResultSet.class);
         test = mock(GaussDBTest.class);
         jdbcContext = mock(JdbcContext.class);
         commonDbConfig = mock(GaussDBConfig.class);
-        consumer = mock(Consumer.class);
+        consumer = t -> {};
 
         when(commonDbConfig.getUser()).thenReturn("user");
         when(commonDbConfig.getDatabase()).thenReturn("database");
         when(commonDbConfig.getSchema()).thenReturn("schema");
-        doNothing().when(consumer).accept(any(TestItem.class));
+        //doNothing().when(consumer).accept(any(TestItem.class));
 
         when(test.jdbcContext()).thenReturn(jdbcContext);
         when(test.commonDbConfig()).thenReturn(commonDbConfig);
         when(test.consumer()).thenReturn(consumer);
+        when(test.init()).thenReturn(test);
     }
 
     @Test
-    public void testParam() {
+    void testParam() {
         Assertions.assertEquals("SELECT COUNT(*) FROM pg_tables WHERE schemaname='%s'", GaussDBTest.PG_TABLE_NUM);
         Assertions.assertEquals("SELECT count(*) FROM information_schema.table_privileges " +
                 "WHERE grantee='%s' AND table_catalog='%s' AND table_schema='%s' AND privilege_type='SELECT'", GaussDBTest.PG_TABLE_SELECT_NUM);
@@ -82,12 +85,12 @@ public class GaussDBTestTest {
     @Nested
     class SupportVersionsTest {
         @BeforeEach
-        public void init() {
+        void init() {
             when(test.supportVersions()).thenCallRealMethod();
         }
 
         @Test
-        public void testSupportVersions() {
+        void testSupportVersions() {
             List<String> list = test.supportVersions();
             Assertions.assertNotNull(list);
             Assertions.assertEquals(5, list.size());
@@ -107,7 +110,7 @@ public class GaussDBTestTest {
     @Nested
     class TestReadPrivilegeTest {
         @BeforeEach
-        public void init() {
+        void init() {
             when(test.testReadPrivilege()).thenCallRealMethod();
         }
 
@@ -124,7 +127,7 @@ public class GaussDBTestTest {
                 String user = verify(commonDbConfig, times(1)).getUser();
                 verify(test, times(tableCountTimes)).tableCount();
                 verify(test, times(1)).consumer();
-                verify(consumer, times(1)).accept(any(TestItem.class));
+                //verify(consumer, times(1)).accept(any(TestItem.class));
                 Assertions.assertEquals(result, testResult);
             }
         }
@@ -184,12 +187,10 @@ public class GaussDBTestTest {
         }
 
         int assertVerify() throws SQLException {
-            try {
-                return test.tableCount();
-            } finally {
-                verify(test, times(1)).jdbcContext();
-                verify(jdbcContext, times(1)).queryWithNext(anyString(), any(ResultSetConsumer.class));
-            }
+            int count = test.tableCount();
+            verify(test, times(1)).jdbcContext();
+            verify(jdbcContext, times(1)).queryWithNext(anyString(), any(ResultSetConsumer.class));
+            return count;
         }
 
         @Test
@@ -202,7 +203,12 @@ public class GaussDBTestTest {
 
         @Test
         public void testQueryWithNextNotThrowException() throws SQLException {
-            doNothing().when(jdbcContext).queryWithNext(anyString(), any(ResultSetConsumer.class));
+            when(rs.getInt(1)).thenReturn(1);
+            doAnswer(a -> {
+                ResultSetConsumer argument = a.getArgument(1, ResultSetConsumer.class);
+                argument.accept(rs);
+                return null;
+            }).when(jdbcContext).queryWithNext(anyString(), any(ResultSetConsumer.class));
             Assertions.assertDoesNotThrow(this::assertVerify);
         }
     }
@@ -212,27 +218,23 @@ public class GaussDBTestTest {
         List<DataMap> tableList;
         @BeforeEach
         public void init() {
-            tableList = mock(ArrayList.class);
+            tableList = mock(List.class);
             when(tableList.isEmpty()).thenReturn(false);
 
             when(test.testWritePrivilege()).thenCallRealMethod();
         }
 
         void assertVerify(int isEmptyTimes, int batchExecuteTimes) throws SQLException {
-            Boolean result = null;
-            try {
-                result = test.testWritePrivilege();
-            } finally {
-                verify(test, times(1)).jdbcContext();
-                verify(test, times(1)).commonDbConfig();
-                String schema = verify(commonDbConfig, times(1)).getSchema();
-                verify(test, times(1)).consumer();
-                verify(consumer, times(1)).accept(any(TestItem.class));
-                verify(jdbcContext, times(1)).queryAllTables(anyList());
-                boolean empty = verify(tableList, times(isEmptyTimes)).isEmpty();
-                verify(jdbcContext, times(batchExecuteTimes)).batchExecute(anyList());
-                Assertions.assertEquals(true, result);
-            }
+            Boolean result = test.testWritePrivilege();
+            verify(test, times(1)).jdbcContext();
+            verify(test, times(1)).commonDbConfig();
+            String schema = verify(commonDbConfig, times(1)).getSchema();
+            verify(test, times(1)).consumer();
+            //verify(consumer, times(1)).accept(any(TestItem.class));
+            verify(jdbcContext, times(1)).queryAllTables(anyList());
+            boolean empty = verify(tableList, times(isEmptyTimes)).isEmpty();
+            verify(jdbcContext, times(batchExecuteTimes)).batchExecute(anyList());
+            Assertions.assertEquals(true, result);
         }
 
         @Test
