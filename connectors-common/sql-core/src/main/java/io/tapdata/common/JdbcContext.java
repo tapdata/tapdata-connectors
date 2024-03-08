@@ -259,12 +259,11 @@ public abstract class JdbcContext implements AutoCloseable {
             hikariDataSource = new HikariDataSource();
             //need 4 attributes
             hikariDataSource.setDriverClassName(config.getJdbcDriver());
-            String databaseUrl = config.getDatabaseUrl();
-            hikariDataSource.setJdbcUrl(databaseUrl);
+            hikariDataSource.setJdbcUrl(config.getDatabaseUrl());
             hikariDataSource.setUsername(config.getUser());
             hikariDataSource.setPassword(config.getPassword());
-            hikariDataSource.setMinimumIdle(getInteger(databaseUrl, "Min Idle",20));
-            hikariDataSource.setMaximumPoolSize(getInteger(databaseUrl, "Max Pool Size",20));
+            hikariDataSource.setMinimumIdle(getInteger(config.getDatabaseUrl(), "Min Idle",20));
+            hikariDataSource.setMaximumPoolSize(getInteger(config.getDatabaseUrl(), "Max Pool Size",20));
             if (EmptyKit.isNotNull(config.getProperties())) {
                 hikariDataSource.setDataSourceProperties(config.getProperties());
             }
@@ -275,7 +274,7 @@ public abstract class JdbcContext implements AutoCloseable {
             return hikariDataSource;
         }
 
-        private static String getParamFromUrl(String databaseUrl, String tag){
+        protected static String getParamFromUrl(String databaseUrl, String tag){
             if (null == databaseUrl || null == tag) return null;
             if (databaseUrl.contains(tag)) {
                 int index = databaseUrl.indexOf(tag) + tag.length();
@@ -284,20 +283,29 @@ public abstract class JdbcContext implements AutoCloseable {
                     end = databaseUrl.length();
                 }
                 String substring = databaseUrl.substring(index, end);
-                substring = substring.replaceAll("=", "").replaceAll(" ", "");
+                substring = replaceAll(replaceAll(substring,"=", "")," ", "");
                 return substring;
             }
             return null;
         }
 
-        private static int getInteger(String databaseUrl, String tag, int defaultValue) {
+        protected static int getInteger(String databaseUrl, String tag, int defaultValue) {
             try {
-                String poolSize = getParamFromUrl(databaseUrl, tag);
-                if (null != poolSize && !"".equals(poolSize)) {
-                    return Integer.parseInt(poolSize);
+                String valueStr = getParamFromUrl(databaseUrl, tag);
+                if (null != valueStr && !"".equals(valueStr)) {
+                    return Integer.parseInt(valueStr);
                 }
-            } catch (Exception ignore) { }
-            return defaultValue;
+                return defaultValue;
+            } catch (NumberFormatException ignore) {
+                return defaultValue;
+            }
+        }
+
+        public static String replaceAll(String str, String old, String to) {
+            while (str.contains(old)) {
+                str = str.replace(old, to);
+            }
+            return str;
         }
     }
 }
