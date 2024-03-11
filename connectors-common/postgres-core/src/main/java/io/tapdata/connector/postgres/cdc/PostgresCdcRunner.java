@@ -47,7 +47,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private int recordSize;
     private StreamReadConsumer consumer;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
-    private TimeZone timeZone;
+    protected TimeZone timeZone;
 
     public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext) throws SQLException {
         this.postgresConfig = (PostgresConfig) postgresJdbcContext.getConfig();

@@ -97,6 +97,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             columnList.stream().filter(col -> table.equals(col.getString("tableName")))
                     .forEach(col -> {
                         TapField tapField = makeTapField(col);
+                        if (null == tapField) return;
                         tapField.setPos(keyPos.incrementAndGet());
                         tapField.setPrimaryKey(primaryKey.contains(tapField.getName()));
                         tapField.setPrimaryKeyPos(primaryKey.indexOf(tapField.getName()) + 1);
