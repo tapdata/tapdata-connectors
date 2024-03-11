@@ -35,6 +35,7 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
+import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import io.tapdata.pdk.apis.functions.connector.source.GetReadPartitionOptions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import io.tapdata.pdk.apis.partition.FieldMinMaxValue;
@@ -145,7 +146,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportTransactionBeginFunction(this::begin);
         connectorFunctions.supportTransactionCommitFunction(this::commit);
         connectorFunctions.supportTransactionRollbackFunction(this::rollback);
-        connectorFunctions.supportQueryHashByAdvanceFilter(this::queryTableHash);
+        connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
     }
 
     private void rollback(TapConnectorContext tapConnectorContext) {
@@ -515,11 +516,11 @@ public class MysqlConnector extends CommonDbConnector {
         return sql.toString();
     }
 
-    protected void queryTableHash(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<Long> consumer) throws Throwable {
+    protected void queryTableHash(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<TapHashResult> consumer) throws Throwable {
         String sql = buildHashSql(filter, table);
         jdbcContext.query(sql, resultSet -> {
             if (isAlive() && resultSet.next()) {
-                consumer.accept(resultSet.getLong(1));
+                consumer.accept(TapHashResult.create().withHash(resultSet.getLong(1)));
             }});
     }
 }
