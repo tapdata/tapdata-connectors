@@ -343,7 +343,9 @@ public class MrsKafkaService extends AbstractMqService {
         try {
             scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
                     new ScriptOptions().engineName("graal.js"));
-            scriptEngine.eval(script);
+            String buildInMethod = initBuildInMethod();
+            String scripts = script + System.lineSeparator() + buildInMethod;
+            scriptEngine.eval(scripts);
         } catch (Exception e) {
             throw new CoreException("Engine initialization failed!");
         }
@@ -462,7 +464,30 @@ public class MrsKafkaService extends AbstractMqService {
             writeListResultConsumer.accept(listResult.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get()));
         }
     }
-
+    protected String initBuildInMethod() {
+        StringBuilder buildInMethod = new StringBuilder();
+        buildInMethod.append("var DateUtil = Java.type(\"com.tapdata.constant.DateUtil\");\n");
+        buildInMethod.append("var UUIDGenerator = Java.type(\"com.tapdata.constant.UUIDGenerator\");\n");
+        buildInMethod.append("var idGen = Java.type(\"com.tapdata.constant.UUIDGenerator\");\n");
+        buildInMethod.append("var HashMap = Java.type(\"java.util.HashMap\");\n");
+        buildInMethod.append("var LinkedHashMap = Java.type(\"java.util.LinkedHashMap\");\n");
+        buildInMethod.append("var ArrayList = Java.type(\"java.util.ArrayList\");\n");
+        buildInMethod.append("var Date = Java.type(\"java.util.Date\");\n");
+        buildInMethod.append("var uuid = UUIDGenerator.uuid;\n");
+        buildInMethod.append("var JSONUtil = Java.type('com.tapdata.constant.JSONUtil');\n");
+        buildInMethod.append("var HanLPUtil = Java.type(\"com.tapdata.constant.HanLPUtil\");\n");
+        buildInMethod.append("var split_chinese = HanLPUtil.hanLPParticiple;\n");
+        buildInMethod.append("var util = Java.type(\"com.tapdata.processor.util.Util\");\n");
+        buildInMethod.append("var MD5Util = Java.type(\"com.tapdata.constant.MD5Util\");\n");
+        buildInMethod.append("var MD5 = function(str){return MD5Util.crypt(str, true);};\n");
+        buildInMethod.append("var Collections = Java.type(\"java.util.Collections\");\n");
+        buildInMethod.append("var MapUtils = Java.type(\"com.tapdata.constant.MapUtil\");\n");
+        buildInMethod.append("var sleep = function(ms){\n" +
+                "var Thread = Java.type(\"java.lang.Thread\");\n" +
+                "Thread.sleep(ms);\n" +
+                "}\n");
+        return buildInMethod.toString();
+    }
     @Override
     public void produce(TapFieldBaseEvent tapFieldBaseEvent) {
         AtomicReference<Throwable> reference = new AtomicReference<>();
