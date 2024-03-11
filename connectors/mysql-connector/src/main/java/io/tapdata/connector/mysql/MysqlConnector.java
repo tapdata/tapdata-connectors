@@ -145,6 +145,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportTransactionBeginFunction(this::begin);
         connectorFunctions.supportTransactionCommitFunction(this::commit);
         connectorFunctions.supportTransactionRollbackFunction(this::rollback);
+        connectorFunctions.supportQueryHashByAdvanceFilter(this::queryTableHash);
     }
 
     private void rollback(TapConnectorContext tapConnectorContext) {
@@ -485,5 +486,40 @@ public class MysqlConnector extends CommonDbConnector {
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("DATA_LENGTH")));
         return tableInfo;
     }
+    private String buildHashSql(TapAdvanceFilter filter, TapTable table) {
+        StringBuilder sql = new StringBuilder("SELECT SUM(CRC32(CONCAT(");
+        LinkedHashMap<String, TapField> nameFieldMap = table.getNameFieldMap();
+        Iterator<Map.Entry<String, TapField>> entryIterator = nameFieldMap.entrySet().iterator();
+        while (entryIterator.hasNext()) {
+            Map.Entry<String, TapField> next = entryIterator.next();
+            if (!filter.getProjection().getIncludeFields().contains(next.getValue().getName())) {
+                continue;
+            }
+            if (filter.getProjection().getExcludeFields().contains(next.getValue().getName())) {
+                continue;
+            }
+            switch (next.getValue().getTapType().getType()) {
+                case TapType.TYPE_DATETIME:
+                    sql.append("round(UNIX_TIMESTAMP(").append(next.getKey()).append(")),");
+                    break;
+                case TapType.TYPE_BINARY:
+                    break;
+                default:
+                    sql.append(next.getKey()).append(",");
+                    break;
+            }
+        }
+        sql = new StringBuilder(sql.substring(0, sql.length() - 1));
+        sql.append("))) FROM ").append(table.getName());
+        commonSqlMaker.buildWhereClause(sql, filter);
+        return sql.toString();
+    }
 
+    protected void queryTableHash(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<Long> consumer) throws Throwable {
+        String sql = buildHashSql(filter, table);
+        jdbcContext.query(sql, resultSet -> {
+            if (isAlive() && resultSet.next()) {
+                consumer.accept(resultSet.getLong(1));
+            }});
+    }
 }
