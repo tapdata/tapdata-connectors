@@ -21,6 +21,7 @@
         <sql.core.version>1.0-SNAPSHOT</sql.core.version>
         <kafka.core.version>1.0-SNAPSHOT</kafka.core.version>
         <kafka.version>3.1.0</kafka.version>
+        <pdk-error-code.version>1.0-SNAPSHOT</pdk-error-code.version>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -144,6 +145,12 @@
             <artifactId>okhttp</artifactId>
             <version>3.10.0</version>
             <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.tapdata</groupId>
+            <artifactId>pdk-error-code</artifactId>
+            <version>${pdk-error-code.version}</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>
