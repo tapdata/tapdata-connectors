@@ -5,7 +5,7 @@
     "doc": "${doc}",
     "id": "csv",
     "authentication": "Beta",
-    "tags": ["File"]
+    "tags": ["File", "schema-free"]
   },
   "configOptions": {
     "connection": {
@@ -573,6 +573,32 @@
             }
           ]
         },
+        "separatorType": {
+          "type": "string",
+          "title": "${separatorType}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 15,
+          "default": ",",
+          "enum": [
+            {
+              "label": "${tab}",
+              "value": "\\t"
+            },
+            {
+              "label": "${comma}",
+              "value": ","
+            },
+            {
+              "label": "${space}",
+              "value": " "
+            },
+            {
+              "label": "${ascii}",
+              "value": "ascii"
+            }
+          ]
+        },
         "separator": {
           "type": "string",
           "title": "${separator}",
@@ -582,15 +608,59 @@
             "tooltip": "${separatorTooltip}"
           },
           "apiServerKey": "separator",
-          "x-index": 15,
+          "x-index": 16,
           "required": true,
-          "default": ",",
+          "default": "0x",
           "x-reactions": [
             {
-              "dependencies": ["$inputs"],
+              "dependencies": ["$inputs", ".separatorType"],
               "fulfill": {
                 "state": {
-                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                  "display": "{{$deps[0].length > 0 && $deps[1] === 'ascii' ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "lineEndType": {
+          "type": "string",
+          "title": "${lineEndType}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 17,
+          "default": "\\n",
+          "enum": [
+            {
+              "label": "${enter}",
+              "value": "\\n"
+            },
+            {
+              "label": "${space}",
+              "value": " "
+            },
+            {
+              "label": "${ascii}",
+              "value": "ascii"
+            }
+          ]
+        },
+        "lineEnd": {
+          "type": "string",
+          "title": "${lineEnd}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${lineEndTooltip}"
+          },
+          "x-index": 18,
+          "required": true,
+          "default": "0x",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".lineEndType"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] === 'ascii' ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -605,8 +675,7 @@
             "tooltip": "${quoteCharTooltip}"
           },
           "apiServerKey": "quoteChar",
-          "x-index": 16,
-          "required": true,
+          "x-index": 19,
           "default": "\"",
           "x-reactions": [
             {
@@ -664,8 +733,10 @@
       "offStandard": "Off Standard CSV",
       "lineExpression": "Expression Each Line",
       "separator": "Separator(single-character)",
+      "separatorType": "Separator Type",
       "quoteChar": "Quote Character(single-character)",
       "lineEnd": "Line End",
+      "lineEndType": "Line End Type",
       "filePathStringTooltip": "The root path of all files that need to be read",
       "includeRegStringTooltip": "Includes wildcards, supports * and ?, takes precedence over excluding wildcards (non regular expressions) ",
       "excludeRegStringTooltip": "Exclude wildcards, support * and ?, exclude (non regular expressions) if wildcards are included",
@@ -678,11 +749,17 @@
       "justStringTooltip": "CSV defaults to fully converting to strings. If each column of data is well organized, especially in numerical and time formats, and does not contain any strings, it can be turned off (reload the model to see the effect)",
       "fileEncodingTooltip": "When there is Chinese garbled code when loading the model or data, pay special attention to whether to choose GBK or UTF-8",
       "writeFilePathTooltip": "The path to the file written when CSV is written as the target",
-      "fileNameExpressionTooltip": "When CSV is used as the target for writing, it is allowed to write to multiple files simultaneously. The file content can be categorized and split using field values and date formats, and saved with corresponding file names. For example: tap_\\${record. id}_\\${date:yyyyMMdd}.csv ",
+      "fileNameExpressionTooltip": "When CSV is used as the target for writing, it is allowed to write to multiple files simultaneously. The file content can be categorized and split using field values and date formats, and saved with corresponding file names. For example: tap_\\${record.id}_\\${date:yyyyMMdd}.csv ",
       "offStandardTooltip": "Non standard CSV format text files that can be customized to collect file content through regular expression matching and used in conjunction with line expressions",
       "lineExpressionTooltip": "Regular expressions that can match each column of fields. When unfamiliar with usage, file data demos can be provided for customer service assistance",
-      "separatorTooltip": "Column spacing character (single character), if preventing tab (TAB) from being filtered, can be enclosed in []",
-      "quoteCharTooltip": "Column quotation marks (single character), each column of data will be wrapped around that character"
+      "separatorTooltip": "Separator (ASCII), hexadecimal number starting with 0x",
+      "lineEndTooltip": "Line break separator (ASCII), hexadecimal number starting with 0x",
+      "quoteCharTooltip": "Column quotation marks (single character), each column of data will be wrapped around that character",
+      "tab": "Tab",
+      "comma": "Comma",
+      "space": "Space",
+      "ascii": "ASCII",
+      "enter": "Enter"
     },
     "zh_CN": {
       "doc": "docs/csv_zh_CN.md",
@@ -723,9 +800,11 @@
       "fileNameExpression": "文件名表达式",
       "offStandard": "非标准CSV格式",
       "lineExpression": "行表达式",
-      "separator": "列间隔符（单字符）",
+      "separator": "列间隔符（ASCII）",
+      "separatorType": "列间隔符类型",
       "quoteChar": "列引号（单字符）",
       "lineEnd": "换行符",
+      "lineEndType": "换行符类型",
       "filePathStringTooltip": "需要读取的所有文件所在的根路径",
       "includeRegStringTooltip": "包含通配，支持*和?，优先于排除通配（非正则表达式）",
       "excludeRegStringTooltip": "排除通配，支持*和?，在包含通配的前提下排除（非正则表达式）",
@@ -741,8 +820,14 @@
       "fileNameExpressionTooltip": "CSV作为目标写入时，允许向多个文件同时写入，文件内容可以用字段值和日期格式作归类分割，并以对应的文件名保存。例如：tap_\\${record.id}_\\${date:yyyyMMdd}.csv",
       "offStandardTooltip": "非标准CSV格式的文本文件，可以通过正则表达式匹配定制化采集文件内容，配合行表达式使用",
       "lineExpressionTooltip": "能匹配每列字段的正则表达式，当不熟悉使用方式时，可以给出文件数据demo求助客服",
-      "separatorTooltip": "列间隔符（单字符），若防止制表符（TAB）被过滤，可以用[]括起来",
-      "quoteCharTooltip": "列引号（单字符），每列数据将会以该字符包绕"
+      "separatorTooltip": "列间隔符（ASCII），0x开头的16进制数值",
+      "lineEndTooltip": "换行间隔符（ASCII），0x开头的16进制数值",
+      "quoteCharTooltip": "列引号（单字符），每列数据将会以该字符包绕",
+      "tab": "制表符",
+      "comma": "逗号",
+      "space": "空格",
+      "ascii": "ASCII",
+      "enter": "Enter换行"
     },
     "zh_TW": {
       "doc": "docs/csv_zh_TW.md",
@@ -784,8 +869,10 @@
       "offStandard": "非標準CSV格式",
       "lineExpression": "行運算式",
       "separator": "列間隔符（單字元）",
+      "separatorType": "列間隔符類型",
       "quoteChar": "列引號（單字元）",
       "lineEnd": "分行符號",
+      "lineEndType": "分行符號類型",
       "filePathStringTooltip": "需要讀取的所有檔案所在的根路徑",
       "includeRegStringTooltip": "包含通配，支持*和？，優先於排除通配（非規則運算式）",
       "excludeRegStringTooltip": "排除通配，支持*和？，在包含通配的前提下排除（非規則運算式）",
@@ -801,8 +888,14 @@
       "fileNameExpressionTooltip": "CSV作為目標寫入時，允許向多個檔案同時寫入，檔案內容可以用欄位值和日期格式作歸類分割，並以對應的檔名保存。例如：tap_\\${record.id}_\\${date:yyyyMMdd}.csv",
       "offStandardTooltip": "非標準CSV格式的文字檔，可以通過規則運算式匹配定制化採集檔案內容，配合行運算式使用",
       "lineExpressionTooltip": "能匹配每列欄位的規則運算式，當不熟悉使用管道時，可以給出檔案數據demo求助客服",
-      "separatorTooltip": "列間隔符（單字元），若防止定位字元（TAB）被過濾，可以用[]括起來",
-      "quoteCharTooltip": "列引號（單字元），每列數據將會以該字元包繞"
+      "separatorTooltip": "列間隔符（ASCII），0x開頭的16進位數值",
+      "lineEndTooltip": "換行間隔符（ASCII），0x開頭的16進位數值",
+      "quoteCharTooltip": "列引號（單字元），每列數據將會以該字元包繞",
+      "tab": "定位字元",
+      "comma": "逗號",
+      "space": "空格",
+      "ascii": "ASCII",
+      "enter": "Enter換行"
     }
   },
   "dataTypes": {

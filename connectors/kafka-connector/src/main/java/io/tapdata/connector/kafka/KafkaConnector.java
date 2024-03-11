@@ -69,9 +69,10 @@ public class KafkaConnector extends ConnectorBase {
                 kafkaSRService.setConnectorId(connectorContext.getId());
                 kafkaSRService.init();
             }
-        }catch (Throwable t){
+        } catch (Throwable t) {
             kafkaExceptionCollector.collectTerminateByServer(t);
-            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(),t);
+            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), t);
+            throw t;
         }
     }
 
@@ -80,7 +81,7 @@ public class KafkaConnector extends ConnectorBase {
         properties.put("bootstrap.servers", kafkaConfig.getNameSrvAddr());
         properties.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
         properties.put("value.serializer", io.confluent.kafka.serializers.KafkaAvroSerializer.class);
-        properties.put("schema.registry.url","" + "http://" + kafkaConfig.getSchemaRegisterUrl());
+        properties.put("schema.registry.url", "" + "http://" + kafkaConfig.getSchemaRegisterUrl());
         if (kafkaConfig.getBasicAuth()) {
             properties.put("basic.auth.credentials.source", kafkaConfig.getAuthCredentialsSource());
             properties.put("basic.auth.user.info", kafkaConfig.getAuthUserName() + ":" + kafkaConfig.getAuthPassword());
@@ -156,31 +157,31 @@ public class KafkaConnector extends ConnectorBase {
         String tableId = tapCreateTableEvent.getTableId();
         CreateTableOptions createTableOptions = new CreateTableOptions();
 //        if (!this.isSchemaRegister) {
-            Integer replicasSize = Optional.ofNullable(kafkaConfig.getReplicasSize()).orElse(1);
-            Integer partitionNum = Optional.ofNullable(kafkaConfig.getPartitionNum()).orElse(3);
-            AdminConfiguration configuration = new AdminConfiguration(kafkaConfig, tapConnectorContext.getId());
-            try (Admin admin = new DefaultAdmin(configuration)) {
-                Set<String> existTopics = admin.listTopics();
-                if (!existTopics.contains(tableId)) {
-                    createTableOptions.setTableExists(false);
-                    admin.createTopics(tableId, partitionNum, replicasSize.shortValue());
-                } else {
-                    List<TopicPartitionInfo> topicPartitionInfos = admin.getTopicPartitionInfo(tableId);
-                    int existTopicPartition = topicPartitionInfos.size();
-                    int existReplicasSize = topicPartitionInfos.get(0).replicas().size();
-                    if (existReplicasSize != replicasSize) {
-                        TapLogger.warn(TAG, "cannot change the number of replicasSize of an existing table, will skip");
-                    }
-                    if (partitionNum <= existTopicPartition) {
-                        TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will skip");
-                    } else {
-                        admin.increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
-                    }
-                    createTableOptions.setTableExists(true);
+        Integer replicasSize = Optional.ofNullable(kafkaConfig.getReplicasSize()).orElse(1);
+        Integer partitionNum = Optional.ofNullable(kafkaConfig.getPartitionNum()).orElse(3);
+        AdminConfiguration configuration = new AdminConfiguration(kafkaConfig, tapConnectorContext.getId());
+        try (Admin admin = new DefaultAdmin(configuration)) {
+            Set<String> existTopics = admin.listTopics();
+            if (!existTopics.contains(tableId)) {
+                createTableOptions.setTableExists(false);
+                admin.createTopics(tableId, partitionNum, replicasSize.shortValue());
+            } else {
+                List<TopicPartitionInfo> topicPartitionInfos = admin.getTopicPartitionInfo(tableId);
+                int existTopicPartition = topicPartitionInfos.size();
+                int existReplicasSize = topicPartitionInfos.get(0).replicas().size();
+                if (existReplicasSize != replicasSize) {
+                    TapLogger.warn(TAG, "cannot change the number of replicasSize of an existing table, will skip");
                 }
-            } catch (InterruptedException | ExecutionException e) {
-                throw new RuntimeException("Create Table " + tableId + " Failed | Error: " + e.getMessage());
+                if (partitionNum <= existTopicPartition) {
+                    TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will skip");
+                } else {
+                    admin.increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
+                }
+                createTableOptions.setTableExists(true);
             }
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException("Create Table " + tableId + " Failed | Error: " + e.getMessage());
+        }
 //        }else{
 //            createTableOptions.setTableExists(true);
 //        }
@@ -220,10 +221,11 @@ public class KafkaConnector extends ConnectorBase {
     private void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) {
         try {
             kafkaService.produce(tapFieldBaseEvent);
-        }catch (Throwable t){
+        } catch (Throwable t) {
             kafkaExceptionCollector.collectTerminateByServer(t);
             kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), t);
-            kafkaExceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
+            kafkaExceptionCollector.collectWritePrivileges("ddl", Collections.emptyList(), t);
+            throw t;
         }
     }
 
@@ -270,23 +272,24 @@ public class KafkaConnector extends ConnectorBase {
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) {
-        try{
+        try {
             if (!this.isSchemaRegister) {
-                if (kafkaConfig.getEnableScript()){
-                    kafkaService.produce(connectorContext,tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
-                }else {
+                if (kafkaConfig.getEnableScript()) {
+                    kafkaService.produce(connectorContext, tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
+                } else {
                     kafkaService.produce(tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
                 }
             } else {
-                if (kafkaConfig.getEnableScript()){
+                if (kafkaConfig.getEnableScript()) {
                     throw new RuntimeException("Custom message is not support in schema register");
-                }else {
+                } else {
                     kafkaSRService.produce(tapRecordEvents, tapTable, writeListResultConsumer, this::isAlive);
                 }
             }
-        }catch (Throwable t){
+        } catch (Throwable t) {
             kafkaExceptionCollector.collectTerminateByServer(t);
             kafkaExceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
+            throw t;
         }
 
     }
@@ -294,20 +297,22 @@ public class KafkaConnector extends ConnectorBase {
     private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         try {
             kafkaService.consumeOne(tapTable, eventBatchSize, eventsOffsetConsumer);
-        }catch (Throwable e){
+        } catch (Throwable e) {
             kafkaExceptionCollector.collectTerminateByServer(e);
             kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);
-            kafkaExceptionCollector.collectReadPrivileges("batchRead",Collections.emptyList(),e);
+            kafkaExceptionCollector.collectReadPrivileges("batchRead", Collections.emptyList(), e);
+            throw e;
         }
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
         try {
             kafkaService.streamConsume(tableList, recordSize, consumer);
-        }catch (Throwable e){
+        } catch (Throwable e) {
             kafkaExceptionCollector.collectTerminateByServer(e);
             kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);
-            kafkaExceptionCollector.collectReadPrivileges("streamRead",Collections.emptyList(),e);
+            kafkaExceptionCollector.collectReadPrivileges("streamRead", Collections.emptyList(), e);
+            throw e;
         }
     }
 

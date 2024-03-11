@@ -364,6 +364,10 @@ public class MongodbConnector extends ConnectorBase {
 			) {
 				mongodbTest.testOneByOne();
 			}
+			int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
+			if (version >= 6) {
+				connectionOptions.capability(Capability.create(ConnectionOptions.CAPABILITY_SOURCE_INCREMENTAL_UPDATE_EVENT_HAVE_BEFORE));
+			}
 		} catch (Throwable throwable) {
 			exceptionCollector.collectTerminateByServer(throwable);
 			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),throwable);
@@ -469,6 +473,7 @@ public class MongodbConnector extends ConnectorBase {
 		codecRegistry.registerFromTapValue(TapStringValue.class, tapValue -> {
 			Object originValue = tapValue.getOriginValue();
 			String value = tapValue.getValue();
+			String originType = tapValue.getOriginType();
 			if (originValue instanceof ObjectId) {
 				return originValue;
 			} else if (originValue instanceof byte[]) {
@@ -476,6 +481,12 @@ public class MongodbConnector extends ConnectorBase {
 				if (bytes.length == 26 && bytes[0] == 99 && bytes[bytes.length - 1] == 23
 						&& null != value && value.length() == 24) {
 					return new ObjectId(tapValue.getValue());
+				}
+			} else if (BsonType.OBJECT_ID.name().equals(originType)) {
+				try {
+					return new ObjectId(tapValue.getValue());
+				} catch (Exception ignored) {
+					// try to convert to ObjectId
 				}
 			}
 			//If not ObjectId, use default TapValue Codec to convert.
@@ -769,6 +780,7 @@ public class MongodbConnector extends ConnectorBase {
 		try {
 			Map<String, Object> executeObj = tapExecuteCommand.getParams();
 			String command = tapExecuteCommand.getCommand();
+			tapConnectorContext.getLog();
 			if (MapUtils.isNotEmpty(executeObj) && StringUtils.isEmpty((CharSequence) executeObj.get("database"))) {
 				executeObj.put("database", mongoConfig.getDatabase());
 			}
@@ -1131,6 +1143,7 @@ public class MongodbConnector extends ConnectorBase {
 			}
 		}
 		exceptionCollector = new MongodbExceptionCollector();
+		mongodbExecuteCommandFunction.setLog(connectionContext.getLog());
 	}
 
 	private void dropTable(TapConnectorContext connectorContext, TapDropTableEvent dropTableEvent) throws Throwable {

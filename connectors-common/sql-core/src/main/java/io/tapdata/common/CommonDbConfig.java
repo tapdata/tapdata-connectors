@@ -256,4 +256,12 @@ public class CommonDbConfig implements Serializable {
     public void setSslKeyPassword(String sslKeyPassword) {
         this.sslKeyPassword = sslKeyPassword;
     }
+
+    public String getSslRandomPath() {
+        return sslRandomPath;
+    }
+
+    public void setSslRandomPath(String sslRandomPath) {
+        this.sslRandomPath = sslRandomPath;
+    }
 }

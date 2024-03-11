@@ -7,11 +7,12 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class TDengineSqlMaker {
 
-    public static String buildColumnDefinition(TapTable tapTable, String timestampField) {
+    public static String buildColumnDefinition(TapTable tapTable, String timestampField, List<String> superTableTags) {
         LinkedHashMap<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
 
         return nameFieldMap.entrySet().stream()
@@ -21,6 +22,7 @@ public class TDengineSqlMaker {
                     }
                 })
                 .sorted(Comparator.comparing(v -> EmptyKit.isNull(v.getValue().getPos()) ? 99999 : v.getValue().getPos()))
+                .filter(v -> !superTableTags.contains(v.getKey()))
                 .map(v -> {
                     StringBuilder builder = new StringBuilder();
                     TapField tapField = v.getValue();

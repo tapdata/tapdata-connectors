@@ -64,7 +64,7 @@ public interface PageStage {
                 if (Objects.isNull(ent)) continue;
                 try {
                     Map<String,Object> after = (Map<String, Object>) ent;
-                    tapEvents.add(TapSimplify.insertRecordEvent(after,tapPage.tableName()).referenceTime(System.currentTimeMillis()));
+                    tapEvents.add(TapSimplify.insertRecordEvent(after,tapPage.tableName()));
                 }catch (Exception e){
                     continue;
                 }
@@ -79,7 +79,7 @@ public interface PageStage {
             return !entity.isEmpty();
         }else if(pageResult instanceof Map){
             Map<String,Object> entity = (Map<String,Object>)pageResult;
-            tapEvents.add(TapSimplify.insertRecordEvent(entity,tapPage.tableName()).referenceTime(System.currentTimeMillis()));
+            tapEvents.add(TapSimplify.insertRecordEvent(entity,tapPage.tableName()));
             consumer.accept(tapEvents, tapPage.offset());
             return true;
         }else {

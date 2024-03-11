@@ -9,7 +9,7 @@ import org.apache.hudi.keygen.CustomAvroKeyGenerator;
 import org.apache.hudi.keygen.constant.KeyGeneratorOptions;
 
 public class GenericHoodieKey implements GenericStage<KeyEntity, GenericRecord, HoodieKey> {
-    private static GenericHoodieKey singleton;
+    private static volatile GenericHoodieKey singleton;
     public static GenericHoodieKey singleton() {
         if (null == GenericHoodieKey.singleton) {
             synchronized (GenericHoodieKey.class) {

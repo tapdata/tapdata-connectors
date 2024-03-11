@@ -11,6 +11,7 @@ import io.tapdata.coding.utils.http.HttpEntity;
 import io.tapdata.coding.utils.tool.Checker;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -149,7 +150,11 @@ public class ProjectMembersLoader extends CodingStarter implements CodingLoader<
                     Long currentTimePoint = updatedAt - updatedAt % (24 * 60 * 60 * 1000);//时间片段
                     String membersHash = this.key(teamMember, null, updatedAt);
                     if (!lastTimeProjectMembersCode.contains(membersHash)) {
-                        events.add(TapSimplify.insertRecordEvent(teamMember, TABLE_NAME).referenceTime(System.currentTimeMillis()));
+                        TapInsertRecordEvent event = TapSimplify.insertRecordEvent(teamMember, TABLE_NAME);
+                        if (isStreamRead) {
+                            event.referenceTime(System.currentTimeMillis());
+                        }
+                        events.add(event);
                         if (!currentTimePoint.equals(this.lastTimePoint)) {
                             this.lastTimePoint = currentTimePoint;
                             lastTimeProjectMembersCode = new HashSet<>();

@@ -4,9 +4,21 @@ import io.tapdata.connector.hive.HiveJdbcContext;
 import io.tapdata.connector.hudi.config.HudiConfig;
 import io.tapdata.connector.hudi.util.SiteXMLUtil;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.logger.Log;
+import org.apache.avro.Schema;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.spark.sql.avro.SchemaConverters;
+import org.apache.spark.sql.execution.datasources.jdbc.JdbcUtils;
+import org.apache.spark.sql.jdbc.JdbcDialect;
+import org.apache.spark.sql.jdbc.JdbcDialects;
+import org.apache.spark.sql.types.StructType;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class ClientHandler {
@@ -41,6 +53,30 @@ public class ClientHandler {
             throw new CoreException("Can not get table path from hdfs system, select sql: {}", sql);
         }
         return tablePath.get();
+    }
+
+    public Schema getJDBCSchema(String tableId, boolean nullable, Log log) {
+        JdbcDialect dialect = JdbcDialects.get(config.getDatabaseUrl());
+        try (Connection connection = hiveJdbcContext.getConnection();
+             final Statement confStatement = connection.createStatement();
+             PreparedStatement schemaQueryStatement = connection.prepareStatement(dialect.getSchemaQuery(tableId))) {
+            final String settingSql = "set hive.resultset.use.unique.column.names = false";
+            try {
+                confStatement.execute(settingSql);
+            } catch (SQLException e) {
+                log.warn("Set config error before get JDBC schema, table id: {}, setting sql: {}, message: {}", tableId, settingSql, e.getMessage());
+            }
+
+            try (ResultSet rs = schemaQueryStatement.executeQuery()) {
+                StructType structType = JdbcUtils.getSchema(rs, dialect, nullable);
+                final String structName = "hoodie_" + tableId + "_record";
+                final String recordNamespace = "hoodie." + tableId;
+                return SchemaConverters.toAvroType(structType, false, structName, recordNamespace);
+            }
+        } catch (Exception e) {
+            log.debug("Can not get schema by jdbc, will get schema from hdfs file system next, table id: {}, message: {}", tableId, e.getMessage());
+        }
+        return null;
     }
 
     private void initHadoopConfig() {
