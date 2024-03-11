@@ -11,7 +11,6 @@ import io.tapdata.connector.tdengine.subscribe.TDengineSubscribe;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.*;
-import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
@@ -22,7 +21,7 @@ import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
-import io.tapdata.entity.utils.cache.KVMap;
+import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -34,7 +33,7 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.lang3.StringUtils;
 
-import java.sql.Timestamp;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -42,10 +41,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-/**
- * @author IssaacWang
- * @date 2022/10/08
- */
 @TapConnectorClass("tdengine-spec.json")
 public class TDengineConnector extends ConnectorBase {
     private static final String TAG = TDengineConnector.class.getSimpleName();
@@ -63,6 +58,7 @@ public class TDengineConnector extends ConnectorBase {
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Exception {
         tdengineConfig = (TDengineConfig) new TDengineConfig().load(connectionContext.getConnectionConfig());
+        isConnectorStarted(connectionContext, connectorContext -> tdengineConfig.load(connectorContext.getNodeConfig()));
         tdengineJdbcContext = new TDengineJdbcContext(tdengineConfig);
         this.connectionTimezone = connectionContext.getConnectionConfig().getString("timezone");
         if ("Database Timezone".equals(this.connectionTimezone) || StringUtils.isBlank(this.connectionTimezone)) {
@@ -75,8 +71,9 @@ public class TDengineConnector extends ConnectorBase {
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
-
-        Class.forName("com.taosdata.jdbc.TSDBDriver");
+        if (!tdengineConfig.getSupportWebSocket()) {
+            Class.forName("com.taosdata.jdbc.TSDBDriver");
+        }
     }
 
     @Override
@@ -151,23 +148,48 @@ public class TDengineConnector extends ConnectorBase {
         connectorFunctions.supportReleaseExternalFunction(this::releaseExternal);
     }
 
-    private CreateTableOptions createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
+    private String getTimestampColumn(TapTable tapTable) {
+        Collection<String> primaryKeys = tapTable.primaryKeys(true);
+        if (EmptyKit.isEmpty(primaryKeys) || primaryKeys.size() > 1) {
+            return tapTable.getNameFieldMap().values().stream()
+                    .filter(tapField -> "timestamp".equals(tapField.getDataType())).findFirst()
+                    .orElseThrow(() -> new RuntimeException("no timestamp columns")).getName();
+        } else {
+            return primaryKeys.iterator().next();
+        }
+
+    }
+
+    private CreateTableOptions createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) {
         TapTable tapTable = tapCreateTableEvent.getTable();
         CreateTableOptions createTableOptions = new CreateTableOptions();
         if (tdengineJdbcContext.queryAllTables(Collections.singletonList(tapTable.getId())).size() > 0) {
             createTableOptions.setTableExists(true);
             return createTableOptions;
         }
-        DataMap nodeConfigMap = tapConnectorContext.getNodeConfig();
-        String timestamp = nodeConfigMap.getString("timestamp");
-        String sql = "CREATE TABLE IF NOT EXISTS `" + tdengineConfig.getDatabase() + "`.`" + tapTable.getId() + "` (" + TDengineSqlMaker.buildColumnDefinition(tapTable, timestamp);
+        String timestamp = getTimestampColumn(tapTable);
+        String sql = "CREATE " + (tdengineConfig.getSupportSuperTable() ? "S" : "") + "TABLE IF NOT EXISTS `"
+                + tdengineConfig.getDatabase() + "`.`" + tapTable.getId() + "` (" +
+                TDengineSqlMaker.buildColumnDefinition(tapTable, timestamp, tdengineConfig.getSupportSuperTable() ? tdengineConfig.getSuperTableTags() : Collections.emptyList());
         sql += ")";
+        if (tdengineConfig.getSupportSuperTable()) {
+            sql += " TAGS (" + tdengineConfig.getSuperTableTags().stream().map(v -> {
+                StringBuilder builder = new StringBuilder();
+                TapField tapField = tapTable.getNameFieldMap().get(v);
+                //ignore those which has no dataType
+                if (tapField.getDataType() == null) {
+                    return "";
+                }
+                builder.append('`').append(tapField.getName()).append("` ").append(tapField.getDataType()).append(' ');
+                return builder.toString();
+            }).collect(Collectors.joining(", ")) + ")";
+        }
         try {
             List<String> sqls = TapSimplify.list();
             sqls.add(sql);
             //comment on table and column
             if (EmptyKit.isNotNull(tapTable.getComment())) {
-                sqls.add("COMMENT '" + tapTable.getComment() + "'");
+                sqls.add(" COMMENT '" + tapTable.getComment() + "'");
             }
             tdengineJdbcContext.batchExecute(sqls);
         } catch (Throwable e) {
@@ -181,7 +203,7 @@ public class TDengineConnector extends ConnectorBase {
     private void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws Throwable {
         String tableId = tapClearTableEvent.getTableId();
         if (tdengineJdbcContext.tableExists(tableId)) {
-            String sql = String.format("DELETE FROM %s.%s", tdengineConfig.getDatabase(), tableId);
+            String sql = String.format("DELETE FROM `%s`.`%s`", tdengineConfig.getDatabase(), tableId);
             tdengineJdbcContext.execute(sql);
         } else {
             TapLogger.warn(TAG, "Table \"{}.{}\" not exists, will skip clear table", tdengineConfig.getDatabase(), tableId);
@@ -190,7 +212,7 @@ public class TDengineConnector extends ConnectorBase {
 
     private void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws Throwable {
         String tableId = tapDropTableEvent.getTableId();
-        String sql = String.format("DROP TABLE IF EXISTS %s.%s", tdengineConfig.getDatabase(), tableId);
+        String sql = String.format("DROP TABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId);
         tdengineJdbcContext.execute(sql);
     }
 
@@ -203,12 +225,16 @@ public class TDengineConnector extends ConnectorBase {
         if (updateDmlPolicy == null) {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
-        DataMap nodeConfigMap = tapConnectorContext.getNodeConfig();
-        String timestamp = nodeConfigMap.getString("timestamp");
-        new TDengineRecordWriter(tdengineJdbcContext, tapTable, timestamp)
-                .setInsertPolicy(insertDmlPolicy)
-                .setUpdatePolicy(updateDmlPolicy)
-                .write(tapRecordEvents, consumer);
+        String timestamp = getTimestampColumn(tapTable);
+        if (tdengineConfig.getSupportSuperTable()) {
+            new TDengineSuperRecordWriter(tdengineJdbcContext, tapTable)
+                    .write(tapRecordEvents, consumer, this::isAlive);
+        } else {
+            new TDengineRecordWriter(tdengineJdbcContext, tapTable, timestamp)
+                    .setInsertPolicy(insertDmlPolicy)
+                    .setUpdatePolicy(updateDmlPolicy)
+                    .write(tapRecordEvents, consumer);
+        }
     }
 
     private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offset, int batchSize, BiConsumer<List<TapEvent>, Object> consumer) throws Throwable {
@@ -233,19 +259,10 @@ public class TDengineConnector extends ConnectorBase {
     }
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
-        List<TapEvent> tapEvents = list();
-        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tables, offset);
-        consumer.streamReadStarted();
-        DataMap nodeConfigMap = tapConnectorContext.getNodeConfig();
-        String timestamp = nodeConfigMap.getString("timestamp");
-        tDengineSubscribe.subscribe((record, tableName) -> {
-            TapInsertRecordEvent tapInsertRecordEvent = insertRecordEvent(record, tableName);
-            String timeString = record.get(timestamp).toString();
-            Timestamp timestamp1 = Timestamp.valueOf(timeString);
-            tapInsertRecordEvent.setReferenceTime(timestamp1.getTime());
-            tapEvents.add(tapInsertRecordEvent);
-            consumer.accept(tapEvents, offset);
-        }, consumer::streamReadEnded);
+        createTopic(tables, false);
+        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
+        tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
+        tDengineSubscribe.subscribe(this::isAlive);
     }
 
     private long batchCount(TapConnectorContext tapConnectorContext, TapTable tapTable) throws Throwable {
@@ -256,7 +273,44 @@ public class TDengineConnector extends ConnectorBase {
     }
 
     private Object timestampToStreamOffset(TapConnectorContext tapConnectorContext, Long startTime) throws Throwable {
+        if (EmptyKit.isNotNull(startTime)) {
+            throw new RuntimeException("TDEngine connector does not support timestamp to stream offset");
+        }
+        List<String> tables = new ArrayList<>();
+        io.tapdata.entity.utils.cache.Iterator<Entry<TapTable>> iterator = tapConnectorContext.getTableMap().iterator();
+        while (iterator.hasNext()) {
+            tables.add(iterator.next().getValue().getId());
+        }
+        createTopic(tables, true);
+        tapConnectorContext.getStateMap().put("tap_topic", tables);
         return new TDengineOffset();
+    }
+
+    private void createTopic(List<String> tables, boolean canReplace) throws SQLException {
+        List<String> createSqls = new ArrayList<>();
+        if (EmptyKit.isEmpty(tables)) {
+            throw new RuntimeException("tables is empty");
+        }
+        for (String tableName : tables) {
+            String topic = "tap_topic_" + tableName;
+            if (canReplace) {
+                createSqls.add(String.format("drop topic if exists %s", topic));
+            }
+            createSqls.add(String.format("create topic if not exists %s as select * from %s", topic, tableName));
+        }
+        tdengineJdbcContext.batchExecute(createSqls);
+    }
+
+    private void dropTopic(List<String> tables) throws SQLException {
+        List<String> dropSqls = new ArrayList<>();
+        if (EmptyKit.isEmpty(tables)) {
+            return;
+        }
+        for (String tableName : tables) {
+            String topic = "tap_topic_" + tableName;
+            dropSqls.add(String.format("drop topic if exists %s", topic));
+        }
+        tdengineJdbcContext.batchExecute(dropSqls);
     }
 
     //one filter can only match one record
@@ -313,19 +367,17 @@ public class TDengineConnector extends ConnectorBase {
         }
     }
 
-    private void releaseExternal(TapConnectorContext tapConnectorContext) {
+    private void releaseExternal(TapConnectorContext tapConnectorContext) throws Exception {
         try {
-            KVMap<Object> stateMap = tapConnectorContext.getStateMap();
-            if (null != stateMap) {
-                stateMap.clear();
-            }
-        } catch (Throwable throwable) {
-            TapLogger.warn(TAG, "Release tdengine state map failed, error: " + throwable.getMessage());
+            onStart(tapConnectorContext);
+            dropTopic((List<String>) tapConnectorContext.getStateMap().get("tap_topic"));
+        } finally {
+            onStop(tapConnectorContext);
         }
     }
 
     @Override
-    public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
+    public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) {
         //get table info
         List<DataMap> tableList = tdengineJdbcContext.queryAllTables(tables);
         //paginate by tableSize
@@ -373,7 +425,7 @@ public class TDengineConnector extends ConnectorBase {
     }
 
     @Override
-    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws Throwable {
+    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
         tdengineConfig = (TDengineConfig) new TDengineConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(tdengineConfig.getConnectionString());

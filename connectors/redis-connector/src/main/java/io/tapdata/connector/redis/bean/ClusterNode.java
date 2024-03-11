@@ -73,4 +73,16 @@ public class ClusterNode {
     public void setEndSlot(Long endSlot) {
         this.endSlot = endSlot;
     }
+
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("master:").append(master).append(", beginSlot:").append(beginSlot).append(", endSlot:").append(endSlot);
+        if (slaves != null) {
+            sb.append(", slaves:");
+            for (HostAndPort slave : slaves) {
+                sb.append(slave).append(",");
+            }
+        }
+        return sb.toString();
+    }
 }

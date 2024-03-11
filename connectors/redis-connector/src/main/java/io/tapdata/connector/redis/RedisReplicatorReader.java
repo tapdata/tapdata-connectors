@@ -24,6 +24,7 @@ import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.control.StopEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -58,20 +59,24 @@ public class RedisReplicatorReader implements AutoCloseable {
     private final AtomicReference<Throwable> exceptionRef = new AtomicReference<>();
     private Map<HostAndPort, RedisOffset> offsetMap = new ConcurrentHashMap<>();
     private final Map<String, HostAndPort> replIdMap = new ConcurrentHashMap<>();
+    private final Log tapLogger;
 
-    public RedisReplicatorReader(RedisContext redisContext, String connectorId) {
+    public RedisReplicatorReader(RedisContext redisContext, String connectorId, Log tapLogger) {
         this.redisContext = redisContext;
         this.redisConfig = redisContext.getRedisConfig();
         this.connectorId = connectorId;
+        this.tapLogger = tapLogger;
         init();
     }
 
     private void init() {
         if (DeployModeEnum.fromString(redisConfig.getDeploymentMode()) == DeployModeEnum.CLUSTER) {
             clusterNodes = generateClusterNodes();
+            tapLogger.info("discover clusterNodes: " + clusterNodes.stream().map(ClusterNode::toString).collect(Collectors.joining(",")));
             executorService = Executors.newFixedThreadPool(clusterNodes.size());
         } else {
             clusterNodes = new ArrayList<>();
+            tapLogger.info("discover no cluster");
             executorService = Executors.newFixedThreadPool(1);
         }
     }
@@ -120,6 +125,7 @@ public class RedisReplicatorReader implements AutoCloseable {
             AtomicReference<String> replId = new AtomicReference<>();
             DefaultDumpValueParser parser = new DefaultDumpValueParser(redisReplicator);
             redisReplicator.addEventListener((replicator, event) -> {
+                tapLogger.debug("thread Name: " + Thread.currentThread().getName() + ", redis event type: " + event.getClass().getSimpleName());
                 if (!isAlive.get()) {
                     EmptyKit.closeAsyncQuietly(redisReplicator);
                     return;
@@ -170,6 +176,7 @@ public class RedisReplicatorReader implements AutoCloseable {
             RedisUtil.dress(redisReplicator);
             AtomicReference<String> replId = new AtomicReference<>();
             AtomicLong offsetV1 = new AtomicLong();
+            DefaultDumpValueParser parser = new DefaultDumpValueParser(redisReplicator);
             if (EmptyKit.isNotNull(redisOffset)) {
                 replId.set(redisOffset.getReplId());
                 offsetV1.set(redisOffset.getOffsetV1());
@@ -219,6 +226,20 @@ public class RedisReplicatorReader implements AutoCloseable {
                             replId.set(auxField.getAuxValue());
                             replIdMap.put(replId.get(), node);
                         }
+                    } else if (event instanceof DumpKeyValuePair) {
+                        DumpKeyValuePair dumpEvent = (DumpKeyValuePair) event;
+                        if (dumpEvent.getDb().getDbNumber() != redisConfig.getDatabase()) {
+                            return;
+                        }
+                        Map<String, Object> after = TapSimplify.map(TapSimplify.entry("redis_key", new String(dumpEvent.getKey())));
+                        if (dumpEvent.getValue().length > 10240) {
+                            after.put("redis_value", "value too large, check info");
+                        } else {
+                            after.put("redis_value", dumpValueToJson(parser.parse(dumpEvent).getValue()));
+                        }
+                        TapRecordEvent recordEvent = new TapInsertRecordEvent().init().table(table).after(after).referenceTime(System.currentTimeMillis());
+                        recordEvent.addInfo("redis_event", dumpEvent);
+                        enqueueEvent(recordEvent, null);
                     } else if (event instanceof PingCommand) {
                         enqueueEvent(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis()), new RedisOffset(replId.get(), offsetV1.get()));
                     }
@@ -270,6 +291,9 @@ public class RedisReplicatorReader implements AutoCloseable {
                 }
             }
         }
+        if (EmptyKit.isNotNull(exceptionRef.get())) {
+            throw exceptionRef.get();
+        }
         if (EmptyKit.isNotEmpty(eventList)) {
             eventsOffsetConsumer.accept(eventList, new HashMap<>());
         }
@@ -305,7 +329,9 @@ public class RedisReplicatorReader implements AutoCloseable {
                     isFinish = true;
                 }
             } else {
-                offsetMap.put(replIdMap.get(event.getOffset().getReplId()), event.getOffset());
+                if (EmptyKit.isNotNull(event.getOffset())){
+                    offsetMap.put(replIdMap.get(event.getOffset().getReplId()), event.getOffset());
+                }
                 eventList.add(event.getEvent());
                 if (eventList.size() >= recordSize) {
                     consumer.accept(eventList, offsetMap);
@@ -337,6 +363,9 @@ public class RedisReplicatorReader implements AutoCloseable {
                 configuration.setReplOffset(redisOffset.getOffsetV1());
             }
             configuration.setSlavePort(slavePort);
+            if (StringUtils.isNotBlank(redisConfig.getUsername())) {
+                configuration.setAuthUser(redisConfig.getUsername());
+            }
             if (StringUtils.isNotBlank(redisConfig.getPassword())) {
                 configuration.setAuthPassword(redisConfig.getPassword());
             }

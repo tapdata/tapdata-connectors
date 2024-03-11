@@ -80,7 +80,7 @@ public class PostgresDebeziumConfig {
                 .with("database.hostname", postgresConfig.getHost())
                 .with("database.port", postgresConfig.getPort())
                 .with("database.user", postgresConfig.getUser())
-                .with("database.password", postgresConfig.getPassword())
+                .with("database.password", EmptyKit.isNull(postgresConfig.getPassword()) ? "" : postgresConfig.getPassword())
                 .with("database.dbname", postgresConfig.getDatabase())
                 .with("time.precision.mode", "connect")
                 .with("transforms.tsFormat1.type", "org.apache.kafka.connect.transforms.TimestampConverter$Value")
@@ -103,6 +103,7 @@ public class PostgresDebeziumConfig {
                 .with("geometry.schema.name", "io.debezium.postgresql.type.Geometry")
                 .with("other.type", "io.tapdata.connector.postgres.converters.OtherConverter")
                 .with("other.schema.name", "io.debezium.postgresql.type.Other")
+                .with("heartbeat.interval.ms", 3000)
                 .with("plugin.name", postgresConfig.getLogPluginName());
         if (EmptyKit.isNotEmpty(observedTableList)) {
             //construct tableWhiteList with schema.table(,) as <public.Student,postgres.test>

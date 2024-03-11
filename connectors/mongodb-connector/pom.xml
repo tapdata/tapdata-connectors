@@ -13,7 +13,7 @@
 
     <properties>
         <java.version>8</java.version>
-        <tapdata.pdk.api.version>1.2.7-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.3.3-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
     <dependencies>
         <dependency>
@@ -40,7 +40,7 @@
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongodb-driver-sync</artifactId>
-            <version>4.5.1</version>
+            <version>4.9.1</version>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
@@ -73,13 +73,38 @@
         <dependency>
             <groupId>com.alibaba</groupId>
             <artifactId>fastjson</artifactId>
-            <version>1.2.76</version>
+            <version>1.2.83</version>
         </dependency>
 
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>pdk-error-code</artifactId>
             <scope>provided</scope>
+        </dependency>
+
+        <!-- Mockito -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-inline</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.bytebuddy</groupId>
+            <artifactId>byte-buddy</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.bytebuddy</groupId>
+            <artifactId>byte-buddy-agent</artifactId>
         </dependency>
 
     </dependencies>

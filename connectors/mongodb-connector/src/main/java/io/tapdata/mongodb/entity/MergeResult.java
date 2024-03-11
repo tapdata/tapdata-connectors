@@ -9,59 +9,59 @@ import org.bson.Document;
  **/
 public class MergeResult {
 
-		private Document filter = new Document();
+	private Document filter = new Document();
 
-		private Document update = new Document();;
+	private Document update = new Document();
 
-		private UpdateOptions updateOptions = new UpdateOptions();
+	private UpdateOptions updateOptions = new UpdateOptions();
 
-		private Document insert = new Document();;
+	private Document insert = new Document();
 
-		private Operation operation;
+	private Operation operation;
 
-		public Operation getOperation() {
-				return operation;
-		}
+	public Operation getOperation() {
+		return operation;
+	}
 
-		public Document getFilter() {
-				return filter;
-		}
+	public Document getFilter() {
+		return filter;
+	}
 
-		public Document getUpdate() {
-				return update;
-		}
+	public Document getUpdate() {
+		return update;
+	}
 
-		public UpdateOptions getUpdateOptions() {
-				return updateOptions;
-		}
+	public UpdateOptions getUpdateOptions() {
+		return updateOptions;
+	}
 
-		public Document getInsert() {
-				return insert;
-		}
+	public Document getInsert() {
+		return insert;
+	}
 
-		public void setFilter(Document filter) {
-				this.filter = filter;
-		}
+	public void setFilter(Document filter) {
+		this.filter = filter;
+	}
 
-		public void setUpdate(Document update) {
-				this.update = update;
-		}
+	public void setUpdate(Document update) {
+		this.update = update;
+	}
 
-		public void setUpdateOptions(UpdateOptions updateOptions) {
-				this.updateOptions = updateOptions;
-		}
+	public void setUpdateOptions(UpdateOptions updateOptions) {
+		this.updateOptions = updateOptions;
+	}
 
-		public void setInsert(Document insert) {
-				this.insert = insert;
-		}
+	public void setInsert(Document insert) {
+		this.insert = insert;
+	}
 
-		public void setOperation(Operation operation) {
-				this.operation = operation;
-		}
+	public void setOperation(Operation operation) {
+		this.operation = operation;
+	}
 
-		public enum Operation{
-				INSERT,
-				UPDATE,
-				DELETE
-		}
+	public enum Operation {
+		INSERT,
+		UPDATE,
+		DELETE
+	}
 }
