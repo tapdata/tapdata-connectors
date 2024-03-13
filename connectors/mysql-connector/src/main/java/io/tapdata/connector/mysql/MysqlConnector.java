@@ -516,11 +516,11 @@ public class MysqlConnector extends CommonDbConnector {
         return sql.toString();
     }
 
-    protected void queryTableHash(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<TapHashResult> consumer) throws Throwable {
+    protected void queryTableHash(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<TapHashResult<String>> consumer) throws Throwable {
         String sql = buildHashSql(filter, table);
         jdbcContext.query(sql, resultSet -> {
             if (isAlive() && resultSet.next()) {
-                consumer.accept(TapHashResult.create().withHash(resultSet.getLong(1)));
+                consumer.accept(TapHashResult.create().withHash(resultSet.getString(1)));
             }});
     }
 }
