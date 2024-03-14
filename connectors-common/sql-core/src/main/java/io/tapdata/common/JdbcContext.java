@@ -262,16 +262,50 @@ public abstract class JdbcContext implements AutoCloseable {
             hikariDataSource.setJdbcUrl(config.getDatabaseUrl());
             hikariDataSource.setUsername(config.getUser());
             hikariDataSource.setPassword(config.getPassword());
+            hikariDataSource.setMinimumIdle(getInteger(config.getDatabaseUrl(), "Min Idle",20));
+            hikariDataSource.setMaximumPoolSize(getInteger(config.getDatabaseUrl(), "Max Pool Size",20));
             if (EmptyKit.isNotNull(config.getProperties())) {
                 hikariDataSource.setDataSourceProperties(config.getProperties());
             }
-            hikariDataSource.setMinimumIdle(1);
-            hikariDataSource.setMaximumPoolSize(20);
             hikariDataSource.setAutoCommit(false);
             hikariDataSource.setIdleTimeout(60 * 1000L);
             hikariDataSource.setKeepaliveTime(60 * 1000L);
             hikariDataSource.setMaxLifetime(600 * 1000L);
             return hikariDataSource;
+        }
+
+        protected static String getParamFromUrl(String databaseUrl, String tag){
+            if (null == databaseUrl || null == tag) return null;
+            if (databaseUrl.contains(tag)) {
+                int index = databaseUrl.indexOf(tag) + tag.length();
+                int end = databaseUrl.indexOf(";", index);
+                if (end < 0) {
+                    end = databaseUrl.length();
+                }
+                String substring = databaseUrl.substring(index, end);
+                substring = replaceAll(replaceAll(substring,"=", "")," ", "");
+                return substring;
+            }
+            return null;
+        }
+
+        protected static int getInteger(String databaseUrl, String tag, int defaultValue) {
+            try {
+                String valueStr = getParamFromUrl(databaseUrl, tag);
+                if (null != valueStr && !"".equals(valueStr)) {
+                    return Integer.parseInt(valueStr);
+                }
+                return defaultValue;
+            } catch (NumberFormatException ignore) {
+                return defaultValue;
+            }
+        }
+
+        public static String replaceAll(String str, String old, String to) {
+            while (str.contains(old)) {
+                str = str.replace(old, to);
+            }
+            return str;
         }
     }
 }
