@@ -5,6 +5,7 @@ import com.zaxxer.hikari.pool.HikariProxyStatement;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.JdbcContext;
 import io.tapdata.common.ResultSetConsumer;
+import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
@@ -44,6 +45,9 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     }
 
     public TimeZone queryTimeZone() throws SQLException {
+        if (EmptyKit.isNotBlank(((MysqlConfig) getConfig()).getTimezone())) {
+            return TimeZone.getTimeZone(ZoneId.of(((MysqlConfig) getConfig()).getTimezone()));
+        }
         AtomicReference<Long> timeOffset = new AtomicReference<>();
         queryWithNext(MYSQL_TIMEZONE, resultSet -> timeOffset.set(resultSet.getLong(1)));
         DecimalFormat decimalFormat = new DecimalFormat("00");
@@ -220,7 +224,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     private final static String MYSQL_VERSION = "SELECT VERSION()";
 
-    private final static String MYSQL_TIMEZONE = "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()) as timeoffset";
+    public final static String MYSQL_TIMEZONE = "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()) as timeoffset";
 
     private static final String GET_TABLE_INFO_SQL = "SELECT TABLE_ROWS,DATA_LENGTH  FROM information_schema.tables WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='%s'";
 

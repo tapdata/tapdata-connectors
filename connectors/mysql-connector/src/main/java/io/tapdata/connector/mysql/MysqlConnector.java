@@ -24,7 +24,6 @@ import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -101,13 +100,16 @@ public class MysqlConnector extends CommonDbConnector {
 
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
             if (tapDateTimeValue.getValue() != null && tapDateTimeValue.getValue().getTimeZone() == null) {
-                tapDateTimeValue.getValue().setTimeZone(timezone);
+                if ("timestamp".equals(tapDateTimeValue.getOriginType())) {
+                    tapDateTimeValue.getValue().setTimeZone(timezone);
+                }
             }
             return formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS");
         });
+        //date类型通过jdbc读取时，会自动转换为当前时区的时间，所以设置为当前时区
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
             if (tapDateValue.getValue() != null && tapDateValue.getValue().getTimeZone() == null) {
-                tapDateValue.getValue().setTimeZone(timezone);
+                tapDateValue.getValue().setTimeZone(TimeZone.getDefault());
             }
             return formatTapDateTime(tapDateValue.getValue(), "yyyy-MM-dd");
         });
