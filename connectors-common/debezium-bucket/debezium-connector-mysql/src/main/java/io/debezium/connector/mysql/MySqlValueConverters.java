@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import io.debezium.connector.mysql.utils.CharsetMappingUtil;
 import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
@@ -147,7 +148,6 @@ public class MySqlValueConverters extends JdbcValueConverters {
      *            {@link io.debezium.jdbc.JdbcValueConverters.BigIntUnsignedMode#PRECISE} is to be used
      * @param binaryMode how binary columns should be represented
      * @param adjuster a temporal adjuster to make a database specific time modification before conversion
-     * @param handler for errors during postponed binlog parsing
      */
     public MySqlValueConverters(DecimalMode decimalMode, TemporalPrecisionMode temporalPrecisionMode, BigIntUnsignedMode bigIntUnsignedMode,
                                 BinaryHandlingMode binaryMode,
@@ -328,10 +328,10 @@ public class MySqlValueConverters extends JdbcValueConverters {
             logger.warn("Column is missing a character set: {}", column);
             return null;
         }
-        String encoding = CharsetMapping.getJavaEncodingForMysqlCharset(mySqlCharsetName);
+        String encoding = CharsetMappingUtil.getJavaEncodingForMysqlCharset(mySqlCharsetName);
         if (encoding == null) {
             logger.debug("Column uses MySQL character set '{}', which has no mapping to a Java character set, will try it in lowercase", mySqlCharsetName);
-            encoding = CharsetMapping.getJavaEncodingForMysqlCharset(mySqlCharsetName.toLowerCase());
+            encoding = CharsetMappingUtil.getJavaEncodingForMysqlCharset(mySqlCharsetName.toLowerCase());
         }
         if (encoding == null) {
             logger.warn("Column uses MySQL character set '{}', which has no mapping to a Java character set", mySqlCharsetName);

@@ -32,6 +32,10 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           echo "BRANCH=${{ github.event.pull_request.head.ref }}" >> $GITHUB_ENV
+      - name: Get Connectors Enterprise Branch Name -- Schedule
+        if: github.event_name == 'schedule'
+        run: |
+          echo "BRANCH=develop" >> $GITHUB_ENV
       - name: output branch name
         id: get_branch
         run: |
