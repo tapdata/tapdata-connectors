@@ -58,7 +58,6 @@ import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -632,25 +631,22 @@ public class MysqlReader implements Closeable {
         ZonedDateTime fromZonedDateTime = dt.atZone(DB_TIME_ZONE.toZoneId());
         ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
         if (tapType instanceof TapDateTime) {
+            long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
             if (value instanceof Long) {
                 int fraction = ((TapDateTime) tapType).getFraction();
-                long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
                 if (fraction > 3) {
-                    value = ((Long) value + diff * 1000) / (long) Math.pow(10, 6 - fraction);
+                    value = ((Long) value) / (long) Math.pow(10, 6 - fraction);
                 } else {
-                    value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
+                    value = ((Long) value) / (long) Math.pow(10, 3 - fraction);
                 }
             } else if (value instanceof String) {
                 try {
-                    value = Instant.parse((CharSequence) value);
+                    value = Instant.parse((CharSequence) value).getEpochSecond() + (TimeZone.getDefault().getRawOffset() + diff) / 1000;
                 } catch (Exception ignored) {
                 }
             }
-        } else if (tapType instanceof TapDate) {
-            if (value instanceof Integer) {
-                long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
-                value = (Integer) value * 24 * 60 * 60 * 1000L + diff;
-            }
+        } else if (tapType instanceof TapDate && (value instanceof Integer)) {
+            value = (Integer) value * 24 * 60 * 60 * 1000L;
         }
         return value;
     }
