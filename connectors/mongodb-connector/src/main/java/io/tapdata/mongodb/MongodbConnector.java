@@ -183,6 +183,10 @@ public class MongodbConnector extends ConnectorBase {
 									getRelateDatabaseField(connectionContext, tableFieldTypesGenerator, value, fieldName, table);
 								}
 							});
+							if (EmptyKit.isEmpty(table.getNameFieldMap())) {
+								TapField fieldOid = TapSimplify.field(COLLECTION_ID_FIELD, BsonType.OBJECT_ID.name()).primaryKeyPos(1);
+								table.add(fieldOid);
+							}
 						} catch (Exception e) {
 							TapLogger.error(TAG, "Use $sample load mongo connection {}'s {} schema failed {}, will use first row as data schema.",
 									MongodbUtil.maskUriPassword(mongoConfig.getUri()), name, e.getMessage(), e);
@@ -780,6 +784,7 @@ public class MongodbConnector extends ConnectorBase {
 		try {
 			Map<String, Object> executeObj = tapExecuteCommand.getParams();
 			String command = tapExecuteCommand.getCommand();
+			tapConnectorContext.getLog();
 			if (MapUtils.isNotEmpty(executeObj) && StringUtils.isEmpty((CharSequence) executeObj.get("database"))) {
 				executeObj.put("database", mongoConfig.getDatabase());
 			}
@@ -1142,6 +1147,7 @@ public class MongodbConnector extends ConnectorBase {
 			}
 		}
 		exceptionCollector = new MongodbExceptionCollector();
+		mongodbExecuteCommandFunction.setLog(connectionContext.getLog());
 	}
 
 	private void dropTable(TapConnectorContext connectorContext, TapDropTableEvent dropTableEvent) throws Throwable {
@@ -1573,10 +1579,6 @@ public class MongodbConnector extends ConnectorBase {
 			String tableName = collection.getString("name");
 			// 如果 tableName 以 "system." 开头, 则跳过(这是一些系统表)
 			if (tableName.startsWith("system.")) {
-				continue;
-			}
-
-			if (getMongoCollection(tableName).estimatedDocumentCount() <= 0) {
 				continue;
 			}
 			temp.add(tableName);
