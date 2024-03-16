@@ -539,6 +539,17 @@ public class MongodbMergeOperate {
 		}
 		switch (operation) {
 			case INSERT:
+				// Ensuring Array Idempotence, just for one level array
+				Document elemMatchDoc = new Document();
+				arrayKeys.forEach(key -> {
+					if (!array) {
+						elemMatchDoc.append(key, new Document("$eq", after.get(key)));
+					}
+				});
+				if (!elemMatchDoc.isEmpty()) {
+					mergeResult.getFilter().append(targetPath, new Document("$not", new Document("$elemMatch", elemMatchDoc)));
+				}
+
 				if (array) {
 					String[] paths = targetPath.split("\\.");
 					if (paths.length > 1) {
