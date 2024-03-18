@@ -8,7 +8,6 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.*;
-import io.tapdata.constant.AppType;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -25,12 +24,12 @@ import io.tapdata.mongodb.writer.error.BulkWriteErrorCodeHandlerEnum;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
+import io.tapdata.utils.AppType;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.bson.Document;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -60,7 +59,7 @@ public class MongodbWriter {
 		this.mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
 		this.connectionString = new ConnectionString(mongodbConfig.getUri());
 		this.mongodbConfig = mongodbConfig;
-		this.is_cloud = AppType.init().isCloud();
+		this.is_cloud = AppType.currentType().isCloud();
 		this.tapLogger = tapLogger;
 		this.shardKeyMap = shardKeyMap;
 	}
