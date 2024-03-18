@@ -24,7 +24,7 @@ public class SchemaConfiguration extends AbstractConfiguration {
         configMap.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, org.apache.kafka.common.serialization.ByteArrayDeserializer.class);
         configMap.put(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, (int) TimeUnit.SECONDS.toMillis(10L));
         configMap.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 0);
-        configMap.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1);
+        configMap.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10);
         configMap.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, 1024);
         configMap.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         return super.build();
