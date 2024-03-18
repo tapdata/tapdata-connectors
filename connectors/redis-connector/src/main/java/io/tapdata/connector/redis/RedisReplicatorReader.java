@@ -316,20 +316,27 @@ public class RedisReplicatorReader implements AutoCloseable {
         boolean isFinish = false;
         List<TapEvent> eventList = TapSimplify.list();
         OffsetRedisEvent event;
+        int timeout = 0;
         while (isAlive.get()) {
             if (EmptyKit.isNotNull(exceptionRef.get())) {
                 throw exceptionRef.get();
             }
             event = eventQueue.poll(1, TimeUnit.SECONDS);
             if (event == null) {
+                timeout++;
                 if (isFinish) {
                     break;
                 }
                 if (countDownLatch.await(500, TimeUnit.MILLISECONDS)) {
                     isFinish = true;
                 }
+                if (timeout > 3 && EmptyKit.isNotEmpty(eventList)) {
+                    consumer.accept(eventList, offsetMap);
+                    timeout = 0;
+                    eventList.clear();
+                }
             } else {
-                if (EmptyKit.isNotNull(event.getOffset())){
+                if (EmptyKit.isNotNull(event.getOffset())) {
                     offsetMap.put(replIdMap.get(event.getOffset().getReplId()), event.getOffset());
                 }
                 eventList.add(event.getEvent());
