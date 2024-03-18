@@ -34,7 +34,6 @@ import io.tapdata.mongodb.writer.MongodbWriter;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
-import io.tapdata.pdk.apis.context.ConfigContext;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
@@ -1178,10 +1177,13 @@ public class MongodbConnector extends ConnectorBase {
 		}
 	}
 
-	private Boolean isShard(String tableId){
-		Document document = mongoDatabase.runCommand(new Document("collStats",tableId));
-		if(document.containsKey("sharded")){
-			return (Boolean)document.get("sharded");
+	private Boolean isShard(String tableId) {
+		try {
+			Document document = mongoDatabase.runCommand(new Document("collStats", tableId));
+			if (document.containsKey("sharded")) {
+				return (Boolean) document.get("sharded");
+			}
+		} catch (Exception ignored) {
 		}
 		return false;
 	}
