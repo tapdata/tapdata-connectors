@@ -24,6 +24,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.exception.StopException;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.kit.StringKit;
@@ -44,9 +45,7 @@ import javax.script.ScriptEngine;
 import javax.script.ScriptException;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -175,11 +174,57 @@ public class KafkaService extends AbstractMqService {
             }
         }
         SchemaConfiguration schemaConfiguration = new SchemaConfiguration(((KafkaConfig) mqConfig), connectorId);
-        submitPageTables(tableSize, consumer, schemaConfiguration, destinationSet);
+        multiThreadDiscoverSchema(new ArrayList<>(destinationSet), tableSize, consumer, schemaConfiguration);
     }
 
-    protected void submitPageTables(int tableSize, Consumer<List<TapTable>> consumer, SchemaConfiguration schemaConfiguration, Set<String> destinationSet) {
-        List<List<String>> tablesList = Lists.partition(new ArrayList<>(destinationSet), tableSize);
+    protected void multiThreadDiscoverSchema(List<String> tables, int tableSize, Consumer<List<TapTable>> consumer, SchemaConfiguration schemaConfiguration) {
+        CopyOnWriteArraySet<List<String>> tableLists = new CopyOnWriteArraySet<>(DbKit.splitToPieces(tables, tableSize));
+        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        CountDownLatch countDownLatch = new CountDownLatch(20);
+        ExecutorService executorService = Executors.newFixedThreadPool(20);
+        try {
+            for (int i = 0; i < 20; i++) {
+                executorService.submit(() -> {
+                    try {
+                        List<String> subList;
+                        while ((subList = getOutTableList(tableLists)) != null) {
+                            submitPageTables(tableSize, consumer, schemaConfiguration, subList);
+                        }
+                    } catch (Exception e) {
+                        throwable.set(e);
+                    } finally {
+                        countDownLatch.countDown();
+                    }
+                });
+            }
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            if (EmptyKit.isNotNull(throwable.get())) {
+                throw new RuntimeException(throwable.get());
+            }
+        } finally {
+            executorService.shutdown();
+        }
+    }
+
+    private synchronized List<String> getOutTableList(CopyOnWriteArraySet<List<String>> tableLists) {
+        if (EmptyKit.isNotEmpty(tableLists)) {
+            List<String> list = tableLists.stream().findFirst().orElseGet(ArrayList::new);
+            tableLists.remove(list);
+            return list;
+        }
+        return null;
+    }
+
+    protected synchronized void syncSchemaSubmit(List<TapTable> tapTables, Consumer<List<TapTable>> consumer) {
+        consumer.accept(tapTables);
+    }
+
+    protected void submitPageTables(int tableSize, Consumer<List<TapTable>> consumer, SchemaConfiguration schemaConfiguration, List<String> destinationSet) {
+        List<List<String>> tablesList = Lists.partition(destinationSet, tableSize);
         Map<String, Object> config = schemaConfiguration.build();
         try (
                 KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(config)
@@ -223,7 +268,7 @@ public class KafkaService extends AbstractMqService {
                     kafkaConsumer.subscribe(topics);
                 }
                 topics.stream().map(TapTable::new).forEach(tableList::add);
-                consumer.accept(tableList);
+                syncSchemaSubmit(tableList, consumer);
             });
         }
     }
@@ -449,6 +494,7 @@ public class KafkaService extends AbstractMqService {
             writeListResultConsumer.accept(listResult.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get()));
         }
     }
+
     protected String initBuildInMethod() {
         StringBuilder buildInMethod = new StringBuilder();
         buildInMethod.append("var DateUtil = Java.type(\"com.tapdata.constant.DateUtil\");\n");
@@ -473,6 +519,7 @@ public class KafkaService extends AbstractMqService {
                 "}\n");
         return buildInMethod.toString();
     }
+
     @Override
     public void produce(TapFieldBaseEvent tapFieldBaseEvent) {
         AtomicReference<Throwable> reference = new AtomicReference<>();
