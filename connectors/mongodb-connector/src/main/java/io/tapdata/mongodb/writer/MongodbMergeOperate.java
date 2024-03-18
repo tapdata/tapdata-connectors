@@ -539,18 +539,16 @@ public class MongodbMergeOperate {
 		}
 		switch (operation) {
 			case INSERT:
-				mergeResult.getFilter().append("$or", Optional.of(arrayKeys).map(keys -> {
-					List<Document> orList = new ArrayList<>();
-					for (String arrayKey : keys) {
-						if (array && targetPath.split("\\.").length > 1) {
-							for (Map<String, String> joinKey : currentProperty.getJoinKeys()) {
-								mergeResult.getFilter().append(joinKey.get("target"), after.get(joinKey.get("source")));
-							}
-						}
-						orList.add(new Document(targetPath + "." + arrayKey, new Document("$ne", after.get(arrayKey))));
+				// Ensuring Array Idempotence, just for one level array
+				Document elemMatchDoc = new Document();
+				arrayKeys.forEach(key -> {
+					if (!array) {
+						elemMatchDoc.append(key, new Document("$eq", after.get(key)));
 					}
-					return orList;
-				}).get());
+				});
+				if (!elemMatchDoc.isEmpty()) {
+					mergeResult.getFilter().append(targetPath, new Document("$not", new Document("$elemMatch", elemMatchDoc)));
+				}
 
 				if (array) {
 					String[] paths = targetPath.split("\\.");
