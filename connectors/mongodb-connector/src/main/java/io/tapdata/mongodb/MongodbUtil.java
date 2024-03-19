@@ -71,43 +71,51 @@ public class MongodbUtil {
 	public static Map<String, Object> getCollectionStatus(MongoClient mongoClient, String database, String collectionName) {
 		Map<String, Object> map = new HashMap<>();
 		if (null == mongoClient || null == database || "".equals(database.trim()) || null == collectionName || "".equals(collectionName.trim())) return map;
-		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
-		Document collStats = mongoDatabase.runCommand(new BsonDocument(COLL_STATS, new BsonString(collectionName)));
-		Set<Map.Entry<String, Object>> entries = collStats.entrySet();
-		if (null != entries && !entries.isEmpty()) {
-			collStats.entrySet()
-					.stream()
-					.filter(Objects::nonNull)
-					.forEach(entry ->
-							map.put(entry.getKey(), entry.getValue())
-					);
+		try {
+			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
+			Document collStats = mongoDatabase.runCommand(new BsonDocument(COLL_STATS, new BsonString(collectionName)));
+			Set<Map.Entry<String, Object>> entries = collStats.entrySet();
+			if (null != entries && !entries.isEmpty()) {
+				collStats.entrySet()
+						.stream()
+						.filter(Objects::nonNull)
+						.forEach(entry ->
+								map.put(entry.getKey(), entry.getValue())
+						);
+			}
+		}catch (Exception e){
+			return map;
 		}
 		return map;
 	}
 
 	public static void getTimeSeriesCollectionStatus(MongoClient mongoClient, String database, String collectionName, TapTable table ){
 		if (null == mongoClient || null == database || "".equals(database.trim()) || null == collectionName || "".equals(collectionName.trim())) return ;
-		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
-		BsonDocument bsonDocument = new BsonDocument();
-		bsonDocument.put("listCollections", new BsonInt32(1));
-		bsonDocument.put("filter",new BsonDocument( "name", new BsonString(collectionName)));
-		Document cursor = (Document) mongoDatabase.runCommand(bsonDocument).get("cursor");
-		if(cursor != null && cursor.get("firstBatch")!= null){
-			if(table.getTableAttr() == null)table.setTableAttr(new HashMap<>());
-		    List<Document> firstBatch =(List<Document>) cursor.get("firstBatch");
-			Document first = firstBatch.stream().findFirst().orElse(null);
-			if (first != null && first.get("type").equals("timeseries") && first.get("options") != null){
-				Document timeSeries =(Document)first.get("options");
-				Set<Map.Entry<String, Object>> entries = ((Document)timeSeries.get("timeseries")).entrySet();
-				if (!entries.isEmpty()) {
-					Map<String, Object> finalTableAttr = table.getTableAttr();
-					entries.stream()
-							.filter(Objects::nonNull)
-							.forEach(entry ->
-									finalTableAttr.put(entry.getKey(), entry.getValue())
-							);
+		try {
+			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
+			BsonDocument bsonDocument = new BsonDocument();
+			bsonDocument.put("listCollections", new BsonInt32(1));
+			bsonDocument.put("filter",new BsonDocument( "name", new BsonString(collectionName)));
+			Document cursor = (Document) mongoDatabase.runCommand(bsonDocument).get("cursor");
+			if(cursor != null && cursor.get("firstBatch")!= null){
+				if(table.getTableAttr() == null)table.setTableAttr(new HashMap<>());
+				List<Document> firstBatch =(List<Document>) cursor.get("firstBatch");
+				Document first = firstBatch.stream().findFirst().orElse(null);
+				if (first != null && first.get("type").equals("timeseries") && first.get("options") != null){
+					Document timeSeries =(Document)first.get("options");
+					Set<Map.Entry<String, Object>> entries = ((Document)timeSeries.get("timeseries")).entrySet();
+					if (!entries.isEmpty()) {
+						Map<String, Object> finalTableAttr = table.getTableAttr();
+						entries.stream()
+								.filter(Objects::nonNull)
+								.forEach(entry ->
+										finalTableAttr.put(entry.getKey(), entry.getValue())
+								);
+					}
 				}
 			}
+		}catch (Exception e){
+			return;
 		}
 	}
 
