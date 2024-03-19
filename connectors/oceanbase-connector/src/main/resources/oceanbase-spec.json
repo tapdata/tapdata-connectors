@@ -23,10 +23,19 @@
         "port": {
           "type": "string",
           "title": "${port}",
+          "default": 2881,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "apiServerKey": "database_port",
           "x-index": 2,
+          "required": true
+        },
+        "tenant": {
+          "type": "string",
+          "title": "${tenant}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 3,
           "required": true
         },
         "database": {
@@ -35,7 +44,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_name",
-          "x-index": 3,
+          "x-index": 4,
           "required": true
         },
         "user": {
@@ -44,7 +53,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_username",
-          "x-index": 4,
+          "x-index": 5,
           "required": true
         },
         "password": {
@@ -53,15 +62,35 @@
           "x-decorator": "FormItem",
           "x-component": "Password",
           "apiServerKey": "database_password",
-          "x-index": 5
+          "x-index": 6
         },
-        "addtionalString": {
+        "extParams": {
           "type": "string",
-          "title": "${addtionalString}",
+          "title": "${extParams}",
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "apiServerKey": "additionalString",
-          "x-index": 6
+          "apiServerKey": "extParams",
+          "x-index": 7
+        },
+        "rpcPort": {
+          "type": "string",
+          "title": "${rpcPort}",
+          "default": 2882,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "rpc_port",
+          "x-index": 8,
+          "required": true
+        },
+        "logProxyPort": {
+          "type": "string",
+          "title": "${logProxyPort}",
+          "default": 2983,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "proxy_port",
+          "x-index": 9,
+          "required": true
         },
         "timezone": {
           "type": "string",
@@ -69,7 +98,7 @@
           "default": "",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "x-index": 7,
+          "x-index": 10,
           "enum": [
             {
               "label": "Database Timezone",
@@ -189,30 +218,39 @@
     "en_US": {
       "host": "Host",
       "port": "Port",
+      "tenant": "Tenant",
       "database": "database",
       "user": "user",
       "password": "password",
       "extParams": "Connection Parameter String",
+      "rpcPort": "RPC Port",
+      "logProxyPort": "Log Proxy Port",
       "timezone": "timezone",
       "doc": "docs/mysql_en_US.md"
     },
     "zh_CN": {
       "host": "地址",
       "port": "端口",
+      "tenant": "租户",
       "database": "数据库",
       "user": "账号",
       "password": "密码",
       "extParams": "连接参数",
+      "rpcPort": "RPC端口",
+      "logProxyPort": "日志代理端口",
       "timezone": "时区",
       "doc": "docs/mysql_zh_CN.md"
     },
     "zh_TW": {
       "host": "地址",
       "port": "端口",
+      "tenant": "租戶",
       "database": "數據庫",
       "user": "賬號",
       "password": "密碼",
       "extParams": "連接參數",
+      "rpcPort": "RPC端口",
+      "logProxyPort": "日誌代理端口",
       "timezone": "時區",
       "doc": "docs/mysql_zh_TW.md"
     }

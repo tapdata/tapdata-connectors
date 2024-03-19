@@ -1,5 +1,10 @@
 package io.tapdata.oceanbase.connector;
 
+import com.oceanbase.clogproxy.client.LogProxyClient;
+import com.oceanbase.clogproxy.client.config.ObReaderConfig;
+import com.oceanbase.clogproxy.client.exception.LogProxyClientException;
+import com.oceanbase.clogproxy.client.listener.RecordListener;
+import com.oceanbase.oms.logmessage.LogMessage;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -14,6 +19,7 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.oceanbase.*;
 import io.tapdata.oceanbase.bean.OceanbaseConfig;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
+import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
@@ -24,7 +30,10 @@ import org.apache.commons.lang3.StringUtils;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * @author dayun
@@ -127,7 +136,11 @@ public class OceanbaseConnector extends CommonDbConnector {
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
-
+        connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
+        connectorFunctions.supportBatchCount(this::batchCount);
+        connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
+        connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
+        connectorFunctions.supportStreamRead(this::streamRead);
         //If database need insert record before table created, then please implement the below two methods.
         connectorFunctions.supportCreateTable(this::createTable);
         connectorFunctions.supportDropTable(this::dropTable);
@@ -271,4 +284,49 @@ public class OceanbaseConnector extends CommonDbConnector {
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("DATA_LENGTH")));
         return tableInfo;
     }
+
+    private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws SQLException {
+        if (EmptyKit.isNotNull(offsetStartTime)) {
+            return offsetStartTime;
+        }
+        AtomicLong offset = new AtomicLong(0);
+        oceanbaseJdbcContext.queryWithNext("select current_timestamp()", resultSet -> {
+            offset.set(resultSet.getTimestamp(1).getTime());
+        });
+        return offset.get();
+    }
+
+    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+        ObReaderConfig config = new ObReaderConfig();
+        config.setRsList(oceanbaseConfig.getHost() + ":" + oceanbaseConfig.getRpcPort() + ":" + oceanbaseConfig.getPort());
+        config.setUsername(oceanbaseConfig.getUser());
+        config.setPassword(oceanbaseConfig.getPassword());
+        config.setStartTimestamp(0L);
+        config.setTableWhiteList(tableList.stream().map(table -> oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + "." + table).collect(Collectors.joining("|")));
+        LogProxyClient client = new LogProxyClient(oceanbaseConfig.getHost(), oceanbaseConfig.getLogProxyPort(), config);
+        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        client.addListener(new RecordListener() {
+            @Override
+            public void notify(LogMessage message) {
+                tapLogger.info(message);
+            }
+
+            @Override
+            public void onException(LogProxyClientException e) {
+                if (e.needStop()) {
+                    client.stop();
+                    throwable.set(e);
+                }
+            }
+        });
+        client.start();
+        client.join();
+        if (EmptyKit.isNotNull(throwable.get())) {
+            throw throwable.get();
+        }
+        if (isAlive()) {
+            throw new RuntimeException("Exception occurs in OceanBase Log Miner service");
+        }
+    }
+
 }

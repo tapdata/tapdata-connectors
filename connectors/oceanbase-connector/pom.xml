@@ -53,7 +53,17 @@
             <artifactId>mysql-connector-java</artifactId>
             <version>${mysql.driver.version}</version>
         </dependency>
-
+        <dependency>
+            <groupId>com.oceanbase</groupId>
+            <artifactId>oblogclient-logproxy</artifactId>
+            <version>1.1.0</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>

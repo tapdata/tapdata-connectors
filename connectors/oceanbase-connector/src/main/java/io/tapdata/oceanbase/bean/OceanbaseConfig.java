@@ -6,23 +6,25 @@ import org.apache.commons.lang3.StringUtils;
 import java.io.Serializable;
 import java.util.Map;
 
-/**
- * @Author dayun
- * @Date 8/23/22
- */
 public class OceanbaseConfig extends CommonDbConfig implements Serializable {
     private static final long serialVersionUID = 1L;
     private String databaseUrlPattern = "jdbc:mysql://%s:%s/%s?rewriteBatchedStatements=true&useSSL=false";
-    private int insertBatchSize = 1000;
+
+    private String tenant;
+    private int rpcPort;
+    private int logProxyPort;
 
     //customize
     public OceanbaseConfig() {
+        setEscapeChar('`');
         setDbType("oceanbase");
         setJdbcDriver("com.mysql.jdbc.Driver");
     }
 
     public OceanbaseConfig load(Map<String, Object> map) {
-        return (OceanbaseConfig) super.load(map);
+        OceanbaseConfig config = (OceanbaseConfig) super.load(map);
+        setSchema(getDatabase());
+        return config;
     }
 
     public String getDatabaseUrl() {
@@ -31,5 +33,29 @@ public class OceanbaseConfig extends CommonDbConfig implements Serializable {
             url += "?" + getExtParams();
         }
         return String.format(url, this.getHost(), this.getPort(), this.getDatabase());
+    }
+
+    public String getTenant() {
+        return tenant;
+    }
+
+    public void setTenant(String tenant) {
+        this.tenant = tenant;
+    }
+
+    public int getRpcPort() {
+        return rpcPort;
+    }
+
+    public void setRpcPort(int rpcPort) {
+        this.rpcPort = rpcPort;
+    }
+
+    public int getLogProxyPort() {
+        return logProxyPort;
+    }
+
+    public void setLogProxyPort(int logProxyPort) {
+        this.logProxyPort = logProxyPort;
     }
 }
