@@ -3,7 +3,6 @@ package io.tapdata.connector.kafka;
 import com.google.common.collect.Lists;
 import io.tapdata.common.constant.MqOp;
 import io.tapdata.connector.kafka.config.KafkaConfig;
-import io.tapdata.connector.kafka.config.SchemaConfiguration;
 import io.tapdata.connector.kafka.util.Krb5Util;
 import io.tapdata.connector.kafka.util.SchemaRegisterUtil;
 import io.tapdata.constant.MqTestItem;
@@ -183,11 +182,6 @@ public class KafkaSRService extends KafkaService {
                 connection.disconnect();
             }
         }
-    }
-
-    @Override
-    protected void submitPageTables(int tableSize, Consumer<List<TapTable>> consumer, SchemaConfiguration schemaConfiguration, Set<String> destinationSet) {
-        super.submitPageTables(tableSize, consumer, schemaConfiguration, destinationSet);
     }
 
     @Override
