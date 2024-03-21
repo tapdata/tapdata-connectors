@@ -296,9 +296,11 @@ public class MongodbWriter {
 			Collection<String> allColumn = tapTable.getNameFieldMap().keySet();
 			TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
 			Map<String, Object> after = updateRecordEvent.getAfter();
-			Map<String, Object> before = updateRecordEvent.getBefore();
-			before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
-			after = DbKit.getAfterForUpdate(after, before, allColumn, pks);
+            Map<String, Object> before = updateRecordEvent.getBefore();
+            before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
+            if (!((TapUpdateRecordEvent) recordEvent).getIsReplaceEvent()) {
+                after = DbKit.getAfterForUpdate(after, before, allColumn, pks);
+            }
 			Map<String, Object> info = recordEvent.getInfo();
 			List<String> removedFields = updateRecordEvent.getRemovedFields();
 			Document pkFilter;
