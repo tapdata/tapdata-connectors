@@ -379,10 +379,19 @@
       "to": "TapBinary",
       "byte": "4g"
     },
+    "bit(1)": {
+      "to": "TapBoolean",
+      "bit": 1,
+      "queryOnly": true
+    },
     "bit[($bit)]": {
       "to": "TapNumber",
       "bit": 64,
       "queryOnly": true
+    },
+    "tinyint(1)": {
+      "to": "TapBoolean",
+      "bit": 1
     },
     "tinyint[($zerofill)]": {
       "to": "TapNumber",
