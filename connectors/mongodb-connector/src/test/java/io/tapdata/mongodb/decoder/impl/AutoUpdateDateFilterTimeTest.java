@@ -37,10 +37,10 @@ public class AutoUpdateDateFilterTimeTest {
 
     @Test
     void testParam() {
-        Assertions.assertEquals("$dynamicDate", AutoUpdateDateFilterTime.FUNCTION_NAME);
-        Assertions.assertEquals("format", AutoUpdateDateFilterTime.FILTER_FUNCTION);
-        Assertions.assertEquals("toString", AutoUpdateDateFilterTime.TO_STRING_FUNCTION);
-        Assertions.assertEquals("subtract", AutoUpdateDateFilterTime.SUBTRACT_FUNCTION);
+        Assertions.assertEquals("$dynamicDate", AutoUpdateDateFilterTime.DYNAMIC_DATE);
+        Assertions.assertEquals("format", AutoUpdateDateFilterTime.FORMAT);
+        Assertions.assertEquals("toString", AutoUpdateDateFilterTime.TO_STRING);
+        Assertions.assertEquals("subtract", AutoUpdateDateFilterTime.SUBTRACT);
     }
 
     @Nested
@@ -170,9 +170,9 @@ public class AutoUpdateDateFilterTimeTest {
             @BeforeEach
             void init() {
                 map = mock(Map.class);
-                when(map.get(AutoUpdateDateFilterTime.FILTER_FUNCTION)).thenReturn("2024-03-20");
-                when(map.get(AutoUpdateDateFilterTime.TO_STRING_FUNCTION)).thenReturn(false);
-                when(map.get(AutoUpdateDateFilterTime.SUBTRACT_FUNCTION)).thenReturn(1000L);
+                when(map.get(AutoUpdateDateFilterTime.FORMAT)).thenReturn("2024-03-20");
+                when(map.get(AutoUpdateDateFilterTime.TO_STRING)).thenReturn(false);
+                when(map.get(AutoUpdateDateFilterTime.SUBTRACT)).thenReturn(1000L);
             }
             @Test
             void testSubtractIsNumber() {
@@ -182,14 +182,14 @@ public class AutoUpdateDateFilterTimeTest {
             }
             @Test
             void testSubtractIsNumberString() {
-                when(map.get(AutoUpdateDateFilterTime.SUBTRACT_FUNCTION)).thenReturn("1000");
+                when(map.get(AutoUpdateDateFilterTime.SUBTRACT)).thenReturn("1000");
                 Assertions.assertDoesNotThrow(() -> filterTime.execute(map, mock(Map.class)));
                 verify(filterTime, times(0)).covertTimestamp(anyLong(), anyLong());
                 verify(filterTime, times(1)).covertTime(anyString(), anyLong(), anyBoolean());
             }
             @Test
             void testSubtractNotNumber() {
-                when(map.get(AutoUpdateDateFilterTime.SUBTRACT_FUNCTION)).thenReturn("uuu");
+                when(map.get(AutoUpdateDateFilterTime.SUBTRACT)).thenReturn("uuu");
                 Assertions.assertDoesNotThrow(() -> filterTime.execute(map, mock(Map.class)));
                 verify(filterTime, times(0)).covertTimestamp(anyLong(), anyLong());
                 verify(filterTime, times(1)).covertTime(anyString(), anyLong(), anyBoolean());
@@ -197,7 +197,7 @@ public class AutoUpdateDateFilterTimeTest {
 
             @Test
             void testFilterIsNumber() {
-                when(map.get(AutoUpdateDateFilterTime.FILTER_FUNCTION)).thenReturn(System.currentTimeMillis());
+                when(map.get(AutoUpdateDateFilterTime.FORMAT)).thenReturn(System.currentTimeMillis());
                 Assertions.assertDoesNotThrow(() -> filterTime.execute(map, mock(Map.class)));
                 verify(filterTime, times(1)).covertTimestamp(anyLong(), anyLong());
                 verify(filterTime, times(0)).covertTime(anyString(), anyLong(), anyBoolean());
@@ -205,7 +205,7 @@ public class AutoUpdateDateFilterTimeTest {
 
             @Test
             void testFilterIsNumberString() {
-                when(map.get(AutoUpdateDateFilterTime.FILTER_FUNCTION)).thenReturn(String.valueOf(System.currentTimeMillis()));
+                when(map.get(AutoUpdateDateFilterTime.FORMAT)).thenReturn(String.valueOf(System.currentTimeMillis()));
                 Assertions.assertDoesNotThrow(() -> filterTime.execute(map, mock(Map.class)));
                 verify(filterTime, times(1)).covertTimestamp(anyLong(), anyLong());
                 verify(filterTime, times(0)).covertTime(anyString(), anyLong(), anyBoolean());
@@ -220,7 +220,7 @@ public class AutoUpdateDateFilterTimeTest {
 
             @Test
             void testFilterIsNull() {
-                when(map.get(AutoUpdateDateFilterTime.FILTER_FUNCTION)).thenReturn(null);
+                when(map.get(AutoUpdateDateFilterTime.FORMAT)).thenReturn(null);
                 Assertions.assertThrows(IllegalArgumentException.class, () -> filterTime.execute(map, mock(Map.class)));
                 verify(filterTime, times(0)).covertTimestamp(anyLong(), anyLong());
                 verify(filterTime, times(0)).covertTime(anyString(), anyLong(), anyBoolean());
