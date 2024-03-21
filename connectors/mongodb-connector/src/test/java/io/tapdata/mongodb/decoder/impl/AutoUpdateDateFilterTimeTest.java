@@ -181,6 +181,13 @@ public class AutoUpdateDateFilterTimeTest {
                 verify(filterTime, times(1)).covertTime(anyString(), anyLong(), anyBoolean());
             }
             @Test
+            void testSubtractIsNullNumber() {
+                when(map.get(AutoUpdateDateFilterTime.SUBTRACT)).thenReturn(null);
+                Assertions.assertDoesNotThrow(() -> filterTime.execute(map, mock(Map.class)));
+                verify(filterTime, times(0)).covertTimestamp(anyLong(), anyLong());
+                verify(filterTime, times(1)).covertTime(anyString(), anyLong(), anyBoolean());
+            }
+            @Test
             void testSubtractIsNumberString() {
                 when(map.get(AutoUpdateDateFilterTime.SUBTRACT)).thenReturn("1000");
                 Assertions.assertDoesNotThrow(() -> filterTime.execute(map, mock(Map.class)));
@@ -190,9 +197,9 @@ public class AutoUpdateDateFilterTimeTest {
             @Test
             void testSubtractNotNumber() {
                 when(map.get(AutoUpdateDateFilterTime.SUBTRACT)).thenReturn("uuu");
-                Assertions.assertDoesNotThrow(() -> filterTime.execute(map, mock(Map.class)));
+                Assertions.assertThrows(IllegalArgumentException.class, () -> filterTime.execute(map, mock(Map.class)));
                 verify(filterTime, times(0)).covertTimestamp(anyLong(), anyLong());
-                verify(filterTime, times(1)).covertTime(anyString(), anyLong(), anyBoolean());
+                verify(filterTime, times(0)).covertTime(anyString(), anyLong(), anyBoolean());
             }
 
             @Test
