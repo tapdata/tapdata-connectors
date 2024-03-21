@@ -60,7 +60,8 @@ public class AutoUpdateDateFilterTimeTest {
 
         @Test
         void testDateTimeLessThanZero(){
-            Assertions.assertThrows(CoreException.class, () -> dateFilterTime.covertTimestamp(-1L, 100L));
+            when(dateFilterTime.covertTimestamp(null, 100L)).thenCallRealMethod();
+            Assertions.assertThrows(CoreException.class, () -> dateFilterTime.covertTimestamp(null, 100L));
             verify(dateFilterTime, times(2)).getFunctionName();
         }
     }
