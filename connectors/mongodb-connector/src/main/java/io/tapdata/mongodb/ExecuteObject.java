@@ -2,6 +2,7 @@ package io.tapdata.mongodb;
 
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.JsonParser;
+import io.tapdata.mongodb.decoder.CustomDocument;
 import io.tapdata.pdk.apis.exception.NotSupportedException;
 import org.bson.Document;
 
@@ -65,9 +66,9 @@ public class ExecuteObject {
 	private Document getFilter(Object obj) {
 		if (obj != null) {
 			if (obj instanceof Map) {
-				return Document.parse(TapSimplify.toJson(obj, JsonParser.ToJsonFeature.WriteMapNullValue));
+				return CustomDocument.parse(TapSimplify.toJson(obj, JsonParser.ToJsonFeature.WriteMapNullValue));
 			} else if (obj instanceof String) {
-				return Document.parse((String) obj);
+				return CustomDocument.parse((String) obj);
 			} else {
 				throw new NotSupportedException(obj.toString());
 			}
@@ -80,13 +81,13 @@ public class ExecuteObject {
 			List<Document> pipeline = new ArrayList<>();
 			if (obj instanceof List) {
 				for (Map<String, Object> o : (List<Map<String, Object>>) obj) {
-					pipeline.add(Document.parse(TapSimplify.toJson(o, JsonParser.ToJsonFeature.WriteMapNullValue)));
+					pipeline.add(CustomDocument.parse(TapSimplify.toJson(o, JsonParser.ToJsonFeature.WriteMapNullValue)));
 				}
 				return pipeline;
 			} else if (obj instanceof String) {
 				List<?> list = TapSimplify.fromJson((String) obj, List.class);
 				for (Object o : list) {
-					pipeline.add(Document.parse(TapSimplify.toJson(o, JsonParser.ToJsonFeature.WriteMapNullValue)));
+					pipeline.add(CustomDocument.parse(TapSimplify.toJson(o, JsonParser.ToJsonFeature.WriteMapNullValue)));
 				}
 				return pipeline;
 			} else {
