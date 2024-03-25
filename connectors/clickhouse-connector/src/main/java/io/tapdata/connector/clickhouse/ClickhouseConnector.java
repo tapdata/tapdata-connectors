@@ -47,8 +47,8 @@ public class ClickhouseConnector extends CommonDbConnector {
     public static final String TAG = ClickhouseConnector.class.getSimpleName();
 
     protected ClickhouseConfig clickhouseConfig;
-    private ClickhouseJdbcContext clickhouseJdbcContext;
-    private String clickhouseVersion;
+    protected ClickhouseJdbcContext clickhouseJdbcContext;
+    protected String clickhouseVersion;
 
     private final ClickhouseBatchWriter clickhouseWriter = new ClickhouseBatchWriter(TAG);
     private ExecutorService executorService;
