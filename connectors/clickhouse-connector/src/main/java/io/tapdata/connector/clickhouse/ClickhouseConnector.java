@@ -46,7 +46,7 @@ public class ClickhouseConnector extends CommonDbConnector {
 
     public static final String TAG = ClickhouseConnector.class.getSimpleName();
 
-    private ClickhouseConfig clickhouseConfig;
+    protected ClickhouseConfig clickhouseConfig;
     private ClickhouseJdbcContext clickhouseJdbcContext;
     private String clickhouseVersion;
 
@@ -74,7 +74,7 @@ public class ClickhouseConnector extends CommonDbConnector {
 
     }
 
-    private void initConnection(TapConnectionContext connectionContext) throws SQLException {
+    protected void initConnection(TapConnectionContext connectionContext) throws SQLException {
         clickhouseConfig = new ClickhouseConfig().load(connectionContext.getConnectionConfig());
         isConnectorStarted(connectionContext, connectorContext -> clickhouseConfig.load(connectorContext.getNodeConfig()));
         clickhouseJdbcContext = new ClickhouseJdbcContext(clickhouseConfig);
