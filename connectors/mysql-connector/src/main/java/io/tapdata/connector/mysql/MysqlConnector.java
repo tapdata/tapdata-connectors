@@ -8,6 +8,7 @@ import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
+import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
 import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -347,8 +348,21 @@ public class MysqlConnector extends CommonDbConnector {
     }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
-        WriteListResult<TapRecordEvent> writeListResult = this.mysqlWriter.write(tapConnectorContext, tapTable, tapRecordEvents);
-        consumer.accept(writeListResult);
+//        WriteListResult<TapRecordEvent> writeListResult = this.mysqlWriter.write(tapConnectorContext, tapTable, tapRecordEvents);
+//        consumer.accept(writeListResult);
+        String insertDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
+        if (insertDmlPolicy == null) {
+            insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
+        }
+        String updateDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
+        if (updateDmlPolicy == null) {
+            updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
+        }
+        new MysqlRecordWriter(mysqlJdbcContext, tapTable)
+                .setInsertPolicy(insertDmlPolicy)
+                .setUpdatePolicy(updateDmlPolicy)
+                .setTapLogger(tapLogger)
+                .write(tapRecordEvents, consumer, this::isAlive);
     }
 
 

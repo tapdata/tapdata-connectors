@@ -36,10 +36,17 @@ public class NormalRecordWriter {
     };
     protected boolean isTransaction = false;
     protected Log tapLogger;
+    protected boolean largeSql = false;
 
     public NormalRecordWriter(JdbcContext jdbcContext, TapTable tapTable) throws SQLException {
         this.connection = jdbcContext.getConnection();
         this.tapTable = tapTable;
+    }
+
+    public NormalRecordWriter(JdbcContext jdbcContext, TapTable tapTable, boolean largeSql) throws SQLException {
+        this.connection = jdbcContext.getConnection();
+        this.tapTable = tapTable;
+        this.largeSql = largeSql;
     }
 
     public NormalRecordWriter(Connection connection, TapTable tapTable) {
