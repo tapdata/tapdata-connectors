@@ -190,6 +190,7 @@ public class MongodbWriter {
 		List<BulkWriteError> writeErrors = originMongoBulkWriteException.getWriteErrors();
 		List<BulkWriteError> cantHandleErrors = new ArrayList<>();
 		List<WriteModel<Document>> retryWriteModels = new ArrayList<>();
+		List<Integer> handledIndexes = new ArrayList<>();
 		for (BulkWriteError writeError : writeErrors) {
 			int code = writeError.getCode();
 			int index = writeError.getIndex();
@@ -203,6 +204,7 @@ public class MongodbWriter {
 				}
 				if (null != retryWriteModel) {
 					retryWriteModels.add(retryWriteModel);
+					handledIndexes.add(index);
 				} else {
 					cantHandleErrors.add(writeError);
 				}
@@ -222,8 +224,25 @@ public class MongodbWriter {
 			errorConsumer.accept(mongoBulkWriteException);
 			return false;
 		} else {
-			bulkWriteModel.clearAll();
-			retryWriteModels.forEach(bulkWriteModel::addAnyOpModel);
+			if (bulkWriteOptions.isOrdered()) {
+				List<WriteModel<Document>> newWriteModelList = new ArrayList<>();
+				for (int i = 0; i < bulkWriteModel.getAllOpWriteModels().size(); i++) {
+					if (i < handledIndexes.get(0)) {
+						continue;
+					}
+					if (handledIndexes.contains(i)) {
+						newWriteModelList.add(retryWriteModels.get(0));
+						retryWriteModels.remove(0);
+					} else {
+						newWriteModelList.add(bulkWriteModel.getAllOpWriteModels().get(i));
+					}
+				}
+				bulkWriteModel.clearAll();
+				newWriteModelList.forEach(bulkWriteModel::addAnyOpModel);
+			} else {
+				bulkWriteModel.clearAll();
+				retryWriteModels.forEach(bulkWriteModel::addAnyOpModel);
+			}
 			return true;
 		}
 	}
