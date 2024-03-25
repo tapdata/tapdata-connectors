@@ -237,6 +237,8 @@ public class MongodbWriter {
 						newWriteModelList.add(bulkWriteModel.getAllOpWriteModels().get(i));
 					}
 				}
+				bulkWriteModel.clearAll();
+				newWriteModelList.forEach(bulkWriteModel::addAnyOpModel);
 			} else {
 				bulkWriteModel.clearAll();
 				retryWriteModels.forEach(bulkWriteModel::addAnyOpModel);
