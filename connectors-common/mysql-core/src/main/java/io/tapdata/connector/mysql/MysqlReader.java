@@ -18,6 +18,7 @@ import io.tapdata.connector.mysql.util.MysqlBinlogPositionUtil;
 import io.tapdata.connector.mysql.util.StringCompressUtil;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
+import io.tapdata.entity.event.ddl.TapDDLUnknownEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -540,7 +541,7 @@ public class MysqlReader implements Closeable {
         return mysqlStreamEvent;
     }
 
-    private List<MysqlStreamEvent> wrapDDL(SourceRecord record) {
+    protected List<MysqlStreamEvent> wrapDDL(SourceRecord record) {
         List<MysqlStreamEvent> mysqlStreamEvents = new ArrayList<>();
         Object value = record.value();
         if (!(value instanceof Struct)) {
@@ -562,12 +563,19 @@ public class MysqlReader implements Closeable {
                             MysqlStreamEvent mysqlStreamEvent = new MysqlStreamEvent(tapDDLEvent, mysqlStreamOffset);
                             tapDDLEvent.setTime(System.currentTimeMillis());
                             tapDDLEvent.setReferenceTime(eventTime);
+                            tapDDLEvent.setOriginDDL(ddlStr);
                             mysqlStreamEvents.add(mysqlStreamEvent);
                             tapLogger.info("Read DDL: " + ddlStr + ", about to be packaged as some event(s)");
                         }
                 );
             } catch (Throwable e) {
-                throw new RuntimeException("Handle ddl failed: " + ddlStr + ", error: " + e.getMessage(), e);
+                TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
+                MysqlStreamEvent mysqlStreamEvent = new MysqlStreamEvent(tapDDLEvent, mysqlStreamOffset);
+                tapDDLEvent.setTime(System.currentTimeMillis());
+                tapDDLEvent.setReferenceTime(eventTime);
+                tapDDLEvent.setOriginDDL(ddlStr);
+                mysqlStreamEvents.add(mysqlStreamEvent);
+//                throw new RuntimeException("Handle ddl failed: " + ddlStr + ", error: " + e.getMessage(), e);
             }
         }
         printDDLEventLog(mysqlStreamEvents);
