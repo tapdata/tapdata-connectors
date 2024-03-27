@@ -880,6 +880,7 @@ public class KafkaService extends AbstractMqService {
         data.put("referenceTime", tapFieldBaseEvent.getReferenceTime());
         data.put("time", tapFieldBaseEvent.getTime());
         data.put("type", tapFieldBaseEvent.getType());
+        data.put("ddl", tapFieldBaseEvent.getOriginDDL());
         data.put("tableId", tapFieldBaseEvent.getTableId());
         if (tapFieldBaseEvent instanceof TapNewFieldEvent) {
             TapNewFieldEvent tapNewFieldEvent = (TapNewFieldEvent) tapFieldBaseEvent;
