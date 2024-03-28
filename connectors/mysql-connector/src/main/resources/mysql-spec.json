@@ -231,31 +231,6 @@
           }
         }
       }
-    },
-    "node":{
-      "properties": {
-        "syncIndex": {
-          "title": "${syncIndex}",
-          "type": "boolean",
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "layout": "horizontal",
-            "tooltip": "${syncIndexTip}"
-          },
-          "default": false,
-          "x-reactions": {
-            "dependencies": [
-              "$inputs"
-            ],
-            "fulfill": {
-              "state": {
-                "visible": "{{$deps[0].length>0}}"
-              }
-            }
-          }
-        }
-      }
     }
   },
   "messages": {
