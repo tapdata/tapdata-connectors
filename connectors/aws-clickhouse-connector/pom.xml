@@ -1,21 +1,33 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
         <artifactId>connectors</artifactId>
         <groupId>io.tapdata</groupId>
         <version>1.0-SNAPSHOT</version>
     </parent>
-    <artifactId>mongodb-connector</artifactId>
-    <version>1.0-SNAPSHOT</version>
-    <name>mongodb-connector</name>
 
+    <artifactId>aws-clickhouse-connector</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <name>aws-clickhouse-connector</name>
+    <description>aws-clickhouse-connector</description>
     <properties>
-        <java.version>8</java.version>
-        <tapdata.pdk.api.version>1.3.3-SNAPSHOT</tapdata.pdk.api.version>
+        <java.version>1.8</java.version>
+        <sql.core.version>1.0-SNAPSHOT</sql.core.version>
+        <debezium.version>1.5.4.Final</debezium.version>
+        <postgres.core.version>1.0-SNAPSHOT</postgres.core.version>
+        <commons-lang3.version>3.12.0</commons-lang3.version>
+        <guava.version>31.0.1-jre</guava.version>
+        <tapdata.pdk.api.version>1.2.6-RELEASE</tapdata.pdk.api.version>
     </properties>
+
     <dependencies>
+        <dependency>
+            <groupId>io.tapdata</groupId>
+            <artifactId>clickhouse-connector</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>tapdata-pdk-api</artifactId>
@@ -24,88 +36,58 @@
         </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>
-            <artifactId>tapdata-api</artifactId>
-            <version>${tapdata.pdk.api.version}</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.tapdata</groupId>
-            <artifactId>read-partition</artifactId>
-            <version>1.0-SNAPSHOT</version>
-        </dependency>
-        <dependency>
-            <groupId>io.tapdata</groupId>
             <artifactId>connector-core</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.mongodb</groupId>
-            <artifactId>mongodb-driver-sync</artifactId>
-            <version>4.9.1</version>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>${commons-lang3.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.tapdata</groupId>
+            <artifactId>sql-core</artifactId>
+            <version>${sql.core.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-collections4</artifactId>
-            <version>4.4</version>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-core</artifactId>
-            <version>2.12.6</version>
-            <scope>compile</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>2.12.6.1</version>
-            <scope>compile</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcprov-jdk15on</artifactId>
-            <version>1.60</version>
         </dependency>
 
         <dependency>
-            <groupId>io.tapdata</groupId>
-            <artifactId>sql-core</artifactId>
-            <version>1.0-SNAPSHOT</version>
+            <groupId>com.clickhouse</groupId>
+            <artifactId>clickhouse-jdbc</artifactId>
+            <version>0.4.6</version>
+            <classifier>all</classifier>
         </dependency>
         <dependency>
-            <groupId>com.alibaba</groupId>
-            <artifactId>fastjson</artifactId>
-            <version>1.2.83</version>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>31.0.1-jre</version>
         </dependency>
-
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>pdk-error-code</artifactId>
-            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.8.1</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>commons-codec</groupId>
+            <artifactId>commons-codec</artifactId>
+            <version>1.15</version>
+            <scope>compile</scope>
         </dependency>
 
-        <!-- Mockito -->
-        <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-core</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.mockito</groupId>
-            <artifactId>mockito-inline</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>net.bytebuddy</groupId>
-            <artifactId>byte-buddy</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>net.bytebuddy</groupId>
-            <artifactId>byte-buddy-agent</artifactId>
-        </dependency>
+        <!--        <dependency>-->
+        <!--            <groupId>io.tapdata</groupId>-->
+        <!--            <artifactId>tapdata-pdk-runner</artifactId>-->
+        <!--            <scope>test</scope>-->
+        <!--        </dependency>-->
+
+
 
     </dependencies>
 
@@ -132,14 +114,13 @@
                             <PDK-Runner-Version>${tapdata.pdk.runner.version}</PDK-Runner-Version>
                             <PDK-API-Version>${tapdata.pdk.api.version}</PDK-API-Version>
                             <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
-                            <Version>${project.version}</Version>
+                            <Version>${version}</Version>
                             <Authentication>GA</Authentication>
                             <Git-Build-Time>${git.build.time}</Git-Build-Time>
                             <Git-Branch>${git.branch}</Git-Branch>
                             <Git-Commit-Id>${git.commit.id}</Git-Commit-Id>
                             <Git-Build-User-Name>${git.build.user.name}</Git-Build-User-Name>
                             <Git-Build-User-Email>${git.build.user.email}</Git-Build-User-Email>
-
                         </manifestEntries>
                     </archive>
                     <appendAssemblyId>false</appendAssemblyId>
@@ -177,7 +158,6 @@
                     <dotGitDirectory>${project.basedir}/../../.git</dotGitDirectory>
                 </configuration>
             </plugin>
-
             <plugin>
                 <artifactId>maven-resources-plugin</artifactId>
                 <version>3.1.0</version>
@@ -190,7 +170,7 @@
                         </goals>
 
                         <configuration>
-                            <outputDirectory>../dist/</outputDirectory>
+                            <outputDirectory>../dist</outputDirectory>
                             <resources>
                                 <resource>
                                     <directory>${basedir}/target/</directory>
@@ -217,39 +197,7 @@
                     <target>8</target>
                 </configuration>
             </plugin>
-            <!--            <plugin>-->
-            <!--                <groupId>org.apache.maven.plugins</groupId>-->
-            <!--                <artifactId>maven-source-plugin</artifactId>-->
-            <!--                <executions>-->
-            <!--                    <execution>-->
-            <!--                        <id>attach-sources</id>-->
-            <!--                        <goals>-->
-            <!--                            <goal>jar</goal>-->
-            <!--                        </goals>-->
-            <!--                    </execution>-->
-            <!--                </executions>-->
-            <!--            </plugin>-->
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <executions>
-                    <!--first execution : for preparing JaCoCo runtime agent-->
-                    <execution>
-                        <id>prepare-agent</id>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
-                    </execution>
-                    <!--second execution : for creating code coverage reports-->
-                    <execution>
-                        <id>report</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
         </plugins>
     </build>
+
 </project>
