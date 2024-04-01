@@ -20,6 +20,13 @@
         <mysql.core.version>1.0-SNAPSHOT</mysql.core.version>
         <commons-lang3.version>3.12.0</commons-lang3.version>
         <tapdata.pdk.api.version>1.2.6-RELEASE</tapdata.pdk.api.version>
+        <!-- dependencies versions -->
+        <flink.version>1.17.0</flink.version>
+        <slf4j.version>1.7.15</slf4j.version>
+        <log4j.version>2.17.1</log4j.version>
+        <scala.binary.version>2.12</scala.binary.version>
+
+
     </properties>
 
     <dependencies>
@@ -73,7 +80,88 @@
             <version>1.0-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
+        <dependency>
+            <groupId>org.tikv</groupId>
+            <artifactId>tikv-client-java</artifactId>
+            <version>3.2.0</version>
+        </dependency>
 
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-shaded-guava</artifactId>
+            <version>30.1.1-jre-16.1</version>
+            <scope>compile</scope>
+        </dependency>
+
+
+        <!-- test dependencies on Flink -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
+            <version>${flink.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.flink</groupId>
+                    <artifactId>flink-shaded-guava</artifactId>
+                </exclusion>
+            </exclusions><!-- Use the version compatible with your project -->
+            <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-runtime</artifactId>
+            <version>${flink.version}</version>
+            <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-test-utils</artifactId>
+            <version>${flink.version}</version>
+            <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-core</artifactId>
+            <version>${flink.version}</version>
+            <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-streaming-java</artifactId>
+            <version>${flink.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.flink</groupId>
+                    <artifactId>flink-shaded-guava</artifactId>
+                </exclusion>
+            </exclusions><!-- Use the version compatible with your project -->
+            <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-common</artifactId>
+            <version>${flink.version}</version>
+            <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-tests</artifactId>
+            <version>${flink.version}</version>
+            <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
+            <version>${flink.version}</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
     <build>

@@ -5,12 +5,13 @@ import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
+import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
+import io.tapdata.connector.tidb.cdc.TidbCdcService;
 import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.connector.tidb.ddl.TidbDDLSqlGenerator;
 import io.tapdata.connector.tidb.dml.TidbReader;
 import io.tapdata.connector.tidb.dml.TidbRecordWriter;
 import io.tapdata.connector.tidb.util.HttpUtil;
-import io.tapdata.connector.tidb.util.pojo.ChangeFeed;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
@@ -33,10 +34,11 @@ import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import org.apache.commons.collections4.CollectionUtils;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.TimeZone;
-import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
-import java.util.regex.Pattern;
 
 
 @TapConnectorClass("spec_tidb.json")
@@ -50,6 +52,10 @@ public class TidbConnector extends CommonDbConnector {
     private HttpUtil httpUtil;
     private String changeFeedId;
 
+    private TidbCdcService tidbCdcService;
+
+    protected final AtomicBoolean started = new AtomicBoolean(false);
+
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
         this.tidbConfig = new TidbConfig().load(tapConnectionContext.getConnectionConfig());
@@ -58,6 +64,11 @@ public class TidbConnector extends CommonDbConnector {
         jdbcContext = tidbJdbcContext;
         if (EmptyKit.isBlank(tidbConfig.getTimezone())) {
             timezone = tidbJdbcContext.queryTimeZone();
+        }
+        tapLogger = tapConnectionContext.getLog();
+        started.set(true);
+        if (tapConnectionContext instanceof TapConnectorContext) {
+            this.tidbCdcService =  new TidbCdcService(tidbConfig,tapLogger,started);
         }
         commonSqlMaker = new CommonSqlMaker('`');
         tidbReader = new TidbReader(tidbJdbcContext);
@@ -91,8 +102,8 @@ public class TidbConnector extends CommonDbConnector {
         // source functions
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadV3);
-//        connectorFunctions.supportStreamRead(this::streamRead);
-//        connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
+        connectorFunctions.supportStreamRead(this::streamRead);
+        connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
 
@@ -129,42 +140,26 @@ public class TidbConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        KafkaConfig kafkaConfig = (KafkaConfig) new KafkaConfig().load(nodeContext.getConnectionConfig());
-        httpUtil = new HttpUtil();
-        changeFeedId = (String) nodeContext.getStateMap().get("changeFeedId");
-        ChangeFeed changefeed = new ChangeFeed();
-        if (EmptyKit.isNull(changeFeedId)) {
-            changeFeedId = UUID.randomUUID().toString().replaceAll("-", "");
-            if (Pattern.matches("^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$", changeFeedId)) {
-                nodeContext.getStateMap().put("changeFeedId", changeFeedId);
-                changefeed.setSinkUri("kafka://" + kafkaConfig.getNameSrvAddr() + "/" + tidbConfig.getMqTopic() + "?" + "kafka-version=2.4.0&partition-num=1&max-message-bytes=67108864&replication-factor=1&protocol=canal-json&auto-create-topic=true");
-                changefeed.setChangeFeedId(changeFeedId);
-                changefeed.setForceReplicate(true);
-                changefeed.setSyncDdl(true);
-                if (httpUtil.createChangefeed(changefeed, tidbConfig.getTicdcUrl())) {
-                    ticdcKafkaService = new TicdcKafkaService(kafkaConfig, tidbConfig);
-                    ticdcKafkaService.streamConsume(tableList, recordSize, consumer);
-                }
-            }
-        } else {
-            if (httpUtil.resumeChangefeed(changeFeedId, tidbConfig.getTicdcUrl())) {
-                ticdcKafkaService = new TicdcKafkaService(kafkaConfig, tidbConfig);
-                ticdcKafkaService.streamConsume(tableList, recordSize, consumer);
-            }
-        }
+        tidbCdcService.readBinlog(nodeContext,tableList,offsetState,recordSize,consumer);
     }
 
-    private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
-        if (EmptyKit.isNull(offsetStartTime)) {
-            return System.currentTimeMillis();
+    private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
+        if (null == offsetStartTime) {
+            MysqlBinlogPosition mysqlBinlogPosition = tidbJdbcContext.readBinlogPosition();
+            return mysqlBinlogPosition.getPosition() >> 18;
         }
         return offsetStartTime;
     }
 
     @Override
     public void onStop(TapConnectionContext connectionContext) throws Exception {
+        started.set(false);
         EmptyKit.closeQuietly(tidbJdbcContext);
         EmptyKit.closeQuietly(ticdcKafkaService);
+        if (EmptyKit.isNotNull(tidbCdcService)) {
+            tidbCdcService.setStarted(new AtomicBoolean(false));
+            tidbCdcService.close();
+        }
         if (EmptyKit.isNotNull(httpUtil)) {
             if (!httpUtil.isChangeFeedClosed()) {
                 httpUtil.pauseChangefeed(changeFeedId, tidbConfig.getTicdcUrl());
