@@ -48,7 +48,7 @@ public class TiKVChangeEventDeserializationSchemaImpl implements TiKVChangeEvent
     public TiKVChangeEventDeserializationSchemaImpl(String database, String tableName, String tapContextId, TiConfiguration tiConf,
                                                     Map<String,LinkedBlockingQueue> logMapQueue) throws Exception {
         logMap = logMapQueue;
-        try(TiSession session = new TiSession(tiConf)) {
+        try(TiSession session = TiSession.create(tiConf)) {
             this.tableName = tableName;
             this.tableInfo = session.getCatalog().getTable(database, tableName);
         }

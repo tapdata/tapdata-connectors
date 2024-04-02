@@ -21,7 +21,7 @@ public class StreamData implements Serializable{
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         try {
             if(database == null || tableName ==null){
-                throw new Exception("StartStream error database or tableName is null");
+                throw new RuntimeException("StartStream error database or tableName is null");
             }
             SourceFunction<String> tidbSource =
                     TidbSource.<String>builder()

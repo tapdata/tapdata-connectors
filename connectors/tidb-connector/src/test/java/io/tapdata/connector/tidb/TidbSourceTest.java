@@ -1,9 +1,6 @@
 package io.tapdata.connector.tidb;
 
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
-import io.tapdata.connector.tidb.TidbConnectionTest;
-import io.tapdata.connector.tidb.TidbConnector;
-import io.tapdata.connector.tidb.TidbJdbcContext;
 import io.tapdata.connector.tidb.cdc.*;
 import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.constant.ConnectionTypeEnum;
@@ -134,7 +131,7 @@ public class TidbSourceTest {
    }
 
    @Test
-   public void testReadBinlog() throws Exception {
+   public void testReadBinlog() throws Throwable {
       TidbConfig tidbConfig = new TidbConfig();
       String database = "test1";
       String tableName = "test";
@@ -158,7 +155,7 @@ public class TidbSourceTest {
          Catalog catalog = Mockito.mock(Catalog.class);
          when(tiSession.getCatalog()).thenReturn(catalog);
          when(tiSession.getCatalog().getTable(database, tableName)).thenReturn(tableInfo);
-         tidbCdcService.readBinlog(connectorContext, tableList, 12345678L, 100, consumer);
+         tidbCdcService.readBinlog(connectorContext, tableList, 12345678L, consumer);
          Map<String, JobClient> streamExecutionEnvironment = (Map<String, JobClient>) ReflectionTestUtils.getField(tidbCdcService, "streamExecutionEnvironment");
          Assert.assertTrue(MapUtils.isNotEmpty(streamExecutionEnvironment));
          Set<Map.Entry<String, JobClient>> entries = streamExecutionEnvironment.entrySet();
@@ -264,7 +261,7 @@ public class TidbSourceTest {
 
       ) {
          TiSession tiSession = Mockito.mock(TiSession.class);
-         tiSessionMockedStatic.when(() -> TiSession.create(tiConf)).thenReturn(tiSession);
+         tiSessionMockedStatic.when(() ->TiSession.create(tiConf)).thenReturn(tiSession);
          TiTableInfo tableInfo = Mockito.mock(TiTableInfo.class);
          Catalog catalog = Mockito.mock(Catalog.class);
          when(tiSession.getCatalog()).thenReturn(catalog);
@@ -294,12 +291,14 @@ public class TidbSourceTest {
           return tidbStreamEvent;
       } catch (InterruptedException ex) {
          throw new RuntimeException(ex);
+      } catch (Exception e) {
+         throw new RuntimeException(e);
       }
 
    }
 
    @Test
-   public void testConvert2Map(){
+   public void testConvert2Map() throws Exception {
       String database = "test1";
       String tableName = "test";
       TiConfiguration tiConf = new TiConfiguration();
