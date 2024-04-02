@@ -25,14 +25,14 @@ import org.tikv.kvproto.Cdcpb;
 import org.tikv.kvproto.Coprocessor;
 import org.tikv.shade.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
-import java.io.Serializable;
 import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.*;
 
 public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T>
-        implements CheckpointListener, CheckpointedFunction, ResultTypeQueryable<T>, Serializable {
+        implements CheckpointListener, CheckpointedFunction, ResultTypeQueryable<T> {
     private static final Logger LOG = LoggerFactory.getLogger(TiKVParallelSourceFunction.class);
+    private static final long SNAPSHOT_VERSION_EPOCH = -1L;
     private static final long STREAMING_VERSION_START_EPOCH = 0L;
 
     private final TiKVSnapshotEventDeserializationSchema<T> snapshotEventDeserializationSchema;
@@ -48,10 +48,10 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
     private transient CDCClient cdcClient = null;
     private transient SourceContext<T> sourceContext = null;
     private transient volatile long resolvedTs = -1L;
-    private transient TreeMap<RowKeyWithTs, Cdcpb.Event.Row> prewrites = null;
-    private transient TreeMap<RowKeyWithTs, Cdcpb.Event.Row> commits = null;
+    private transient TreeMap<TiKVParallelSourceFunction.RowKeyWithTs, Cdcpb.Event.Row> prewrites = null;
+    private transient TreeMap<TiKVParallelSourceFunction.RowKeyWithTs, Cdcpb.Event.Row> commits = null;
     private transient BlockingQueue<Cdcpb.Event.Row> committedEvents = null;
-    private transient OutputCollector<T> outputCollector;
+    private transient TiKVParallelSourceFunction.OutputCollector<T> outputCollector;
 
     private transient boolean running = true;
     private transient ExecutorService executorService;
@@ -78,8 +78,7 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
         this.startTs = startTs;
     }
     @Override
-    public void notifyCheckpointComplete(long checkpointId){
-        throw new UnsupportedOperationException("notImplemented() cannot be performed ");
+    public void notifyCheckpointComplete(long checkpointId) throws Exception {
 
     }
 
@@ -100,12 +99,13 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
     public void initializeState(FunctionInitializationContext functionInitializationContext) throws Exception {
         LOG.info("initialize checkpoint");
         offsetState = functionInitializationContext.getOperatorStateStore().getListState(
-                                new ListStateDescriptor<>(
-                                        "resolvedTsState", LongSerializer.INSTANCE));
+                new ListStateDescriptor<>(
+                        "resolvedTsState", LongSerializer.INSTANCE));
         if (functionInitializationContext.isRestored()) {
             for (final Long offset : offsetState.get()) {
                 resolvedTs = offset;
                 LOG.info("Restore State from resolvedTs: {}", resolvedTs);
+                return;
             }
         } else {
             resolvedTs = 0;
@@ -116,7 +116,7 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
     @Override
     public void open(final Configuration config) throws Exception {
         super.open(config);
-        session = new TiSession(tiConf);
+        session = TiSession.create(tiConf);
         TiTableInfo tableInfo = session.getCatalog().getTable(database, tableName);
         if (tableInfo == null) {
             throw new RuntimeException(
@@ -132,7 +132,7 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
         prewrites = new TreeMap<>();
         commits = new TreeMap<>();
         committedEvents = new LinkedBlockingQueue<>();
-        outputCollector = new OutputCollector<>();
+        outputCollector = new TiKVParallelSourceFunction.OutputCollector<>();
         ThreadFactory threadFactory =
                 new ThreadFactoryBuilder()
                         .setNameFormat(
@@ -194,17 +194,17 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
         LOG.debug("binlog record, type: {}, data: {}", row.getType(), row);
         switch (row.getType()) {
             case COMMITTED:
-                prewrites.put(RowKeyWithTs.ofStart(row), row);
-                commits.put(RowKeyWithTs.ofCommit(row), row);
+                prewrites.put(TiKVParallelSourceFunction.RowKeyWithTs.ofStart(row), row);
+                commits.put(TiKVParallelSourceFunction.RowKeyWithTs.ofCommit(row), row);
                 break;
             case COMMIT:
-                commits.put(RowKeyWithTs.ofCommit(row), row);
+                commits.put(TiKVParallelSourceFunction.RowKeyWithTs.ofCommit(row), row);
                 break;
             case PREWRITE:
-                prewrites.put(RowKeyWithTs.ofStart(row), row);
+                prewrites.put(TiKVParallelSourceFunction.RowKeyWithTs.ofStart(row), row);
                 break;
             case ROLLBACK:
-                prewrites.remove(RowKeyWithTs.ofStart(row));
+                prewrites.remove(TiKVParallelSourceFunction.RowKeyWithTs.ofStart(row));
                 break;
             default:
                 LOG.warn("Unsupported row type:{}",row.getType());
@@ -217,7 +217,7 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
             while (!commits.isEmpty() && commits.firstKey().timestamp <= timestamp) {
                 final Cdcpb.Event.Row commitRow = commits.pollFirstEntry().getValue();
                 final Cdcpb.Event.Row prewriteRow =
-                        prewrites.remove(RowKeyWithTs.ofStart(commitRow));
+                        prewrites.remove(TiKVParallelSourceFunction.RowKeyWithTs.ofStart(commitRow));
                 // if pull cdc event block when region split, cdc event will lose.
                 committedEvents.offer(prewriteRow);
             }
@@ -241,14 +241,13 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
                             CLOSE_TIMEOUT);
                 }
             }
-        } catch (final InterruptedException e) {
+        } catch (final Exception e) {
             LOG.error("Unable to close cdcClient", e);
-            Thread.currentThread().interrupt();
         }
     }
 
 
-    private static class RowKeyWithTs implements Comparable<RowKeyWithTs> {
+    private static class RowKeyWithTs implements Comparable<TiKVParallelSourceFunction.RowKeyWithTs> {
         private final long timestamp;
         private final RowKey rowKey;
 
@@ -262,7 +261,7 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
         }
 
         @Override
-        public int compareTo(final RowKeyWithTs that) {
+        public int compareTo(final TiKVParallelSourceFunction.RowKeyWithTs that) {
             int res = Long.compare(this.timestamp, that.timestamp);
             if (res == 0) {
                 res = Long.compare(this.rowKey.getTableId(), that.rowKey.getTableId());
@@ -281,18 +280,18 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
         @Override
         public boolean equals(final Object thatObj) {
             if (thatObj instanceof TiKVParallelSourceFunction.RowKeyWithTs) {
-                final RowKeyWithTs that = (RowKeyWithTs) thatObj;
+                final TiKVParallelSourceFunction.RowKeyWithTs that = (TiKVParallelSourceFunction.RowKeyWithTs) thatObj;
                 return this.timestamp == that.timestamp && this.rowKey.equals(that.rowKey);
             }
             return false;
         }
 
-        static RowKeyWithTs ofStart(final Cdcpb.Event.Row row) {
-            return new RowKeyWithTs(row.getStartTs(), row.getKey().toByteArray());
+        static TiKVParallelSourceFunction.RowKeyWithTs ofStart(final Cdcpb.Event.Row row) {
+            return new TiKVParallelSourceFunction.RowKeyWithTs(row.getStartTs(), row.getKey().toByteArray());
         }
 
-        static RowKeyWithTs ofCommit(final Cdcpb.Event.Row row) {
-            return new RowKeyWithTs(row.getCommitTs(), row.getKey().toByteArray());
+        static TiKVParallelSourceFunction.RowKeyWithTs ofCommit(final Cdcpb.Event.Row row) {
+            return new TiKVParallelSourceFunction.RowKeyWithTs(row.getCommitTs(), row.getKey().toByteArray());
         }
     }
 
@@ -302,8 +301,8 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
         private SourceContext<T> context;
 
         @Override
-        public void collect(T rowRecord) {
-            context.collect(rowRecord);
+        public void collect(T record) {
+            context.collect(record);
         }
 
         @Override

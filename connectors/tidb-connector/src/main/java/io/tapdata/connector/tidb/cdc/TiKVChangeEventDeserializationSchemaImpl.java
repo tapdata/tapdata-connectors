@@ -105,6 +105,7 @@ public class TiKVChangeEventDeserializationSchemaImpl implements TiKVChangeEvent
         if(tapRecordEvent !=null) {
             tapRecordEvent.setTableId(tableName);
             tapRecordEvent.setReferenceTime(eventTime);
+
             long offset = rowRecord.getCommitTs() >> 18;
             TidbStreamEvent tidbStreamEvent = new TidbStreamEvent(tapRecordEvent, offset);
             while (!TidbCdcService.getLogMap().get(database + tapContextId).offer(tidbStreamEvent, 1, TimeUnit.SECONDS)) {
