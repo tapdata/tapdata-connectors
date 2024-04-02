@@ -63,6 +63,7 @@ public class TidbCdcClient {
                     try {
                         eventsBuffer.put(event);
                     } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                         e.printStackTrace();
                     }
                 };
