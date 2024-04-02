@@ -251,8 +251,7 @@ public class TidbSourceTest {
       TiConfiguration tiConf = new TiConfiguration();
       String tapContextId = "12345678";
       LinkedBlockingQueue<TidbStreamEvent> logQueue = new LinkedBlockingQueue<>(5000);
-      Map<String, LinkedBlockingQueue> logMap = new ConcurrentHashMap();
-      logMap.put(database+tapContextId,logQueue);
+      TidbCdcService.getLogMap().put(database+tapContextId,logQueue);
       try (
               MockedStatic<TiSession> tiSessionMockedStatic = mockStatic(TiSession.class);
               MockedStatic<RowKey> rowKeyMockedStatic = mockStatic(RowKey.class);
@@ -267,7 +266,7 @@ public class TidbSourceTest {
          when(tiSession.getCatalog()).thenReturn(catalog);
          when(tiSession.getCatalog().getTable(database, tableName)).thenReturn(tableInfo);
          TiKVChangeEventDeserializationSchemaImpl tiKVChangeEventDeserializationSchema =
-                 new TiKVChangeEventDeserializationSchemaImpl(database, tableName, tapContextId, tiConf, logMap);
+                 new TiKVChangeEventDeserializationSchemaImpl(database, tableName, tapContextId, tiConf);
          Cdcpb.Event.Row row = Mockito.mock(Cdcpb.Event.Row.class);
          org.tikv.kvproto.Cdcpb.Event.Row.OpType result = org.tikv.kvproto.Cdcpb.Event.Row.OpType.valueOf(opType);
          when(row.getOpType()).thenReturn(result);
@@ -314,7 +313,7 @@ public class TidbSourceTest {
          when(tiSession.getCatalog()).thenReturn(catalog);
          when(tiSession.getCatalog().getTable(database, tableName)).thenReturn(tableInfo);
          TiKVChangeEventDeserializationSchemaImpl tiKVChangeEventDeserializationSchema =
-                 new TiKVChangeEventDeserializationSchemaImpl(database, tableName, "12345678", tiConf, logMap);
+                 new TiKVChangeEventDeserializationSchemaImpl(database, tableName, "12345678", tiConf);
          int id = 1;
          int year =8;
          Object[] tikvValues = new Object[]{id,year};

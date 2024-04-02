@@ -79,6 +79,7 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
     }
     @Override
     public void notifyCheckpointComplete(long checkpointId){
+        throw new UnsupportedOperationException("notImplemented() cannot be performed ");
 
     }
 
@@ -105,7 +106,6 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
             for (final Long offset : offsetState.get()) {
                 resolvedTs = offset;
                 LOG.info("Restore State from resolvedTs: {}", resolvedTs);
-                break;
             }
         } else {
             resolvedTs = 0;
@@ -207,7 +207,7 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
                 prewrites.remove(RowKeyWithTs.ofStart(row));
                 break;
             default:
-                LOG.warn("Unsupported row type:" + row.getType());
+                LOG.warn("Unsupported row type:{}",row.getType());
         }
     }
 
@@ -241,8 +241,9 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
                             CLOSE_TIMEOUT);
                 }
             }
-        } catch (final Exception e) {
+        } catch (final InterruptedException e) {
             LOG.error("Unable to close cdcClient", e);
+            Thread.currentThread().interrupt();
         }
     }
 

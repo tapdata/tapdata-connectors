@@ -24,7 +24,7 @@ public class TidbCdcService implements Serializable {
 
     private TidbConfig tidbConfig;
 
-    private static Map<String, LinkedBlockingQueue> logMap = new ConcurrentHashMap();
+    public static Map<String, LinkedBlockingQueue> logMap = new ConcurrentHashMap();
 
     private String database;
 
@@ -58,7 +58,7 @@ public class TidbCdcService implements Serializable {
                 offset = ((CdcOffset) offsetState).getOffset();
             }
             TiKVChangeEventDeserializationSchema tiKVChangeEventDeserializationSchema =
-                    new TiKVChangeEventDeserializationSchemaImpl(database, table, nodeContext.getId(), tiConf, logMap);
+                    new TiKVChangeEventDeserializationSchemaImpl(database, table, nodeContext.getId(), tiConf);
 
             JobClient jobClient = streamData.startStream(database, table, tiConf, offset, tiKVChangeEventDeserializationSchema, tapLogger);
             streamExecutionEnvironment.put(database+tapContextId+table, jobClient);
@@ -86,6 +86,7 @@ public class TidbCdcService implements Serializable {
                 consumer.accept(tapEvents, tidbStreamEvent.getCdcOffset());
             } catch (InterruptedException e) {
                 tapLogger.error(" ReadBinlog error:{}",e.getMessage());
+                Thread.currentThread().interrupt();
             }
         }
 
@@ -116,4 +117,7 @@ public class TidbCdcService implements Serializable {
         this.started = started;
     }
 
+    public static Map<String, LinkedBlockingQueue> getLogMap() {
+        return logMap;
+    }
 }

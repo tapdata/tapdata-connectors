@@ -78,18 +78,18 @@ public class ExecuteObject {
 
 	private List<Document> getPipeline(Object obj) {
 		if (obj != null) {
-			List<Document> pipeline = new ArrayList<>();
+			List<Document> pipelineList = new ArrayList<>();
 			if (obj instanceof List) {
 				for (Map<String, Object> o : (List<Map<String, Object>>) obj) {
-					pipeline.add(CustomDocument.parse(TapSimplify.toJson(o, JsonParser.ToJsonFeature.WriteMapNullValue)));
+					pipelineList.add(CustomDocument.parse(TapSimplify.toJson(o, JsonParser.ToJsonFeature.WriteMapNullValue)));
 				}
-				return pipeline;
+				return pipelineList;
 			} else if (obj instanceof String) {
 				List<?> list = TapSimplify.fromJson((String) obj, List.class);
 				for (Object o : list) {
-					pipeline.add(CustomDocument.parse(TapSimplify.toJson(o, JsonParser.ToJsonFeature.WriteMapNullValue)));
+					pipelineList.add(CustomDocument.parse(TapSimplify.toJson(o, JsonParser.ToJsonFeature.WriteMapNullValue)));
 				}
-				return pipeline;
+				return pipelineList;
 			} else {
 				throw new NotSupportedException(obj.toString());
 			}

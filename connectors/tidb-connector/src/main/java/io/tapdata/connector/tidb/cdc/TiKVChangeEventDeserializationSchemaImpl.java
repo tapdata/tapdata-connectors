@@ -28,15 +28,12 @@ import static org.apache.flink.api.common.typeinfo.BasicTypeInfo.STRING_TYPE_INF
 import static org.tikv.common.codec.TableCodec.decodeObjects;
 
 public class TiKVChangeEventDeserializationSchemaImpl implements TiKVChangeEventDeserializationSchema, Serializable {
-    private static final Logger LOGGER = LoggerFactory.getLogger(TiKVChangeEventDeserializationSchemaImpl.class);
 
     private TiTableInfo tableInfo;
 
     private String database;
 
     private String tapContextId;
-
-   private static Map<String,LinkedBlockingQueue>  logMap;
 
    private String tableName;
 
@@ -45,9 +42,7 @@ public class TiKVChangeEventDeserializationSchemaImpl implements TiKVChangeEvent
 
 
 
-    public TiKVChangeEventDeserializationSchemaImpl(String database, String tableName, String tapContextId, TiConfiguration tiConf,
-                                                    Map<String,LinkedBlockingQueue> logMapQueue) throws Exception {
-        logMap = logMapQueue;
+    public TiKVChangeEventDeserializationSchemaImpl(String database, String tableName, String tapContextId, TiConfiguration tiConf) throws Exception {
         try(TiSession session = TiSession.create(tiConf)) {
             this.tableName = tableName;
             this.tableInfo = session.getCatalog().getTable(database, tableName);
@@ -112,7 +107,7 @@ public class TiKVChangeEventDeserializationSchemaImpl implements TiKVChangeEvent
             tapRecordEvent.setReferenceTime(eventTime);
             long offset = rowRecord.getCommitTs() >> 18;
             TidbStreamEvent tidbStreamEvent = new TidbStreamEvent(tapRecordEvent, offset);
-            while (!logMap.get(database + tapContextId).offer(tidbStreamEvent, 1, TimeUnit.SECONDS)) {
+            while (!TidbCdcService.getLogMap().get(database + tapContextId).offer(tidbStreamEvent, 1, TimeUnit.SECONDS)) {
                 Thread.sleep(50);
             }
         }
