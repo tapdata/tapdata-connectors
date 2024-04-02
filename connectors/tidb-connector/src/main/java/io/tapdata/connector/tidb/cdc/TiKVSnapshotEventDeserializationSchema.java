@@ -7,6 +7,6 @@ import org.tikv.kvproto.Kvrpcpb.KvPair;
 import java.io.Serializable;
 
 public interface TiKVSnapshotEventDeserializationSchema <T> extends Serializable ,ResultTypeQueryable<T> {
-    void deserialize(KvPair record, Collector<T> out) throws Exception;
+    void deserialize(KvPair rowRecord, Collector<T> out) throws Exception;
 
 }

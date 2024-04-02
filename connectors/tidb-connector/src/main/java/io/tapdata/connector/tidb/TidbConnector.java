@@ -140,7 +140,7 @@ public class TidbConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        tidbCdcService.readBinlog(nodeContext,tableList,offsetState,recordSize,consumer);
+        tidbCdcService.readBinlog(nodeContext,tableList,offsetState,consumer);
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {

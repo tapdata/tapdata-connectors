@@ -7,5 +7,5 @@ import org.tikv.kvproto.Cdcpb.Event.Row;
 import java.io.Serializable;
 
 public interface TiKVChangeEventDeserializationSchema<T> extends Serializable,ResultTypeQueryable<T> {
-    void deserialize(Row record, Collector<T> out) throws Exception;
+    void deserialize(Row rowRecord, Collector<T> out) throws Exception;
 }

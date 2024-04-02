@@ -41,11 +41,11 @@ public class TidbCdcEvent {
         return new TidbCdcEvent(regionId, CDCEventType.RESOLVED_TS, resolvedTs, null, null);
     }
 
-    public static TidbCdcEvent error(final long regionId, final Throwable error) {
+    public static TidbCdcEvent errorMessage(final long regionId, final Throwable error) {
         return new TidbCdcEvent(regionId, CDCEventType.ERROR, 0, null, error);
     }
 
-    public static TidbCdcEvent error(final long regionId, final Throwable error, long resolvedTs) {
+    public static TidbCdcEvent errorResolvedTs(final long regionId, final Throwable error, long resolvedTs) {
         return new TidbCdcEvent(regionId, CDCEventType.ERROR, resolvedTs, null, error);
     }
 

@@ -9,6 +9,10 @@ import org.tikv.common.TiConfiguration;
 import java.util.Map;
 
 public class TDBSourceOptions {
+
+    private TDBSourceOptions(){
+        
+    }
     public static final ConfigOption<String> DATABASE_NAME =
             ConfigOptions.key("database-name")
                     .stringType()

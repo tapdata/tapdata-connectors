@@ -31,7 +31,6 @@ public class TidbRegionCdcClient implements AutoCloseable, StreamObserver<Cdcpb.
     private TiRegion region;
     private final Coprocessor.KeyRange keyRange;
     private final Coprocessor.KeyRange regionKeyRange;
-    private final ManagedChannel channel;
     private final ChangeDataGrpc.ChangeDataStub asyncStub;
     private final Consumer<TidbCdcEvent> eventConsumer;
     private final CDCConfig config;
@@ -51,7 +50,6 @@ public class TidbRegionCdcClient implements AutoCloseable, StreamObserver<Cdcpb.
             final CDCConfig config) {
         this.region = region;
         this.keyRange = keyRange;
-        this.channel = channel;
         this.asyncStub = ChangeDataGrpc.newStub(channel);
         this.eventConsumer = eventConsumer;
         this.config = config;
@@ -165,7 +163,7 @@ public class TidbRegionCdcClient implements AutoCloseable, StreamObserver<Cdcpb.
                 resolvedTs,
                 error);
         running.set(false);
-        eventConsumer.accept(TidbCdcEvent.error(region.getId(), error, resolvedTs));
+        eventConsumer.accept(TidbCdcEvent.errorResolvedTs(region.getId(), error, resolvedTs));
     }
 
     @Override
@@ -182,10 +180,10 @@ public class TidbRegionCdcClient implements AutoCloseable, StreamObserver<Cdcpb.
                         .forEach(this::submitEvent);
 
                 if (event.hasResolvedTs()) {
-                    final Cdcpb.ResolvedTs resolvedTs = event.getResolvedTs();
-                    this.resolvedTs = resolvedTs.getTs();
-                    if (resolvedTs.getRegionsList().indexOf(region.getId()) >= 0) {
-                        submitEvent(TidbCdcEvent.resolvedTsEvent(region.getId(), resolvedTs.getTs()));
+                    final Cdcpb.ResolvedTs eventResolvedTs = event.getResolvedTs();
+                    this.resolvedTs = eventResolvedTs.getTs();
+                    if (eventResolvedTs.getRegionsList().indexOf(region.getId()) >= 0) {
+                        submitEvent(TidbCdcEvent.resolvedTsEvent(region.getId(), eventResolvedTs.getTs()));
                     }
                 }
             }

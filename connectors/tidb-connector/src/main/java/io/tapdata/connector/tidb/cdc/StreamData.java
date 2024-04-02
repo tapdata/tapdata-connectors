@@ -32,9 +32,9 @@ public class StreamData implements Serializable{
                                     new TiKVSnapshotEventDeserializationSchema<String>() {
                                         @Override
                                         public void deserialize(
-                                                Kvrpcpb.KvPair record, Collector<String> out)
+                                                Kvrpcpb.KvPair data, Collector<String> out)
                                                 throws Exception {
-                                            out.collect(record.toString());
+                                            out.collect(data.toString());
                                         }
 
                                         @Override
@@ -50,9 +50,6 @@ public class StreamData implements Serializable{
             jobClient = env.executeAsync(database + tableName);
         } catch (Exception e) {
             tapLogger.error(" start tidb stream error:{}",e.getMessage());
-            if (jobClient != null) {
-                jobClient.cancel();
-            }
         }
         return jobClient;
     }

@@ -33,7 +33,6 @@ import java.util.concurrent.*;
 public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T>
         implements CheckpointListener, CheckpointedFunction, ResultTypeQueryable<T>, Serializable {
     private static final Logger LOG = LoggerFactory.getLogger(TiKVParallelSourceFunction.class);
-    private static final long SNAPSHOT_VERSION_EPOCH = -1L;
     private static final long STREAMING_VERSION_START_EPOCH = 0L;
 
     private final TiKVSnapshotEventDeserializationSchema<T> snapshotEventDeserializationSchema;
@@ -79,7 +78,7 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
         this.startTs = startTs;
     }
     @Override
-    public void notifyCheckpointComplete(long checkpointId) throws Exception {
+    public void notifyCheckpointComplete(long checkpointId){
 
     }
 
@@ -106,7 +105,7 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
             for (final Long offset : offsetState.get()) {
                 resolvedTs = offset;
                 LOG.info("Restore State from resolvedTs: {}", resolvedTs);
-                return;
+                break;
             }
         } else {
             resolvedTs = 0;
@@ -117,7 +116,7 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
     @Override
     public void open(final Configuration config) throws Exception {
         super.open(config);
-        session = TiSession.create(tiConf);
+        session = new TiSession(tiConf);
         TiTableInfo tableInfo = session.getCatalog().getTable(database, tableName);
         if (tableInfo == null) {
             throw new RuntimeException(
@@ -302,8 +301,8 @@ public class TiKVParallelSourceFunction <T> extends RichParallelSourceFunction<T
         private SourceContext<T> context;
 
         @Override
-        public void collect(T record) {
-            context.collect(record);
+        public void collect(T rowRecord) {
+            context.collect(rowRecord);
         }
 
         @Override

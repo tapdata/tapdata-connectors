@@ -10,6 +10,10 @@ import java.math.BigInteger;
 import java.util.List;
 
 public class TableKeyRangeUtils {
+
+    private TableKeyRangeUtils(){
+
+    }
     public static Coprocessor.KeyRange getTableKeyRange(final long tableId) {
         return KeyRangeUtils.makeCoprocRange(
                 RowKey.createMin(tableId).toByteString(),

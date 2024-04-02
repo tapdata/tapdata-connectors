@@ -42,7 +42,7 @@ public class TidbCdcService implements Serializable {
     }
 
 
-    public void readBinlog(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Exception {
+    public void readBinlog(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, StreamReadConsumer consumer) throws Throwable {
         TiConfiguration tiConf = TDBSourceOptions.getTiConfiguration(
                 tidbConfig.getPdServer(), new HashMap<>());
         database = tidbConfig.getDatabase();
@@ -64,8 +64,8 @@ public class TidbCdcService implements Serializable {
             streamExecutionEnvironment.put(database+tapContextId+table, jobClient);
         }
         tapLogger.info("Tidb cdc started");
+        Long minOffset = 0L;
         while (started.get()) {
-            Long minOffset = 0L;
             try {
                 TidbStreamEvent tidbStreamEvent = logQueue.poll(1, TimeUnit.SECONDS);
                 if (tidbStreamEvent == null) {
@@ -85,7 +85,7 @@ public class TidbCdcService implements Serializable {
                 }
                 consumer.accept(tapEvents, tidbStreamEvent.getCdcOffset());
             } catch (InterruptedException e) {
-
+                tapLogger.error(" ReadBinlog error:{}",e.getMessage());
             }
         }
 
