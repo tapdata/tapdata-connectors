@@ -41,9 +41,11 @@ public class RedisConfig {
     private String schemaKey = "-schema-key-";
     private long rateLimit = 5000L;
 
+    private final static String DATA_BASE ="database";
+
     public RedisConfig load(Map<String, Object> map) {
-        if (map != null && map.get("database") instanceof String) {
-            map.put("database", Integer.valueOf(map.get("database").toString()));
+        if (map != null && map.get(DATA_BASE) instanceof String) {
+            map.put(DATA_BASE, Integer.valueOf(map.get(DATA_BASE).toString()));
         }
         beanUtils.mapToBean(map, this);
         if (EmptyKit.isNotNull(sentinelAddress)) {

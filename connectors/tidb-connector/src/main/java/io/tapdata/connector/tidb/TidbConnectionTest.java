@@ -65,7 +65,9 @@ public class TidbConnectionTest extends CommonDbTest {
 
     @Override
     public Boolean testOneByOne() {
-        testFunctionMap.put("testPbserver", this::testPbserver);
+        if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
+            testFunctionMap.put("testPbserver", this::testPbserver);
+        }
         testFunctionMap.put("testVersion", this::testVersion);
         if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
             TidbConfig tidbConfig = (TidbConfig) commonDbConfig;
