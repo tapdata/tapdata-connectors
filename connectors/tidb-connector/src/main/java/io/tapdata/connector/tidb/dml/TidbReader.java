@@ -8,6 +8,7 @@ import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 
+import java.io.Serializable;
 import java.sql.ResultSetMetaData;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -17,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
-public class TidbReader {
+public class TidbReader implements Serializable {
 
     private final TidbJdbcContext tidbJdbcContext;
 

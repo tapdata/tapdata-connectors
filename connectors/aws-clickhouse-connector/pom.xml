@@ -1,46 +1,42 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>io.tapdata</groupId>
         <artifactId>connectors</artifactId>
+        <groupId>io.tapdata</groupId>
         <version>1.0-SNAPSHOT</version>
     </parent>
-    <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>tidb-connector</artifactId>
+    <artifactId>aws-clickhouse-connector</artifactId>
     <version>1.0-SNAPSHOT</version>
-    <name>tidb-connector</name>
-
+    <name>aws-clickhouse-connector</name>
+    <description>aws-clickhouse-connector</description>
     <properties>
-        <maven.compiler.source>8</maven.compiler.source>
-        <maven.compiler.target>8</maven.compiler.target>
+        <java.version>1.8</java.version>
         <sql.core.version>1.0-SNAPSHOT</sql.core.version>
-        <mysql.core.version>1.0-SNAPSHOT</mysql.core.version>
+        <debezium.version>1.5.4.Final</debezium.version>
+        <postgres.core.version>1.0-SNAPSHOT</postgres.core.version>
         <commons-lang3.version>3.12.0</commons-lang3.version>
+        <guava.version>31.0.1-jre</guava.version>
         <tapdata.pdk.api.version>1.2.6-RELEASE</tapdata.pdk.api.version>
-        <!-- dependencies versions -->
-        <flink.version>1.17.0</flink.version>
-        <slf4j.version>1.7.15</slf4j.version>
-        <log4j.version>2.17.1</log4j.version>
-        <scala.binary.version>2.12</scala.binary.version>
-
-
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>io.tapdata</groupId>
+            <artifactId>clickhouse-connector</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>tapdata-pdk-api</artifactId>
             <version>${tapdata.pdk.api.version}</version>
             <scope>provided</scope>
         </dependency>
-
         <dependency>
             <groupId>io.tapdata</groupId>
-            <artifactId>tapdata-pdk-runner</artifactId>
-            <scope>test</scope>
+            <artifactId>connector-core</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
@@ -52,116 +48,47 @@
             <artifactId>sql-core</artifactId>
             <version>${sql.core.version}</version>
         </dependency>
-
-        <dependency>
-            <groupId>io.tapdata</groupId>
-            <artifactId>mysql-core</artifactId>
-            <version>${mysql.core.version}</version>
-        </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-collections4</artifactId>
         </dependency>
+
         <dependency>
-            <groupId>org.apache.httpcomponents</groupId>
-            <artifactId>httpcore</artifactId>
-            <version>4.4.15</version>
-            <scope>compile</scope>
+            <groupId>com.clickhouse</groupId>
+            <artifactId>clickhouse-jdbc</artifactId>
+            <version>0.4.6</version>
+            <classifier>all</classifier>
         </dependency>
         <dependency>
-            <groupId>org.apache.httpcomponents</groupId>
-            <artifactId>httpclient</artifactId>
-            <version>4.5.13</version>
-            <scope>compile</scope>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>31.0.1-jre</version>
         </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>
-            <artifactId>kafka-core</artifactId>
-            <version>1.0-SNAPSHOT</version>
-            <scope>compile</scope>
+            <artifactId>pdk-error-code</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.tikv</groupId>
-            <artifactId>tikv-client-java</artifactId>
-            <version>3.2.0</version>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.8.1</version>
+            <scope>test</scope>
         </dependency>
-
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-shaded-guava</artifactId>
-            <version>30.1.1-jre-16.1</version>
-            <scope>compile</scope>
-        </dependency>
-
-
-        <!-- test dependencies on Flink -->
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
-            <version>${flink.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.flink</groupId>
-                    <artifactId>flink-shaded-guava</artifactId>
-                </exclusion>
-            </exclusions><!-- Use the version compatible with your project -->
+            <groupId>commons-codec</groupId>
+            <artifactId>commons-codec</artifactId>
+            <version>1.15</version>
             <scope>compile</scope>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-runtime</artifactId>
-            <version>${flink.version}</version>
-            <scope>compile</scope>
-        </dependency>
+        <!--        <dependency>-->
+        <!--            <groupId>io.tapdata</groupId>-->
+        <!--            <artifactId>tapdata-pdk-runner</artifactId>-->
+        <!--            <scope>test</scope>-->
+        <!--        </dependency>-->
 
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-test-utils</artifactId>
-            <version>${flink.version}</version>
-            <scope>compile</scope>
-        </dependency>
 
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-core</artifactId>
-            <version>${flink.version}</version>
-            <scope>compile</scope>
-        </dependency>
 
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-streaming-java</artifactId>
-            <version>${flink.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.flink</groupId>
-                    <artifactId>flink-shaded-guava</artifactId>
-                </exclusion>
-            </exclusions><!-- Use the version compatible with your project -->
-            <scope>compile</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-common</artifactId>
-            <version>${flink.version}</version>
-            <scope>compile</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-tests</artifactId>
-            <version>${flink.version}</version>
-            <scope>compile</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-table-planner_${scala.binary.version}</artifactId>
-            <version>${flink.version}</version>
-            <scope>compile</scope>
-        </dependency>
     </dependencies>
 
     <build>
@@ -188,7 +115,7 @@
                             <PDK-API-Version>${tapdata.pdk.api.version}</PDK-API-Version>
                             <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
                             <Version>${version}</Version>
-                            <Authentication>Beta</Authentication>
+                            <Authentication>GA</Authentication>
                             <Git-Build-Time>${git.build.time}</Git-Build-Time>
                             <Git-Branch>${git.branch}</Git-Branch>
                             <Git-Commit-Id>${git.commit.id}</Git-Commit-Id>
@@ -243,7 +170,7 @@
                         </goals>
 
                         <configuration>
-                            <outputDirectory>${basedir}/../dist/</outputDirectory>
+                            <outputDirectory>../dist</outputDirectory>
                             <resources>
                                 <resource>
                                     <directory>${basedir}/target/</directory>
@@ -272,4 +199,5 @@
             </plugin>
         </plugins>
     </build>
+
 </project>
