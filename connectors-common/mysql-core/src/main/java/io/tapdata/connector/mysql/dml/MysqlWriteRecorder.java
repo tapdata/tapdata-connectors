@@ -1,7 +1,6 @@
 package io.tapdata.connector.mysql.dml;
 
 import io.tapdata.common.dml.NormalWriteRecorder;
-import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
@@ -109,6 +108,18 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
                 + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
                 "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ON DUPLICATE KEY UPDATE "
                 + after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=values(" + escapeChar + k + escapeChar + ")").collect(Collectors.joining(", "));
+    }
+
+    protected Object filterValue(Object value, String dataType) {
+        if (dataType.startsWith("char")) {
+            return trimTailBlank(value);
+        }
+        return value;
+    }
+
+    private String trimTailBlank(Object str) {
+        if (null == str) return null;
+        return ("_" + str).trim().substring(1);
     }
 
 }
