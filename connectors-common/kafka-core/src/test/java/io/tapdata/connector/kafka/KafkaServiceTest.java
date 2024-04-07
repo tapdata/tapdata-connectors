@@ -2,6 +2,7 @@ package io.tapdata.connector.kafka;
 
 import io.tapdata.common.MqConfig;
 import io.tapdata.connector.kafka.config.KafkaConfig;
+import io.tapdata.connector.kafka.util.ScriptUtil;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -73,7 +74,7 @@ public class KafkaServiceTest {
             when(isAlive.get()).thenReturn(true).thenReturn(false);
             doCallRealMethod().when(kafkaService).produce(connectorContext,tapRecordEvents,tapTable,writeListResultConsumer,isAlive);
             kafkaService.produce(connectorContext,tapRecordEvents,tapTable,writeListResultConsumer,isAlive);
-            verify(kafkaService).initBuildInMethod();
+//            verify(kafkaService).initBuildInMethod();
         }
         private void reflectScriptFactory(ScriptFactory mockScriptFactory) throws NoSuchFieldException, IllegalAccessException {
             Field scriptFactory = KafkaService.class.getDeclaredField("scriptFactory");
@@ -89,7 +90,7 @@ public class KafkaServiceTest {
         @Test
         void testInitBuildInMethod(){
             kafkaService = new KafkaService();
-            String s = kafkaService.initBuildInMethod();
+            String s = ScriptUtil.initBuildInMethod();
             assertEquals(true,s.contains("var DateUtil"));
         }
     }

@@ -6,17 +6,18 @@ import io.tapdata.common.constant.MqOp;
 import io.tapdata.connector.kafka.admin.Admin;
 import io.tapdata.connector.kafka.admin.DefaultAdmin;
 import io.tapdata.connector.kafka.config.*;
-import io.tapdata.connector.kafka.util.Krb5Util;
-import io.tapdata.connector.kafka.util.ObjectUtils;
+import io.tapdata.connector.kafka.util.*;
 import io.tapdata.constant.MqTestItem;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
+import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.script.ScriptFactory;
 import io.tapdata.entity.script.ScriptOptions;
@@ -32,6 +33,7 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
+import org.apache.commons.collections4.MapUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -39,7 +41,6 @@ import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
-
 import javax.script.Invocable;
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
@@ -60,6 +61,9 @@ public class KafkaService extends AbstractMqService {
     private KafkaProducer<byte[], byte[]> kafkaProducer;
     private static final ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata"); //script factory
 
+    Invocable customScriptEngine = null;
+
+    Invocable declareScriptEngine = null;
     public KafkaService() {
 
     }
@@ -136,7 +140,18 @@ public class KafkaService extends AbstractMqService {
 
     @Override
     public void init() {
-
+        KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
+        String enableCustomParseScript = kafkaConfig.getEnableCustomParseScript();
+        Boolean enableCustomParse = kafkaConfig.getEnableCustomParse();
+        if (Boolean.TRUE.equals(enableCustomParse)) {
+            customScriptEngine = ScriptUtil.getScriptEngine(enableCustomParseScript, "graal.js", scriptFactory);
+        }
+        Boolean enableModelDeclare = kafkaConfig.getEnableModelDeclare();
+        if(Boolean.TRUE.equals(enableModelDeclare)){
+            declareScriptEngine = ScriptUtil.getScriptEngine(kafkaConfig.getEnableModelDeclareScript(), "graal.js", scriptFactory);
+            KafkaTapModelDeclare tapModelDeclare = new KafkaTapModelDeclare();
+            ((ScriptEngine) declareScriptEngine).put("TapModelDeclare", tapModelDeclare);
+        }
     }
 
     @Override
@@ -223,6 +238,70 @@ public class KafkaService extends AbstractMqService {
         consumer.accept(tapTables);
     }
 
+    public void loadTables(List<String> tableNames, int tableSize, Consumer<Map<String, TapTable>> listConsumer) {
+        CountDownLatch countDownLatch = new CountDownLatch(20);
+        ExecutorService executorService = Executors.newFixedThreadPool(20);
+        SchemaConfiguration schemaConfiguration = new SchemaConfiguration(((KafkaConfig) mqConfig), connectorId);
+        Map<String, Object> config = schemaConfiguration.build();
+        Map<String, TapTable> tapTableMap = new HashMap<>();
+        tableNames.forEach(tableName -> {
+            try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(config)) {
+                kafkaConsumer.subscribe(Collections.singletonList(tableName));
+                ConsumerRecords<byte[], byte[]> consumerRecords;
+                while (!(consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L))).isEmpty()) {
+                    for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+                        Map<String, Object> messageBody;
+                        try {
+                            messageBody = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
+                        } catch (Exception e) {
+                            tapLogger.error("topic[{}] value [{}] can not parse to json, ignore...", consumerRecord.topic(), consumerRecord.value());
+                            continue;
+                        }
+                        if (messageBody == null) {
+                            tapLogger.warn("messageBody not allow null...");
+                            continue;
+                        }
+                        Object event = ObjectUtils.covertData(executeScript(customScriptEngine, "process", messageBody));
+                        if (null == event) {
+                            tapLogger.error("event is null");
+                        }
+                        if (tapTableMap.containsKey(tableName)) {
+                            continue;
+                        }
+                        TapBaseEvent tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) event);
+                        if (tapBaseEvent instanceof TapRecordEvent) {
+                            TapTable table = new TapTable();
+                            if (tapBaseEvent instanceof TapInsertRecordEvent) {
+                                SCHEMA_PARSER.parse(table, ((TapInsertRecordEvent) tapBaseEvent).getAfter());
+                            } else if (tapBaseEvent instanceof TapUpdateRecordEvent) {
+                                SCHEMA_PARSER.parse(table, ((TapUpdateRecordEvent) tapBaseEvent).getAfter());
+                            } else {
+                                SCHEMA_PARSER.parse(table, ((TapDeleteRecordEvent) tapBaseEvent).getBefore());
+                            }
+                            tapTableMap.put(tableName, table);
+                        }
+                    }
+                    kafkaConsumer.subscribe(Collections.singletonList(tableName));
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            } finally {
+            }
+        });
+        if (MapUtils.isNotEmpty(tapTableMap)) {
+            if (((KafkaConfig) mqConfig).getEnableModelDeclare()) {
+                for (TapTable tapTable : tapTableMap.values()) {
+                    try {
+                        declareScriptEngine.invokeFunction("declare", tapTable);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
+            listConsumer.accept(tapTableMap);
+        }
+    }
+
     protected void submitPageTables(int tableSize, Consumer<List<TapTable>> consumer, SchemaConfiguration schemaConfiguration, List<String> destinationSet) {
         List<List<String>> tablesList = Lists.partition(destinationSet, tableSize);
         Map<String, Object> config = schemaConfiguration.build();
@@ -274,6 +353,21 @@ public class KafkaService extends AbstractMqService {
     }
 
     public static Object executeScript(ScriptEngine scriptEngine, String function, Object... params) {
+        if (scriptEngine != null) {
+            Invocable invocable = (Invocable) scriptEngine;
+            try {
+                return invocable.invokeFunction(function, params);
+            } catch (StopException e) {
+//                TapLogger.info(TAG, "Get data and stop script.");
+                throw new RuntimeException(e);
+            } catch (ScriptException | NoSuchMethodException | RuntimeException e) {
+//                TapLogger.error(TAG, "Run script error, message: {}", e.getMessage(), e);
+                throw new RuntimeException(e);
+            }
+        }
+        return null;
+    }
+    public static Object executeScript(Invocable scriptEngine, String function, Object... params) {
         if (scriptEngine != null) {
             Invocable invocable = (Invocable) scriptEngine;
             try {
@@ -373,7 +467,7 @@ public class KafkaService extends AbstractMqService {
         try {
             scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
                     new ScriptOptions().engineName("graal.js"));
-            String buildInMethod = initBuildInMethod();
+            String buildInMethod = ScriptUtil.initBuildInMethod();
             String scripts = script + System.lineSeparator() + buildInMethod;
             scriptEngine.eval(scripts);
         } catch (Exception e) {
@@ -495,30 +589,7 @@ public class KafkaService extends AbstractMqService {
         }
     }
 
-    protected String initBuildInMethod() {
-        StringBuilder buildInMethod = new StringBuilder();
-        buildInMethod.append("var DateUtil = Java.type(\"com.tapdata.constant.DateUtil\");\n");
-        buildInMethod.append("var UUIDGenerator = Java.type(\"com.tapdata.constant.UUIDGenerator\");\n");
-        buildInMethod.append("var idGen = Java.type(\"com.tapdata.constant.UUIDGenerator\");\n");
-        buildInMethod.append("var HashMap = Java.type(\"java.util.HashMap\");\n");
-        buildInMethod.append("var LinkedHashMap = Java.type(\"java.util.LinkedHashMap\");\n");
-        buildInMethod.append("var ArrayList = Java.type(\"java.util.ArrayList\");\n");
-        buildInMethod.append("var Date = Java.type(\"java.util.Date\");\n");
-        buildInMethod.append("var uuid = UUIDGenerator.uuid;\n");
-        buildInMethod.append("var JSONUtil = Java.type('com.tapdata.constant.JSONUtil');\n");
-        buildInMethod.append("var HanLPUtil = Java.type(\"com.tapdata.constant.HanLPUtil\");\n");
-        buildInMethod.append("var split_chinese = HanLPUtil.hanLPParticiple;\n");
-        buildInMethod.append("var util = Java.type(\"com.tapdata.processor.util.Util\");\n");
-        buildInMethod.append("var MD5Util = Java.type(\"com.tapdata.constant.MD5Util\");\n");
-        buildInMethod.append("var MD5 = function(str){return MD5Util.crypt(str, true);};\n");
-        buildInMethod.append("var Collections = Java.type(\"java.util.Collections\");\n");
-        buildInMethod.append("var MapUtils = Java.type(\"com.tapdata.constant.MapUtil\");\n");
-        buildInMethod.append("var sleep = function(ms){\n" +
-                "var Thread = Java.type(\"java.lang.Thread\");\n" +
-                "Thread.sleep(ms);\n" +
-                "}\n");
-        return buildInMethod.toString();
-    }
+
 
     @Override
     public void produce(TapFieldBaseEvent tapFieldBaseEvent) {
@@ -558,7 +629,11 @@ public class KafkaService extends AbstractMqService {
                 break;
             }
             for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-                makeMessage(consumerRecord, list, tableName);
+                if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
+                    makeCustomMessage(consumerRecord,list,tableName);
+                } else {
+                    makeMessage(consumerRecord, list, tableName);
+                }
                 if (list.size() >= eventBatchSize) {
                     eventsOffsetConsumer.accept(list, TapSimplify.list());
                     list = TapSimplify.list();
@@ -584,7 +659,11 @@ public class KafkaService extends AbstractMqService {
                 continue;
             }
             for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-                makeMessage(consumerRecord, list, consumerRecord.topic());
+                if(((KafkaConfig) mqConfig).getEnableCustomParse()){
+                    makeCustomMessage(consumerRecord,list,consumerRecord.topic());
+                }else{
+                    makeMessage(consumerRecord, list, consumerRecord.topic());
+                }
                 if (list.size() >= eventBatchSize) {
                     eventsOffsetConsumer.accept(list, TapSimplify.list());
                     list = TapSimplify.list();
@@ -597,6 +676,32 @@ public class KafkaService extends AbstractMqService {
         kafkaConsumer.close();
     }
 
+    private void makeCustomMessage(ConsumerRecord<byte[], byte[]> consumerRecord, List<TapEvent> list, String tableName) {
+        AtomicReference<String> mqOpReference = new AtomicReference<>();
+        Map<String, Object> messageBody = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
+        Object data = ObjectUtils.covertData(executeScript(customScriptEngine, "process", messageBody));
+        TapBaseEvent tapBaseEvent = null;
+        if (null != data) {
+//            tapLogger.error("event is null");
+            tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) data);
+        }
+        if (tapBaseEvent instanceof TapFieldBaseEvent) {
+            TapFieldBaseEvent tapFieldBaseEvent = (TapFieldBaseEvent) tapBaseEvent;
+            list.add(tapFieldBaseEvent);
+        } else if (tapBaseEvent instanceof TapInsertRecordEvent) {
+            TapInsertRecordEvent tapInsertRecordEvent = (TapInsertRecordEvent) tapBaseEvent;
+            tapInsertRecordEvent.table(tableName);
+            list.add(tapInsertRecordEvent);
+        } else if (tapBaseEvent instanceof TapUpdateRecordEvent) {
+            TapUpdateRecordEvent tapUpdateRecordEvent = (TapUpdateRecordEvent) tapBaseEvent;
+            tapUpdateRecordEvent.table(tableName);
+            list.add(tapUpdateRecordEvent);
+        } else {
+            TapDeleteRecordEvent tapDeleteRecordEvent = (TapDeleteRecordEvent) tapBaseEvent;
+            tapDeleteRecordEvent.table(tableName);
+            list.add(tapDeleteRecordEvent);
+        }
+    }
     private void makeMessage(ConsumerRecord<byte[], byte[]> consumerRecord, List<TapEvent> list, String tableName) {
         AtomicReference<String> mqOpReference = new AtomicReference<>();
         mqOpReference.set(MqOp.INSERT.getOp());
@@ -633,5 +738,74 @@ public class KafkaService extends AbstractMqService {
         if (EmptyKit.isNotNull(kafkaProducer)) {
             kafkaProducer.close();
         }
+    }
+
+    public void produceDDLRecord(TapFieldBaseEvent tapFieldBaseEvent) {
+        AtomicReference<Throwable> reference = new AtomicReference<>();
+        Map<String, Object> data = getDDLRecordData(tapFieldBaseEvent);
+        byte[] body = jsonParser.toJsonBytes(data, JsonParser.ToJsonFeature.WriteMapNullValue);
+        ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapFieldBaseEvent.getTableId(),
+                null, tapFieldBaseEvent.getTime(), null, body,
+                new RecordHeaders());
+        Callback callback = (metadata, exception) -> reference.set(exception);
+        kafkaProducer.send(producerRecord, callback);
+        if (EmptyKit.isNotNull(reference.get())) {
+            throw new RuntimeException(reference.get());
+        }
+    }
+
+    public void produceCustomDDLRecord(TapFieldBaseEvent tapFieldBaseEvent) {
+        AtomicReference<Throwable> reference = new AtomicReference<>();
+        String script = ((KafkaConfig) mqConfig).getEnableDDLCustomScript();
+        ScriptEngine scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
+                new ScriptOptions().engineName("graal.js"));
+        String buildInMethod = ScriptUtil.initBuildInMethod();
+        String scripts = script + System.lineSeparator() + buildInMethod;
+        try {
+            scriptEngine.eval(scripts);
+        }catch (Exception e){
+            TapLogger.warn("Can not load Graal.js engine, msg: {}", e.getMessage());
+        }
+        Map<String, Object> ddlRecordData = getDDLRecordData(tapFieldBaseEvent);
+        Object object = ObjectUtils.covertData(executeScript(scriptEngine, "process", ddlRecordData));
+        Map<String, Object> res = (Map<String, Object>) object;
+        byte[] body = jsonParser.toJsonBytes(res, JsonParser.ToJsonFeature.WriteMapNullValue);
+        ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapFieldBaseEvent.getTableId(),
+                null, tapFieldBaseEvent.getTime(), null, body,
+                new RecordHeaders());
+        Callback callback = (metadata, exception) -> reference.set(exception);
+        kafkaProducer.send(producerRecord, callback);
+        if (EmptyKit.isNotNull(reference.get())) {
+            throw new RuntimeException(reference.get());
+        }
+    }
+
+    private static Map<String, Object> getDDLRecordData(TapFieldBaseEvent tapFieldBaseEvent) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("referenceTime", tapFieldBaseEvent.getReferenceTime());
+        data.put("time", tapFieldBaseEvent.getTime());
+        data.put("type", tapFieldBaseEvent.getType());
+        data.put("tableId", tapFieldBaseEvent.getTableId());
+        if (tapFieldBaseEvent instanceof TapNewFieldEvent) {
+            TapNewFieldEvent tapNewFieldEvent = (TapNewFieldEvent) tapFieldBaseEvent;
+            data.put("newFields", tapNewFieldEvent.getNewFields());
+        } else if (tapFieldBaseEvent instanceof TapAlterFieldNameEvent) {
+            TapAlterFieldNameEvent tapAlterFieldNameEvent = (TapAlterFieldNameEvent) tapFieldBaseEvent;
+            data.put("nameChange", tapAlterFieldNameEvent.getNameChange());
+        } else if (tapFieldBaseEvent instanceof TapAlterFieldAttributesEvent) {
+            TapAlterFieldAttributesEvent tapAlterFieldAttributesEvent = (TapAlterFieldAttributesEvent) tapFieldBaseEvent;
+            data.put("fieldName", tapAlterFieldAttributesEvent.getFieldName());
+            data.put("dataTypeChange", tapAlterFieldAttributesEvent.getDataTypeChange());
+            data.put("checkChange", tapAlterFieldAttributesEvent.getCheckChange());
+            data.put("constraintChange", tapAlterFieldAttributesEvent.getConstraintChange());
+            data.put("nullableChange", tapAlterFieldAttributesEvent.getNullableChange());
+            data.put("commentChange", tapAlterFieldAttributesEvent.getCommentChange());
+            data.put("defaultChange", tapAlterFieldAttributesEvent.getDefaultChange());
+            data.put("primaryChange", tapAlterFieldAttributesEvent.getPrimaryChange());
+        } else if (tapFieldBaseEvent instanceof TapDropFieldEvent) {
+            TapDropFieldEvent tapDropFieldEvent = (TapDropFieldEvent) tapFieldBaseEvent;
+            data.put("fieldName", tapDropFieldEvent.getFieldName());
+        }
+        return data;
     }
 }

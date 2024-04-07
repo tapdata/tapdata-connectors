@@ -346,7 +346,8 @@
           "x-component-props": {
             "min": 1,
             "max": 255
-          }
+          },
+          "x-index": 130
         },
         "replicasSize": {
           "required": true,
@@ -362,7 +363,93 @@
           "x-component-props": {
             "min": 1,
             "max": 255
-          }
+          },
+          "x-index": 140
+        },
+        "enableCustomParse": {
+          "title": "${enableCustomParse}",
+          "type": "boolean",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${enableCustomParseTooltip}"
+          },
+          "x-index": 150
+        },
+        "enableCustomParseScript": {
+          "type": "string",
+          "required": false,
+          "default": "function process(record){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
+          "x-decorator": "FormItem",
+          "x-component": "JsEditor",
+          "x-component-props": {
+            "options": { "showPrintMargin": false, "useWrapMode": true },
+            "includeBeforeAndAfter": true,
+            "before": "function process(record){",
+            "beforeRegexp": "^[^]*function\\s+process\\s*\\(record\\)\\{",
+            "afterRegexp": "}[^}]*$",
+            "after": "}"
+          },
+          "x-reactions": {
+            "dependencies": [
+              "nodeConfig.enableCustomParse"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
+              }
+            }
+          },
+          "x-index": 160
+        },
+        "enableModelDeclare": {
+          "title": "${enableModelDeclare}",
+          "type": "boolean",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${enableModelDeclareTooltip}"
+          },
+          "x-index": 170
+        },
+        "enableModelDeclareScript": {
+          "type": "string",
+          "required": false,
+          "x-decorator": "FormItem",
+          "x-component": "JsEditor",
+          "default": "function declare(tapTable){}",
+          "x-component-props": {
+            "options": { "showPrintMargin": false, "useWrapMode": true },
+            "includeBeforeAndAfter": true,
+            "before": "function declare(tapTable){",
+            "beforeRegexp": "^[^]*function\\s+declare\\s*\\(tapTable\\)\\{",
+            "afterRegexp": "}[^}]*$",
+            "after": "}"
+          },
+          "x-reactions": {
+            "dependencies": [
+              "nodeConfig.enableModelDeclare"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
+              }
+            }
+          },
+          "x-index": 180
+        },
+        "enableScript": {
+          "title": "${enableScript}",
+          "type": "boolean",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${scriptTooltip}"
+          },
+          "x-index": 190
         },
         "script": {
           "type": "string",
@@ -387,7 +474,45 @@
                 "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
               }
             }
-          }
+          },
+          "x-index": 200
+        },
+        "enableCustomDDLMessage": {
+          "title": "${enabledCustomDDLMessage}",
+          "type": "boolean",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${enabledCustomDDLMessageTooltip}"
+          },
+          "x-index": 210
+        },
+        "enableDDLCustomScript": {
+          "type": "string",
+          "required": false,
+          "default": "function process(record){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
+          "x-decorator": "FormItem",
+          "x-component": "JsEditor",
+          "x-component-props": {
+            "options": { "showPrintMargin": false, "useWrapMode": true },
+            "includeBeforeAndAfter": true,
+            "before": "function process(record){",
+            "beforeRegexp": "^[^]*function\\s+process\\s*\\(record\\)\\{",
+            "afterRegexp": "}[^}]*$",
+            "after": "}"
+          },
+          "x-reactions": {
+            "dependencies": [
+              "nodeConfig.enableCustomDDLMessage"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
+              }
+            }
+          },
+          "x-index": 220
         }
       }
     }
@@ -432,8 +557,12 @@
       "authPassword": "authPassword",
       "basicAuth": "basicAuth",
       "enableScript": "Custom message body format",
+      "enableCustomParse": "Enable custom parse body",
       "script": "script",
-      "scriptTooltip": "1. Parameter Description:\n· 'record' is the data record, including 'header' and 'data', where 'data' contains 'before' and 'after'.\n· 'op' represents the operation type, with a total of 3 options: insert, update, and delete.\n· 'conditionKeys' is the collection of primary key field names.\n2. Examples:\n· Add the operation type to the Kafka message: record.data.op = op\n· Add a custom header: record.header.test='test header'\n· Delete the 'before' field: delete record.data.before\n· Discard the data record: return null"
+      "scriptTooltip": "1. Parameter Description:\n· 'record' is the data record, including 'header' and 'data', where 'data' contains 'before' and 'after'.\n· 'op' represents the operation type, with a total of 3 options: insert, update, and delete.\n· 'conditionKeys' is the collection of primary key field names.\n2. Examples:\n· Add the operation type to the Kafka message: record.data.op = op\n· Add a custom header: record.header.test='test header'\n· Delete the 'before' field: delete record.data.before\n· Discard the data record: return null",
+      "enabledCustomDDLMessage": "Enables custom DDL event message format body",
+      "enabledCustomDDLMessageTooltip": "",
+      "enableCustomParseTooltip": "",
     },
     "zh_CN": {
       "partitionNumTooltip": "若Topic存在，分区的数量只能增加不能减小",
@@ -474,7 +603,12 @@
       "basicAuth": "基本认证",
       "enableScript": "自定义消息体格式",
       "script": "脚本",
-      "scriptTooltip": "1.参数说明\n·record为每条数据记录，包含header和data，data中包含before和after\n·op为操作类型，共3种：insert，update，delete\n·conditionKeys为主键字段名集合\n2.示例\n·kafka message中添加操作类型: record.data.op = op\n·添加自定义header: record.header.test='test header'\n·删除before: delete record.data.before\n·丢弃该条数据: return null"
+      "enableCustomParse":"开启自定义解析消息体",
+      "scriptTooltip": "1.参数说明\n·record为每条数据记录，包含header和data，data中包含before和after\n·op为操作类型，共3种：insert，update，delete\n·conditionKeys为主键字段名集合\n2.示例\n·kafka message中添加操作类型: record.data.op = op\n·添加自定义header: record.header.test='test header'\n·删除before: delete record.data.before\n·丢弃该条数据: return null",
+      "enabledCustomDDLMessage": "开启自定义DDL事件消息格式体",
+      "enabledCustomDDLMessageTooltip": "123",
+      "enableModelDeclare": "自定义Kafka模型",
+      "enableCustomParseTooltip": ""
     },
     "zh_TW": {
       "partitionNumTooltip": "若Topic存在，分區的數量只能增加不能減小",
@@ -515,7 +649,11 @@
       "basicAuth": "基本認證",
       "enableScript": "自定義消息體格式",
       "script": "腳本",
-      "scriptTooltip": "1.參數說明\n·record為每條數據記錄，包含header和data，data中包含before和after\n·op為操作類型，共有 3 種：insert，update，delete\n·conditionKeys為主鍵字段名集合\n2.示例\n·在 Kafka message中添加操作類型：record.data.op = op\n·添加自訂header：record.header.test = 'test header'\n·刪除before：delete record.data.before\n·丟棄該條數據：return null"
+      "enableCustomParse":"开启自定义解析消息体",
+      "scriptTooltip": "1.參數說明\n·record為每條數據記錄，包含header和data，data中包含before和after\n·op為操作類型，共有 3 種：insert，update，delete\n·conditionKeys為主鍵字段名集合\n2.示例\n·在 Kafka message中添加操作類型：record.data.op = op\n·添加自訂header：record.header.test = 'test header'\n·刪除before：delete record.data.before\n·丟棄該條數據：return null",
+      "enabledCustomDDLMessage": "開啓自定義DDL事件消息格式體",
+      "enabledCustomDDLMessageTooltip": "",
+      "enableCustomParseTooltip": ""
     }
   },
   "dataTypes": {

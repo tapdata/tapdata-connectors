@@ -27,7 +27,6 @@ import io.tapdata.pdk.apis.entity.Capability;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
-import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.avro.generic.GenericRecord;
@@ -40,6 +39,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static io.tapdata.pdk.apis.entity.ConnectionOptions.*;
+import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 
 @TapConnectorClass("spec_kafka.json")
 public class KafkaConnector extends ConnectorBase {
@@ -151,6 +151,15 @@ public class KafkaConnector extends ConnectorBase {
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportCreateTableV2(this::createTableV2);
+        connectorFunctions.supportDiscoverSchemaUsingNodeConfig(this::discoverSchemaUsingNodeConfig);
+    }
+
+    private void discoverSchemaUsingNodeConfig(TapConnectorContext tapConnectorContext, List<String> tableNames, int tableSize, Consumer<Map<String,TapTable>> listConsumer) {
+        try {
+            kafkaService.loadTables(tableNames,tableSize,listConsumer);
+        } catch (Throwable e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
@@ -220,7 +229,11 @@ public class KafkaConnector extends ConnectorBase {
 
     private void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) {
         try {
-            kafkaService.produce(tapFieldBaseEvent);
+            if (Boolean.TRUE.equals(this.kafkaConfig.getEnableCustomDDLMessage())) {
+                kafkaService.produceCustomDDLRecord(tapFieldBaseEvent);
+            } else {
+                kafkaService.produceDDLRecord(tapFieldBaseEvent);
+            }
         } catch (Throwable t) {
             kafkaExceptionCollector.collectTerminateByServer(t);
             kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), t);

@@ -41,5 +41,32 @@ public enum JsonType {
         }
         return null;
     }
+    public static JsonType of(String obj) {
+        if (obj == null) {
+            return null;
+        }
+        if ("Map".equalsIgnoreCase(obj)) {
+            return JsonType.OBJECT;
+        }
+        if ("Collection".equalsIgnoreCase(obj) || "Array".equalsIgnoreCase(obj)) {
+            return JsonType.ARRAY;
+        }
+        if ("Number".equalsIgnoreCase(obj)) {
+            return JsonType.NUMBER;
+        }
+        if ("Boolean".equalsIgnoreCase(obj)) {
+            return JsonType.BOOLEAN;
+        }
+        if ("String".equalsIgnoreCase(obj)) {
+            return JsonType.STRING;
+        }
+        if ("Integer".equalsIgnoreCase(obj)) {
+            return JsonType.INTEGER;
+        }
+        if ("Test".equalsIgnoreCase(obj)) {
+            return JsonType.TEXT;
+        }
+        return null;
+    }
 
 }

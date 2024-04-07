@@ -25,6 +25,29 @@ public class KafkaConfig extends MqConfig {
 
     private Integer replicasSize;
     private String script;
+    private Boolean enableModelDeclare = false;
+    private String enableModelDeclareScript;
+    private Boolean enableCustomDDLMessage =false;
+    private String enableDDLCustomScript;
+
+    private Boolean enableCustomParse = false;
+    private String enableCustomParseScript;
+
+    public Boolean getEnableCustomParse() {
+        return enableCustomParse;
+    }
+
+    public void setEnableCustomParse(Boolean enableCustomParse) {
+        this.enableCustomParse = enableCustomParse;
+    }
+
+    public String getEnableCustomParseScript() {
+        return enableCustomParseScript;
+    }
+
+    public void setEnableCustomParseScript(String enableCustomParseScript) {
+        this.enableCustomParseScript = enableCustomParseScript;
+    }
 
     public Integer getPartitionNum() {
         return partitionNum;
@@ -44,6 +67,22 @@ public class KafkaConfig extends MqConfig {
 
     public String getAuthCredentialsSource() {
         return authCredentialsSource;
+    }
+
+    public Boolean getEnableCustomDDLMessage() {
+        return enableCustomDDLMessage;
+    }
+
+    public void setEnableCustomDDLMessage(Boolean enableCustomDDLMessage) {
+        this.enableCustomDDLMessage = enableCustomDDLMessage;
+    }
+
+    public String getEnableDDLCustomScript() {
+        return enableDDLCustomScript;
+    }
+
+    public void setEnableDDLCustomScript(String enableDDLCustomScript) {
+        this.enableDDLCustomScript = enableDDLCustomScript;
     }
 
     public void setAuthCredentialsSource(String authCredentialsSource) {
@@ -84,6 +123,23 @@ public class KafkaConfig extends MqConfig {
      */
     private Integer kafkaConsumerRequestTimeout = 0;
     private Boolean kafkaConsumerUseTransactional = false;
+
+    public Boolean getEnableModelDeclare() {
+        return enableModelDeclare;
+    }
+
+    public void setEnableModelDeclare(Boolean enableModelDeclare) {
+        this.enableModelDeclare = enableModelDeclare;
+    }
+
+    public String getEnableModelDeclareScript() {
+        return enableModelDeclareScript;
+    }
+
+    public void setEnableModelDeclareScript(String enableModelDeclareScript) {
+        this.enableModelDeclareScript = enableModelDeclareScript;
+    }
+
     private Integer kafkaMaxPollRecords = 0;
     private Integer kafkaPollTimeoutMS = 0;
     private Integer kafkaMaxFetchBytes = 0;
