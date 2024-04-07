@@ -7,9 +7,9 @@
         <groupId>io.tapdata</groupId>
         <version>1.0-SNAPSHOT</version>
     </parent>
-    <artifactId>mongodb-atlas-connector</artifactId>
+    <artifactId>mongodb-lower-connector</artifactId>
     <version>1.0-SNAPSHOT</version>
-    <name>mongodb-atlas-connector</name>
+    <name>mongodb-lower-connector</name>
 
     <properties>
         <java.version>8</java.version>

@@ -16,7 +16,7 @@
         <module>postgres-connector</module>
 		<module>elasticsearch-connector</module>
         <module>doris-connector</module>
-        <module>oceanbase-connector</module>
+        <module>oceanbase-mysql-connector</module>
 		<module>kafka-connector</module>
         <module>rabbitmq-connector</module>
         <module>rocketmq-connector</module>
@@ -62,7 +62,8 @@
         <module>hudi-connector</module>
 		<module>open-gaussdb-connector</module>
 		<module>aws-clickhouse-connector</module>
-    </modules>
+		<module>mongodb-lower-connector</module>
+	</modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
 		<java.version>8</java.version>
@@ -95,20 +96,6 @@
             <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
-
-		<dependency>
-			<groupId>org.springframework</groupId>
-			<artifactId>spring-test</artifactId>
-			<version>5.0.4.RELEASE</version>
-			<scope>test</scope>
-		</dependency>
-
-		<dependency>
-			<groupId>org.mockito</groupId>
-			<artifactId>mockito-inline</artifactId>
-			<version>4.11.0</version>
-			<scope>test</scope>
-		</dependency>
 
 	</dependencies>
 
@@ -220,13 +207,6 @@
 				<groupId>net.bytebuddy</groupId>
 				<artifactId>byte-buddy-agent</artifactId>
 				<version>${byte-buddy.version}</version>
-			</dependency>
-
-			<dependency>
-				<groupId>org.s</groupId>
-				<artifactId>mockito-inline</artifactId>
-				<version>${mockito.version}</version>
-				<scope>test</scope>
 			</dependency>
 
 		</dependencies>
