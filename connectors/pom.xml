@@ -16,7 +16,7 @@
         <module>postgres-connector</module>
 		<module>elasticsearch-connector</module>
         <module>doris-connector</module>
-        <module>oceanbase-connector</module>
+        <module>oceanbase-mysql-connector</module>
 		<module>kafka-connector</module>
         <module>rabbitmq-connector</module>
         <module>rocketmq-connector</module>
