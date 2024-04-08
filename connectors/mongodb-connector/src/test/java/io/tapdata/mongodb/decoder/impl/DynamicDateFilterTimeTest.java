@@ -38,6 +38,10 @@ public class DynamicDateFilterTimeTest {
         Assertions.assertEquals("toStringFormat", DynamicDateFilterTime.TO_STRING_FORMAT);
         Assertions.assertEquals("subtract", DynamicDateFilterTime.SUBTRACT);
         Assertions.assertEquals("yyyy-MM-dd HH:mm:ss.SSS", DynamicDateFilterTime.DEFAULT_DATE_FORMAT);
+        Assertions.assertEquals("covertType", DynamicDateFilterTime.COVERT_TYPE);
+        Assertions.assertEquals("date", DynamicDateFilterTime.TO_DATE);
+        Assertions.assertEquals("timestamp", DynamicDateFilterTime.TO_TIMESTAMP);
+        Assertions.assertEquals("string", DynamicDateFilterTime.TO_DATE_STRING);
     }
 
     @Nested
@@ -105,6 +109,9 @@ public class DynamicDateFilterTimeTest {
 
             when(filterTime.execute(any(Object.class), anyMap())).thenCallRealMethod();
             when(filterTime.covertTime(anyString(), anyInt(), anyString())).thenReturn("");
+            Date d = mock(Date.class);
+            when(d.getTime()).thenReturn(1L);
+            when(filterTime.covertTime(anyString(), anyInt(), any())).thenReturn(d);
         }
         @Nested
         class FunctionObjIsMapTest {
@@ -115,6 +122,7 @@ public class DynamicDateFilterTimeTest {
                 when(map.get(DynamicDateFilterTime.CUSTOM_FORMAT)).thenReturn("2024-03-20 00:00:00.000");
                 when(map.get(DynamicDateFilterTime.TO_STRING_FORMAT)).thenReturn("yyyy-MM-dd");
                 when(map.get(DynamicDateFilterTime.SUBTRACT)).thenReturn(1000);
+                when(map.get(DynamicDateFilterTime.COVERT_TYPE)).thenReturn(null);
             }
             @Test
             void testCustomFormatIsNull(){
@@ -218,6 +226,34 @@ public class DynamicDateFilterTimeTest {
                 when(map.get(DynamicDateFilterTime.SUBTRACT)).thenReturn("code");
                 Assertions.assertThrows(IllegalArgumentException.class, () -> filterTime.execute(map, mock(Map.class)));
                 verify(filterTime, times(0)).covertTime(anyString(), anyInt(), anyString());
+                verify(map, times(1)).get(DynamicDateFilterTime.CUSTOM_FORMAT);
+                verify(map, times(1)).get(DynamicDateFilterTime.TO_STRING_FORMAT);
+                verify(map, times(1)).get(DynamicDateFilterTime.SUBTRACT);
+            }
+
+            @Test
+            void testToDate() {
+                when(map.get(DynamicDateFilterTime.COVERT_TYPE)).thenReturn(DynamicDateFilterTime.TO_DATE);
+                Assertions.assertDoesNotThrow(() -> filterTime.execute(map, mock(Map.class)));
+                verify(filterTime, times(1)).covertTime(anyString(), anyInt(), any());
+                verify(map, times(1)).get(DynamicDateFilterTime.CUSTOM_FORMAT);
+                verify(map, times(1)).get(DynamicDateFilterTime.TO_STRING_FORMAT);
+                verify(map, times(1)).get(DynamicDateFilterTime.SUBTRACT);
+            }
+            @Test
+            void testToString() {
+                when(map.get(DynamicDateFilterTime.COVERT_TYPE)).thenReturn(DynamicDateFilterTime.TO_DATE_STRING);
+                Assertions.assertDoesNotThrow(() -> filterTime.execute(map, mock(Map.class)));
+                verify(filterTime, times(1)).covertTime(anyString(), anyInt(), anyString());
+                verify(map, times(1)).get(DynamicDateFilterTime.CUSTOM_FORMAT);
+                verify(map, times(1)).get(DynamicDateFilterTime.TO_STRING_FORMAT);
+                verify(map, times(1)).get(DynamicDateFilterTime.SUBTRACT);
+            }
+            @Test
+            void testToTimestamp() {
+                when(map.get(DynamicDateFilterTime.COVERT_TYPE)).thenReturn(DynamicDateFilterTime.TO_TIMESTAMP);
+                Assertions.assertDoesNotThrow(() -> filterTime.execute(map, mock(Map.class)));
+                verify(filterTime, times(1)).covertTime(anyString(), anyInt(), any());
                 verify(map, times(1)).get(DynamicDateFilterTime.CUSTOM_FORMAT);
                 verify(map, times(1)).get(DynamicDateFilterTime.TO_STRING_FORMAT);
                 verify(map, times(1)).get(DynamicDateFilterTime.SUBTRACT);
