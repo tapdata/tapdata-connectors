@@ -39,6 +39,11 @@ public class HttpPutBuilder {
         return this;
     }
 
+    public HttpPutBuilder addPartialHeader() {
+        header.put("partial_columns", "true");
+        return this;
+    }
+
     public HttpPutBuilder addHeader(String key, String value) {
         header.put(key, value);
         return this;

@@ -160,6 +160,9 @@ public class DorisStreamLoader {
                         .enableDelete()
                         .setEntity(entity);
             }
+            if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Unique".equals(dorisConfig.getUniqueKeyType())) {
+                putBuilder.addPartialHeader();
+            }
             HttpPut httpPut = putBuilder.build();
             TapLogger.debug(TAG, "Call stream load http api, url: {}, headers: {}", loadUrl, putBuilder.header);
             return handlePreCommitResponse(httpClient.execute(httpPut));

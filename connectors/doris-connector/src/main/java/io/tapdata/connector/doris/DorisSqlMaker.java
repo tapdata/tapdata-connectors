@@ -14,7 +14,7 @@ public class DorisSqlMaker extends CommonSqlMaker {
         super('`');
     }
 
-    public String buildColumnDefinitionByOrder(TapTable tapTable, Collection<String> keyOrdered) {
+    public String buildColumnDefinitionByOrder(TapTable tapTable, Collection<String> keyOrdered, boolean aggregate) {
         LinkedHashMap<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
         List<String> keyOrderedFields = new ArrayList<>(keyOrdered);
         keyOrderedFields.addAll(nameFieldMap.entrySet().stream().filter(v -> !keyOrdered.contains(v.getKey())).sorted(Comparator.comparing(v ->
@@ -27,6 +27,9 @@ public class DorisSqlMaker extends CommonSqlMaker {
                 return "";
             }
             builder.append(getEscapeChar()).append(tapField.getName()).append(getEscapeChar()).append(' ').append(tapField.getDataType()).append(' ');
+            if (aggregate && Boolean.FALSE.equals(tapField.getPrimaryKey())) {
+                builder.append("REPLACE_IF_NOT_NULL ");
+            }
             buildDefaultDefinition(builder, tapField);
             buildNullDefinition(builder, tapField);
             buildCommentDefinition(builder, tapField);
