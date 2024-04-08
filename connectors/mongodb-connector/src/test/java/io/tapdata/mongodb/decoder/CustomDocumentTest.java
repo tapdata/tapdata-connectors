@@ -29,5 +29,12 @@ public class CustomDocumentTest {
             Assertions.assertNotNull(parse.get("create"));
             Assertions.assertEquals(Date.class.getName(), parse.get("create").getClass().getName());
         }
+        @Test
+        void testJsonParseCovertToTimestamp(){
+            Document parse = CustomDocument.parse("{\"create\":{\"$dateToTimestamp\": {\"$dynamicDate\":{\"format\":\"2024-03-07\"}}}}");
+            Assertions.assertNotNull(parse);
+            Assertions.assertNotNull(parse.get("create"));
+            Assertions.assertEquals(Long.class.getName(), parse.get("create").getClass().getName());
+        }
     }
 }

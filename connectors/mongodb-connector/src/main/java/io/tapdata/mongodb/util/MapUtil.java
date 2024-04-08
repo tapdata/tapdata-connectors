@@ -557,18 +557,22 @@ public class MapUtil {
     }
   }
 
-		public static void recursiveFlatMap(Map<String, Object> dataMap, Map<String, Object> newMap, String parentKey) {
-				if (MapUtils.isNotEmpty(dataMap)) {
-						dataMap.forEach((key, value) -> {
-								String fieldName = getFieldName(parentKey, key);
-								if (value instanceof Map) {
-										recursiveFlatMap((Map) value, newMap, fieldName);
-								} else {
-										newMap.put(fieldName, value);
-								}
-						});
-				}
-		}
+  public static void recursiveFlatMap(Map<String, Object> dataMap, Map<String, Object> newMap, String parentKey) {
+	  if (MapUtils.isNotEmpty(dataMap) && null != newMap) {
+		  dataMap.forEach((key, value) -> {
+			  String fieldName = getFieldName(parentKey, key);
+			  if (value instanceof Map) {
+				  if (((Map<?, ?>) value).isEmpty()) {
+					  newMap.put(fieldName, value);
+				  } else {
+					  recursiveFlatMap((Map) value, newMap, fieldName);
+				  }
+			  } else {
+				  newMap.put(fieldName, value);
+			  }
+		  });
+	  }
+  }
 
 		private static String getFieldName(String parentKey, String key) {
 				String fieldName;
