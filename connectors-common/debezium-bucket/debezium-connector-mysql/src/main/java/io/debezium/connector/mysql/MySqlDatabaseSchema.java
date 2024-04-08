@@ -13,6 +13,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.apache.kafka.connect.data.Schema;
@@ -209,16 +212,19 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
         }
 
         try {
-            this.ddlChanges.reset();
-            this.ddlParser.setCurrentSchema(databaseName);
-            this.ddlParser.parse(ddlStatements, tables());
+            handleParse(ddlStatements, databaseName);
         }
         catch (ParsingException | MultipleParsingExceptions e) {
-            if (databaseHistory.skipUnparseableDdlStatements()) {
-                LOGGER.warn("Ignoring unparseable DDL statement '{}': {}", ddlStatements, e);
-            }
-            else {
-                throw e;
+            try {
+                String filteredSql = handleForUnparseableDDL(ddlStatements);
+                handleParse(filteredSql, databaseName);
+            }catch (ParsingException | MultipleParsingExceptions exception){
+                if (databaseHistory.skipUnparseableDdlStatements()) {
+                    LOGGER.warn("Ignoring unparseable DDL statement '{}': {}", ddlStatements, exception);
+                }
+                else {
+                    throw exception;
+                }
             }
         }
 
@@ -284,6 +290,24 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
             LOGGER.debug("Changes for DDL '{}' were filtered and not recorded in database history", ddlStatements);
         }
         return schemaChangeEvents;
+    }
+
+    private void handleParse(String ddlStatements, String databaseName) {
+        this.ddlChanges.reset();
+        this.ddlParser.setCurrentSchema(databaseName);
+        this.ddlParser.parse(ddlStatements, tables());
+    }
+
+    protected String handleForUnparseableDDL(String ddlStatements){
+        Pattern pattern = Pattern.compile("(?:,\n\\sGLOBAL\\s+INDEX|,\n\\sUNIQUE\\s+GLOBAL\\s+INDEX)[\\s\\S]*?PARTITIONS \\d+", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Matcher matcher = pattern.matcher(ddlStatements);
+        List<String> ignoreSql = new ArrayList<>();
+        AtomicReference<String> filteredSql = new AtomicReference<>(ddlStatements);
+        while (matcher.find()) {
+            ignoreSql.add(matcher.group());
+        }
+        ignoreSql.forEach((sql)-> filteredSql.set(filteredSql.get().replace(sql,"")));
+        return filteredSql.get();
     }
 
     private void emitChangeEvent(MySqlOffsetContext offset, List<SchemaChangeEvent> schemaChangeEvents,
