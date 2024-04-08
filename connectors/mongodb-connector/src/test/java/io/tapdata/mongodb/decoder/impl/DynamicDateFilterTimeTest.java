@@ -105,6 +105,8 @@ public class DynamicDateFilterTimeTest {
 
             when(filterTime.execute(any(Object.class), anyMap())).thenCallRealMethod();
             when(filterTime.covertTime(anyString(), anyInt(), anyString())).thenReturn("");
+            Date d = mock(Date.class);
+            when(d.getTime()).thenReturn(1L);
         }
         @Nested
         class FunctionObjIsMapTest {
