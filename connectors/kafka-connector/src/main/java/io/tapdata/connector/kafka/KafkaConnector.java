@@ -151,15 +151,6 @@ public class KafkaConnector extends ConnectorBase {
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportCreateTableV2(this::createTableV2);
-        connectorFunctions.supportDiscoverSchemaUsingNodeConfig(this::discoverSchemaUsingNodeConfig);
-    }
-
-    private void discoverSchemaUsingNodeConfig(TapConnectorContext tapConnectorContext, List<String> tableNames, int tableSize, Consumer<Map<String,TapTable>> listConsumer) {
-        try {
-            kafkaService.loadTables(tableNames,tableSize,listConsumer);
-        } catch (Throwable e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
@@ -245,7 +236,11 @@ public class KafkaConnector extends ConnectorBase {
     @Override
     public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
         if (!this.isSchemaRegister) {
-            kafkaService.loadTables(tableSize, consumer);
+            if (Boolean.TRUE.equals(kafkaConfig.getEnableCustomParse())) {
+                kafkaService.loadTables(tables, tableSize, consumer);
+            } else {
+                kafkaService.loadTables(tableSize, consumer);
+            }
         } else {
             kafkaSRService.loadTables(tableSize, consumer);
         }

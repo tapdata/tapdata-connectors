@@ -513,6 +513,72 @@
             }
           },
           "x-index": 220
+        },
+        "enableLoadTable": {
+          "title": "${enableLoadTable}",
+          "type": "boolean",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${enableLoadTableTooltip}"
+          },
+          "x-index": 230
+        },
+        "table_names": {
+          "type": "array",
+          "title": "${table_names}",
+          "x-decorator": "FormItem",
+          "x-component": "ArrayTable",
+          "x-index": 240,
+          "required": true,
+          "default": [
+            {
+              "type": "uuid",
+              "pri": true,
+              "name": "id"
+            }
+          ],
+          "x-reactions": {
+            "dependencies": [
+              "nodeConfig.enableLoadTable"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}",
+                "required": "{{$deps[0]===true ? null:\"none\"}}"
+              }
+            }
+          },
+          "items": {
+            "type": "object",
+            "properties": {
+              "c1": {
+                "type": "void",
+                "x-component": "ArrayTable.Column",
+                "x-index": 1,
+                "x-component-props": {
+                  "title": "${col_table_name}"
+                },
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "required": true,
+                    "x-decorator": "FormItem",
+                    "x-component": "Input"
+                  }
+                }
+              }
+            }
+          },
+          "properties": {
+            "add": {
+              "type": "void",
+              "x-component": "ArrayTable.Addition",
+              "title": "${df_table_field_btn_add}",
+              "x-index": 250
+            }
+          }
         }
       }
     }
@@ -562,7 +628,7 @@
       "scriptTooltip": "1. Parameter Description:\n· 'record' is the data record, including 'header' and 'data', where 'data' contains 'before' and 'after'.\n· 'op' represents the operation type, with a total of 3 options: insert, update, and delete.\n· 'conditionKeys' is the collection of primary key field names.\n2. Examples:\n· Add the operation type to the Kafka message: record.data.op = op\n· Add a custom header: record.header.test='test header'\n· Delete the 'before' field: delete record.data.before\n· Discard the data record: return null",
       "enabledCustomDDLMessage": "Enables custom DDL event message format body",
       "enabledCustomDDLMessageTooltip": "",
-      "enableCustomParseTooltip": "",
+      "enableCustomParseTooltip": "1.参数说明"
     },
     "zh_CN": {
       "partitionNumTooltip": "若Topic存在，分区的数量只能增加不能减小",
@@ -606,9 +672,15 @@
       "enableCustomParse":"开启自定义解析消息体",
       "scriptTooltip": "1.参数说明\n·record为每条数据记录，包含header和data，data中包含before和after\n·op为操作类型，共3种：insert，update，delete\n·conditionKeys为主键字段名集合\n2.示例\n·kafka message中添加操作类型: record.data.op = op\n·添加自定义header: record.header.test='test header'\n·删除before: delete record.data.before\n·丢弃该条数据: return null",
       "enabledCustomDDLMessage": "开启自定义DDL事件消息格式体",
-      "enabledCustomDDLMessageTooltip": "123",
       "enableModelDeclare": "自定义Kafka模型",
-      "enableCustomParseTooltip": ""
+      "enableCustomParseTooltip": "参数说明\n record为每条消息的body 要将每条消息转换为Tapdata 的DML或DDL事件，需要遵守以下协议。\n·1、若要转为添加字段DDL,js中返回的对象需要有以下格式 record.type=209, record.newFields=[{name:'要添加的字段名',dataType:'要添加的字段类型'}],newFields是一个数组。dateType的值可以为Map、Array、Number、Boolean、String、Integer、Text。\n2、若要转为改名DDL,需要将脚本的返回值需要有以下格式 record.type=202, record.nameChange={after:'更改后的名字',before:'更改前的名字'}。\n3、若要转为删除字段DDL，脚本返回值的对象需要有以下格式 record.type=207，record.fieldName='要删除的字段'。\n4、要转为dml事件，脚本的返回值需要有以下格式 record.type='insert或者'update或者'delete'。insert事件record中需要有after，delete事件需要有before，update事件record中需要有before或者after\n5、若要丢弃此消息，则return null",
+      "enabledCustomDDLMessageTooltip": "参数说明\n record为每条ddl中的信息，ddl事件中都会有referenceTime、time、type、tableId属性。tableId代表表名、type代表DDL事件的类型，209代表新增字段DDL事件、202代表改名DDL事件、207代表删除字段DDL事件、201代表改变字段属性DDL事件",
+      "enableModelDeclareTooltip": "",
+      "loadTableNames": "需要加载的表名",
+      "loadTableNameAdd": "添加表名按钮",
+      "table_names": "需要添加的表名",
+      "df_table_field_btn_add": "添加表名",
+      "col_table_name": "表名称"
     },
     "zh_TW": {
       "partitionNumTooltip": "若Topic存在，分區的數量只能增加不能減小",

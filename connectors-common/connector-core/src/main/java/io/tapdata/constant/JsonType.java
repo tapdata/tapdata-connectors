@@ -63,7 +63,7 @@ public enum JsonType {
         if ("Integer".equalsIgnoreCase(obj)) {
             return JsonType.INTEGER;
         }
-        if ("Test".equalsIgnoreCase(obj)) {
+        if ("Text".equalsIgnoreCase(obj)) {
             return JsonType.TEXT;
         }
         return null;

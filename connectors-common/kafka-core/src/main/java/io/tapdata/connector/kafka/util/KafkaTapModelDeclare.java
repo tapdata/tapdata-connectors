@@ -4,9 +4,12 @@ import io.tapdata.constant.JsonType;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 
+import java.util.LinkedHashMap;
+
 public class KafkaTapModelDeclare {
     public void addField(TapTable tapTable, String fieldName, String tapType) throws Throwable {
-        if (tapTable.getNameFieldMap().containsKey(fieldName)) {
+        LinkedHashMap<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
+        if (null == nameFieldMap || nameFieldMap.containsKey(fieldName)) {
             return;
         }
         TapField field = buildField(fieldName, fieldName, tapType);
@@ -14,7 +17,8 @@ public class KafkaTapModelDeclare {
     }
 
     public void updateField(TapTable tapTable, String fieldName, String tapType) throws Throwable {
-        if (!tapTable.getNameFieldMap().containsKey(fieldName)) {
+        LinkedHashMap<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
+        if (null == nameFieldMap ||!tapTable.getNameFieldMap().containsKey(fieldName)) {
             return;
         }
         TapField field = buildField(fieldName, fieldName, tapType);
