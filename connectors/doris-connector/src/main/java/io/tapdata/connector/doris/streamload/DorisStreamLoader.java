@@ -138,27 +138,23 @@ public class DorisStreamLoader {
             columns.add(Constants.DORIS_DELETE_SIGN);
             HttpPutBuilder putBuilder = new HttpPutBuilder();
             InputStreamEntity entity = new InputStreamEntity(recordStream, recordStream.getContentLength());
+            putBuilder.setUrl(loadUrl)
+                    // 前端表单传出来的值和tdd json加载的值可能有差别，如前端传的pwd可能是null，tdd的是空字符串
+                    .baseAuth(dorisConfig.getUser(), dorisConfig.getPassword())
+                    .addCommonHeader()
+                    .addFormat(writeFormat)
+                    .addColumns(columns)
+                    .setLabel(label)
+                    .setEntity(entity);
             Collection<String> primaryKeys = table.primaryKeys(true);
             if (CollectionUtils.isEmpty(primaryKeys)) {
-                putBuilder.setUrl(loadUrl)
-                        // 前端表单传出来的值和tdd json加载的值可能有差别，如前端传的pwd可能是null，tdd的是空字符串
-                        .baseAuth(dorisConfig.getUser(), dorisConfig.getPassword())
-                        .addCommonHeader()
-                        .addFormat(writeFormat)
-                        .addColumns(columns)
-                        .setLabel(label)
-                        .enableAppend()
-                        .setEntity(entity);
+                putBuilder.enableAppend();
             } else {
-                putBuilder.setUrl(loadUrl)
-                        // 前端表单传出来的值和tdd json加载的值可能有差别，如前端传的pwd可能是null，tdd的是空字符串
-                        .baseAuth(dorisConfig.getUser(), dorisConfig.getPassword())
-                        .addCommonHeader()
-                        .addFormat(writeFormat)
-                        .addColumns(columns)
-                        .setLabel(label)
-                        .enableDelete()
-                        .setEntity(entity);
+                if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Unique".equals(dorisConfig.getUniqueKeyType())) {
+                    putBuilder.enableDelete();
+                } else {
+                    putBuilder.enableAppend();
+                }
             }
             if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Unique".equals(dorisConfig.getUniqueKeyType())) {
                 putBuilder.addPartialHeader();
