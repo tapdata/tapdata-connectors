@@ -36,7 +36,7 @@ public class CustomParseUtil {
                 TapField tapField = new TapField();
                 tapField.setName(MapUtils.getString(newFieldMap, "name"));
                 String dataType = MapUtils.getString(newFieldMap, "dataType");
-                tapField.setDataType(JsonType.of(dataType).name());
+                tapField.setDataType(dataType);
                 return tapField;
             }).collect(Collectors.toList());
             tapNewFieldEvent.setTime(System.currentTimeMillis());

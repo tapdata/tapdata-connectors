@@ -731,8 +731,8 @@
     "BOOLEAN": {
       "to": "TapBoolean"
     },
-    "STRING": {
-      "byte": 200,
+    "STRING[($byte)]": {
+			"byte": 200,
       "priority": 1,
       "defaultByte": 200,
       "preferByte": 200,
