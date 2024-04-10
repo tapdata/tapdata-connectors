@@ -340,6 +340,7 @@
           "x-component": "InputNumber",
           "apiServerKey": "partitionNum",
           "default": 3,
+
           "x-decorator-props": {
             "tooltip": "${partitionNumTooltip}"
           },
@@ -347,7 +348,17 @@
             "min": 1,
             "max": 255
           },
-          "x-index": 130
+          "x-index": 130,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         },
         "replicasSize": {
           "required": true,
@@ -364,6 +375,16 @@
             "min": 1,
             "max": 255
           },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ],
           "x-index": 140
         },
         "enableCustomParse": {
@@ -372,6 +393,16 @@
           "default": false,
           "x-decorator": "FormItem",
           "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"hidden\":\"visible\"}}"
+                }
+              }
+            }
+          ],
           "x-decorator-props": {
             "tooltip": "${enableCustomParseTooltip}"
           },
@@ -403,43 +434,6 @@
           },
           "x-index": 160
         },
-        "enableModelDeclare": {
-          "title": "${enableModelDeclare}",
-          "type": "boolean",
-          "default": false,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "tooltip": "${enableModelDeclareTooltip}"
-          },
-          "x-index": 170
-        },
-        "enableModelDeclareScript": {
-          "type": "string",
-          "required": false,
-          "x-decorator": "FormItem",
-          "x-component": "JsEditor",
-          "default": "function declare(tapTable){}",
-          "x-component-props": {
-            "options": { "showPrintMargin": false, "useWrapMode": true },
-            "includeBeforeAndAfter": true,
-            "before": "function declare(tapTable){",
-            "beforeRegexp": "^[^]*function\\s+declare\\s*\\(tapTable\\)\\{",
-            "afterRegexp": "}[^}]*$",
-            "after": "}"
-          },
-          "x-reactions": {
-            "dependencies": [
-              "nodeConfig.enableModelDeclare"
-            ],
-            "fulfill": {
-              "schema": {
-                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
-              }
-            }
-          },
-          "x-index": 180
-        },
         "enableScript": {
           "title": "${enableScript}",
           "type": "boolean",
@@ -449,6 +443,16 @@
           "x-decorator-props": {
             "tooltip": "${scriptTooltip}"
           },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ],
           "x-index": 190
         },
         "script": {
@@ -483,6 +487,16 @@
           "default": false,
           "x-decorator": "FormItem",
           "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ],
           "x-decorator-props": {
             "tooltip": "${enabledCustomDDLMessageTooltip}"
           },
@@ -491,7 +505,7 @@
         "enableDDLCustomScript": {
           "type": "string",
           "required": false,
-          "default": "function process(record){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
+          "default": "function process(record){\n\n\t// Enter your code at here\n\t return record;\n}",
           "x-decorator": "FormItem",
           "x-component": "JsEditor",
           "x-component-props": {
@@ -514,71 +528,26 @@
           },
           "x-index": 220
         },
-        "enableLoadTable": {
-          "title": "${enableLoadTable}",
+        "enableUseTargetSchema": {
+          "title": "${enableUseTargetSchema}",
           "type": "boolean",
           "default": false,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-decorator-props": {
-            "tooltip": "${enableLoadTableTooltip}"
+            "tooltip": "${enableUseTargetSchemaTooltip}"
           },
-          "x-index": 230
-        },
-        "table_names": {
-          "type": "array",
-          "title": "${table_names}",
-          "x-decorator": "FormItem",
-          "x-component": "ArrayTable",
-          "x-index": 240,
-          "required": true,
-          "default": [
+          "x-reactions": [
             {
-              "type": "uuid",
-              "pri": true,
-              "name": "id"
-            }
-          ],
-          "x-reactions": {
-            "dependencies": [
-              "nodeConfig.enableLoadTable"
-            ],
-            "fulfill": {
-              "schema": {
-                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}",
-                "required": "{{$deps[0]===true ? null:\"none\"}}"
-              }
-            }
-          },
-          "items": {
-            "type": "object",
-            "properties": {
-              "c1": {
-                "type": "void",
-                "x-component": "ArrayTable.Column",
-                "x-index": 1,
-                "x-component-props": {
-                  "title": "${col_table_name}"
-                },
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "required": true,
-                    "x-decorator": "FormItem",
-                    "x-component": "Input"
-                  }
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"hidden\":\"visible\"}}"
                 }
               }
             }
-          },
-          "properties": {
-            "add": {
-              "type": "void",
-              "x-component": "ArrayTable.Addition",
-              "title": "${df_table_field_btn_add}",
-              "x-index": 250
-            }
-          }
+          ],
+          "x-index": 260
         }
       }
     }
@@ -670,17 +639,12 @@
       "enableScript": "自定义消息体格式",
       "script": "脚本",
       "enableCustomParse":"开启自定义解析消息体",
+      "enableCustomParseTooltip": "参数说明\n record为每条消息的body 要将每条消息转换为Tapdata 的DML或DDL事件，需要遵守以下协议。\n·1、若要转为添加字段DDL,js中返回的对象需要有以下格式 record.type=209, record.newFields=[{name:'要添加的字段名',dataType:'要添加的字段类型'}],newFields是一个数组。dateType的值可以为Map、Array、Number、Boolean、String、Integer、Text。\n2、若要转为改名DDL,需要将脚本的返回值需要有以下格式 record.type=202, record.nameChange={after:'更改后的名字',before:'更改前的名字'}。\n3、若要转为删除字段DDL，脚本返回值的对象需要有以下格式 record.type=207，record.fieldName='要删除的字段'。\n4、要转为dml事件，脚本的返回值需要有以下格式 record.type='insert或者'update或者'delete'。insert事件record中需要有after，delete事件需要有before，update事件record中需要有before或者after\n5、若要丢弃此消息，则return null",
       "scriptTooltip": "1.参数说明\n·record为每条数据记录，包含header和data，data中包含before和after\n·op为操作类型，共3种：insert，update，delete\n·conditionKeys为主键字段名集合\n2.示例\n·kafka message中添加操作类型: record.data.op = op\n·添加自定义header: record.header.test='test header'\n·删除before: delete record.data.before\n·丢弃该条数据: return null",
       "enabledCustomDDLMessage": "开启自定义DDL事件消息格式体",
-      "enableModelDeclare": "自定义Kafka模型",
-      "enableCustomParseTooltip": "参数说明\n record为每条消息的body 要将每条消息转换为Tapdata 的DML或DDL事件，需要遵守以下协议。\n·1、若要转为添加字段DDL,js中返回的对象需要有以下格式 record.type=209, record.newFields=[{name:'要添加的字段名',dataType:'要添加的字段类型'}],newFields是一个数组。dateType的值可以为Map、Array、Number、Boolean、String、Integer、Text。\n2、若要转为改名DDL,需要将脚本的返回值需要有以下格式 record.type=202, record.nameChange={after:'更改后的名字',before:'更改前的名字'}。\n3、若要转为删除字段DDL，脚本返回值的对象需要有以下格式 record.type=207，record.fieldName='要删除的字段'。\n4、要转为dml事件，脚本的返回值需要有以下格式 record.type='insert或者'update或者'delete'。insert事件record中需要有after，delete事件需要有before，update事件record中需要有before或者after\n5、若要丢弃此消息，则return null",
-      "enabledCustomDDLMessageTooltip": "参数说明\n record为每条ddl中的信息，ddl事件中都会有referenceTime、time、type、tableId属性。tableId代表表名、type代表DDL事件的类型，209代表新增字段DDL事件、202代表改名DDL事件、207代表删除字段DDL事件、201代表改变字段属性DDL事件",
-      "enableModelDeclareTooltip": "",
-      "loadTableNames": "需要加载的表名",
-      "loadTableNameAdd": "添加表名按钮",
-      "table_names": "需要添加的表名",
-      "df_table_field_btn_add": "添加表名",
-      "col_table_name": "表名称"
+      "enabledCustomDDLMessageTooltip": "参数说明\n record为每条ddl中的信息，ddl事件中都会有referenceTime、time、type、tableId属性。tableId代表表名、type代表DDL事件的类型，209代表新增字段DDL事件、202代表改名DDL事件、207代表删除字段DDL事件、201代表改变字段属性DDL事件。不同类型的DDL事件中有不同的属性。\n1、新增字段DDL中会有newFields，代表所有新增字段的属性。如newFields:[{autoInc: false, dataType:'STRING',name:'f1',nullable: true,partitionKey:false,primaryKey:false}]\n2、删除字段事件DDL特有的属性是：fieldName:'删除的字段名'\n3、字段改名事件特有的属性：nameChange:{after:'改名后的值',before:'改名前的值'}\n4、字段改属性事件DDL特有的属性是：fieldName:'要改的属性名'代表需要更改属性的名称,dataTypeChange：{before:'更改前的数据类型',after:'更改后的数据类型'}数据类型改变,checkChange：{before:'更改前的约束',after:'更改后的约束'},nullableChange:{before:true,after:false}是否可以为nullable,defaultChange:{before:'',after:''},primaryChange:{before:'',after:''}\n如想要将改名事件转为自己的属性可以返回一个对象{type:202,fromName:record.nameChange.before}",
+      "enableUseTargetSchema": "Kafka使用目标模型",
+      "enableUseTargetSchemaTooltip": "开启了此配置之后，Kafka会使用目标的模型进行推演，要保证目标有模型，并且模型跟Kafka的消息匹配，否则会出现报错"
     },
     "zh_TW": {
       "partitionNumTooltip": "若Topic存在，分區的數量只能增加不能減小",
@@ -725,7 +689,8 @@
       "scriptTooltip": "1.參數說明\n·record為每條數據記錄，包含header和data，data中包含before和after\n·op為操作類型，共有 3 種：insert，update，delete\n·conditionKeys為主鍵字段名集合\n2.示例\n·在 Kafka message中添加操作類型：record.data.op = op\n·添加自訂header：record.header.test = 'test header'\n·刪除before：delete record.data.before\n·丟棄該條數據：return null",
       "enabledCustomDDLMessage": "開啓自定義DDL事件消息格式體",
       "enabledCustomDDLMessageTooltip": "",
-      "enableCustomParseTooltip": ""
+      "enableCustomParseTooltip": "",
+      "enableUseTargetSchema": "是否开启Kafka使用目标的Schema"
     }
   },
   "dataTypes": {
