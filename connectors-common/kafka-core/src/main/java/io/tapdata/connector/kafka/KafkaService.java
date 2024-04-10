@@ -809,6 +809,7 @@ public class KafkaService extends AbstractMqService {
                 list.add(tapFieldBaseEvent);
             });
         } else {
+            Map<String, Object> data = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
             switch (MqOp.fromValue(mqOpReference.get())) {
                 case INSERT:
                     list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
