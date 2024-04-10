@@ -798,7 +798,6 @@ public class KafkaService extends AbstractMqService {
         AtomicReference<String> mqOpReference = new AtomicReference<>();
         mqOpReference.set(MqOp.INSERT.getOp());
         consumerRecord.headers().headers("mqOp").forEach(header -> mqOpReference.set(new String(header.value())));
-        Map<String, Object> data = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
         if (MqOp.fromValue(mqOpReference.get()) == MqOp.DDL) {
             consumerRecord.headers().headers("eventClass").forEach(eventClass -> {
                 TapFieldBaseEvent tapFieldBaseEvent;
@@ -810,6 +809,7 @@ public class KafkaService extends AbstractMqService {
                 list.add(tapFieldBaseEvent);
             });
         } else {
+            Map<String, Object> data = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
             switch (MqOp.fromValue(mqOpReference.get())) {
                 case INSERT:
                     list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
