@@ -348,7 +348,7 @@ public class KafkaService extends AbstractMqService {
                     kafkaConsumer.subscribe(topics);
                 }
                 topics.stream().map(TapTable::new).forEach(tableList::add);
-                declareSchemaIfNeed(tableList);
+//                declareSchemaIfNeed(tableList);
                 syncSchemaSubmit(tableList, consumer);
             });
         }
@@ -407,7 +407,7 @@ public class KafkaService extends AbstractMqService {
                     kafkaConsumer.subscribe(topics);
                 }
                 topics.stream().map(TapTable::new).forEach(tableList::add);
-                declareSchemaIfNeed(tableList);
+//                declareSchemaIfNeed(tableList);
                 syncSchemaSubmit(tableList, consumer);
             });
         }
@@ -809,7 +809,6 @@ public class KafkaService extends AbstractMqService {
                 list.add(tapFieldBaseEvent);
             });
         } else {
-            Map<String, Object> data = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
             switch (MqOp.fromValue(mqOpReference.get())) {
                 case INSERT:
                     list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
@@ -838,7 +837,9 @@ public class KafkaService extends AbstractMqService {
         byte[] body = jsonParser.toJsonBytes(data, JsonParser.ToJsonFeature.WriteMapNullValue);
         ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapFieldBaseEvent.getTableId(),
                 null, tapFieldBaseEvent.getTime(), null, body,
-                new RecordHeaders());
+                new RecordHeaders()
+                        .add("mqOp", MqOp.DDL.getOp().getBytes())
+                        .add("eventClass", tapFieldBaseEvent.getClass().getName().getBytes()));
         Callback callback = (metadata, exception) -> reference.set(exception);
         kafkaProducer.send(producerRecord, callback);
         if (EmptyKit.isNotNull(reference.get())) {

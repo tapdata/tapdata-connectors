@@ -325,7 +325,7 @@ public class KafkaConnector extends ConnectorBase {
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
-        return TapSimplify.list();
+        return offsetStartTime;
     }
 
     private void checkConnection(TapConnectionContext connectionContext, List<String> items, Consumer<ConnectionCheckItem> consumer) {
