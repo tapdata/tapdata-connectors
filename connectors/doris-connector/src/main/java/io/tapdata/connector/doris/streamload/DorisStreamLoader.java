@@ -25,6 +25,7 @@ import org.apache.http.util.EntityUtils;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static io.tapdata.base.ConnectorBase.writeListResult;
@@ -48,6 +49,7 @@ public class DorisStreamLoader {
     private boolean loadBatchFirstRecord;
     private int size;
     private final AtomicInteger lastEventFlag;
+    private AtomicReference<Set<String>> dataColumns;
     private MessageSerializer messageSerializer;
     private TapTable tapTable;
     private final Metrics metrics;
@@ -65,6 +67,7 @@ public class DorisStreamLoader {
         this.loadBatchFirstRecord = true;
         this.size = 0;
         this.lastEventFlag = new AtomicInteger(0);
+        this.dataColumns = new AtomicReference<>();
         initMessageSerializer();
         this.metrics = new Metrics();
     }
@@ -120,7 +123,19 @@ public class DorisStreamLoader {
         recordStream.startInput();
         recordStream.write(messageSerializer.batchStart());
         lastEventFlag.set(OperationType.getOperationFlag(recordEvent));
+        dataColumns.set(getDataColumns(recordEvent));
         loadBatchFirstRecord = true;
+    }
+
+    private Set<String> getDataColumns(TapRecordEvent recordEvent) {
+        if (recordEvent instanceof TapInsertRecordEvent) {
+            return ((TapInsertRecordEvent) recordEvent).getAfter().keySet();
+        } else if (recordEvent instanceof TapUpdateRecordEvent) {
+            return ((TapUpdateRecordEvent) recordEvent).getAfter().keySet();
+        } else if (recordEvent instanceof TapDeleteRecordEvent) {
+            return ((TapDeleteRecordEvent) recordEvent).getBefore().keySet();
+        }
+        return Collections.emptySet();
     }
 
     public RespContent put(final TapTable table) throws StreamLoadException, DorisRetryableException {
@@ -131,8 +146,8 @@ public class DorisStreamLoader {
 
             String label = prefix + "-" + UUID.randomUUID();
             List<String> columns = new ArrayList<>();
-            for (Map.Entry<String, TapField> entry : table.getNameFieldMap().entrySet()) {
-                columns.add("`" + entry.getKey() + "`");
+            for (String col : dataColumns.get()) {
+                columns.add("`" + col + "`");
             }
             // add the DORIS_DELETE_SIGN at the end of the column
             columns.add(Constants.DORIS_DELETE_SIGN);
@@ -236,7 +251,7 @@ public class DorisStreamLoader {
 
     private boolean needFlush(TapRecordEvent recordEvent, int length) {
         int lastEventType = lastEventFlag.get();
-        return lastEventType > 0 && lastEventType != OperationType.getOperationFlag(recordEvent)
+        return lastEventType > 0 && !getDataColumns(recordEvent).equals(dataColumns.get())
                 || this.size >= MAX_FLUSH_BATCH_SIZE
                 || !recordStream.canWrite(length);
     }

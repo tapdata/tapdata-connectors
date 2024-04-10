@@ -193,7 +193,7 @@ public class DorisConnector extends CommonDbConnector {
                         "DISTRIBUTED BY HASH(`" + String.join("`,`", allColumns) + "`) BUCKETS 16 " +
                         "PROPERTIES(\"replication_num\" = \"" +
                         dorisConfig.getReplicationNum().toString() +
-                        "\")";
+                        "\"" + ("UNIQUE".equals(uniqueType) ? ", \"enable_unique_key_merge_on_write\" = \"true\"" : "") + ")";
             } else {
                 sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
                         "(" + ((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, dorisConfig.getDuplicateKey(), false) + ") " +
@@ -210,7 +210,7 @@ public class DorisConnector extends CommonDbConnector {
                     "DISTRIBUTED BY HASH(`" + String.join("`,`", primaryKeys) + "`) BUCKETS 16 " +
                     "PROPERTIES(\"replication_num\" = \"" +
                     dorisConfig.getReplicationNum().toString() +
-                    "\")";
+                    "\"" + ("UNIQUE".equals(uniqueType) ? ", \"enable_unique_key_merge_on_write\" = \"true\"" : "") + ")";
         }
         createTableOptions.setTableExists(false);
         try {
