@@ -565,6 +565,8 @@ public class KafkaService extends AbstractMqService {
         } catch (Exception e) {
             throw new CoreException("Engine initialization failed!");
         }
+        Map<String,Object> context=new HashMap<>();
+        scriptEngine.put("context",context);
         try {
             for (TapRecordEvent event : tapRecordEvents) {
                 if (null != isAlive && !isAlive.get()) {
@@ -573,6 +575,9 @@ public class KafkaService extends AbstractMqService {
                 Map<String, Object> data;
                 Map<String, Map<String, Object>> allData = new HashMap();
                 MqOp mqOp = MqOp.INSERT;
+                context.put("tableId",event.getTableId());
+                context.put("eventInfo",event.getInfo());
+                context.put("referenceTime",event.getReferenceTime());
                 if (event instanceof TapInsertRecordEvent) {
                     data = ((TapInsertRecordEvent) event).getAfter();
                     allData.put("before", new HashMap<String, Object>());
@@ -599,8 +604,9 @@ public class KafkaService extends AbstractMqService {
                 String op = mqOp.getOp();
                 Collection<String> conditionKeys = tapTable.primaryKeys(true);
                 RecordHeaders recordHeaders = new RecordHeaders();
-                byte[] body = {};
                 Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, op, conditionKeys));
+                context.clear();
+                byte[] body = {};
                 if (null == eventObj) {
                     continue;
                 } else {
@@ -861,12 +867,12 @@ public class KafkaService extends AbstractMqService {
             TapLogger.warn("Can not load Graal.js engine, msg: {}", e.getMessage());
         }
         Map<String, Object> ddlRecordData = getDDLRecordData(tapFieldBaseEvent);
-        Object object = ObjectUtils.covertData(executeScript(scriptEngine, "process", ddlRecordData));
-        if (null == object) {
+        Object jsRecordData = ObjectUtils.covertData(executeScript(scriptEngine, "process", ddlRecordData));
+        if (null == jsRecordData) {
             return;
         }
-        Map<String, Object> res = (Map<String, Object>) object;
-        byte[] body = jsonParser.toJsonBytes(res, JsonParser.ToJsonFeature.WriteMapNullValue);
+        Map<String, Object> jsRecordDataMap = (Map<String, Object>) jsRecordData;
+        byte[] body = jsonParser.toJsonBytes(jsRecordDataMap, JsonParser.ToJsonFeature.WriteMapNullValue);
         ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapFieldBaseEvent.getTableId(),
                 null, tapFieldBaseEvent.getTime(), null, body,
                 new RecordHeaders());
