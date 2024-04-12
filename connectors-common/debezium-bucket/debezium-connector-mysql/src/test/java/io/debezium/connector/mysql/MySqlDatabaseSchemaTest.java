@@ -6,6 +6,7 @@
 package io.debezium.connector.mysql;
 
 import static org.fest.assertions.Assertions.assertThat;
+import static org.junit.Assert.assertEquals;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -403,5 +404,44 @@ public class MySqlDatabaseSchemaTest {
 
     protected void printStatements(String dbName, Set<TableId> tables, String ddlStatements) {
         Testing.print("Running DDL for '" + dbName + "': " + ddlStatements + " changing tables '" + tables + "'");
+    }
+    @Test
+    public void testHandleForUnparseableDDL(){
+        String ddlStatements = "CREATE TABLE `memberd` (\n" +
+                "\t`id` bigint(20) NOT NULL COMMENT '会员id',\n" +
+                "\t`code` varchar(30) DEFAULT NULL COMMENT '会员编号',\n" +
+                "\t`phone` varchar(22) DEFAULT NULL COMMENT '会员手机号',\n" +
+                "\t`telephone` varchar(15) DEFAULT '' COMMENT '座机固话',\n" +
+                "\t`name` varchar(100) NOT NULL DEFAULT '' COMMENT '会员姓名',\n" +
+                "\t`nick_name` varchar(64) NOT NULL DEFAULT '' COMMENT '会员昵称',\n" +
+                "\tPRIMARY KEY (`id`),\n" +
+                "\tGLOBAL INDEX `idx_g_register_time` (`register_time`) PARTITION BY KEY (`register_time`),\n" +
+                "\tUNIQUE INDEX `uk_g_phone` (`phone`) PARTITION BY KEY (`phone`) PARTITIONS 16,\n" +
+                "\tUNIQUE GLOBAL INDEX `__advise_index_gsi_member_phone` (`phone`) COVERING (`code`, `telephone`, `name`, `nick_name`, `gender`, `birthday`, `month_day`, `status`, `identity`, `head_img_url`, `store_code`, `channel_code`, `application_code`, `password`, `invitor`, `invitor_name`, `register_time`, `deleted`, `create_user`, `create_user_name`, `create_time`, `update_user`, `update_user_name`, `update_time`, `level_id`, `is_real_name`) PARTITION BY KEY (`phone`) PARTITIONS 16,\n" +
+                "\tGLOBAL INDEX `__advise_index_gsi_member_store_code_create_time` (`store_code`, `create_time`) PARTITION BY KEY (`store_code`, `create_time`) PARTITIONS 16,\n" +
+                "\tUNIQUE KEY `UN_CODE` (`code`),\n" +
+                "\tUNIQUE KEY `UK_PHONE` USING BTREE (`phone`),\n" +
+                "\tKEY `INX_REGISTER_TIME` USING BTREE (`register_time`)\n" +
+                ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '会员基础信息表'\n" +
+                "PARTITION BY KEY(`id`)\n" +
+                "PARTITIONS 16";
+        final Configuration config = DATABASE.defaultConfig().build();
+        mysql = getSchema(config);
+        String actual = mysql.handleForUnparseableDDL(ddlStatements);
+        String expect = "CREATE TABLE `memberd` (\n" +
+                "\t`id` bigint(20) NOT NULL COMMENT '会员id',\n" +
+                "\t`code` varchar(30) DEFAULT NULL COMMENT '会员编号',\n" +
+                "\t`phone` varchar(22) DEFAULT NULL COMMENT '会员手机号',\n" +
+                "\t`telephone` varchar(15) DEFAULT '' COMMENT '座机固话',\n" +
+                "\t`name` varchar(100) NOT NULL DEFAULT '' COMMENT '会员姓名',\n" +
+                "\t`nick_name` varchar(64) NOT NULL DEFAULT '' COMMENT '会员昵称',\n" +
+                "\tPRIMARY KEY (`id`),\n" +
+                "\tUNIQUE KEY `UN_CODE` (`code`),\n" +
+                "\tUNIQUE KEY `UK_PHONE` USING BTREE (`phone`),\n" +
+                "\tKEY `INX_REGISTER_TIME` USING BTREE (`register_time`)\n" +
+                ") ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT '会员基础信息表'\n" +
+                "PARTITION BY KEY(`id`)\n" +
+                "PARTITIONS 16";
+        assertEquals(expect, actual);
     }
 }

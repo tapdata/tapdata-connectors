@@ -18,7 +18,6 @@ import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.FilterResult;
@@ -37,8 +36,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-
-import static io.tapdata.entity.simplify.TapSimplify.list;
 
 public abstract class CommonDbConnector extends ConnectorBase {
 
@@ -538,6 +535,14 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void batchReadWithoutOffset(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        if (commonDbConfig.getHashSplit()) {
+            batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
+        } else {
+            batchReadWithoutHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
+        }
+    }
+
+    protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + c + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
         String sql = String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
 
@@ -566,6 +571,44 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
             }
         });
+    }
+
+    protected String getHashSplitStringSql(TapTable tapTable) {
+        throw new UnsupportedOperationException("getHashSplitStringSql is not supported");
+    }
+
+    protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + c + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
+        String sql = String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
+        for (int i = 0; i < commonDbConfig.getMaxSplit(); i++) {
+            String splitSql = sql + " WHERE mod(" + getHashSplitStringSql(tapTable) + "," + commonDbConfig.getMaxSplit() + ")=" + i;
+            tapLogger.info("batchRead, splitSql[{}]: {}", i + 1, splitSql);
+            jdbcContext.query(splitSql, resultSet -> {
+                List<TapEvent> tapEvents = list();
+                //get all column names
+                List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+                try {
+                    while (isAlive() && resultSet.next()) {
+                        DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                        processDataMap(dataMap, tapTable);
+                        tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
+                        if (tapEvents.size() == eventBatchSize) {
+                            eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
+                            tapEvents = list();
+                        }
+                    }
+                } catch (SQLException e) {
+                    exceptionCollector.collectTerminateByServer(e);
+                    exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+                    exceptionCollector.revealException(e);
+                    throw e;
+                }
+                //last events those less than eventBatchSize
+                if (EmptyKit.isNotEmpty(tapEvents)) {
+                    eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
+                }
+            });
+        }
     }
 
     //for mysql type (with offset & limit)

@@ -8,6 +8,7 @@ import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
+import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
 import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -133,6 +134,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportCreateIndex(this::createIndex);
+        connectorFunctions.supportQueryIndexes(this::queryIndexes);
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
@@ -300,55 +302,25 @@ public class MysqlConnector extends CommonDbConnector {
             exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), t);
             throw new RuntimeException("Create table failed, message: " + t.getMessage(), t);
         }
-        List<TapIndex> indexList = tapCreateTableEvent.getTable().getIndexList();
-        if (EmptyKit.isNotEmpty(indexList) && tapConnectorContext.getNodeConfig() != null && tapConnectorContext.getNodeConfig().getValue("syncIndex", false)) {
-            List<String> sqlList = TapSimplify.list();
-            List<TapIndex> createIndexList = new ArrayList<>();
-            List<TapIndex> existsIndexList = discoverIndex(tapCreateTableEvent.getTable().getId());
-            // 如果索引已经存在，就不再创建; 名字相同视为存在; 字段以及顺序相同, 也视为存在
-            if (EmptyKit.isNotEmpty(existsIndexList)) {
-                for (TapIndex tapIndex : indexList) {
-                    boolean exists = false;
-                    for (TapIndex existsIndex : existsIndexList) {
-                        if (tapIndex.getName().equals(existsIndex.getName())) {
-                            exists = true;
-                            break;
-                        }
-                        if (tapIndex.getIndexFields().size() == existsIndex.getIndexFields().size()) {
-                            boolean same = true;
-                            for (int i = 0; i < tapIndex.getIndexFields().size(); i++) {
-                                if (!tapIndex.getIndexFields().get(i).getName().equals(existsIndex.getIndexFields().get(i).getName())
-                                        || tapIndex.getIndexFields().get(i).getFieldAsc() != existsIndex.getIndexFields().get(i).getFieldAsc()) {
-                                    same = false;
-                                    break;
-                                }
-                            }
-                            if (same) {
-                                exists = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (!exists) {
-                        createIndexList.add(tapIndex);
-                    }
-                }
-            } else {
-                createIndexList.addAll(indexList);
-            }
-            tapLogger.info("Table: {} will create Index list: {}", tapCreateTableEvent.getTable().getName(), createIndexList);
-            if (EmptyKit.isNotEmpty(createIndexList)) {
-                createIndexList.stream().filter(i -> !i.isPrimary()).forEach(i ->
-                        sqlList.add(getCreateIndexSql(tapCreateTableEvent.getTable(), i)));
-            }
-            jdbcContext.batchExecute(sqlList);
-        }
         return createTableOptions;
     }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
-        WriteListResult<TapRecordEvent> writeListResult = this.mysqlWriter.write(tapConnectorContext, tapTable, tapRecordEvents);
-        consumer.accept(writeListResult);
+//        WriteListResult<TapRecordEvent> writeListResult = this.mysqlWriter.write(tapConnectorContext, tapTable, tapRecordEvents);
+//        consumer.accept(writeListResult);
+        String insertDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
+        if (insertDmlPolicy == null) {
+            insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
+        }
+        String updateDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
+        if (updateDmlPolicy == null) {
+            updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
+        }
+        new MysqlRecordWriter(mysqlJdbcContext, tapTable)
+                .setInsertPolicy(insertDmlPolicy)
+                .setUpdatePolicy(updateDmlPolicy)
+                .setTapLogger(tapLogger)
+                .write(tapRecordEvents, consumer, this::isAlive);
     }
 
 

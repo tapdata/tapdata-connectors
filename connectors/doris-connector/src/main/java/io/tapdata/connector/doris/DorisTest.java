@@ -85,7 +85,7 @@ public class DorisTest extends CommonDbTest {
 
     protected Boolean testStreamLoadPrivilege() {
         try {
-            if (HttpUtil.get("http://" + ((DorisConfig) commonDbConfig).getDorisHttp()).contains("<title>Doris</title>")) {
+            if (HttpUtil.get("http://" + ((DorisConfig) commonDbConfig).getDorisHttp()).contains("Doris</title>")) {
                 consumer.accept(testItem(STREAM_WRITE, TestItem.RESULT_SUCCESSFULLY, "StreamLoad Service is available"));
             } else {
                 consumer.accept(testItem(STREAM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "port of StreamLoad Service is not right"));

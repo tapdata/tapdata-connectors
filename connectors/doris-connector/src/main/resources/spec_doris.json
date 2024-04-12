@@ -331,6 +331,55 @@
               "value": "csv"
             }
           ]
+        },
+        "updateSpecific": {
+          "type": "boolean",
+          "title": "${updateSpecific}",
+          "default": false,
+          "x-index": 6,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${updateSpecificTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "uniqueKeyType": {
+          "type": "string",
+          "title": "${uniqueKeyType}",
+          "default": "Unique",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 7,
+          "enum": [
+            {
+              "label": "Aggregate",
+              "value": "Aggregate"
+            },
+            {
+              "label": "Unique",
+              "value": "Unique"
+            }
+          ],
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".updateSpecific"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -359,7 +408,10 @@
       "doc": "docs/readme_en_US.md",
       "duplicateKey": "duplicateKey",
       "distributedKey": "distributedKey",
-      "replicationNum": "replicationNum"
+      "replicationNum": "replicationNum",
+      "updateSpecific": "updateSpecific",
+      "updateSpecificTooltip": "2.0 new feature (1.x does not take effect), turning on the switch can improve the performance of batch updating fixed fields",
+      "uniqueKeyType": "uniqueKeyType(Aggregate/Unique)"
     },
     "zh_CN": {
       "host": "数据库地址",
@@ -383,7 +435,10 @@
       "doc": "docs/readme_zh_CN.md",
       "duplicateKey": "排序字段",
       "distributedKey": "分区字段",
-      "replicationNum": "副本数"
+      "replicationNum": "副本数",
+      "updateSpecific": "是否更新特定字段",
+      "updateSpecificTooltip": "2.0新特性(1.x不生效)，打开开关可以提升批量更新固定字段性能",
+      "uniqueKeyType": "唯一键类型(Aggregate/Unique)"
     },
     "zh_TW": {
       "host": "數據庫地址",
@@ -407,7 +462,10 @@
       "doc": "docs/readme_zh_CN.md",
       "duplicateKey": "排序字段",
       "distributedKey": "分区字段",
-      "replicationNum": "副本數"
+      "replicationNum": "副本數",
+      "updateSpecific": "是否更新特定字段",
+      "updateSpecificTooltip": "2.0新特性(1.x不生效)，打開開關可以提升批量更新固定字段性能",
+      "uniqueKeyType": "唯一鍵類型(Aggregate/Unique)"
     }
   },
   "dataTypes": {

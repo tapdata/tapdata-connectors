@@ -33,10 +33,10 @@ public class CsvSerializer implements MessageSerializer {
             value += buildCSVString(table, after, false);
         } else if (recordEvent instanceof TapUpdateRecordEvent) {
             final TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
-            final Map<String, Object> before = updateRecordEvent.getBefore();
+//            final Map<String, Object> before = updateRecordEvent.getBefore();
             final Map<String, Object> after = updateRecordEvent.getAfter();
-            value += buildCSVString(table, before, true);
-            value += Constants.LINE_DELIMITER_DEFAULT;
+//            value += buildCSVString(table, before, true);
+//            value += Constants.LINE_DELIMITER_DEFAULT;
             value += buildCSVString(table, after, false);
         } else {
             final TapDeleteRecordEvent deleteRecordEvent = (TapDeleteRecordEvent) recordEvent;
@@ -47,17 +47,19 @@ public class CsvSerializer implements MessageSerializer {
     }
 
     private String buildCSVString(TapTable table, Map<String, Object> values, boolean delete) throws IOException {
-        if(MapUtils.isNotEmpty(values)) {
-            Object value="";
+        if (MapUtils.isNotEmpty(values)) {
+            Object value = "";
             StringJoiner joiner = new StringJoiner(Constants.FIELD_DELIMITER_DEFAULT);
             final Map<String, TapField> tapFieldMap = table.getNameFieldMap();
             for (final Map.Entry<String, TapField> entry : tapFieldMap.entrySet()) {
-                value = values.getOrDefault(entry.getKey(), Constants.NULL_VALUE);
-                // value get from the value map may be null
-                if (value == null) {
-                    value = Constants.NULL_VALUE;
+                if (values.containsKey(entry.getKey())) {
+                    joiner.add(value.toString());
                 }
-                joiner.add(value.toString());
+//                value = values.getOrDefault(entry.getKey(), Constants.NULL_VALUE);
+//                // value get from the value map may be null
+//                if (value == null) {
+//                    value = Constants.NULL_VALUE;
+//                }
             }
             joiner.add(delete ? "1" : "0");
             return joiner.toString();

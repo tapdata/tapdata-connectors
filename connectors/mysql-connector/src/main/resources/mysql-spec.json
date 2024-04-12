@@ -231,31 +231,6 @@
           }
         }
       }
-    },
-    "node":{
-      "properties": {
-        "syncIndex": {
-          "title": "${syncIndex}",
-          "type": "boolean",
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "layout": "horizontal",
-            "tooltip": "${syncIndexTip}"
-          },
-          "default": false,
-          "x-reactions": {
-            "dependencies": [
-              "$inputs"
-            ],
-            "fulfill": {
-              "state": {
-                "visible": "{{$deps[0].length>0}}"
-              }
-            }
-          }
-        }
-      }
     }
   },
   "messages": {
@@ -379,10 +354,19 @@
       "to": "TapBinary",
       "byte": "4g"
     },
+    "bit(1)": {
+      "to": "TapBoolean",
+      "bit": 1,
+      "queryOnly": true
+    },
     "bit[($bit)]": {
       "to": "TapNumber",
       "bit": 64,
       "queryOnly": true
+    },
+    "tinyint(1)": {
+      "to": "TapBoolean",
+      "bit": 1
     },
     "tinyint[($zerofill)]": {
       "to": "TapNumber",

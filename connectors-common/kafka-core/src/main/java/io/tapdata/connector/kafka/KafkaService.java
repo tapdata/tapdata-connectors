@@ -242,23 +242,26 @@ public class KafkaService extends AbstractMqService {
                         Map<String, Object> messageBody;
                         try {
                             messageBody = jsonParser.fromJsonBytes(record.value(), Map.class);
+                            if (messageBody == null) {
+                                tapLogger.warn("messageBody not allow null...");
+                                continue;
+                            }
+                            if (messageBody.containsKey("mqOp")) {
+                                messageBody = (Map<String, Object>) messageBody.get("data");
+                            }
                         } catch (Exception e) {
-                            tapLogger.error("topic[{}] value [{}] can not parse to json, ignore...", record.topic(), record.value());
+                            tapLogger.warn("topic[{}] value [{}] can not parse to json, ignore...", record.topic(), new String(record.value()));
+                            TapTable tapTable = new TapTable(record.topic());
+                            tableList.add(tapTable);
+                            topics.remove(record.topic());
                             continue;
-                        }
-                        if (messageBody == null) {
-                            tapLogger.warn("messageBody not allow null...");
-                            continue;
-                        }
-                        if (messageBody.containsKey("mqOp")) {
-                            messageBody = (Map<String, Object>) messageBody.get("data");
                         }
                         try {
                             TapTable tapTable = new TapTable(record.topic());
                             SCHEMA_PARSER.parse(tapTable, messageBody);
                             tableList.add(tapTable);
                         } catch (Throwable t) {
-                            tapLogger.error(String.format("%s parse topic invalid json object: %s", record.topic(), t.getMessage()), t);
+                            tapLogger.warn(String.format("%s parse topic invalid json object: %s", record.topic(), t.getMessage()), t);
                         }
                         topics.remove(record.topic());
                     }
