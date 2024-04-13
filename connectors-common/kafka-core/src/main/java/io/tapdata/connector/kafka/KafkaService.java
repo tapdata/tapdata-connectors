@@ -8,7 +8,6 @@ import io.tapdata.connector.kafka.admin.DefaultAdmin;
 import io.tapdata.connector.kafka.config.*;
 import io.tapdata.connector.kafka.util.*;
 import io.tapdata.constant.MqTestItem;
-import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.*;
@@ -17,7 +16,6 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.script.ScriptFactory;
 import io.tapdata.entity.script.ScriptOptions;
@@ -59,14 +57,14 @@ public class KafkaService extends AbstractMqService {
     private static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
     private String connectorId;
     private KafkaProducer<byte[], byte[]> kafkaProducer;
-    private static final ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata"); //script factory
+	private ScriptEngine produceScriptEngineCustomDDL;
+	private ScriptEngine produceScriptEngineCustomDML;
 
     Invocable customScriptEngine = null;
 
     Invocable declareScriptEngine = null;
     public KafkaService() {
-
-    }
+		}
 
     public KafkaService(KafkaConfig mqConfig, Log tapLogger) {
         this.mqConfig = mqConfig;
@@ -141,18 +139,43 @@ public class KafkaService extends AbstractMqService {
     @Override
     public void init() {
         ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata");
+				String scriptEngineName = "graal.js";
         KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
         String enableCustomParseScript = kafkaConfig.getEnableCustomParseScript();
         Boolean enableCustomParse = kafkaConfig.getEnableCustomParse();
         if (Boolean.TRUE.equals(enableCustomParse)) {
-            customScriptEngine = ScriptUtil.getScriptEngine(enableCustomParseScript, "graal.js", scriptFactory);
+            customScriptEngine = ScriptUtil.getScriptEngine(enableCustomParseScript, scriptEngineName, scriptFactory);
         }
         Boolean enableModelDeclare = kafkaConfig.getEnableModelDeclare();
         if(Boolean.TRUE.equals(enableModelDeclare)){
-            declareScriptEngine = ScriptUtil.getScriptEngine(kafkaConfig.getEnableModelDeclareScript(), "graal.js", scriptFactory);
+            declareScriptEngine = ScriptUtil.getScriptEngine(kafkaConfig.getEnableModelDeclareScript(), scriptEngineName, scriptFactory);
             KafkaTapModelDeclare tapModelDeclare = new KafkaTapModelDeclare();
             ((ScriptEngine) declareScriptEngine).put("TapModelDeclare", tapModelDeclare);
         }
+
+			if (Boolean.TRUE.equals(kafkaConfig.getEnableScript())) {
+				try {
+					String script = kafkaConfig.getScript();
+					produceScriptEngineCustomDML = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(scriptEngineName));
+					String buildInMethod = ScriptUtil.initBuildInMethod();
+					String scripts = script + System.lineSeparator() + buildInMethod;
+					produceScriptEngineCustomDML.eval(scripts);
+				} catch (Exception e) {
+					throw new RuntimeException("Init DML custom parser failed: " + e.getMessage(), e);
+				}
+			}
+
+			if (Boolean.TRUE.equals(kafkaConfig.getEnableCustomDDLMessage())) {
+				try {
+					String script = kafkaConfig.getEnableDDLCustomScript();
+					produceScriptEngineCustomDDL = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(scriptEngineName));
+					String buildInMethod = ScriptUtil.initBuildInMethod();
+					String scripts = script + System.lineSeparator() + buildInMethod;
+					produceScriptEngineCustomDDL.eval(scripts);
+				} catch (ScriptException e) {
+					throw new RuntimeException("Init DDL custom parser failed: " + e.getMessage(), e);
+				}
+			}
     }
 
     @Override
@@ -553,20 +576,9 @@ public class KafkaService extends AbstractMqService {
         AtomicLong delete = new AtomicLong(0);
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
-        ScriptEngine scriptEngine;
-        String script = ((KafkaConfig) mqConfig).getScript();
         Map<String, Object> record = new HashMap();
-        try {
-            scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
-                    new ScriptOptions().engineName("graal.js"));
-            String buildInMethod = ScriptUtil.initBuildInMethod();
-            String scripts = script + System.lineSeparator() + buildInMethod;
-            scriptEngine.eval(scripts);
-        } catch (Exception e) {
-            throw new CoreException("Engine initialization failed!");
-        }
         Map<String,Object> context=new HashMap<>();
-        scriptEngine.put("context",context);
+			produceScriptEngineCustomDML.put("context",context);
         try {
             for (TapRecordEvent event : tapRecordEvents) {
                 if (null != isAlive && !isAlive.get()) {
@@ -604,7 +616,7 @@ public class KafkaService extends AbstractMqService {
                 String op = mqOp.getOp();
                 Collection<String> conditionKeys = tapTable.primaryKeys(true);
                 RecordHeaders recordHeaders = new RecordHeaders();
-                Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, op, conditionKeys));
+                Object eventObj = ObjectUtils.covertData(executeScript(produceScriptEngineCustomDML, "process", record, op, conditionKeys));
                 context.clear();
                 byte[] body = {};
                 if (null == eventObj) {
@@ -617,12 +629,8 @@ public class KafkaService extends AbstractMqService {
                         Object obj = res.get("data");
                         if (obj instanceof Map) {
                             Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
-                            if (map.containsKey("before") && map.get("before").isEmpty()) {
-                                map.remove("before");
-                            }
-                            if (map.containsKey("after") && map.get("after").isEmpty()) {
-                                map.remove("after");
-                            }
+														removeIfEmptyInMap(map, "before");
+														removeIfEmptyInMap(map, "after");
                             res.put("data", map);
                             body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
                         } else {
@@ -687,6 +695,13 @@ public class KafkaService extends AbstractMqService {
         }
     }
 
+		private void removeIfEmptyInMap(Map<String, Map<String, Object>> map, String key) {
+			if (!map.containsKey(key)) return;
+			Map<String, Object> o = map.get(key);
+			if (null == o || o.isEmpty()) {
+				map.remove(key);
+			}
+		}
 
 
     @Override
@@ -778,12 +793,10 @@ public class KafkaService extends AbstractMqService {
         AtomicReference<String> mqOpReference = new AtomicReference<>();
         Map<String, Object> messageBody = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
         Object data = ObjectUtils.covertData(executeScript(customScriptEngine, "process", messageBody));
-        TapBaseEvent tapBaseEvent = null;
-        if (null != data) {
+        if (null == data) return;
 //            tapLogger.error("event is null");
-            tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) data);
-        }
-        if (tapBaseEvent instanceof TapFieldBaseEvent) {
+			TapBaseEvent tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) data);
+			if (tapBaseEvent instanceof TapFieldBaseEvent) {
             TapFieldBaseEvent tapFieldBaseEvent = (TapFieldBaseEvent) tapBaseEvent;
             list.add(tapFieldBaseEvent);
         } else if (tapBaseEvent instanceof TapInsertRecordEvent) {
@@ -856,18 +869,8 @@ public class KafkaService extends AbstractMqService {
 
     public void produceCustomDDLRecord(TapFieldBaseEvent tapFieldBaseEvent) {
         AtomicReference<Throwable> reference = new AtomicReference<>();
-        String script = ((KafkaConfig) mqConfig).getEnableDDLCustomScript();
-        ScriptEngine scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
-                new ScriptOptions().engineName("graal.js"));
-        String buildInMethod = ScriptUtil.initBuildInMethod();
-        String scripts = script + System.lineSeparator() + buildInMethod;
-        try {
-            scriptEngine.eval(scripts);
-        }catch (Exception e){
-            TapLogger.warn("Can not load Graal.js engine, msg: {}", e.getMessage());
-        }
         Map<String, Object> ddlRecordData = getDDLRecordData(tapFieldBaseEvent);
-        Object jsRecordData = ObjectUtils.covertData(executeScript(scriptEngine, "process", ddlRecordData));
+        Object jsRecordData = ObjectUtils.covertData(executeScript(produceScriptEngineCustomDDL, "process", ddlRecordData));
         if (null == jsRecordData) {
             return;
         }
