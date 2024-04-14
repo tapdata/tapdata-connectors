@@ -50,6 +50,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 
 	private final static String LOCAL_DATABASE = "local";
 	private final static String OPLOG_COLLECTION = "oplog.rs";
+	public static final long CONSUME_TIME_OUT = TimeUnit.SECONDS.toMillis(1L);
 
 	private MongodbConfig mongodbConfig;
 
@@ -148,21 +149,22 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 		}
 
 		List<TapEvent> tapEvents = new ArrayList<>(eventBatchSize);
+		long lastConsumeTs = 0L;
 		while (running.get()) {
 			try {
 				final TapEventOffset tapEventOffset = tapEventQueue.poll(3, TimeUnit.SECONDS);
 				if (tapEventOffset != null) {
 					tapEvents.add(tapEventOffset.getTapEvent());
 					this.offset.put(tapEventOffset.getReplicaSetName(), tapEventOffset.getOffset());
-					if (tapEvents.size() >= eventBatchSize) {
-						Map<String, MongoV3StreamOffset> newOffset = new ConcurrentHashMap<>(this.offset);
-						consumer.accept(tapEvents, newOffset);
-						tapEvents = new ArrayList<>(eventBatchSize);
-					}
-				} else if (!tapEvents.isEmpty()) {
+				}
+
+				long consumeInterval = System.currentTimeMillis() - lastConsumeTs;
+				if (tapEvents.size() >= eventBatchSize
+						|| consumeInterval > CONSUME_TIME_OUT) {
 					Map<String, MongoV3StreamOffset> newOffset = new ConcurrentHashMap<>(this.offset);
 					consumer.accept(tapEvents, newOffset);
 					tapEvents = new ArrayList<>(eventBatchSize);
+					lastConsumeTs = System.currentTimeMillis();
 				}
 			} catch (InterruptedException e) {
 				TapLogger.info("Stream polling failed: {}", e.getMessage(), e);
