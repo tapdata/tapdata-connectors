@@ -3,6 +3,9 @@ package io.tapdata.connector.kafka;
 import com.google.common.collect.Lists;
 import io.tapdata.common.AbstractMqService;
 import io.tapdata.common.constant.MqOp;
+import io.tapdata.connector.kafka.MultiThreadUtil.ConcurrentCalculator;
+import io.tapdata.connector.kafka.MultiThreadUtil.ConcurrentScriptEngine;
+import io.tapdata.connector.kafka.MultiThreadUtil.Concurrents;
 import io.tapdata.connector.kafka.admin.Admin;
 import io.tapdata.connector.kafka.admin.DefaultAdmin;
 import io.tapdata.connector.kafka.config.*;
@@ -59,12 +62,23 @@ public class KafkaService extends AbstractMqService {
     private KafkaProducer<byte[], byte[]> kafkaProducer;
 	private ScriptEngine produceScriptEngineCustomDDL;
 	private ScriptEngine produceScriptEngineCustomDML;
+    public static final String scriptEngineName = "graal.js";
+
+    private ConcurrentHashMap<String, Invocable> customParseScriptEngine = new ConcurrentHashMap<>();
+
+	public static final int consumeCustomMessageCoreSize = 8;
+	private ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata");
+
+	private Concurrents<Invocable> customParseConcurrents;
+
+	private ConcurrentCalculator<ConsumerRecord<byte[], byte[]>,TapEvent> customConcurrentCalculator;
+
 
     Invocable customScriptEngine = null;
 
     Invocable declareScriptEngine = null;
     public KafkaService() {
-		}
+	}
 
     public KafkaService(KafkaConfig mqConfig, Log tapLogger) {
         this.mqConfig = mqConfig;
@@ -136,47 +150,64 @@ public class KafkaService extends AbstractMqService {
         return connectionCheckItem;
     }
 
-    @Override
-    public void init() {
-        ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata");
-				String scriptEngineName = "graal.js";
-        KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
-        String enableCustomParseScript = kafkaConfig.getEnableCustomParseScript();
-        Boolean enableCustomParse = kafkaConfig.getEnableCustomParse();
-        if (Boolean.TRUE.equals(enableCustomParse)) {
-            customScriptEngine = ScriptUtil.getScriptEngine(enableCustomParseScript, scriptEngineName, scriptFactory);
-        }
-        Boolean enableModelDeclare = kafkaConfig.getEnableModelDeclare();
-        if(Boolean.TRUE.equals(enableModelDeclare)){
-            declareScriptEngine = ScriptUtil.getScriptEngine(kafkaConfig.getEnableModelDeclareScript(), scriptEngineName, scriptFactory);
-            KafkaTapModelDeclare tapModelDeclare = new KafkaTapModelDeclare();
-            ((ScriptEngine) declareScriptEngine).put("TapModelDeclare", tapModelDeclare);
-        }
-
-			if (Boolean.TRUE.equals(kafkaConfig.getEnableScript())) {
-				try {
-					String script = kafkaConfig.getScript();
-					produceScriptEngineCustomDML = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(scriptEngineName));
-					String buildInMethod = ScriptUtil.initBuildInMethod();
-					String scripts = script + System.lineSeparator() + buildInMethod;
-					produceScriptEngineCustomDML.eval(scripts);
-				} catch (Exception e) {
-					throw new RuntimeException("Init DML custom parser failed: " + e.getMessage(), e);
+	@Override
+	public void init() {
+		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
+		Boolean enableCustomParse = kafkaConfig.getEnableCustomParse();
+		if (Boolean.TRUE.equals(enableCustomParse)) {
+			String enableCustomParseScript = kafkaConfig.getEnableCustomParseScript();
+			customParseConcurrents = new Concurrents<Invocable>() {
+				@Override
+				protected String getInstanceId() {
+					String id = String.valueOf(Thread.currentThread().getId());
+					return id;
 				}
-			}
 
-			if (Boolean.TRUE.equals(kafkaConfig.getEnableCustomDDLMessage())) {
-				try {
-					String script = kafkaConfig.getEnableDDLCustomScript();
-					produceScriptEngineCustomDDL = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(scriptEngineName));
-					String buildInMethod = ScriptUtil.initBuildInMethod();
-					String scripts = script + System.lineSeparator() + buildInMethod;
-					produceScriptEngineCustomDDL.eval(scripts);
-				} catch (ScriptException e) {
-					throw new RuntimeException("Init DDL custom parser failed: " + e.getMessage(), e);
+				@Override
+				protected Invocable initNewInstance(String instanceId) {
+					Invocable customParseEngine = ScriptUtil.getScriptEngine(enableCustomParseScript, scriptEngineName, scriptFactory);
+					return customParseEngine;
 				}
+			};
+			customConcurrentCalculator =new ConcurrentCalculator<ConsumerRecord<byte[], byte[]>,TapEvent>(consumeCustomMessageCoreSize) {
+				@Override
+				protected TapEvent performComputation(ConsumerRecord<byte[], byte[]> data) {
+					return makeCustomMessageNoUseList(data);
+				}
+			};
+//			customScriptEngine = ScriptUtil.getScriptEngine(enableCustomParseScript, scriptEngineName, scriptFactory);
+		}
+		Boolean enableModelDeclare = kafkaConfig.getEnableModelDeclare();
+		if (Boolean.TRUE.equals(enableModelDeclare)) {
+			declareScriptEngine = ScriptUtil.getScriptEngine(kafkaConfig.getEnableModelDeclareScript(), scriptEngineName, scriptFactory);
+			KafkaTapModelDeclare tapModelDeclare = new KafkaTapModelDeclare();
+			((ScriptEngine) declareScriptEngine).put("TapModelDeclare", tapModelDeclare);
+		}
+
+		if (Boolean.TRUE.equals(kafkaConfig.getEnableScript())) {
+			try {
+				String script = kafkaConfig.getScript();
+				produceScriptEngineCustomDML = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(scriptEngineName));
+				String buildInMethod = ScriptUtil.initBuildInMethod();
+				String scripts = script + System.lineSeparator() + buildInMethod;
+				produceScriptEngineCustomDML.eval(scripts);
+			} catch (Exception e) {
+				throw new RuntimeException("Init DML custom parser failed: " + e.getMessage(), e);
 			}
-    }
+		}
+
+		if (Boolean.TRUE.equals(kafkaConfig.getEnableCustomDDLMessage())) {
+			try {
+				String script = kafkaConfig.getEnableDDLCustomScript();
+				produceScriptEngineCustomDDL = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(scriptEngineName));
+				String buildInMethod = ScriptUtil.initBuildInMethod();
+				String scripts = script + System.lineSeparator() + buildInMethod;
+				produceScriptEngineCustomDDL.eval(scripts);
+			} catch (ScriptException e) {
+				throw new RuntimeException("Init DDL custom parser failed: " + e.getMessage(), e);
+			}
+		}
+	}
 
     @Override
     public int countTables() throws Throwable {
@@ -269,113 +300,10 @@ public class KafkaService extends AbstractMqService {
     }
 
     public void loadTables(List<String> tableNames, int tableSize, Consumer<List<TapTable>> consumer) {
-//        CountDownLatch countDownLatch = new CountDownLatch(20);
-//        ExecutorService executorService = Executors.newFixedThreadPool(20);
-//        Map<String, Object> config = schemaConfiguration.build();
-//        Map<String, TapTable> tapTableMap = new HashMap<>();
-//        tableNames.forEach(tableName -> {
-//            try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(config)) {
-//                kafkaConsumer.subscribe(Collections.singletonList(tableName));
-//                ConsumerRecords<byte[], byte[]> consumerRecords;
-//                while (!(consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L))).isEmpty()) {
-//                    for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-//                        Map<String, Object> messageBody;
-//                        try {
-//                            messageBody = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
-//                        } catch (Exception e) {
-//                            tapLogger.error("topic[{}] value [{}] can not parse to json, ignore...", consumerRecord.topic(), consumerRecord.value());
-//                            continue;
-//                        }
-//                        if (messageBody == null) {
-//                            tapLogger.warn("messageBody not allow null...");
-//                            continue;
-//                        }
-//                        Object event = ObjectUtils.covertData(executeScript(customScriptEngine, "process", messageBody));
-//                        if (null == event) {
-//                            tapLogger.error("event is null");
-//                        }
-//                        if (tapTableMap.containsKey(tableName)) {
-//                            continue;
-//                        }
-//                        TapBaseEvent tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) event);
-//                        if (tapBaseEvent instanceof TapRecordEvent) {
-//                            TapTable table = new TapTable();
-//                            table.setName(consumerRecord.topic());
-//                            if (tapBaseEvent instanceof TapInsertRecordEvent) {
-//                                SCHEMA_PARSER.parse(table, ((TapInsertRecordEvent) tapBaseEvent).getAfter());
-//                            } else if (tapBaseEvent instanceof TapUpdateRecordEvent) {
-//                                SCHEMA_PARSER.parse(table, ((TapUpdateRecordEvent) tapBaseEvent).getAfter());
-//                            } else {
-//                                SCHEMA_PARSER.parse(table, ((TapDeleteRecordEvent) tapBaseEvent).getBefore());
-//                            }
-//                            tapTableMap.put(tableName, table);
-//                        }
-//                    }
-//                    kafkaConsumer.subscribe(Collections.singletonList(tableName));
-//                }
-//            } catch (Exception e) {
-//                throw new RuntimeException(e);
-//            } finally {
-//            }
-//        });
         SchemaConfiguration schemaConfiguration = new SchemaConfiguration(((KafkaConfig) mqConfig), connectorId);
         multiThreadDiscoverSchema(new ArrayList<>(tableNames), tableSize, consumer, schemaConfiguration);
     }
 
-    private void submitPageTablesCustomParse(int tableSize, Consumer<List<TapTable>> consumer, SchemaConfiguration schemaConfiguration, List<String> subList) {
-        List<List<String>> tablesList = Lists.partition(subList, tableSize);
-        Map<String, Object> config = schemaConfiguration.build();
-        try (
-                KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(config)
-        ) {
-            tablesList.forEach(tables -> {
-                List<TapTable> tableList = new ArrayList<>();
-                List<String> topics = new ArrayList<>(tables);
-                kafkaConsumer.subscribe(topics);
-                ConsumerRecords<byte[], byte[]> consumerRecords;
-                while (!(consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L))).isEmpty()) {
-                    for (ConsumerRecord<byte[], byte[]> record : consumerRecords) {
-                        if (!topics.contains(record.topic())) {
-                            continue;
-                        }
-                        Map<String, Object> messageBody;
-                        try {
-                            messageBody = jsonParser.fromJsonBytes(record.value(), Map.class);
-                        } catch (Exception e) {
-                            tapLogger.error("topic[{}] value [{}] can not parse to json, ignore...", record.topic(), record.value());
-                            continue;
-                        }
-                        if (messageBody == null) {
-                            tapLogger.warn("messageBody not allow null...");
-                            continue;
-                        }
-                        if (messageBody.containsKey("mqOp")) {
-                            messageBody = (Map<String, Object>) messageBody.get("data");
-                        }
-                        if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
-                            customParseLoadSchema(record, messageBody, tableList);
-                        } else {
-                            try {
-                                TapTable tapTable = new TapTable(record.topic());
-                                SCHEMA_PARSER.parse(tapTable, messageBody);
-                                tableList.add(tapTable);
-                            } catch (Throwable t) {
-                                tapLogger.error(String.format("%s parse topic invalid json object: %s", record.topic(), t.getMessage()), t);
-                            }
-                        }
-                        topics.remove(record.topic());
-                    }
-                    if (EmptyKit.isEmpty(topics)) {
-                        break;
-                    }
-                    kafkaConsumer.subscribe(topics);
-                }
-                topics.stream().map(TapTable::new).forEach(tableList::add);
-//                declareSchemaIfNeed(tableList);
-                syncSchemaSubmit(tableList, consumer);
-            });
-        }
-    }
     protected void submitPageTables(int tableSize, Consumer<List<TapTable>> consumer, SchemaConfiguration schemaConfiguration, List<String> destinationSet) {
         List<List<String>> tablesList = Lists.partition(destinationSet, tableSize);
         Map<String, Object> config = schemaConfiguration.build();
@@ -728,44 +656,68 @@ public class KafkaService extends AbstractMqService {
         }
     }
 
-    @Override
-    public void consumeOne(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
-        consuming.set(true);
-        List<TapEvent> list = TapSimplify.list();
-        String tableName = tapTable.getId();
-        ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(((KafkaConfig) mqConfig), connectorId, true);
-        KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
-        kafkaConsumer.subscribe(Collections.singleton(tapTable.getId()));
-        while (consuming.get()) {
-            ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(6L));
-            if (consumerRecords.isEmpty()) {
-                break;
-            }
-            for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-                if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
-                    makeCustomMessage(consumerRecord,list,tableName);
-                } else {
-                    makeMessage(consumerRecord, list, tableName);
-                }
-                if (list.size() >= eventBatchSize) {
-                    eventsOffsetConsumer.accept(list, TapSimplify.list());
-                    list = TapSimplify.list();
-                }
-            }
-        }
-        kafkaConsumer.close();
-        if (EmptyKit.isNotEmpty(list)) {
-            eventsOffsetConsumer.accept(list, TapSimplify.list());
-        }
-    }
+	@Override
+	public void consumeOne(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+		consuming.set(true);
+		List<TapEvent> list = TapSimplify.list();
+		String tableName = tapTable.getId();
+		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(((KafkaConfig) mqConfig), connectorId, true);
+		KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
+		kafkaConsumer.subscribe(Collections.singleton(tapTable.getId()));
+		while (consuming.get()) {
+			ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(6L));
+			if (consumerRecords.isEmpty()) {
+				break;
+			}
+			List<Future<TapEvent>> tapEventResults = new ArrayList<>();
+			List<ConsumerRecord<byte[], byte[]>> consumerRecordList = new ArrayList<>();
+			if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
+				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+					consumerRecordList.add(consumerRecord);
+				}
+				try {
+					List<TapEvent> result = customConcurrentCalculator.calc(consumerRecordList);
+					for (TapEvent tapEvent : result) {
+						list.add(tapEvent);
+					}
+					if (list.size() >= eventBatchSize) {
+						eventsOffsetConsumer.accept(list, TapSimplify.list());
+						list = TapSimplify.list();
+					}
+				} catch (Exception e) {
+					new RuntimeException(e);
+				}
+			} else {
+				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+					if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
+
+
+//					makeCustomMessage(consumerRecord, list, tableName);
+					} else {
+						makeMessage(consumerRecord, list, tableName);
+					}
+					if (list.size() >= eventBatchSize) {
+						eventsOffsetConsumer.accept(list, TapSimplify.list());
+						list = TapSimplify.list();
+					}
+				}
+			}
+		}
+		kafkaConsumer.close();
+		if (EmptyKit.isNotEmpty(list)) {
+			eventsOffsetConsumer.accept(list, TapSimplify.list());
+		}
+	}
 
     @Override
     public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         consuming.set(true);
         ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(((KafkaConfig) mqConfig), connectorId, true);
         KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
+
         kafkaConsumer.subscribe(tableList);
         List<TapEvent> list = TapSimplify.list();
+
         while (consuming.get()) {
             ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
             if (consumerRecords.isEmpty()) {
@@ -788,13 +740,42 @@ public class KafkaService extends AbstractMqService {
         }
         kafkaConsumer.close();
     }
+	private TapEvent makeCustomMessageNoUseList(ConsumerRecord<byte[], byte[]> consumerRecord) {
+		String threadName = Thread.currentThread().getName();
+//        customParseScriptEngine.computeIfAbsent(threadName, (k) -> {
+////            return ScriptUtil.getScriptEngine(enableCustomParseScript, scriptEngineName, scriptFactory);
+//        });
+		Invocable scriptEngine = customParseScriptEngine.computeIfAbsent(threadName, (k) -> {
+			return ScriptUtil.getScriptEngine(((KafkaConfig) mqConfig).getEnableCustomParseScript(), scriptEngineName, scriptFactory);
+		});
+		Map<String, Object> messageBody = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
+		Object data = ObjectUtils.covertData(executeScript(scriptEngine, "process", messageBody));
+		if (null == data) return null;
+		TapBaseEvent tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) data);
+		if (tapBaseEvent instanceof TapFieldBaseEvent) {
+			TapFieldBaseEvent tapFieldBaseEvent = (TapFieldBaseEvent) tapBaseEvent;
+		} else if (tapBaseEvent instanceof TapInsertRecordEvent) {
+			TapInsertRecordEvent tapInsertRecordEvent = (TapInsertRecordEvent) tapBaseEvent;
+//			tapInsertRecordEvent.table(tableName);
+		} else if (tapBaseEvent instanceof TapUpdateRecordEvent) {
+			TapUpdateRecordEvent tapUpdateRecordEvent = (TapUpdateRecordEvent) tapBaseEvent;
+//			tapUpdateRecordEvent.table(tableName);
+		} else {
+			TapDeleteRecordEvent tapDeleteRecordEvent = (TapDeleteRecordEvent) tapBaseEvent;
+//			tapDeleteRecordEvent.table(tableName);
+		}
+		return tapBaseEvent;
+	}
 
     private void makeCustomMessage(ConsumerRecord<byte[], byte[]> consumerRecord, List<TapEvent> list, String tableName) {
-        AtomicReference<String> mqOpReference = new AtomicReference<>();
+        String threadName = Thread.currentThread().getName();
+//        customParseScriptEngine.computeIfAbsent(threadName, (k) -> {
+////            return ScriptUtil.getScriptEngine(enableCustomParseScript, scriptEngineName, scriptFactory);
+//        });
+//		ScriptUtil.getScriptEngine(((KafkaConfig) mqConfig).getEnableCustomParseScript(), scriptEngineName, scriptFactory);
         Map<String, Object> messageBody = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
         Object data = ObjectUtils.covertData(executeScript(customScriptEngine, "process", messageBody));
         if (null == data) return;
-//            tapLogger.error("event is null");
 			TapBaseEvent tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) data);
 			if (tapBaseEvent instanceof TapFieldBaseEvent) {
             TapFieldBaseEvent tapFieldBaseEvent = (TapFieldBaseEvent) tapBaseEvent;
