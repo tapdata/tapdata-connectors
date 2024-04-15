@@ -4,16 +4,14 @@ import com.alibaba.fastjson.JSONObject;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.MysqlTestItem;
+import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.constant.ConnectionTypeEnum;
 import io.tapdata.pdk.apis.entity.TestItem;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -38,6 +36,7 @@ public class MysqlConnectionTest extends CommonDbTest {
 
     public MysqlConnectionTest(MysqlConfig mysqlConfig, Consumer<TestItem> consumer) {
         super(mysqlConfig, consumer);
+        MysqlUtil.buildMasterNode(mysqlConfig);
         jdbcContext = new MysqlJdbcContextV2(mysqlConfig);
         if (!ConnectionTypeEnum.SOURCE.getType().equals(commonDbConfig.get__connectionType())) {
 //            testFunctionMap.put("testCreateTablePrivilege", this::testCreateTablePrivilege);

@@ -1,15 +1,19 @@
 package io.tapdata.connector.mysql.util;
 
 import io.debezium.util.HexConverter;
+import io.tapdata.connector.mysql.MysqlJdbcContextV2;
+import io.tapdata.connector.mysql.config.MysqlConfig;
+import io.tapdata.connector.mysql.constant.DeployModeEnum;
+import io.tapdata.kit.EmptyKit;
+import io.tapdata.util.NetUtil;
 import org.apache.commons.lang3.StringUtils;
 
+import java.io.IOException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
-import java.util.Date;
-import java.util.Random;
-import java.util.TimeZone;
+import java.util.*;
 import java.util.regex.Pattern;
 
 /**
@@ -170,5 +174,80 @@ public class MysqlUtil extends JdbcUtil {
 			return "'" + obj + "'";
 		}
 		return result;
+	}
+
+	protected static void testHostPortForMasterSlave(MysqlConfig mysqlConfig) {
+		ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress = mysqlConfig.getMasterSlaveAddress();
+		ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress = Optional.ofNullable(mysqlConfig.getAvailableMasterSlaveAddress()).orElse(new ArrayList<>());
+		for (LinkedHashMap<String, Integer> hostPort : masterSlaveAddress) {
+            try {
+                NetUtil.validateHostPortWithSocket(String.valueOf(hostPort.get("host")), hostPort.get("port"));
+				availableMasterSlaveAddress.add(hostPort);
+            } catch (IOException e) {
+				availableMasterSlaveAddress.remove(hostPort);
+            }
+		}
+		mysqlConfig.setAvailableMasterSlaveAddress(availableMasterSlaveAddress);
+	}
+	public static void buildMasterNode(MysqlConfig mysqlConfig) {
+		if (null == mysqlConfig) return;
+		String deploymentMode = mysqlConfig.getDeploymentMode();
+		DeployModeEnum deployModeEnum = DeployModeEnum.fromString(deploymentMode);
+		if (deployModeEnum == null) {
+			deployModeEnum = DeployModeEnum.STANDALONE;
+		}
+		if (deployModeEnum == DeployModeEnum.MASTER_SLAVE) {
+			ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress = mysqlConfig.getMasterSlaveAddress();
+			if (EmptyKit.isEmpty(masterSlaveAddress)) {
+				throw new RuntimeException("host cannot be empty");
+			}
+			testHostPortForMasterSlave(mysqlConfig);
+			ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress = mysqlConfig.getAvailableMasterSlaveAddress();
+			if (EmptyKit.isEmpty(availableMasterSlaveAddress)){
+				throw new RuntimeException("there is no available node");
+			}
+			MysqlJdbcContextV2 mysqlJdbcContext;
+			HashSet<LinkedHashMap<String, Integer>> masterNode = new HashSet<>(availableMasterSlaveAddress);
+			Map<String, Object> masterHostPortAndStatus = null;
+			int count = 1;
+			boolean needQuerySlaveStatus = false;
+			if (availableMasterSlaveAddress.size() == 1) {
+				needQuerySlaveStatus = true;
+			}
+			while ((count < 3 && masterNode.size() != 1) || needQuerySlaveStatus) {
+				Iterator<LinkedHashMap<String, Integer>> iterator = masterNode.iterator();
+				while (iterator.hasNext()){
+					LinkedHashMap<String, Integer> address = iterator.next();
+					mysqlConfig.setHost(String.valueOf(address.get("host")));
+					mysqlConfig.setPort(address.get("port"));
+                    try {
+						mysqlJdbcContext = new MysqlJdbcContextV2(mysqlConfig);
+                        masterHostPortAndStatus = mysqlJdbcContext.querySlaveStatus();
+                    } catch (Throwable e) {
+                        throw new RuntimeException(e);
+                    }
+                    if (EmptyKit.isEmpty(masterHostPortAndStatus)) {
+						continue;
+					}
+					String slaveIoRunning = (String) masterHostPortAndStatus.get("slaveIoRunning");
+					String slaveSqlRunning = (String) masterHostPortAndStatus.get("slaveSqlRunning");
+					if ("Yes".equalsIgnoreCase(slaveIoRunning) || "Yes".equalsIgnoreCase(slaveSqlRunning)) {
+						iterator.remove();
+					}
+				}
+				count++;
+				needQuerySlaveStatus = false;
+			}
+			if (masterNode.size() < 1) {
+				throw new RuntimeException(String.format("master node:%s is not available, please make sure host port is valid", masterSlaveAddress.get(0)));
+			} else if (masterNode.size() > 1) {
+				throw new RuntimeException("please make sure there is one master node at most");
+			} else {
+				LinkedHashMap<String, Integer> master = masterNode.stream().findFirst().get();
+				mysqlConfig.setHost(String.valueOf(master.get("host")));
+				mysqlConfig.setPort(master.get("port"));
+				mysqlConfig.setMasterNode(master);
+			}
+		}
 	}
 }

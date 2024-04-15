@@ -9,6 +9,7 @@ import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
 import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
+import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -73,6 +74,7 @@ public class MysqlConnector extends CommonDbConnector {
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
         mysqlConfig = new MysqlConfig().load(tapConnectionContext.getConnectionConfig());
+        MysqlUtil.buildMasterNode(mysqlConfig);
         mysqlJdbcContext = new MysqlJdbcContextV2(mysqlConfig);
         commonDbConfig = mysqlConfig;
         jdbcContext = mysqlJdbcContext;
@@ -477,6 +479,7 @@ public class MysqlConnector extends CommonDbConnector {
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
         mysqlConfig = new MysqlConfig().load(connectionContext.getConnectionConfig());
+        MysqlUtil.buildMasterNode(mysqlConfig);
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(mysqlConfig.getConnectionString());
         try (

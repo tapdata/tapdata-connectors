@@ -6,10 +6,7 @@ import io.tapdata.kit.EmptyKit;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 public class MysqlConfig extends CommonDbConfig {
 
@@ -133,6 +130,10 @@ public class MysqlConfig extends CommonDbConfig {
     }
 
     protected String timezone;
+    private String deploymentMode;
+    private ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress;
+    private ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress;
+    private LinkedHashMap<String, Integer> masterNode;
 
     public String getTimezone() {
         return timezone;
@@ -140,5 +141,37 @@ public class MysqlConfig extends CommonDbConfig {
 
     public void setTimezone(String timezone) {
         this.timezone = timezone;
+    }
+
+    public String getDeploymentMode() {
+        return deploymentMode;
+    }
+
+    public void setDeploymentMode(String deploymentMode) {
+        this.deploymentMode = deploymentMode;
+    }
+
+    public ArrayList<LinkedHashMap<String, Integer>> getMasterSlaveAddress() {
+        return masterSlaveAddress;
+    }
+
+    public void setMasterSlaveAddress(ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress) {
+        this.masterSlaveAddress = masterSlaveAddress;
+    }
+
+    public ArrayList<LinkedHashMap<String, Integer>> getAvailableMasterSlaveAddress() {
+        return availableMasterSlaveAddress;
+    }
+
+    public void setAvailableMasterSlaveAddress(ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress) {
+        this.availableMasterSlaveAddress = availableMasterSlaveAddress;
+    }
+
+    public LinkedHashMap<String, Integer> getMasterNode() {
+        return masterNode;
+    }
+
+    public void setMasterNode(LinkedHashMap<String, Integer> masterNode) {
+        this.masterNode = masterNode;
     }
 }

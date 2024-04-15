@@ -10,11 +10,13 @@ import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.common.ddl.wrapper.DDLWrapperConfig;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.mysql.config.MysqlConfig;
+import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.mysql.entity.MysqlSnapshotOffset;
 import io.tapdata.connector.mysql.entity.MysqlStreamEvent;
 import io.tapdata.connector.mysql.entity.MysqlStreamOffset;
 import io.tapdata.connector.mysql.util.MysqlBinlogPositionUtil;
+import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.mysql.util.StringCompressUtil;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
@@ -203,12 +205,30 @@ public class MysqlReader implements Closeable {
     public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
                            Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer) throws Throwable {
         MysqlConfig mysqlConfig = new MysqlConfig().load(tapConnectorContext.getConnectionConfig());
+        MysqlUtil.buildMasterNode(mysqlConfig);
         try {
             initDebeziumServerName(tapConnectorContext);
             this.tapTableMap = tapConnectorContext.getTableMap();
             this.ddlParserType = ddlParserType;
             String offsetStr = "";
             JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
+            String deploymentMode = mysqlConfig.getDeploymentMode();
+            DeployModeEnum deployModeEnum = DeployModeEnum.fromString(deploymentMode);
+            if (deployModeEnum == null) {
+                deployModeEnum = DeployModeEnum.STANDALONE;
+            }
+            if (deployModeEnum == DeployModeEnum.MASTER_SLAVE){
+                if (offset instanceof MysqlStreamOffset) {
+                    Map<String, String> offset1 = ((MysqlStreamOffset) offset).getOffset();
+                    AtomicReference<String> os = new AtomicReference<>();
+                    offset1.forEach((k,v)->os.set(v));
+                    HashMap map = jsonParser.fromJson(os.get(), HashMap.class);
+                    Integer ts = (Integer) map.get("ts_sec");
+                    if (null != ts){
+                        offset = TimeUnit.SECONDS.toMillis(new Long(ts));
+                    }
+                }
+            }
             MysqlStreamOffset mysqlStreamOffset = null;
             if (offset instanceof MysqlStreamOffset) {
                 mysqlStreamOffset = (MysqlStreamOffset) offset;
@@ -329,6 +349,7 @@ public class MysqlReader implements Closeable {
             embeddedEngine.run();
             if (null != throwableAtomicReference.get()) {
                 Throwable e = ErrorKit.getLastCause(throwableAtomicReference.get());
+                ((MysqlExceptionCollector)exceptionCollector).setMysqlConfig(mysqlConfig);
                 exceptionCollector.collectTerminateByServer(e);
                 exceptionCollector.collectOffsetInvalid(offset, e);
                 exceptionCollector.collectCdcConfigInvalid(e);

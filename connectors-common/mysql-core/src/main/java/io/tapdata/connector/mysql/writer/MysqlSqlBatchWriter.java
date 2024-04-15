@@ -92,6 +92,7 @@ public class MysqlSqlBatchWriter extends MysqlJdbcWriter {
             getJdbcCache().getConnection().commit();
         } catch (Throwable e) {
             if (isAlive.get()) {
+
                 exceptionCollector.collectTerminateByServer(e);
                 exceptionCollector.collectViolateNull(null, e);
                 TapRecordEvent errorEvent = writeListResult.get().getErrorMap().keySet().stream().findFirst().orElse(null);

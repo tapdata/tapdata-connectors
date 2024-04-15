@@ -17,9 +17,7 @@ import org.apache.commons.lang3.StringUtils;
 import java.sql.*;
 import java.text.DecimalFormat;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.TimeZone;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class MysqlJdbcContextV2 extends JdbcContext {
@@ -141,6 +139,18 @@ public class MysqlJdbcContextV2 extends JdbcContext {
             }
         });
         return mysqlBinlogPositionAtomicReference.get();
+    }
+    public Map<String, Object> querySlaveStatus() throws Throwable {
+        Map<String, Object> hostPortAndStatus = new HashMap<>();
+        normalQuery("SHOW SLAVE STATUS", rs -> {
+            if (rs.next()) {
+                hostPortAndStatus.put("host",rs.getString("Master_Host"));
+                hostPortAndStatus.put("port",rs.getInt("Master_Port"));
+                hostPortAndStatus.put("slaveIoRunning",rs.getString("Slave_IO_Running"));
+                hostPortAndStatus.put("slaveSqlRunning",rs.getString("Slave_SQL_Running"));
+            }
+        });
+        return hostPortAndStatus;
     }
 
     public String getServerId() throws Throwable {
