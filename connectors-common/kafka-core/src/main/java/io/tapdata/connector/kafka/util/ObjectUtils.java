@@ -1,6 +1,11 @@
 package io.tapdata.connector.kafka.util;
 
 import io.tapdata.base.ConnectorBase;
+import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.TapUtils;
 
@@ -26,4 +31,20 @@ public class ObjectUtils {
             return apply;
         }
     }
+	public static Map<String, Object> getBefore(TapRecordEvent tapEvent) {
+		if (tapEvent instanceof TapUpdateRecordEvent) {
+			return ((TapUpdateRecordEvent) tapEvent).getBefore();
+		} else if (tapEvent instanceof TapDeleteRecordEvent) {
+			return ((TapDeleteRecordEvent) tapEvent).getBefore();
+		}
+		return null;
+	}
+	public static Map<String, Object> getAfter(TapRecordEvent tapEvent) {
+		if (tapEvent instanceof TapInsertRecordEvent) {
+			return ((TapInsertRecordEvent) tapEvent).getAfter();
+		} else if (tapEvent instanceof TapUpdateRecordEvent) {
+			return ((TapUpdateRecordEvent) tapEvent).getAfter();
+		}
+		return null;
+	}
 }

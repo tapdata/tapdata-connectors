@@ -119,6 +119,11 @@ public abstract class Concurrents<T> implements AutoCloseable {
 						}
 					});
 				}
+
+				@Override
+				protected List<Object> performComputation(List<Object> data) {
+					return null;
+				}
 			}
 		) {
 			int counts = 1000000;
