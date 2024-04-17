@@ -2,6 +2,7 @@ package io.tapdata.connector.mysql.config;
 
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.util.FileUtil;
+import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.kit.EmptyKit;
 import org.apache.commons.lang3.StringUtils;
 
@@ -33,6 +34,12 @@ public class MysqlConfig extends CommonDbConfig {
         setUser(EmptyKit.isBlank(getUser()) ? (String) map.get("username") : getUser());
         setExtParams(EmptyKit.isBlank(getExtParams()) ? (String) map.get("addtionalString") : getExtParams());
         setSchema(getDatabase());
+        String deploymentMode = config.getDeploymentMode();
+        DeployModeEnum deployModeEnum = DeployModeEnum.fromString(deploymentMode);
+        if (deployModeEnum == null) {
+            deploymentMode = DeployModeEnum.STANDALONE.getMode();
+            config.setDeploymentMode(deploymentMode);
+        }
         return config;
     }
 

@@ -9,6 +9,8 @@ import io.tapdata.util.NetUtil;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.time.*;
@@ -176,27 +178,33 @@ public class MysqlUtil extends JdbcUtil {
 		return result;
 	}
 
-	protected static void testHostPortForMasterSlave(MysqlConfig mysqlConfig) {
+	public static void testHostPortForMasterSlave(MysqlConfig mysqlConfig) {
 		ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress = mysqlConfig.getMasterSlaveAddress();
 		ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress = Optional.ofNullable(mysqlConfig.getAvailableMasterSlaveAddress()).orElse(new ArrayList<>());
 		for (LinkedHashMap<String, Integer> hostPort : masterSlaveAddress) {
             try {
+				if (EmptyKit.isEmpty(hostPort)){
+					continue;
+				}else {
+					if (null == hostPort.get("host") || null == hostPort.get("port"))
+					{
+						throw new IllegalArgumentException("please check server host and port configuration");
+					}
+				}
                 NetUtil.validateHostPortWithSocket(String.valueOf(hostPort.get("host")), hostPort.get("port"));
-				availableMasterSlaveAddress.add(hostPort);
+				if (!availableMasterSlaveAddress.contains(hostPort)){
+					availableMasterSlaveAddress.add(hostPort);
+				}
             } catch (IOException e) {
 				availableMasterSlaveAddress.remove(hostPort);
             }
 		}
 		mysqlConfig.setAvailableMasterSlaveAddress(availableMasterSlaveAddress);
 	}
-	public static void buildMasterNode(MysqlConfig mysqlConfig) {
+	public static void buildMasterNode(MysqlConfig mysqlConfig, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) {
 		if (null == mysqlConfig) return;
 		String deploymentMode = mysqlConfig.getDeploymentMode();
-		DeployModeEnum deployModeEnum = DeployModeEnum.fromString(deploymentMode);
-		if (deployModeEnum == null) {
-			deployModeEnum = DeployModeEnum.STANDALONE;
-		}
-		if (deployModeEnum == DeployModeEnum.MASTER_SLAVE) {
+		if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
 			ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress = mysqlConfig.getMasterSlaveAddress();
 			if (EmptyKit.isEmpty(masterSlaveAddress)) {
 				throw new RuntimeException("host cannot be empty");
@@ -218,12 +226,14 @@ public class MysqlUtil extends JdbcUtil {
 				Iterator<LinkedHashMap<String, Integer>> iterator = masterNode.iterator();
 				while (iterator.hasNext()){
 					LinkedHashMap<String, Integer> address = iterator.next();
-					mysqlConfig.setHost(String.valueOf(address.get("host")));
-					mysqlConfig.setPort(address.get("port"));
+					String host = String.valueOf(address.get("host"));
+					Integer port = address.get("port");
+					mysqlConfig.setHost(host);
+					mysqlConfig.setPort(port);
                     try {
-						mysqlJdbcContext = new MysqlJdbcContextV2(mysqlConfig);
+						mysqlJdbcContext = contextMapForMasterSlave.get(host+port);
                         masterHostPortAndStatus = mysqlJdbcContext.querySlaveStatus();
-                    } catch (Throwable e) {
+					} catch (Throwable e) {
                         throw new RuntimeException(e);
                     }
                     if (EmptyKit.isEmpty(masterHostPortAndStatus)) {
@@ -239,7 +249,7 @@ public class MysqlUtil extends JdbcUtil {
 				needQuerySlaveStatus = false;
 			}
 			if (masterNode.size() < 1) {
-				throw new RuntimeException(String.format("master node:%s is not available, please make sure host port is valid", masterSlaveAddress.get(0)));
+				throw new RuntimeException(String.format("master node:%s is not available, please make sure host port is valid and slave status is right", masterSlaveAddress.get(0)));
 			} else if (masterNode.size() > 1) {
 				throw new RuntimeException("please make sure there is one master node at most");
 			} else {
@@ -249,5 +259,69 @@ public class MysqlUtil extends JdbcUtil {
 				mysqlConfig.setMasterNode(master);
 			}
 		}
+	}
+	public static ArrayList<Map<String, Object>> compareMasterSlaveCurrentTime(MysqlConfig mysqlConfig, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave){
+		if (null == mysqlConfig) return null;
+		String deploymentMode = mysqlConfig.getDeploymentMode();
+		if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
+			ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress = mysqlConfig.getAvailableMasterSlaveAddress();
+			if (EmptyKit.isEmpty(availableMasterSlaveAddress)) return null;
+			MysqlJdbcContextV2 mysqlJdbcContext;
+			ArrayList<Map<String, Object>> timeList = new ArrayList();
+			long start = System.currentTimeMillis();
+			for (LinkedHashMap<String, Integer> address : availableMasterSlaveAddress) {
+				String host = String.valueOf(address.get("host"));
+				Integer port = address.get("port");
+				mysqlJdbcContext = contextMapForMasterSlave.get(host+port);
+                try {
+					Timestamp timestamp = mysqlJdbcContext.queryCurrentTime();
+					long end = System.currentTimeMillis();
+					long interval = end - start;
+					long time = timestamp.getTime() - interval;
+					Map<String, Object> hostPortAndTime = new HashMap<>();
+					hostPortAndTime.put("hostPort", host+":"+port);
+					hostPortAndTime.put("time", time);
+					timeList.add(hostPortAndTime);
+				} catch (SQLException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+			ArrayList<Map<String, Object>> inconsistent = new ArrayList<>();
+			for (int i=0;i<timeList.size();i++) {
+				for (int j=i;j<timeList.size();j++){
+					Map<String, Object> hostPortAndTime1 = timeList.get(i);
+					Map<String, Object> hostPortAndTime2 = timeList.get(j);
+					Object time1 = hostPortAndTime1.get("time");
+					Object time2 = hostPortAndTime2.get("time");
+					long abs = Math.abs((long) time1 - (long) time2);
+					if (abs > 1000){
+						inconsistent.add(hostPortAndTime1);
+						inconsistent.add(hostPortAndTime2);
+						return inconsistent;
+					}
+
+				}
+			}
+
+		}
+		return null;
+	}
+	public static HashMap<String, MysqlJdbcContextV2> buildContextMapForMasterSlave(MysqlConfig mysqlConfig){
+		if (null == mysqlConfig) return null;
+		HashMap<String, MysqlJdbcContextV2> contextMap = new HashMap<>();
+		String deploymentMode = mysqlConfig.getDeploymentMode();
+		if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
+			testHostPortForMasterSlave(mysqlConfig);
+			ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress = mysqlConfig.getAvailableMasterSlaveAddress();
+			if (EmptyKit.isEmpty(availableMasterSlaveAddress)) return contextMap;
+			for (LinkedHashMap<String, Integer> address : availableMasterSlaveAddress) {
+				String host = String.valueOf(address.get("host"));
+				Integer port = address.get("port");
+				mysqlConfig.setHost(host);
+				mysqlConfig.setPort(port);
+				contextMap.putIfAbsent(host+port, new MysqlJdbcContextV2(mysqlConfig));
+			}
+		}
+		return contextMap;
 	}
 }

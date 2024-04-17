@@ -153,11 +153,7 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
     private void handleForMaterSlave(Throwable cause) {
         if (null == mysqlConfig) return;
         String deploymentMode = mysqlConfig.getDeploymentMode();
-        DeployModeEnum deployModeEnum = DeployModeEnum.fromString(deploymentMode);
-        if (deployModeEnum == null) {
-            deployModeEnum = DeployModeEnum.STANDALONE;
-        }
-        if (deployModeEnum == DeployModeEnum.MASTER_SLAVE){
+        if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
             throw new TapPdkRetryableEx(String.format("mysql master node:%s is down, try to switch other node if it become master node, previous available node: %s", mysqlConfig.getMasterNode(), mysqlConfig.getAvailableMasterSlaveAddress()), pdkId, cause);
         }
     }

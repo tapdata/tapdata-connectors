@@ -152,7 +152,11 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         });
         return hostPortAndStatus;
     }
-
+    public Timestamp queryCurrentTime() throws SQLException {
+        AtomicReference<Timestamp> currentTime = new AtomicReference<>();
+        queryWithNext(MYSQL_CURRENT_TIME, resultSet -> currentTime.set(resultSet.getTimestamp(1)));
+        return currentTime.get();
+    }
     public String getServerId() throws Throwable {
         AtomicReference<String> serverId = new AtomicReference<>();
         normalQuery("SHOW VARIABLES LIKE 'SERVER_ID'", rs -> {
@@ -233,6 +237,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "\tSEQ_IN_INDEX";
 
     private final static String MYSQL_VERSION = "SELECT VERSION()";
+    private final static String MYSQL_CURRENT_TIME = "SELECT NOW();";
 
     public final static String MYSQL_TIMEZONE = "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()) as timeoffset";
 

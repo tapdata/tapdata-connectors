@@ -203,9 +203,9 @@ public class MysqlReader implements Closeable {
     }
 
     public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
-                           Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer) throws Throwable {
+                           Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) throws Throwable {
         MysqlConfig mysqlConfig = new MysqlConfig().load(tapConnectorContext.getConnectionConfig());
-        MysqlUtil.buildMasterNode(mysqlConfig);
+        MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         try {
             initDebeziumServerName(tapConnectorContext);
             this.tapTableMap = tapConnectorContext.getTableMap();
@@ -213,11 +213,7 @@ public class MysqlReader implements Closeable {
             String offsetStr = "";
             JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
             String deploymentMode = mysqlConfig.getDeploymentMode();
-            DeployModeEnum deployModeEnum = DeployModeEnum.fromString(deploymentMode);
-            if (deployModeEnum == null) {
-                deployModeEnum = DeployModeEnum.STANDALONE;
-            }
-            if (deployModeEnum == DeployModeEnum.MASTER_SLAVE){
+            if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
                 if (offset instanceof MysqlStreamOffset) {
                     Map<String, String> offset1 = ((MysqlStreamOffset) offset).getOffset();
                     AtomicReference<String> os = new AtomicReference<>();
