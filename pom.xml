@@ -18,7 +18,10 @@
     </modules>
 
     <properties>
-        <sonar.test.exclusions>**/src/test/**</sonar.test.exclusions>
+        <sonar.test.exclusions>
+            **/src/test/**,
+            tapdata-cli/**
+        </sonar.test.exclusions>
     </properties>
 
     <build>

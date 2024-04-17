@@ -183,6 +183,8 @@ public class DorisConnector extends CommonDbConnector {
         String sql;
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
         String uniqueType = Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Aggregate".equals(dorisConfig.getUniqueKeyType()) ? "AGGREGATE" : "UNIQUE";
+        long bucket = (EmptyKit.isNotNull(tapTable.getTableAttr()) && EmptyKit.isNotNull((tapTable.getTableAttr().get("capacity")))) ?
+                (Math.min(Long.parseLong(tapTable.getTableAttr().get("capacity").toString())/1000000L, 14) + 2) : 16;
         if (CollectionUtils.isEmpty(primaryKeys)) {
             //append mode
             if (EmptyKit.isEmpty(dorisConfig.getDuplicateKey())) {
@@ -190,15 +192,15 @@ public class DorisConnector extends CommonDbConnector {
                 sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
                         "(" + commonSqlMaker.buildColumnDefinition(tapTable, true) + ") " +
                         uniqueType + " KEY (`" + String.join("`,`", allColumns) + "`) " +
-                        "DISTRIBUTED BY HASH(`" + String.join("`,`", allColumns) + "`) BUCKETS 16 " +
+                        "DISTRIBUTED BY HASH(`" + String.join("`,`", allColumns) + "`) BUCKETS " + bucket + " " +
                         "PROPERTIES(\"replication_num\" = \"" +
                         dorisConfig.getReplicationNum().toString() +
-                        "\"" + ("UNIQUE".equals(uniqueType) ? ", \"enable_unique_key_merge_on_write\" = \"true\"" : "") + ")";
+                        "\"" + ("UNIQUE".equals(uniqueType) ? ", \"enable_unique_key_merge_on_write\" = \"true\", \"store_row_column\" = \"true\"" : "") + ")";
             } else {
                 sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
                         "(" + ((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, dorisConfig.getDuplicateKey(), false) + ") " +
                         "DUPLICATE KEY (`" + String.join("`,`", dorisConfig.getDuplicateKey()) + "`) " +
-                        "DISTRIBUTED BY HASH(`" + String.join("`,`", dorisConfig.getDistributedKey()) + "`) BUCKETS 16 " +
+                        "DISTRIBUTED BY HASH(`" + String.join("`,`", dorisConfig.getDistributedKey()) + "`) BUCKETS " + bucket + " " +
                         "PROPERTIES(\"replication_num\" = \"" +
                         dorisConfig.getReplicationNum().toString() +
                         "\")";
@@ -207,10 +209,10 @@ public class DorisConnector extends CommonDbConnector {
             sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
                     "(" + ((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, primaryKeys, "AGGREGATE".equals(uniqueType)) + ") " +
                     uniqueType + " KEY (`" + String.join("`,`", primaryKeys) + "`) " +
-                    "DISTRIBUTED BY HASH(`" + String.join("`,`", primaryKeys) + "`) BUCKETS 16 " +
+                    "DISTRIBUTED BY HASH(`" + String.join("`,`", primaryKeys) + "`) BUCKETS " + bucket + " " +
                     "PROPERTIES(\"replication_num\" = \"" +
                     dorisConfig.getReplicationNum().toString() +
-                    "\"" + ("UNIQUE".equals(uniqueType) ? ", \"enable_unique_key_merge_on_write\" = \"true\"" : "") + ")";
+                    "\"" + ("UNIQUE".equals(uniqueType) ? ", \"enable_unique_key_merge_on_write\" = \"true\", \"store_row_column\" = \"true\"" : "") + ")";
         }
         createTableOptions.setTableExists(false);
         try {
