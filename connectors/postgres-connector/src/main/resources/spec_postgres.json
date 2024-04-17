@@ -11,7 +11,7 @@
     "capabilities":[
       {
         "id": "dml_insert_policy",
-        "alternatives": ["update_on_exists", "ignore_on_exists"]
+        "alternatives": ["update_on_exists", "ignore_on_exists", "just_insert"]
       },
       {
         "id": "dml_update_policy",
