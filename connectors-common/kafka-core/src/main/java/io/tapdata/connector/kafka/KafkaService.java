@@ -3,9 +3,7 @@ package io.tapdata.connector.kafka;
 import com.google.common.collect.Lists;
 import io.tapdata.common.AbstractMqService;
 import io.tapdata.common.constant.MqOp;
-import io.tapdata.connector.kafka.MultiThreadUtil.ConcurrentCalculator;
-import io.tapdata.connector.kafka.MultiThreadUtil.Concurrents;
-import io.tapdata.connector.kafka.MultiThreadUtil.DMLRecordEventConvert;
+import io.tapdata.connector.kafka.MultiThreadUtil.*;
 import io.tapdata.connector.kafka.admin.Admin;
 import io.tapdata.connector.kafka.admin.DefaultAdmin;
 import io.tapdata.connector.kafka.config.*;
@@ -35,7 +33,6 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
 import org.apache.commons.collections4.CollectionUtils;
-import org.apache.commons.collections4.MapUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -76,6 +73,10 @@ public class KafkaService extends AbstractMqService {
 
 	private Concurrents<Invocable> customDmlConcurrents;
 	private ConcurrentCalculator<DMLRecordEventConvert, DMLRecordEventConvert> customDmlCalculator;
+
+	private Concurrents<Invocable> customDmlConcurrentsQueue;
+
+	private ConcurrentHashMap<String,DMLCalculatorQueue<DMLRecordEventConvert, DMLRecordEventConvert>> dmlCalculatorQueueConcurrentHashMap =new ConcurrentHashMap<>();
 
 
     Invocable customScriptEngine = null;
@@ -274,6 +275,20 @@ public class KafkaService extends AbstractMqService {
                     }
                 };
 
+
+				customDmlConcurrentsQueue=new Concurrents<Invocable>() {
+					@Override
+					protected String getInstanceId() {
+						String id = String.valueOf(Thread.currentThread().getId());
+						return id;
+					}
+
+					@Override
+					protected Invocable initNewInstance(String instanceId) {
+						Invocable customParseEngine = ScriptUtil.getScriptEngine(kafkaConfig.getScript(), scriptEngineName, scriptFactory);
+						return customParseEngine;
+					}
+				};
 //				String script = kafkaConfig.getScript();
 //				produceScriptEngineCustomDML = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(scriptEngineName));
 //				String buildInMethod = ScriptUtil.initBuildInMethod();
@@ -591,74 +606,24 @@ public class KafkaService extends AbstractMqService {
 		AtomicLong update = new AtomicLong(0);
 		AtomicLong delete = new AtomicLong(0);
 		WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
+		String threadName = String.valueOf(Thread.currentThread().getId());
 		CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
+		ProduceInfo produceInfo = new ProduceInfo(kafkaProducer,countDownLatch,insert,update,delete,listResult);
+		DMLCalculatorQueue<DMLRecordEventConvert, DMLRecordEventConvert> customDmlCalculatorQueue = dmlCalculatorQueueConcurrentHashMap.computeIfAbsent(threadName, (k) -> {
+			return new DMLCalculatorQueue<>(CONSUME_CUSTOM_MESSAGE_CORE_SIZE, 1000, customDmlConcurrentsQueue);
+		});
+		dmlCalculatorQueueConcurrentHashMap.computeIfPresent(threadName,(k,v)->{
+			v.setProduceInfo(produceInfo);
+			return v;
+		});
 		try {
-			List<DMLRecordEventConvert> dmlRecordEventBeforeConverts = tapRecordEvents.stream().map((event -> {
+			customDmlCalculatorQueue.setProduceInfo(produceInfo);
+			for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
 				DMLRecordEventConvert dmlRecordEventConvert = new DMLRecordEventConvert();
-				dmlRecordEventConvert.setRecordEvent(event);
+				dmlRecordEventConvert.setRecordEvent(tapRecordEvent);
 				dmlRecordEventConvert.setTapTable(tapTable);
-				return dmlRecordEventConvert;
-			})).collect(Collectors.toList());
-			List<DMLRecordEventConvert> dmlRecordEventAfterConverts = customDmlCalculator.calc(dmlRecordEventBeforeConverts);
-			dmlRecordEventAfterConverts.stream().filter(res-> MapUtils.isNotEmpty(res.getJsConvertResultMap())).forEach(dmlRecordEventConvert->{
-				TapRecordEvent event = dmlRecordEventConvert.getRecordEvent();
-				Map<String, Object> jsConvertResultMap = dmlRecordEventConvert.getJsConvertResultMap();
-				byte[] body = {};
-				RecordHeaders recordHeaders = new RecordHeaders();
-				if (null == jsConvertResultMap.get("data")) {
-					throw new RuntimeException("data cannot be null");
-				} else {
-					Object obj = jsConvertResultMap.get("data");
-					if (obj instanceof Map) {
-						Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) jsConvertResultMap.get("data");
-						removeIfEmptyInMap(map, "before");
-						removeIfEmptyInMap(map, "after");
-						body = jsonParser.toJsonBytes(jsConvertResultMap.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
-					} else {
-						body = obj.toString().getBytes();
-					}
-				}
-				String mqOp = MapUtils.getString(jsConvertResultMap, "op");
-				if (jsConvertResultMap.containsKey("header")) {
-					Object obj = jsConvertResultMap.get("header");
-					if (obj instanceof Map) {
-						Map<String, Object> head = (Map<String, Object>) jsConvertResultMap.get("header");
-						for (String s : head.keySet()) {
-							recordHeaders.add(s, head.get(s).toString().getBytes());
-						}
-					} else {
-						throw new RuntimeException("header must be a collection type");
-					}
-				} else {
-					recordHeaders.add("mqOp", mqOp.toString().getBytes());
-				}
-				MqOp finalMqOp = MqOp.fromValue(mqOp);
-
-				Callback callback = (metadata, exception) -> {
-					try {
-						if (EmptyKit.isNotNull(exception)) {
-							listResult.addError(event, exception);
-						}
-						switch (finalMqOp) {
-							case INSERT:
-								insert.incrementAndGet();
-								break;
-							case UPDATE:
-								update.incrementAndGet();
-								break;
-							case DELETE:
-								delete.incrementAndGet();
-								break;
-						}
-					} finally {
-						countDownLatch.countDown();
-					}
-				};
-				ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapTable.getId(),
-					null, null, dmlRecordEventConvert.getKafkaMessageKey(), body,
-					recordHeaders);
-				kafkaProducer.send(producerRecord, callback);
-			});
+				customDmlCalculatorQueue.multiCalc(dmlRecordEventConvert);
+			}
 
 		} catch (RejectedExecutionException e) {
 			tapLogger.warn("task stopped, some data produce failed!", e);
@@ -1027,6 +992,16 @@ public class KafkaService extends AbstractMqService {
         super.close();
         if (EmptyKit.isNotNull(kafkaProducer)) {
             kafkaProducer.close();
+        }
+        try {
+			if(null!=customParseCalculator){
+				customParseCalculator.close();
+			}
+			if(null!=customDmlCalculator){
+				customDmlCalculator.close();
+			}
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 

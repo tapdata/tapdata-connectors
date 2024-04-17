@@ -22,7 +22,7 @@ public abstract class ConcurrentCalculator<T,V> implements AutoCloseable {
 
 	protected ConcurrentCalculator(int concurrentSize) {
 		executorService = Executors.newFixedThreadPool(concurrentSize);
-	}
+    }
 
 	public List<V> calc(List<T> dataList) throws InterruptedException, ExecutionException {
 		List<CompletableFuture<V>> futures = new ArrayList<>();
@@ -60,7 +60,6 @@ public abstract class ConcurrentCalculator<T,V> implements AutoCloseable {
 		}
 		return null;
 	}
-
 	public void calc(List<T> dataList, Consumer<V> callback) throws InterruptedException, ExecutionException {
 		List<CompletableFuture<V>> futures = new ArrayList<>();
 		for (T data : dataList) {
@@ -76,6 +75,10 @@ public abstract class ConcurrentCalculator<T,V> implements AutoCloseable {
 	protected abstract V performComputation(T data);
 
 	protected abstract List<V> performComputation(List<T> data);
+
+	protected boolean isRunning() {
+		return !Thread.currentThread().isInterrupted();
+	}
 	@Override
 	public void close() throws Exception {
 		executorService.shutdown();
