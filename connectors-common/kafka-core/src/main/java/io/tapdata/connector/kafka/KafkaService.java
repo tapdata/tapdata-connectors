@@ -65,6 +65,7 @@ public class KafkaService extends AbstractMqService {
     public static final String scriptEngineName = "graal.js";
 
 	public static final int CONSUME_CUSTOM_MESSAGE_CORE_SIZE = 4;
+	public static final int CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE=2000;
 	private ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata");
 
 	private Concurrents<Invocable> customParseConcurrents;
@@ -610,7 +611,7 @@ public class KafkaService extends AbstractMqService {
 		CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
 		ProduceInfo produceInfo = new ProduceInfo(kafkaProducer,countDownLatch,insert,update,delete,listResult);
 		DMLCalculatorQueue<DMLRecordEventConvert, DMLRecordEventConvert> customDmlCalculatorQueue = dmlCalculatorQueueConcurrentHashMap.computeIfAbsent(threadName, (k) -> {
-			return new DMLCalculatorQueue<>(CONSUME_CUSTOM_MESSAGE_CORE_SIZE, 1000, customDmlConcurrentsQueue);
+			return new DMLCalculatorQueue<>(CONSUME_CUSTOM_MESSAGE_CORE_SIZE, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customDmlConcurrentsQueue);
 		});
 		dmlCalculatorQueueConcurrentHashMap.computeIfPresent(threadName,(k,v)->{
 			v.setProduceInfo(produceInfo);
