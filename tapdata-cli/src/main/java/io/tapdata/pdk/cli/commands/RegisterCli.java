@@ -90,6 +90,9 @@ public class RegisterCli extends CommonCli {
                         if (needSkip(authentication, filterTypes)) {
                             connectionType = authentication;
                             needUpload = false;
+                            if (file.length == 1) {
+                                return 2;
+                            }
                             break;
                         }
                         needUpload = true;
