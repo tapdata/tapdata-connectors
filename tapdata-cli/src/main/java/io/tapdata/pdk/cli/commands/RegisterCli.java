@@ -68,7 +68,7 @@ public class RegisterCli extends CommonCli {
     @CommandLine.Option(names = {"-f", "--filter"}, required = false, description = "The list which are the Authentication types should not be skipped, if value is empty will register all connector. if it contains multiple, please separate them with commas")
     private String needRegisterConnectionTypes;
 
-    public String execute() throws Exception {
+    public Integer execute() throws Exception {
         List<String> filterTypes = generateSkipTypes();
         if (!filterTypes.isEmpty()) {
             System.out.println(String.format("Starting to register data sources, plan to skip data sources that are not within the registration scope. The types of data sources that need to be registered are: %s", filterTypes));
@@ -76,14 +76,12 @@ public class RegisterCli extends CommonCli {
             System.out.println("Start registering data sources and plan to register all submitted data sources");
         }
         StringJoiner unUploaded = new StringJoiner("\n");
-        StringJoiner joiner = new StringJoiner("\n");
         try {
             CommonUtils.setProperty("refresh_local_jars", "true");
             TapConnectorManager.getInstance().start(Arrays.asList(files));
 
             try {
                 for (File file : files) {
-                    joiner.add("* Register Connector: " + file.getName());
                     try {
                         List<String> jsons = new ArrayList<>();
                         TapConnector connector = TapConnectorManager.getInstance().getTapConnectorByJarName(file.getName());
@@ -97,7 +95,6 @@ public class RegisterCli extends CommonCli {
                             if (needSkip(authentication, filterTypes)) {
                                 connectionType = authentication;
                                 needUpload = false;
-                                joiner.add("* Register Connector: " + file.getName() + " Skipped");
                                 break;
                             }
                             needUpload = true;
@@ -258,9 +255,7 @@ public class RegisterCli extends CommonCli {
                             System.out.println("File " + file + " doesn't exists");
                             System.out.println(file.getName() + " registered failed");
                         }
-                        joiner.add("* Register Connector: " + file.getName() + " Succeed");
                     } catch (Exception e) {
-                        joiner.add("* Register Connector: " + file.getName() + " Failed");
                         throw e;
                     }
                 }
@@ -269,11 +264,13 @@ public class RegisterCli extends CommonCli {
                     System.out.println(String.format("[INFO] Some connector that are not in the scope are registered this time: \n%s\nThe data connector type that needs to be registered is: %s\n", unUploaded.toString(), filterTypes));
                 }
             }
+            System.exit(0);
         } catch (Throwable throwable) {
             throwable.printStackTrace();
             CommonUtils.logError(TAG, "Start failed", throwable);
+            System.exit(-1);
         }
-        return joiner.toString();
+        return 0;
     }
 
     protected static final String path = "tapdata-cli/src/main/resources/replace/";
