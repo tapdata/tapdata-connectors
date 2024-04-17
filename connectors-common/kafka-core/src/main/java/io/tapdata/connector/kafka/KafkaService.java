@@ -67,8 +67,6 @@ public class KafkaService extends AbstractMqService {
 	private ScriptEngine produceScriptEngineCustomDML;
     public static final String scriptEngineName = "graal.js";
 
-    private ConcurrentHashMap<String, Invocable> customParseScriptEngine = new ConcurrentHashMap<>();
-
 	public static final int CONSUME_CUSTOM_MESSAGE_CORE_SIZE = 4;
 	private ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata");
 
@@ -853,8 +851,8 @@ public class KafkaService extends AbstractMqService {
 			if (consumerRecords.isEmpty()) {
 				break;
 			}
-			List<ConsumerRecord<byte[], byte[]>> consumerRecordList = new ArrayList<>();
 			if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
+				List<ConsumerRecord<byte[], byte[]>> consumerRecordList = new ArrayList<>();
 				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
 					consumerRecordList.add(consumerRecord);
 				}
@@ -872,13 +870,13 @@ public class KafkaService extends AbstractMqService {
 				}
 			} else {
 				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-					if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
+//					if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
 
 
 //					makeCustomMessage(consumerRecord, list, tableName);
-					} else {
-						makeMessage(consumerRecord, list, tableName);
-					}
+//					} else {
+					makeMessage(consumerRecord, list, tableName);
+//					}
 					if (list.size() >= eventBatchSize) {
 						eventsOffsetConsumer.accept(list, TapSimplify.list());
 						list = TapSimplify.list();
@@ -906,17 +904,34 @@ public class KafkaService extends AbstractMqService {
             if (consumerRecords.isEmpty()) {
                 continue;
             }
-            for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-                if(((KafkaConfig) mqConfig).getEnableCustomParse()){
-                    makeCustomMessage(consumerRecord,list,consumerRecord.topic());
-                }else{
-                    makeMessage(consumerRecord, list, consumerRecord.topic());
-                }
-                if (list.size() >= eventBatchSize) {
-                    eventsOffsetConsumer.accept(list, TapSimplify.list());
-                    list = TapSimplify.list();
-                }
-            }
+			if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
+				List<ConsumerRecord<byte[], byte[]>> consumerRecordList = new ArrayList<>();
+				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+					consumerRecordList.add(consumerRecord);
+				}
+				try {
+					List<TapEvent> result = customParseCalculator.calcList(consumerRecordList);
+					for (TapEvent tapEvent : result) {
+						list.add(tapEvent);
+					}
+					if (list.size() >= eventBatchSize) {
+						eventsOffsetConsumer.accept(list, TapSimplify.list());
+						list = TapSimplify.list();
+					}
+				} catch (Exception e) {
+					new RuntimeException(e);
+				}
+			} else {
+				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+					makeCustomMessage(consumerRecord, list, consumerRecord.topic());
+					makeMessage(consumerRecord, list, consumerRecord.topic());
+					if (list.size() >= eventBatchSize) {
+						eventsOffsetConsumer.accept(list, TapSimplify.list());
+						list = TapSimplify.list();
+					}
+				}
+			}
+
         }
         if (EmptyKit.isNotEmpty(list)) {
             eventsOffsetConsumer.accept(list, TapSimplify.list());
