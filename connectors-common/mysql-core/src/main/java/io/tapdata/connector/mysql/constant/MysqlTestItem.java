@@ -12,6 +12,7 @@ public enum MysqlTestItem {
 	CHECK_BINLOG_MODE("Check binlog mode"),
 	CHECK_BINLOG_ROW_IMAGE("Check binlog row image"),
 	CHECK_CREATE_TABLE_PRIVILEGE("Check create table privilege"),
+	CHECK_NODE_CURRENT_TIME_CONSISTENT("Check node current time consistent")
 	;
 
 	private String content;

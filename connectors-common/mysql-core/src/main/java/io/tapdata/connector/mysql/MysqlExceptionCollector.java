@@ -9,6 +9,7 @@ import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.exception.*;
 import io.tapdata.kit.ErrorKit;
 
+import java.io.EOFException;
 import java.sql.SQLException;
 import java.sql.SQLNonTransientConnectionException;
 import java.util.List;
@@ -25,14 +26,16 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
     }
     private MysqlConfig mysqlConfig;
 
-    public void revealException(Throwable cause) {
-        handleForMaterSlave(cause);
-        super.revealException(cause);
-    }
     @Override
     public void collectTerminateByServer(Throwable cause) {
         if (cause instanceof SQLException && "08003".equals(((SQLException) cause).getSQLState())) {
             throw new TapPdkTerminateByServerEx(pdkId, ErrorKit.getLastCause(cause));
+        }
+        String deploymentMode = mysqlConfig.getDeploymentMode();
+        if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
+            if (cause instanceof SQLException && "Connection is closed".equals(cause.getMessage()) || cause instanceof EOFException && cause.getMessage().startsWith("Failed to read")){
+                throw new TapPdkRetryableEx(String.format("mysql master node:%s is down, try to switch other node if it become master node, previous available node: %s", mysqlConfig.getMasterNode(), mysqlConfig.getAvailableMasterSlaveAddress()), pdkId, cause);
+            }
         }
     }
 
@@ -147,15 +150,7 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
 
     @Override
     public void collectCdcConfigInvalid(Throwable cause) {
-        handleForMaterSlave(cause);
         super.collectCdcConfigInvalid(cause);
-    }
-    private void handleForMaterSlave(Throwable cause) {
-        if (null == mysqlConfig) return;
-        String deploymentMode = mysqlConfig.getDeploymentMode();
-        if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
-            throw new TapPdkRetryableEx(String.format("mysql master node:%s is down, try to switch other node if it become master node, previous available node: %s", mysqlConfig.getMasterNode(), mysqlConfig.getAvailableMasterSlaveAddress()), pdkId, cause);
-        }
     }
 
     public MysqlConfig getMysqlConfig() {
