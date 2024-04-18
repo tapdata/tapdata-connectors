@@ -89,7 +89,7 @@ public class MysqlConfig extends CommonDbConfig {
             properties.put(defaultKey, DEFAULT_PROPERTIES.get(defaultKey));
         }
 
-        if (StringUtils.isNotBlank(timezone)) {
+        if (StringUtils.isNotBlank(timezone) && !timezone.startsWith("GMT")) {
             timezone = "GMT" + timezone;
             String serverTimezone = timezone.replace("+", "%2B").replace(":00", "");
             properties.put("serverTimezone", serverTimezone);
