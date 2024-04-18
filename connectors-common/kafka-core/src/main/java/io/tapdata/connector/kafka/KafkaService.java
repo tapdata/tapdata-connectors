@@ -33,6 +33,7 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.MapUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -61,23 +62,20 @@ public class KafkaService extends AbstractMqService {
     private String connectorId;
     private KafkaProducer<byte[], byte[]> kafkaProducer;
 	private ScriptEngine produceScriptEngineCustomDDL;
-	private ScriptEngine produceScriptEngineCustomDML;
     public static final String scriptEngineName = "graal.js";
 
-	public static final int CONSUME_CUSTOM_MESSAGE_CORE_SIZE = 4;
-	public static final int CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE=2000;
+	public static final int CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE = 100;
 	private ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata");
 
 	private Concurrents<Invocable> customParseConcurrents;
 
-	private ConcurrentCalculator<ConsumerRecord<byte[], byte[]>,TapEvent> customParseCalculator;
-
-	private Concurrents<Invocable> customDmlConcurrents;
-	private ConcurrentCalculator<DMLRecordEventConvert, DMLRecordEventConvert> customDmlCalculator;
+	private CustomParseCalculatorQueue streamReadCustomParseCalculatorQueue;
+	private CustomParseCalculatorQueue batchReadCustomParseCalculatorQueue;
 
 	private Concurrents<Invocable> customDmlConcurrentsQueue;
 
 	private ConcurrentHashMap<String,DMLCalculatorQueue<DMLRecordEventConvert, DMLRecordEventConvert>> dmlCalculatorQueueConcurrentHashMap =new ConcurrentHashMap<>();
+
 
 
     Invocable customScriptEngine = null;
@@ -162,6 +160,7 @@ public class KafkaService extends AbstractMqService {
 		Boolean enableCustomParse = kafkaConfig.getEnableCustomParse();
 		if (Boolean.TRUE.equals(enableCustomParse)) {
 			String enableCustomParseScript = kafkaConfig.getEnableCustomParseScript();
+			Integer customParseThreadNum = Optional.ofNullable(kafkaConfig.getCustomParseThreadNum()).orElse(4);
 			customParseConcurrents = new Concurrents<Invocable>() {
 				@Override
 				protected String getInstanceId() {
@@ -175,27 +174,31 @@ public class KafkaService extends AbstractMqService {
 					return customParseEngine;
 				}
 			};
-			customParseCalculator = new ConcurrentCalculator<ConsumerRecord<byte[], byte[]>, TapEvent>(CONSUME_CUSTOM_MESSAGE_CORE_SIZE) {
-				@Override
-				protected TapEvent performComputation(ConsumerRecord<byte[], byte[]> data) {
-					TapEvent process = customParseConcurrents.process(scriptEngine -> makeCustomMessageUseScriptEngine(scriptEngine, data));
-					return process;
-				}
-				@Override
-				protected List<TapEvent> performComputation(List<ConsumerRecord<byte[], byte[]>> data) {
-					List<TapEvent> process = customParseConcurrents.process(scriptEngine -> {
-						List<TapEvent> result = new ArrayList<>();
-						for (ConsumerRecord<byte[], byte[]> consumerRecord : data) {
-							TapEvent tapEvent = makeCustomMessageUseScriptEngine(scriptEngine, consumerRecord);
-							if (null != tapEvent) {
-								result.add(tapEvent);
-							}
-						}
-						return result;
-					});
-					return process;
-				}
+			streamReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
+			batchReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents){
+
 			};
+		//			customParseCalculator = new ConcurrentCalculator<ConsumerRecord<byte[], byte[]>, TapEvent>(kafkaConfig.getCustomParseThreadNum()) {
+//				@Override
+//				protected TapEvent performComputation(ConsumerRecord<byte[], byte[]> data) {
+//					TapEvent process = customParseConcurrents.process(scriptEngine -> makeCustomMessageUseScriptEngine(scriptEngine, data));
+//					return process;
+//				}
+//				@Override
+//				protected List<TapEvent> performComputation(List<ConsumerRecord<byte[], byte[]>> data) {
+//					List<TapEvent> process = customParseConcurrents.process(scriptEngine -> {
+//						List<TapEvent> result = new ArrayList<>();
+//						for (ConsumerRecord<byte[], byte[]> consumerRecord : data) {
+//							TapEvent tapEvent = makeCustomMessageUseScriptEngine(scriptEngine, consumerRecord);
+//							if (null != tapEvent) {
+//								result.add(tapEvent);
+//							}
+//						}
+//						return result;
+//					});
+//					return process;
+//				}
+//			};
 //			customScriptEngine = ScriptUtil.getScriptEngine(enableCustomParseScript, scriptEngineName, scriptFactory);
 		}
 		Boolean enableModelDeclare = kafkaConfig.getEnableModelDeclare();
@@ -207,76 +210,6 @@ public class KafkaService extends AbstractMqService {
 
 		if (Boolean.TRUE.equals(kafkaConfig.getEnableScript())) {
 			try {
-				customDmlConcurrents = new Concurrents<Invocable>() {
-					@Override
-					protected String getInstanceId() {
-						String id = String.valueOf(Thread.currentThread().getId());
-						return id;
-					}
-
-					@Override
-					protected Invocable initNewInstance(String instanceId) {
-						Invocable customParseEngine = ScriptUtil.getScriptEngine(kafkaConfig.getScript(), scriptEngineName, scriptFactory);
-						return customParseEngine;
-					}
-				};
-				customDmlCalculator = new ConcurrentCalculator<DMLRecordEventConvert, DMLRecordEventConvert>(CONSUME_CUSTOM_MESSAGE_CORE_SIZE) {
-					@Override
-					protected DMLRecordEventConvert performComputation(DMLRecordEventConvert dmlRecordEventConvert) {
-						DMLRecordEventConvert result = customDmlConcurrents.process(scriptEngine -> {
-							Collection<String> primaryKeys = dmlRecordEventConvert.getTapTable().primaryKeys(true);
-							TapRecordEvent event = dmlRecordEventConvert.getRecordEvent();
-							Map<String, Object> jsProcessParam = new HashMap<>();
-							Map<String, Map<String, Object>> allData = new HashMap();
-							MqOp mqOp = INSERT;
-							Map<String, Object> eventInfo = new HashMap<>();
-							eventInfo.put("tableId", event.getTableId());
-							eventInfo.put("eventInfo", event.getInfo());
-							eventInfo.put("referenceTime", event.getReferenceTime());
-							jsProcessParam.put("eventInfo", eventInfo);
-							Map<String, Object> data;
-							if (event instanceof TapInsertRecordEvent) {
-								data = ((TapInsertRecordEvent) event).getAfter();
-								allData.put("before", new HashMap<String, Object>());
-								allData.put("after", data);
-							} else if (event instanceof TapUpdateRecordEvent) {
-								data = ((TapUpdateRecordEvent) event).getAfter();
-								Map<String, Object> before = ((TapUpdateRecordEvent) event).getBefore();
-								allData.put("before", null == before ? new HashMap<>() : before);
-								allData.put("after", data);
-								mqOp = UPDATE;
-							} else if (event instanceof TapDeleteRecordEvent) {
-								data = ((TapDeleteRecordEvent) event).getBefore();
-								allData.put("before", data);
-								allData.put("after", new HashMap<String, Object>());
-								mqOp = DELETE;
-							} else {
-								data = new HashMap<>();
-							}
-							byte[] kafkaMessageKey = getKafkaMessageKey(data, dmlRecordEventConvert.getTapTable());
-							dmlRecordEventConvert.setKafkaMessageKey(kafkaMessageKey);
-							jsProcessParam.put("data", allData);
-							String op = mqOp.getOp();
-							Map<String, Object> header = new HashMap();
-							header.put("mqOp", op);
-							jsProcessParam.put("header", header);
-							Object jsConvertResult = ObjectUtils.covertData(executeScript(scriptEngine, "process", jsProcessParam, op, primaryKeys));
-							if (jsConvertResult != null) {
-								Map<String, Object> jsConvertResultMap = (Map<String, Object>) jsConvertResult;
-								jsConvertResultMap.put("op", op);
-								dmlRecordEventConvert.setJsConvertResultMap(jsConvertResultMap);
-							}
-							return dmlRecordEventConvert;
-						});
-						return result;
-					}
-                    @Override
-                    protected List<DMLRecordEventConvert> performComputation(List<DMLRecordEventConvert> data) {
-                        return null;
-                    }
-                };
-
-
 				customDmlConcurrentsQueue=new Concurrents<Invocable>() {
 					@Override
 					protected String getInstanceId() {
@@ -290,11 +223,6 @@ public class KafkaService extends AbstractMqService {
 						return customParseEngine;
 					}
 				};
-//				String script = kafkaConfig.getScript();
-//				produceScriptEngineCustomDML = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(scriptEngineName));
-//				String buildInMethod = ScriptUtil.initBuildInMethod();
-//				String scripts = script + System.lineSeparator() + buildInMethod;
-//				produceScriptEngineCustomDML.eval(scripts);
 			} catch (Exception e) {
 				throw new RuntimeException("Init DML custom parser failed: " + e.getMessage(), e);
 			}
@@ -408,65 +336,56 @@ public class KafkaService extends AbstractMqService {
         multiThreadDiscoverSchema(new ArrayList<>(tableNames), tableSize, consumer, schemaConfiguration);
     }
 
-    protected void submitPageTables(int tableSize, Consumer<List<TapTable>> consumer, SchemaConfiguration schemaConfiguration, List<String> destinationSet) {
-        List<List<String>> tablesList = Lists.partition(destinationSet, tableSize);
-        Map<String, Object> config = schemaConfiguration.build();
-        try (
-                KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(config)
-        ) {
-            tablesList.forEach(tables -> {
-                List<TapTable> tableList = new ArrayList<>();
-                List<String> topics = new ArrayList<>(tables);
-                kafkaConsumer.subscribe(topics);
-                ConsumerRecords<byte[], byte[]> consumerRecords;
+	protected void submitPageTables(int tableSize, Consumer<List<TapTable>> consumer, SchemaConfiguration schemaConfiguration, List<String> destinationSet) {
+		List<List<String>> tablesList = Lists.partition(destinationSet, tableSize);
+		Map<String, Object> config = schemaConfiguration.build();
+		try (
+			KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(config)
+		) {
+			tablesList.forEach(tables -> {
+				List<TapTable> tableList = new ArrayList<>();
+				List<String> topics = new ArrayList<>(tables);
+				kafkaConsumer.subscribe(topics);
+				ConsumerRecords<byte[], byte[]> consumerRecords;
 
-                while (!(consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L))).isEmpty()) {
-                    for (ConsumerRecord<byte[], byte[]> record : consumerRecords) {
-                        if (!topics.contains(record.topic())) {
-                            continue;
-                        }
-                        Map<String, Object> messageBody;
-                        try {
-                            messageBody = jsonParser.fromJsonBytes(record.value(), Map.class);
-                        } catch (Exception e) {
-                            tapLogger.error("topic[{}] value [{}] can not parse to json, ignore...", record.topic(), record.value());
-                            continue;
-                        }
-                        if (messageBody == null) {
-                            tapLogger.warn("messageBody not allow null...");
-                            continue;
-                        }
-                        if (messageBody.containsKey("mqOp")) {
-                            messageBody = (Map<String, Object>) messageBody.get("data");
-                        }
-                        if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
-                            try{
-                                customParseLoadSchema(record, messageBody, tableList);
-                            }catch (Throwable t){
-                                tapLogger.error(String.format("%s custom Parse topic message error: %s",record.topic(),t.getMessage()),t);
-                            }
-                        } else {
-                            try {
-                                TapTable tapTable = new TapTable(record.topic());
-                                SCHEMA_PARSER.parse(tapTable, messageBody);
-                                tableList.add(tapTable);
-                            } catch (Throwable t) {
-                                tapLogger.error(String.format("%s parse topic invalid json object: %s", record.topic(), t.getMessage()), t);
-                            }
-                        }
-                        topics.remove(record.topic());
-                    }
-                    if (EmptyKit.isEmpty(topics)) {
-                        break;
-                    }
-                    kafkaConsumer.subscribe(topics);
-                }
-                topics.stream().map(TapTable::new).forEach(tableList::add);
-//                declareSchemaIfNeed(tableList);
-                syncSchemaSubmit(tableList, consumer);
-            });
-        }
-    }
+				while (!(consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L))).isEmpty()) {
+					for (ConsumerRecord<byte[], byte[]> record : consumerRecords) {
+						if (!topics.contains(record.topic())) {
+							continue;
+						}
+						Map<String, Object> messageBody;
+						try {
+							messageBody = jsonParser.fromJsonBytes(record.value(), Map.class);
+						} catch (Exception e) {
+							tapLogger.error("topic[{}] value [{}] can not parse to json, ignore...", record.topic(), record.value());
+							continue;
+						}
+						if (messageBody == null) {
+							tapLogger.warn("messageBody not allow null...");
+							continue;
+						}
+						if (messageBody.containsKey("mqOp")) {
+							messageBody = (Map<String, Object>) messageBody.get("data");
+						}
+						try {
+							TapTable tapTable = new TapTable(record.topic());
+							SCHEMA_PARSER.parse(tapTable, messageBody);
+							tableList.add(tapTable);
+						} catch (Throwable t) {
+							tapLogger.error(String.format("%s parse topic invalid json object: %s", record.topic(), t.getMessage()), t);
+						}
+						topics.remove(record.topic());
+					}
+					if (EmptyKit.isEmpty(topics)) {
+						break;
+					}
+					kafkaConsumer.subscribe(topics);
+				}
+				topics.stream().map(TapTable::new).forEach(tableList::add);
+				syncSchemaSubmit(tableList, consumer);
+			});
+		}
+	}
 
     private void declareSchemaIfNeed(List<TapTable> tableList) {
         if (CollectionUtils.isNotEmpty(tableList)) {
@@ -607,25 +526,28 @@ public class KafkaService extends AbstractMqService {
 		AtomicLong update = new AtomicLong(0);
 		AtomicLong delete = new AtomicLong(0);
 		WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
+		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
 		String threadName = String.valueOf(Thread.currentThread().getId());
 		CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
-		ProduceInfo produceInfo = new ProduceInfo(kafkaProducer,countDownLatch,insert,update,delete,listResult);
-		DMLCalculatorQueue<DMLRecordEventConvert, DMLRecordEventConvert> customDmlCalculatorQueue = dmlCalculatorQueueConcurrentHashMap.computeIfAbsent(threadName, (k) -> {
-			return new DMLCalculatorQueue<>(CONSUME_CUSTOM_MESSAGE_CORE_SIZE, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customDmlConcurrentsQueue);
+		ProduceCustomDmlRecordInfo produceCustomDmlRecordInfo = new ProduceCustomDmlRecordInfo(kafkaProducer, countDownLatch, insert, update, delete, listResult);
+		Integer dmlThreadNum = Optional.ofNullable(kafkaConfig.getCustomDmlThreadNum()).orElse(4);
+		DMLCalculatorQueue<DMLRecordEventConvert, DMLRecordEventConvert> customDmlCalculatorQueue = dmlCalculatorQueueConcurrentHashMap.computeIfAbsent(threadName, (key) -> {
+			DMLCalculatorQueue dmlCalculatorQueue = new DMLCalculatorQueue<>(dmlThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customDmlConcurrentsQueue);
+			return dmlCalculatorQueue;
 		});
-		dmlCalculatorQueueConcurrentHashMap.computeIfPresent(threadName,(k,v)->{
-			v.setProduceInfo(produceInfo);
-			return v;
+		dmlCalculatorQueueConcurrentHashMap.computeIfPresent(threadName, (key, value) -> {
+			value.setProduceInfo(produceCustomDmlRecordInfo);
+			return value;
 		});
+
 		try {
-			customDmlCalculatorQueue.setProduceInfo(produceInfo);
+			customDmlCalculatorQueue.setProduceInfo(produceCustomDmlRecordInfo);
 			for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
 				DMLRecordEventConvert dmlRecordEventConvert = new DMLRecordEventConvert();
 				dmlRecordEventConvert.setRecordEvent(tapRecordEvent);
 				dmlRecordEventConvert.setTapTable(tapTable);
 				customDmlCalculatorQueue.multiCalc(dmlRecordEventConvert);
 			}
-
 		} catch (RejectedExecutionException e) {
 			tapLogger.warn("task stopped, some data produce failed!", e);
 		} catch (Exception e) {
@@ -633,6 +555,9 @@ public class KafkaService extends AbstractMqService {
 		}
 		try {
 			while (null != isAlive && isAlive.get()) {
+				if(customDmlCalculatorQueue.getHasException().get()){
+					throw new RuntimeException("produce error!", customDmlCalculatorQueue.getException().get());
+				}
 				if (countDownLatch.await(200L, TimeUnit.MILLISECONDS)) {
 					break;
 				}
@@ -644,140 +569,7 @@ public class KafkaService extends AbstractMqService {
 		}
 	}
 
-	/*
-	@Override
-	public void produce(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, Supplier<Boolean> isAlive) {
-		AtomicLong insert = new AtomicLong(0);
-		AtomicLong update = new AtomicLong(0);
-		AtomicLong delete = new AtomicLong(0);
-		WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
-		CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
-//		produceScriptEngineCustomDML.put("eventInfo", eventInfo);
-		try {
 
-
-			for (TapRecordEvent event : tapRecordEvents) {
-				if (null != isAlive && !isAlive.get()) {
-					break;
-				}
-				Map<String, Object> record = new HashMap<>();
-				Map<String, Map<String, Object>> allData = new HashMap();
-				Map<String, Object> eventInfo = new HashMap<>();
-				eventInfo.put("tableId", event.getTableId());
-				eventInfo.put("eventInfo", event.getInfo());
-				eventInfo.put("referenceTime", event.getReferenceTime());
-				Map<String, Object> data;
-				MqOp mqOp = INSERT;
-				if (event instanceof TapInsertRecordEvent) {
-					data = ((TapInsertRecordEvent) event).getAfter();
-					allData.put("before", new HashMap<String, Object>());
-					allData.put("after", data);
-				} else if (event instanceof TapUpdateRecordEvent) {
-					data = ((TapUpdateRecordEvent) event).getAfter();
-					Map<String, Object> before = ((TapUpdateRecordEvent) event).getBefore();
-					allData.put("before", null == before ? new HashMap<>() : before);
-					allData.put("after", data);
-					mqOp = UPDATE;
-				} else if (event instanceof TapDeleteRecordEvent) {
-					data = ((TapDeleteRecordEvent) event).getBefore();
-					allData.put("before", data);
-					allData.put("after", new HashMap<String, Object>());
-					mqOp = DELETE;
-				} else {
-					data = new HashMap<>();
-				}
-				byte[] kafkaMessageKey = getKafkaMessageKey(data, tapTable);
-				record.put("data", allData);
-				String op = mqOp.getOp();
-				Map<String, Object> header = new HashMap();
-				header.put("mqOp", op);
-				record.put("header", header);
-				Collection<String> conditionKeys = tapTable.primaryKeys(true);
-				Object jsConvertedData = ObjectUtils.covertData(executeScript(produceScriptEngineCustomDML, "process", record, op, conditionKeys));
-				byte[] body = {};
-				RecordHeaders recordHeaders = new RecordHeaders();
-				if (null == jsConvertedData) {
-					continue;
-				}
-				Map<String, Object> res = (Map<String, Object>) jsConvertedData;
-				if (null == res.get("data")) {
-					throw new RuntimeException("data cannot be null");
-				} else {
-					Object obj = res.get("data");
-					if (obj instanceof Map) {
-						Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
-						removeIfEmptyInMap(map, "before");
-						removeIfEmptyInMap(map, "after");
-						body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
-					} else {
-						body = obj.toString().getBytes();
-					}
-				}
-				if (res.containsKey("header")) {
-					Object obj = res.get("header");
-					if (obj instanceof Map) {
-						Map<String, Object> head = (Map<String, Object>) res.get("header");
-						for (String s : head.keySet()) {
-							recordHeaders.add(s, head.get(s).toString().getBytes());
-						}
-					} else {
-						throw new RuntimeException("header must be a collection type");
-					}
-				} else {
-					recordHeaders.add("mqOp", mqOp.toString().getBytes());
-				}
-
-				MqOp finalMqOp = mqOp;
-				Callback callback = (metadata, exception) -> {
-					try {
-						if (EmptyKit.isNotNull(exception)) {
-							listResult.addError(event, exception);
-						}
-						switch (finalMqOp) {
-							case INSERT:
-								insert.incrementAndGet();
-								break;
-							case UPDATE:
-								update.incrementAndGet();
-								break;
-							case DELETE:
-								delete.incrementAndGet();
-								break;
-						}
-					} finally {
-						countDownLatch.countDown();
-					}
-				};
-				ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapTable.getId(),
-					null, System.currentTimeMillis(), kafkaMessageKey, body,
-					recordHeaders);
-				kafkaProducer.send(producerRecord, callback);
-			}
-		} catch (RejectedExecutionException e) {
-			tapLogger.warn("task stopped, some data produce failed!", e);
-		} catch (Exception e) {
-			tapLogger.error("produce error, or task interrupted!", e);
-		}
-		try {
-			while (null != isAlive && isAlive.get()) {
-				if (countDownLatch.await(500L, TimeUnit.MILLISECONDS)) {
-					break;
-				}
-			}
-		} catch (InterruptedException e) {
-			tapLogger.error("error occur when await", e);
-		} finally {
-			writeListResultConsumer.accept(listResult.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get()));
-		}
-	}*/
-
-	private void removeIfEmptyInMap(Map<String, Map<String, Object>> map, String key) {
-		if (!map.containsKey(key)) return;
-		Map<String, Object> o = map.get(key);
-		if (null == o || o.isEmpty()) {
-			map.remove(key);
-		}
-	}
 
 
     @Override
@@ -812,152 +604,104 @@ public class KafkaService extends AbstractMqService {
 		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(((KafkaConfig) mqConfig), connectorId, true);
 		KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
 		kafkaConsumer.subscribe(Collections.singleton(tapTable.getId()));
+		if (null != batchReadCustomParseCalculatorQueue) {
+			batchReadCustomParseCalculatorQueue.setEventsOffsetConsumer(eventsOffsetConsumer);
+			batchReadCustomParseCalculatorQueue.setConsuming(consuming);
+			batchReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
+		}
 		while (consuming.get()) {
+			if (batchReadCustomParseCalculatorQueue.getHasException().get()) {
+				throw new RuntimeException("Consume Message error !",batchReadCustomParseCalculatorQueue.getException().get());
+			}
 			ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(6L));
 			if (consumerRecords.isEmpty()) {
 				break;
 			}
-			if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
-				List<ConsumerRecord<byte[], byte[]>> consumerRecordList = new ArrayList<>();
-				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-					consumerRecordList.add(consumerRecord);
-				}
-				try {
-					List<TapEvent> result = customParseCalculator.calc(consumerRecordList);
-					for (TapEvent tapEvent : result) {
-						list.add(tapEvent);
+			for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+				if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
+					try {
+						batchReadCustomParseCalculatorQueue.multiCalc(consumerRecord);
+					} catch (Exception e) {
+						throw new RuntimeException(e);
 					}
-					if (list.size() >= eventBatchSize) {
-						eventsOffsetConsumer.accept(list, TapSimplify.list());
-						list = TapSimplify.list();
-					}
-				} catch (Exception e) {
-					new RuntimeException(e);
-				}
-			} else {
-				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-//					if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
-
-
-//					makeCustomMessage(consumerRecord, list, tableName);
-//					} else {
+				} else {
 					makeMessage(consumerRecord, list, tableName);
-//					}
-					if (list.size() >= eventBatchSize) {
-						eventsOffsetConsumer.accept(list, TapSimplify.list());
-						list = TapSimplify.list();
-					}
+				}
+				if (null == batchReadCustomParseCalculatorQueue && list.size() >= eventBatchSize) {
+					eventsOffsetConsumer.accept(list, TapSimplify.list());
+					list = TapSimplify.list();
 				}
 			}
 		}
+		if (batchReadCustomParseCalculatorQueue.getHasException().get()) {
+			throw new RuntimeException("Consume Message error !",batchReadCustomParseCalculatorQueue.getException().get());
+		}
 		kafkaConsumer.close();
-		if (EmptyKit.isNotEmpty(list)) {
+		if (null != batchReadCustomParseCalculatorQueue) {
+			try {
+				batchReadCustomParseCalculatorQueue.close();
+			} catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+		}
+		if (null == batchReadCustomParseCalculatorQueue && EmptyKit.isNotEmpty(list)) {
 			eventsOffsetConsumer.accept(list, TapSimplify.list());
 		}
 	}
 
-    @Override
-    public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
-        consuming.set(true);
-        ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(((KafkaConfig) mqConfig), connectorId, true);
-        KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
-
-        kafkaConsumer.subscribe(tableList);
-        List<TapEvent> list = TapSimplify.list();
-
-        while (consuming.get()) {
-            ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
-            if (consumerRecords.isEmpty()) {
-                continue;
-            }
-			if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
-				List<ConsumerRecord<byte[], byte[]>> consumerRecordList = new ArrayList<>();
-				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-					consumerRecordList.add(consumerRecord);
-				}
-				try {
-					List<TapEvent> result = customParseCalculator.calcList(consumerRecordList);
-					for (TapEvent tapEvent : result) {
-						list.add(tapEvent);
+	@Override
+	public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+		consuming.set(true);
+		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
+		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration((kafkaConfig), connectorId, true);
+		KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
+		kafkaConsumer.subscribe(tableList);
+		List<TapEvent> list = TapSimplify.list();
+		if (null != streamReadCustomParseCalculatorQueue) {
+			streamReadCustomParseCalculatorQueue.setEventsOffsetConsumer(eventsOffsetConsumer);
+			streamReadCustomParseCalculatorQueue.setConsuming(consuming);
+			streamReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
+		}
+		while (consuming.get()) {
+			if (streamReadCustomParseCalculatorQueue.getHasException().get()) {
+				throw new RuntimeException("Consume Message error !",streamReadCustomParseCalculatorQueue.getException().get());
+			}
+			ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
+			if (consumerRecords.isEmpty()) {
+				continue;
+			}
+			for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+				if (kafkaConfig.getEnableCustomParse()) {
+					try {
+						streamReadCustomParseCalculatorQueue.multiCalc(consumerRecord);
+					} catch (Exception e) {
+						throw new RuntimeException(e);
 					}
-					if (list.size() >= eventBatchSize) {
-						eventsOffsetConsumer.accept(list, TapSimplify.list());
-						list = TapSimplify.list();
-					}
-				} catch (Exception e) {
-					new RuntimeException(e);
-				}
-			} else {
-				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-					makeCustomMessage(consumerRecord, list, consumerRecord.topic());
+				} else {
 					makeMessage(consumerRecord, list, consumerRecord.topic());
-					if (list.size() >= eventBatchSize) {
-						eventsOffsetConsumer.accept(list, TapSimplify.list());
-						list = TapSimplify.list();
-					}
+				}
+				if (null == streamReadCustomParseCalculatorQueue && list.size() >= eventBatchSize) {
+					eventsOffsetConsumer.accept(list, TapSimplify.list());
+					list = TapSimplify.list();
 				}
 			}
-
-        }
-        if (EmptyKit.isNotEmpty(list)) {
-            eventsOffsetConsumer.accept(list, TapSimplify.list());
-        }
-        kafkaConsumer.close();
-    }
-	private TapEvent makeCustomMessageUseScriptEngine(Invocable customScriptEngine,ConsumerRecord<byte[], byte[]> consumerRecord) {
-		String threadName = Thread.currentThread().getName();
-//        customParseScriptEngine.computeIfAbsent(threadName, (k) -> {
-////            return ScriptUtil.getScriptEngine(enableCustomParseScript, scriptEngineName, scriptFactory);
-//        });
-//		Invocable scriptEngine = customParseScriptEngine.computeIfAbsent(threadName, (k) -> {
-//			return ScriptUtil.getScriptEngine(((KafkaConfig) mqConfig).getEnableCustomParseScript(), scriptEngineName, scriptFactory);
-//		});
-		Map<String, Object> messageBody = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
-		Object data = ObjectUtils.covertData(executeScript(customScriptEngine, "process", messageBody));
-		if (null == data) return null;
-		TapBaseEvent tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) data);
-		if (tapBaseEvent instanceof TapFieldBaseEvent) {
-			TapFieldBaseEvent tapFieldBaseEvent = (TapFieldBaseEvent) tapBaseEvent;
-		} else if (tapBaseEvent instanceof TapInsertRecordEvent) {
-			TapInsertRecordEvent tapInsertRecordEvent = (TapInsertRecordEvent) tapBaseEvent;
-//			tapInsertRecordEvent.table(tableName);
-		} else if (tapBaseEvent instanceof TapUpdateRecordEvent) {
-			TapUpdateRecordEvent tapUpdateRecordEvent = (TapUpdateRecordEvent) tapBaseEvent;
-//			tapUpdateRecordEvent.table(tableName);
-		} else {
-			TapDeleteRecordEvent tapDeleteRecordEvent = (TapDeleteRecordEvent) tapBaseEvent;
-//			tapDeleteRecordEvent.table(tableName);
 		}
-		return tapBaseEvent;
+		if (null == streamReadCustomParseCalculatorQueue && EmptyKit.isNotEmpty(list)) {
+			eventsOffsetConsumer.accept(list, TapSimplify.list());
+		}
+		if (streamReadCustomParseCalculatorQueue.getHasException().get()) {
+			throw new RuntimeException("Consume Message error !",streamReadCustomParseCalculatorQueue.getException().get());
+		}
+		kafkaConsumer.close();
+		if (null != streamReadCustomParseCalculatorQueue) {
+			try {
+				streamReadCustomParseCalculatorQueue.close();
+			} catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+		}
 	}
 
-    private void makeCustomMessage(ConsumerRecord<byte[], byte[]> consumerRecord, List<TapEvent> list, String tableName) {
-        String threadName = Thread.currentThread().getName();
-//        customParseScriptEngine.computeIfAbsent(threadName, (k) -> {
-////            return ScriptUtil.getScriptEngine(enableCustomParseScript, scriptEngineName, scriptFactory);
-//        });
-//		ScriptUtil.getScriptEngine(((KafkaConfig) mqConfig).getEnableCustomParseScript(), scriptEngineName, scriptFactory);
-        Map<String, Object> messageBody = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
-        Object data = ObjectUtils.covertData(executeScript(customScriptEngine, "process", messageBody));
-        if (null == data) return;
-			TapBaseEvent tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) data);
-			if (tapBaseEvent instanceof TapFieldBaseEvent) {
-            TapFieldBaseEvent tapFieldBaseEvent = (TapFieldBaseEvent) tapBaseEvent;
-            list.add(tapFieldBaseEvent);
-        } else if (tapBaseEvent instanceof TapInsertRecordEvent) {
-            TapInsertRecordEvent tapInsertRecordEvent = (TapInsertRecordEvent) tapBaseEvent;
-            tapInsertRecordEvent.table(tableName);
-            list.add(tapInsertRecordEvent);
-        } else if (tapBaseEvent instanceof TapUpdateRecordEvent) {
-            TapUpdateRecordEvent tapUpdateRecordEvent = (TapUpdateRecordEvent) tapBaseEvent;
-            tapUpdateRecordEvent.table(tableName);
-            list.add(tapUpdateRecordEvent);
-        } else {
-            TapDeleteRecordEvent tapDeleteRecordEvent = (TapDeleteRecordEvent) tapBaseEvent;
-            tapDeleteRecordEvent.table(tableName);
-            list.add(tapDeleteRecordEvent);
-        }
-    }
     private void makeMessage(ConsumerRecord<byte[], byte[]> consumerRecord, List<TapEvent> list, String tableName) {
         AtomicReference<String> mqOpReference = new AtomicReference<>();
         mqOpReference.set(INSERT.getOp());
@@ -988,23 +732,36 @@ public class KafkaService extends AbstractMqService {
         }
     }
 
-    @Override
-    public void close() {
-        super.close();
-        if (EmptyKit.isNotNull(kafkaProducer)) {
-            kafkaProducer.close();
+	@Override
+	public void close() {
+		super.close();
+		if (EmptyKit.isNotNull(kafkaProducer)) {
+			kafkaProducer.close();
+		}
+		if (MapUtils.isNotEmpty(dmlCalculatorQueueConcurrentHashMap)) {
+			dmlCalculatorQueueConcurrentHashMap.values().forEach(calculator -> {
+				try {
+					calculator.close();
+				} catch (Exception e) {
+					throw new RuntimeException(e);
+				}
+			});
+		}
+		if(streamReadCustomParseCalculatorQueue!=null){
+            try {
+                streamReadCustomParseCalculatorQueue.close();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
-        try {
-			if(null!=customParseCalculator){
-				customParseCalculator.close();
-			}
-			if(null!=customDmlCalculator){
-				customDmlCalculator.close();
-			}
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+		if(batchReadCustomParseCalculatorQueue!=null){
+            try {
+                batchReadCustomParseCalculatorQueue.close();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
-    }
+	}
 
     public void produceDDLRecord(TapFieldBaseEvent tapFieldBaseEvent) {
         AtomicReference<Throwable> reference = new AtomicReference<>();

@@ -1,744 +1,837 @@
 {
-  "properties": {
-    "name": "Kafka",
-    "icon": "icons/kafka.png",
-    "doc": "${doc}",
-    "id": "kafka",
-    "authentication": "Alpha",
-    "tags": [
-      "Database",
-      "schema-free"
-    ]
-  },
-  "configOptions": {
-    "supportDDL": {
-      "events": [
-        "new_field_event", "alter_field_name_event", "alter_field_attributes_event", "drop_field_event"
-      ]
-    },
-    "connection": {
-      "type": "object",
-      "properties": {
-        "nameSrvAddr": {
-          "required": true,
-          "type": "string",
-          "title": "${nameSrvAddr}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "apiServerKey": "mq_nameSrvAddr",
-          "x-decorator-props": {
-            "tooltip": "${nameSrvAddrTip}"
-          },
-          "x-index": 1
-        },
-        "mqTopicString": {
-          "type": "string",
-          "title": "${mqTopicString}",
-          "x-decorator": "FormItem",
-          "x-decorator-props": {
-            "tooltip": "${mqTopicStringTooltip}"
-          },
-          "x-component": "Input",
-          "apiServerKey": "mq_topics",
-          "x-index": 8
-        },
-        "krb5": {
-          "type": "boolean",
-          "title": "${krb5}",
-          "default": false,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "apiServerKey": "krb5",
-          "x-reactions": [
-            {
-              "target": "*(krb5Keytab,krb5Conf,krb5Principal,krb5ServiceName)",
-              "fulfill": {
-                "state": {
-                  "visible": "{{$self.value===true}}"
-                }
-              }
-            },
-            {
-              "target": "*(mqUsername,mqPassword,kafkaSaslMechanism)",
-              "fulfill": {
-                "state": {
-                  "visible": "{{$self.value===false}}"
-                }
-              }
-            }
-          ],
-          "x-index": 9
-        },
-        "krb5Keytab": {
-          "type": "string",
-          "title": "${krb5Keytab}",
-          "x-decorator": "FormItem",
-          "x-component": "TextFileReader",
-          "x-component-props": {
-            "base64": true
-          },
-          "x-decorator-props": {
-            "tooltip": "${krb5KeytabTip}"
-          },
-          "apiServerKey": "krb5Keytab",
-          "fileNameField": "krb5KeytabFile",
-          "required": true,
-          "x-index": 20
-        },
-        "krb5Conf": {
-          "type": "string",
-          "title": "${krb5Conf}",
-          "x-decorator": "FormItem",
-          "x-component": "TextFileReader",
-          "x-component-props": {
-            "base64": true
-          },
-          "x-decorator-props": {
-            "tooltip": "${krb5ConfTip}"
-          },
-          "apiServerKey": "krb5Conf",
-          "fileNameField": "krb5ConfFile",
-          "required": true,
-          "x-index": 30
-        },
-        "krb5Principal": {
-          "type": "string",
-          "title": "${krb5Principal}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "apiServerKey": "krb5Principal",
-          "x-decorator-props": {
-            "tooltip": "${krb5PrincipalTip}"
-          },
-          "required": true,
-          "x-index": 40
-        },
-        "krb5ServiceName": {
-          "type": "string",
-          "title": "${krb5ServiceName}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "apiServerKey": "krb5ServiceName",
-          "x-decorator-props": {
-            "tooltip": "${krb5ServiceNameTip}"
-          },
-          "required": true,
-          "x-index": 50
-        },
-        "mqUsername": {
-          "type": "string",
-          "title": "${mqUsername}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "apiServerKey": "mq_username",
-          "x-index": 60
-        },
-        "mqPassword": {
-          "type": "string",
-          "title": "${mqPassword}",
-          "x-decorator": "FormItem",
-          "x-component": "Password",
-          "apiServerKey": "mq_password",
-          "x-index": 70
-        },
-        "OPTIONAL_FIELDS": {
-          "type": "void",
-          "properties": {
-            "schemaRegister": {
-              "type": "boolean",
-              "title": "${schemaRegister}",
-              "default": false,
-              "x-decorator": "FormItem",
-              "x-decorator-props": {
-                "tooltip": "${schemaRegisterTip}"
-              },
-              "x-component": "Switch",
-              "apiServerKey": "schemaRegister",
-              "x-reactions": [
-                {
-                  "target": "*(schemaRegisterUrl,basicAuth)",
-                  "fulfill": {
-                    "state": {
-                      "visible": "{{$self.value===true}}"
-                    }
-                  }
-                }
-              ],
-              "x-index": 2
-            },
-            "basicAuth": {
-              "type": "boolean",
-              "title": "${basicAuth}",
-              "default": false,
-              "x-decorator": "FormItem",
-              "x-component": "Switch",
-              "apiServerKey": "basicAuth",
-              "x-reactions": [
-                {
-                  "target": "*(authCredentialsSource,authUserName,authPassword)",
-                  "fulfill": {
-                    "state": {
-                      "visible": "{{$self.value===true}}"
-                    }
-                  }
-                }
-              ],
-              "x-index": 4
-            },
-            "schemaRegisterUrl": {
-              "required": true,
-              "type": "string",
-              "title": "${schemaRegisterUrl}",
-              "x-decorator": "FormItem",
-              "x-component": "Input",
-              "apiServerKey": "schemaRegisterUrl",
-              "x-index": 3
-            },
-            "authCredentialsSource": {
-              "required": true,
-              "type": "string",
-              "title": "${authCredentialsSource}",
-              "x-decorator": "FormItem",
-              "x-component": "Input",
-              "apiServerKey": "authCredentialsSource",
-              "x-index": 5
-            },
-            "authUserName": {
-              "required": true,
-              "type": "string",
-              "title": "${authUserName}",
-              "x-decorator": "FormItem",
-              "x-component": "Input",
-              "apiServerKey": "database_username",
-              "x-index": 6
-            },
-            "authPassword": {
-              "required": true,
-              "type": "string",
-              "title": "${authPassword}",
-              "x-decorator": "FormItem",
-              "x-component": "Password",
-              "apiServerKey": "database_password",
-              "x-index": 7
-            },
-            "kafkaSaslMechanism": {
-              "type": "string",
-              "title": "${kafkaSaslMechanism}",
-              "default": "PLAIN",
-              "x-decorator": "FormItem",
-              "x-component": "Select",
-              "apiServerKey": "kafkaSaslMechanism",
-              "x-index": 80,
-              "enum": [
-                {
-                  "label": "PLAIN",
-                  "value": "PLAIN"
-                },
-                {
-                  "label": "SHA256",
-                  "value": "SHA256"
-                },
-                {
-                  "label": "SHA512",
-                  "value": "SHA512"
-                }
-              ]
-            },
-            "kafkaIgnoreInvalidRecord": {
-              "type": "boolean",
-              "title": "${kafkaIgnoreInvalidRecord}",
-              "default": false,
-              "x-decorator": "FormItem",
-              "x-component": "Switch",
-              "apiServerKey": "kafkaIgnoreInvalidRecord",
-              "x-index": 90
-            },
-            "kafkaAcks": {
-              "type": "string",
-              "title": "${kafkaAcks}",
-              "default": "-1",
-              "x-decorator": "FormItem",
-              "x-component": "Select",
-              "apiServerKey": "kafkaAcks",
-              "x-index": 100,
-              "enum": [
-                {
-                  "label": "${not_sure}",
-                  "value": "0"
-                },
-                {
-                  "label": "${just_write_master}",
-                  "value": "1"
-                },
-                {
-                  "label": "${write_most_isr}",
-                  "value": "-1"
-                },
-                {
-                  "label": "${write_all_isr}",
-                  "value": "all"
-                }
-              ]
-            },
-            "kafkaCompressionType": {
-              "type": "string",
-              "title": "${kafkaCompressionType}",
-              "default": "gzip",
-              "x-decorator": "FormItem",
-              "x-component": "Select",
-              "apiServerKey": "kafkaCompressionType",
-              "x-index": 110,
-              "enum": [
-                {
-                  "label": "gzip",
-                  "value": "gzip"
-                },
-                {
-                  "label": "snappy",
-                  "value": "snappy"
-                },
-                {
-                  "label": "lz4",
-                  "value": "lz4"
-                },
-                {
-                  "label": "zstd",
-                  "value": "zstd"
-                }
-              ]
-            },
-            "kafkaIgnorePushError": {
-              "type": "boolean",
-              "title": "${kafkaIgnorePushError}",
-              "default": false,
-              "x-decorator": "FormItem",
-              "x-component": "Switch",
-              "apiServerKey": "kafkaIgnorePushError",
-              "x-index": 120
-            }
-          }
-        }
-      }
-    },
-    "node":{
-      "properties": {
-        "enableScript": {
-          "title": "${enableScript}",
-          "type": "boolean",
-          "default": false,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "tooltip": "${scriptTooltip}"
-          }
-        },
-        "partitionNum": {
-          "required": true,
-          "type": "string",
-          "title": "${partitionNum}",
-          "x-decorator": "FormItem",
-          "x-component": "InputNumber",
-          "apiServerKey": "partitionNum",
-          "default": 3,
-
-          "x-decorator-props": {
-            "tooltip": "${partitionNumTooltip}"
-          },
-          "x-component-props": {
-            "min": 1,
-            "max": 255
-          },
-          "x-index": 130,
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ]
-        },
-        "replicasSize": {
-          "required": true,
-          "type": "string",
-          "title": "${replicasSize}",
-          "x-decorator": "FormItem",
-          "x-component": "InputNumber",
-          "apiServerKey": "replicasSize",
-          "default": 1,
-          "x-decorator-props": {
-            "tooltip": "${replicasSizeTooltip}"
-          },
-          "x-component-props": {
-            "min": 1,
-            "max": 255
-          },
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ],
-          "x-index": 140
-        },
-        "enableCustomParse": {
-          "title": "${enableCustomParse}",
-          "type": "boolean",
-          "default": false,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{$deps[0].length > 0 ? \"hidden\":\"visible\"}}"
-                }
-              }
-            }
-          ],
-          "x-decorator-props": {
-            "tooltip": "${enableCustomParseTooltip}"
-          },
-          "x-index": 150
-        },
-        "enableCustomParseScript": {
-          "type": "string",
-          "required": false,
-          "default": "function process(record){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
-          "x-decorator": "FormItem",
-          "x-component": "JsEditor",
-          "x-component-props": {
-            "options": { "showPrintMargin": false, "useWrapMode": true },
-            "includeBeforeAndAfter": true,
-            "before": "function process(record){",
-            "beforeRegexp": "^[^]*function\\s+process\\s*\\(record\\)\\{",
-            "afterRegexp": "}[^}]*$",
-            "after": "}"
-          },
-          "x-reactions": {
-            "dependencies": [
-              "nodeConfig.enableCustomParse"
-            ],
-            "fulfill": {
-              "schema": {
-                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
-              }
-            }
-          },
-          "x-index": 160
-        },
-        "enableScript": {
-          "title": "${enableScript}",
-          "type": "boolean",
-          "default": false,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "tooltip": "${scriptTooltip}"
-          },
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ],
-          "x-index": 190
-        },
-        "script": {
-          "type": "string",
-          "required": false,
-          "default": "function process(record, op, conditionKeys){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
-          "x-decorator": "FormItem",
-          "x-component": "JsEditor",
-          "x-component-props": {
-            "options": { "showPrintMargin": false, "useWrapMode": true },
-            "includeBeforeAndAfter": true,
-            "before": "function process(record, op, conditionKeys){",
-            "beforeRegexp": "^[^]*function\\s+process\\s*\\(record, op, conditionKeys\\)\\{",
-            "afterRegexp": "}[^}]*$",
-            "after": "}"
-          },
-          "x-reactions": {
-            "dependencies": [
-              "nodeConfig.enableScript"
-            ],
-            "fulfill": {
-              "schema": {
-                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
-              }
-            }
-          },
-          "x-index": 200
-        },
-        "enableCustomDDLMessage": {
-          "title": "${enabledCustomDDLMessage}",
-          "type": "boolean",
-          "default": false,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ],
-          "x-decorator-props": {
-            "tooltip": "${enabledCustomDDLMessageTooltip}"
-          },
-          "x-index": 210
-        },
-        "enableDDLCustomScript": {
-          "type": "string",
-          "required": false,
-          "default": "function process(record){\n\n\t// Enter your code at here\n\t return record;\n}",
-          "x-decorator": "FormItem",
-          "x-component": "JsEditor",
-          "x-component-props": {
-            "options": { "showPrintMargin": false, "useWrapMode": true },
-            "includeBeforeAndAfter": true,
-            "before": "function process(record){",
-            "beforeRegexp": "^[^]*function\\s+process\\s*\\(record\\)\\{",
-            "afterRegexp": "}[^}]*$",
-            "after": "}"
-          },
-          "x-reactions": {
-            "dependencies": [
-              "nodeConfig.enableCustomDDLMessage"
-            ],
-            "fulfill": {
-              "schema": {
-                "x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
-              }
-            }
-          },
-          "x-index": 220
-        },
-        "enableUseTargetSchema": {
-          "title": "${enableUseTargetSchema}",
-          "type": "boolean",
-          "default": false,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "tooltip": "${enableUseTargetSchemaTooltip}"
-          },
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{$deps[0].length > 0 ? \"hidden\":\"visible\"}}"
-                }
-              }
-            }
-          ],
-          "x-index": 260
-        }
-      }
-    }
-  },
-  "messages": {
-    "default": "en_US",
-    "en_US": {
-      "partitionNumTooltip": "If Topic exists, the number of partitions can only increase, not decrease",
-      "replicasSizeTooltip": "The number of replica sets cannot be changed after the Topic is created. The number of replica sets at creation cannot be greater than the number of Kafka clusters",
-      "replicasSize": "Number of replications",
-      "partitionNum": "Number of partitions",
-      "doc": "docs/kafka_en_US.md",
-      "nameSrvAddr": "Kafka Host",
-      "nameSrvAddrTip": "Kafka host address, multiple addresses are separated by commas, such as 192.168.1.200:9092,192.168.1.201:9092",
-      "mqTopicString": "topic expression",
-      "mqTopicStringTooltip": "Multiple topics are separated by commas, support *? wildcard expression (non regular)",
-      "krb5": "kerberos authentication",
-      "krb5Keytab": "Key representation file",
-      "krb5KeytabTip": "Keytab file, which can achieve SSH login free",
-      "krb5Conf": "Configuration file",
-      "krb5ConfTip": "Kerberos configuration file",
-      "krb5Principal": "Body Configuration",
-      "krb5PrincipalTip": "for example: kafka/hostname@REALM",
-      "krb5ServiceName": "Service name",
-      "krb5ServiceNameTip": "Service name, usually kafka",
-      "mqUsername": "User Name",
-      "mqPassword": "Password",
-      "kafkaSaslMechanism": "Encryption",
-      "kafkaIgnoreInvalidRecord": "Ignore non-JSON Object format messages",
-      "kafkaAcks": "ACK confirmation mechanism",
-      "not_sure": "Do not confirm",
-      "just_write_master": "Write to master partition only",
-      "write_most_isr": "Write to most ISR partitions",
-      "write_all_isr": "Write to all ISR partitions",
-      "kafkaCompressionType": "Message compression type",
-      "kafkaIgnorePushError": "Ignore push message exception",
-      "schemaRegister": "schemaRegister",
-      "schemaRegisterTip": "To register a center using third-party mode, an additional address is required. If basic authentication is enabled, authentication information is also required",
-      "schemaRegisterUrl": "schemaRegisterUrl",
-      "authCredentialsSource": "authCredentialsSource",
-      "authUserName": "authUserName",
-      "authPassword": "authPassword",
-      "basicAuth": "basicAuth",
-      "enableScript": "Custom message body format",
-      "enableCustomParse": "Enable custom parse body",
-      "script": "script",
-      "enableCustomParse":"Enable custom parsing message body ",
-      "enableCustomParseTooltip": "Parameter description \n record is the body of each message To convert each message into a DML or DDL event of Tapdata, the following protocol needs to be observed. To convert to adding fields DDL, the object returned from js needs to have the following format record.type=209, newFields=[{name:' name of field to add ',dataType:' type of field to add '}],newFields is an array. dateType values can be Map, Array, Number, Boolean, String, Integer, and Text. To convert to rename DDL, you need to return the script with the following format: record.type=202, record.nameChange={after:' changed name ',before:' changed name '}. To convert to a remove fields DDL, the script returns an object with the following format: record.type=207, record.fieldName=' field to remove '. To be converted to a dml event, the return value of the script needs to have the following format record.type='insert or 'update or 'delete'. insert event record needs to have after, delete event needs to have before, update event record needs to have before or after\n5, to discard this message, return null",
-      "scriptTooltip": "1. Parameter description \n·record is for each data record, including header and data, data contains before and after\n·op is the operation type, a total of 3 types: insert, update, delete\n·conditionKeys primary key field name set \n2. Example \n· Adding operation type to kafka message: record.data.op = op\n· Adding custom header: record.header.test='test header'\n· Delete before: delete record.data.before\n· Discard this data: return null",
-      "enabledCustomDDLMessage": "Enable custom DDL event message format ",
-      "enabledCustomDDLMessageTooltip": "Parameter Description\nrecord is the information in each ddl, and the ddl event will have referenceTime, time, type, and tableId properties. tableId represents the table name, type represents the type of DDL event, 209 represents the add field DDL event, 202 represents the rename DDL event, 207 represents the delete field DDL event, 201 represents the change field attribute DDL eventThere are different properties in different types of DDL events.\nNew fields DDL will have newFields, which represents the properties of all new fields. Such as newFields: [{autoInc: false, dataType: 'STRING' name: 'f1' nullable: true, partitionKey: false, the primaryKey: false}]\nfieldName:' Name of the deleted field 'The DDL-specific property for the event is: fieldName:' The name of the deleted field'.\nEvent-specific field rename properties: nameChange:{after:' value renamed ',before:' value renamed '}\nDdl-specific attributes are: fieldName:' property name to change 'means the name of the property to be changed,dataTypeChange: {before:' data type to be changed ',after:' data type to be changed '} data type change,checkChange: {before:' constraint before change ',after:' constraint after change '},nullableChange:{before:true,after:false} Can be nullable,defaultChange:{before: \",after:\" },primaryChange:{before:'',after:''}\nIf want to change name events into their own property returns an object {type: 202, fromName: record. NameChange. Before}",
-      "enableUseTargetSchema": "Kafka uses a target model",
-      "enableUseTargetSchemaTooltip": "With this configuration enabled, Kafka will use the target's model for inferences.Make sure that the target has a model and that the model matches the Kafka message, or you will get an error"
-    },
-    "zh_CN": {
-      "partitionNumTooltip": "若Topic存在，分区的数量只能增加不能减小",
-      "replicasSizeTooltip": "副本集的数量在Topic创建后不可更改。并且创建时副本集的数量不能大于Kafka集群的数量。",
-      "replicasSize": "副本数数量",
-      "partitionNum": "分区数量",
-      "doc": "docs/kafka_zh_CN.md",
-      "nameSrvAddr": "Kafka地址",
-      "nameSrvAddrTip": "Kafka地址，多个地址用逗号分隔，如：192.168.1.200:9092,192.168.1.201:9092",
-      "mqTopicString": "主题表达式",
-      "mqTopicStringTooltip": "多个主题用逗号分隔，支持*?通配表达式（非正则）",
-      "krb5": "kerberos 认证",
-      "krb5Keytab": "密钥表示文件",
-      "krb5KeytabTip": "keytab文件，可以实现ssh免登录",
-      "krb5Conf": "配置文件",
-      "krb5ConfTip": "krb5的conf配置文件",
-      "krb5Principal": "主体配置",
-      "krb5PrincipalTip": "例如：kafka/hostname@REALM",
-      "krb5ServiceName": "服务名",
-      "krb5ServiceNameTip": "服务名，一般均为kafka",
-      "mqUsername": "账号",
-      "mqPassword": "密码",
-      "kafkaSaslMechanism": "加密方式",
-      "kafkaIgnoreInvalidRecord": "忽略非JSON对象格式消息",
-      "kafkaAcks": "ACK确认机制",
-      "not_sure": "不确认",
-      "just_write_master": "仅写入master分区",
-      "write_most_isr": "写入大多数ISR分区",
-      "write_all_isr": "写入所有ISR分区",
-      "kafkaCompressionType": "消息压缩类型",
-      "kafkaIgnorePushError": "忽略推送消息异常",
-      "schemaRegister": "模式注册",
-      "schemaRegisterTip": "使用第三方模式注册中心，需要额外提供地址，若打开基本认证还需要提供认证信息等",
-      "schemaRegisterUrl": "模式注册地址",
-      "authCredentialsSource": "认证凭据来源",
-      "authUserName": "认证用户名",
-      "authPassword": "认证密码",
-      "basicAuth": "基本认证",
-      "enableScript": "自定义消息体格式",
-      "script": "脚本",
-      "enableCustomParse":"开启自定义解析消息体",
-      "enableCustomParseTooltip": "参数说明\n record为每条消息的body 要将每条消息转换为Tapdata 的DML或DDL事件，需要遵守以下协议。\n·1、若要转为添加字段DDL,js中返回的对象需要有以下格式 record.type=209, record.newFields=[{name:'要添加的字段名',dataType:'要添加的字段类型'}],newFields是一个数组。dateType的值可以为Map、Array、Number、Boolean、String、Integer、Text。\n2、若要转为改名DDL,需要将脚本的返回值需要有以下格式 record.type=202, record.nameChange={after:'更改后的名字',before:'更改前的名字'}。\n3、若要转为删除字段DDL，脚本返回值的对象需要有以下格式 record.type=207，record.fieldName='要删除的字段'。\n4、要转为dml事件，脚本的返回值需要有以下格式 record.type='insert或者'update或者'delete'。insert事件record中需要有after，delete事件需要有before，update事件record中需要有before或者after\n5、若要丢弃此消息，则return null",
-      "scriptTooltip": "1.参数说明\n·record为每条数据记录，包含header和data，data中包含before和after\n·op为操作类型，共3种：insert，update，delete\n·conditionKeys为主键字段名集合\n2.示例\n·kafka message中添加操作类型: record.data.op = op\n·添加自定义header: record.header.test='test header'\n·删除before: delete record.data.before\n·丢弃该条数据: return null",
-      "enabledCustomDDLMessage": "开启自定义DDL事件消息格式体",
-      "enabledCustomDDLMessageTooltip": "参数说明\n record为每条ddl中的信息，ddl事件中都会有referenceTime、time、type、tableId属性。tableId代表表名、type代表DDL事件的类型，209代表新增字段DDL事件、202代表改名DDL事件、207代表删除字段DDL事件、201代表改变字段属性DDL事件。不同类型的DDL事件中有不同的属性。\n1、新增字段DDL中会有newFields，代表所有新增字段的属性。如newFields:[{autoInc: false, dataType:'STRING',name:'f1',nullable: true,partitionKey:false,primaryKey:false}]\n2、删除字段事件DDL特有的属性是：fieldName:'删除的字段名'\n3、字段改名事件特有的属性：nameChange:{after:'改名后的值',before:'改名前的值'}\n4、字段改属性事件DDL特有的属性是：fieldName:'要改的属性名'代表需要更改属性的名称,dataTypeChange：{before:'更改前的数据类型',after:'更改后的数据类型'}数据类型改变,checkChange：{before:'更改前的约束',after:'更改后的约束'},nullableChange:{before:true,after:false}是否可以为nullable,defaultChange:{before:'',after:''},primaryChange:{before:'',after:''}\n例如:将改名事件转为自己的属性可以返回一个对象{type:202,fromName:record.nameChange.before}",
-      "enableUseTargetSchema": "Kafka使用目标模型",
-      "enableUseTargetSchemaTooltip": "开启了此配置之后，Kafka会使用目标的模型进行推演，要保证目标有模型，并且模型跟Kafka的消息匹配，否则会出现报错"
-    },
-    "zh_TW": {
-      "partitionNumTooltip": "若Topic存在，分區的數量只能增加不能減小",
-      "replicasSizeTooltip": "副本集的數量在Topic創建後不能更改，並且創建時副本數的數量不能大於Kafka集群的數量。",
-      "replicasSize": "副本數數量",
-      "partitionNum": "分區數量",
-      "doc": "docs/kafka_zh_TW.md",
-      "nameSrvAddr": "Kafka地址",
-      "nameSrvAddrTip": "Kafka地址，多個地址用逗號分隔，如：192.168.1.200:9092,192.168.1.201:9092",
-      "mqTopicString": "主題表達式",
-      "mqTopicStringTooltip": "多個主題用逗號分隔，支持*?通配運算式（非正則）",
-      "krb5": "kerberos 認證",
-      "krb5Keytab": "密鑰表示文件",
-      "krb5KeytabTip": "keytab文件，可以實現ssh免登錄",
-      "krb5Conf": "配置文件",
-      "krb5ConfTip": "krb5的conf配置文件",
-      "krb5Principal": "主体配置",
-      "krb5PrincipalTip": "例如：kafka/hostname@REALM",
-      "krb5ServiceName": "服務名",
-      "krb5ServiceNameTip": "服務名，一般均為kafka",
-      "mqUsername": "賬號",
-      "mqPassword": "密碼",
-      "kafkaSaslMechanism": "加密方式",
-      "kafkaIgnoreInvalidRecord": "忽略非JSON對象格式消息",
-      "kafkaAcks": "ACK確認機制",
-      "not_sure": "不確認",
-      "just_write_master": "僅寫入master分區",
-      "write_most_isr": "寫入大多數ISR分區",
-      "write_all_isr": "寫入所有ISR分區",
-      "kafkaCompressionType": "消息壓縮類型",
-      "kafkaIgnorePushError": "忽略推理消息異常",
-      "schemaRegister": "模式註冊",
-      "schemaRegisterTip": "使用第三方模式註冊中心，需要額外提供地址，若打開基本認證還需要提供認證信息等",
-      "schemaRegisterUrl": "模式註冊地址",
-      "authCredentialsSource": "認證憑據來源",
-      "authUserName": "認證用戶名",
-      "authPassword": "認證密碼",
-      "basicAuth": "基本認證",
-      "enableScript": "自定義消息體格式",
-      "script": "腳本",
-      "enableCustomParse":"開啓自定義解析消息體",
-      "enableCustomParseTooltip": "參數說明\n record爲每條消息的body 要將每條消息轉換爲Tapdata 的DML或DDL事件，需要遵守以下協議。\n·1、若要轉爲添加字段DDL,js中返回的對象需要有以下格式 record.type=209, record.newFields=[{name:'要添加的字段名',dataType:'要添加的字段類型'}],newFields是一個數組。dateType的值可以爲Map、Array、Number、Boolean、String、Integer、Text。\n2、若要轉爲改名DDL,需要將腳本的返回值需要有以下格式 record.type=202, record.nameChange={after:'更改後的名字',before:'更改前的名字'}。\n3、若要轉爲刪除字段DDL，腳本返回值的對象需要有以下格式 record.type=207，record.fieldName='要刪除的字段'。\n4、要轉爲dml事件，腳本的返回值需要有以下格式 record.type='insert或者'update或者'delete'。insert事件record中需要有after，delete事件需要有before，update事件record中需要有before或者after\n5、若要丟棄此消息，則return null",
-      "scriptTooltip": "1.參數說明\n·record爲每條數據記錄，包含header和data，data中包含before和after\n·op爲操作類型，共3種：insert，update，delete\n·conditionKeys爲主鍵字段名集合\n2.示例\n·kafka message中添加操作類型: record.data.op = op\n·添加自定義header: record.header.test='test header'\n·刪除before: delete record.data.before\n·丟棄該條數據: return null",
-      "enabledCustomDDLMessage": "開啓自定義DDL事件消息格式體",
-      "enabledCustomDDLMessageTooltip": "參數說明\n record爲每條ddl中的信息，ddl事件中都會有referenceTime、time、type、tableId屬性。tableId代表表名、type代表DDL事件的類型，209代表新增字段DDL事件、202代表改名DDL事件、207代表刪除字段DDL事件、201代表改變字段屬性DDL事件。不同類型的DDL事件中有不同的屬性。\n1、新增字段DDL中會有newFields，代表所有新增字段的屬性。如newFields:[{autoInc: false, dataType:'STRING',name:'f1',nullable: true,partitionKey:false,primaryKey:false}]\n2、刪除字段事件DDL特有的屬性是：fieldName:'刪除的字段名'\n3、字段改名事件特有的屬性：nameChange:{after:'改名後的值',before:'改名前的值'}\n4、字段改屬性事件DDL特有的屬性是：fieldName:'要改的屬性名'代表需要更改屬性的名稱,dataTypeChange：{before:'更改前的數據類型',after:'更改後的數據類型'}數據類型改變,checkChange：{before:'更改前的約束',after:'更改後的約束'},nullableChange:{before:true,after:false}是否可以爲nullable,defaultChange:{before:'',after:''},primaryChange:{before:'',after:''}\n如想要將改名事件轉爲自己的屬性可以返回一個對象{type:202,fromName:record.nameChange.before}",
-      "enableUseTargetSchema": "Kafka使用目標模型",
-      "enableUseTargetSchemaTooltip": "開啓了此配置之後，Kafka會使用目標的模型進行推演，要保證目標有模型，並且模型跟Kafka的消息匹配，否則會出現報錯"
-    }
-  },
-  "dataTypes": {
-    "OBJECT": {
-      "to": "TapMap"
-    },
-    "ARRAY": {
-      "to": "TapArray"
-    },
-    "NUMBER": {
-      "precision": [
-        1,
-        1000
-      ],
-      "scale": [
-        0,
-        1000
-      ],
-      "fixed": true,
-      "preferPrecision": 20,
-      "preferScale": 8,
-      "priority": 1,
-      "to": "TapNumber"
-    },
-    "INTEGER": {
-      "bit": 32,
-      "priority": 1,
-      "value": [
-        -2147483648,
-        2147483647
-      ],
-      "to": "TapNumber"
-    },
-    "BOOLEAN": {
-      "to": "TapBoolean"
-    },
-    "STRING[($byte)]": {
-      "priority": 1,
-      "defaultByte": 200,
-      "preferByte": 200,
-      "to": "TapString"
-    },
-    "TEXT": {
-      "to": "TapString"
-    }
-  }
+	"properties": {
+		"name": "Kafka",
+		"icon": "icons/kafka.png",
+		"doc": "${doc}",
+		"id": "kafka",
+		"authentication": "Alpha",
+		"tags": [
+			"Database",
+			"schema-free"
+		]
+	},
+	"configOptions": {
+		"supportDDL": {
+			"events": [
+				"new_field_event",
+				"alter_field_name_event",
+				"alter_field_attributes_event",
+				"drop_field_event"
+			]
+		},
+		"connection": {
+			"type": "object",
+			"properties": {
+				"nameSrvAddr": {
+					"required": true,
+					"type": "string",
+					"title": "${nameSrvAddr}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"apiServerKey": "mq_nameSrvAddr",
+					"x-decorator-props": {
+						"tooltip": "${nameSrvAddrTip}"
+					},
+					"x-index": 1
+				},
+				"mqTopicString": {
+					"type": "string",
+					"title": "${mqTopicString}",
+					"x-decorator": "FormItem",
+					"x-decorator-props": {
+						"tooltip": "${mqTopicStringTooltip}"
+					},
+					"x-component": "Input",
+					"apiServerKey": "mq_topics",
+					"x-index": 8
+				},
+				"krb5": {
+					"type": "boolean",
+					"title": "${krb5}",
+					"default": false,
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"apiServerKey": "krb5",
+					"x-reactions": [
+						{
+							"target": "*(krb5Keytab,krb5Conf,krb5Principal,krb5ServiceName)",
+							"fulfill": {
+								"state": {
+									"visible": "{{$self.value===true}}"
+								}
+							}
+						},
+						{
+							"target": "*(mqUsername,mqPassword,kafkaSaslMechanism)",
+							"fulfill": {
+								"state": {
+									"visible": "{{$self.value===false}}"
+								}
+							}
+						}
+					],
+					"x-index": 9
+				},
+				"krb5Keytab": {
+					"type": "string",
+					"title": "${krb5Keytab}",
+					"x-decorator": "FormItem",
+					"x-component": "TextFileReader",
+					"x-component-props": {
+						"base64": true
+					},
+					"x-decorator-props": {
+						"tooltip": "${krb5KeytabTip}"
+					},
+					"apiServerKey": "krb5Keytab",
+					"fileNameField": "krb5KeytabFile",
+					"required": true,
+					"x-index": 20
+				},
+				"krb5Conf": {
+					"type": "string",
+					"title": "${krb5Conf}",
+					"x-decorator": "FormItem",
+					"x-component": "TextFileReader",
+					"x-component-props": {
+						"base64": true
+					},
+					"x-decorator-props": {
+						"tooltip": "${krb5ConfTip}"
+					},
+					"apiServerKey": "krb5Conf",
+					"fileNameField": "krb5ConfFile",
+					"required": true,
+					"x-index": 30
+				},
+				"krb5Principal": {
+					"type": "string",
+					"title": "${krb5Principal}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"apiServerKey": "krb5Principal",
+					"x-decorator-props": {
+						"tooltip": "${krb5PrincipalTip}"
+					},
+					"required": true,
+					"x-index": 40
+				},
+				"krb5ServiceName": {
+					"type": "string",
+					"title": "${krb5ServiceName}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"apiServerKey": "krb5ServiceName",
+					"x-decorator-props": {
+						"tooltip": "${krb5ServiceNameTip}"
+					},
+					"required": true,
+					"x-index": 50
+				},
+				"mqUsername": {
+					"type": "string",
+					"title": "${mqUsername}",
+					"x-decorator": "FormItem",
+					"x-component": "Input",
+					"apiServerKey": "mq_username",
+					"x-index": 60
+				},
+				"mqPassword": {
+					"type": "string",
+					"title": "${mqPassword}",
+					"x-decorator": "FormItem",
+					"x-component": "Password",
+					"apiServerKey": "mq_password",
+					"x-index": 70
+				},
+				"OPTIONAL_FIELDS": {
+					"type": "void",
+					"properties": {
+						"schemaRegister": {
+							"type": "boolean",
+							"title": "${schemaRegister}",
+							"default": false,
+							"x-decorator": "FormItem",
+							"x-decorator-props": {
+								"tooltip": "${schemaRegisterTip}"
+							},
+							"x-component": "Switch",
+							"apiServerKey": "schemaRegister",
+							"x-reactions": [
+								{
+									"target": "*(schemaRegisterUrl,basicAuth)",
+									"fulfill": {
+										"state": {
+											"visible": "{{$self.value===true}}"
+										}
+									}
+								}
+							],
+							"x-index": 2
+						},
+						"basicAuth": {
+							"type": "boolean",
+							"title": "${basicAuth}",
+							"default": false,
+							"x-decorator": "FormItem",
+							"x-component": "Switch",
+							"apiServerKey": "basicAuth",
+							"x-reactions": [
+								{
+									"target": "*(authCredentialsSource,authUserName,authPassword)",
+									"fulfill": {
+										"state": {
+											"visible": "{{$self.value===true}}"
+										}
+									}
+								}
+							],
+							"x-index": 4
+						},
+						"schemaRegisterUrl": {
+							"required": true,
+							"type": "string",
+							"title": "${schemaRegisterUrl}",
+							"x-decorator": "FormItem",
+							"x-component": "Input",
+							"apiServerKey": "schemaRegisterUrl",
+							"x-index": 3
+						},
+						"authCredentialsSource": {
+							"required": true,
+							"type": "string",
+							"title": "${authCredentialsSource}",
+							"x-decorator": "FormItem",
+							"x-component": "Input",
+							"apiServerKey": "authCredentialsSource",
+							"x-index": 5
+						},
+						"authUserName": {
+							"required": true,
+							"type": "string",
+							"title": "${authUserName}",
+							"x-decorator": "FormItem",
+							"x-component": "Input",
+							"apiServerKey": "database_username",
+							"x-index": 6
+						},
+						"authPassword": {
+							"required": true,
+							"type": "string",
+							"title": "${authPassword}",
+							"x-decorator": "FormItem",
+							"x-component": "Password",
+							"apiServerKey": "database_password",
+							"x-index": 7
+						},
+						"kafkaSaslMechanism": {
+							"type": "string",
+							"title": "${kafkaSaslMechanism}",
+							"default": "PLAIN",
+							"x-decorator": "FormItem",
+							"x-component": "Select",
+							"apiServerKey": "kafkaSaslMechanism",
+							"x-index": 80,
+							"enum": [
+								{
+									"label": "PLAIN",
+									"value": "PLAIN"
+								},
+								{
+									"label": "SHA256",
+									"value": "SHA256"
+								},
+								{
+									"label": "SHA512",
+									"value": "SHA512"
+								}
+							]
+						},
+						"kafkaIgnoreInvalidRecord": {
+							"type": "boolean",
+							"title": "${kafkaIgnoreInvalidRecord}",
+							"default": false,
+							"x-decorator": "FormItem",
+							"x-component": "Switch",
+							"apiServerKey": "kafkaIgnoreInvalidRecord",
+							"x-index": 90
+						},
+						"kafkaAcks": {
+							"type": "string",
+							"title": "${kafkaAcks}",
+							"default": "-1",
+							"x-decorator": "FormItem",
+							"x-component": "Select",
+							"apiServerKey": "kafkaAcks",
+							"x-index": 100,
+							"enum": [
+								{
+									"label": "${not_sure}",
+									"value": "0"
+								},
+								{
+									"label": "${just_write_master}",
+									"value": "1"
+								},
+								{
+									"label": "${write_most_isr}",
+									"value": "-1"
+								},
+								{
+									"label": "${write_all_isr}",
+									"value": "all"
+								}
+							]
+						},
+						"kafkaCompressionType": {
+							"type": "string",
+							"title": "${kafkaCompressionType}",
+							"default": "gzip",
+							"x-decorator": "FormItem",
+							"x-component": "Select",
+							"apiServerKey": "kafkaCompressionType",
+							"x-index": 110,
+							"enum": [
+								{
+									"label": "gzip",
+									"value": "gzip"
+								},
+								{
+									"label": "snappy",
+									"value": "snappy"
+								},
+								{
+									"label": "lz4",
+									"value": "lz4"
+								},
+								{
+									"label": "zstd",
+									"value": "zstd"
+								}
+							]
+						},
+						"kafkaIgnorePushError": {
+							"type": "boolean",
+							"title": "${kafkaIgnorePushError}",
+							"default": false,
+							"x-decorator": "FormItem",
+							"x-component": "Switch",
+							"apiServerKey": "kafkaIgnorePushError",
+							"x-index": 120
+						}
+					}
+				}
+			}
+		},
+		"node": {
+			"properties": {
+				"enableScript": {
+					"title": "${enableScript}",
+					"type": "boolean",
+					"default": false,
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"x-decorator-props": {
+						"tooltip": "${scriptTooltip}"
+					}
+				},
+				"partitionNum": {
+					"required": true,
+					"type": "string",
+					"title": "${partitionNum}",
+					"x-decorator": "FormItem",
+					"x-component": "InputNumber",
+					"apiServerKey": "partitionNum",
+					"default": 3,
+					"x-decorator-props": {
+						"tooltip": "${partitionNumTooltip}"
+					},
+					"x-component-props": {
+						"min": 1,
+						"max": 255
+					},
+					"x-index": 130,
+					"x-reactions": [
+						{
+							"dependencies": [
+								"$inputs"
+							],
+							"fulfill": {
+								"state": {
+									"display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+								}
+							}
+						}
+					]
+				},
+				"replicasSize": {
+					"required": true,
+					"type": "string",
+					"title": "${replicasSize}",
+					"x-decorator": "FormItem",
+					"x-component": "InputNumber",
+					"apiServerKey": "replicasSize",
+					"default": 1,
+					"x-decorator-props": {
+						"tooltip": "${replicasSizeTooltip}"
+					},
+					"x-component-props": {
+						"min": 1,
+						"max": 255
+					},
+					"x-reactions": [
+						{
+							"dependencies": [
+								"$inputs"
+							],
+							"fulfill": {
+								"state": {
+									"display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+								}
+							}
+						}
+					],
+					"x-index": 140
+				},
+				"enableCustomParse": {
+					"title": "${enableCustomParse}",
+					"type": "boolean",
+					"default": false,
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"x-reactions": [
+						{
+							"dependencies": [
+								"$inputs"
+							],
+							"fulfill": {
+								"state": {
+									"display": "{{$deps[0].length > 0 ? \"hidden\":\"visible\"}}"
+								}
+							}
+						}
+					],
+					"x-decorator-props": {
+						"tooltip": "${enableCustomParseTooltip}"
+					},
+					"x-index": 150
+				},
+				"customParseThreadNum": {
+					"required": true,
+					"type": "string",
+					"title": "${customParseThreadNum}",
+					"x-decorator": "FormItem",
+					"x-component": "InputNumber",
+					"apiServerKey": "customParseThreadNum",
+					"default": 4,
+					"x-decorator-props": {
+						"tooltip": "${customParseThreadNumTooltip}"
+					},
+					"x-component-props": {
+						"min": 1,
+						"max": 255
+					},
+					"x-index": 160,
+					"x-reactions": [
+						{
+							"dependencies": [
+								"nodeConfig.enableCustomParse"
+							],
+							"fulfill": {
+								"schema": {
+									"x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
+								}
+							}
+						}
+					]
+				},
+				"enableCustomParseScript": {
+					"type": "string",
+					"required": false,
+					"default": "function process(record){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
+					"x-decorator": "FormItem",
+					"x-component": "JsEditor",
+					"x-component-props": {
+						"options": {
+							"showPrintMargin": false,
+							"useWrapMode": true
+						},
+						"includeBeforeAndAfter": true,
+						"before": "function process(record){",
+						"beforeRegexp": "^[^]*function\\s+process\\s*\\(record\\)\\{",
+						"afterRegexp": "}[^}]*$",
+						"after": "}"
+					},
+					"x-reactions": {
+						"dependencies": [
+							"nodeConfig.enableCustomParse"
+						],
+						"fulfill": {
+							"schema": {
+								"x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
+							}
+						}
+					},
+					"x-index": 170
+				},
+				"enableScript": {
+					"title": "${enableScript}",
+					"type": "boolean",
+					"default": false,
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"x-decorator-props": {
+						"tooltip": "${scriptTooltip}"
+					},
+					"x-reactions": [
+						{
+							"dependencies": [
+								"$inputs"
+							],
+							"fulfill": {
+								"state": {
+									"display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+								}
+							}
+						}
+					],
+					"x-index": 180
+				},
+				"script": {
+					"type": "string",
+					"required": false,
+					"default": "function process(record, op, conditionKeys){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
+					"x-decorator": "FormItem",
+					"x-component": "JsEditor",
+					"x-component-props": {
+						"options": {
+							"showPrintMargin": false,
+							"useWrapMode": true
+						},
+						"includeBeforeAndAfter": true,
+						"before": "function process(record, op, conditionKeys){",
+						"beforeRegexp": "^[^]*function\\s+process\\s*\\(record, op, conditionKeys\\)\\{",
+						"afterRegexp": "}[^}]*$",
+						"after": "}"
+					},
+					"x-reactions": {
+						"dependencies": [
+							"nodeConfig.enableScript"
+						],
+						"fulfill": {
+							"schema": {
+								"x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
+							}
+						}
+					},
+					"x-index": 190
+				},
+				"customDmlThreadNum": {
+					"required": true,
+					"type": "string",
+					"title": "${customDmlThreadNum}",
+					"x-decorator": "FormItem",
+					"x-component": "InputNumber",
+					"apiServerKey": "customDmlThreadNum",
+					"default": 4,
+					"x-decorator-props": {
+						"tooltip": "${customDmlThreadNumTooltip}"
+					},
+					"x-component-props": {
+						"min": 1,
+						"max": 255
+					},
+					"x-index": 200,
+					"x-reactions": [
+						{
+							"dependencies": [
+								"nodeConfig.enableScript"
+							],
+							"fulfill": {
+								"schema": {
+									"x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
+								}
+							}
+						}
+					]
+				},
+				"enableCustomDDLMessage": {
+					"title": "${enabledCustomDDLMessage}",
+					"type": "boolean",
+					"default": false,
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"x-reactions": [
+						{
+							"dependencies": [
+								"$inputs"
+							],
+							"fulfill": {
+								"state": {
+									"display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+								}
+							}
+						}
+					],
+					"x-decorator-props": {
+						"tooltip": "${enabledCustomDDLMessageTooltip}"
+					},
+					"x-index": 210
+				},
+				"enableDDLCustomScript": {
+					"type": "string",
+					"required": false,
+					"default": "function process(record){\n\n\t// Enter your code at here\n\t return record;\n}",
+					"x-decorator": "FormItem",
+					"x-component": "JsEditor",
+					"x-component-props": {
+						"options": {
+							"showPrintMargin": false,
+							"useWrapMode": true
+						},
+						"includeBeforeAndAfter": true,
+						"before": "function process(record){",
+						"beforeRegexp": "^[^]*function\\s+process\\s*\\(record\\)\\{",
+						"afterRegexp": "}[^}]*$",
+						"after": "}"
+					},
+					"x-reactions": {
+						"dependencies": [
+							"nodeConfig.enableCustomDDLMessage"
+						],
+						"fulfill": {
+							"schema": {
+								"x-decorator-props.style.display": "{{$deps[0]===true ? null:\"none\"}}"
+							}
+						}
+					},
+					"x-index": 220
+				},
+				"enableUseTargetSchema": {
+					"title": "${enableUseTargetSchema}",
+					"type": "boolean",
+					"default": false,
+					"x-decorator": "FormItem",
+					"x-component": "Switch",
+					"x-decorator-props": {
+						"tooltip": "${enableUseTargetSchemaTooltip}"
+					},
+					"x-reactions": [
+						{
+							"dependencies": [
+								"$inputs"
+							],
+							"fulfill": {
+								"state": {
+									"display": "{{$deps[0].length > 0 ? \"hidden\":\"visible\"}}"
+								}
+							}
+						}
+					],
+					"x-index": 230
+				}
+			}
+		}
+	},
+	"messages": {
+		"default": "en_US",
+		"en_US": {
+			"partitionNumTooltip": "If Topic exists, the number of partitions can only increase, not decrease",
+			"replicasSizeTooltip": "The number of replica sets cannot be changed after the Topic is created. The number of replica sets at creation cannot be greater than the number of Kafka clusters",
+			"replicasSize": "Number of replications",
+			"partitionNum": "Number of partitions",
+			"doc": "docs/kafka_en_US.md",
+			"nameSrvAddr": "Kafka Host",
+			"nameSrvAddrTip": "Kafka host address, multiple addresses are separated by commas, such as 192.168.1.200:9092,192.168.1.201:9092",
+			"mqTopicString": "topic expression",
+			"mqTopicStringTooltip": "Multiple topics are separated by commas, support *? wildcard expression (non regular)",
+			"krb5": "kerberos authentication",
+			"krb5Keytab": "Key representation file",
+			"krb5KeytabTip": "Keytab file, which can achieve SSH login free",
+			"krb5Conf": "Configuration file",
+			"krb5ConfTip": "Kerberos configuration file",
+			"krb5Principal": "Body Configuration",
+			"krb5PrincipalTip": "for example: kafka/hostname@REALM",
+			"krb5ServiceName": "Service name",
+			"krb5ServiceNameTip": "Service name, usually kafka",
+			"mqUsername": "User Name",
+			"mqPassword": "Password",
+			"kafkaSaslMechanism": "Encryption",
+			"kafkaIgnoreInvalidRecord": "Ignore non-JSON Object format messages",
+			"kafkaAcks": "ACK confirmation mechanism",
+			"not_sure": "Do not confirm",
+			"just_write_master": "Write to master partition only",
+			"write_most_isr": "Write to most ISR partitions",
+			"write_all_isr": "Write to all ISR partitions",
+			"kafkaCompressionType": "Message compression type",
+			"kafkaIgnorePushError": "Ignore push message exception",
+			"schemaRegister": "schemaRegister",
+			"schemaRegisterTip": "To register a center using third-party mode, an additional address is required. If basic authentication is enabled, authentication information is also required",
+			"schemaRegisterUrl": "schemaRegisterUrl",
+			"authCredentialsSource": "authCredentialsSource",
+			"authUserName": "authUserName",
+			"authPassword": "authPassword",
+			"basicAuth": "basicAuth",
+			"enableScript": "Custom message body format",
+			"enableCustomParse": "Enable custom parse body",
+			"script": "script",
+			"enableCustomParse": "Enable custom parsing message body ",
+			"enableCustomParseTooltip": "Parameter description \n record is the body of each message To convert each message into a DML or DDL event of Tapdata, the following protocol needs to be observed. To convert to adding fields DDL, the object returned from js needs to have the following format record.type=209, newFields=[{name:' name of field to add ',dataType:' type of field to add '}],newFields is an array. dateType values can be Map, Array, Number, Boolean, String, Integer, and Text. To convert to rename DDL, you need to return the script with the following format: record.type=202, record.nameChange={after:' changed name ',before:' changed name '}. To convert to a remove fields DDL, the script returns an object with the following format: record.type=207, record.fieldName=' field to remove '. To be converted to a dml event, the return value of the script needs to have the following format record.type='insert or 'update or 'delete'. insert event record needs to have after, delete event needs to have before, update event record needs to have before or after\n5, to discard this message, return null",
+			"scriptTooltip": "1. Parameter description \n·record is for each data record, including header and data, data contains before and after\n·op is the operation type, a total of 3 types: insert, update, delete\n·conditionKeys primary key field name set \n2. Example \n· Adding operation type to kafka message: record.data.op = op\n· Adding custom header: record.header.test='test header'\n· Delete before: delete record.data.before\n· Discard this data: return null",
+			"enabledCustomDDLMessage": "Enable custom DDL event message format ",
+			"enabledCustomDDLMessageTooltip": "Parameter Description\nrecord is the information in each ddl, and the ddl event will have referenceTime, time, type, and tableId properties. tableId represents the table name, type represents the type of DDL event, 209 represents the add field DDL event, 202 represents the rename DDL event, 207 represents the delete field DDL event, 201 represents the change field attribute DDL eventThere are different properties in different types of DDL events.\nNew fields DDL will have newFields, which represents the properties of all new fields. Such as newFields: [{autoInc: false, dataType: 'STRING' name: 'f1' nullable: true, partitionKey: false, the primaryKey: false}]\nfieldName:' Name of the deleted field 'The DDL-specific property for the event is: fieldName:' The name of the deleted field'.\nEvent-specific field rename properties: nameChange:{after:' value renamed ',before:' value renamed '}\nDdl-specific attributes are: fieldName:' property name to change 'means the name of the property to be changed,dataTypeChange: {before:' data type to be changed ',after:' data type to be changed '} data type change,checkChange: {before:' constraint before change ',after:' constraint after change '},nullableChange:{before:true,after:false} Can be nullable,defaultChange:{before: \",after:\" },primaryChange:{before:'',after:''}\nIf want to change name events into their own property returns an object {type: 202, fromName: record. NameChange. Before}",
+			"enableUseTargetSchema": "Kafka uses a target model",
+			"enableUseTargetSchemaTooltip": "With this configuration enabled, Kafka will use the target's model for inferences.Make sure that the target has a model and that the model matches the Kafka message, or you will get an error",
+			"customDmlThreadNum": "With this configuration enabled, Kafka will use the target's model for inferences.Make sure that the target has a model and that the model matches the Kafka message, or you will get an error",
+			"customDmlThreadNumTooltip": "Customize the number of message body script parsing threads",
+			"customParseThreadNum": "Customize the number of parse script threads",
+			"customParseThreadNumTooltip": "Kafka customizes the number of parsing scripts and increases the number of threads to speed up parsing"
+		},
+		"zh_CN": {
+			"partitionNumTooltip": "若Topic存在，分区的数量只能增加不能减小",
+			"replicasSizeTooltip": "副本集的数量在Topic创建后不可更改。并且创建时副本集的数量不能大于Kafka集群的数量。",
+			"replicasSize": "副本数数量",
+			"partitionNum": "分区数量",
+			"doc": "docs/kafka_zh_CN.md",
+			"nameSrvAddr": "Kafka地址",
+			"nameSrvAddrTip": "Kafka地址，多个地址用逗号分隔，如：192.168.1.200:9092,192.168.1.201:9092",
+			"mqTopicString": "主题表达式",
+			"mqTopicStringTooltip": "多个主题用逗号分隔，支持*?通配表达式（非正则）",
+			"krb5": "kerberos 认证",
+			"krb5Keytab": "密钥表示文件",
+			"krb5KeytabTip": "keytab文件，可以实现ssh免登录",
+			"krb5Conf": "配置文件",
+			"krb5ConfTip": "krb5的conf配置文件",
+			"krb5Principal": "主体配置",
+			"krb5PrincipalTip": "例如：kafka/hostname@REALM",
+			"krb5ServiceName": "服务名",
+			"krb5ServiceNameTip": "服务名，一般均为kafka",
+			"mqUsername": "账号",
+			"mqPassword": "密码",
+			"kafkaSaslMechanism": "加密方式",
+			"kafkaIgnoreInvalidRecord": "忽略非JSON对象格式消息",
+			"kafkaAcks": "ACK确认机制",
+			"not_sure": "不确认",
+			"just_write_master": "仅写入master分区",
+			"write_most_isr": "写入大多数ISR分区",
+			"write_all_isr": "写入所有ISR分区",
+			"kafkaCompressionType": "消息压缩类型",
+			"kafkaIgnorePushError": "忽略推送消息异常",
+			"schemaRegister": "模式注册",
+			"schemaRegisterTip": "使用第三方模式注册中心，需要额外提供地址，若打开基本认证还需要提供认证信息等",
+			"schemaRegisterUrl": "模式注册地址",
+			"authCredentialsSource": "认证凭据来源",
+			"authUserName": "认证用户名",
+			"authPassword": "认证密码",
+			"basicAuth": "基本认证",
+			"enableScript": "自定义消息体格式",
+			"script": "脚本",
+			"enableCustomParse": "开启自定义解析消息体",
+			"enableCustomParseTooltip": "参数说明\n record为每条消息的body 要将每条消息转换为Tapdata 的DML或DDL事件，需要遵守以下协议。\n·1、若要转为添加字段DDL,js中返回的对象需要有以下格式 record.type=209, record.newFields=[{name:'要添加的字段名',dataType:'要添加的字段类型'}],newFields是一个数组。dateType的值可以为Map、Array、Number、Boolean、String、Integer、Text。\n2、若要转为改名DDL,需要将脚本的返回值需要有以下格式 record.type=202, record.nameChange={after:'更改后的名字',before:'更改前的名字'}。\n3、若要转为删除字段DDL，脚本返回值的对象需要有以下格式 record.type=207，record.fieldName='要删除的字段'。\n4、要转为dml事件，脚本的返回值需要有以下格式 record.type='insert或者'update或者'delete'。insert事件record中需要有after，delete事件需要有before，update事件record中需要有before或者after\n5、若要丢弃此消息，则return null",
+			"scriptTooltip": "1.参数说明\n·record为每条数据记录，包含header和data，data中包含before和after\n·op为操作类型，共3种：insert，update，delete\n·conditionKeys为主键字段名集合\n2.示例\n·kafka message中添加操作类型: record.data.op = op\n·添加自定义header: record.header.test='test header'\n·删除before: delete record.data.before\n·丢弃该条数据: return null",
+			"enabledCustomDDLMessage": "开启自定义DDL事件消息格式体",
+			"enabledCustomDDLMessageTooltip": "参数说明\n record为每条ddl中的信息，ddl事件中都会有referenceTime、time、type、tableId属性。tableId代表表名、type代表DDL事件的类型，209代表新增字段DDL事件、202代表改名DDL事件、207代表删除字段DDL事件、201代表改变字段属性DDL事件。不同类型的DDL事件中有不同的属性。\n1、新增字段DDL中会有newFields，代表所有新增字段的属性。如newFields:[{autoInc: false, dataType:'STRING',name:'f1',nullable: true,partitionKey:false,primaryKey:false}]\n2、删除字段事件DDL特有的属性是：fieldName:'删除的字段名'\n3、字段改名事件特有的属性：nameChange:{after:'改名后的值',before:'改名前的值'}\n4、字段改属性事件DDL特有的属性是：fieldName:'要改的属性名'代表需要更改属性的名称,dataTypeChange：{before:'更改前的数据类型',after:'更改后的数据类型'}数据类型改变,checkChange：{before:'更改前的约束',after:'更改后的约束'},nullableChange:{before:true,after:false}是否可以为nullable,defaultChange:{before:'',after:''},primaryChange:{before:'',after:''}\n例如:将改名事件转为自己的属性可以返回一个对象{type:202,fromName:record.nameChange.before}",
+			"enableUseTargetSchema": "Kafka使用目标模型",
+			"enableUseTargetSchemaTooltip": "开启了此配置之后，Kafka会使用目标的模型进行推演，要保证目标有模型，并且模型跟Kafka的消息匹配，否则会出现报错",
+			"customDmlThreadNum": "自定义消息体脚本解析线程数量",
+			"customDmlThreadNumTooltip": "提高解析脚本的线程数量，可以提高解析的速度",
+			"customParseThreadNum": "自定义解析脚本线程数量",
+			"customParseThreadNumTooltip": "Kafka自定义解析脚本数量，提高线程的数量，可以提高解析的速度",
+		},
+		"zh_TW": {
+			"partitionNumTooltip": "若Topic存在，分區的數量只能增加不能減小",
+			"replicasSizeTooltip": "副本集的數量在Topic創建後不能更改，並且創建時副本數的數量不能大於Kafka集群的數量。",
+			"replicasSize": "副本數數量",
+			"partitionNum": "分區數量",
+			"doc": "docs/kafka_zh_TW.md",
+			"nameSrvAddr": "Kafka地址",
+			"nameSrvAddrTip": "Kafka地址，多個地址用逗號分隔，如：192.168.1.200:9092,192.168.1.201:9092",
+			"mqTopicString": "主題表達式",
+			"mqTopicStringTooltip": "多個主題用逗號分隔，支持*?通配運算式（非正則）",
+			"krb5": "kerberos 認證",
+			"krb5Keytab": "密鑰表示文件",
+			"krb5KeytabTip": "keytab文件，可以實現ssh免登錄",
+			"krb5Conf": "配置文件",
+			"krb5ConfTip": "krb5的conf配置文件",
+			"krb5Principal": "主体配置",
+			"krb5PrincipalTip": "例如：kafka/hostname@REALM",
+			"krb5ServiceName": "服務名",
+			"krb5ServiceNameTip": "服務名，一般均為kafka",
+			"mqUsername": "賬號",
+			"mqPassword": "密碼",
+			"kafkaSaslMechanism": "加密方式",
+			"kafkaIgnoreInvalidRecord": "忽略非JSON對象格式消息",
+			"kafkaAcks": "ACK確認機制",
+			"not_sure": "不確認",
+			"just_write_master": "僅寫入master分區",
+			"write_most_isr": "寫入大多數ISR分區",
+			"write_all_isr": "寫入所有ISR分區",
+			"kafkaCompressionType": "消息壓縮類型",
+			"kafkaIgnorePushError": "忽略推理消息異常",
+			"schemaRegister": "模式註冊",
+			"schemaRegisterTip": "使用第三方模式註冊中心，需要額外提供地址，若打開基本認證還需要提供認證信息等",
+			"schemaRegisterUrl": "模式註冊地址",
+			"authCredentialsSource": "認證憑據來源",
+			"authUserName": "認證用戶名",
+			"authPassword": "認證密碼",
+			"basicAuth": "基本認證",
+			"enableScript": "自定義消息體格式",
+			"script": "腳本",
+			"enableCustomParse": "開啓自定義解析消息體",
+			"enableCustomParseTooltip": "參數說明\n record爲每條消息的body 要將每條消息轉換爲Tapdata 的DML或DDL事件，需要遵守以下協議。\n·1、若要轉爲添加字段DDL,js中返回的對象需要有以下格式 record.type=209, record.newFields=[{name:'要添加的字段名',dataType:'要添加的字段類型'}],newFields是一個數組。dateType的值可以爲Map、Array、Number、Boolean、String、Integer、Text。\n2、若要轉爲改名DDL,需要將腳本的返回值需要有以下格式 record.type=202, record.nameChange={after:'更改後的名字',before:'更改前的名字'}。\n3、若要轉爲刪除字段DDL，腳本返回值的對象需要有以下格式 record.type=207，record.fieldName='要刪除的字段'。\n4、要轉爲dml事件，腳本的返回值需要有以下格式 record.type='insert或者'update或者'delete'。insert事件record中需要有after，delete事件需要有before，update事件record中需要有before或者after\n5、若要丟棄此消息，則return null",
+			"scriptTooltip": "1.參數說明\n·record爲每條數據記錄，包含header和data，data中包含before和after\n·op爲操作類型，共3種：insert，update，delete\n·conditionKeys爲主鍵字段名集合\n2.示例\n·kafka message中添加操作類型: record.data.op = op\n·添加自定義header: record.header.test='test header'\n·刪除before: delete record.data.before\n·丟棄該條數據: return null",
+			"enabledCustomDDLMessage": "開啓自定義DDL事件消息格式體",
+			"enabledCustomDDLMessageTooltip": "參數說明\n record爲每條ddl中的信息，ddl事件中都會有referenceTime、time、type、tableId屬性。tableId代表表名、type代表DDL事件的類型，209代表新增字段DDL事件、202代表改名DDL事件、207代表刪除字段DDL事件、201代表改變字段屬性DDL事件。不同類型的DDL事件中有不同的屬性。\n1、新增字段DDL中會有newFields，代表所有新增字段的屬性。如newFields:[{autoInc: false, dataType:'STRING',name:'f1',nullable: true,partitionKey:false,primaryKey:false}]\n2、刪除字段事件DDL特有的屬性是：fieldName:'刪除的字段名'\n3、字段改名事件特有的屬性：nameChange:{after:'改名後的值',before:'改名前的值'}\n4、字段改屬性事件DDL特有的屬性是：fieldName:'要改的屬性名'代表需要更改屬性的名稱,dataTypeChange：{before:'更改前的數據類型',after:'更改後的數據類型'}數據類型改變,checkChange：{before:'更改前的約束',after:'更改後的約束'},nullableChange:{before:true,after:false}是否可以爲nullable,defaultChange:{before:'',after:''},primaryChange:{before:'',after:''}\n如想要將改名事件轉爲自己的屬性可以返回一個對象{type:202,fromName:record.nameChange.before}",
+			"enableUseTargetSchema": "Kafka使用目標模型",
+			"enableUseTargetSchemaTooltip": "開啓了此配置之後，Kafka會使用目標的模型進行推演，要保證目標有模型，並且模型跟Kafka的消息匹配，否則會出現報錯",
+			"customDmlThreadNum": "自定義消息體腳本解析線程數量",
+			"customDmlThreadNumTooltip": "提高解析腳本的線程數量，可以提高解析的速度",
+			"customParseThreadNum": "自定義解析腳本線程數量",
+			"customParseThreadNumTooltip": "Kafka自定義解析腳本數量，提高線程的數量，可以提高解析的速度",
+		}
+	},
+	"dataTypes": {
+		"OBJECT": {
+			"to": "TapMap"
+		},
+		"ARRAY": {
+			"to": "TapArray"
+		},
+		"NUMBER": {
+			"precision": [
+				1,
+				1000
+			],
+			"scale": [
+				0,
+				1000
+			],
+			"fixed": true,
+			"preferPrecision": 20,
+			"preferScale": 8,
+			"priority": 1,
+			"to": "TapNumber"
+		},
+		"INTEGER": {
+			"bit": 32,
+			"priority": 1,
+			"value": [
+				-2147483648,
+				2147483647
+			],
+			"to": "TapNumber"
+		},
+		"BOOLEAN": {
+			"to": "TapBoolean"
+		},
+		"STRING[($byte)]": {
+			"priority": 1,
+			"defaultByte": 200,
+			"preferByte": 200,
+			"to": "TapString"
+		},
+		"TEXT": {
+			"to": "TapString"
+		}
+	}
 }

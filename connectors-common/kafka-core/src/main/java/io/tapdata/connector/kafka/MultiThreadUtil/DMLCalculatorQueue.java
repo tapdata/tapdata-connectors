@@ -18,7 +18,6 @@ import javax.script.Invocable;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import static io.tapdata.common.constant.MqOp.*;
 import static io.tapdata.connector.kafka.KafkaService.executeScript;
@@ -26,27 +25,22 @@ import static io.tapdata.connector.kafka.KafkaService.executeScript;
 public class DMLCalculatorQueue<P,V> extends ConcurrentCalculatorQueue<DMLRecordEventConvert, DMLRecordEventConvert>{
 	private static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
 	private Concurrents<Invocable> customDmlConcurrents;
-	private ProduceInfo produceInfo;
-	private Consumer<DMLRecordEventConvert> sendConsumer;
+	private ProduceCustomDmlRecordInfo produceCustomDmlRecordInfo;
+
 	public DMLCalculatorQueue(int threadSize, int queueSize,Concurrents<Invocable> customDmlConcurrents) {
 		super(threadSize, queueSize);
 		this.customDmlConcurrents=customDmlConcurrents;
 	}
 
-	public void setSendConsumer(Consumer<DMLRecordEventConvert> sendConsumer) {
-		this.sendConsumer = sendConsumer;
-	}
-
-	public ProduceInfo getProduceInfo() {
-		return produceInfo;
-	}
-
-	public void setProduceInfo(ProduceInfo produceInfo) {
-		this.produceInfo = produceInfo;
+	public void setProduceInfo(ProduceCustomDmlRecordInfo produceCustomDmlRecordInfo) {
+		this.produceCustomDmlRecordInfo = produceCustomDmlRecordInfo;
 	}
 
 	@Override
 	protected void distributingData(DMLRecordEventConvert dmlRecordEventConvert) {
+		if (null == dmlRecordEventConvert.getJsConvertResultMap()) {
+			return;
+		}
 		TapRecordEvent event = dmlRecordEventConvert.getRecordEvent();
 		Map<String, Object> jsConvertResultMap = dmlRecordEventConvert.getJsConvertResultMap();
 		byte[] body = {};
@@ -83,27 +77,27 @@ public class DMLCalculatorQueue<P,V> extends ConcurrentCalculatorQueue<DMLRecord
 		Callback callback = (metadata, exception) -> {
 			try {
 				if (EmptyKit.isNotNull(exception)) {
-					this.produceInfo.getListResult().addError(event, exception);
+					this.produceCustomDmlRecordInfo.getListResult().addError(event, exception);
 				}
 				switch (finalMqOp) {
 					case INSERT:
-						produceInfo.getInsert().incrementAndGet();
+						produceCustomDmlRecordInfo.getInsert().incrementAndGet();
 						break;
 					case UPDATE:
-						produceInfo.getUpdate().incrementAndGet();
+						produceCustomDmlRecordInfo.getUpdate().incrementAndGet();
 						break;
 					case DELETE:
-						produceInfo.getDelete().incrementAndGet();
+						produceCustomDmlRecordInfo.getDelete().incrementAndGet();
 						break;
 				}
 			} finally {
-				produceInfo.getCountDownLatch().countDown();
+				produceCustomDmlRecordInfo.getCountDownLatch().countDown();
 			}
 		};
 		ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(dmlRecordEventConvert.getTapTable().getId(),
 			null, null, dmlRecordEventConvert.getKafkaMessageKey(), body,
 			recordHeaders);
-		produceInfo.getKafkaProducer().send(producerRecord, callback);
+		produceCustomDmlRecordInfo.getKafkaProducer().send(producerRecord, callback);
 	}
 
 	@Override
@@ -155,6 +149,14 @@ public class DMLCalculatorQueue<P,V> extends ConcurrentCalculatorQueue<DMLRecord
 		});
 		return result;
 	}
+
+	@Override
+	protected void handleError(Exception e) {
+		if(getHasException().compareAndSet(false, true)){
+			getException().set(e);
+		}
+	}
+
 	private byte[] getKafkaMessageKey(Map<String, Object> data, TapTable tapTable) {
 		if (EmptyKit.isEmpty(tapTable.primaryKeys(true))) {
 			return null;
@@ -163,10 +165,6 @@ public class DMLCalculatorQueue<P,V> extends ConcurrentCalculatorQueue<DMLRecord
 		}
 	}
 
-	@Override
-	protected void handleError(Exception e) {
-
-	}
 	private void removeIfEmptyInMap(Map<String, Map<String, Object>> map, String key) {
 		if (!map.containsKey(key)) return;
 		Map<String, Object> o = map.get(key);
