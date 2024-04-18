@@ -4,6 +4,7 @@ import io.debezium.util.HexConverter;
 import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.util.NetUtil;
 import org.apache.commons.lang3.StringUtils;
@@ -27,6 +28,7 @@ public class MysqlUtil extends JdbcUtil {
 
 	private static final DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS");
 	private static final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
+	private final static String pdkId = "mysql";
 
 	public static Integer getSubVersion(String version, int index) {
 		if (StringUtils.isBlank(version)) {
@@ -206,13 +208,10 @@ public class MysqlUtil extends JdbcUtil {
 		String deploymentMode = mysqlConfig.getDeploymentMode();
 		if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
 			ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress = mysqlConfig.getMasterSlaveAddress();
-			if (EmptyKit.isEmpty(masterSlaveAddress)) {
-				throw new RuntimeException("host cannot be empty");
-			}
 			testHostPortForMasterSlave(mysqlConfig);
 			ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress = mysqlConfig.getAvailableMasterSlaveAddress();
 			if (EmptyKit.isEmpty(availableMasterSlaveAddress)){
-				throw new RuntimeException("there is no available node");
+				throw new TapPdkRetryableEx(pdkId, new Exception("there is no available node"));
 			}
 			MysqlJdbcContextV2 mysqlJdbcContext;
 			HashSet<LinkedHashMap<String, Integer>> masterNode = new HashSet<>(availableMasterSlaveAddress);
@@ -231,7 +230,7 @@ public class MysqlUtil extends JdbcUtil {
 					mysqlConfig.setHost(host);
 					mysqlConfig.setPort(port);
                     try {
-						mysqlJdbcContext = contextMapForMasterSlave.get(host+port);
+						mysqlJdbcContext = contextMapForMasterSlave.get(host+":"+port);
                         masterHostPortAndStatus = mysqlJdbcContext.querySlaveStatus();
 					} catch (Throwable e) {
                         throw new RuntimeException(e);
@@ -249,9 +248,9 @@ public class MysqlUtil extends JdbcUtil {
 				needQuerySlaveStatus = false;
 			}
 			if (masterNode.size() < 1) {
-				throw new RuntimeException(String.format("master node:%s is not available, please make sure host port is valid and slave status is right", masterSlaveAddress.get(0)));
+				throw new TapPdkRetryableEx(pdkId, new Exception("master node is not assigned, please make sure host port is valid and slave status is right"));
 			} else if (masterNode.size() > 1) {
-				throw new RuntimeException("please make sure there is one master node at most");
+				throw new TapPdkRetryableEx(pdkId, new Exception("please make sure there is one master node at most"));
 			} else {
 				LinkedHashMap<String, Integer> master = masterNode.stream().findFirst().get();
 				mysqlConfig.setHost(String.valueOf(master.get("host")));
@@ -272,7 +271,7 @@ public class MysqlUtil extends JdbcUtil {
 			for (LinkedHashMap<String, Integer> address : availableMasterSlaveAddress) {
 				String host = String.valueOf(address.get("host"));
 				Integer port = address.get("port");
-				mysqlJdbcContext = contextMapForMasterSlave.get(host+port);
+				mysqlJdbcContext = contextMapForMasterSlave.get(host+":"+port);
                 try {
 					Timestamp timestamp = mysqlJdbcContext.queryCurrentTime();
 					long end = System.currentTimeMillis();
@@ -299,10 +298,8 @@ public class MysqlUtil extends JdbcUtil {
 						inconsistent.add(hostPortAndTime2);
 						return inconsistent;
 					}
-
 				}
 			}
-
 		}
 		return null;
 	}
@@ -319,7 +316,7 @@ public class MysqlUtil extends JdbcUtil {
 				Integer port = address.get("port");
 				mysqlConfig.setHost(host);
 				mysqlConfig.setPort(port);
-				contextMap.putIfAbsent(host+port, new MysqlJdbcContextV2(mysqlConfig));
+				contextMap.putIfAbsent(host+":"+port, new MysqlJdbcContextV2(mysqlConfig));
 			}
 		}
 		return contextMap;

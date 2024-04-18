@@ -40,6 +40,21 @@ public class MysqlConfig extends CommonDbConfig {
             deploymentMode = DeployModeEnum.STANDALONE.getMode();
             config.setDeploymentMode(deploymentMode);
         }
+        if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
+            ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress = config.getMasterSlaveAddress();
+            if (EmptyKit.isEmpty(masterSlaveAddress)) {
+                throw new RuntimeException("host cannot be empty");
+            }
+            for (LinkedHashMap<String, Integer> hostPort : masterSlaveAddress) {
+                if (EmptyKit.isEmpty(hostPort)) {
+                    continue;
+                } else {
+                    if (null == hostPort.get("host") || null == hostPort.get("port")) {
+                        throw new IllegalArgumentException("please check server host and port configuration");
+                    }
+                }
+            }
+        }
         return config;
     }
 
