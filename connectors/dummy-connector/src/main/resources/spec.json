@@ -499,8 +499,7 @@
       "to": "TapString",
       "byte": "16m",
       "defaultByte": 64,
-      "preferByte": 100,
-			"byteRatio": 3
+      "preferByte": 100
 		},
     "number[($precision,$scale)]": {
       "to": "TapNumber",
@@ -591,7 +590,6 @@
       "to": "TapString",
       "byte": 36,
       "preferByte": 36,
-			"byteRatio": 3,
       "queryOnly": true
     },
     "serial[($begin,$step)]": {
@@ -608,14 +606,15 @@
         1,
         40
       ],
-      "defaultPrecision": 4
+      "defaultPrecision": 4,
+			"queryOnly": true
     },
     "rstring[($byte)]": {
       "to": "TapString",
       "byte": "16m",
       "defaultByte": 8,
       "preferByte": 8,
-			"byteRatio": 3
+			"queryOnly": true
 		}
   }
 }
