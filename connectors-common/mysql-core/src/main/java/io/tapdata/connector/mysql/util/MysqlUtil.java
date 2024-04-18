@@ -211,7 +211,7 @@ public class MysqlUtil extends JdbcUtil {
 			testHostPortForMasterSlave(mysqlConfig);
 			ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress = mysqlConfig.getAvailableMasterSlaveAddress();
 			if (EmptyKit.isEmpty(availableMasterSlaveAddress)){
-				throw new TapPdkRetryableEx(pdkId, new Exception("there is no available node"));
+				throw new TapPdkRetryableEx(pdkId, new RuntimeException("there is no available node"));
 			}
 			MysqlJdbcContextV2 mysqlJdbcContext;
 			HashSet<LinkedHashMap<String, Integer>> masterNode = new HashSet<>(availableMasterSlaveAddress);
@@ -248,9 +248,9 @@ public class MysqlUtil extends JdbcUtil {
 				needQuerySlaveStatus = false;
 			}
 			if (masterNode.size() < 1) {
-				throw new TapPdkRetryableEx(pdkId, new Exception("master node is not assigned, please make sure host port is valid and slave status is right"));
+				throw new TapPdkRetryableEx(pdkId, new RuntimeException("master node is not assigned, please make sure host port is valid and slave status is right"));
 			} else if (masterNode.size() > 1) {
-				throw new TapPdkRetryableEx(pdkId, new Exception("please make sure there is one master node at most"));
+				throw new TapPdkRetryableEx(pdkId, new RuntimeException("please make sure there is one master node at most"));
 			} else {
 				LinkedHashMap<String, Integer> master = masterNode.stream().findFirst().get();
 				mysqlConfig.setHost(String.valueOf(master.get("host")));
