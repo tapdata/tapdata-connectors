@@ -187,11 +187,6 @@ public class MysqlUtil extends JdbcUtil {
             try {
 				if (EmptyKit.isEmpty(hostPort)){
 					continue;
-				}else {
-					if (null == hostPort.get("host") || null == hostPort.get("port"))
-					{
-						throw new IllegalArgumentException("please check server host and port configuration");
-					}
 				}
                 NetUtil.validateHostPortWithSocket(String.valueOf(hostPort.get("host")), hostPort.get("port"));
 				if (!availableMasterSlaveAddress.contains(hostPort)){
