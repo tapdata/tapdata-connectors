@@ -148,7 +148,7 @@
                         </goals>
 
                         <configuration>
-                            <outputDirectory>../dist/GA</outputDirectory>
+                            <outputDirectory>../dist</outputDirectory>
                             <resources>
                                 <resource>
                                     <directory>${basedir}/target/</directory>
