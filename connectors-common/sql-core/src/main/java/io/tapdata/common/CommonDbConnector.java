@@ -84,6 +84,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             //2、table name/comment
             String table = subTable.getString("tableName");
             TapTable tapTable = table(table);
+            tapTable.setTableAttr(getSpecificAttr(subTable));
             tapTable.setComment(subTable.getString("tableComment"));
             //3、primary key and table index
             List<String> primaryKey = TapSimplify.list();
@@ -123,6 +124,10 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected TapField makeTapField(DataMap dataMap) {
         return new CommonColumn(dataMap).getTapField();
+    }
+
+    protected Map<String, Object> getSpecificAttr(DataMap dataMap) {
+        return null;
     }
 
     protected void getTableNames(TapConnectionContext tapConnectionContext, int batchSize, Consumer<List<String>> listConsumer) throws SQLException {
