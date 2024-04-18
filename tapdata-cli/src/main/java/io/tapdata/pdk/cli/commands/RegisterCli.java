@@ -12,6 +12,7 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.spec.TapNodeSpecification;
 import io.tapdata.pdk.cli.CommonCli;
 import io.tapdata.pdk.cli.services.UploadFileService;
+import io.tapdata.pdk.cli.utils.PrintUtil;
 import io.tapdata.pdk.core.connector.TapConnector;
 import io.tapdata.pdk.core.connector.TapConnectorManager;
 import io.tapdata.pdk.core.constants.DataSourceQCType;
@@ -21,13 +22,20 @@ import io.tapdata.pdk.core.utils.CommonUtils;
 import io.tapdata.pdk.core.utils.IOUtils;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.output.WriterOutputStream;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.poi.ss.formula.functions.T;
 import picocli.CommandLine;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.io.Writer;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -37,6 +45,7 @@ import java.util.*;
 )
 public class RegisterCli extends CommonCli {
     private static final String TAG = RegisterCli.class.getSimpleName();
+    private PrintUtil printUtil;
     @CommandLine.Parameters(paramLabel = "FILE", description = "One or more pdk jar files")
     File[] files;
 
@@ -64,20 +73,41 @@ public class RegisterCli extends CommonCli {
     @CommandLine.Option(names = {"-f", "--filter"}, required = false, description = "The list which are the Authentication types should not be skipped, if value is empty will register all connector. if it contains multiple, please separate them with commas")
     private String needRegisterConnectionTypes;
 
+    @CommandLine.Option(names = {"-X", "--X"}, required = false, description = "Output detailed logs, true or false")
+    private boolean showAllMessage = false;
+
+
     public Integer execute() throws Exception {
+        printUtil = new PrintUtil(showAllMessage);
         List<String> filterTypes = generateSkipTypes();
         if (!filterTypes.isEmpty()) {
-            System.out.println(String.format("Starting to register data sources, plan to skip data sources that are not within the registration scope. The types of data sources that need to be registered are: %s", filterTypes));
+            printUtil.print(String.format("* Starting to register data sources, plan to skip data sources that are not within the registration scope.\n* The types of data sources that need to be registered are: %s", filterTypes));
         } else {
-            System.out.println("Start registering data sources and plan to register all submitted data sources");
+            printUtil.print("Start registering data sources and plan to register all submitted data sources");
         }
         StringJoiner unUploaded = new StringJoiner("\n");
+        files = getAllJarFile(files);
         try {
             CommonUtils.setProperty("refresh_local_jars", "true");
-            TapConnectorManager.getInstance().start(Arrays.asList(files));
+            PrintStream out = System.out;
+            try {
+                System.setOut(new PrintStream(new ByteArrayOutputStream() {
+                    @Override
+                    public void write(int b) {
+                        if (showAllMessage) {
+                            super.write(b);
+                        }
+                    }
+                }));
+                TapConnectorManager.getInstance().start(Arrays.asList(files));
+            } finally {
+                System.setOut(out);
+            }
 
             try {
+                printUtil.print(PrintUtil.TYPE.INFO, "Register connector to: " + tmUrl);
                 for (File file : files) {
+                    printUtil.print(PrintUtil.TYPE.APPEND, String.format("* Register Connector: %s  Starting", file.getName()));
                     List<String> jsons = new ArrayList<>();
                     TapConnector connector = TapConnectorManager.getInstance().getTapConnectorByJarName(file.getName());
                     Collection<TapNodeInfo> tapNodeInfoCollection = connector.getTapNodeClassFactory().getConnectorTapNodeInfos();
@@ -87,9 +117,10 @@ public class RegisterCli extends CommonCli {
                     for (TapNodeInfo nodeInfo : tapNodeInfoCollection) {
                         TapNodeSpecification specification = nodeInfo.getTapNodeSpecification();
                         String authentication = specification.getManifest().get("Authentication");
+                        connectionType = authentication;
                         if (needSkip(authentication, filterTypes)) {
-                            connectionType = authentication;
                             needUpload = false;
+                            printUtil.print(PrintUtil.TYPE.INFO, String.format("... Skipped with (%s)", connectionType));
                             break;
                         }
                         needUpload = true;
@@ -134,7 +165,7 @@ public class RegisterCli extends CommonCli {
                         o.put("group", nodeInfo.getNodeClass().getPackage().getImplementationVendor());
 
                         TapNodeContainer nodeContainer = JSON.parseObject(IOUtils.toString(nodeInfo.readResource(nodeInfo.getNodeClass().getAnnotation(TapConnectorClass.class).value())), TapNodeContainer.class);
-                        if(nodeContainer.getDataTypes() == null) {
+                        if (nodeContainer.getDataTypes() == null) {
                             try (InputStream dataTypeInputStream = this.getClass().getClassLoader().getResourceAsStream("default-data-types.json")) {
                                 if (dataTypeInputStream != null) {
                                     String dataTypesJson = org.apache.commons.io.IOUtils.toString(dataTypeInputStream, StandardCharsets.UTF_8);
@@ -149,24 +180,24 @@ public class RegisterCli extends CommonCli {
                         Map<String, Object> messsages = nodeContainer.getMessages();
                         String replacePath = null;//"replace_default";
                         Map<String, Object> replaceConfig = needReplaceKeyWords(nodeInfo, replacePath);
-                        if(messsages != null) {
+                        if (messsages != null) {
                             Set<String> keys = messsages.keySet();
-                            for(String key : keys) {
-                                if(!key.equalsIgnoreCase("default")) {
+                            for (String key : keys) {
+                                if (!key.equalsIgnoreCase("default")) {
                                     Map<String, Object> messagesForLan = (Map<String, Object>) messsages.get(key);
-                                    if(messagesForLan != null) {
+                                    if (messagesForLan != null) {
                                         Object docPath = messagesForLan.get("doc");
-                                        if(docPath instanceof String) {
+                                        if (docPath instanceof String) {
                                             String docPathStr = (String) docPath;
-                                            if(!inputStreamMap.containsKey(docPathStr)) {
+                                            if (!inputStreamMap.containsKey(docPathStr)) {
                                                 Optional.ofNullable(nodeInfo.readResource(docPathStr)).ifPresent(stream -> {
                                                     InputStream inputStream = stream;
-                                                    if (null != replaceConfig){
+                                                    if (null != replaceConfig) {
                                                         Scanner scanner = null;
                                                         try {
                                                             scanner = new Scanner(stream, "UTF-8");
                                                             StringBuilder docTxt = new StringBuilder();
-                                                            while(scanner.hasNextLine()) {
+                                                            while (scanner.hasNextLine()) {
                                                                 docTxt.append(scanner.nextLine()).append("\n");
                                                             }
                                                             String finalTxt = docTxt.toString();
@@ -174,10 +205,12 @@ public class RegisterCli extends CommonCli {
                                                                 finalTxt = finalTxt.replaceAll(entry.getKey(), String.valueOf(entry.getValue()));
                                                             }
                                                             inputStream = new ByteArrayInputStream(finalTxt.getBytes(StandardCharsets.UTF_8));
-                                                        } catch (Exception e) {} finally {
+                                                        } catch (Exception e) {
+                                                        } finally {
                                                             try {
                                                                 if (null != scanner) scanner.close();
-                                                            }catch (Exception ignore){}
+                                                            } catch (Exception ignore) {
+                                                            }
                                                         }
                                                     }
                                                     inputStreamMap.put(docPathStr, inputStream);
@@ -200,13 +233,13 @@ public class RegisterCli extends CommonCli {
 
                         List<Capability> capabilities = connectorFunctions.getCapabilities();
                         DataMap dataMap = nodeContainer.getConfigOptions();
-                        if(dataMap != null) {
+                        if (dataMap != null) {
                             List<Map<String, Object>> capabilityList = (List<Map<String, Object>>) dataMap.get("capabilities");
 
-                            if(CollectionUtils.isNotEmpty(capabilityList)) {
-                                for(Map<String, Object> capabilityFromSpec : capabilityList) {
+                            if (CollectionUtils.isNotEmpty(capabilityList)) {
+                                for (Map<String, Object> capabilityFromSpec : capabilityList) {
                                     String capabilityId = (String) capabilityFromSpec.get("id");
-                                    if(capabilityId != null) {
+                                    if (capabilityId != null) {
                                         List<String> alternatives = (List<String>) capabilityFromSpec.get("alternatives");
                                         capabilities.add(Capability.create(capabilityId).alternatives(alternatives).type(Capability.TYPE_OTHER));
                                     }
@@ -214,10 +247,10 @@ public class RegisterCli extends CommonCli {
                             }
 
                             Map<String, Object> supportDDL = (Map<String, Object>) dataMap.get("supportDDL");
-                            if(supportDDL != null) {
+                            if (supportDDL != null) {
                                 List<String> ddlEvents = (List<String>) supportDDL.get("events");
-                                if(ddlEvents != null) {
-                                    for(String ddlEvent : ddlEvents) {
+                                if (ddlEvents != null) {
+                                    for (String ddlEvent : ddlEvents) {
                                         capabilities.add(Capability.create(ddlEvent).type(Capability.TYPE_DDL));
                                     }
                                 }
@@ -236,32 +269,80 @@ public class RegisterCli extends CommonCli {
                         String jsonString = o.toJSONString();
                         jsons.add(jsonString);
                     }
+
                     if (!needUpload) {
                         unUploaded.add(String.format("\t- %s's source types is [%s]", file.getName(), connectionType));
                         continue;
                     }
-                    if(file.isFile()) {
-                        System.out.println(file.getName() + " uploading... to url " + tmUrl);
-                        UploadFileService.upload(inputStreamMap, file, jsons, latest, tmUrl, authToken, ak, sk);
-                        System.out.println(file.getName() + " registered successfully");
-                    }
-                    else {
-                        System.out.println("File " + file + " doesn't exists");
-                        System.out.println(file.getName() + " registered failed");
+                    if (file.isFile()) {
+                        printUtil.print(PrintUtil.TYPE.INFO, " => uploading ");
+                        printUtil.print(PrintUtil.TYPE.DEBUG, file.getName() + " uploading... to url " + tmUrl);
+                        UploadFileService.upload(inputStreamMap, file, jsons, latest, tmUrl, authToken, ak, sk, printUtil);
+                        printUtil.print(PrintUtil.TYPE.DEBUG, file.getName() + " registered successfully");
+                        printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s | (%s) Completed", file.getName(), connectionType));
+                    } else {
+                        printUtil.print(PrintUtil.TYPE.DEBUG, "File " + file + " doesn't exists");
+                        printUtil.print(PrintUtil.TYPE.DEBUG, file.getName() + " registered failed");
                     }
                 }
             } finally {
                 if (unUploaded.toString().length() > 0) {
-                    System.out.println(String.format("[INFO] Some connector that are not in the scope are registered this time: \n%s\nThe data connector type that needs to be registered is: %s\n", unUploaded.toString(), filterTypes));
+                    printUtil.print(PrintUtil.TYPE.DEBUG, String.format("[INFO] Some connector that are not in the scope are registered this time: \n%s\nThe data connector type that needs to be registered is: %s\n", unUploaded.toString(), filterTypes));
                 }
             }
             System.exit(0);
         } catch (Throwable throwable) {
-            throwable.printStackTrace();
-            CommonUtils.logError(TAG, "Start failed", throwable);
+            printUtil.print(PrintUtil.TYPE.WARN, throwable.getMessage());
+            if (showAllMessage) {
+                throwable.printStackTrace();
+                CommonUtils.logError(TAG, "Start failed", throwable);
+            }
             System.exit(-1);
         }
         return 0;
+    }
+
+    public File[] getAllJarFile(File[] paths) {
+        Collection<File> allJarFiles = getAllJarFiles(paths);
+        File[] strings = new File[allJarFiles.size()];
+        return allJarFiles.toArray(strings);
+    }
+
+    protected Collection<File> getAllJarFiles(File[] paths) {
+        Set<File> path = new HashSet<>();
+        for (File s : paths) {
+            fileTypeDirector(s, path);
+        }
+        return path;
+    }
+
+    protected void fileTypeDirector(File f, Set<File> pathSet) {
+        int i = fileType(f);
+        switch (i) {
+            case 1:
+                File[] files = f.listFiles();
+                if (null != files && files.length > 0) {
+                    pathSet.addAll(getAllJarFiles(files));
+                }
+                break;
+            case 2:
+                pathSet.add(f);
+                break;
+        }
+    }
+
+
+    protected int fileType(File file) {
+        if (null == file || !file.exists()) {
+            return -1;
+        }
+        if (file.isDirectory()) {
+            return 1;
+        }
+        if (file.isFile() && file.getAbsolutePath().endsWith(".jar")) {
+            return 2;
+        }
+        return -1;
     }
 
     protected static final String path = "tapdata-cli/src/main/resources/replace/";
@@ -296,6 +377,6 @@ public class RegisterCli extends CommonCli {
     }
 
     protected boolean needSkip(String authentication, List<String> skipList) {
-        return !skipList.isEmpty() && !skipList.contains(String.valueOf(authentication).toUpperCase());
+        return StringUtils.isNotBlank(authentication) && !skipList.isEmpty() && !skipList.contains(String.valueOf(authentication).toUpperCase());
     }
 }
