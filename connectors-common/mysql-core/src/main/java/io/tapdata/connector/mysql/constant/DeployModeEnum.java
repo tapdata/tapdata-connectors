@@ -3,6 +3,8 @@ package io.tapdata.connector.mysql.constant;
 
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.HashMap;
+
 /**
  * @author lemon
  */
@@ -21,16 +23,14 @@ public enum DeployModeEnum {
     public String getMode() {
         return mode;
     }
+    public static final HashMap<String, DeployModeEnum> MODE_MAP = new HashMap();
+    static {
+        for (DeployModeEnum value : values()) {
+            MODE_MAP.put(value.getMode(), value);
+        }
+    }
 
     public static DeployModeEnum fromString(String mode) {
-        if (StringUtils.isBlank(mode)) {
-            return null;
-        }
-        for (DeployModeEnum value : values()) {
-            if (mode.equals(value.getMode())) {
-                return value;
-            }
-        }
-        return null;
+        return MODE_MAP.get(mode);
     }
 }
