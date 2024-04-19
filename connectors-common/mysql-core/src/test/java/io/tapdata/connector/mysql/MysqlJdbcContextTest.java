@@ -1,6 +1,5 @@
-package io.tapdata.connector.empty;
+package io.tapdata.connector.mysql;
 
-import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Nested;
