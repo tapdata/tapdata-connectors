@@ -37,41 +37,135 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  */
 @Slf4j
 public class UploadFileService {
+  public static class Param {
+    Map<String, InputStream> inputStreamMap;
+    File file;
+    List<String> jsons;
+    boolean latest;
+    String hostAndPort;
+    String token;
+    String ak;
+    String sk;
+    PrintUtil printUtil;
 
-  public static void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, boolean latest, String hostAndPort, String accessCode, String ak, String sk, PrintUtil printUtil) {
-
-    boolean cloud = StringUtils.isNotBlank(ak);
-
-
-    String token = null;
-    if (!cloud) {
-
-      String tokenUrl = hostAndPort + "/api/users/generatetoken";
-      Map<String, String> param = new HashMap<>();
-      param.put("accesscode", accessCode);
-      String jsonString = JSON.toJSONString(param);
-      String s = OkHttpUtils.postJsonParams(tokenUrl, jsonString);
-
-      printUtil.print(PrintUtil.TYPE.DEBUG, "generate token " + s);
-
-      if (StringUtils.isBlank(s)) {
-        printUtil.print(PrintUtil.TYPE.ERROR, "TM sever not found or generate token failed");
-        return;
-      }
-
-      Map map = JSON.parseObject(s, Map.class);
-      Object data = map.get("data");
-      if (null == data) {
-        printUtil.print(PrintUtil.TYPE.ERROR, "TM sever not found or generate token failed");
-        return;
-      }
-      JSONObject data1 = (JSONObject) data;
-      token = (String) data1.get("id");
-      if (StringUtils.isBlank(token)) {
-        printUtil.print(PrintUtil.TYPE.ERROR, "TM sever not found or generate token failed");
-        return;
-      }
+    public Map<String, InputStream> getInputStreamMap() {
+      return inputStreamMap;
     }
+
+    public void setInputStreamMap(Map<String, InputStream> inputStreamMap) {
+      this.inputStreamMap = inputStreamMap;
+    }
+
+    public File getFile() {
+      return file;
+    }
+
+    public void setFile(File file) {
+      this.file = file;
+    }
+
+    public List<String> getJsons() {
+      return jsons;
+    }
+
+    public void setJsons(List<String> jsons) {
+      this.jsons = jsons;
+    }
+
+    public boolean isLatest() {
+      return latest;
+    }
+
+    public void setLatest(boolean latest) {
+      this.latest = latest;
+    }
+
+    public String getHostAndPort() {
+      return hostAndPort;
+    }
+
+    public void setHostAndPort(String hostAndPort) {
+      this.hostAndPort = hostAndPort;
+    }
+
+    public String getToken() {
+      return token;
+    }
+
+    public void setToken(String token) {
+      this.token = token;
+    }
+
+    public String getAk() {
+      return ak;
+    }
+
+    public void setAk(String ak) {
+      this.ak = ak;
+    }
+
+    public String getSk() {
+      return sk;
+    }
+
+    public void setSk(String sk) {
+      this.sk = sk;
+    }
+
+    public PrintUtil getPrintUtil() {
+      return printUtil;
+    }
+
+    public void setPrintUtil(PrintUtil printUtil) {
+      this.printUtil = printUtil;
+    }
+  }
+
+  public static boolean isCloud(String ak) {
+    return StringUtils.isNotBlank(ak);
+  }
+
+  public static String findOpToken(String hostAndPort, String accessCode, PrintUtil printUtil) {
+    String token = null;
+    String tokenUrl = hostAndPort + "/api/users/generatetoken";
+    Map<String, String> param = new HashMap<>();
+    param.put("accesscode", accessCode);
+    String jsonString = JSON.toJSONString(param);
+    String s = OkHttpUtils.postJsonParams(tokenUrl, jsonString);
+
+    printUtil.print(PrintUtil.TYPE.DEBUG, "generate token " + s);
+    String error = "* TM sever not found or generate token failed";
+    if (StringUtils.isBlank(s)) {
+      printUtil.print(PrintUtil.TYPE.ERROR, error);
+      return null;
+    }
+
+    Map<?, ?> map = JSON.parseObject(s, Map.class);
+    Object data = map.get("data");
+    if (null == data) {
+      printUtil.print(PrintUtil.TYPE.ERROR, error);
+      return null;
+    }
+    JSONObject data1 = (JSONObject) data;
+    token = (String) data1.get("id");
+    if (StringUtils.isBlank(token)) {
+      printUtil.print(PrintUtil.TYPE.ERROR, error);
+      return token;
+    }
+    return token;
+  }
+
+  public static void uploadSourceToTM(Param paramEntity) {
+    Map<String, InputStream> inputStreamMap = paramEntity.getInputStreamMap();
+    File file = paramEntity.getFile();
+    List<String> jsons = paramEntity.jsons;
+    boolean latest = paramEntity.latest;
+    String hostAndPort = paramEntity.hostAndPort;
+    String token = paramEntity.token;
+    String ak = paramEntity.ak;
+    String sk = paramEntity.sk;
+    PrintUtil printUtil = paramEntity.printUtil;
+    boolean cloud = isCloud(ak);
 
     Map<String, String> params = new HashMap<>();
     params.put("ts", String.valueOf(System.currentTimeMillis()));
@@ -150,7 +244,6 @@ public class UploadFileService {
     final String method = "POST";
     HttpRequest request;
     if (cloud) {
-
       String bodyHash = Base64Util.encode(digest.digest());
 
       printUtil.print(PrintUtil.TYPE.DEBUG, String.format("bodyHash: %s", bodyHash));
@@ -207,15 +300,15 @@ public class UploadFileService {
 
     String response = request.body();
 
-    Map map = JSON.parseObject(response, Map.class);
+    Map<?, ?> map = JSON.parseObject(response, Map.class);
 
     String msg = "success";
     String result = "success";
     if (!"ok".equals(map.get("code"))) {
-        msg = map.get("reqId") != null ? (String) map.get("message") : (String) map.get("msg");
-        result = "fail";
+      msg = map.get("reqId") != null ? (String) map.get("message") : (String) map.get("msg");
+      result = "fail";
     }
-    printUtil.print(PrintUtil.TYPE.DEBUG, "result:" + result + ", name:" + file.getName() + ", msg:" + msg + ", response:" + response);
+    printUtil.print(PrintUtil.TYPE.DEBUG, "* Register result: " + result + ", name:" + (null == file ? "-" : file.getName()) + ", msg:" + msg + ", response:" + response);
   }
 
   public static RequestBody create(final MediaType mediaType, final InputStream inputStream) {
