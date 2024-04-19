@@ -79,22 +79,22 @@ import static java.util.Collections.singletonList;
 public class MongodbConnector extends ConnectorBase {
 
 	private static final int SAMPLE_SIZE_BATCH_SIZE = 1000;
-	private static final String COLLECTION_ID_FIELD = "_id";
+	protected static final String COLLECTION_ID_FIELD = "_id";
 	public static final String TAG = MongodbConnector.class.getSimpleName();
 	private final AtomicLong counter = new AtomicLong();
 	private final AtomicBoolean isShutDown = new AtomicBoolean(false);
 	protected MongodbConfig mongoConfig;
 	protected MongoClient mongoClient;
-	private MongoDatabase mongoDatabase;
+	protected MongoDatabase mongoDatabase;
 	private final int[] lock = new int[0];
 	MongoCollection<Document> mongoCollection;
 	private MongoBatchOffset batchOffset = null;
-	private MongodbExceptionCollector exceptionCollector;
+	protected MongodbExceptionCollector exceptionCollector;
 	private MongodbStreamReader mongodbStreamReader;
 	private ConcurrentHashMap<String,Set<String>> shardKeyMap = new ConcurrentHashMap<>();
 
 	private volatile MongodbWriter mongodbWriter;
-	private Map<String, Integer> stringTypeValueMap;
+	protected Map<String, Integer> stringTypeValueMap;
 
 	private final MongodbExecuteCommandFunction mongodbExecuteCommandFunction = new MongodbExecuteCommandFunction();
 	/**
@@ -108,7 +108,7 @@ public class MongodbConnector extends ConnectorBase {
 		return gte(firstPrimaryKey, value);
 	}
 
-	private MongoCollection<Document> getMongoCollection(String table) {
+	protected MongoCollection<Document> getMongoCollection(String table) {
 		MongoCollection<Document> collection = null;
 		try {
 			collection = mongoDatabase.getCollection(table);
@@ -1457,7 +1457,7 @@ public class MongodbConnector extends ConnectorBase {
 				}
 			}
 			if (mongoConfig.isNoCursorTimeout()) {
-				findIterable.noCursorTimeout(true).maxTime(30, TimeUnit.MINUTES);
+				findIterable.noCursorTimeout(true);
 			}
 
 			Document lastDocument = null;
@@ -1569,7 +1569,7 @@ public class MongodbConnector extends ConnectorBase {
 		return mongodbStreamReader;
 	}
 
-	private void getTableNames(TapConnectionContext tapConnectionContext, int batchSize, Consumer<List<String>> listConsumer) throws Throwable {
+	protected void getTableNames(TapConnectionContext tapConnectionContext, int batchSize, Consumer<List<String>> listConsumer) throws Throwable {
 		try {
 		String database = mongoConfig.getDatabase();
 		List<String> temp = new ArrayList<>();
@@ -1664,7 +1664,7 @@ public class MongodbConnector extends ConnectorBase {
 		throw throwable instanceof RuntimeException ? (RuntimeException) throwable : new RuntimeException(throwable);
 	}
 
-	private int getSampleSizeBatchSize(TapConnectionContext context) {
+	protected int getSampleSizeBatchSize(TapConnectionContext context) {
 		if (null == context) return SAMPLE_SIZE_BATCH_SIZE;
 		DataMap config = context.getConnectionConfig();
 		if (null == config || !config.containsKey("mongodbLoadSchemaSampleSize")) return SAMPLE_SIZE_BATCH_SIZE;

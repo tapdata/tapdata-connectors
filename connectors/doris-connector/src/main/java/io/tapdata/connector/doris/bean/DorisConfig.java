@@ -19,6 +19,8 @@ public class DorisConfig extends CommonDbConfig {
     private Integer writeByteBufferCapacity = 10240;
     private String writeFormat = "json";
     private String timezone;
+    private Boolean updateSpecific = false;
+    private String uniqueKeyType = "Unique";
 
     //customize
     public DorisConfig() {
@@ -102,6 +104,22 @@ public class DorisConfig extends CommonDbConfig {
 
     public void setTimezone(String timezone) {
         this.timezone = timezone;
+    }
+
+    public Boolean getUpdateSpecific() {
+        return updateSpecific;
+    }
+
+    public void setUpdateSpecific(Boolean updateSpecific) {
+        this.updateSpecific = updateSpecific;
+    }
+
+    public String getUniqueKeyType() {
+        return uniqueKeyType;
+    }
+
+    public void setUniqueKeyType(String uniqueKeyType) {
+        this.uniqueKeyType = uniqueKeyType;
     }
 
     public enum WriteFormat {

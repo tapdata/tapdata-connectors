@@ -4,10 +4,14 @@ import com.github.shyiko.mysql.binlog.network.ServerException;
 import io.debezium.connector.mysql.utils.GTIDException;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
+import io.tapdata.connector.mysql.config.MysqlConfig;
+import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.exception.*;
 import io.tapdata.kit.ErrorKit;
 
+import java.io.EOFException;
 import java.sql.SQLException;
+import java.sql.SQLNonTransientConnectionException;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -20,11 +24,18 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
     protected String getPdkId() {
         return pdkId;
     }
+    private MysqlConfig mysqlConfig;
 
     @Override
     public void collectTerminateByServer(Throwable cause) {
         if (cause instanceof SQLException && "08003".equals(((SQLException) cause).getSQLState())) {
             throw new TapPdkTerminateByServerEx(pdkId, ErrorKit.getLastCause(cause));
+        }
+        String deploymentMode = mysqlConfig.getDeploymentMode();
+        if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
+            if (cause instanceof SQLException && "Connection is closed".equals(cause.getMessage()) || cause instanceof EOFException && cause.getMessage().startsWith("Failed to read")){
+                throw new TapPdkRetryableEx(String.format("mysql master node:%s is down, try to switch other node if it become master node, previous available node: %s", mysqlConfig.getMasterNode(), mysqlConfig.getAvailableMasterSlaveAddress()), pdkId, cause);
+            }
         }
     }
 
@@ -142,6 +153,13 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
         super.collectCdcConfigInvalid(cause);
     }
 
+    public MysqlConfig getMysqlConfig() {
+        return mysqlConfig;
+    }
+
+    public void setMysqlConfig(MysqlConfig mysqlConfig) {
+        this.mysqlConfig = mysqlConfig;
+    }
     //exception collector for mysql needed to add later
     /*
      * 1、SQLSyntaxErrorException SQLState 42000 ErrorCode 1118

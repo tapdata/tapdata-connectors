@@ -3,17 +3,17 @@ package io.tapdata.connector.mysql;
 import com.alibaba.fastjson.JSONObject;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.mysql.config.MysqlConfig;
+import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.connector.mysql.constant.MysqlTestItem;
+import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.constant.ConnectionTypeEnum;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.TestItem;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -39,6 +39,7 @@ public class MysqlConnectionTest extends CommonDbTest {
     public MysqlConnectionTest(MysqlConfig mysqlConfig, Consumer<TestItem> consumer) {
         super(mysqlConfig, consumer);
         jdbcContext = new MysqlJdbcContextV2(mysqlConfig);
+        String deploymentMode = mysqlConfig.getDeploymentMode();
         if (!ConnectionTypeEnum.SOURCE.getType().equals(commonDbConfig.get__connectionType())) {
 //            testFunctionMap.put("testCreateTablePrivilege", this::testCreateTablePrivilege);
             testFunctionMap.put("testWritePrivilege", this::testWritePrivilege);
@@ -48,6 +49,27 @@ public class MysqlConnectionTest extends CommonDbTest {
             testFunctionMap.put("testBinlogRowImage", this::testBinlogRowImage);
             testFunctionMap.put("testCDCPrivileges", this::testCDCPrivileges);
         }
+        if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
+            testFunctionMap.put("testCurrentTimeConsistent", this::testCurrentTimeConsistent);
+        }
+    }
+    protected Boolean testCurrentTimeConsistent(){
+        AtomicReference<TestItem> testItem = new AtomicReference<>();
+        if (commonDbConfig instanceof MysqlConfig){
+            HashMap<String, MysqlJdbcContextV2> contextMap = MysqlUtil.buildContextMapForMasterSlave((MysqlConfig) commonDbConfig);
+            ArrayList<Map<String, Object>> maps = MysqlUtil.compareMasterSlaveCurrentTime((MysqlConfig) commonDbConfig, contextMap);
+            if (EmptyKit.isEmpty(maps)){
+                testItem.set(testItem(MysqlTestItem.CHECK_NODE_CURRENT_TIME_CONSISTENT.getContent(), TestItem.RESULT_SUCCESSFULLY));
+            } else {
+                cdcCapability = false;
+                if (maps.size() == 2){
+                    testItem.set(testItem(MysqlTestItem.CHECK_NODE_CURRENT_TIME_CONSISTENT.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
+                            String.format("The time of each node is inconsistent, please check nodes: %s and %s", maps.get(0).toString(), maps.get(1).toString())));
+                }
+            }
+        }
+        consumer.accept(testItem.get());
+        return cdcCapability;
     }
 
     protected String getGrantsSql() {

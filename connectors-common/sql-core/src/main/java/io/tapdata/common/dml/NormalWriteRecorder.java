@@ -13,6 +13,13 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Statement;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -38,6 +45,8 @@ public abstract class NormalWriteRecorder {
     protected String preparedStatementKey;
     protected Map<String, PreparedStatement> preparedStatementMap = new HashMap<>();
     protected PreparedStatement preparedStatement = null;
+    protected List<String> largeSqlValues;
+    protected boolean largeSql = false;
 
     protected final AtomicLong atomicLong = new AtomicLong(0); //record counter
     protected final List<TapRecordEvent> batchCache = TapSimplify.list(); //event cache
@@ -62,6 +71,13 @@ public abstract class NormalWriteRecorder {
         columnTypeMap = tapTable.getNameFieldMap().entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, v -> v.getValue().getDataType()));
     }
 
+    public void setLargeSql(boolean largeSql) {
+        this.largeSql = largeSql;
+        if (largeSql) {
+            largeSqlValues = new ArrayList<>();
+        }
+    }
+
     /**
      * batch write events
      *
@@ -70,6 +86,15 @@ public abstract class NormalWriteRecorder {
     public void executeBatch(WriteListResult<TapRecordEvent> listResult) throws SQLException {
         long succeed = batchCache.size();
         if (succeed <= 0) {
+            return;
+        }
+        if (largeSql) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(getLargeInsertSql());
+                largeSqlValues.clear();
+                batchCache.clear();
+            }
+            atomicLong.addAndGet(succeed);
             return;
         }
         try {
@@ -137,6 +162,10 @@ public abstract class NormalWriteRecorder {
         if (EmptyKit.isEmpty(after)) {
             return;
         }
+        if (largeSql) {
+            largeInsert(after);
+            return;
+        }
         if (EmptyKit.isEmpty(uniqueCondition)) {
             justInsert(after);
         } else {
@@ -180,6 +209,10 @@ public abstract class NormalWriteRecorder {
     //插入唯一键冲突时忽略
     protected void insertIgnore(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         throw new UnsupportedOperationException("insertIgnore is not supported");
+    }
+
+    protected void largeInsert(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("largeInsert is not supported");
     }
 
     //直接插入
@@ -246,6 +279,12 @@ public abstract class NormalWriteRecorder {
             preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
         }
         setBeforeValue(containsNull, before, pos);
+    }
+
+    protected String getLargeInsertSql() {
+        return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
+                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
+                + String.join(", ", largeSqlValues);
     }
 
     protected String getUpdateSql(Map<String, Object> after, Map<String, Object> before, boolean containsNull) {
@@ -327,5 +366,34 @@ public abstract class NormalWriteRecorder {
 
     protected Object filterValue(Object value, String dataType) throws SQLException {
         return value;
+    }
+
+    private static final DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS");
+    private static final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
+
+    protected String object2String(Object obj) {
+        String result;
+        if (null == obj) {
+            result = "null";
+        } else if (obj instanceof String) {
+            result = "'" + ((String) obj).replace("\\", "\\\\").replace("'", "\\'").replace("(", "\\(").replace(")", "\\)") + "'";
+        } else if (obj instanceof Number) {
+            result = obj.toString();
+        } else if (obj instanceof Date) {
+            result = "'" + dateFormat.format(obj) + "'";
+        } else if (obj instanceof Instant) {
+            result = "'" + LocalDateTime.ofInstant((Instant) obj, ZoneId.of("GMT")).format(dateTimeFormatter) + "'";
+        } else if (obj instanceof byte[]) {
+            String hexString = StringKit.convertToHexString((byte[]) obj);
+            return "X'" + hexString + "'";
+        } else if (obj instanceof Boolean) {
+            if ("true".equalsIgnoreCase(obj.toString())) {
+                return "1";
+            }
+            return "0";
+        } else {
+            return "'" + obj + "'";
+        }
+        return result;
     }
 }

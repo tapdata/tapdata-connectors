@@ -30,7 +30,7 @@ public class RegisterMain {
 		Mongodb(BASE_PATH + "connectors/dist/mongodb-connector-v1.0-SNAPSHOT.jar", "all", "mongodb", "basic", "jdbc"),
 		Mongodb_Atlas(BASE_PATH + "connectors/dist/mongodb-atlas-connector-v1.0-SNAPSHOT.jar", "all", "mongodb-atlas"),
 		Elasticsearch(BASE_PATH + "connectors/dist/elasticsearch-connector-v1.0-SNAPSHOT.jar", "all", "elasticsearch"),
-		Oceanbase(BASE_PATH + "connectors/dist/oceanbase-connector-v1.0-SNAPSHOT.jar", "all", "oceanbase"),
+		Oceanbase(BASE_PATH + "connectors/dist/oceanbase-mysql-connector-v1.0-SNAPSHOT.jar", "all", "oceanbase"),
 		Doris(BASE_PATH + "connectors/dist/doris-connector-v1.0-SNAPSHOT.jar", "all", "doris"),
 		Activemq(BASE_PATH + "connectors/dist/activemq-connector-v1.0-SNAPSHOT.jar", "all", "activemq", "mq"),
 		Rabbitmq(BASE_PATH + "connectors/dist/rabbitmq-connector-v1.0-SNAPSHOT.jar", "all", "rabbitmq", "mq"),
@@ -129,12 +129,14 @@ public class RegisterMain {
 		// -Dserver=http://192.168.1.132:31787
 		// -Dserver=http://192.168.1.181:31321
 		// -Dbeta=true
+		// -Dfilter=GA
 
 		List<String> postList = new ArrayList<>();
 		//String server = System.getProperty("server", "https://v3.test.cloud.tapdata.net/tm");
-		String server = System.getProperty("server", "http://localhost:3000");
+		String server = System.getProperty("server", "http://127.0.0.1/:3000");
+		String filter = System.getProperty("filter", "");
 		//String server = System.getProperty("server", "http://192.168.1.189:30205");
-		Collections.addAll(postList, "register", "-a", "3324cfdf-7d3e-4792-bd32-571638d4562f", "-ak", "", "-sk", "", "-t", server);
+		Collections.addAll(postList, "register", "-a", "3324cfdf-7d3e-4792-bd32-571638d4562f", "-ak", "", "-sk", "","-f",filter, "-t", server);
 		String[] tags = System.getProperty("tags", "all").split(",");
 		ConnectorEnums.addByTags(postList, tags);
 		Main.registerCommands().execute(postList.toArray(new String[0]));

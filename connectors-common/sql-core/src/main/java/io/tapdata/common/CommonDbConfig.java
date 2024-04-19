@@ -36,6 +36,8 @@ public class CommonDbConfig implements Serializable {
     private String jdbcDriver;
     protected Properties properties;
     private char escapeChar = '"';
+    private Boolean hashSplit = false;
+    private int maxSplit = 20;
 
     private Boolean useSSL = false;
     private String sslCa;
@@ -215,6 +217,22 @@ public class CommonDbConfig implements Serializable {
 
     public void setEscapeChar(char escapeChar) {
         this.escapeChar = escapeChar;
+    }
+
+    public Boolean getHashSplit() {
+        return hashSplit;
+    }
+
+    public void setHashSplit(Boolean hashSplit) {
+        this.hashSplit = hashSplit;
+    }
+
+    public int getMaxSplit() {
+        return maxSplit;
+    }
+
+    public void setMaxSplit(int maxSplit) {
+        this.maxSplit = maxSplit;
     }
 
     public Boolean getUseSSL() {

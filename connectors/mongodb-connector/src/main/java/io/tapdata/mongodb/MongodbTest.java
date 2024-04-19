@@ -317,7 +317,7 @@ public class MongodbTest extends CommonDbTest {
     }
 
 
-    private boolean validateOplog(Document connectionStatus) {
+    protected boolean validateOplog(Document connectionStatus) {
         Document nodeAuthInfo = connectionStatus.get("authInfo", Document.class);
         List authUserPrivileges = nodeAuthInfo.get("authenticatedUserPrivileges", List.class);
         if (CollectionUtils.isNotEmpty(authUserPrivileges)) {

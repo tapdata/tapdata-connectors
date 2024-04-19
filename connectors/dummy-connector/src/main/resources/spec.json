@@ -495,126 +495,20 @@
     }
   },
   "dataTypes": {
-    "string[($byte)]": {
-      "to": "TapString",
-      "byte": "16m",
-      "defaultByte": 64,
-      "preferByte": 100
-		},
-    "number[($precision,$scale)]": {
-      "to": "TapNumber",
-      "precision": [
-        1,
-        40
-      ],
-      "defaultPrecision": 4,
-      "scale": [
-        0,
-        10
-      ],
-      "defaultScale": 1
-    },
-    "boolean": {
-      "to": "TapBoolean"
-    },
-    "array": {
-      "to": "TapArray",
-      "pkEnablement": false
-    },
-    "binary": {
-      "to": "TapBinary",
-      "pkEnablement": false
-    },
-    "map": {
-      "to": "TapMap",
-      "pkEnablement": false
-    },
-    "time": {
-      "to": "TapTime",
-      "range": [
-        "-838:59:59",
-        "838:59:59"
-      ]
-    },
-    "date": {
-      "to": "TapDate",
-      "range": [
-        "1000-01-01",
-        "9999-12-31"
-      ],
-      "pattern": "yyyy-MM-dd"
-    },
-    "datetime[($fraction)]": {
-      "to": "TapDateTime",
-      "range": [
-        "1000-01-01 00:00:00.000000",
-        "9999-12-31 23:59:59.999999"
-      ],
-      "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS",
-      "fraction": [
-        0,
-        6
-      ],
-      "defaultFraction": 0
-    },
-    "timestamp[($fraction)]": {
-      "to": "TapDateTime",
-      "range": [
-        "1970-01-01 00:00:01.000000",
-        "2038-01-19 03:14:07.999999"
-      ],
-      "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS",
-      "fraction": [
-        0,
-        6
-      ],
-      "defaultFraction": 0,
-      "withTimeZone": true
-    },
-    "now": {
-      "to": "TapDateTime",
-      "range": [
-        "1970-01-01 00:00:01.000000",
-        "2038-01-19 03:14:07.999999"
-      ],
-      "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS",
-      "fraction": [
-        0,
-        6
-      ],
-      "defaultFraction": 6,
-      "withTimeZone": true,
-      "queryOnly": true
-    },
-    "uuid": {
-      "to": "TapString",
-      "byte": 36,
-      "preferByte": 36,
-      "queryOnly": true
-    },
-    "serial[($begin,$step)]": {
-      "to": "TapNumber",
-      "min": [
-        1,
-        40
-      ],
-      "queryOnly": true
-    },
-    "rnumber[($precision)]": {
-      "to": "TapNumber",
-      "precision": [
-        1,
-        40
-      ],
-      "defaultPrecision": 4,
-			"queryOnly": true
-    },
-    "rstring[($byte)]": {
-      "to": "TapString",
-      "byte": "16m",
-      "defaultByte": 8,
-      "preferByte": 8,
-			"queryOnly": true
-		}
+    "string[($byte)]": {"to" : "TapString", "byte" : "16m", "defaultByte": 64, "preferByte": 100},
+    "number[($precision,$scale)]": {"to": "TapNumber", "precision" : [1, 40], "defaultPrecision" : 4, "scale" : [0, 10], "defaultScale" : 1},
+    "boolean": {"to": "TapBoolean"},
+    "array": {"to": "TapArray", "pkEnablement": false},
+    "binary": {"to": "TapBinary", "pkEnablement": false},
+    "map": {"to": "TapMap", "pkEnablement": false},
+    "time": {"to": "TapTime", "range": ["-838:59:59", "838:59:59"]},
+    "date": {"to": "TapDate", "range": ["1000-01-01", "9999-12-31"], "pattern": "yyyy-MM-dd"},
+    "datetime[($fraction)]": {"to": "TapDateTime", "range": ["1000-01-01 00:00:00.000000", "9999-12-31 23:59:59.999999"], "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS", "fraction": [0, 6], "defaultFraction": 0},
+    "timestamp[($fraction)]": {"to": "TapDateTime", "range": ["1970-01-01 00:00:01.000000", "2038-01-19 03:14:07.999999"], "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS", "fraction": [0, 6], "defaultFraction": 0, "withTimeZone": true},
+    "now": {"to": "TapDateTime", "range": ["1970-01-01 00:00:01.000000", "2038-01-19 03:14:07.999999"], "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS", "fraction": [0, 6], "defaultFraction": 6, "withTimeZone": true, "queryOnly": true},
+    "uuid": {"to": "TapString", "byte" : 36, "preferByte": 36, "queryOnly": true},
+    "serial[($begin,$step)]": {"to": "TapNumber", "min" : [1, 40], "queryOnly": true},
+    "rnumber[($precision)]": {"to": "TapNumber", "precision" : [1, 40], "defaultPrecision" : 4, "queryOnly": true},
+    "rstring[($byte)]": {"to": "TapString", "byte" : "16m", "defaultByte": 8, "preferByte": 8, "queryOnly": true}
   }
 }

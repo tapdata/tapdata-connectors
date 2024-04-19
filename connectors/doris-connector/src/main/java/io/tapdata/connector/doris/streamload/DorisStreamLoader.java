@@ -25,6 +25,7 @@ import org.apache.http.util.EntityUtils;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static io.tapdata.base.ConnectorBase.writeListResult;
@@ -48,6 +49,7 @@ public class DorisStreamLoader {
     private boolean loadBatchFirstRecord;
     private int size;
     private final AtomicInteger lastEventFlag;
+    private AtomicReference<Set<String>> dataColumns;
     private MessageSerializer messageSerializer;
     private TapTable tapTable;
     private final Metrics metrics;
@@ -65,6 +67,7 @@ public class DorisStreamLoader {
         this.loadBatchFirstRecord = true;
         this.size = 0;
         this.lastEventFlag = new AtomicInteger(0);
+        this.dataColumns = new AtomicReference<>();
         initMessageSerializer();
         this.metrics = new Metrics();
     }
@@ -120,7 +123,19 @@ public class DorisStreamLoader {
         recordStream.startInput();
         recordStream.write(messageSerializer.batchStart());
         lastEventFlag.set(OperationType.getOperationFlag(recordEvent));
+        dataColumns.set(getDataColumns(recordEvent));
         loadBatchFirstRecord = true;
+    }
+
+    private Set<String> getDataColumns(TapRecordEvent recordEvent) {
+        if (recordEvent instanceof TapInsertRecordEvent) {
+            return ((TapInsertRecordEvent) recordEvent).getAfter().keySet();
+        } else if (recordEvent instanceof TapUpdateRecordEvent) {
+            return ((TapUpdateRecordEvent) recordEvent).getAfter().keySet();
+        } else if (recordEvent instanceof TapDeleteRecordEvent) {
+            return ((TapDeleteRecordEvent) recordEvent).getBefore().keySet();
+        }
+        return Collections.emptySet();
     }
 
     public RespContent put(final TapTable table) throws StreamLoadException, DorisRetryableException {
@@ -131,34 +146,33 @@ public class DorisStreamLoader {
 
             String label = prefix + "-" + UUID.randomUUID();
             List<String> columns = new ArrayList<>();
-            for (Map.Entry<String, TapField> entry : table.getNameFieldMap().entrySet()) {
-                columns.add("`" + entry.getKey() + "`");
+            for (String col : dataColumns.get()) {
+                columns.add("`" + col + "`");
             }
             // add the DORIS_DELETE_SIGN at the end of the column
             columns.add(Constants.DORIS_DELETE_SIGN);
             HttpPutBuilder putBuilder = new HttpPutBuilder();
             InputStreamEntity entity = new InputStreamEntity(recordStream, recordStream.getContentLength());
+            putBuilder.setUrl(loadUrl)
+                    // 前端表单传出来的值和tdd json加载的值可能有差别，如前端传的pwd可能是null，tdd的是空字符串
+                    .baseAuth(dorisConfig.getUser(), dorisConfig.getPassword())
+                    .addCommonHeader()
+                    .addFormat(writeFormat)
+                    .addColumns(columns)
+                    .setLabel(label)
+                    .setEntity(entity);
             Collection<String> primaryKeys = table.primaryKeys(true);
             if (CollectionUtils.isEmpty(primaryKeys)) {
-                putBuilder.setUrl(loadUrl)
-                        // 前端表单传出来的值和tdd json加载的值可能有差别，如前端传的pwd可能是null，tdd的是空字符串
-                        .baseAuth(dorisConfig.getUser(), dorisConfig.getPassword())
-                        .addCommonHeader()
-                        .addFormat(writeFormat)
-                        .addColumns(columns)
-                        .setLabel(label)
-                        .enableAppend()
-                        .setEntity(entity);
+                putBuilder.enableAppend();
             } else {
-                putBuilder.setUrl(loadUrl)
-                        // 前端表单传出来的值和tdd json加载的值可能有差别，如前端传的pwd可能是null，tdd的是空字符串
-                        .baseAuth(dorisConfig.getUser(), dorisConfig.getPassword())
-                        .addCommonHeader()
-                        .addFormat(writeFormat)
-                        .addColumns(columns)
-                        .setLabel(label)
-                        .enableDelete()
-                        .setEntity(entity);
+                if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Unique".equals(dorisConfig.getUniqueKeyType())) {
+                    putBuilder.enableDelete();
+                } else {
+                    putBuilder.enableAppend();
+                }
+            }
+            if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Unique".equals(dorisConfig.getUniqueKeyType())) {
+                putBuilder.addPartialHeader();
             }
             HttpPut httpPut = putBuilder.build();
             TapLogger.debug(TAG, "Call stream load http api, url: {}, headers: {}", loadUrl, putBuilder.header);
@@ -237,7 +251,7 @@ public class DorisStreamLoader {
 
     private boolean needFlush(TapRecordEvent recordEvent, int length) {
         int lastEventType = lastEventFlag.get();
-        return lastEventType > 0 && lastEventType != OperationType.getOperationFlag(recordEvent)
+        return lastEventType > 0 && !getDataColumns(recordEvent).equals(dataColumns.get())
                 || this.size >= MAX_FLUSH_BATCH_SIZE
                 || !recordStream.canWrite(length);
     }

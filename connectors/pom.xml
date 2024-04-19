@@ -16,7 +16,7 @@
         <module>postgres-connector</module>
 		<module>elasticsearch-connector</module>
         <module>doris-connector</module>
-        <module>oceanbase-connector</module>
+        <module>oceanbase-mysql-connector</module>
 		<module>kafka-connector</module>
         <module>rabbitmq-connector</module>
         <module>rocketmq-connector</module>
@@ -62,12 +62,13 @@
         <module>hudi-connector</module>
 		<module>open-gaussdb-connector</module>
 		<module>aws-clickhouse-connector</module>
-    </modules>
+		<module>mongodb-lower-connector</module>
+	</modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
 		<java.version>8</java.version>
-		<tapdata.pdk.runner.version>1.2-SNAPSHOT</tapdata.pdk.runner.version>
-		<tapdata.pdk.api.version>1.2.6-RELEASE</tapdata.pdk.api.version>
+		<tapdata.pdk.runner.version>1.5-SNAPSHOT</tapdata.pdk.runner.version>
+		<tapdata.pdk.api.version>1.3.3-SNAPSHOT</tapdata.pdk.api.version>
 		<tapdata.pdk.connector.core.version>1.0-SNAPSHOT</tapdata.pdk.connector.core.version>
 		<junit.jupiter.version>5.8.1</junit.jupiter.version>
 		<junit.platform.version>1.8.1</junit.platform.version>
@@ -220,13 +221,6 @@
 				<groupId>net.bytebuddy</groupId>
 				<artifactId>byte-buddy-agent</artifactId>
 				<version>${byte-buddy.version}</version>
-			</dependency>
-
-			<dependency>
-				<groupId>org.s</groupId>
-				<artifactId>mockito-inline</artifactId>
-				<version>${mockito.version}</version>
-				<scope>test</scope>
 			</dependency>
 
 		</dependencies>

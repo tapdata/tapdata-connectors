@@ -36,11 +36,11 @@ public class JsonSerializer implements MessageSerializer {
 		} else if (recordEvent instanceof TapUpdateRecordEvent) {
 			final TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
 			Map<String, Object> after = updateRecordEvent.getAfter();
-			Map<String, Object> before = updateRecordEvent.getBefore();
-			before = before == null ? after : before;
-			jsonString = toJsonString(table, before, true);
-			jsonString += LINE_END;
-			jsonString += toJsonString(table, after, false);
+//			Map<String, Object> before = updateRecordEvent.getBefore();
+//			before = before == null ? after : before;
+//			jsonString = toJsonString(table, before, false);
+//			jsonString += LINE_END;
+			jsonString = toJsonString(table, after, false);
 		} else {
 			final TapDeleteRecordEvent deleteRecordEvent = (TapDeleteRecordEvent) recordEvent;
 			final Map<String, Object> before = deleteRecordEvent.getBefore();
@@ -71,7 +71,7 @@ public class JsonSerializer implements MessageSerializer {
 		for (String field : tapTable.getNameFieldMap().keySet()) {
 			Object value = record.get(field);
 			if (null == value) {
-				linkedRecord.put(field, null);
+//				linkedRecord.put(field, null);
 			} else {
 				linkedRecord.put(field, value.toString());
 			}
