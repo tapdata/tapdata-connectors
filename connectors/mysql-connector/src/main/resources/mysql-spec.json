@@ -404,13 +404,15 @@
       "to": "TapString",
       "byte": 255,
       "defaultByte": 1,
+      "byteRatio": 3,
       "fixed": true
     },
     "varchar($byte)": {
       "name": "varchar",
       "to": "TapString",
       "byte": 16358,
-      "defaultByte": 1
+      "defaultByte": 1,
+      "byteRatio": 3
     },
     "tinytext": {
       "to": "TapString",
@@ -441,14 +443,12 @@
       "to": "TapBinary",
       "byte": 255,
       "defaultByte": 1,
-			"byteRatio": 3,
       "fixed": true
     },
     "varbinary[($byte)]": {
       "to": "TapBinary",
       "byte": 65532,
-      "defaultByte": 1,
-			"byteRatio": 3
+      "defaultByte": 1
 		},
     "tinyblob": {
       "to": "TapBinary",
