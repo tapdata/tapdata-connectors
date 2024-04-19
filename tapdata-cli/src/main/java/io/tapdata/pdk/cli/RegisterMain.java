@@ -130,7 +130,7 @@ public class RegisterMain {
 		// -Dserver=http://192.168.1.181:31321
 		// -Dbeta=true
 		// -Dfilter=GA
-		// -Dthread=GA
+		// -Dthread=1
 
 		List<String> postList = new ArrayList<>();
 		//String server = System.getProperty("server", "https://v3.test.cloud.tapdata.net/tm");
