@@ -15,6 +15,7 @@ import io.tapdata.pdk.cli.CommonCli;
 import io.tapdata.pdk.cli.services.UploadFileService;
 import io.tapdata.pdk.cli.utils.MultiThreadFactory;
 import io.tapdata.pdk.cli.utils.PrintUtil;
+import io.tapdata.pdk.cli.utils.split.SplitByFileSizeImpl;
 import io.tapdata.pdk.core.connector.TapConnector;
 import io.tapdata.pdk.core.connector.TapConnectorManager;
 import io.tapdata.pdk.core.constants.DataSourceQCType;
@@ -102,7 +103,7 @@ public class RegisterCli extends CommonCli {
         files = getAllJarFile(files);
 
         CommonUtils.setProperty("refresh_local_jars", "true");
-        loadAllPDKJar();
+        loadAllPDKJar(Arrays.asList(files));
 
         printUtil.print(PrintUtil.TYPE.INFO, "- Register connector to: " + tmUrl);
         final String tmToken = findTMToken();
@@ -117,17 +118,18 @@ public class RegisterCli extends CommonCli {
                 printUtil.print(PrintUtil.TYPE.TIP, String.format("* Start registering with multi thread of %s workers", maxThreadCount));
                 final int eachSize = (files.length / maxThreadCount) + (files.length % maxThreadCount > 0 ? 1 : 0);
                 MultiThreadFactory<File> multiThreadFactory = new MultiThreadFactory<>(maxThreadCount, eachSize);
+                multiThreadFactory.setSplitStage(new SplitByFileSizeImpl(maxThreadCount, printUtil));
                 multiThreadFactory.handel(Lists.newArrayList(files), fileListAnBatch -> {
                     File[] fs = new File[fileListAnBatch.size()];
                     registerOneBatch(fileListAnBatch.toArray(fs), filterTypes, tmToken);
                 });
             }
-            printUtil.print(PrintUtil.TYPE.DEBUG, String.format("* Register all connectors completed cost time: %s", formatData(printUtil, startRegister)));
+            printUtil.print(PrintUtil.TYPE.DEBUG, String.format("* Register all connectors completed cost time: %s", PrintUtil.formatDate(startRegister)));
         } catch (Exception e) {
-            printUtil.print(PrintUtil.TYPE.WARN, String.format("* Register connectors failed cost time: %s", formatData(printUtil, start)));
+            printUtil.print(PrintUtil.TYPE.WARN, String.format("* Register connectors failed cost time: %s", PrintUtil.formatDate(start)));
             System.exit(-1);
         }
-        printUtil.print(PrintUtil.TYPE.UN_OUTSHOOT, String.format("* Register connectors completed cost time: %s", formatData(printUtil, start)));
+        printUtil.print(PrintUtil.TYPE.UN_OUTSHOOT, String.format("* Register connectors completed cost time: %s", PrintUtil.formatDate(start)));
         System.exit(0);
         return 0;
     }
@@ -146,15 +148,11 @@ public class RegisterCli extends CommonCli {
         } else {
             printUtil.print(PrintUtil.TYPE.INFO, "* Will register to Cloud environment");
         }
-        printUtil.print(PrintUtil.TYPE.UN_OUTSHOOT, "* Get permission registration authentication completed, cost time: " + formatData(printUtil, startFindToken));
+        printUtil.print(PrintUtil.TYPE.UN_OUTSHOOT, "* Get permission registration authentication completed, cost time: " + PrintUtil.formatDate(startFindToken));
         return token;
     }
 
-    public String formatData(PrintUtil printUtil, long times) {
-        return printUtil.string(PrintUtil.TYPE.OUTSHOOT, new DecimalFormat("#0.000").format(new BigDecimal(System.currentTimeMillis() - times).divide(new BigDecimal(1000),3,BigDecimal.ROUND_HALF_UP)) + "m");
-    }
-
-    protected void loadAllPDKJar() {
+    protected void loadAllPDKJar(List<File> files) {
         printUtil.print(PrintUtil.TYPE.DEBUG, "* Start load all connector to connector manager");
         long startLoadAllPDKJar = System.currentTimeMillis();
         PrintStream out = System.out;
@@ -167,10 +165,10 @@ public class RegisterCli extends CommonCli {
             }
         })) {
             System.setOut(p);
-            TapConnectorManager.getInstance().start(Arrays.asList(files));
+            TapConnectorManager.getInstance().start(files);
             System.setOut(out);
             printUtil.print(PrintUtil.TYPE.DEBUG, String.format("* Load all connector to connector manager completed cost time: %s",
-                    formatData(printUtil, startLoadAllPDKJar))
+                    PrintUtil.formatDate(startLoadAllPDKJar))
             );
         } catch (Exception e) {
             System.setOut(out);
@@ -403,7 +401,7 @@ public class RegisterCli extends CommonCli {
             return allJarFiles.toArray(strings);
         } finally {
             printUtil.print(PrintUtil.TYPE.DEBUG, String.format("* Scan connector Jar registration package completed cost time: %s, %s connectors be scanned",
-                    formatData(printUtil, startScan), files.length)
+                    PrintUtil.formatDate(startScan), files.length)
             );
         }
     }

@@ -43,6 +43,8 @@ public class UploadFileService {
   public static final String FILE = "file";
   public static final String SOURCE = "source";
 
+  public static final String OP_URL = "%s/api/pdk/upload/source?access_token=%s";
+
   public static class Param {
     Map<String, InputStream> inputStreamMap;
     File file;
@@ -161,7 +163,7 @@ public class UploadFileService {
   }
 
   /**
-   * @deprecated please use method to upload connector
+   * @deprecated please use method to upload connector,
    * */
   public static void uploadSourceToTM(Param paramEntity) {
     Map<String, InputStream> inputStreamMap = paramEntity.getInputStreamMap();
@@ -325,7 +327,7 @@ public class UploadFileService {
       return;
     }
     if (isCloud(paramEntity.ak)) {
-      uploadSourceToCloud(paramEntity);
+      uploadSourceToTM(paramEntity);
     } else {
       uploadSourceToOP(paramEntity);
     }
@@ -341,7 +343,7 @@ public class UploadFileService {
   }
 
   protected static void uploadSourceToOP(Param paramEntity) {
-    final String url = String.format("%s/api/pdk/upload/source?access_token=%s", paramEntity.getHostAndPort(), paramEntity.getToken());;
+    final String url = String.format(OP_URL, paramEntity.getHostAndPort(), paramEntity.getToken());
     HttpRequest request = new HttpRequest(url, POST);
     sendSource(request, paramEntity, String.valueOf(paramEntity.isLatest()));
   }
@@ -365,6 +367,7 @@ public class UploadFileService {
     }
     return digest;
   }
+
   protected static void uploadSourceToCloud(Param paramEntity) {
     PrintUtil printUtil = paramEntity.printUtil;
     Map<String, String> params = initHttpParam(paramEntity);
@@ -461,12 +464,13 @@ public class UploadFileService {
     String response = request.body();
     Map<?, ?> map = JSON.parseObject(response, Map.class);
     String msg = String.format("Connector %s register succeed", fileName);
-    String result = "success";
+    PrintUtil printUtil = paramEntity.getPrintUtil();
     if (!"ok".equals(map.get("code"))) {
       msg = map.get("reqId") != null ? (String) map.get("message") : (String) map.get("msg");
-      result = "fail";
+      printUtil.print(PrintUtil.TYPE.DEBUG, String.format("* Register %s, connector file name: %s, msg: %s, response: %s", PrintUtil.string(PrintUtil.TYPE.ERROR, "failed"), fileName, msg, response));
+      return;
     }
-    paramEntity.getPrintUtil().print(PrintUtil.TYPE.DEBUG, String.format("* Register result: %s, connector file name: %s, msg: %s, response: %s", result, fileName, msg, response));
+    printUtil.print(PrintUtil.TYPE.DEBUG, String.format("* Register %s, connector file name: %s, msg: %s, response: %s", PrintUtil.string(PrintUtil.TYPE.ERROR, "succeed"), fileName, msg, response));
   }
 
   public static RequestBody create(final MediaType mediaType, final InputStream inputStream) {
