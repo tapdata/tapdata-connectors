@@ -25,5 +25,61 @@ public class MysqlJdbcContextTest {
                 Assertions.assertEquals(config.getTimezone(), "GMT+08:00");
             }
         }
+
+        @Test
+        void testBlankTimezone() {
+            MysqlConfig config = new MysqlConfig();
+            config.setDbType("mysql");
+            config.setJdbcDriver("com.mysql.cj.jdbc.Driver");
+            config.setHost("localhost");
+            config.setPort(3306);
+            config.setDatabase("test");
+            config.setUser("root");
+            config.setPassword("password");
+            config.setTimezone("");
+            try (
+                    MysqlJdbcContextV2 mysqlJdbcContextV2 = new MysqlJdbcContextV2(config)
+            ) {
+                Assertions.assertEquals("", config.getTimezone());
+            }
+        }
+
+        @Test
+        void testAdditionalString() {
+            MysqlConfig config = new MysqlConfig();
+            config.setDbType("mysql");
+            config.setJdbcDriver("com.mysql.cj.jdbc.Driver");
+            config.setHost("localhost");
+            config.setPort(3306);
+            config.setDatabase("test");
+            config.setUser("root");
+            config.setPassword("password");
+            config.setTimezone("");
+            config.setExtParams("zeroDateTimeBehavior=convertToNull&autoReconnect=true");
+            try (
+                    MysqlJdbcContextV2 mysqlJdbcContextV2 = new MysqlJdbcContextV2(config)
+            ) {
+                Assertions.assertEquals("", config.getTimezone());
+            }
+        }
+
+        @Test
+        void testAdditionalStringWithQuestionMark() {
+            MysqlConfig config = new MysqlConfig();
+            config.setDbType("mysql");
+            config.setJdbcDriver("com.mysql.cj.jdbc.Driver");
+            config.setHost("localhost");
+            config.setPort(3306);
+            config.setDatabase("test");
+            config.setUser("root");
+            config.setPassword("password");
+            config.setTimezone("");
+            config.setExtParams("?zeroDateTimeBehavior=convertToNull&autoReconnect=true");
+            try (
+                    MysqlJdbcContextV2 mysqlJdbcContextV2 = new MysqlJdbcContextV2(config)
+            ) {
+                Assertions.assertEquals("", config.getTimezone());
+            }
+        }
     }
 }
