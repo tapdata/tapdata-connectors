@@ -517,7 +517,7 @@ public class MongodbMergeOperate {
 					mergeResult.getUpdate().put("$set", updateOpDoc);
 				}
 				if (MapUtils.isNotEmpty(unsetOpDoc)) {
-					unsetOpDoc.keySet().removeIf(key -> !array && isShareJoinKey(sharedJoinKeys, key));
+					removeShareKeys(sharedJoinKeys, unsetOpDoc, array);
 					if (mergeResult.getUpdate().containsKey("$unset")) {
 						if (!unsetOpDoc.isEmpty()) {
 							mergeResult.getUpdate().get("$unset", Document.class).putAll(unsetOpDoc);
@@ -530,7 +530,7 @@ public class MongodbMergeOperate {
 				}
 				break;
 			case DELETE:
-				updateOpDoc.keySet().removeIf(key -> !array && isShareJoinKey(sharedJoinKeys, key));
+				removeShareKeys(sharedJoinKeys, updateOpDoc, array);
 				if (mergeResult.getUpdate().containsKey("$unset")) {
 					mergeResult.getUpdate().get("$unset", Document.class).putAll(updateOpDoc);
 				} else {
@@ -538,6 +538,17 @@ public class MongodbMergeOperate {
 				}
 				break;
 		}
+	}
+
+	private static void removeShareKeys(Set<String> sharedJoinKeys, Document update, boolean array) {
+		update.keySet().removeIf(key -> {
+			if (array) {
+				String keyRemoveElement = key.replace(".$[element1]", "");
+				return isShareJoinKey(sharedJoinKeys, keyRemoveElement);
+			} else {
+				return isShareJoinKey(sharedJoinKeys, key);
+			}
+		});
 	}
 
 	private static boolean isShareJoinKey(Set<String> sharedJoinKey, String field) {
