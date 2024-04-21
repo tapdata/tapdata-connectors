@@ -449,7 +449,7 @@
       "to": "TapBinary",
       "byte": 65532,
       "defaultByte": 1
-    },
+		},
     "tinyblob": {
       "to": "TapBinary",
       "byte": 255

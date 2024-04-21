@@ -251,12 +251,16 @@ public abstract class JdbcContext implements AutoCloseable {
 
     //static Hikari connection
     static class HikariConnection {
+
+        public static HikariDataSource create() {
+            return new HikariDataSource();
+        }
+
         public static HikariDataSource getHikariDataSource(CommonDbConfig config) throws IllegalArgumentException {
-            HikariDataSource hikariDataSource;
             if (EmptyKit.isNull(config)) {
                 throw new IllegalArgumentException("Config cannot be null");
             }
-            hikariDataSource = new HikariDataSource();
+            HikariDataSource hikariDataSource = create();
             //need 4 attributes
             hikariDataSource.setDriverClassName(config.getJdbcDriver());
             String jdbcUrl = config.getDatabaseUrl();
@@ -275,7 +279,7 @@ public abstract class JdbcContext implements AutoCloseable {
             return hikariDataSource;
         }
 
-        protected static String getParamFromUrl(String databaseUrl, String tag){
+        protected static String getParamFromUrl(String databaseUrl, String tag) {
             if (null == databaseUrl || null == tag) return null;
             if (databaseUrl.contains(tag)) {
                 int index = databaseUrl.indexOf(tag) + tag.length();
@@ -284,7 +288,7 @@ public abstract class JdbcContext implements AutoCloseable {
                     end = databaseUrl.length();
                 }
                 String substring = databaseUrl.substring(index, end);
-                substring = replaceAll(replaceAll(substring,"=", "")," ", "");
+                substring = replaceAll(replaceAll(substring, "=", ""), " ", "");
                 return substring;
             }
             return null;
