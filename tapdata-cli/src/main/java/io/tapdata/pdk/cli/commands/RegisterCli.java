@@ -34,10 +34,18 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.text.DecimalFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Scanner;
+import java.util.Set;
 
 @CommandLine.Command(
         description = "Push PDK jar file into TM",
@@ -61,10 +69,10 @@ public class RegisterCli extends CommonCli {
     @CommandLine.Option(names = {"-sk", "--secretKey"}, required = false, description = "Provide auth secretKey")
     private String sk;
 
-    @CommandLine.Option(names = {"-t", "--tm"}, required = true, description = "Tapdata TM url")
+    @CommandLine.Option(names = {"-t", "--tm"}, required = true, description = "TM server url")
     private String tmUrl;
 
-    @CommandLine.Option(names = {"-h", "--help"}, usageHelp = true, description = "TapData cli help")
+    @CommandLine.Option(names = {"-h", "--help"}, usageHelp = true, description = "Register cli help")
     private boolean helpRequested = false;
 
     @CommandLine.Option(names = {"-r", "--replace"}, required = false, description = "Replace Config file name")
@@ -94,8 +102,10 @@ public class RegisterCli extends CommonCli {
         printUtil = new PrintUtil(showAllMessage);
         final List<String> filterTypes = generateSkipTypes();
         if (!filterTypes.isEmpty()) {
-            printUtil.print(PrintUtil.TYPE.TIP, "* Starting to register data sources, plan to skip data sources that are not within the registration scope");
-            printUtil.print(PrintUtil.TYPE.TIP, String.format("* The types of data sources that need to be registered are: %s", filterTypes));
+            boolean tooMany = filterTypes.size() > 1;
+            printUtil.print(PrintUtil.TYPE.TIP, String.format("* Starting to register data sources, plan to skip data sources that are not within the registration scope\n" +
+                            "* The types of data sources that need to be registered %s: %s",
+                    tooMany ? "are" : "is", filterTypes));
         } else {
             printUtil.print(PrintUtil.TYPE.TIP, "* Start registering data sources and plan to register all submitted data sources connectors");
         }
@@ -126,10 +136,10 @@ public class RegisterCli extends CommonCli {
             }
             printUtil.print(PrintUtil.TYPE.DEBUG, String.format("* Register all connectors completed cost time: %s", PrintUtil.formatDate(startRegister)));
         } catch (Exception e) {
-            printUtil.print(PrintUtil.TYPE.WARN, String.format("* Register connectors failed cost time: %s", PrintUtil.formatDate(start)));
+            printUtil.print(PrintUtil.TYPE.WARN, String.format("* Register all connectors failed cost time: %s", PrintUtil.formatDate(start)));
             System.exit(-1);
         }
-        printUtil.print(PrintUtil.TYPE.UN_OUTSHOOT, String.format("* Register connectors completed cost time: %s", PrintUtil.formatDate(start)));
+        printUtil.print(PrintUtil.TYPE.UN_OUTSHOOT, String.format("* Register all connectors completed cost time: %s", PrintUtil.formatDate(start)));
         System.exit(0);
         return 0;
     }
@@ -172,7 +182,7 @@ public class RegisterCli extends CommonCli {
             );
         } catch (Exception e) {
             System.setOut(out);
-            printUtil.print(PrintUtil.TYPE.WARN, String.format("* Can not load connector jar, message: %s", e.getMessage()));
+            printUtil.print(PrintUtil.TYPE.WARN, String.format("* Can not load connector jar, register failed, message: %s", e.getMessage()));
             System.exit(-1);
         }
     }
@@ -194,7 +204,7 @@ public class RegisterCli extends CommonCli {
                         connectionType = authentication;
                         if (needSkip(authentication, filterTypes)) {
                             needUpload = false;
-                            printUtil.print(PrintUtil.TYPE.IGNORE, String.format(" !Connector: %s, Skipped with (%s)", file.getName(), connectionType));
+                            printUtil.print(PrintUtil.TYPE.IGNORE, String.format(" Connector: %s, Skipped with (%s)", file.getName(), connectionType));
                             break;
                         }
                         needUpload = true;
