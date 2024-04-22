@@ -146,6 +146,15 @@ public class JdbcContextTest {
                     verify(config, times(1)).getDatabaseUrl();
                 }
             }
+
+            @Test
+            void testCreateHikariConnection() {
+                try (
+                        HikariDataSource hikariDataSource = JdbcContext.HikariConnection.create()
+                ) {
+
+                }
+            }
         }
     }
 }

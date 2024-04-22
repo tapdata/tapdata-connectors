@@ -267,8 +267,8 @@ public abstract class JdbcContext implements AutoCloseable {
             hikariDataSource.setJdbcUrl(jdbcUrl);
             hikariDataSource.setUsername(config.getUser());
             hikariDataSource.setPassword(config.getPassword());
-            hikariDataSource.setMinimumIdle(getInteger(jdbcUrl, "Min Idle", 1));
-            hikariDataSource.setMaximumPoolSize(getInteger(jdbcUrl, "Max Pool Size", 20));
+            hikariDataSource.setMinimumIdle(getInteger(jdbcUrl, "Min Idle",1));
+            hikariDataSource.setMaximumPoolSize(getInteger(jdbcUrl, "Max Pool Size",20));
             if (EmptyKit.isNotNull(config.getProperties())) {
                 hikariDataSource.setDataSourceProperties(config.getProperties());
             }

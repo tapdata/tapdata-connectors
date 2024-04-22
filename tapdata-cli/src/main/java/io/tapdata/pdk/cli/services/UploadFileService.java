@@ -10,6 +10,7 @@ import com.tapdata.tm.sdk.util.IOUtil;
 import com.tapdata.tm.sdk.util.SignUtil;
 import io.tapdata.pdk.cli.utils.HttpRequest;
 import io.tapdata.pdk.cli.utils.OkHttpUtils;
+import io.tapdata.pdk.cli.utils.PrintUtil;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 import okhttp3.internal.Util;
@@ -37,7 +38,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 @Slf4j
 public class UploadFileService {
 
-  public static void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, boolean latest, String hostAndPort, String accessCode, String ak, String sk) {
+  public static void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, boolean latest, String hostAndPort, String accessCode, String ak, String sk, PrintUtil printUtil) {
 
     boolean cloud = StringUtils.isNotBlank(ak);
 
@@ -51,17 +52,25 @@ public class UploadFileService {
       String jsonString = JSON.toJSONString(param);
       String s = OkHttpUtils.postJsonParams(tokenUrl, jsonString);
 
-      System.out.println("generate token " + s);
+      printUtil.print(PrintUtil.TYPE.DEBUG, "generate token " + s);
 
       if (StringUtils.isBlank(s)) {
-        log.error("tm sever not found or generate token failed");
+        printUtil.print(PrintUtil.TYPE.ERROR, "TM sever not found or generate token failed");
         return;
       }
 
       Map map = JSON.parseObject(s, Map.class);
       Object data = map.get("data");
+      if (null == data) {
+        printUtil.print(PrintUtil.TYPE.ERROR, "TM sever not found or generate token failed");
+        return;
+      }
       JSONObject data1 = (JSONObject) data;
       token = (String) data1.get("id");
+      if (StringUtils.isBlank(token)) {
+        printUtil.print(PrintUtil.TYPE.ERROR, "TM sever not found or generate token failed");
+        return;
+      }
     }
 
     Map<String, String> params = new HashMap<>();
@@ -144,18 +153,18 @@ public class UploadFileService {
 
       String bodyHash = Base64Util.encode(digest.digest());
 
-      System.out.println("bodyHash: " + bodyHash);
+      printUtil.print(PrintUtil.TYPE.DEBUG, String.format("bodyHash: %s", bodyHash));
       BasicCredentials basicCredentials = new BasicCredentials(ak, sk);
       Signer signer = Signer.getSigner(basicCredentials);
 
 
       String canonicalQueryString = SignUtil.canonicalQueryString(params);
       String stringToSign = String.format("%s:%s:%s", method, canonicalQueryString, bodyHash);
-      System.out.println("stringToSign: " + stringToSign);
+      printUtil.print(PrintUtil.TYPE.DEBUG, String.format("stringToSign: %s", stringToSign));
       String sign = signer.signString(stringToSign, basicCredentials);
 
       params.put("sign", sign);
-      System.out.println("sign: " + sign);
+      printUtil.print(PrintUtil.TYPE.DEBUG, "sign: " + sign);
 
       String queryString = params.keySet().stream().map(key -> {
         try {
@@ -206,7 +215,7 @@ public class UploadFileService {
         msg = map.get("reqId") != null ? (String) map.get("message") : (String) map.get("msg");
         result = "fail";
     }
-    System.out.println("result:" + result + ", name:" + file.getName() + ", msg:" + msg + ", response:" + response);
+    printUtil.print(PrintUtil.TYPE.DEBUG, "result:" + result + ", name:" + file.getName() + ", msg:" + msg + ", response:" + response);
   }
 
   public static RequestBody create(final MediaType mediaType, final InputStream inputStream) {

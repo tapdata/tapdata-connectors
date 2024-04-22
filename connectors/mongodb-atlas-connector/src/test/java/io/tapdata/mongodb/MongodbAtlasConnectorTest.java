@@ -5,6 +5,7 @@ import com.mongodb.MongoClientException;
 import com.mongodb.client.*;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.Assertions;
@@ -131,6 +132,16 @@ public class MongodbAtlasConnectorTest {
 
                 @Override
                 public ListCollectionsIterable<Document> batchSize(int i) {
+                    return null;
+                }
+
+                @Override
+                public ListCollectionsIterable<Document> comment(String s) {
+                    return null;
+                }
+
+                @Override
+                public ListCollectionsIterable<Document> comment(BsonValue bsonValue) {
                     return null;
                 }
 

@@ -7,8 +7,10 @@ import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.config.MysqlConfig;
+import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
 import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
+import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -23,6 +25,7 @@ import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
@@ -69,18 +72,42 @@ public class MysqlConnector extends CommonDbConnector {
     protected TimeZone timezone;
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
+    public static final String MASTER_NODE_KEY = "MASTER_NODE";
+    public HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave;
+
 
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
         mysqlConfig = new MysqlConfig().load(tapConnectionContext.getConnectionConfig());
-        mysqlJdbcContext = new MysqlJdbcContextV2(mysqlConfig);
+        contextMapForMasterSlave = MysqlUtil.buildContextMapForMasterSlave(mysqlConfig);
+        MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
+        MysqlJdbcContextV2 contextV2 = contextMapForMasterSlave.get(mysqlConfig.getHost() + mysqlConfig.getPort());
+        if (null != contextV2){
+            mysqlJdbcContext = contextV2;
+        }else {
+            mysqlJdbcContext = new MysqlJdbcContextV2(mysqlConfig);
+        }
         commonDbConfig = mysqlConfig;
         jdbcContext = mysqlJdbcContext;
         commonSqlMaker = new CommonSqlMaker('`');
         tapLogger = tapConnectionContext.getLog();
         exceptionCollector = new MysqlExceptionCollector();
         this.version = mysqlJdbcContext.queryVersion();
+        ArrayList<Map<String, Object>> inconsistentNodes = MysqlUtil.compareMasterSlaveCurrentTime(mysqlConfig, contextMapForMasterSlave);
+        if (null != inconsistentNodes && inconsistentNodes.size() == 2){
+            Map<String, Object> node1 = inconsistentNodes.get(0);
+            Map<String, Object> node2 = inconsistentNodes.get(1);
+            tapLogger.warn(String.format("The time of each node is inconsistent, please check nodes: %s and %s", node1.toString(), node2.toString()));
+        }
         if (tapConnectionContext instanceof TapConnectorContext) {
+            if (DeployModeEnum.fromString(mysqlConfig.getDeploymentMode()) == DeployModeEnum.MASTER_SLAVE){
+                KVMap<Object> stateMap = ((TapConnectorContext) tapConnectionContext).getStateMap();
+                Object masterNode = stateMap.get(MASTER_NODE_KEY);
+                if (null != masterNode && null != mysqlConfig.getMasterNode()){
+                    if (! masterNode.toString().contains(mysqlConfig.getMasterNode().toString()))
+                        tapLogger.warn(String.format("The master node has switched, please pay attention to whether the data is consistent, current master node: %s", mysqlConfig.getMasterNode()));
+                }
+            }
             this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext, this::isAlive);
             this.mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
             this.timezone = mysqlJdbcContext.queryTimeZone();
@@ -258,6 +285,13 @@ public class MysqlConnector extends CommonDbConnector {
     @Override
     public void onStop(TapConnectionContext connectionContext) {
         started.set(false);
+        if (connectionContext instanceof TapConnectorContext && null != mysqlConfig && DeployModeEnum.fromString(mysqlConfig.getDeploymentMode()) == DeployModeEnum.MASTER_SLAVE) {
+            KVMap<Object> stateMap = ((TapConnectorContext) connectionContext).getStateMap();
+            if (null != stateMap){
+                stateMap.put(MASTER_NODE_KEY, mysqlConfig.getMasterNode());
+                ((TapConnectorContext) connectionContext).setStateMap(stateMap);
+            }
+        }
         try {
             Optional.ofNullable(this.mysqlReader).ifPresent(MysqlReader::close);
         } catch (Exception ignored) {
@@ -269,6 +303,16 @@ public class MysqlConnector extends CommonDbConnector {
             } catch (Exception e) {
                 tapLogger.error("Release connector failed, error: " + e.getMessage() + "\n" + getStackString(e));
             }
+        }
+        if (EmptyKit.isNotEmpty(contextMapForMasterSlave)){
+            contextMapForMasterSlave.forEach((hostPort,context)->{
+                try {
+                    context.close();
+                } catch (Exception e) {
+                    tapLogger.error("Release connector failed, error: " + e.getMessage() + "\n" + getStackString(e));
+                }
+            });
+            contextMapForMasterSlave = null;
         }
     }
 
@@ -470,13 +514,15 @@ public class MysqlConnector extends CommonDbConnector {
 
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
-        mysqlReader.readBinlog(tapConnectorContext, tables, offset, batchSize, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer);
+        mysqlReader.readBinlog(tapConnectorContext, tables, offset, batchSize, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, contextMapForMasterSlave);
     }
 
 
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
         mysqlConfig = new MysqlConfig().load(connectionContext.getConnectionConfig());
+        contextMapForMasterSlave = MysqlUtil.buildContextMapForMasterSlave(mysqlConfig);
+        MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(mysqlConfig.getConnectionString());
         try (

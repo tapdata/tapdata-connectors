@@ -1457,7 +1457,7 @@ public class MongodbConnector extends ConnectorBase {
 				}
 			}
 			if (mongoConfig.isNoCursorTimeout()) {
-				findIterable.noCursorTimeout(true).maxTime(30, TimeUnit.MINUTES);
+				findIterable.noCursorTimeout(true);
 			}
 
 			Document lastDocument = null;
