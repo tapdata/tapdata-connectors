@@ -239,7 +239,7 @@ public abstract class NormalWriteRecorder {
         Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
             case "insert_on_nonexists":
-                insertUpdate(lastAfter, lastBefore, listResult);
+                insertUpdate(after, lastBefore, listResult);
                 break;
             default:
                 justUpdate(lastAfter, lastBefore, listResult);
