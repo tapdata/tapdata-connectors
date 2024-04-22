@@ -149,7 +149,11 @@ public class JdbcContextTest {
 
             @Test
             void testCreateHikariConnection() {
-                JdbcContext.HikariConnection.create().close();
+                try (
+                        HikariDataSource hikariDataSource = JdbcContext.HikariConnection.create()
+                ) {
+
+                }
             }
         }
     }
