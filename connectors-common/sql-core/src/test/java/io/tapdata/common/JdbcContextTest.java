@@ -146,6 +146,11 @@ public class JdbcContextTest {
                     verify(config, times(1)).getDatabaseUrl();
                 }
             }
+
+            @Test
+            void testCreateHikariConnection() {
+                JdbcContext.HikariConnection.create().close();
+            }
         }
     }
 }
