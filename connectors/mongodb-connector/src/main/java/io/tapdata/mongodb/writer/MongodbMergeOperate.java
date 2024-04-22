@@ -12,6 +12,7 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.entity.MergeBundle;
 import io.tapdata.mongodb.entity.MergeFilter;
 import io.tapdata.mongodb.entity.MergeResult;
+import io.tapdata.mongodb.merge.MergeFilterManager;
 import io.tapdata.mongodb.util.MapUtil;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
 import io.tapdata.pdk.apis.entity.merge.MergeLookupResult;
@@ -832,6 +833,11 @@ public class MongodbMergeOperate {
 		if (null == parentFilters) {
 			return;
 		}
-		mergeResult.getFilter().putAll(parentFilters);
+		for (Map.Entry<String, Object> entry : parentFilters.entrySet()) {
+			if (!MergeFilterManager.test(entry)) {
+				continue;
+			}
+			mergeResult.getFilter().put(entry.getKey(), entry.getValue());
+		}
 	}
 }
