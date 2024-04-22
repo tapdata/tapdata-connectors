@@ -17,7 +17,7 @@ Arguments：
   - -t (--tm): Tapdata TM url, where you want register connector to
   - -r (--replace): Replace Config file name, value is oem type
   - -f (--filter): The list of the Authentication types should not be skipped. If value is empty, all connectors will register all connectors. if it contains multiple, please separate them with commas
-  - -T (--threadCount): Multi thread registration parameter, enable thread count, maximum value of 20, default value of 1
+  - -T (--threadCount): Multi thread registration parameter, enable thread count, maximum value of 20, default value of 4
   - -h (--help): TapData cli help
   
 A. Tip: 
