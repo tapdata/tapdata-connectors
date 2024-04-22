@@ -36,12 +36,10 @@ public class ScriptUtil {
         buildInMethod.append("var MD5 = function(str){return MD5Util.crypt(str, true);};\n");
         buildInMethod.append("var Collections = Java.type(\"java.util.Collections\");\n");
         buildInMethod.append("var MapUtils = Java.type(\"com.tapdata.constant.MapUtil\");\n");
-        buildInMethod.append("var CustomParseUtil = Java.type(\"com.tapdata.processor.CustomParseUtil\");\n");
         buildInMethod.append("var sleep = function(ms){\n" +
                 "var Thread = Java.type(\"java.lang.Thread\");\n" +
                 "Thread.sleep(ms);\n" +
                 "}\n");
-        buildInMethod.append("var applyCustomParse = function(record){return CustomParseUtil.applyCustomParse(record);};\n");
         return buildInMethod.toString();
     }
 }

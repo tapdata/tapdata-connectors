@@ -7,6 +7,7 @@ import io.tapdata.connector.kafka.MultiThreadUtil.*;
 import io.tapdata.connector.kafka.admin.Admin;
 import io.tapdata.connector.kafka.admin.DefaultAdmin;
 import io.tapdata.connector.kafka.config.*;
+import io.tapdata.connector.kafka.exception.KafkaExCode_11;
 import io.tapdata.connector.kafka.util.*;
 import io.tapdata.constant.MqTestItem;
 import io.tapdata.entity.event.TapBaseEvent;
@@ -59,6 +60,7 @@ import static io.tapdata.common.constant.MqOp.*;
 public class KafkaService extends AbstractMqService {
 
     private static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
+	public static final String PDK_ID = "kafka";
     private String connectorId;
     private KafkaProducer<byte[], byte[]> kafkaProducer;
 	private ScriptEngine produceScriptEngineCustomDDL;
@@ -74,9 +76,7 @@ public class KafkaService extends AbstractMqService {
 
 	private Concurrents<Invocable> customDmlConcurrentsQueue;
 
-	private ConcurrentHashMap<String,DMLCalculatorQueue<DMLRecordEventConvert, DMLRecordEventConvert>> dmlCalculatorQueueConcurrentHashMap =new ConcurrentHashMap<>();
-
-
+	private ConcurrentHashMap<String, CustomDMLCalculatorQueue<DMLRecordEventConvertDto, DMLRecordEventConvertDto>> dmlCalculatorQueueConcurrentHashMap =new ConcurrentHashMap<>();
 
     Invocable customScriptEngine = null;
 
@@ -159,25 +159,11 @@ public class KafkaService extends AbstractMqService {
 		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
 		Boolean enableCustomParse = kafkaConfig.getEnableCustomParse();
 		if (Boolean.TRUE.equals(enableCustomParse)) {
-			String enableCustomParseScript = kafkaConfig.getEnableCustomParseScript();
+			String customParseScript = kafkaConfig.getEnableCustomParseScript();
 			Integer customParseThreadNum = Optional.ofNullable(kafkaConfig.getCustomParseThreadNum()).orElse(4);
-			customParseConcurrents = new Concurrents<Invocable>() {
-				@Override
-				protected String getInstanceId() {
-					String id = String.valueOf(Thread.currentThread().getId());
-					return id;
-				}
-
-				@Override
-				protected Invocable initNewInstance(String instanceId) {
-					Invocable customParseEngine = ScriptUtil.getScriptEngine(enableCustomParseScript, scriptEngineName, scriptFactory);
-					return customParseEngine;
-				}
-			};
+			customParseConcurrents = new ScriptEngineConcurrents<>(customParseScript);
 			streamReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
-			batchReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents){
-
-			};
+			batchReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
 		//			customParseCalculator = new ConcurrentCalculator<ConsumerRecord<byte[], byte[]>, TapEvent>(kafkaConfig.getCustomParseThreadNum()) {
 //				@Override
 //				protected TapEvent performComputation(ConsumerRecord<byte[], byte[]> data) {
@@ -210,19 +196,7 @@ public class KafkaService extends AbstractMqService {
 
 		if (Boolean.TRUE.equals(kafkaConfig.getEnableScript())) {
 			try {
-				customDmlConcurrentsQueue=new Concurrents<Invocable>() {
-					@Override
-					protected String getInstanceId() {
-						String id = String.valueOf(Thread.currentThread().getId());
-						return id;
-					}
-
-					@Override
-					protected Invocable initNewInstance(String instanceId) {
-						Invocable customParseEngine = ScriptUtil.getScriptEngine(kafkaConfig.getScript(), scriptEngineName, scriptFactory);
-						return customParseEngine;
-					}
-				};
+				customDmlConcurrentsQueue = new ScriptEngineConcurrents<>(kafkaConfig.getScript());
 			} catch (Exception e) {
 				throw new RuntimeException("Init DML custom parser failed: " + e.getMessage(), e);
 			}
@@ -534,8 +508,8 @@ public class KafkaService extends AbstractMqService {
 		CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
 		ProduceCustomDmlRecordInfo produceCustomDmlRecordInfo = new ProduceCustomDmlRecordInfo(kafkaProducer, countDownLatch, insert, update, delete, listResult);
 		Integer dmlThreadNum = Optional.ofNullable(kafkaConfig.getCustomDmlThreadNum()).orElse(4);
-		DMLCalculatorQueue<DMLRecordEventConvert, DMLRecordEventConvert> customDmlCalculatorQueue = dmlCalculatorQueueConcurrentHashMap.computeIfAbsent(threadName, (key) -> {
-			DMLCalculatorQueue dmlCalculatorQueue = new DMLCalculatorQueue<>(dmlThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customDmlConcurrentsQueue);
+		CustomDMLCalculatorQueue<DMLRecordEventConvertDto, DMLRecordEventConvertDto> customDmlCalculatorQueue = dmlCalculatorQueueConcurrentHashMap.computeIfAbsent(threadName, (key) -> {
+			CustomDMLCalculatorQueue dmlCalculatorQueue = new CustomDMLCalculatorQueue<>(dmlThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customDmlConcurrentsQueue);
 			return dmlCalculatorQueue;
 		});
 		dmlCalculatorQueueConcurrentHashMap.computeIfPresent(threadName, (key, value) -> {
@@ -546,10 +520,10 @@ public class KafkaService extends AbstractMqService {
 		try {
 			customDmlCalculatorQueue.setProduceInfo(produceCustomDmlRecordInfo);
 			for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
-				DMLRecordEventConvert dmlRecordEventConvert = new DMLRecordEventConvert();
-				dmlRecordEventConvert.setRecordEvent(tapRecordEvent);
-				dmlRecordEventConvert.setTapTable(tapTable);
-				customDmlCalculatorQueue.multiCalc(dmlRecordEventConvert);
+				DMLRecordEventConvertDto dmlRecordEventConvertDto = new DMLRecordEventConvertDto();
+				dmlRecordEventConvertDto.setRecordEvent(tapRecordEvent);
+				dmlRecordEventConvertDto.setTapTable(tapTable);
+				customDmlCalculatorQueue.multiCalc(dmlRecordEventConvertDto);
 			}
 		} catch (RejectedExecutionException e) {
 			tapLogger.warn("task stopped, some data produce failed!", e);
@@ -558,9 +532,7 @@ public class KafkaService extends AbstractMqService {
 		}
 		try {
 			while (null != isAlive && isAlive.get()) {
-				if(customDmlCalculatorQueue.getHasException().get()){
-					throw new RuntimeException("produce error!", customDmlCalculatorQueue.getException().get());
-				}
+				errorHandle(customDmlCalculatorQueue,KafkaExCode_11.KAFKA_CUSTOM_WRITE_PARSE);
 				if (countDownLatch.await(200L, TimeUnit.MILLISECONDS)) {
 					break;
 				}
@@ -572,6 +544,18 @@ public class KafkaService extends AbstractMqService {
 		}
 	}
 
+	void errorHandle(ConcurrentCalculatorQueue calculatorQueue, String errorCode) {
+		if (calculatorQueue.getHasException().get()) {
+			Object exception = calculatorQueue.getException().get();
+			if (exception instanceof Exception) {
+				if(KafkaExCode_11.KAFKA_CUSTOM_WRITE_PARSE.equals(errorCode)){
+					throw new RuntimeException("Kafka custom write message error",((Exception) exception).getCause());
+				} else if (KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE.equals(errorCode)) {
+					throw new RuntimeException("Kafka custom read message error",((Exception) exception).getCause());
+				}
+			}
+		}
+	}
 
 
 
@@ -613,8 +597,8 @@ public class KafkaService extends AbstractMqService {
 			batchReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
 		}
 		while (consuming.get()) {
-			if (batchReadCustomParseCalculatorQueue.getHasException().get()) {
-				throw new RuntimeException("Consume Message error !",batchReadCustomParseCalculatorQueue.getException().get());
+			if (null != batchReadCustomParseCalculatorQueue) {
+				errorHandle(batchReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
 			}
 			ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(6L));
 			if (consumerRecords.isEmpty()) {
@@ -636,12 +620,10 @@ public class KafkaService extends AbstractMqService {
 				}
 			}
 		}
-		if (batchReadCustomParseCalculatorQueue.getHasException().get()) {
-			throw new RuntimeException("Consume Message error !",batchReadCustomParseCalculatorQueue.getException().get());
-		}
 		kafkaConsumer.close();
 		if (null != batchReadCustomParseCalculatorQueue) {
 			try {
+				errorHandle(batchReadCustomParseCalculatorQueue,KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
 				batchReadCustomParseCalculatorQueue.close();
 			} catch (Exception e) {
 				throw new RuntimeException(e);
@@ -666,9 +648,6 @@ public class KafkaService extends AbstractMqService {
 			streamReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
 		}
 		while (consuming.get()) {
-			if (streamReadCustomParseCalculatorQueue.getHasException().get()) {
-				throw new RuntimeException("Consume Message error !",streamReadCustomParseCalculatorQueue.getException().get());
-			}
 			ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
 			if (consumerRecords.isEmpty()) {
 				continue;
@@ -683,6 +662,7 @@ public class KafkaService extends AbstractMqService {
 				} else {
 					makeMessage(consumerRecord, list, consumerRecord.topic());
 				}
+				errorHandle(streamReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
 				if (null == streamReadCustomParseCalculatorQueue && list.size() >= eventBatchSize) {
 					eventsOffsetConsumer.accept(list, TapSimplify.list());
 					list = TapSimplify.list();
@@ -692,11 +672,9 @@ public class KafkaService extends AbstractMqService {
 		if (null == streamReadCustomParseCalculatorQueue && EmptyKit.isNotEmpty(list)) {
 			eventsOffsetConsumer.accept(list, TapSimplify.list());
 		}
-		if (streamReadCustomParseCalculatorQueue.getHasException().get()) {
-			throw new RuntimeException("Consume Message error !",streamReadCustomParseCalculatorQueue.getException().get());
-		}
 		kafkaConsumer.close();
 		if (null != streamReadCustomParseCalculatorQueue) {
+			errorHandle(streamReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
 			try {
 				streamReadCustomParseCalculatorQueue.close();
 			} catch (Exception e) {
@@ -741,29 +719,27 @@ public class KafkaService extends AbstractMqService {
 		if (EmptyKit.isNotNull(kafkaProducer)) {
 			kafkaProducer.close();
 		}
-		if (MapUtils.isNotEmpty(dmlCalculatorQueueConcurrentHashMap)) {
-			dmlCalculatorQueueConcurrentHashMap.values().forEach(calculator -> {
-				try {
-					calculator.close();
-				} catch (Exception e) {
-					throw new RuntimeException(e);
+		try {
+			if (MapUtils.isNotEmpty(dmlCalculatorQueueConcurrentHashMap)) {
+				for (CustomDMLCalculatorQueue dmlCalculatorQueue : dmlCalculatorQueueConcurrentHashMap.values()) {
+					dmlCalculatorQueue.close();
 				}
-			});
+			}
+			if (null != streamReadCustomParseCalculatorQueue) {
+				streamReadCustomParseCalculatorQueue.close();
+			}
+			if (null != batchReadCustomParseCalculatorQueue) {
+				batchReadCustomParseCalculatorQueue.close();
+			}
+			if (null != customParseConcurrents) {
+				customParseConcurrents.close();
+			}
+			if (null != customParseConcurrents) {
+				customParseConcurrents.close();
+			}
+		} catch (Exception e) {
+			throw new RuntimeException(e);
 		}
-		if(streamReadCustomParseCalculatorQueue!=null){
-            try {
-                streamReadCustomParseCalculatorQueue.close();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
-		if(batchReadCustomParseCalculatorQueue!=null){
-            try {
-                batchReadCustomParseCalculatorQueue.close();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
 	}
 
     public void produceDDLRecord(TapFieldBaseEvent tapFieldBaseEvent) {
@@ -802,32 +778,32 @@ public class KafkaService extends AbstractMqService {
     }
 
     private static Map<String, Object> getDDLRecordData(TapFieldBaseEvent tapFieldBaseEvent) {
-        Map<String, Object> data = new HashMap<>();
-        data.put("referenceTime", tapFieldBaseEvent.getReferenceTime());
-        data.put("time", tapFieldBaseEvent.getTime());
-        data.put("type", tapFieldBaseEvent.getType());
-        data.put("ddl", tapFieldBaseEvent.getOriginDDL());
-        data.put("tableId", tapFieldBaseEvent.getTableId());
+        Map<String, Object> ddlRecordData = new HashMap<>();
+		ddlRecordData.put("referenceTime", tapFieldBaseEvent.getReferenceTime());
+		ddlRecordData.put("time", tapFieldBaseEvent.getTime());
+		ddlRecordData.put("type", tapFieldBaseEvent.getType());
+		ddlRecordData.put("ddl", tapFieldBaseEvent.getOriginDDL());
+		ddlRecordData.put("tableId", tapFieldBaseEvent.getTableId());
         if (tapFieldBaseEvent instanceof TapNewFieldEvent) {
             TapNewFieldEvent tapNewFieldEvent = (TapNewFieldEvent) tapFieldBaseEvent;
-            data.put("newFields", tapNewFieldEvent.getNewFields());
+			ddlRecordData.put("newFields", tapNewFieldEvent.getNewFields());
         } else if (tapFieldBaseEvent instanceof TapAlterFieldNameEvent) {
             TapAlterFieldNameEvent tapAlterFieldNameEvent = (TapAlterFieldNameEvent) tapFieldBaseEvent;
-            data.put("nameChange", tapAlterFieldNameEvent.getNameChange());
+			ddlRecordData.put("nameChange", tapAlterFieldNameEvent.getNameChange());
         } else if (tapFieldBaseEvent instanceof TapAlterFieldAttributesEvent) {
             TapAlterFieldAttributesEvent tapAlterFieldAttributesEvent = (TapAlterFieldAttributesEvent) tapFieldBaseEvent;
-            data.put("fieldName", tapAlterFieldAttributesEvent.getFieldName());
-            data.put("dataTypeChange", tapAlterFieldAttributesEvent.getDataTypeChange());
-            data.put("checkChange", tapAlterFieldAttributesEvent.getCheckChange());
-            data.put("constraintChange", tapAlterFieldAttributesEvent.getConstraintChange());
-            data.put("nullableChange", tapAlterFieldAttributesEvent.getNullableChange());
-            data.put("commentChange", tapAlterFieldAttributesEvent.getCommentChange());
-            data.put("defaultChange", tapAlterFieldAttributesEvent.getDefaultChange());
-            data.put("primaryChange", tapAlterFieldAttributesEvent.getPrimaryChange());
+			ddlRecordData.put("fieldName", tapAlterFieldAttributesEvent.getFieldName());
+			ddlRecordData.put("dataTypeChange", tapAlterFieldAttributesEvent.getDataTypeChange());
+			ddlRecordData.put("checkChange", tapAlterFieldAttributesEvent.getCheckChange());
+			ddlRecordData.put("constraintChange", tapAlterFieldAttributesEvent.getConstraintChange());
+			ddlRecordData.put("nullableChange", tapAlterFieldAttributesEvent.getNullableChange());
+			ddlRecordData.put("commentChange", tapAlterFieldAttributesEvent.getCommentChange());
+			ddlRecordData.put("defaultChange", tapAlterFieldAttributesEvent.getDefaultChange());
+			ddlRecordData.put("primaryChange", tapAlterFieldAttributesEvent.getPrimaryChange());
         } else if (tapFieldBaseEvent instanceof TapDropFieldEvent) {
             TapDropFieldEvent tapDropFieldEvent = (TapDropFieldEvent) tapFieldBaseEvent;
-            data.put("fieldName", tapDropFieldEvent.getFieldName());
+			ddlRecordData.put("fieldName", tapDropFieldEvent.getFieldName());
         }
-        return data;
+        return ddlRecordData;
     }
 }

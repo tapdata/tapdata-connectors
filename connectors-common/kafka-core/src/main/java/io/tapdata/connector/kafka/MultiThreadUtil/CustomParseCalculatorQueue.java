@@ -4,26 +4,23 @@ import io.tapdata.connector.kafka.util.CustomParseUtil;
 import io.tapdata.connector.kafka.util.ObjectUtils;
 import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
-import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
-import io.tapdata.entity.event.dml.TapInsertRecordEvent;
-import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.exception.StopException;
-import io.tapdata.kit.EmptyKit;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-
 import javax.script.Invocable;
 import javax.script.ScriptException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 
 public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<ConsumerRecord<byte[], byte[]>, TapEvent>{
-	private List<TapEvent> consumeList;
+	private List<TapEvent> consumeList = TapSimplify.list();
 	private Concurrents<Invocable> customDmlConcurrents;
 	private static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
 	protected AtomicBoolean consuming;
@@ -61,25 +58,41 @@ public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<Consum
 	}
 
 	@Override
-	protected void distributingData(TapEvent data) {
-		if (null == consumeList) {
+	protected void distributingFuture(CompletableFuture<TapEvent> future) throws ExecutionException, InterruptedException {
+		super.distributingFuture(future);
+		distributingDataDelay();
+	}
+
+	private void distributingDataDelay() {
+		if (CollectionUtils.isNotEmpty(consumeList) && (System.currentTimeMillis() > lastSendTime || consumeList.size() >= eventBatchSize)) {
+			distributingDataBatch(consumeList);
 			consumeList = TapSimplify.list();
+			this.lastSendTime = System.currentTimeMillis() + 500;
 		}
-		consumeList.add(data);
-		if (consuming.get()) {
-			if (consumeList.size() >= eventBatchSize || System.currentTimeMillis() > lastSendTime) {
-				List<TapEvent> engineConsumeList = consumeList;
-				eventsOffsetConsumer.accept(engineConsumeList, TapSimplify.list());
-				consumeList = TapSimplify.list();
-				this.lastSendTime = System.currentTimeMillis() + 500;
-			}
-		}else{
-			if (EmptyKit.isNotEmpty(consumeList)) {
-				eventsOffsetConsumer.accept(consumeList, TapSimplify.list());
-			}
+	}
+
+	@Override
+	protected void distributingData(TapEvent data) {
+		if (null != data) {
+			consumeList.add(data);
 		}
+//		if (consumeList.size() >= eventBatchSize) {
+//			List<TapEvent> engineConsumeList = consumeList;
+//			eventsOffsetConsumer.accept(engineConsumeList, TapSimplify.list());
+//			consumeList = TapSimplify.list();
+//		}
+	}
 
-
+	protected void distributingDataBatch(List<TapEvent> data) {
+		eventsOffsetConsumer.accept(data, TapSimplify.list());
+//		if (null != data) {
+//			consumeList.add(data);
+//		}
+//		if (consumeList.size() >= eventBatchSize) {
+//			List<TapEvent> engineConsumeList = consumeList;
+//			eventsOffsetConsumer.accept(engineConsumeList, TapSimplify.list());
+//			consumeList = TapSimplify.list();
+//		}
 	}
 
 
@@ -112,18 +125,7 @@ public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<Consum
 		Object data = ObjectUtils.covertData(executeScript(customScriptEngine, "process", messageBody));
 		if (null == data) return null;
 		TapBaseEvent tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) data);
-		if (tapBaseEvent instanceof TapFieldBaseEvent) {
-			TapFieldBaseEvent tapFieldBaseEvent = (TapFieldBaseEvent) tapBaseEvent;
-		} else if (tapBaseEvent instanceof TapInsertRecordEvent) {
-			TapInsertRecordEvent tapInsertRecordEvent = (TapInsertRecordEvent) tapBaseEvent;
-			tapInsertRecordEvent.table(consumerRecord.topic());
-		} else if (tapBaseEvent instanceof TapUpdateRecordEvent) {
-			TapUpdateRecordEvent tapUpdateRecordEvent = (TapUpdateRecordEvent) tapBaseEvent;
-			tapUpdateRecordEvent.table(consumerRecord.topic());
-		} else {
-			TapDeleteRecordEvent tapDeleteRecordEvent = (TapDeleteRecordEvent) tapBaseEvent;
-			tapDeleteRecordEvent.table(consumerRecord.topic());
-		}
+		tapBaseEvent.setTableId(consumerRecord.topic());
 		return tapBaseEvent;
 	}
 	public static Object executeScript(Invocable scriptEngine, String function, Object... params) {

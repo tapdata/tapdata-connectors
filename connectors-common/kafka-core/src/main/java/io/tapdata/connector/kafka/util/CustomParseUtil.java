@@ -14,6 +14,7 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
 import org.apache.commons.collections4.MapUtils;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.HashMap;
 import java.util.List;
@@ -22,88 +23,103 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class CustomParseUtil {
-    private static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
-    public static final String OP_DML_TYPE = "dml";
-    public static final String OP_DDL_TYPE = "ddl";
-    public static final Map<Integer, Function<Map<String, Object>, TapBaseEvent>> HANDLER_MAP = new HashMap<>();
-    public static final Map<String, Function<Map<String, Object>, TapBaseEvent>> HANDLER_MAP_DML = new HashMap<>();
+	public static final String OP_DML_TYPE = "dml";
+	public static final String OP_DDL_TYPE = "ddl";
+	public static final Map<Integer, Function<Map<String, Object>, TapBaseEvent>> HANDLER_MAP_DDL = new HashMap<>();
+	public static final Map<String, Function<Map<String, Object>, TapBaseEvent>> HANDLER_MAP_DML = new HashMap<>();
 
-    static {
-        HANDLER_MAP.put(209, (record) -> {
-            TapNewFieldEvent tapNewFieldEvent = new TapNewFieldEvent();
-            List<Map<String, Object>> newFields = (List<Map<String, Object>>) record.get("newFields");
-            List<TapField> newFieldList = newFields.stream().map(newFieldMap -> {
-                TapField tapField = new TapField();
-                tapField.setName(MapUtils.getString(newFieldMap, "name"));
-                String dataType = MapUtils.getString(newFieldMap, "dataType");
-                tapField.setDataType(dataType);
-                return tapField;
-            }).collect(Collectors.toList());
-            tapNewFieldEvent.setTime(System.currentTimeMillis());
-            tapNewFieldEvent.setReferenceTime(System.currentTimeMillis());
-            tapNewFieldEvent.setNewFields(newFieldList);
-            tapNewFieldEvent.setTableId(MapUtils.getString(record, "tableId"));
-            return tapNewFieldEvent;
-        });
-        HANDLER_MAP.put(202, (record) -> {
-            TapAlterFieldNameEvent tapAlterFieldNameEvent = new TapAlterFieldNameEvent();
-            tapAlterFieldNameEvent.setReferenceTime(System.currentTimeMillis());
-            tapAlterFieldNameEvent.setTime(System.currentTimeMillis());
-            tapAlterFieldNameEvent.setTableId(MapUtils.getString(record, "tableId"));
-            Map nameChange = MapUtils.getMap(record, "nameChange");
-            String after = MapUtils.getString(nameChange, "after");
-            String before = MapUtils.getString(nameChange, "before");
-            ValueChange valueChange = new ValueChange();
-            valueChange.setAfter(after);
-            valueChange.setBefore(before);
-            tapAlterFieldNameEvent.setNameChange(valueChange);
-            return tapAlterFieldNameEvent;
-        });
-        HANDLER_MAP.put(207, (record) -> {
-            TapDropFieldEvent tapDropFieldEvent = new TapDropFieldEvent();
-            tapDropFieldEvent.setReferenceTime(System.currentTimeMillis());
-            tapDropFieldEvent.setTime(System.currentTimeMillis());
-            tapDropFieldEvent.setTableId(MapUtils.getString(record, "tableId"));
-            String fieldName = MapUtils.getString(record, "fieldName");
-            tapDropFieldEvent.setFieldName(fieldName);
-            return tapDropFieldEvent;
-        });
-        HANDLER_MAP.put(201, (record) -> {
-            TapAlterFieldAttributesEvent tapAlterFieldAttributesEvent = JSON.parseObject(JSON.toJSONString(record), TapAlterFieldAttributesEvent.class);
+	static {
+		HANDLER_MAP_DDL.put(209, (record) -> {
+			TapNewFieldEvent tapNewFieldEvent = new TapNewFieldEvent();
+			List<Map<String, Object>> newFields = (List<Map<String, Object>>) record.get("newFields");
+			List<TapField> newFieldList = newFields.stream().map(newFieldMap -> {
+				TapField tapField = new TapField();
+				String fieldName = MapUtils.getString(newFieldMap, "name");
+				if (StringUtils.isEmpty(fieldName))
+					throw new RuntimeException("custom newFieldEvent FieldName can not be null");
+				tapField.setName(fieldName);
+				String dataType = MapUtils.getString(newFieldMap, "dataType");
+				if (StringUtils.isEmpty(dataType))
+					throw new RuntimeException("custom newFieldEvent dataType can not be null");
+				tapField.setDataType(dataType);
+				return tapField;
+			}).collect(Collectors.toList());
+			tapNewFieldEvent.setTime(System.currentTimeMillis());
+			tapNewFieldEvent.setReferenceTime(System.currentTimeMillis());
+			tapNewFieldEvent.setNewFields(newFieldList);
+			tapNewFieldEvent.setTableId(MapUtils.getString(record, "tableId"));
+			return tapNewFieldEvent;
+		});
+		HANDLER_MAP_DDL.put(202, (record) -> {
+			TapAlterFieldNameEvent tapAlterFieldNameEvent = new TapAlterFieldNameEvent();
+			tapAlterFieldNameEvent.setReferenceTime(System.currentTimeMillis());
+			tapAlterFieldNameEvent.setTime(System.currentTimeMillis());
+			tapAlterFieldNameEvent.setTableId(MapUtils.getString(record, "tableId"));
+			Map nameChange = MapUtils.getMap(record, "nameChange");
+			String before = MapUtils.getString(nameChange, "before");
+			String after = MapUtils.getString(nameChange, "after");
+			if (StringUtils.isEmpty(before)) throw new RuntimeException("custom nameChangeEvent before can not be null");
+			if (StringUtils.isEmpty(after)) throw new RuntimeException("custom nameChangeEvent after can not be null");
+			ValueChange valueChange = new ValueChange();
+			valueChange.setAfter(after);
+			valueChange.setBefore(before);
+			tapAlterFieldNameEvent.setNameChange(valueChange);
+			return tapAlterFieldNameEvent;
+		});
+		HANDLER_MAP_DDL.put(207, (record) -> {
+			TapDropFieldEvent tapDropFieldEvent = new TapDropFieldEvent();
+			String fieldName = MapUtils.getString(record, "fieldName");
+			String tableId = MapUtils.getString(record, "tableId");
+			if (StringUtils.isEmpty(fieldName))
+				throw new RuntimeException("custom DropFieldEvent FieldName can not be null");
+			tapDropFieldEvent.setTableId(tableId);
+			tapDropFieldEvent.setFieldName(fieldName);
+			tapDropFieldEvent.setReferenceTime(System.currentTimeMillis());
+			tapDropFieldEvent.setTime(System.currentTimeMillis());
+			return tapDropFieldEvent;
+		});
+		HANDLER_MAP_DDL.put(201, (record) -> {
+			TapAlterFieldAttributesEvent tapAlterFieldAttributesEvent = null;
+			try {
+				tapAlterFieldAttributesEvent = JSON.parseObject(JSON.toJSONString(record), TapAlterFieldAttributesEvent.class);
+			} catch (Exception e) {
+				throw new RuntimeException("cast custom AlterFieldAttributeEvent failed");
+			}
+			return tapAlterFieldAttributesEvent;
+		});
+		HANDLER_MAP_DML.put("insert", (record) -> {
+			Map<String, Object> after = (Map<String, Object>) MapUtils.getMap(record, "after");
+			if (MapUtils.isEmpty(after)) throw new RuntimeException("custom InsertEvent after can not be null");
+			TapInsertRecordEvent tapInsertRecordEvent = new TapInsertRecordEvent().init().after(after).referenceTime(System.currentTimeMillis());
+			return tapInsertRecordEvent;
+		});
+		HANDLER_MAP_DML.put("update", (record) -> {
+			Map<String, Object> before = (Map<String, Object>) MapUtils.getMap(record, "before");
+			Map<String, Object> after = (Map<String, Object>) MapUtils.getMap(record, "after");
+			if (MapUtils.isEmpty(after)) throw new RuntimeException("custom UpdateEvent after can not be null");
+			TapUpdateRecordEvent tapUpdateRecordEvent = new TapUpdateRecordEvent().init().before(before).after(after).referenceTime(System.currentTimeMillis());
+			return tapUpdateRecordEvent;
+		});
+		HANDLER_MAP_DML.put("delete", (record) -> {
+			Map<String, Object> before = (Map<String, Object>) MapUtils.getMap(record, "before");
+			if (MapUtils.isEmpty(before)) throw new RuntimeException("custom UpdateEvent after can not be null");
+			TapDeleteRecordEvent tapDeleteRecordEvent = new TapDeleteRecordEvent().init().before(before).referenceTime(System.currentTimeMillis());
+			return tapDeleteRecordEvent;
+		});
+	}
 
-            return tapAlterFieldAttributesEvent;
-        });
-        HANDLER_MAP_DML.put("insert", (record) -> {
-            Map<String, Object> after = (Map<String, Object>) MapUtils.getMap(record, "after");
-            TapInsertRecordEvent tapInsertRecordEvent = new TapInsertRecordEvent().init().after(after).referenceTime(System.currentTimeMillis());
-            return tapInsertRecordEvent;
-        });
-        HANDLER_MAP_DML.put("update", (record) -> {
-            Map<String, Object> after = (Map<String, Object>) MapUtils.getMap(record, "after");
-            Map<String, Object> before = (Map<String, Object>) MapUtils.getMap(record, "before");
-            TapUpdateRecordEvent tapUpdateRecordEvent = new TapUpdateRecordEvent().init().before(before).after(after).referenceTime(System.currentTimeMillis());
-            return tapUpdateRecordEvent;
-        });
-        HANDLER_MAP_DML.put("delete", (record) -> {
-            Map<String, Object> before = (Map<String, Object>) MapUtils.getMap(record, "before");
-            TapDeleteRecordEvent tapDeleteRecordEvent = new TapDeleteRecordEvent().init().before(before).referenceTime(System.currentTimeMillis());
-            return tapDeleteRecordEvent;
-        });
-
-    }
-
-    public static TapBaseEvent applyCustomParse(Map<String, Object> record) {
-        String op = MapUtils.getString(record, "op", "invalid");
-        if (OP_DDL_TYPE.equals(op)) {
-            Integer type = MapUtils.getInteger(record, "type");
-            Function<Map<String, Object>, TapBaseEvent> mapTapBaseEventFunction = HANDLER_MAP.get(type);
-            return mapTapBaseEventFunction.apply(record);
-        } else {
-            if (HANDLER_MAP_DML.containsKey(op)) {
-                return HANDLER_MAP_DML.get(op).apply(record);
-            } else {
-                throw new RuntimeException("op type not support");
-            }
-        }
-    }
+	public static TapBaseEvent applyCustomParse(Map<String, Object> record) {
+		String op = MapUtils.getString(record, "op", "invalid");
+		if (OP_DDL_TYPE.equals(op)) {
+			Integer type = MapUtils.getInteger(record, "type");
+			Function<Map<String, Object>, TapBaseEvent> mapTapBaseEventFunction = HANDLER_MAP_DDL.get(type);
+			return mapTapBaseEventFunction.apply(record);
+		} else {
+			if (HANDLER_MAP_DML.containsKey(op)) {
+				return HANDLER_MAP_DML.get(op).apply(record);
+			} else {
+				throw new RuntimeException("op type not support");
+			}
+		}
+	}
 }

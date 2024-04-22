@@ -3,7 +3,6 @@ package io.tapdata.connector.kafka.MultiThreadUtil;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 public abstract class ConcurrentCalculatorQueue<P, V> implements AutoCloseable {
 	private volatile AtomicBoolean isClose = new AtomicBoolean(false);
@@ -24,6 +23,7 @@ public abstract class ConcurrentCalculatorQueue<P, V> implements AutoCloseable {
 				}
 			} catch (Exception e) {
 				handleError(e);
+				isClose.compareAndSet(false, true);
 				Thread.currentThread().interrupt();
 			}
 		});

@@ -5,7 +5,7 @@ import io.tapdata.entity.schema.TapTable;
 
 import java.util.Map;
 
-public class DMLRecordEventConvert {
+public class DMLRecordEventConvertDto {
 	private TapTable tapTable;
 	TapRecordEvent recordEvent;
 	Map<String,Object> jsConvertResultMap;

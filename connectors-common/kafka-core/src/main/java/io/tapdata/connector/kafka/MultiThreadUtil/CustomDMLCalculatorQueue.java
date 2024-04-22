@@ -11,6 +11,7 @@ import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.kit.EmptyKit;
 import org.apache.commons.collections4.MapUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
@@ -22,12 +23,12 @@ import java.util.stream.Collectors;
 import static io.tapdata.common.constant.MqOp.*;
 import static io.tapdata.connector.kafka.KafkaService.executeScript;
 
-public class DMLCalculatorQueue<P,V> extends ConcurrentCalculatorQueue<DMLRecordEventConvert, DMLRecordEventConvert>{
+public class CustomDMLCalculatorQueue<P,V> extends ConcurrentCalculatorQueue<DMLRecordEventConvertDto, DMLRecordEventConvertDto>{
 	private static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
 	private Concurrents<Invocable> customDmlConcurrents;
 	private ProduceCustomDmlRecordInfo produceCustomDmlRecordInfo;
 
-	public DMLCalculatorQueue(int threadSize, int queueSize,Concurrents<Invocable> customDmlConcurrents) {
+	public CustomDMLCalculatorQueue(int threadSize, int queueSize, Concurrents<Invocable> customDmlConcurrents) {
 		super(threadSize, queueSize);
 		this.customDmlConcurrents=customDmlConcurrents;
 	}
@@ -37,25 +38,25 @@ public class DMLCalculatorQueue<P,V> extends ConcurrentCalculatorQueue<DMLRecord
 	}
 
 	@Override
-	protected void distributingData(DMLRecordEventConvert dmlRecordEventConvert) {
-		if (null == dmlRecordEventConvert.getJsConvertResultMap()) {
+	protected void distributingData(DMLRecordEventConvertDto dmlRecordEventConvertDto) {
+		if (null == dmlRecordEventConvertDto.getJsConvertResultMap()) {
 			return;
 		}
-		TapRecordEvent event = dmlRecordEventConvert.getRecordEvent();
-		Map<String, Object> jsConvertResultMap = dmlRecordEventConvert.getJsConvertResultMap();
+		TapRecordEvent event = dmlRecordEventConvertDto.getRecordEvent();
+		Map<String, Object> jsConvertResultMap = dmlRecordEventConvertDto.getJsConvertResultMap();
 		byte[] body = {};
 		RecordHeaders recordHeaders = new RecordHeaders();
 		if (null == jsConvertResultMap.get("data")) {
 			throw new RuntimeException("data cannot be null");
 		} else {
-			Object obj = jsConvertResultMap.get("data");
-			if (obj instanceof Map) {
-				Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) jsConvertResultMap.get("data");
-				removeIfEmptyInMap(map, "before");
-				removeIfEmptyInMap(map, "after");
-				body = jsonParser.toJsonBytes(jsConvertResultMap.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
+			Object jsConvertData = jsConvertResultMap.get("data");
+			if (jsConvertData instanceof Map) {
+				Map<String, Map<String, Object>> jsConvertDataMap = (Map<String, Map<String, Object>>) jsConvertResultMap.get("data");
+				removeIfEmptyInMap(jsConvertDataMap, "before");
+				removeIfEmptyInMap(jsConvertDataMap, "after");
+				body = jsonParser.toJsonBytes(jsConvertDataMap, JsonParser.ToJsonFeature.WriteMapNullValue);
 			} else {
-				body = obj.toString().getBytes();
+				body = jsConvertData.toString().getBytes();
 			}
 		}
 		String mqOp = MapUtils.getString(jsConvertResultMap, "op");
@@ -94,23 +95,30 @@ public class DMLCalculatorQueue<P,V> extends ConcurrentCalculatorQueue<DMLRecord
 				produceCustomDmlRecordInfo.getCountDownLatch().countDown();
 			}
 		};
-		ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(dmlRecordEventConvert.getTapTable().getId(),
-			null, null, dmlRecordEventConvert.getKafkaMessageKey(), body,
+		ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(dmlRecordEventConvertDto.getTapTable().getId(),
+			null, null, dmlRecordEventConvertDto.getKafkaMessageKey(), body,
 			recordHeaders);
 		produceCustomDmlRecordInfo.getKafkaProducer().send(producerRecord, callback);
 	}
 
 	@Override
-	protected DMLRecordEventConvert performComputation(DMLRecordEventConvert dmlRecordEventConvert) {
-		DMLRecordEventConvert result = customDmlConcurrents.process(scriptEngine -> {
-			Collection<String> primaryKeys = dmlRecordEventConvert.getTapTable().primaryKeys(true);
-			TapRecordEvent event = dmlRecordEventConvert.getRecordEvent();
+	protected DMLRecordEventConvertDto performComputation(DMLRecordEventConvertDto dmlRecordEventConvertDto) {
+		DMLRecordEventConvertDto result = customDmlConcurrents.process(scriptEngine -> {
+			Collection<String> primaryKeys = dmlRecordEventConvertDto.getTapTable().primaryKeys(true);
+			TapRecordEvent event = dmlRecordEventConvertDto.getRecordEvent();
 			Map<String, Object> jsProcessParam = new HashMap<>();
 			Map<String, Map<String, Object>> allData = new HashMap();
 			MqOp mqOp = INSERT;
 			Map<String, Object> eventInfo = new HashMap<>();
+			String xid = MapUtils.getString(event.getInfo(), "XID");
+			String rowId = MapUtils.getString(event.getInfo(), "rowId");
+			if(StringUtils.isNotEmpty(xid)){
+				eventInfo.put("XID", xid);
+			}
+			if(StringUtils.isNotEmpty(rowId)){
+				eventInfo.put("rowId",rowId);
+			}
 			eventInfo.put("tableId", event.getTableId());
-			eventInfo.put("eventInfo", event.getInfo());
 			eventInfo.put("referenceTime", event.getReferenceTime());
 			jsProcessParam.put("eventInfo", eventInfo);
 			Map<String, Object> data;
@@ -132,8 +140,8 @@ public class DMLCalculatorQueue<P,V> extends ConcurrentCalculatorQueue<DMLRecord
 			} else {
 				data = new HashMap<>();
 			}
-			byte[] kafkaMessageKey = getKafkaMessageKey(data, dmlRecordEventConvert.getTapTable());
-			dmlRecordEventConvert.setKafkaMessageKey(kafkaMessageKey);
+			byte[] kafkaMessageKey = getKafkaMessageKey(data, dmlRecordEventConvertDto.getTapTable());
+			dmlRecordEventConvertDto.setKafkaMessageKey(kafkaMessageKey);
 			jsProcessParam.put("data", allData);
 			String op = mqOp.getOp();
 			Map<String, Object> header = new HashMap();
@@ -143,9 +151,9 @@ public class DMLCalculatorQueue<P,V> extends ConcurrentCalculatorQueue<DMLRecord
 			if (jsConvertResult != null) {
 				Map<String, Object> jsConvertResultMap = (Map<String, Object>) jsConvertResult;
 				jsConvertResultMap.put("op", op);
-				dmlRecordEventConvert.setJsConvertResultMap(jsConvertResultMap);
+				dmlRecordEventConvertDto.setJsConvertResultMap(jsConvertResultMap);
 			}
-			return dmlRecordEventConvert;
+			return dmlRecordEventConvertDto;
 		});
 		return result;
 	}
