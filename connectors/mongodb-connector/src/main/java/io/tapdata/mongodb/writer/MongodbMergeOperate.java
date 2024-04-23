@@ -825,8 +825,8 @@ public class MongodbMergeOperate {
 		return arrayFilter;
 	}
 
-	private static void appendAllParentMergeFilters(MergeResult mergeResult, MergeFilter mergeFilter) {
-		if (null == mergeResult || null == mergeResult.getFilter() || null == mergeFilter) {
+	protected static void appendAllParentMergeFilters(MergeResult mergeResult, MergeFilter mergeFilter) {
+		if (null == mergeResult || MapUtils.isEmpty(mergeResult.getFilter()) || null == mergeFilter) {
 			return;
 		}
 		Document parentFilters = mergeFilter.appendFilters();
@@ -834,7 +834,7 @@ public class MongodbMergeOperate {
 			return;
 		}
 		for (Map.Entry<String, Object> entry : parentFilters.entrySet()) {
-			if (!MergeFilterManager.test(entry)) {
+			if (MergeFilterManager.test(entry)) {
 				continue;
 			}
 			mergeResult.getFilter().put(entry.getKey(), entry.getValue());

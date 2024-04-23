@@ -21,11 +21,14 @@ public class MergeFilterManager {
 	}
 
 	public static boolean test(Map.Entry<String, Object> entry) {
+		if (null == entry) {
+			return true;
+		}
 		for (MergeFilterEntryPredicate mergeFilterEntryPredicate : mergeFilterEntryPredicateList) {
 			if (!mergeFilterEntryPredicate.test(entry)) {
-				return false;
+				return true;
 			}
 		}
-		return true;
+		return false;
 	}
 }

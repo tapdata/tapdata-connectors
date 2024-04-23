@@ -11,9 +11,6 @@ public class MergeFilterEntryNotElemMatchPredicate implements MergeFilterEntryPr
 
 	@Override
 	public boolean test(Map.Entry<String, Object> entry) {
-		if (null == entry) {
-			return false;
-		}
 		Object value = entry.getValue();
 		if (value instanceof Map && ((Map) value).size() == 1 && ((Map) value).containsKey("$not")) {
 			Object notMap = ((Map<?, ?>) value).get("$not");
