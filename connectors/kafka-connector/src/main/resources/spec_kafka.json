@@ -411,8 +411,9 @@
 					"required": false,
 					"default": "function process(record){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
 					"x-decorator": "FormItem",
-					"x-component": "JsEditor",
+					"x-component": "JsField",
 					"x-component-props": {
+						"apiFileName": "doc:customParse",
 						"options": {
 							"showPrintMargin": false,
 							"useWrapMode": true
@@ -470,9 +471,6 @@
 					"default": false,
 					"x-decorator": "FormItem",
 					"x-component": "Switch",
-					"x-decorator-props": {
-						"tooltip": "${scriptTooltip}"
-					},
 					"x-reactions": [
 						{
 							"dependencies": [
@@ -492,8 +490,9 @@
 					"required": false,
 					"default": "function process(record, op, conditionKeys){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
 					"x-decorator": "FormItem",
-					"x-component": "JsEditor",
+					"x-component": "JsField",
 					"x-component-props": {
+						"apiFileName": "doc:customWriteDML",
 						"options": {
 							"showPrintMargin": false,
 							"useWrapMode": true
@@ -564,7 +563,7 @@
 						}
 					],
 					"x-decorator-props": {
-						"tooltip": "${enabledCustomDDLMessageTooltip}"
+						"apiFileName": "doc:customWriteDDL"
 					},
 					"x-index": 210
 				},
@@ -573,8 +572,9 @@
 					"required": false,
 					"default": "function process(record){\n\n\t// Enter your code at here\n\t return record;\n}",
 					"x-decorator": "FormItem",
-					"x-component": "JsEditor",
+					"x-component": "JsField",
 					"x-component-props": {
+						"apiFileName": "doc:customWriteDDL",
 						"options": {
 							"showPrintMargin": false,
 							"useWrapMode": true
@@ -631,6 +631,9 @@
 			"replicasSize": "Number of replications",
 			"partitionNum": "Number of partitions",
 			"doc": "docs/kafka_en_US.md",
+			"doc:customParse": "docs/customParse_zh_US.md",
+			"doc:customWriteDDL": "docs/customWriteDDL_zh_US.md",
+			"doc:customWriteDML": "docs/customWriteDML_zh_US.md",
 			"nameSrvAddr": "Kafka Host",
 			"nameSrvAddrTip": "Kafka host address, multiple addresses are separated by commas, such as 192.168.1.200:9092,192.168.1.201:9092",
 			"mqTopicString": "topic expression",
@@ -675,7 +678,10 @@
 			"customDmlThreadNum": "With this configuration enabled, Kafka will use the target's model for inferences.Make sure that the target has a model and that the model matches the Kafka message, or you will get an error",
 			"customDmlThreadNumTooltip": "Customize the number of message body script parsing threads",
 			"customParseThreadNum": "Customize the number of parse script threads",
-			"customParseThreadNumTooltip": "Kafka customizes the number of parsing scripts and increases the number of threads to speed up parsing"
+			"customParseThreadNumTooltip": "Kafka customizes the number of parsing scripts and increases the number of threads to speed up parsing",
+			"DMLScriptTitle": "自定義DML消息體腳本",
+			"customParseTitle": "自定義解析消息體腳本",
+			"DDLScriptTitle": "自定義DDL消息體腳本"
 		},
 		"zh_CN": {
 			"partitionNumTooltip": "若Topic存在，分区的数量只能增加不能减小",
@@ -683,6 +689,10 @@
 			"replicasSize": "副本数数量",
 			"partitionNum": "分区数量",
 			"doc": "docs/kafka_zh_CN.md",
+			"doc:customParse": "docs/customParse_zh_CN.md",
+			"doc:customWriteDDL": "docs/customWriteDDL_zh_CN.md",
+			"doc:customWriteDML": "docs/customWriteDML_zh_CN.md",
+			"scriptDoc": "docs/custom_script.md",
 			"nameSrvAddr": "Kafka地址",
 			"nameSrvAddrTip": "Kafka地址，多个地址用逗号分隔，如：192.168.1.200:9092,192.168.1.201:9092",
 			"mqTopicString": "主题表达式",
@@ -727,6 +737,9 @@
 			"customDmlThreadNumTooltip": "提高解析脚本的线程数量，可以提高解析的速度",
 			"customParseThreadNum": "自定义解析脚本线程数量",
 			"customParseThreadNumTooltip": "Kafka自定义解析脚本数量，提高线程的数量，可以提高解析的速度",
+			"DMLScriptTitle": "自定义DML消息体脚本",
+			"customParseTitle": "自定义解析消息体脚本",
+			"DDLScriptTitle": "自定义DDL消息体脚本"
 		},
 		"zh_TW": {
 			"partitionNumTooltip": "若Topic存在，分區的數量只能增加不能減小",
@@ -734,6 +747,9 @@
 			"replicasSize": "副本數數量",
 			"partitionNum": "分區數量",
 			"doc": "docs/kafka_zh_TW.md",
+			"doc:customParse": "docs/customParse_zh_TW.md",
+			"doc:customWriteDDL": "docs/customWriteDDL_zh_TW.md",
+			"doc:customWriteDML": "docs/customWriteDML_zh_TW.md",
 			"nameSrvAddr": "Kafka地址",
 			"nameSrvAddrTip": "Kafka地址，多個地址用逗號分隔，如：192.168.1.200:9092,192.168.1.201:9092",
 			"mqTopicString": "主題表達式",
@@ -778,6 +794,9 @@
 			"customDmlThreadNumTooltip": "提高解析腳本的線程數量，可以提高解析的速度",
 			"customParseThreadNum": "自定義解析腳本線程數量",
 			"customParseThreadNumTooltip": "Kafka自定義解析腳本數量，提高線程的數量，可以提高解析的速度",
+			"DMLScriptTitle": "Custom DML message body scripts",
+			"customParseTitle": "Custom parsing message body scripts",
+			"DDLScriptTitle": "Custom DDL message body scripts"
 		}
 	},
 	"dataTypes": {
