@@ -53,13 +53,12 @@ public class CsvSerializer implements MessageSerializer {
             final Map<String, TapField> tapFieldMap = table.getNameFieldMap();
             for (final Map.Entry<String, TapField> entry : tapFieldMap.entrySet()) {
                 if (values.containsKey(entry.getKey())) {
+                    value = values.get(entry.getKey());
+                    if (value == null) {
+                        value = Constants.NULL_VALUE;
+                    }
                     joiner.add(value.toString());
                 }
-//                value = values.getOrDefault(entry.getKey(), Constants.NULL_VALUE);
-//                // value get from the value map may be null
-//                if (value == null) {
-//                    value = Constants.NULL_VALUE;
-//                }
             }
             joiner.add(delete ? "1" : "0");
             return joiner.toString();

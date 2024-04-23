@@ -12,7 +12,6 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
-import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.commons.collections4.CollectionUtils;
@@ -235,7 +234,7 @@ public class DorisStreamLoader {
 
     public void shutdown() {
         try {
-            this.stopLoad();
+//            this.stopLoad();
             this.httpClient.close();
         } catch (Exception ignored) {
         }

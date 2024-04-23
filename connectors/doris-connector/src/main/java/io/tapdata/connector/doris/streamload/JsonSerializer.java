@@ -69,11 +69,13 @@ public class JsonSerializer implements MessageSerializer {
 		if (null == record) throw new IllegalArgumentException("Record cannot be null");
 		LinkedHashMap<String, Object> linkedRecord = new LinkedHashMap<>();
 		for (String field : tapTable.getNameFieldMap().keySet()) {
-			Object value = record.get(field);
-			if (null == value) {
-//				linkedRecord.put(field, null);
-			} else {
-				linkedRecord.put(field, value.toString());
+			if (record.containsKey(field)) {
+				Object value = record.get(field);
+				if (null == value) {
+					linkedRecord.put(field, null);
+				} else {
+					linkedRecord.put(field, value.toString());
+				}
 			}
 		}
 		linkedRecord.put(Constants.DORIS_DELETE_SIGN, delete ? 1 : 0);
