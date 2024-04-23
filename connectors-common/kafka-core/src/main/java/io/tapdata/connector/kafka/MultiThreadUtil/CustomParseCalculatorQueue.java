@@ -115,9 +115,7 @@ public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<Consum
 
 	@Override
 	protected void handleError(Exception e) {
-		if(getHasException().compareAndSet(false, true)){
-			getException().set(e);
-		}
+		getException().compareAndSet(null, e);
 	}
 
 	private TapEvent makeCustomMessageUseScriptEngine(Invocable customScriptEngine, ConsumerRecord<byte[], byte[]> consumerRecord) {

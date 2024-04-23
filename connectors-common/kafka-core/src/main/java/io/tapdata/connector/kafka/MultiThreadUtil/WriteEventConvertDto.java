@@ -1,13 +1,13 @@
 package io.tapdata.connector.kafka.MultiThreadUtil;
 
-import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.schema.TapTable;
 
 import java.util.Map;
 
-public class DMLRecordEventConvertDto {
+public class WriteEventConvertDto {
 	private TapTable tapTable;
-	TapRecordEvent recordEvent;
+	TapEvent tapEvent;
 	Map<String,Object> jsConvertResultMap;
 	private byte[] kafkaMessageKey;
 
@@ -36,10 +36,11 @@ public class DMLRecordEventConvertDto {
 		this.tapTable = tapTable;
 	}
 
-	public TapRecordEvent getRecordEvent() {
-		return recordEvent;
+	public TapEvent getTapEvent() {
+		return tapEvent;
 	}
-	public void setRecordEvent(TapRecordEvent recordEvent) {
-		this.recordEvent = recordEvent;
+
+	public void setTapEvent(TapEvent tapEvent) {
+		this.tapEvent = tapEvent;
 	}
 }

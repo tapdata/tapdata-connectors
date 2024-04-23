@@ -7,7 +7,7 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
 
-public class ProduceCustomDmlRecordInfo {
+public class ProduceCustomDMLRecordInfo {
 	KafkaProducer<byte[],byte[]> kafkaProducer;
 	CountDownLatch countDownLatch;
 	private AtomicLong insert;
@@ -16,7 +16,7 @@ public class ProduceCustomDmlRecordInfo {
 	WriteListResult<TapRecordEvent> listResult;
 
 
-	public ProduceCustomDmlRecordInfo(KafkaProducer<byte[], byte[]> kafkaProducer, CountDownLatch countDownLatch, AtomicLong insert, AtomicLong update, AtomicLong delete, WriteListResult<TapRecordEvent> listResult) {
+	public ProduceCustomDMLRecordInfo(KafkaProducer<byte[], byte[]> kafkaProducer, CountDownLatch countDownLatch, AtomicLong insert, AtomicLong update, AtomicLong delete, WriteListResult<TapRecordEvent> listResult) {
 		this.kafkaProducer = kafkaProducer;
 		this.countDownLatch = countDownLatch;
 		this.insert=insert;

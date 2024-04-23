@@ -9,7 +9,6 @@ public abstract class ConcurrentCalculatorQueue<P, V> implements AutoCloseable {
 	protected final ExecutorService executorService;
 	protected final ArrayBlockingQueue<CompletableFuture<V>> futureQueue;
 	//	protected final Function<P, V> performComputation;
-	private AtomicBoolean hasException = new AtomicBoolean(false);
 	private AtomicReference<Exception> exception =new AtomicReference<>();
 
 	protected ConcurrentCalculatorQueue(int threadSize, int queueSize) {
@@ -22,9 +21,8 @@ public abstract class ConcurrentCalculatorQueue<P, V> implements AutoCloseable {
 					distributingFuture(future);
 				}
 			} catch (Exception e) {
-				handleError(e);
 				isClose.compareAndSet(false, true);
-				Thread.currentThread().interrupt();
+				handleError(e);
 			}
 		});
 	}
@@ -47,13 +45,6 @@ public abstract class ConcurrentCalculatorQueue<P, V> implements AutoCloseable {
 	}
 	protected abstract V performComputation(P data);
 
-	public AtomicBoolean getHasException() {
-		return hasException;
-	}
-
-	public void setHasException(AtomicBoolean hasException) {
-		this.hasException = hasException;
-	}
 
 	public AtomicReference<Exception> getException() {
 		return exception;
@@ -63,7 +54,7 @@ public abstract class ConcurrentCalculatorQueue<P, V> implements AutoCloseable {
 		this.exception = exception;
 	}
 
-	protected boolean isRunning() {
+	public boolean isRunning() {
 		return !isClose.get();
 	}
 	protected abstract void handleError(Exception e);

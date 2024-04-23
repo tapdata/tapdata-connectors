@@ -30,53 +30,69 @@ public class CustomParseUtil {
 
 	static {
 		HANDLER_MAP_DDL.put(209, (record) -> {
-			TapNewFieldEvent tapNewFieldEvent = new TapNewFieldEvent();
-			List<Map<String, Object>> newFields = (List<Map<String, Object>>) record.get("newFields");
-			List<TapField> newFieldList = newFields.stream().map(newFieldMap -> {
-				TapField tapField = new TapField();
-				String fieldName = MapUtils.getString(newFieldMap, "name");
-				if (StringUtils.isEmpty(fieldName))
-					throw new RuntimeException("custom newFieldEvent FieldName can not be null");
-				tapField.setName(fieldName);
-				String dataType = MapUtils.getString(newFieldMap, "dataType");
-				if (StringUtils.isEmpty(dataType))
-					throw new RuntimeException("custom newFieldEvent dataType can not be null");
-				tapField.setDataType(dataType);
-				return tapField;
-			}).collect(Collectors.toList());
+			TapNewFieldEvent tapNewFieldEvent = null;
+			try{
+				tapNewFieldEvent=JSON.parseObject(JSON.toJSONString(record),TapNewFieldEvent.class);
+			}catch (Exception e){
+				throw new RuntimeException("cast custom tapNewFieldEvent failed");
+			}
 			tapNewFieldEvent.setTime(System.currentTimeMillis());
 			tapNewFieldEvent.setReferenceTime(System.currentTimeMillis());
-			tapNewFieldEvent.setNewFields(newFieldList);
-			tapNewFieldEvent.setTableId(MapUtils.getString(record, "tableId"));
 			return tapNewFieldEvent;
+//			List<Map<String, Object>> newFields = (List<Map<String, Object>>) record.get("newFields");
+//			List<TapField> newFieldList = newFields.stream().map(newFieldMap -> {
+//				TapField tapField = new TapField();
+//				String fieldName = MapUtils.getString(newFieldMap, "name");
+//				if (StringUtils.isEmpty(fieldName))
+//					throw new RuntimeException("custom newFieldEvent FieldName can not be null");
+//				tapField.setName(fieldName);
+//				String dataType = MapUtils.getString(newFieldMap, "dataType");
+//				if (StringUtils.isEmpty(dataType))
+//					throw new RuntimeException("custom newFieldEvent dataType can not be null");
+//				tapField.setDataType(dataType);
+//				return tapField;
+//			}).collect(Collectors.toList());
+//			tapNewFieldEvent.setNewFields(newFieldList);
+//			tapNewFieldEvent.setTableId(MapUtils.getString(record, "tableId"));
 		});
 		HANDLER_MAP_DDL.put(202, (record) -> {
-			TapAlterFieldNameEvent tapAlterFieldNameEvent = new TapAlterFieldNameEvent();
+			TapAlterFieldNameEvent tapAlterFieldNameEvent = null;
+			try {
+				tapAlterFieldNameEvent = JSON.parseObject(JSON.toJSONString(record), TapAlterFieldNameEvent.class);
+			} catch (Exception e) {
+				throw new RuntimeException("cast custom tapAlterFieldNameEvent failed");
+			}
 			tapAlterFieldNameEvent.setReferenceTime(System.currentTimeMillis());
 			tapAlterFieldNameEvent.setTime(System.currentTimeMillis());
-			tapAlterFieldNameEvent.setTableId(MapUtils.getString(record, "tableId"));
-			Map nameChange = MapUtils.getMap(record, "nameChange");
-			String before = MapUtils.getString(nameChange, "before");
-			String after = MapUtils.getString(nameChange, "after");
-			if (StringUtils.isEmpty(before)) throw new RuntimeException("custom nameChangeEvent before can not be null");
-			if (StringUtils.isEmpty(after)) throw new RuntimeException("custom nameChangeEvent after can not be null");
-			ValueChange valueChange = new ValueChange();
-			valueChange.setAfter(after);
-			valueChange.setBefore(before);
-			tapAlterFieldNameEvent.setNameChange(valueChange);
 			return tapAlterFieldNameEvent;
+//			tapAlterFieldNameEvent.setTableId(MapUtils.getString(record, "tableId"));
+//			Map nameChange = MapUtils.getMap(record, "nameChange");
+//			String before = MapUtils.getString(nameChange, "before");
+//			String after = MapUtils.getString(nameChange, "after");
+//			if (StringUtils.isEmpty(before)) throw new RuntimeException("custom nameChangeEvent before can not be null");
+//			if (StringUtils.isEmpty(after)) throw new RuntimeException("custom nameChangeEvent after can not be null");
+//			ValueChange valueChange = new ValueChange();
+//			valueChange.setAfter(after);
+//			valueChange.setBefore(before);
+//			tapAlterFieldNameEvent.setNameChange(valueChange);
 		});
 		HANDLER_MAP_DDL.put(207, (record) -> {
-			TapDropFieldEvent tapDropFieldEvent = new TapDropFieldEvent();
-			String fieldName = MapUtils.getString(record, "fieldName");
-			String tableId = MapUtils.getString(record, "tableId");
-			if (StringUtils.isEmpty(fieldName))
-				throw new RuntimeException("custom DropFieldEvent FieldName can not be null");
-			tapDropFieldEvent.setTableId(tableId);
-			tapDropFieldEvent.setFieldName(fieldName);
+			TapDropFieldEvent tapDropFieldEvent = null;
+			try {
+				tapDropFieldEvent = JSON.parseObject(JSON.toJSONString(record), TapDropFieldEvent.class);
+			} catch (Exception e) {
+				throw new RuntimeException("cast custom DropFieldEvent failed");
+			}
 			tapDropFieldEvent.setReferenceTime(System.currentTimeMillis());
 			tapDropFieldEvent.setTime(System.currentTimeMillis());
 			return tapDropFieldEvent;
+//			TapDropFieldEvent tapDropFieldEvent = new TapDropFieldEvent();
+//			String fieldName = MapUtils.getString(record, "fieldName");
+//			String tableId = MapUtils.getString(record, "tableId");
+//			if (StringUtils.isEmpty(fieldName))
+//				throw new RuntimeException("custom DropFieldEvent FieldName can not be null");
+//			tapDropFieldEvent.setTableId(tableId);
+//			tapDropFieldEvent.setFieldName(fieldName);
 		});
 		HANDLER_MAP_DDL.put(201, (record) -> {
 			TapAlterFieldAttributesEvent tapAlterFieldAttributesEvent = null;
