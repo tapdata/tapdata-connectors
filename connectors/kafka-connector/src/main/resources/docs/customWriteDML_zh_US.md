@@ -2,7 +2,7 @@
 
 ### Input parameter description
 
-1. The record represents the output data from the source and has the following structure
+#### The record represents the output data from the source and has the following structure
 
 ```
 record:{
@@ -25,35 +25,29 @@ record:{
 }
 ```
 
-2. op stands for operation type, and there are three operation types: insert, update, and delete
-3. conditionKeys a collection of primary key field names that contains all the primary keys
+* op stands for operation type, and there are three operation types: insert, update, and delete
+* conditionKeys a collection of primary key field names that contains all the primary keys
 
 ### Return Value Description
 
-1. The returned value represents the structure written to the Kafka message body
-2. We can add header and data properties to the return object, where header represents the header part of the kafka message and data represents the body part of the kafka message:
+* The returned value represents the structure written to the Kafka message body
+* The return value object can have header and data properties, where header represents the header part of the kafka message and data represents the body part of the kafka message
 
 ```
 customMeesage:{
 	// Customize Kafka headers, which contain key/value pairs
-	'header':{key:value}
+	'header':{key:value},
 	// Customize Kafka's body
-	'data':{
-		'tableId':record.eventInfo.tableId,
-		'after':record.data.after,
-		'rid':record.eventInfo.rowId,
-	}
+	'data':{key:value}
 }
 ```
 
-This return value will add a header with the key op and the value dml to the header of the kafka message.
-And write three fields in the body: tableId, after, rid, whose value is the table name of the record, the modified data of the record, and the rowId of the record
-
-3. If the return value is empty, it means that the data is filtered
+* The preceding return value will customize the kafka message body, with headers and data added as key-value pairs
+* If the return value is empty, it means that the data is filtered
 
 ### Examples
 
-1. Write the XID, rowId, tableId of the dml event, a new field attribute in the script, and the DML data custom into the Body of Kafka, the example code is as follows:
+The XID, rowId, and tableId of the dml event, as well as the new tapd field in the script and the DML data customization, are written into the Body of Kafka, as shown in the following example code:
 
 ```
 // Create a LinkedHashMap object as the body container object

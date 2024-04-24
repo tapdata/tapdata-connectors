@@ -505,7 +505,7 @@ public class KafkaService extends AbstractMqService {
 		String threadId = String.valueOf(Thread.currentThread().getId());
 		CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
 		ProduceCustomDMLRecordInfo produceCustomDmlRecordInfo = new ProduceCustomDMLRecordInfo(kafkaProducer, countDownLatch, insert, update, delete, listResult);
-		Integer dmlThreadNum = Optional.ofNullable(kafkaConfig.getCustomDmlThreadNum()).orElse(4);
+		Integer dmlThreadNum = Optional.ofNullable(kafkaConfig.getCustomWriteThreadNum()).orElse(4);
 		CustomWriteCalculatorQueue<WriteEventConvertDto, WriteEventConvertDto> customWriteCalculatorQueue = writeCalculatorQueueConcurrentHashMap.computeIfAbsent(threadId
 			, (key) -> new CustomWriteCalculatorQueue<>(dmlThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customDmlConcurrents,customDDLConcurrents));
 		try {
@@ -579,7 +579,7 @@ public class KafkaService extends AbstractMqService {
 	public void consumeOneCustom(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
 		consuming.set(true);
 		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
-		Integer customParseThreadNum = Optional.ofNullable(kafkaConfig.getCustomDmlThreadNum()).orElse(4);
+		Integer customParseThreadNum = Optional.ofNullable(kafkaConfig.getCustomWriteThreadNum()).orElse(4);
 		CustomParseCalculatorQueue batchReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
 		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(kafkaConfig, connectorId, true);
 		batchReadCustomParseCalculatorQueue.setEventsOffsetConsumer(eventsOffsetConsumer);
@@ -638,7 +638,7 @@ public class KafkaService extends AbstractMqService {
 		consuming.set(true);
 		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
 		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration((kafkaConfig), connectorId, true);
-		Integer customParseThreadNum = Optional.ofNullable(kafkaConfig.getCustomDmlThreadNum()).orElse(4);
+		Integer customParseThreadNum = Optional.ofNullable(kafkaConfig.getCustomWriteThreadNum()).orElse(4);
 		CustomParseCalculatorQueue streamReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
 		streamReadCustomParseCalculatorQueue.setEventsOffsetConsumer(eventsOffsetConsumer);
 		streamReadCustomParseCalculatorQueue.setConsuming(consuming);
@@ -762,7 +762,7 @@ public class KafkaService extends AbstractMqService {
 		CountDownLatch countDownLatch = new CountDownLatch(1);
 		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
 		String threadId = String.valueOf(Thread.currentThread().getId());
-		Integer ddlThreadNum = Optional.ofNullable(kafkaConfig.getCustomDmlThreadNum()).orElse(4);
+		Integer ddlThreadNum = Optional.ofNullable(kafkaConfig.getCustomWriteThreadNum()).orElse(4);
 		CustomWriteCalculatorQueue<WriteEventConvertDto, WriteEventConvertDto> customDDLCalculatorQueue = writeCalculatorQueueConcurrentHashMap.computeIfAbsent(threadId
 			, key -> new CustomWriteCalculatorQueue<>(ddlThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customDmlConcurrents, customDDLConcurrents));
 		ProduceCustomDDLRecordInfo produceCustomDdlRecordInfo = new ProduceCustomDDLRecordInfo(kafkaProducer, countDownLatch);

@@ -8,7 +8,7 @@ var record={
 	'referenceTime':1713724313,	//事件產生的時間單位爲毫秒，類型爲Long
 	'time':1713724313,	//事件產生的時間單位爲毫秒，類型爲Long
 	'type':203,	//代表DDL的事件類型，209代表新增字段事件，201代表修改字段屬性事件，202代表修改字段名事件，207代表刪除字段事件
-	'ddl':"alter table add column test varchar(1)",	//代表數據庫原始的DDL語句
+	'ddl':'alter table add column test varchar(1)',	//代表數據庫原始的DDL語句
 	'tableId':"test",		//代表發生DDL的表名稱
 	// 新增字段DDL事件特有屬性
 	'newFields':[
@@ -23,8 +23,8 @@ var record={
 	]
 	// 修改字段名DDL事件特有屬性
 	nameChange:{
-		after:'改名後的值',
-		before:'改名前的值'
+		after:'afterName',
+		before:'beforeName'
 	}
 	// fieldName、checkChange、constraintChange、nullableChange、commentChange、defaultChange、primaryChange、fieldName是修改字段屬性DDL事件特有屬性
 	fieldName:'修改屬性的字段名屬性'
@@ -32,32 +32,32 @@ var record={
 		before:'String',
 		after:'Integer'
 	},
-	// 字段check約束變化
+	// 字段check約束變化、確保滿足Check表達式才能寫入
 	checkChange:{
-		before:'',
-		after:''
+		before:'beforeCheckexpression',
+		after:'afterCheckexpression'
 	},
-	//字段constraint約束變化
+	//字段constraint約束變化，constraint代表字段的約束
 	constraintChange:{
-		before:'',
-		after:''
+		before:'beforeConstraint',
+		after:'afterConstraint'
 	},
-	//字段nullable約束變化
+	//字段nullable約束變化,nullable代表字段是否可以爲空
 	nullableChange:{
 		before:false,
 		after:true
 	},
-	//字段comment約束變化
+	//字段comment約束變化，comment代表字段的註釋
 	commentChange:{
 		before:'',
 		after:''
 	},
-	//字段default約束變化
+	//字段default值變化，default代表字段的默認值
 	defaultChange:{
 		before:beforeDefaultValue,
 		after:afterDefaultValue,
 	},
-	//字段primary约束变化
+	//字段primary約束變化,大於0代表爲主鍵，0代表不是主鍵
 	primaryChange:{
 		before:0
 		after:1
@@ -70,7 +70,7 @@ var record={
 1. 返回值代表寫入Kafka的body結構
 2. 返回null代表過濾這條數據
 ### 示例
-1. 如上示例將字段改名DDL事件自定義寫進Kafka消息的body中，根據入參record的type判斷是哪種DDL事件，然後添加opType，並且在body中寫入表屬主，表名，還有DDL的原始語句
+1. 如上示例將字段改名DDL事件自定義寫進Kafka消息的body中，根據入參record的type判斷是哪種DDL事件，然後添加opType，並且在body中寫入表屬主，表名，DDL的原始語句還有在tapType中寫入tapdata的DDL事件
 ```
 	//創建一個LinkedHashMap對象作爲body容器對象
 	let data = new LinkedHashMap();

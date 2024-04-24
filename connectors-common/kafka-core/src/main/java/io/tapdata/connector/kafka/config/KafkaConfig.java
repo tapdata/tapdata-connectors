@@ -33,16 +33,17 @@ public class KafkaConfig extends MqConfig {
     private Boolean enableCustomParse = false;
     private String enableCustomParseScript;
 
-	private Integer customDmlThreadNum;
+	private Integer customWriteThreadNum;
 
 	private Integer customParseThreadNum;
 
-	public Integer getCustomDmlThreadNum() {
-		return customDmlThreadNum;
+
+	public Integer getCustomWriteThreadNum() {
+		return customWriteThreadNum;
 	}
 
-	public void setCustomDmlThreadNum(Integer customDmlThreadNum) {
-		this.customDmlThreadNum = customDmlThreadNum;
+	public void setCustomWriteThreadNum(Integer customWriteThreadNum) {
+		this.customWriteThreadNum = customWriteThreadNum;
 	}
 
 	public Integer getCustomParseThreadNum() {

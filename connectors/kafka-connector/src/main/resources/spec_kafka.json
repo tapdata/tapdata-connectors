@@ -515,16 +515,16 @@
 					},
 					"x-index": 190
 				},
-				"customDmlThreadNum": {
+				"customWriteThreadNum": {
 					"required": true,
 					"type": "string",
-					"title": "${customDmlThreadNum}",
+					"title": "${customWriteThreadNum}",
 					"x-decorator": "FormItem",
 					"x-component": "InputNumber",
-					"apiServerKey": "customDmlThreadNum",
+					"apiServerKey": "customWriteThreadNum",
 					"default": 4,
 					"x-decorator-props": {
-						"tooltip": "${customDmlThreadNumTooltip}"
+						"tooltip": "${customWriteThreadNumTooltip}"
 					},
 					"x-component-props": {
 						"min": 1,
@@ -675,8 +675,8 @@
 			"enabledCustomDDLMessageTooltip": "Parameter Description\nrecord is the information in each ddl, and the ddl event will have referenceTime, time, type, and tableId properties. tableId represents the table name, type represents the type of DDL event, 209 represents the add field DDL event, 202 represents the rename DDL event, 207 represents the delete field DDL event, 201 represents the change field attribute DDL eventThere are different properties in different types of DDL events.\nNew fields DDL will have newFields, which represents the properties of all new fields. Such as newFields: [{autoInc: false, dataType: 'STRING' name: 'f1' nullable: true, partitionKey: false, the primaryKey: false}]\nfieldName:' Name of the deleted field 'The DDL-specific property for the event is: fieldName:' The name of the deleted field'.\nEvent-specific field rename properties: nameChange:{after:' value renamed ',before:' value renamed '}\nDdl-specific attributes are: fieldName:' property name to change 'means the name of the property to be changed,dataTypeChange: {before:' data type to be changed ',after:' data type to be changed '} data type change,checkChange: {before:' constraint before change ',after:' constraint after change '},nullableChange:{before:true,after:false} Can be nullable,defaultChange:{before: \",after:\" },primaryChange:{before:'',after:''}\nIf want to change name events into their own property returns an object {type: 202, fromName: record. NameChange. Before}",
 			"enableUseTargetSchema": "Kafka uses a target model",
 			"enableUseTargetSchemaTooltip": "With this configuration enabled, Kafka will use the target's model for inferences.Make sure that the target has a model and that the model matches the Kafka message, or you will get an error",
-			"customDmlThreadNum": "With this configuration enabled, Kafka will use the target's model for inferences.Make sure that the target has a model and that the model matches the Kafka message, or you will get an error",
-			"customDmlThreadNumTooltip": "Customize the number of message body script parsing threads",
+			"customWriteThreadNum": "With this configuration enabled, Kafka will use the target's model for inferences.Make sure that the target has a model and that the model matches the Kafka message, or you will get an error",
+			"customWriteThreadNumTooltip": "Customize the number of message body script parsing threads",
 			"customParseThreadNum": "Customize the number of parse script threads",
 			"customParseThreadNumTooltip": "Kafka customizes the number of parsing scripts and increases the number of threads to speed up parsing",
 			"DMLScriptTitle": "自定義DML消息體腳本",
@@ -733,8 +733,8 @@
 			"enabledCustomDDLMessageTooltip": "參數說明\n record爲每條ddl中的信息，ddl事件中都會有referenceTime、time、type、tableId屬性。tableId代表表名、type代表DDL事件的類型，209代表新增字段DDL事件、202代表改名DDL事件、207代表刪除字段DDL事件、201代表改變字段屬性DDL事件。不同類型的DDL事件中有不同的屬性。\n1、新增字段DDL中會有newFields，代表所有新增字段的屬性。如newFields:[{autoInc: false, dataType:'STRING',name:'f1',nullable: true,partitionKey:false,primaryKey:false}]\n2、刪除字段事件DDL特有的屬性是：fieldName:'刪除的字段名'\n3、字段改名事件特有的屬性：nameChange:{after:'改名後的值',before:'改名前的值'}\n4、字段改屬性事件DDL特有的屬性是：fieldName:'要改的屬性名'代表需要更改屬性的名稱,dataTypeChange：{before:'更改前的數據類型',after:'更改後的數據類型'}數據類型改變,checkChange：{before:'更改前的約束',after:'更改後的約束'},nullableChange:{before:true,after:false}是否可以爲nullable,defaultChange:{before:'',after:''},primaryChange:{before:'',after:''}\n例如:將改名事件轉爲自己的屬性可以返回一個對象{type:202,fromName:record.nameChange.before}",
 			"enableUseTargetSchema": "Kafka使用目标模型",
 			"enableUseTargetSchemaTooltip": "开启了此配置之后，Kafka会使用目标的模型进行推演，要保证目标有模型，并且模型跟Kafka的消息匹配，否则会出现报错",
-			"customDmlThreadNum": "自定义消息体脚本解析线程数量",
-			"customDmlThreadNumTooltip": "提高解析脚本的线程数量，可以提高解析的速度",
+			"customWriteThreadNum": "自定义消息体脚本解析线程数量",
+			"customWriteThreadNumTooltip": "提高解析脚本的线程数量，可以提高解析的速度",
 			"customParseThreadNum": "自定义解析脚本线程数量",
 			"customParseThreadNumTooltip": "Kafka自定义解析脚本数量，提高线程的数量，可以提高解析的速度",
 			"DMLScriptTitle": "自定义DML消息体脚本",
@@ -790,8 +790,8 @@
 			"enabledCustomDDLMessageTooltip": "參數說明\n record爲每條ddl中的信息，ddl事件中都會有referenceTime、time、type、tableId屬性。tableId代表表名、type代表DDL事件的類型，209代表新增字段DDL事件、202代表改名DDL事件、207代表刪除字段DDL事件、201代表改變字段屬性DDL事件。不同類型的DDL事件中有不同的屬性。\n1、新增字段DDL中會有newFields，代表所有新增字段的屬性。如newFields:[{autoInc: false, dataType:'STRING',name:'f1',nullable: true,partitionKey:false,primaryKey:false}]\n2、刪除字段事件DDL特有的屬性是：fieldName:'刪除的字段名'\n3、字段改名事件特有的屬性：nameChange:{after:'改名後的值',before:'改名前的值'}\n4、字段改屬性事件DDL特有的屬性是：fieldName:'要改的屬性名'代表需要更改屬性的名稱,dataTypeChange：{before:'更改前的數據類型',after:'更改後的數據類型'}數據類型改變,checkChange：{before:'更改前的約束',after:'更改後的約束'},nullableChange:{before:true,after:false}是否可以爲nullable,defaultChange:{before:'',after:''},primaryChange:{before:'',after:''}\n如想要將改名事件轉爲自己的屬性可以返回一個對象{type:202,fromName:record.nameChange.before}",
 			"enableUseTargetSchema": "Kafka使用目標模型",
 			"enableUseTargetSchemaTooltip": "開啓了此配置之後，Kafka會使用目標的模型進行推演，要保證目標有模型，並且模型跟Kafka的消息匹配，否則會出現報錯",
-			"customDmlThreadNum": "自定義消息體腳本解析線程數量",
-			"customDmlThreadNumTooltip": "提高解析腳本的線程數量，可以提高解析的速度",
+			"customWriteThreadNum": "自定義消息體腳本解析線程數量",
+			"customWriteThreadNumTooltip": "提高解析腳本的線程數量，可以提高解析的速度",
 			"customParseThreadNum": "自定義解析腳本線程數量",
 			"customParseThreadNumTooltip": "Kafka自定義解析腳本數量，提高線程的數量，可以提高解析的速度",
 			"DMLScriptTitle": "Custom DML message body scripts",

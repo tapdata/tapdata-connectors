@@ -9,7 +9,7 @@ var record={
 	'referenceTime':1713724313,	// Events are generated in milliseconds and are of type Long
 	'time':1713724313,	// Events are generated in milliseconds and are of type Long
 	'type':203,		// represents the DDL event type, 209 represents the add field event, 201 represents the change field attribute event, 202 represents the change field name event, 207 represents the delete field event
-	'ddl':"alter table add column test varchar(1)",		// represents the original DDL statement of the database
+	'ddl':'alter table add column test varchar(1)',		// represents the original DDL statement of the database
 	'tableId':"test",	// represents the name of the table where the DDL occurred
 	// New fields DDL event-specific properties
 	'newFields':[
@@ -24,8 +24,8 @@ var record={
 	]
 	// Change field name DDL event-specific property
 	nameChange:{
-		after:'Renamed value',
-		before:'Value before renaming'
+		after:'afterName',
+		before:'beforeName'
 	}
 	// fieldName、checkChange、constraintChange、nullableChange、commentChange、defaultChange、primaryChange、fieldName is specific to the DDL event that modifies the field property
 	fieldName:'Change the field name property of the property'
@@ -33,32 +33,32 @@ var record={
 		before:'String',
 		after:'Integer'
 	},
-	// Field check constraint changes
+	// Field check constraint changes, make sure Check expression is satisfied before writing
 	checkChange:{
-		before:'',
-		after:''
+		before:'beforeCheckexpression',
+		after:'afterCheckexpression'
 	},
-	// Field constraint changes
+	// Field constraint constraint changes, constraint stands for the field constraint
 	constraintChange:{
-		before:'',
-		after:''
+		before:'beforeConstraint',
+		after:'afterConstraint'
 	},
-	// Field nullable constraint changes
+	// Field nullable constraints change. nullable represents whether a field can be null or not
 	nullableChange:{
 		before:false,
 		after:true
 	},
-	// Field comment constraint changes
+	// Field comment constrains the change, and comment represents the comment of the field
 	commentChange:{
-		before:'',
-		after:''
+		before:'beforeComment',
+		after:'afterComment'
 	},
-	// Field default constraint changes
+	// Field default value changes, default stands for the default value of the field
 	defaultChange:{
 		before:beforeDefaultValue,
 		after:afterDefaultValue,
 	},
-	// Field primary constraint changes
+	// Field primary constraint changes, greater than 0 means primary key, 0 means not primary key
 	primaryChange:{
 		before:0
 		after:1

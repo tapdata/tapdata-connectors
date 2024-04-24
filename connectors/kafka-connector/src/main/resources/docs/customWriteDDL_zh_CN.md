@@ -9,7 +9,7 @@ var record={
 	'referenceTime':1713724313,	//事件产生的时间单位为毫秒，类型为Long
 	'time':1713724313,	//事件产生的时间单位为毫秒，类型为Long
 	'type':203,	//代表DDL的事件类型，209代表新增字段事件，201代表修改字段属性事件，202代表修改字段名事件，207代表删除字段事件
-	'ddl':"alter table add column test varchar(1)",	//代表数据库原始的DDL语句
+	'ddl':'alter table add column test varchar(1)',	//代表数据库原始的DDL语句
 	'tableId':"test",		//代表发生DDL的表名称
 	// 新增字段DDL事件特有属性
 	'newFields':[
@@ -24,8 +24,8 @@ var record={
 	]
 	// 修改字段名DDL事件特有属性
 	nameChange:{
-		after:'改名後的值',
-		before:'改名前的值'
+		after:'afterName',
+		before:'beforeName'
 	}
 	// fieldName、checkChange、constraintChange、nullableChange、commentChange、defaultChange、primaryChange、fieldName是修改字段属性DDL事件特有属性
 	fieldName:‘修改属性的字段名属性’
@@ -33,32 +33,32 @@ var record={
 		before:'String',
 		after:'Integer'
 	},
-	// 字段check约束变化
+	// 字段check约束变化、确保满足Check表达式才能写入
 	checkChange:{
-		before:'',
-		after:''
+		before:'beforeCheckexpression',
+		after:'afterCheckexpression'
 	},
-	//字段constraint约束变化
+	//字段constraint约束变化，constraint代表字段的约束
 	constraintChange:{
-		before:'',
-		after:''
+		before:'beforeConstraint',
+		after:'afterConstraint'
 	},
-	//字段nullable约束变化
+	//字段nullable约束变化,nullable代表字段是否可以为空
 	nullableChange:{
 		before:false,
 		after:true
 	},
-	//字段comment约束变化
+	//字段comment约束变化，comment代表字段的注释
 	commentChange:{
-		before:'',
-		after:''
+		before:'beforeComment',
+		after:'afterComment'
 	},
-	//字段default约束变化
+	//字段default值变化，default代表字段的默认值
 	defaultChange:{
 		before:beforeDefaultValue,
 		after:afterDefaultValue,
 	},
-	//字段primary约束变化
+	//字段primary约束变化,大于0代表为主键，0代表不是主键
 	primaryChange:{
 		before:0
 		after:1
@@ -71,7 +71,7 @@ var record={
 1. 返回值代表写入Kafka的body结构
 2. 返回null代表过滤这条数据
 ### 常用方法
-1. 如上示例将字段改名DDL事件自定义写进Kafka消息的body中，根据入参record的type判断是哪种DDL事件，然后添加opType，并且在body中写入表属主，表名，还有DDL的原始语句
+1. 如上示例将字段改名DDL事件自定义写进Kafka消息的body中，根据入参record的type判断是哪种DDL事件，然后添加opType，并且在body中写入表属主，表名，DDL的原始语句还有在tapType中写入tapdata的DDL事件
 ```
 	//创建一个LinkedHashMap对象作为body容器对象
 	let data = new LinkedHashMap();

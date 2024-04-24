@@ -1,22 +1,22 @@
 ## 自定义解析Kafka消息体使用说明
 ### 输入参数说明
 record为每条消息的body 要将每条消息转换为Tapdata 的DML或DDL事件，需要遵守以下协议。
-1. 若要转为添加字段DDL事件,脚本的返回值需要遵守以下协议:
+* 若要转为添加字段DDL事件,脚本的返回值需要遵守以下协议:
 ```
 {type:209, newFields=[{name:'fieldName',dataType:'fieldDataType'}]}
 ```
 newFields是一个数组。代表所有新增的字段。dateType的值可以为Map、Array、Number、Boolean、String、Integer、Text。
-2. 若要转为改名DDL,脚本的返回值需要遵守以下协议:
+* 若要转为改名DDL,脚本的返回值需要遵守以下协议:
 ```
 {type=202, nameChange={after:'afterName',before:'beforeName'}}
 ```
 nameChange代表修改前后的字段名，这个值一定不能为空，否则会转换不成功，报错。
-3. 若要转为删除字段DDL，脚本返回值的对象需要有以下协议:
+* 若要转为删除字段DDL，脚本返回值的对象需要有以下协议:
 ```
 {type:207，fieldName:'deleteFieldName'}
 ```
 fieldName代表要删除的字段名，这个值一定不能为空，否则会转换不成功，报错。
-4. 若要转为修改字段属性DDL，脚本的返回值需要遵守以下协议:
+* 若要转为修改字段属性DDL，脚本的返回值需要遵守以下协议:
 ```
 {
 	type:201,
@@ -60,7 +60,7 @@ fieldName代表要删除的字段名，这个值一定不能为空，否则会�
 ```
 其中fieldName代表需要修改属性的列名,fieldName不能为空，否则会报错。<br/>
 dataTypeChange、checkChange、constraintChange、nullableChange、commentChange、defaultChange、primaryChange这其中有一个一定不能为空，否则会报错。
-4. 若要转为dml事件，脚本的返回值需要有以下协议:
+* 若要转为dml事件，脚本的返回值需要有以下协议:
 ```
 {
 	type:'insert或者'update或者'delete',
@@ -69,9 +69,9 @@ dataTypeChange、checkChange、constraintChange、nullableChange、commentChange
 }
 ```
 type的值可以为insert、update、delete，其中当type为insert和update时，after不能为空，当type为delete时，before不能为空,否则会报错。
-5. 若要丢弃此消息，则return null
+* 若要丢弃此消息，则return null
 ### 示例
-1. 如下示例将op值为1001、1002、1003转为DML事件，op值为2001、2002、2003转为DDL事件,并且需要将不同DDL需要的不同信息从body中取出放到返回值中。
+* 如下示例将op值为1001、1002、1003转为DML事件，op值为2001、2002、2003转为DDL事件,并且需要将不同DDL需要的不同信息从body中取出放到返回值中。
 ```
 let data = new LinkedHashMap();
 switch (record.op) {
@@ -86,7 +86,7 @@ switch (record.op) {
    case 2002:
    case 2003:
     data.put("op", "ddl");
-    data.putAll(record.tapType);
+    data.putAll(record.tapType);	//kafka的消息体中的tapType包含tapdata中各种类型的DDL需要的信息
     return data;
    default:
     return null;
