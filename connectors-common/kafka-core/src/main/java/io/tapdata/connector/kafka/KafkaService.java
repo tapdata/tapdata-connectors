@@ -63,8 +63,7 @@ public class KafkaService extends AbstractMqService {
 	public static final String PDK_ID = "kafka";
     private String connectorId;
     private KafkaProducer<byte[], byte[]> kafkaProducer;
-	private ScriptEngine produceScriptEngineCustomDDL;
-    public static final String scriptEngineName = "graal.js";
+    public static final String SCRIPT_ENGINE_NAME = "graal.js";
 
 	public static final int CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE = 100;
 	private ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata");
@@ -162,10 +161,9 @@ public class KafkaService extends AbstractMqService {
 		Boolean enableCustomParse = kafkaConfig.getEnableCustomParse();
 		if (Boolean.TRUE.equals(enableCustomParse)) {
 			String customParseScript = kafkaConfig.getEnableCustomParseScript();
-			Integer customParseThreadNum = Optional.ofNullable(kafkaConfig.getCustomParseThreadNum()).orElse(4);
 			customParseConcurrents = new ScriptEngineConcurrents<>(customParseScript);
-			streamReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
-			batchReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
+//			streamReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
+//			batchReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
 		//			customParseCalculator = new ConcurrentCalculator<ConsumerRecord<byte[], byte[]>, TapEvent>(kafkaConfig.getCustomParseThreadNum()) {
 //				@Override
 //				protected TapEvent performComputation(ConsumerRecord<byte[], byte[]> data) {
@@ -191,7 +189,7 @@ public class KafkaService extends AbstractMqService {
 		}
 		Boolean enableModelDeclare = kafkaConfig.getEnableModelDeclare();
 		if (Boolean.TRUE.equals(enableModelDeclare)) {
-			declareScriptEngine = ScriptUtil.getScriptEngine(kafkaConfig.getEnableModelDeclareScript(), scriptEngineName, scriptFactory);
+			declareScriptEngine = ScriptUtil.getScriptEngine(kafkaConfig.getEnableModelDeclareScript(), SCRIPT_ENGINE_NAME, scriptFactory);
 			KafkaTapModelDeclare tapModelDeclare = new KafkaTapModelDeclare();
 			((ScriptEngine) declareScriptEngine).put("TapModelDeclare", tapModelDeclare);
 		}
@@ -466,6 +464,8 @@ public class KafkaService extends AbstractMqService {
                             case DELETE:
                                 delete.incrementAndGet();
                                 break;
+							default:
+								throw new RuntimeException("mqOp must be insert,update,delete");
                         }
                     } finally {
                         countDownLatch.countDown();
@@ -516,20 +516,20 @@ public class KafkaService extends AbstractMqService {
 				writeEventConvertDto.setTapTable(tapTable);
 				customWriteCalculatorQueue.multiCalc(writeEventConvertDto);
 			}
-		} catch (RejectedExecutionException e) {
-			tapLogger.warn("task stopped, some data produce failed!", e);
-		} catch (Exception e) {
+		} catch (InterruptedException e) {
 			tapLogger.error("produce error, or task interrupted!", e);
+			Thread.currentThread().interrupt();
 		}
 		try {
-			while (null != isAlive && isAlive.get()) {
+			while (null != isAlive && isAlive.get() && customWriteCalculatorQueue.isRunning()) {
 				checkChildThreadException(customWriteCalculatorQueue,KafkaExCode_11.KAFKA_CUSTOM_WRITE_PARSE);
-				if (countDownLatch.await(200L, TimeUnit.MILLISECONDS) || !customWriteCalculatorQueue.isRunning()) {
+				if (countDownLatch.await(200L, TimeUnit.MILLISECONDS)) {
 					break;
 				}
 			}
 		} catch (InterruptedException e) {
-			tapLogger.error("error occur when await", e);
+			Thread.currentThread().interrupt();
+			tapLogger.error("error occur when await ", e);
 		} finally {
 			writeListResultConsumer.accept(listResult.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get()));
 		}
@@ -569,11 +569,42 @@ public class KafkaService extends AbstractMqService {
 
     private byte[] getKafkaMessageKey(Map<String, Object> data, TapTable tapTable) {
         if (EmptyKit.isEmpty(tapTable.primaryKeys(true))) {
-            return null;
+            return new byte[0];
         } else {
             return jsonParser.toJsonBytes(tapTable.primaryKeys(true).stream().map(key -> String.valueOf(data.get(key))).collect(Collectors.joining("_")));
         }
     }
+
+	@Override
+	public void consumeOneCustom(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+		consuming.set(true);
+		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
+		Integer customParseThreadNum = Optional.ofNullable(kafkaConfig.getCustomDmlThreadNum()).orElse(4);
+		CustomParseCalculatorQueue batchReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
+		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(kafkaConfig, connectorId, true);
+		batchReadCustomParseCalculatorQueue.setEventsOffsetConsumer(eventsOffsetConsumer);
+		batchReadCustomParseCalculatorQueue.setConsuming(consuming);
+		batchReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
+		try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
+			kafkaConsumer.subscribe(Collections.singleton(tapTable.getId()));
+			while (consuming.get() && batchReadCustomParseCalculatorQueue.isRunning()) {
+				checkChildThreadException(batchReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
+				ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(6L));
+				if (consumerRecords.isEmpty()) {
+					break;
+				}
+				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+					batchReadCustomParseCalculatorQueue.multiCalc(consumerRecord);
+				}
+			}
+			checkChildThreadException(batchReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			tapLogger.error("batch consume occur InterruptedException");
+		} finally {
+			ErrorKit.ignoreAnyError(batchReadCustomParseCalculatorQueue::close);
+		}
+	}
 
 	@Override
 	public void consumeOne(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
@@ -583,48 +614,55 @@ public class KafkaService extends AbstractMqService {
 		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(((KafkaConfig) mqConfig), connectorId, true);
 		KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
 		kafkaConsumer.subscribe(Collections.singleton(tapTable.getId()));
-		if (null != batchReadCustomParseCalculatorQueue) {
-			batchReadCustomParseCalculatorQueue.setEventsOffsetConsumer(eventsOffsetConsumer);
-			batchReadCustomParseCalculatorQueue.setConsuming(consuming);
-			batchReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
-		}
 		while (consuming.get()) {
-			if (null != batchReadCustomParseCalculatorQueue) {
-				checkChildThreadException(batchReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
-			}
 			ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(6L));
 			if (consumerRecords.isEmpty()) {
 				break;
 			}
 			for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-				if (((KafkaConfig) mqConfig).getEnableCustomParse()) {
-					try {
-						batchReadCustomParseCalculatorQueue.multiCalc(consumerRecord);
-					} catch (Exception e) {
-						throw new RuntimeException(e);
-					}
-				} else {
 					makeMessage(consumerRecord, list, tableName);
-				}
-				if (null == batchReadCustomParseCalculatorQueue && list.size() >= eventBatchSize) {
+				if (list.size() >= eventBatchSize) {
 					eventsOffsetConsumer.accept(list, TapSimplify.list());
 					list = TapSimplify.list();
 				}
 			}
 		}
 		kafkaConsumer.close();
-		if (null != batchReadCustomParseCalculatorQueue) {
-			try {
-				batchReadCustomParseCalculatorQueue.close();
-				checkChildThreadException(batchReadCustomParseCalculatorQueue,KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
-			} catch (Exception e) {
-				throw new RuntimeException(e);
-			}
-		}
-		if (null == batchReadCustomParseCalculatorQueue && EmptyKit.isNotEmpty(list)) {
+		if (EmptyKit.isNotEmpty(list)) {
 			eventsOffsetConsumer.accept(list, TapSimplify.list());
 		}
 	}
+
+	@Override
+	public void streamConsumeCustom(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+		consuming.set(true);
+		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
+		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration((kafkaConfig), connectorId, true);
+		Integer customParseThreadNum = Optional.ofNullable(kafkaConfig.getCustomDmlThreadNum()).orElse(4);
+		CustomParseCalculatorQueue streamReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
+		streamReadCustomParseCalculatorQueue.setEventsOffsetConsumer(eventsOffsetConsumer);
+		streamReadCustomParseCalculatorQueue.setConsuming(consuming);
+		streamReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
+		try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
+			kafkaConsumer.subscribe(tableList);
+			while (consuming.get() && streamReadCustomParseCalculatorQueue.isRunning()) {
+				checkChildThreadException(streamReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
+				ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
+				if (consumerRecords.isEmpty()) {
+					continue;
+				}
+				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+					streamReadCustomParseCalculatorQueue.multiCalc(consumerRecord);
+				}
+			}
+			checkChildThreadException(streamReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
+		} catch (InterruptedException interruptedException) {
+			Thread.currentThread().interrupt();
+			tapLogger.error("stream consume occur InterruptedException");
+		}finally {
+			ErrorKit.ignoreAnyError(streamReadCustomParseCalculatorQueue::close);
+		}
+}
 
 	@Override
 	public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
@@ -634,44 +672,23 @@ public class KafkaService extends AbstractMqService {
 		KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
 		kafkaConsumer.subscribe(tableList);
 		List<TapEvent> list = TapSimplify.list();
-		if (null != streamReadCustomParseCalculatorQueue) {
-			streamReadCustomParseCalculatorQueue.setEventsOffsetConsumer(eventsOffsetConsumer);
-			streamReadCustomParseCalculatorQueue.setConsuming(consuming);
-			streamReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
-		}
 		while (consuming.get()) {
 			ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
 			if (consumerRecords.isEmpty()) {
 				continue;
 			}
 			for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-				if (kafkaConfig.getEnableCustomParse()) {
-					try {
-						streamReadCustomParseCalculatorQueue.multiCalc(consumerRecord);
-					} catch (Exception e) {
-						throw new RuntimeException(e);
-					}
-				} else {
-					makeMessage(consumerRecord, list, consumerRecord.topic());
-				}
-				checkChildThreadException(streamReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
-				if (null == streamReadCustomParseCalculatorQueue && list.size() >= eventBatchSize) {
+				makeMessage(consumerRecord, list, consumerRecord.topic());
+				if (list.size() >= eventBatchSize) {
 					eventsOffsetConsumer.accept(list, TapSimplify.list());
 					list = TapSimplify.list();
 				}
 			}
 		}
-		if (null == streamReadCustomParseCalculatorQueue && EmptyKit.isNotEmpty(list)) {
+		if (EmptyKit.isNotEmpty(list)) {
 			eventsOffsetConsumer.accept(list, TapSimplify.list());
 		}
-		ErrorKit.ignoreAnyError(() -> kafkaConsumer.close());
-		if (null != streamReadCustomParseCalculatorQueue) {
-			try {
-				checkChildThreadException(streamReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
-			} finally {
-				ErrorKit.ignoreAnyError(() -> streamReadCustomParseCalculatorQueue.close());
-			}
-		}
+		ErrorKit.ignoreAnyError(kafkaConsumer::close);
 	}
 
     private void makeMessage(ConsumerRecord<byte[], byte[]> consumerRecord, List<TapEvent> list, String tableName) {
@@ -700,6 +717,8 @@ public class KafkaService extends AbstractMqService {
                 case DELETE:
                     list.add(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()));
                     break;
+				default:
+					throw new RuntimeException("Unsupported operation type: " + mqOpReference.get());
             }
         }
     }
@@ -745,22 +764,21 @@ public class KafkaService extends AbstractMqService {
 		String threadId = String.valueOf(Thread.currentThread().getId());
 		Integer ddlThreadNum = Optional.ofNullable(kafkaConfig.getCustomDmlThreadNum()).orElse(4);
 		CustomWriteCalculatorQueue<WriteEventConvertDto, WriteEventConvertDto> customDdlCalculatorQueue = writeCalculatorQueueConcurrentHashMap.computeIfAbsent(threadId
-			, (key) -> new CustomWriteCalculatorQueue<>(ddlThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customDmlConcurrents, customDDLConcurrents));
+			, key -> new CustomWriteCalculatorQueue<>(ddlThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customDmlConcurrents, customDDLConcurrents));
 		ProduceCustomDDLRecordInfo produceCustomDdlRecordInfo = new ProduceCustomDDLRecordInfo(kafkaProducer, countDownLatch);
 		customDdlCalculatorQueue.setProduceCustomDdlRecordInfo(produceCustomDdlRecordInfo);
 		WriteEventConvertDto writeEventConvertDto = new WriteEventConvertDto();
 		writeEventConvertDto.setTapEvent(tapFieldBaseEvent);
 		try {
 			customDdlCalculatorQueue.multiCalc(writeEventConvertDto);
-		} catch (InterruptedException e) {
-			throw new RuntimeException(e);
-		}
-		try {
 			while (!countDownLatch.await(200L, TimeUnit.MILLISECONDS) || !customDdlCalculatorQueue.isRunning()) {
 				checkChildThreadException(customDdlCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_WRITE_PARSE);
 			}
 		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
 			tapLogger.error("error occur when await", e);
+		}finally {
+			ErrorKit.ignoreAnyError(customDdlCalculatorQueue::close);
 		}
 	}
 

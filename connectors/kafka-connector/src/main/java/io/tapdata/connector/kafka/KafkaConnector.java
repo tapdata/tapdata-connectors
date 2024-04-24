@@ -19,6 +19,7 @@ import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -153,70 +154,38 @@ public class KafkaConnector extends ConnectorBase {
         connectorFunctions.supportCreateTableV2(this::createTableV2);
     }
 
-    private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
-        String tableId = tapCreateTableEvent.getTableId();
-        CreateTableOptions createTableOptions = new CreateTableOptions();
-//        if (!this.isSchemaRegister) {
-        Integer replicasSize = Optional.ofNullable(kafkaConfig.getReplicasSize()).orElse(1);
-        Integer partitionNum = Optional.ofNullable(kafkaConfig.getPartitionNum()).orElse(3);
-        AdminConfiguration configuration = new AdminConfiguration(kafkaConfig, tapConnectorContext.getId());
-        try (Admin admin = new DefaultAdmin(configuration)) {
-            Set<String> existTopics = admin.listTopics();
-            if (!existTopics.contains(tableId)) {
-                createTableOptions.setTableExists(false);
-                admin.createTopics(tableId, partitionNum, replicasSize.shortValue());
-            } else {
-                List<TopicPartitionInfo> topicPartitionInfos = admin.getTopicPartitionInfo(tableId);
-                int existTopicPartition = topicPartitionInfos.size();
-                int existReplicasSize = topicPartitionInfos.get(0).replicas().size();
-                if (existReplicasSize != replicasSize) {
-                    TapLogger.warn(TAG, "cannot change the number of replicasSize of an existing table, will skip");
-                }
-                if (partitionNum <= existTopicPartition) {
-                    TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will skip");
-                } else {
-                    admin.increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
-                }
-                createTableOptions.setTableExists(true);
-            }
-        } catch (InterruptedException | ExecutionException e) {
-            throw new RuntimeException("Create Table " + tableId + " Failed | Error: " + e.getMessage());
-        }
-//        }else{
-//            createTableOptions.setTableExists(true);
-//        }
-        return createTableOptions;
-    }
+	private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
+		String tableId = tapCreateTableEvent.getTableId();
+		CreateTableOptions createTableOptions = new CreateTableOptions();
+		Integer replicasSize = Optional.ofNullable(kafkaConfig.getReplicasSize()).orElse(1);
+		Integer partitionNum = Optional.ofNullable(kafkaConfig.getPartitionNum()).orElse(3);
+		AdminConfiguration configuration = new AdminConfiguration(kafkaConfig, tapConnectorContext.getId());
+		try (Admin admin = new DefaultAdmin(configuration)) {
+			Set<String> existTopics = admin.listTopics();
+			if (!existTopics.contains(tableId)) {
+				createTableOptions.setTableExists(false);
+				admin.createTopics(tableId, partitionNum, replicasSize.shortValue());
+			} else {
+				List<TopicPartitionInfo> topicPartitionInfos = admin.getTopicPartitionInfo(tableId);
+				int existTopicPartition = topicPartitionInfos.size();
+				int existReplicasSize = topicPartitionInfos.get(0).replicas().size();
+				if (existReplicasSize != replicasSize) {
+					TapLogger.warn(TAG, "cannot change the number of replicasSize of an existing table, will skip");
+				}
+				if (partitionNum <= existTopicPartition) {
+					TapLogger.warn(TAG, "The number of partitions set is less than or equal to the number of partitions of the existing table，will skip");
+				} else {
+					admin.increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
+				}
+				createTableOptions.setTableExists(true);
+			}
+		} catch (InterruptedException | ExecutionException e) {
+			throw new RuntimeException("Create Table " + tableId + " Failed | Error: " + e.getMessage());
+		}
+		return createTableOptions;
+	}
 
 
-//    private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws ExecutionException, InterruptedException, IOException {
-//        TapTable tapTable = tapCreateTableEvent.getTable();
-//        CreateTableOptions createTableOptions = new CreateTableOptions();
-//        if (this.isSchemaRegister) {
-//            if (checkTopicExists(kafkaConfig.getConnectionString(), tapTable.getId())) {
-//                createTableOptions.setTableExists(true);
-//                return createTableOptions;
-//            }
-//            AdminClient adminClient = null;
-//            try {
-////                properties.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaConfig.getConnectionString());
-//                adminClient = AdminClient.create(properties);
-//                int numPartitions = 3;
-//                short replicationFactor = 1;
-//                NewTopic newTopic = new NewTopic(tapTable.getId(), numPartitions, replicationFactor);
-//                adminClient.createTopics(Collections.singletonList(newTopic)).all().get();
-//            } catch (InterruptedException e) {
-//                throw new RuntimeException("Create Table " + tapTable.getId() + " Failed! " + e.getMessage());
-//            } finally {
-//                adminClient.close();
-//            }
-//            createTableOptions.setTableExists(false);
-//        } else {
-//            createTableOptions.setTableExists(true);
-//        }
-//
-//        return createTableOptions;
-//    }
 
     private void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) {
         try {
@@ -233,46 +202,41 @@ public class KafkaConnector extends ConnectorBase {
         }
     }
 
-    @Override
-    public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-        if (!this.isSchemaRegister) {
-            if (Boolean.TRUE.equals(kafkaConfig.getEnableCustomParse())) {
-                kafkaService.loadTables(tables, tableSize, consumer);
-            } else {
-                kafkaService.loadTables(tableSize, consumer);
-            }
-        } else {
-            kafkaSRService.loadTables(tableSize, consumer);
-        }
-    }
+	@Override
+	public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
+		if (!this.isSchemaRegister) {
+			kafkaService.loadTables(tableSize, consumer);
+		} else {
+			kafkaSRService.loadTables(tableSize, consumer);
+		}
+	}
 
-    @Override
-    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
-        kafkaConfig = (KafkaConfig) new KafkaConfig().load(connectionContext.getConnectionConfig());
-        ConnectionOptions connectionOptions = ConnectionOptions.create();
-        connectionOptions.connectionString(kafkaConfig.getConnectionString());
-        try {
-            onStart(connectionContext);
-            CommonDbConfig config = new CommonDbConfig();
-            config.set__connectionType(kafkaConfig.get__connectionType());
-            KafkaTest kafkaTest = new KafkaTest(kafkaConfig, consumer, this.kafkaService, config, isSchemaRegister, kafkaSRService);
-            kafkaTest.testOneByOne();
-        } catch (Throwable throwable) {
-            TapLogger.error(TAG, throwable.getMessage());
-            kafkaExceptionCollector.collectTerminateByServer(throwable);
-            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), throwable);
-            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Failed, " + throwable.getMessage()));
-        } finally {
-            onStop(connectionContext);
-        }
-        List<Capability> ddlCapabilities = Arrays.asList(
-                Capability.create(DDL_NEW_FIELD_EVENT).type(Capability.TYPE_DDL),
-                Capability.create(DDL_ALTER_FIELD_NAME_EVENT).type(Capability.TYPE_DDL),
-                Capability.create(DDL_ALTER_FIELD_ATTRIBUTES_EVENT).type(Capability.TYPE_DDL),
-                Capability.create(DDL_DROP_FIELD_EVENT).type(Capability.TYPE_DDL));
-        ddlCapabilities.forEach(connectionOptions::capability);
-        return connectionOptions;
-    }
+	@Override
+	public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
+		kafkaConfig = (KafkaConfig) new KafkaConfig().load(connectionContext.getConnectionConfig());
+		ConnectionOptions connectionOptions = ConnectionOptions.create();
+		connectionOptions.connectionString(kafkaConfig.getConnectionString());
+		onStart(connectionContext);
+		CommonDbConfig config = new CommonDbConfig();
+		config.set__connectionType(kafkaConfig.get__connectionType());
+		try (KafkaTest kafkaTest = new KafkaTest(kafkaConfig, consumer, this.kafkaService, config, isSchemaRegister, kafkaSRService);) {
+			kafkaTest.testOneByOne();
+		} catch (Throwable throwable) {
+			TapLogger.error(TAG, throwable.getMessage());
+			kafkaExceptionCollector.collectTerminateByServer(throwable);
+			kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), throwable);
+			consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Failed, " + throwable.getMessage()));
+		} finally {
+			onStop(connectionContext);
+		}
+		List<Capability> ddlCapabilities = Arrays.asList(
+			Capability.create(DDL_NEW_FIELD_EVENT).type(Capability.TYPE_DDL),
+			Capability.create(DDL_ALTER_FIELD_NAME_EVENT).type(Capability.TYPE_DDL),
+			Capability.create(DDL_ALTER_FIELD_ATTRIBUTES_EVENT).type(Capability.TYPE_DDL),
+			Capability.create(DDL_DROP_FIELD_EVENT).type(Capability.TYPE_DDL));
+		ddlCapabilities.forEach(connectionOptions::capability);
+		return connectionOptions;
+	}
 
     @Override
     public int tableCount(TapConnectionContext connectionContext) throws Throwable {
@@ -304,7 +268,11 @@ public class KafkaConnector extends ConnectorBase {
 
     private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         try {
-            kafkaService.consumeOne(tapTable, eventBatchSize, eventsOffsetConsumer);
+			if(Boolean.TRUE.equals(kafkaConfig.getEnableCustomParse())){
+				kafkaService.consumeOneCustom(tapTable, eventBatchSize, eventsOffsetConsumer);
+			}else{
+				kafkaService.consumeOne(tapTable, eventBatchSize, eventsOffsetConsumer);
+			}
         } catch (Throwable e) {
             kafkaExceptionCollector.collectTerminateByServer(e);
             kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);
@@ -315,7 +283,11 @@ public class KafkaConnector extends ConnectorBase {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
         try {
-            kafkaService.streamConsume(tableList, recordSize, consumer);
+			if (Boolean.TRUE.equals(kafkaConfig.getEnableCustomParse())) {
+				kafkaService.streamConsumeCustom(tableList, recordSize, consumer);
+			} else {
+				kafkaService.streamConsume(tableList, recordSize, consumer);
+			}
         } catch (Throwable e) {
             kafkaExceptionCollector.collectTerminateByServer(e);
             kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);
