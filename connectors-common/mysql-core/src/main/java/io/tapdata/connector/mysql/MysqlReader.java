@@ -284,6 +284,9 @@ public class MysqlReader implements Closeable {
             if (StringUtils.isNotBlank(offsetStr)) {
                 builder.with("pdk.offset.string", offsetStr);
             }
+            if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
+                builder.with("provide.transaction.metadata", true);
+            }
 			/*
 				todo At present, the schema loading logic will load the schema of all current tables each time it is started. When there is ddl in the historical data, it will cause a parsing error
 				todo The main scenario is shared mining, which dynamically modifies the table include list. If the last cached model list is used, debezium will not load the newly added table model, resulting in a parsing error when reading: whose schema isn't known to this connector
