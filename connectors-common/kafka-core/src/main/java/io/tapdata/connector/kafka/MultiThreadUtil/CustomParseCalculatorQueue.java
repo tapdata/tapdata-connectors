@@ -23,6 +23,7 @@ public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<Consum
 	private List<TapEvent> consumeList = TapSimplify.list();
 	private Concurrents<Invocable> customDmlConcurrents;
 	private static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
+	public static final int DEFAULT_SEND_TIMEOUT=500;
 	protected AtomicBoolean consuming;
 	BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer;
 	private int eventBatchSize;
@@ -67,7 +68,7 @@ public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<Consum
 		if (CollectionUtils.isNotEmpty(consumeList) && (System.currentTimeMillis() > lastSendTime || consumeList.size() >= eventBatchSize)) {
 			distributingDataBatch(consumeList);
 			consumeList = TapSimplify.list();
-			this.lastSendTime = System.currentTimeMillis() + 500;
+			this.lastSendTime = System.currentTimeMillis() + DEFAULT_SEND_TIMEOUT;
 		}
 	}
 

@@ -8,8 +8,9 @@ public abstract class ConcurrentCalculatorQueue<P, V> implements AutoCloseable {
 	private volatile AtomicBoolean isClose = new AtomicBoolean(false);
 	protected final ExecutorService executorService;
 	protected final ArrayBlockingQueue<CompletableFuture<V>> futureQueue;
-	//	protected final Function<P, V> performComputation;
 	private AtomicReference<Exception> exception =new AtomicReference<>();
+
+	public static final long DEFAULT_OFFER_QUEUE_TIMEOUT=TimeUnit.MINUTES.toMillis(1);
 
 	protected ConcurrentCalculatorQueue(int threadSize, int queueSize) {
 		this.futureQueue = new ArrayBlockingQueue<>(queueSize);
@@ -39,7 +40,11 @@ public abstract class ConcurrentCalculatorQueue<P, V> implements AutoCloseable {
 	}
 	public void multiCalc(P val) throws InterruptedException {
 		CompletableFuture<V> future = CompletableFuture.supplyAsync(() -> performComputation(val), executorService);
+		long offerQueueTimeOut = System.currentTimeMillis() + DEFAULT_OFFER_QUEUE_TIMEOUT;
 		do {
+			if (System.currentTimeMillis() > offerQueueTimeOut) {
+				throw new RuntimeException("Offer Kafka multi thread queue timeout");
+			}
 			if (futureQueue.offer(future, 200, TimeUnit.MILLISECONDS)) break;
 		} while (isRunning());
 	}

@@ -521,7 +521,7 @@ public class KafkaService extends AbstractMqService {
 			Thread.currentThread().interrupt();
 		}
 		try {
-			while (null != isAlive && isAlive.get() && customWriteCalculatorQueue.isRunning()) {
+			while (null != isAlive && isAlive.get()) {
 				checkChildThreadException(customWriteCalculatorQueue,KafkaExCode_11.KAFKA_CUSTOM_WRITE_PARSE);
 				if (countDownLatch.await(200L, TimeUnit.MILLISECONDS)) {
 					break;
@@ -587,13 +587,13 @@ public class KafkaService extends AbstractMqService {
 		batchReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
 		try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
 			kafkaConsumer.subscribe(Collections.singleton(tapTable.getId()));
-			while (consuming.get() && batchReadCustomParseCalculatorQueue.isRunning()) {
-				checkChildThreadException(batchReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
+			while (consuming.get()) {
 				ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(6L));
 				if (consumerRecords.isEmpty()) {
 					break;
 				}
 				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+					checkChildThreadException(batchReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
 					batchReadCustomParseCalculatorQueue.multiCalc(consumerRecord);
 				}
 			}
@@ -645,13 +645,13 @@ public class KafkaService extends AbstractMqService {
 		streamReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
 		try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
 			kafkaConsumer.subscribe(tableList);
-			while (consuming.get() && streamReadCustomParseCalculatorQueue.isRunning()) {
-				checkChildThreadException(streamReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
+			while (consuming.get()) {
 				ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
 				if (consumerRecords.isEmpty()) {
 					continue;
 				}
 				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+					checkChildThreadException(streamReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
 					streamReadCustomParseCalculatorQueue.multiCalc(consumerRecord);
 				}
 			}
@@ -763,22 +763,23 @@ public class KafkaService extends AbstractMqService {
 		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
 		String threadId = String.valueOf(Thread.currentThread().getId());
 		Integer ddlThreadNum = Optional.ofNullable(kafkaConfig.getCustomDmlThreadNum()).orElse(4);
-		CustomWriteCalculatorQueue<WriteEventConvertDto, WriteEventConvertDto> customDdlCalculatorQueue = writeCalculatorQueueConcurrentHashMap.computeIfAbsent(threadId
+		CustomWriteCalculatorQueue<WriteEventConvertDto, WriteEventConvertDto> customDDLCalculatorQueue = writeCalculatorQueueConcurrentHashMap.computeIfAbsent(threadId
 			, key -> new CustomWriteCalculatorQueue<>(ddlThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customDmlConcurrents, customDDLConcurrents));
 		ProduceCustomDDLRecordInfo produceCustomDdlRecordInfo = new ProduceCustomDDLRecordInfo(kafkaProducer, countDownLatch);
-		customDdlCalculatorQueue.setProduceCustomDdlRecordInfo(produceCustomDdlRecordInfo);
+		customDDLCalculatorQueue.setProduceCustomDdlRecordInfo(produceCustomDdlRecordInfo);
 		WriteEventConvertDto writeEventConvertDto = new WriteEventConvertDto();
 		writeEventConvertDto.setTapEvent(tapFieldBaseEvent);
 		try {
-			customDdlCalculatorQueue.multiCalc(writeEventConvertDto);
-			while (!countDownLatch.await(200L, TimeUnit.MILLISECONDS) || !customDdlCalculatorQueue.isRunning()) {
-				checkChildThreadException(customDdlCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_WRITE_PARSE);
+			customDDLCalculatorQueue.multiCalc(writeEventConvertDto);
+			while (!countDownLatch.await(200L, TimeUnit.MILLISECONDS)) {
+				checkChildThreadException(customDDLCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_WRITE_PARSE);
 			}
+			checkChildThreadException(customDDLCalculatorQueue,KafkaExCode_11.KAFKA_CUSTOM_WRITE_PARSE);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			tapLogger.error("error occur when await", e);
 		}finally {
-			ErrorKit.ignoreAnyError(customDdlCalculatorQueue::close);
+			ErrorKit.ignoreAnyError(customDDLCalculatorQueue::close);
 		}
 	}
 
