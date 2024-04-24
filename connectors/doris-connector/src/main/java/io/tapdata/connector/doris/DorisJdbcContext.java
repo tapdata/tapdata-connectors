@@ -71,7 +71,7 @@ public class DorisJdbcContext extends MysqlJdbcContextV2 {
 
     public TimeZone queryTimeZone() throws SQLException {
         if (EmptyKit.isNotBlank(((DorisConfig) getConfig()).getTimezone())) {
-            return TimeZone.getTimeZone(ZoneId.of(((MysqlConfig) getConfig()).getTimezone()));
+            return TimeZone.getTimeZone(ZoneId.of(((DorisConfig) getConfig()).getTimezone()));
         }
         AtomicReference<Long> timeOffset = new AtomicReference<>();
         queryWithNext(DORIS_TIMEZONE, resultSet -> timeOffset.set(resultSet.getLong(1)));
