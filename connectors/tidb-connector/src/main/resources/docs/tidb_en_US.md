@@ -3,7 +3,7 @@
 ### **1. TiDB installation instructions**
 
 
-Please follow the instructions below to ensure that TiDB database is successfully added and used in Tapdata and TiCDC is successfully deployed，it is recommended that TIDB and TICDC versions be consistent.
+Please follow the instructions below to ensure that TiDB database is successfully.as well as successful deployment of TiKV service and PD service
 
 ### **2. Supported versions**
 TiDB 5.4+ , TiCDC6.3+

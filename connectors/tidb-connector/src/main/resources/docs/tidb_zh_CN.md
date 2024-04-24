@@ -1,10 +1,10 @@
 ## **连接配置帮助**
 ### **1. TiDB 安装说明**
 
-请遵循以下说明以确保在 Tapdata 中成功添加和使用 TiDB 数据库以及成功部署TiCDC,建议TIDB与TICDC版本一致。
+请遵循以下说明以确保在 Tapdata 中成功添加和使用 TiDB 数据库以及成功部署TiKV服务以及以及PD服务
 
 ### **2. 支持版本**
-TiDB 5.4+ , TiCDC6.3+
+TiDB 5.4+
 
 ### **3. 先决条件（作为源）**
 3.1配置连接示例
@@ -17,13 +17,6 @@ PdServer 地址：xxxx:xxxx
 数据库名称：xxxx
 账号：xxxx
 密码：xxxx
-```
-3.1.2开启增量只需要追加以下配置
-```
-kafka地址：xxxx:xxxx
-kafka主题：xxxx
-ticdc地址：xxxxx:xxxx
-
 ```
 
 对于某个数据库赋于select权限
