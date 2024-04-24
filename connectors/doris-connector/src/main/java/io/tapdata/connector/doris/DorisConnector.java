@@ -32,10 +32,7 @@ import org.apache.commons.collections4.CollectionUtils;
 
 import java.io.IOException;
 import java.sql.SQLException;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -52,6 +49,9 @@ public class DorisConnector extends CommonDbConnector {
     private DorisConfig dorisConfig;
     private final Map<String, DorisStreamLoader> dorisStreamLoaderMap = new ConcurrentHashMap<>();
 
+    protected TimeZone timezone;
+
+
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
         this.dorisConfig = new DorisConfig().load(tapConnectionContext.getConnectionConfig());
@@ -65,6 +65,8 @@ public class DorisConnector extends CommonDbConnector {
         jdbcContext = dorisJdbcContext;
         commonSqlMaker = new DorisSqlMaker();
         exceptionCollector = new DorisExceptionCollector();
+        this.timezone = dorisJdbcContext.queryTimeZone();
+
     }
 
 
@@ -132,8 +134,27 @@ public class DorisConnector extends CommonDbConnector {
             return "null";
         });
         codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
+            if (tapDateTimeValue.getValue() != null && tapDateTimeValue.getValue().getTimeZone() == null) {
+                if ("timestamp".equals(tapDateTimeValue.getOriginType())) {
+                    tapDateTimeValue.getValue().setTimeZone(timezone);
+                }
+            }
+            return formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS");
+        });
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
+            if (tapDateValue.getValue() != null && tapDateValue.getValue().getTimeZone() == null) {
+                tapDateValue.getValue().setTimeZone(TimeZone.getDefault());
+            }
+            return formatTapDateTime(tapDateValue.getValue(), "yyyy-MM-dd");
+        });
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
+        codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> {
+            if (tapYearValue.getValue() != null && tapYearValue.getValue().getTimeZone() == null) {
+                tapYearValue.getValue().setTimeZone(timezone);
+            }
+            return formatTapDateTime(tapYearValue.getValue(), "yyyy");
+        });
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
 
