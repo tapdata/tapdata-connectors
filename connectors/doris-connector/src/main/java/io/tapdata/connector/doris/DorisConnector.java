@@ -53,7 +53,7 @@ public class DorisConnector extends CommonDbConnector {
 
 
     @Override
-    public void onStart(TapConnectionContext tapConnectionContext) {
+    public void onStart(TapConnectionContext tapConnectionContext) throws Throwable{
         this.dorisConfig = new DorisConfig().load(tapConnectionContext.getConnectionConfig());
         isConnectorStarted(tapConnectionContext, connectorContext -> dorisConfig.load(connectorContext.getNodeConfig()));
         dorisJdbcContext = new DorisJdbcContext(dorisConfig);
