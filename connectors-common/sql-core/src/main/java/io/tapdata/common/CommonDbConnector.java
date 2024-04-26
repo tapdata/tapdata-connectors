@@ -135,6 +135,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     private CreateTableOptions createTable(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent, Boolean commentInField) throws SQLException {
+        if (Boolean.TRUE.equals(commonDbConfig.getDoubleActive())) {
+            createDoubleActiveTempTable();
+        }
         TapTable tapTable = createTableEvent.getTable();
         CreateTableOptions createTableOptions = new CreateTableOptions();
         if (jdbcContext.queryAllTables(Collections.singletonList(tapTable.getId())).size() > 0) {
@@ -185,6 +188,13 @@ public abstract class CommonDbConnector extends ConnectorBase {
     //for mysql type
     protected CreateTableOptions createTableV3(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
         return createTable(connectorContext, createTableEvent, true);
+    }
+
+    protected void createDoubleActiveTempTable() throws SQLException {
+        if (jdbcContext.queryAllTables(Collections.singletonList("_tap_double_active")).size() < 1) {
+            jdbcContext.execute(String.format("create table %s (c1 int primary key, c2 varchar(50))", getSchemaAndTable("_tap_double_active")));
+            jdbcContext.execute(String.format("insert into %s values (1, null)", getSchemaAndTable("_tap_double_active")));
+        }
     }
 
     //Primary key sorting area reading

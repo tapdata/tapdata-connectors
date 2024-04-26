@@ -79,12 +79,13 @@ public class MysqlConnector extends CommonDbConnector {
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
         mysqlConfig = new MysqlConfig().load(tapConnectionContext.getConnectionConfig());
+        mysqlConfig.load(tapConnectionContext.getNodeConfig());
         contextMapForMasterSlave = MysqlUtil.buildContextMapForMasterSlave(mysqlConfig);
         MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         MysqlJdbcContextV2 contextV2 = contextMapForMasterSlave.get(mysqlConfig.getHost() + mysqlConfig.getPort());
-        if (null != contextV2){
+        if (null != contextV2) {
             mysqlJdbcContext = contextV2;
-        }else {
+        } else {
             mysqlJdbcContext = new MysqlJdbcContextV2(mysqlConfig);
         }
         commonDbConfig = mysqlConfig;
@@ -94,17 +95,17 @@ public class MysqlConnector extends CommonDbConnector {
         exceptionCollector = new MysqlExceptionCollector();
         this.version = mysqlJdbcContext.queryVersion();
         ArrayList<Map<String, Object>> inconsistentNodes = MysqlUtil.compareMasterSlaveCurrentTime(mysqlConfig, contextMapForMasterSlave);
-        if (null != inconsistentNodes && inconsistentNodes.size() == 2){
+        if (null != inconsistentNodes && inconsistentNodes.size() == 2) {
             Map<String, Object> node1 = inconsistentNodes.get(0);
             Map<String, Object> node2 = inconsistentNodes.get(1);
             tapLogger.warn(String.format("The time of each node is inconsistent, please check nodes: %s and %s", node1.toString(), node2.toString()));
         }
         if (tapConnectionContext instanceof TapConnectorContext) {
-            if (DeployModeEnum.fromString(mysqlConfig.getDeploymentMode()) == DeployModeEnum.MASTER_SLAVE){
+            if (DeployModeEnum.fromString(mysqlConfig.getDeploymentMode()) == DeployModeEnum.MASTER_SLAVE) {
                 KVMap<Object> stateMap = ((TapConnectorContext) tapConnectionContext).getStateMap();
                 Object masterNode = stateMap.get(MASTER_NODE_KEY);
-                if (null != masterNode && null != mysqlConfig.getMasterNode()){
-                    if (! masterNode.toString().contains(mysqlConfig.getMasterNode().toString()))
+                if (null != masterNode && null != mysqlConfig.getMasterNode()) {
+                    if (!masterNode.toString().contains(mysqlConfig.getMasterNode().toString()))
                         tapLogger.warn(String.format("The master node has switched, please pay attention to whether the data is consistent, current master node: %s", mysqlConfig.getMasterNode()));
                 }
             }
@@ -287,7 +288,7 @@ public class MysqlConnector extends CommonDbConnector {
         started.set(false);
         if (connectionContext instanceof TapConnectorContext && null != mysqlConfig && DeployModeEnum.fromString(mysqlConfig.getDeploymentMode()) == DeployModeEnum.MASTER_SLAVE) {
             KVMap<Object> stateMap = ((TapConnectorContext) connectionContext).getStateMap();
-            if (null != stateMap){
+            if (null != stateMap) {
                 stateMap.put(MASTER_NODE_KEY, mysqlConfig.getMasterNode());
                 ((TapConnectorContext) connectionContext).setStateMap(stateMap);
             }
@@ -304,8 +305,8 @@ public class MysqlConnector extends CommonDbConnector {
                 tapLogger.error("Release connector failed, error: " + e.getMessage() + "\n" + getStackString(e));
             }
         }
-        if (EmptyKit.isNotEmpty(contextMapForMasterSlave)){
-            contextMapForMasterSlave.forEach((hostPort,context)->{
+        if (EmptyKit.isNotEmpty(contextMapForMasterSlave)) {
+            contextMapForMasterSlave.forEach((hostPort, context) -> {
                 try {
                     context.close();
                 } catch (Exception e) {
@@ -321,8 +322,10 @@ public class MysqlConnector extends CommonDbConnector {
     }
 
     protected CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws SQLException {
+        if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
+            createDoubleActiveTempTable();
+        }
         CreateTableOptions createTableOptions = new CreateTableOptions();
-
         try {
             if (mysqlJdbcContext.queryAllTables(Collections.singletonList(tapCreateTableEvent.getTableId())).size() > 0) {
                 DataMap connectionConfig = tapConnectorContext.getConnectionConfig();
