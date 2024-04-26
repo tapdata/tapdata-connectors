@@ -22,12 +22,14 @@
             connectors-common/debezium-bucket/**,
             connectors-tdd/**,
             tapdata-cli/**,
-            **/**Entity*
+            **/**Entity*,
+            **/enums/**
         </sonar.coverage.exclusions>
         <sonar.exclusions>
             connectors-common/debezium-bucket/**,
             connectors-tdd/**,
-            **/**Entity*
+            **/**Entity*,
+            **/enums/**
         </sonar.exclusions>
         <sonar.test.exclusions>
             **/src/test/**,
