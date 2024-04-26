@@ -145,8 +145,10 @@ public class DorisStreamLoader {
 
             String label = prefix + "-" + UUID.randomUUID();
             List<String> columns = new ArrayList<>();
-            for (String col : dataColumns.get()) {
-                columns.add("`" + col + "`");
+            for (String col : tapTable.getNameFieldMap().keySet()) {
+                if (dataColumns.get().contains(col)) {
+                    columns.add("`" + col + "`");
+                }
             }
             // add the DORIS_DELETE_SIGN at the end of the column
             columns.add(Constants.DORIS_DELETE_SIGN);
@@ -164,14 +166,12 @@ public class DorisStreamLoader {
             if (CollectionUtils.isEmpty(primaryKeys)) {
                 putBuilder.enableAppend();
             } else {
-                if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Unique".equals(dorisConfig.getUniqueKeyType())) {
-                    putBuilder.enableDelete();
-                } else {
+                if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Aggregate".equals(dorisConfig.getUniqueKeyType())) {
                     putBuilder.enableAppend();
+                } else {
+                    putBuilder.enableDelete();
+                    putBuilder.addPartialHeader();
                 }
-            }
-            if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Unique".equals(dorisConfig.getUniqueKeyType())) {
-                putBuilder.addPartialHeader();
             }
             HttpPut httpPut = putBuilder.build();
             TapLogger.debug(TAG, "Call stream load http api, url: {}, headers: {}", loadUrl, putBuilder.header);
@@ -251,7 +251,6 @@ public class DorisStreamLoader {
     private boolean needFlush(TapRecordEvent recordEvent, int length) {
         int lastEventType = lastEventFlag.get();
         return lastEventType > 0 && !getDataColumns(recordEvent).equals(dataColumns.get())
-                || this.size >= MAX_FLUSH_BATCH_SIZE
                 || !recordStream.canWrite(length);
     }
 
