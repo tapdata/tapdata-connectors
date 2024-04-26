@@ -20,6 +20,7 @@
     <properties>
         <sonar.coverage.exclusions>
             connectors-common/debezium-bucket/**,
+            connectors-common/mysql-binlog-connector-java/**,
             connectors-tdd/**,
             tapdata-cli/**,
             **/**Entity*,
@@ -27,6 +28,7 @@
         </sonar.coverage.exclusions>
         <sonar.exclusions>
             connectors-common/debezium-bucket/**,
+            connectors-common/mysql-binlog-connector-java/**,
             connectors-tdd/**,
             **/**Entity*,
             **/enums/**
