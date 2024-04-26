@@ -19,14 +19,14 @@
 
     <properties>
         <sonar.coverage.exclusions>
-            connectors-common/debezium-bucket/**
-            connectors-tdd/**
-            tapdata-cli/**
+            connectors-common/debezium-bucket/**,
+            connectors-tdd/**,
+            tapdata-cli/**,
             **/**Entity*
         </sonar.coverage.exclusions>
         <sonar.exclusions>
-            connectors-common/debezium-bucket/**
-            connectors-tdd/**
+            connectors-common/debezium-bucket/**,
+            connectors-tdd/**,
             **/**Entity*
         </sonar.exclusions>
         <sonar.test.exclusions>
