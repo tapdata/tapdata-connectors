@@ -282,22 +282,25 @@ public class KafkaConnector extends ConnectorBase {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
-        try {
-			if (Boolean.TRUE.equals(kafkaConfig.getEnableCustomParse())) {
-				kafkaService.streamConsumeCustom(tableList, recordSize, consumer);
-			} else {
-				kafkaService.streamConsume(tableList, recordSize, consumer);
-			}
-        } catch (Throwable e) {
-            kafkaExceptionCollector.collectTerminateByServer(e);
-            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);
-            kafkaExceptionCollector.collectReadPrivileges("streamRead", Collections.emptyList(), e);
-            throw e;
-        }
+	    try {
+		    if (Boolean.TRUE.equals(kafkaConfig.getEnableCustomParse())) {
+			    kafkaService.streamConsumeCustom(tableList, offsetState, recordSize, consumer);
+		    } else {
+			    kafkaService.streamConsume(tableList, offsetState, recordSize, consumer);
+		    }
+	    } catch (Throwable e) {
+		    kafkaExceptionCollector.collectTerminateByServer(e);
+		    kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);
+		    kafkaExceptionCollector.collectReadPrivileges("streamRead", Collections.emptyList(), e);
+		    throw e;
+	    }
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
-        return TapSimplify.list();
+	    if (null == offsetStartTime) {
+		    return System.currentTimeMillis();
+	    }
+	    return offsetStartTime;
     }
 
     private void checkConnection(TapConnectionContext connectionContext, List<String> items, Consumer<ConnectionCheckItem> consumer) {

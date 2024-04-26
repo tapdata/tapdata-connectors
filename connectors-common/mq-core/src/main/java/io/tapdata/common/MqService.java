@@ -42,12 +42,4 @@ public interface MqService extends AutoCloseable {
     void consumeOne(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable;
 
     void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable;
-
-	default void consumeOneCustom(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
-		throw new UnsupportedOperationException();
-	}
-
-	default void streamConsumeCustom(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer){
-		throw new UnsupportedOperationException();
-	}
 }

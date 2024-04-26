@@ -7,6 +7,7 @@ import io.tapdata.connector.kafka.MultiThreadUtil.*;
 import io.tapdata.connector.kafka.admin.Admin;
 import io.tapdata.connector.kafka.admin.DefaultAdmin;
 import io.tapdata.connector.kafka.config.*;
+import io.tapdata.connector.kafka.data.KafkaStreamOffset;
 import io.tapdata.connector.kafka.exception.KafkaExCode_11;
 import io.tapdata.connector.kafka.util.*;
 import io.tapdata.constant.MqTestItem;
@@ -41,6 +42,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import javax.script.Invocable;
 import javax.script.ScriptEngine;
@@ -575,7 +577,6 @@ public class KafkaService extends AbstractMqService {
         }
     }
 
-	@Override
 	public void consumeOneCustom(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
 		consuming.set(true);
 		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
@@ -633,62 +634,73 @@ public class KafkaService extends AbstractMqService {
 		}
 	}
 
-	@Override
-	public void streamConsumeCustom(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+	public void streamConsumeCustom(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
 		consuming.set(true);
 		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
 		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration((kafkaConfig), connectorId, true);
 		Integer customParseThreadNum = Optional.ofNullable(kafkaConfig.getCustomWriteThreadNum()).orElse(4);
-		CustomParseCalculatorQueue streamReadCustomParseCalculatorQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents);
-		streamReadCustomParseCalculatorQueue.setEventsOffsetConsumer(eventsOffsetConsumer);
-		streamReadCustomParseCalculatorQueue.setConsuming(consuming);
-		streamReadCustomParseCalculatorQueue.setEventBatchSize(eventBatchSize);
-		try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
-			kafkaConsumer.subscribe(tableList);
+		try (
+			KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
+			CustomParseCalculatorQueue customParseQueue = new CustomParseCalculatorQueue(customParseThreadNum, CONSUME_CUSTOM_MESSAGE_QUEUE_SIZE, customParseConcurrents)
+		) {
+			KafkaStreamOffset streamOffset = KafkaOffsetUtils.setConsumerByOffset(kafkaConsumer, tableList, offset, consuming);
+			customParseQueue.setEventsOffsetConsumer(eventsOffsetConsumer);
+			customParseQueue.setConsuming(consuming);
+			customParseQueue.setEventBatchSize(eventBatchSize);
+			customParseQueue.setStreamOffset(streamOffset);
+
 			while (consuming.get()) {
 				ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
 				if (consumerRecords.isEmpty()) {
 					continue;
 				}
 				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-					checkChildThreadException(streamReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
-					streamReadCustomParseCalculatorQueue.multiCalc(consumerRecord);
+					checkChildThreadException(customParseQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
+					customParseQueue.multiCalc(consumerRecord);
 				}
 			}
-			checkChildThreadException(streamReadCustomParseCalculatorQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
-		} catch (InterruptedException interruptedException) {
+			checkChildThreadException(customParseQueue, KafkaExCode_11.KAFKA_CUSTOM_READ_PARSE);
+		} catch (InterruptedException | InterruptException ex) {
 			Thread.currentThread().interrupt();
-			tapLogger.error("stream consume occur InterruptedException");
-		}finally {
-			ErrorKit.ignoreAnyError(streamReadCustomParseCalculatorQueue::close);
+		} catch (Exception ex) {
+			tapLogger.error("Stream consume occur: {}", ex.getMessage(), ex);
 		}
-}
+	}
 
 	@Override
 	public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+			throw new UnsupportedOperationException();
+	}
+
+	public void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
 		consuming.set(true);
 		KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
 		ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration((kafkaConfig), connectorId, true);
-		KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
-		kafkaConsumer.subscribe(tableList);
-		List<TapEvent> list = TapSimplify.list();
-		while (consuming.get()) {
-			ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
-			if (consumerRecords.isEmpty()) {
-				continue;
-			}
-			for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-				makeMessage(consumerRecord, list, consumerRecord.topic());
-				if (list.size() >= eventBatchSize) {
-					eventsOffsetConsumer.accept(list, TapSimplify.list());
-					list = TapSimplify.list();
+		try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
+			KafkaStreamOffset streamOffset = KafkaOffsetUtils.setConsumerByOffset(kafkaConsumer, tableList, offset, consuming);
+			List<TapEvent> list = TapSimplify.list();
+			while (consuming.get()) {
+				ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
+				if (consumerRecords.isEmpty()) {
+					continue;
+				}
+				for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+					streamOffset.addTopicOffset(consumerRecord); // 推进 offset
+					makeMessage(consumerRecord, list, consumerRecord.topic());
+					if (list.size() >= eventBatchSize) {
+						eventsOffsetConsumer.accept(list, streamOffset.clone());
+						list = TapSimplify.list();
+					}
 				}
 			}
+			if (EmptyKit.isNotEmpty(list)) {
+				eventsOffsetConsumer.accept(list, streamOffset.clone());
+			}
+		} catch (InterruptedException | InterruptException ex) {
+			Thread.currentThread().interrupt();
+		} catch (Exception ex) {
+			tapLogger.error("Stream consume occur: {}", ex.getMessage(), ex);
 		}
-		if (EmptyKit.isNotEmpty(list)) {
-			eventsOffsetConsumer.accept(list, TapSimplify.list());
-		}
-		ErrorKit.ignoreAnyError(kafkaConsumer::close);
 	}
 
     private void makeMessage(ConsumerRecord<byte[], byte[]> consumerRecord, List<TapEvent> list, String tableName) {

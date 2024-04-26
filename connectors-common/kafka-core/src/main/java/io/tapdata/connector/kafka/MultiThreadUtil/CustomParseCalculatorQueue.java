@@ -1,5 +1,8 @@
 package io.tapdata.connector.kafka.MultiThreadUtil;
 
+import io.tapdata.connector.kafka.data.KafkaStreamOffset;
+import io.tapdata.connector.kafka.data.KafkaTopicOffset;
+import io.tapdata.connector.kafka.data.PerformResults;
 import io.tapdata.connector.kafka.util.CustomParseUtil;
 import io.tapdata.connector.kafka.util.ObjectUtils;
 import io.tapdata.entity.event.TapBaseEvent;
@@ -10,6 +13,7 @@ import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.exception.StopException;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+
 import javax.script.Invocable;
 import javax.script.ScriptException;
 import java.util.List;
@@ -19,13 +23,15 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 
-public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<ConsumerRecord<byte[], byte[]>, TapEvent>{
+public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<ConsumerRecord<byte[], byte[]>, PerformResults>{
+	public static final int DEFAULT_SEND_TIMEOUT = 500;
+	private static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
+
+	private KafkaStreamOffset streamOffset;
 	private List<TapEvent> consumeList = TapSimplify.list();
 	private Concurrents<Invocable> customDmlConcurrents;
-	private static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
-	public static final int DEFAULT_SEND_TIMEOUT=500;
 	protected AtomicBoolean consuming;
-	BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer;
+	private BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer;
 	private int eventBatchSize;
 	protected long lastSendTime;
 
@@ -59,43 +65,30 @@ public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<Consum
 	}
 
 	@Override
-	protected void distributingFuture(CompletableFuture<TapEvent> future) throws ExecutionException, InterruptedException {
+	protected void distributingFuture(CompletableFuture<PerformResults> future) throws ExecutionException, InterruptedException {
 		super.distributingFuture(future);
 		distributingDataDelay();
 	}
 
 	private void distributingDataDelay() {
 		if (CollectionUtils.isNotEmpty(consumeList) && (System.currentTimeMillis() > lastSendTime || consumeList.size() >= eventBatchSize)) {
-			distributingDataBatch(consumeList);
+			eventsOffsetConsumer.accept(consumeList, streamOffset.clone());
 			consumeList = TapSimplify.list();
 			this.lastSendTime = System.currentTimeMillis() + DEFAULT_SEND_TIMEOUT;
 		}
 	}
 
 	@Override
-	protected void distributingData(TapEvent data) {
+	protected void distributingData(PerformResults data) {
 		if (null != data) {
-			consumeList.add(data);
+			streamOffset.addTopicOffset(data.getTopic(), data.getOffset());
+			consumeList.add(data.getTapEvent());
 		}
-//		if (consumeList.size() >= eventBatchSize) {
-//			List<TapEvent> engineConsumeList = consumeList;
-//			eventsOffsetConsumer.accept(engineConsumeList, TapSimplify.list());
-//			consumeList = TapSimplify.list();
-//		}
 	}
 
-	protected void distributingDataBatch(List<TapEvent> data) {
-		eventsOffsetConsumer.accept(data, TapSimplify.list());
-//		if (null != data) {
-//			consumeList.add(data);
-//		}
-//		if (consumeList.size() >= eventBatchSize) {
-//			List<TapEvent> engineConsumeList = consumeList;
-//			eventsOffsetConsumer.accept(engineConsumeList, TapSimplify.list());
-//			consumeList = TapSimplify.list();
-//		}
+	public void setStreamOffset(KafkaStreamOffset streamOffset) {
+		this.streamOffset = streamOffset;
 	}
-
 
 	public void setConsumeList(List<TapEvent> consumeList) {
 		this.consumeList = consumeList;
@@ -110,7 +103,7 @@ public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<Consum
 	}
 
 	@Override
-	protected TapEvent performComputation(ConsumerRecord<byte[], byte[]> data) {
+	protected PerformResults performComputation(ConsumerRecord<byte[], byte[]> data) {
 		return customDmlConcurrents.process((scriptEngine) -> makeCustomMessageUseScriptEngine(scriptEngine, data));
 	}
 
@@ -119,14 +112,18 @@ public class CustomParseCalculatorQueue extends ConcurrentCalculatorQueue<Consum
 		getException().compareAndSet(null, e);
 	}
 
-	private TapEvent makeCustomMessageUseScriptEngine(Invocable customScriptEngine, ConsumerRecord<byte[], byte[]> consumerRecord) {
+	private PerformResults makeCustomMessageUseScriptEngine(Invocable customScriptEngine, ConsumerRecord<byte[], byte[]> consumerRecord) {
 		Map<String, Object> messageBody = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
 		Object data = ObjectUtils.covertData(executeScript(customScriptEngine, "process", messageBody));
 		if (null == data) return null;
+
+		// kafka offset 表示下一个事件的偏移量，所以需要 + 1
+		KafkaTopicOffset offset = new KafkaTopicOffset(consumerRecord.partition(), consumerRecord.offset() + 1, consumerRecord.timestamp());
 		TapBaseEvent tapBaseEvent = CustomParseUtil.applyCustomParse((Map<String, Object>) data);
 		tapBaseEvent.setTableId(consumerRecord.topic());
-		return tapBaseEvent;
+		return new PerformResults(consumerRecord.topic(), offset, tapBaseEvent);
 	}
+
 	public static Object executeScript(Invocable scriptEngine, String function, Object... params) {
 		if (scriptEngine != null) {
 			Invocable invocable = (Invocable) scriptEngine;
