@@ -25,12 +25,10 @@ import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.ParagraphFormatter;
 import io.tapdata.exception.TapPdkTerminateByServerEx;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.mongodb.batch.BatchReadEvent;
-import io.tapdata.mongodb.batch.NormalDocumentConverter;
-import io.tapdata.mongodb.batch.OpLogDocumentConverter;
-import io.tapdata.mongodb.batch.ReadParam;
+import io.tapdata.mongodb.batch.MongoBatchReader;
+import io.tapdata.mongodb.entity.ReadParam;
 import io.tapdata.mongodb.entity.MongodbConfig;
-import io.tapdata.mongodb.reader.MongoCdcOffset;
+import io.tapdata.mongodb.entity.MongoCdcOffset;
 import io.tapdata.mongodb.reader.MongodbOpLogStreamV3Reader;
 import io.tapdata.mongodb.reader.MongodbStreamReader;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
@@ -68,7 +66,6 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
@@ -1470,8 +1467,7 @@ public class MongodbConnector extends ConnectorBase {
 				.withMongodbExceptionCollector(exceptionCollector)
 				.withMongoCollection(this::getMongoCollection)
 				.withErrorHandler(e -> errorHandle(e, connectorContext));
-		BatchReadEvent.of(param)
-				.batchReadCollection(param);
+		new MongoBatchReader(param).batchReadCollection(param);
 	}
 
 	private Object streamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {

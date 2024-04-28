@@ -1,31 +1,20 @@
-package io.tapdata.mongodb.batch;
+package io.tapdata.mongodb.entity;
 
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.mongodb.MongoBatchOffset;
 import io.tapdata.mongodb.MongodbExceptionCollector;
-import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.mongodb.batch.CollectionCollector;
+import io.tapdata.mongodb.batch.ErrorHandler;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import org.bson.conversions.Bson;
 
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
-import java.util.function.Supplier;
 
 public class ReadParam {
     public static ReadParam of() {
         return new ReadParam();
-    }
-    Bson sort;
-    public ReadParam withSort(Bson sort) {
-        this.sort = sort;
-        return this;
-    }
-    String offsetKey;
-    public ReadParam withOffsetKey(String offsetKey) {
-        this.offsetKey = offsetKey;
-        return this;
     }
     TapConnectorContext connectorContext;
     public ReadParam withConnectorContext(TapConnectorContext connectorContext) {
@@ -81,14 +70,6 @@ public class ReadParam {
     public ReadParam withCheckAlive(BooleanSupplier checkAlive) {
         this.checkAlive = checkAlive;
         return this;
-    }
-
-    public Bson getSort() {
-        return sort;
-    }
-
-    public String getOffsetKey() {
-        return offsetKey;
     }
 
     public TapConnectorContext getConnectorContext() {

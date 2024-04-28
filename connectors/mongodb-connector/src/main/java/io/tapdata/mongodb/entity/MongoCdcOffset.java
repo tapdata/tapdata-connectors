@@ -1,4 +1,4 @@
-package io.tapdata.mongodb.reader;
+package io.tapdata.mongodb.entity;
 
 public class MongoCdcOffset {
     private Object opLogOffset;
