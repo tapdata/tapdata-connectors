@@ -25,9 +25,16 @@ import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.ParagraphFormatter;
 import io.tapdata.exception.TapPdkTerminateByServerEx;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.mongodb.batch.BatchReadEvent;
+import io.tapdata.mongodb.batch.NormalDocumentConverter;
+import io.tapdata.mongodb.batch.OpLogDocumentConverter;
+import io.tapdata.mongodb.batch.ReadParam;
 import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.mongodb.reader.MongoCdcOffset;
+import io.tapdata.mongodb.reader.MongodbOpLogStreamV3Reader;
 import io.tapdata.mongodb.reader.MongodbStreamReader;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
+import io.tapdata.mongodb.reader.StreamWithOpLogCollection;
 import io.tapdata.mongodb.reader.v3.MongodbV3StreamReader;
 import io.tapdata.mongodb.util.MongoShardUtil;
 import io.tapdata.mongodb.writer.MongodbWriter;
@@ -79,24 +86,24 @@ import static java.util.Collections.singletonList;
 public class MongodbConnector extends ConnectorBase {
 
 	private static final int SAMPLE_SIZE_BATCH_SIZE = 1000;
-	protected static final String COLLECTION_ID_FIELD = "_id";
+	public static final String COLLECTION_ID_FIELD = "_id";
 	public static final String TAG = MongodbConnector.class.getSimpleName();
-	private final AtomicLong counter = new AtomicLong();
 	private final AtomicBoolean isShutDown = new AtomicBoolean(false);
 	protected MongodbConfig mongoConfig;
 	protected MongoClient mongoClient;
 	protected MongoDatabase mongoDatabase;
-	private final int[] lock = new int[0];
-	MongoCollection<Document> mongoCollection;
 	private MongoBatchOffset batchOffset = null;
 	protected MongodbExceptionCollector exceptionCollector;
 	private MongodbStreamReader mongodbStreamReader;
+	private MongodbStreamReader opLogStreamReader;
 	private ConcurrentHashMap<String,Set<String>> shardKeyMap = new ConcurrentHashMap<>();
 
 	private volatile MongodbWriter mongodbWriter;
 	protected Map<String, Integer> stringTypeValueMap;
 
 	private final MongodbExecuteCommandFunction mongodbExecuteCommandFunction = new MongodbExecuteCommandFunction();
+	protected ThreadPoolExecutor sourceRunner;
+	protected Future<?> sourceRunnerFuture;
 	/**
 	 * Reference：<a href="https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml">error_codes.yml</a>
 	 * connectors/mongodb-connector/src/main/resources/mongo-error-codes.yml
@@ -104,9 +111,6 @@ public class MongodbConnector extends ConnectorBase {
 	private final static int[] SERVER_ERROR_CODES = new int[]{6, 7, 70, 71, 74, 76, 83, 89, 90, 91, 92, 93, 94, 95, 133, 149, 189, 190, 202, 279, 317, 384, 402, 9001, 10058, 10107, 11600, 11602, 13435, 13436};
 	private final static int[] RETRYABLE_ERROR_CODES = new int[]{43, 50, 134, 175, 222, 234, 237, 262, 358, 363, 50915};
 
-	private Bson queryCondition(String firstPrimaryKey, Object value) {
-		return gte(firstPrimaryKey, value);
-	}
 
 	protected MongoCollection<Document> getMongoCollection(String table) {
 		MongoCollection<Document> collection = null;
@@ -1147,6 +1151,22 @@ public class MongodbConnector extends ConnectorBase {
 		}
 		exceptionCollector = new MongodbExceptionCollector();
 		mongodbExecuteCommandFunction.setLog(connectionContext.getLog());
+
+		try {
+			if(null != sourceRunnerFuture) {
+				sourceRunnerFuture.cancel(false);
+			}
+		} catch (Exception e) {
+			// ignore
+		}
+		try {
+			if(null != sourceRunner) {
+				sourceRunner.shutdown();
+			}
+			sourceRunner = null;
+		} catch (Exception e) {
+			// ignore
+		}
 	}
 
 	private void dropTable(TapConnectorContext connectorContext, TapDropTableEvent dropTableEvent) throws Throwable {
@@ -1438,72 +1458,32 @@ public class MongodbConnector extends ConnectorBase {
 	 * @param tapReadOffsetConsumer
 	 */
 	private void batchRead(TapConnectorContext connectorContext, TapTable table, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> tapReadOffsetConsumer) throws Throwable {
-		try {
-			List<TapEvent> tapEvents = list();
-			MongoCollection<Document> collection = getMongoCollection(table.getId());
-			final int batchSize = eventBatchSize > 0 ? eventBatchSize : 5000;
-			FindIterable<Document> findIterable;
-			if (offset == null) {
-				findIterable = collection.find().sort(Sorts.ascending(COLLECTION_ID_FIELD)).batchSize(batchSize);
-			} else {
-				MongoBatchOffset mongoOffset = (MongoBatchOffset) offset;//fromJson(offset, MongoOffset.class);
-				Object offsetValue = mongoOffset.value();
-				if (offsetValue != null) {
-					findIterable = collection.find(queryCondition(COLLECTION_ID_FIELD, offsetValue)).sort(Sorts.ascending(COLLECTION_ID_FIELD))
-							.batchSize(batchSize);
-				} else {
-					findIterable = collection.find().sort(Sorts.ascending(COLLECTION_ID_FIELD)).batchSize(batchSize);
-					TapLogger.warn(TAG, "Offset format is illegal {}, no offset value has been found. Final offset will be null to do the batchRead", offset);
-				}
-			}
-			if (mongoConfig.isNoCursorTimeout()) {
-				findIterable.noCursorTimeout(true);
-			}
-
-			Document lastDocument = null;
-
-			try (MongoCursor<Document> mongoCursor = findIterable.iterator()) {
-				while (mongoCursor.hasNext()) {
-					if (!isAlive()) return;
-					lastDocument = mongoCursor.next();
-					tapEvents.add(insertRecordEvent(lastDocument, table.getId()));
-
-					if (tapEvents.size() == eventBatchSize) {
-						Object value = lastDocument.get(COLLECTION_ID_FIELD);
-						batchOffset = new MongoBatchOffset(COLLECTION_ID_FIELD, value);
-						tapReadOffsetConsumer.accept(tapEvents, batchOffset);
-						tapEvents = list();
-					}
-				}
-				if (!tapEvents.isEmpty()) {
-					if(lastDocument != null){
-						Object value = lastDocument.get(COLLECTION_ID_FIELD);
-						batchOffset = new MongoBatchOffset(COLLECTION_ID_FIELD, value);
-						tapReadOffsetConsumer.accept(tapEvents, batchOffset);
-					}else{
-						tapReadOffsetConsumer.accept(tapEvents, null);
-					}
-				}
-			} catch (Exception e) {
-				if (!isAlive() && e instanceof MongoInterruptedException) {
-					// ignored
-				} else {
-					throw e;
-				}
-			}
-		} catch (Exception e) {
-			exceptionCollector.collectTerminateByServer(e);
-			exceptionCollector.collectReadPrivileges(e);
-			exceptionCollector.revealException(e);
-			errorHandle(e, connectorContext);
-		}
+		ReadParam param = ReadParam.of()
+				.withConnectorContext(connectorContext)
+				.withTapTable(table)
+				.withOffset(offset)
+				.withEventBatchSize(eventBatchSize)
+				.withTapReadOffsetConsumer(tapReadOffsetConsumer)
+				.withCheckAlive(this::isAlive)
+				.withMongodbConfig(mongoConfig)
+				.withBatchOffset(batchOffset)
+				.withMongodbExceptionCollector(exceptionCollector)
+				.withMongoCollection(this::getMongoCollection)
+				.withErrorHandler(e -> errorHandle(e, connectorContext));
+		BatchReadEvent.of(param)
+				.batchReadCollection(param);
 	}
 
 	private Object streamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
+		if (null == opLogStreamReader && StreamWithOpLogCollection.OP_LOG_DB.equals(mongoConfig.getDatabase())) {
+			opLogStreamReader = new MongodbOpLogStreamV3Reader();
+			opLogStreamReader.onStart(mongoConfig);
+		}
 		if (mongodbStreamReader == null) {
 			mongodbStreamReader = createStreamReader();
 		}
-		return mongodbStreamReader.streamOffset(offsetStartTime);
+		return new MongoCdcOffset(null == opLogStreamReader ? null : opLogStreamReader.streamOffset(offsetStartTime),
+				mongodbStreamReader.streamOffset(offsetStartTime));
 	}
 
 	/**
@@ -1523,23 +1503,61 @@ public class MongodbConnector extends ConnectorBase {
 	 *                         //     * @param consumer
 	 */
 	private void streamRead(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
-		if (mongodbStreamReader == null) {
-			mongodbStreamReader = createStreamReader();
+		int size = tableList.size();
+		streamReadOpLog(connectorContext, tableList, offset instanceof MongoCdcOffset ? ((MongoCdcOffset) offset).getOpLogOffset() : null, eventBatchSize, consumer);
+		if (size == tableList.size() || !tableList.isEmpty()) {
+			if (mongodbStreamReader == null) {
+				mongodbStreamReader = createStreamReader();
+			}
+			Object cdcOffset = offset instanceof MongoCdcOffset ?  ((MongoCdcOffset) offset).getCdcOffset() : offset;
+			doStreamRead(mongodbStreamReader, connectorContext, tableList, cdcOffset, eventBatchSize, consumer);
 		}
+	}
+
+	protected void doStreamRead(MongodbStreamReader streamReader, TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
 		try {
-			mongodbStreamReader.read(connectorContext, tableList, offset, eventBatchSize, consumer);
+			streamReader.read(connectorContext, tableList, offset, eventBatchSize, consumer);
 		} catch (Exception e) {
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectWritePrivileges(e);
 			try {
-				mongodbStreamReader.onDestroy();
+				streamReader.onDestroy();
 			} catch (Exception ignored) {
 			}
-			mongodbStreamReader = null;
 			exceptionCollector.revealException(e);
 			errorHandle(e, connectorContext);
 		}
+	}
 
+	protected void streamReadOpLog(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
+		String database = mongoConfig.getDatabase();
+		if (StreamWithOpLogCollection.OP_LOG_DB.equals(database) && tableList.contains(StreamWithOpLogCollection.OP_LOG_COLLECTION)) {
+			connectorContext.getLog().info("Start read oplog collection, db: local");
+			tableList.remove(StreamWithOpLogCollection.OP_LOG_COLLECTION);
+			if (opLogStreamReader == null) {
+				opLogStreamReader = new MongodbOpLogStreamV3Reader();
+				opLogStreamReader.onStart(mongoConfig);
+			}
+			if (tableList.isEmpty()) {
+				doStreamRead(opLogStreamReader, connectorContext, list(StreamWithOpLogCollection.OP_LOG_COLLECTION), offset, eventBatchSize, consumer);
+			} else {
+				if (null == sourceRunner) {
+					sourceRunner = new ThreadPoolExecutor(
+							1,
+							1,
+							60,
+							TimeUnit.SECONDS,
+							new LinkedBlockingDeque<>(100),
+							r -> new Thread(r, "Mongo-oplog-stream-reader[" + database + "]" + System.currentTimeMillis()),
+							(r, executor) -> {
+								TapLogger.error(TAG, "Thread is rejected, runnable {} pool {}", r, executor);
+							});
+					//Don't waste core thread when idle.
+					sourceRunner.allowCoreThreadTimeOut(true);
+				}
+				sourceRunnerFuture = sourceRunner.submit(() -> doStreamRead(opLogStreamReader, connectorContext, list(StreamWithOpLogCollection.OP_LOG_COLLECTION), offset, eventBatchSize, consumer));
+			}
+		}
 	}
 
 	/**
@@ -1553,7 +1571,7 @@ public class MongodbConnector extends ConnectorBase {
 //    @Override
 //    public void onDestroy(TapConnectionContext connectionContext) {
 //    }
-	private MongodbStreamReader createStreamReader() {
+	protected MongodbStreamReader createStreamReader() {
 		MongodbStreamReader mongodbStreamReader = null;
 		try {
 			final int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
