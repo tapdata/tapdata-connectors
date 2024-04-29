@@ -84,14 +84,7 @@ public class MongodbUtil {
 						);
 			}
 		}catch (Exception e){
-			return filterOpLog(map, database, collectionName);
-		}
-		return filterOpLog(map, database, collectionName);
-	}
-
-	protected static Map<String, Object> filterOpLog(Map<String, Object> map, String database, String collectionName) {
-		if ("local".equals(database) && "oplog.rs".equals(collectionName)) {
-			return new HashMap<>();
+			return map;
 		}
 		return map;
 	}
