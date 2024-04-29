@@ -121,14 +121,14 @@ public class MongodbTest extends CommonDbTest {
     public Boolean testVersion() {
         try {
             String version = MongodbUtil.getVersionString(mongoClient, mongodbConfig.getDatabase());
-            String versionMsg = "mongodb version: " + version;
+            String versionMsg = "MongoDB version: " + version;
             connectionOptions.setDbVersion(version);
             if (supportVersions().stream().noneMatch(v -> {
                 String reg = v.replaceAll("\\*", ".*");
                 Pattern pattern = Pattern.compile(reg);
                 return pattern.matcher(version).matches();
             })) {
-                consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, versionMsg + " not supported well"));
+                consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, versionMsg + " is not officially supported. Please report the issues to us if you encounter any."));
             } else {
                 consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, versionMsg));
             }
