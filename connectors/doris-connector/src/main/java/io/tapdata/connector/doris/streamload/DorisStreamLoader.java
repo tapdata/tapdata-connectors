@@ -143,7 +143,7 @@ public class DorisStreamLoader {
             String label = prefix + "-" + UUID.randomUUID();
             List<String> columns = new ArrayList<>();
             for (String col : tapTable.getNameFieldMap().keySet()) {
-                if (dataColumns.get().contains(col) || DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType()) || DorisConfig.WriteFormat.json == dorisConfig.getWriteFormatEnum()) {
+                if (dataColumns.get().contains(col) || DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType())) {
                     columns.add("`" + col + "`");
                 }
             }
