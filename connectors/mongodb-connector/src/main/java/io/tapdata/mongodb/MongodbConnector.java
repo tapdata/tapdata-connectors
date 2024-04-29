@@ -1438,7 +1438,7 @@ public class MongodbConnector extends ConnectorBase {
 	 * @param offset
 	 * @param tapReadOffsetConsumer
 	 */
-	protected void batchRead(TapConnectorContext connectorContext, TapTable table, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> tapReadOffsetConsumer) throws Throwable {
+	protected void batchRead(TapConnectorContext connectorContext, TapTable table, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> tapReadOffsetConsumer) {
 		ReadParam param = ReadParam.of()
 				.withConnectorContext(connectorContext)
 				.withTapTable(table)
@@ -1531,9 +1531,7 @@ public class MongodbConnector extends ConnectorBase {
 							TimeUnit.SECONDS,
 							new LinkedBlockingDeque<>(100),
 							r -> new Thread(r, "Mongo-oplog-stream-reader[" + database + "]" + System.currentTimeMillis()),
-							(r, executor) -> {
-								TapLogger.error(TAG, "Thread is rejected, runnable {} pool {}", r, executor);
-							});
+							(r, executor) -> TapLogger.error(TAG, "Thread is rejected, runnable {} pool {}", r, executor));
 					//Don't waste core thread when idle.
 					sourceRunner.allowCoreThreadTimeOut(true);
 				}
