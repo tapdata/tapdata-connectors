@@ -400,7 +400,7 @@
 						],
 						"fulfill": {
 							"state": {
-								"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0 && $deps[1]}}"
+								"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0}}"
 							}
 						}
 					},
