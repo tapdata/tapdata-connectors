@@ -79,6 +79,11 @@
             <artifactId>pdk-error-code</artifactId>
             <scope>provided</scope>
         </dependency>
+        <dependency>
+            <groupId>io.tapdata</groupId>
+            <artifactId>tapdata-pdk-runner</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- Mockito -->
         <dependency>
