@@ -8,6 +8,10 @@ import java.util.Optional;
 
 public class MongodbOpLogStreamV3Reader extends MongodbV3StreamReader implements StreamWithOpLogCollection {
 
+    public static MongodbStreamReader of() {
+        return new MongodbOpLogStreamV3Reader();
+    }
+
     @Override
     protected TapBaseEvent handleOplogEvent(Document event) {
         if (null == event) return null;

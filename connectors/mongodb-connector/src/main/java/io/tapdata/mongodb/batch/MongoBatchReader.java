@@ -42,6 +42,10 @@ public class MongoBatchReader {
     protected Object offset;
     protected Bson sort;
 
+    public static MongoBatchReader of(ReadParam param) {
+        return new MongoBatchReader(param);
+    }
+
     public MongoBatchReader(ReadParam param) {
         this.tapReadOffsetConsumer = param.getTapReadOffsetConsumer();
         this.exceptionCollector = param.getExceptionCollector();

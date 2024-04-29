@@ -1148,22 +1148,6 @@ public class MongodbConnector extends ConnectorBase {
 		}
 		exceptionCollector = new MongodbExceptionCollector();
 		mongodbExecuteCommandFunction.setLog(connectionContext.getLog());
-
-		try {
-			if(null != sourceRunnerFuture) {
-				sourceRunnerFuture.cancel(false);
-			}
-		} catch (Exception e) {
-			// ignore
-		}
-		try {
-			if(null != sourceRunner) {
-				sourceRunner.shutdown();
-			}
-			sourceRunner = null;
-		} catch (Exception e) {
-			// ignore
-		}
 	}
 
 	private void dropTable(TapConnectorContext connectorContext, TapDropTableEvent dropTableEvent) throws Throwable {
@@ -1454,7 +1438,7 @@ public class MongodbConnector extends ConnectorBase {
 	 * @param offset
 	 * @param tapReadOffsetConsumer
 	 */
-	private void batchRead(TapConnectorContext connectorContext, TapTable table, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> tapReadOffsetConsumer) throws Throwable {
+	protected void batchRead(TapConnectorContext connectorContext, TapTable table, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> tapReadOffsetConsumer) throws Throwable {
 		ReadParam param = ReadParam.of()
 				.withConnectorContext(connectorContext)
 				.withTapTable(table)
@@ -1467,18 +1451,19 @@ public class MongodbConnector extends ConnectorBase {
 				.withMongodbExceptionCollector(exceptionCollector)
 				.withMongoCollection(this::getMongoCollection)
 				.withErrorHandler(e -> errorHandle(e, connectorContext));
-		new MongoBatchReader(param).batchReadCollection(param);
+		MongoBatchReader.of(param).batchReadCollection(param);
 	}
 
-	private Object streamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
+	protected Object streamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
 		if (null == opLogStreamReader && StreamWithOpLogCollection.OP_LOG_DB.equals(mongoConfig.getDatabase())) {
-			opLogStreamReader = new MongodbOpLogStreamV3Reader();
+			opLogStreamReader = MongodbOpLogStreamV3Reader.of();
 			opLogStreamReader.onStart(mongoConfig);
 		}
 		if (mongodbStreamReader == null) {
 			mongodbStreamReader = createStreamReader();
 		}
-		return new MongoCdcOffset(null == opLogStreamReader ? null : opLogStreamReader.streamOffset(offsetStartTime),
+		return new MongoCdcOffset(
+				null == opLogStreamReader ? null : opLogStreamReader.streamOffset(offsetStartTime),
 				mongodbStreamReader.streamOffset(offsetStartTime));
 	}
 
@@ -1498,7 +1483,7 @@ public class MongodbConnector extends ConnectorBase {
 	 * @param connectorContext //     * @param offset
 	 *                         //     * @param consumer
 	 */
-	private void streamRead(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
+	protected void streamRead(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
 		int size = tableList.size();
 		streamReadOpLog(connectorContext, tableList, offset instanceof MongoCdcOffset ? ((MongoCdcOffset) offset).getOpLogOffset() : null, eventBatchSize, consumer);
 		if (size == tableList.size() || !tableList.isEmpty()) {
@@ -1518,7 +1503,8 @@ public class MongodbConnector extends ConnectorBase {
 			exceptionCollector.collectWritePrivileges(e);
 			try {
 				streamReader.onDestroy();
-			} catch (Exception ignored) {
+			} catch (Exception exception) {
+				connectorContext.getLog().debug("Close Stream reader failed, message: {}", exception.getMessage());
 			}
 			exceptionCollector.revealException(e);
 			errorHandle(e, connectorContext);
@@ -1531,7 +1517,7 @@ public class MongodbConnector extends ConnectorBase {
 			connectorContext.getLog().info("Start read oplog collection, db: local");
 			tableList.remove(StreamWithOpLogCollection.OP_LOG_COLLECTION);
 			if (opLogStreamReader == null) {
-				opLogStreamReader = new MongodbOpLogStreamV3Reader();
+				opLogStreamReader = MongodbOpLogStreamV3Reader.of();
 				opLogStreamReader.onStart(mongoConfig);
 			}
 			if (tableList.isEmpty()) {
@@ -1634,6 +1620,23 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 		}
+		closeOpLogThreadSource();
+	}
+	protected void closeOpLogThreadSource() {
+		try {
+			Optional.ofNullable(sourceRunnerFuture).ifPresent(f -> f.cancel(true));
+		} catch (Exception e) {
+			exceptionCollector.collectTerminateByServer(e);
+		} finally {
+			sourceRunnerFuture = null;
+		}
+		try {
+			Optional.ofNullable(sourceRunner).ifPresent(ThreadPoolExecutor::shutdown);
+		} catch (Exception e) {
+			exceptionCollector.collectTerminateByServer(e);
+		} finally {
+			sourceRunner = null;
+		}
 	}
 
 	private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
@@ -1652,7 +1655,7 @@ public class MongodbConnector extends ConnectorBase {
 		return tableInfo;
 	}
 
-	private void errorHandle(Throwable throwable, TapConnectorContext connectorContext) {
+	protected void errorHandle(Throwable throwable, TapConnectorContext connectorContext) {
 		if (null == throwable) {
 			return;
 		}

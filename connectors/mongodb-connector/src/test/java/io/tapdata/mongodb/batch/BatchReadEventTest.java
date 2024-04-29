@@ -96,6 +96,14 @@ class BatchReadEventTest {
     @Nested
     class NewObjectTest {
         @Test
+        void testNewByOf() {
+            when(mongoConfig.getDatabase()).thenReturn("test");
+            when(table.getId()).thenReturn(StreamWithOpLogCollection.OP_LOG_COLLECTION);
+            Assertions.assertDoesNotThrow(() -> MongoBatchReader.of(param));
+            verify(mongoConfig).getDatabase();
+            verify(table, times(0)).getId();
+        }
+        @Test
         void testDataBaseNotLocal() {
             when(mongoConfig.getDatabase()).thenReturn("test");
             when(table.getId()).thenReturn(StreamWithOpLogCollection.OP_LOG_COLLECTION);
