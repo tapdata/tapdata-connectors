@@ -2,7 +2,7 @@
 
 ### **1. TiDB 安裝説明**
 
-請遵循以下説明以確保在 Tapdata 中成功添加和使用 TiDB數據庫以及成功部署,TiCDC建议TIDB与TICDC版本一致。
+請遵循以下説明以確保在 Tapdata 中成功添加和使用 TiDB數據庫以以及成功部署TiKV服務以及以及PD服務
 ### **2. 支持版本**
 TiDB 5.4+ , TiCDC6.3+
 
