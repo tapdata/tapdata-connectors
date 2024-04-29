@@ -123,7 +123,8 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-component-props": {
-            "placeholder": "${connection_form_database_host_placeholder}"
+            "placeholder": "${connection_form_database_host_placeholder}",
+            "tooltip": "${connection_form_database_host_tooltip}"
           },
           "required": true,
           "x-index": 30
@@ -392,6 +393,7 @@
       "dataForm_form_databaseUri": "Database URI",
       "dataForm_form_host": "DB Address",
       "connection_form_database_host_placeholder": "Please enter the database address",
+      "connection_form_database_host_tooltip": "Database address, hostname or IP address, and port, for example: 192.168.1.1:27017.",
       "dataForm_form_databaseName": "DB Name",
       "dataForm_form_userName": "User",
       "dataForm_form_password": "Password",
@@ -424,6 +426,7 @@
       "dataForm_form_databaseUri": "数据库 URI",
       "dataForm_form_host": "数据库地址",
       "connection_form_database_host_placeholder": "请输入数据库地址",
+      "connection_form_database_host_tooltip": "数据库地址，主机名或IP地址以及端口，例如：192.168.1.1:27017",
       "dataForm_form_databaseName": "数据库名称",
       "dataForm_form_userName": "账号",
       "dataForm_form_password": "密码",
@@ -456,6 +459,7 @@
       "dataForm_form_databaseUri": "數據庫 URI",
       "dataForm_form_host": "數據庫地址",
       "connection_form_database_host_placeholder": "請輸入數據庫地址",
+      "connection_form_database_host_tooltip": "資料庫地址，主機名稱或IP地址，以及端口，例如：192.168.1.1:27017",
       "dataForm_form_databaseName": "數據庫名稱",
       "dataForm_form_userName": "賬號",
       "dataForm_form_password": "密碼",
