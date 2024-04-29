@@ -12,7 +12,6 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
-import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.commons.collections4.CollectionUtils;
@@ -40,16 +39,14 @@ public class DorisStreamLoader {
 
     private static final String LOAD_URL_PATTERN = "http://%s/api/%s/%s/_stream_load";
     private static final String LABEL_PREFIX_PATTERN = "tapdata_%s_%s";
-    private static final int MAX_FLUSH_BATCH_SIZE = 5000;
 
     private final DorisConfig dorisConfig;
     private final CloseableHttpClient httpClient;
     private final RecordStream recordStream;
 
     private boolean loadBatchFirstRecord;
-    private int size;
-    private final AtomicInteger lastEventFlag;
-    private AtomicReference<Set<String>> dataColumns;
+    private AtomicInteger lastEventFlag;
+    private final AtomicReference<Set<String>> dataColumns;
     private MessageSerializer messageSerializer;
     private TapTable tapTable;
     private final Metrics metrics;
@@ -65,7 +62,6 @@ public class DorisStreamLoader {
         }
         this.recordStream = new RecordStream(writeByteBufferCapacity, Constants.CACHE_BUFFER_COUNT);
         this.loadBatchFirstRecord = true;
-        this.size = 0;
         this.lastEventFlag = new AtomicInteger(0);
         this.dataColumns = new AtomicReference<>();
         initMessageSerializer();
@@ -90,9 +86,10 @@ public class DorisStreamLoader {
             TapLogger.debug(TAG, "Batch events length is: {}", tapRecordEvents.size());
             WriteListResult<TapRecordEvent> listResult = writeListResult();
             this.tapTable = table;
+            boolean isAgg = dorisConfig.getUpdateSpecific() && DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType());
             for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
-                byte[] bytes = messageSerializer.serialize(table, tapRecordEvent);
-                if (needFlush(tapRecordEvent, bytes.length)) {
+                byte[] bytes = messageSerializer.serialize(table, tapRecordEvent, isAgg);
+                if (needFlush(tapRecordEvent, bytes.length, isAgg)) {
                     flush(table, listResult);
                 }
                 if (lastEventFlag.get() == 0) {
@@ -116,7 +113,6 @@ public class DorisStreamLoader {
             recordStream.write(messageSerializer.lineEnd());
         }
         recordStream.write(record);
-        size += 1;
     }
 
     public void startLoad(final TapRecordEvent recordEvent) throws IOException {
@@ -146,8 +142,10 @@ public class DorisStreamLoader {
 
             String label = prefix + "-" + UUID.randomUUID();
             List<String> columns = new ArrayList<>();
-            for (String col : dataColumns.get()) {
-                columns.add("`" + col + "`");
+            for (String col : tapTable.getNameFieldMap().keySet()) {
+                if (dataColumns.get().contains(col) || DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType()) || DorisConfig.WriteFormat.json == dorisConfig.getWriteFormatEnum()) {
+                    columns.add("`" + col + "`");
+                }
             }
             // add the DORIS_DELETE_SIGN at the end of the column
             columns.add(Constants.DORIS_DELETE_SIGN);
@@ -165,14 +163,12 @@ public class DorisStreamLoader {
             if (CollectionUtils.isEmpty(primaryKeys)) {
                 putBuilder.enableAppend();
             } else {
-                if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Unique".equals(dorisConfig.getUniqueKeyType())) {
-                    putBuilder.enableDelete();
-                } else {
+                if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType())) {
                     putBuilder.enableAppend();
+                } else {
+                    putBuilder.enableDelete();
+                    putBuilder.addPartialHeader();
                 }
-            }
-            if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && "Unique".equals(dorisConfig.getUniqueKeyType())) {
-                putBuilder.addPartialHeader();
             }
             HttpPut httpPut = putBuilder.build();
             TapLogger.debug(TAG, "Call stream load http api, url: {}, headers: {}", loadUrl, putBuilder.header);
@@ -228,14 +224,13 @@ public class DorisStreamLoader {
             throw new DorisRuntimeException(e);
         } finally {
             lastEventFlag.set(0);
-            size = 0;
             recordStream.setContentLength(0L);
         }
     }
 
     public void shutdown() {
         try {
-            this.stopLoad();
+//            this.stopLoad();
             this.httpClient.close();
         } catch (Exception ignored) {
         }
@@ -249,10 +244,9 @@ public class DorisStreamLoader {
         return String.format(LABEL_PREFIX_PATTERN, Thread.currentThread().getId(), tableName);
     }
 
-    private boolean needFlush(TapRecordEvent recordEvent, int length) {
+    protected boolean needFlush(TapRecordEvent recordEvent, int length, boolean noNeed) {
         int lastEventType = lastEventFlag.get();
-        return lastEventType > 0 && !getDataColumns(recordEvent).equals(dataColumns.get())
-                || this.size >= MAX_FLUSH_BATCH_SIZE
+        return lastEventType > 0 && !getDataColumns(recordEvent).equals(dataColumns.get()) && !noNeed
                 || !recordStream.canWrite(length);
     }
 

@@ -33,8 +33,12 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
                     + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
                     + String.join(", ", largeSqlValues) + " ON DUPLICATE KEY UPDATE "
                     + allColumn.stream().map(k -> escapeChar + k + escapeChar + "=values(" + escapeChar + k + escapeChar + ")").collect(Collectors.joining(", "));
-        } else {
+        } else if ("ignore_on_exists".equals(insertPolicy)) {
             return "INSERT IGNORE INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
+                    + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
+                    + String.join(", ", largeSqlValues);
+        } else {
+            return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
                     + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
                     + String.join(", ", largeSqlValues);
         }

@@ -97,10 +97,13 @@ public class MysqlReader implements Closeable {
     private TimeZone DB_TIME_ZONE;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     private final ExceptionCollector exceptionCollector;
+    private String dropTransactionId = null;
+    private final MysqlConfig mysqlConfig;
     protected Log tapLogger;
 
     public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, Supplier<Boolean> isAlive) {
         this.mysqlJdbcContext = mysqlJdbcContext;
+        this.mysqlConfig = (MysqlConfig) mysqlJdbcContext.getConfig();
         this.isAlive = isAlive;
         this.tapLogger = tapLogger;
         this.exceptionCollector = new MysqlExceptionCollector();
@@ -204,7 +207,6 @@ public class MysqlReader implements Closeable {
 
     public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
                            Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) throws Throwable {
-        MysqlConfig mysqlConfig = new MysqlConfig().load(tapConnectorContext.getConnectionConfig());
         MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         try {
             initDebeziumServerName(tapConnectorContext);
@@ -278,11 +280,17 @@ public class MysqlReader implements Closeable {
 //                builder.with("database.serverTimezone", mysqlJdbcContext.queryTimeZone());
 //            }
             List<String> dbTableNames = tables.stream().map(t -> mysqlConfig.getDatabase() + "." + t).collect(Collectors.toList());
+            if (mysqlConfig.getDoubleActive()) {
+                dbTableNames.add(mysqlConfig.getDatabase() + "._tap_double_active");
+            }
             builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, mysqlConfig.getDatabase());
             builder.with(MySqlConnectorConfig.TABLE_INCLUDE_LIST, String.join(",", dbTableNames));
             builder.with(EmbeddedEngine.OFFSET_STORAGE, "io.tapdata.connector.mysql.PdkPersistenceOffsetBackingStore");
             if (StringUtils.isNotBlank(offsetStr)) {
                 builder.with("pdk.offset.string", offsetStr);
+            }
+            if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
+                builder.with("provide.transaction.metadata", true);
             }
 			/*
 				todo At present, the schema loading logic will load the schema of all current tables each time it is started. When there is ddl in the historical data, it will cause a parsing error
@@ -512,6 +520,21 @@ public class MysqlReader implements Closeable {
             }
             return null;
         }).orElse(source.getString("table"));
+        //双活情形下，需要过滤_tap_double_active记录的同事务数据
+        if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
+            if ("_tap_double_active".equals(table)) {
+                dropTransactionId = String.valueOf(record.sourceOffset().get("transaction_id"));
+                return null;
+            } else {
+                if (null != dropTransactionId) {
+                    if (dropTransactionId.equals(String.valueOf(record.sourceOffset().get("transaction_id")))) {
+                        return null;
+                    } else {
+                        dropTransactionId = null;
+                    }
+                }
+            }
+        }
         String op = value.getString("op");
         MysqlOpType mysqlOpType = MysqlOpType.fromOp(op);
         if (null == mysqlOpType) {
