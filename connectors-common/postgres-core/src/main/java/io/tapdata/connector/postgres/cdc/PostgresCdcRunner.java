@@ -48,6 +48,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private StreamReadConsumer consumer;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     protected TimeZone timeZone;
+    private String dropTransactionId = null;
 
     public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext) throws SQLException {
         this.postgresConfig = (PostgresConfig) postgresJdbcContext.getConfig();
@@ -60,6 +61,9 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     }
 
     public PostgresCdcRunner watch(List<String> observedTableList) {
+        if (postgresConfig.getDoubleActive()) {
+            observedTableList.add("_tap_double_active");
+        }
         postgresDebeziumConfig = new PostgresDebeziumConfig()
                 .use(postgresConfig)
                 .use(timeZone)
@@ -145,10 +149,27 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
                 eventList.add(new HeartbeatEvent().init().referenceTime(((Struct)sr.value()).getInt64("ts_ms")));
                 continue;
+            } else if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
+                continue;
             }
             String op = struct.getString("op");
             String lsn = String.valueOf(offset.get("lsn"));
             String table = struct.getStruct("source").getString("table");
+            //双活情形下，需要过滤_tap_double_active记录的同事务数据
+            if (Boolean.TRUE.equals(postgresConfig.getDoubleActive())) {
+                if ("_tap_double_active".equals(table)) {
+                    dropTransactionId = String.valueOf(sr.sourceOffset().get("transaction_id"));
+                    continue;
+                } else {
+                    if (null != dropTransactionId) {
+                        if (dropTransactionId.equals(String.valueOf(sr.sourceOffset().get("transaction_id")))) {
+                            continue;
+                        } else {
+                            dropTransactionId = null;
+                        }
+                    }
+                }
+            }
             Struct after = struct.getStruct("after");
             Struct before = struct.getStruct("before");
             TapRecordEvent event = null;

@@ -24,8 +24,8 @@ public class PostgresRecordWriter extends NormalRecordWriter {
         }
     }
 
-    public PostgresRecordWriter(JdbcContext jdbcContext, Connection connection, TapTable tapTable, String version) throws SQLException {
-        super(connection, tapTable);
+    public PostgresRecordWriter(JdbcContext jdbcContext, Connection connection, TapTable tapTable, String version) {
+        super(jdbcContext, connection, tapTable);
         exceptionCollector = new PostgresExceptionCollector();
         if (Integer.parseInt(version) > 90500) {
             insertRecorder = new ConflictWriteRecorder(connection, tapTable, jdbcContext.getConfig().getSchema());

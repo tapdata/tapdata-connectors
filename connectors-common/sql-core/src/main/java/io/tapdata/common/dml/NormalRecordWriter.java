@@ -1,5 +1,6 @@
 package io.tapdata.common.dml;
 
+import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.JdbcContext;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
@@ -15,8 +16,10 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -37,19 +40,23 @@ public class NormalRecordWriter {
     protected boolean isTransaction = false;
     protected Log tapLogger;
     protected boolean largeSql = false;
+    protected CommonDbConfig commonDbConfig;
 
     public NormalRecordWriter(JdbcContext jdbcContext, TapTable tapTable) throws SQLException {
+        this.commonDbConfig = jdbcContext.getConfig();
         this.connection = jdbcContext.getConnection();
         this.tapTable = tapTable;
     }
 
     public NormalRecordWriter(JdbcContext jdbcContext, TapTable tapTable, boolean largeSql) throws SQLException {
+        this.commonDbConfig = jdbcContext.getConfig();
         this.connection = jdbcContext.getConnection();
         this.tapTable = tapTable;
         this.largeSql = largeSql;
     }
 
-    public NormalRecordWriter(Connection connection, TapTable tapTable) {
+    public NormalRecordWriter(JdbcContext jdbcContext, Connection connection, TapTable tapTable) {
+        this.commonDbConfig = jdbcContext.getConfig();
         this.connection = connection;
         this.tapTable = tapTable;
         isTransaction = true;
@@ -67,6 +74,12 @@ public class NormalRecordWriter {
             updateRecorder.setTapLogger(tapLogger);
             deleteRecorder.setVersion(version);
             deleteRecorder.setTapLogger(tapLogger);
+            //doubleActive
+            if (Boolean.TRUE.equals(commonDbConfig.getDoubleActive())) {
+                try (Statement statement = connection.createStatement()) {
+                    statement.execute(upsertDoubleActive());
+                }
+            }
             //insert,update,delete events must consecutive, so execute the other two first
             for (TapRecordEvent recordEvent : tapRecordEvents) {
                 if (null != isAlive && !isAlive.get()) {
@@ -146,5 +159,11 @@ public class NormalRecordWriter {
     public NormalRecordWriter setTapLogger(Log tapLogger) {
         this.tapLogger = tapLogger;
         return this;
+    }
+
+    protected String upsertDoubleActive() {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        return "update " + escapeChar + commonDbConfig.getSchema() + escapeChar + "." + escapeChar + "_tap_double_active" + escapeChar + " set " +
+                escapeChar + "c2" + escapeChar + " = '" + UUID.randomUUID() + "' where " + escapeChar + "c1" + escapeChar + " = '1'";
     }
 }

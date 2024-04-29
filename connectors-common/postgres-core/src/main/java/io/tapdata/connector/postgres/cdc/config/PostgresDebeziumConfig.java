@@ -105,6 +105,9 @@ public class PostgresDebeziumConfig {
                 .with("other.schema.name", "io.debezium.postgresql.type.Other")
                 .with("heartbeat.interval.ms", 3000)
                 .with("plugin.name", postgresConfig.getLogPluginName());
+        if (Boolean.TRUE.equals(postgresConfig.getDoubleActive())) {
+            builder.with("provide.transaction.metadata", true);
+        }
         if (EmptyKit.isNotEmpty(observedTableList)) {
             //construct tableWhiteList with schema.table(,) as <public.Student,postgres.test>
             String tableWhiteList = observedTableList.stream().map(v -> postgresConfig.getSchema() + "." + v).collect(Collectors.joining(", "));
