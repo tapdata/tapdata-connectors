@@ -251,19 +251,24 @@ public abstract class JdbcContext implements AutoCloseable {
 
     //static Hikari connection
     static class HikariConnection {
+
+        public static HikariDataSource create() {
+            return new HikariDataSource();
+        }
+
         public static HikariDataSource getHikariDataSource(CommonDbConfig config) throws IllegalArgumentException {
-            HikariDataSource hikariDataSource;
             if (EmptyKit.isNull(config)) {
                 throw new IllegalArgumentException("Config cannot be null");
             }
-            hikariDataSource = new HikariDataSource();
+            HikariDataSource hikariDataSource = create();
             //need 4 attributes
             hikariDataSource.setDriverClassName(config.getJdbcDriver());
-            hikariDataSource.setJdbcUrl(config.getDatabaseUrl());
+            String jdbcUrl = config.getDatabaseUrl();
+            hikariDataSource.setJdbcUrl(jdbcUrl);
             hikariDataSource.setUsername(config.getUser());
             hikariDataSource.setPassword(config.getPassword());
-            hikariDataSource.setMinimumIdle(getInteger(config.getDatabaseUrl(), "Min Idle",1));
-            hikariDataSource.setMaximumPoolSize(getInteger(config.getDatabaseUrl(), "Max Pool Size",20));
+            hikariDataSource.setMinimumIdle(getInteger(jdbcUrl, "Min Idle",1));
+            hikariDataSource.setMaximumPoolSize(getInteger(jdbcUrl, "Max Pool Size",20));
             if (EmptyKit.isNotNull(config.getProperties())) {
                 hikariDataSource.setDataSourceProperties(config.getProperties());
             }
@@ -274,7 +279,7 @@ public abstract class JdbcContext implements AutoCloseable {
             return hikariDataSource;
         }
 
-        protected static String getParamFromUrl(String databaseUrl, String tag){
+        protected static String getParamFromUrl(String databaseUrl, String tag) {
             if (null == databaseUrl || null == tag) return null;
             if (databaseUrl.contains(tag)) {
                 int index = databaseUrl.indexOf(tag) + tag.length();
@@ -283,7 +288,7 @@ public abstract class JdbcContext implements AutoCloseable {
                     end = databaseUrl.length();
                 }
                 String substring = databaseUrl.substring(index, end);
-                substring = replaceAll(replaceAll(substring,"=", "")," ", "");
+                substring = replaceAll(replaceAll(substring, "=", ""), " ", "");
                 return substring;
             }
             return null;
