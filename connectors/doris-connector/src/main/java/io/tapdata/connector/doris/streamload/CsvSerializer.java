@@ -19,7 +19,7 @@ import java.util.StringJoiner;
  */
 public class CsvSerializer implements MessageSerializer {
     @Override
-    public byte[] serialize(TapTable table, TapRecordEvent recordEvent) throws Throwable {
+    public byte[] serialize(TapTable table, TapRecordEvent recordEvent, boolean isAgg) throws Throwable {
         // in some case, the before might be null, here we use after if the before is null
         // and doris will use pk to delete the data
 //        if (before == null) {
@@ -30,29 +30,29 @@ public class CsvSerializer implements MessageSerializer {
         if (recordEvent instanceof TapInsertRecordEvent) {
             final TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
             final Map<String, Object> after = insertRecordEvent.getAfter();
-            value += buildCSVString(table, after, false);
+            value += buildCSVString(table, after, false, isAgg);
         } else if (recordEvent instanceof TapUpdateRecordEvent) {
             final TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
 //            final Map<String, Object> before = updateRecordEvent.getBefore();
             final Map<String, Object> after = updateRecordEvent.getAfter();
 //            value += buildCSVString(table, before, true);
 //            value += Constants.LINE_DELIMITER_DEFAULT;
-            value += buildCSVString(table, after, false);
+            value += buildCSVString(table, after, false, isAgg);
         } else {
             final TapDeleteRecordEvent deleteRecordEvent = (TapDeleteRecordEvent) recordEvent;
             final Map<String, Object> before = deleteRecordEvent.getBefore();
-            value += buildCSVString(table, before, true);
+            value += buildCSVString(table, before, true, isAgg);
         }
         return value.getBytes(StandardCharsets.UTF_8);
     }
 
-    private String buildCSVString(TapTable table, Map<String, Object> values, boolean delete) throws IOException {
+    private String buildCSVString(TapTable table, Map<String, Object> values, boolean delete, boolean isAgg) throws IOException {
         if (MapUtils.isNotEmpty(values)) {
             Object value = "";
             StringJoiner joiner = new StringJoiner(Constants.FIELD_DELIMITER_DEFAULT);
             final Map<String, TapField> tapFieldMap = table.getNameFieldMap();
             for (final Map.Entry<String, TapField> entry : tapFieldMap.entrySet()) {
-                if (values.containsKey(entry.getKey())) {
+                if (values.containsKey(entry.getKey()) || isAgg) {
                     value = values.get(entry.getKey());
                     if (value == null) {
                         value = Constants.NULL_VALUE;

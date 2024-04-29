@@ -411,7 +411,12 @@
       "replicationNum": "replicationNum",
       "updateSpecific": "updateSpecific",
       "updateSpecificTooltip": "2.0 new feature (1.x does not take effect), turning on the switch can improve the performance of batch updating fixed fields",
-      "uniqueKeyType": "uniqueKeyType(Aggregate/Unique)"
+      "uniqueKeyType": "uniqueKeyType(Aggregate/Unique)",
+      "prompt": "Add",
+      "tableProperties": "Table Properties",
+      "tablePropertiesTip": "Table properties, for example: {replication_num: 3, storage_format: v2}",
+      "propKey": "Property Name",
+      "propValue": "Property Value"
     },
     "zh_CN": {
       "host": "数据库地址",
@@ -438,7 +443,12 @@
       "replicationNum": "副本数",
       "updateSpecific": "是否更新特定字段",
       "updateSpecificTooltip": "2.0新特性(1.x不生效)，打开开关可以提升批量更新固定字段性能",
-      "uniqueKeyType": "唯一键类型(Aggregate/Unique)"
+      "uniqueKeyType": "唯一键类型(Aggregate/Unique)",
+      "prompt": "添加",
+      "tableProperties": "表属性",
+      "tablePropertiesTip": "表属性，例如：{replication_num: 3, storage_format: v2}",
+      "propKey": "属性名",
+      "propValue": "属性值"
     },
     "zh_TW": {
       "host": "數據庫地址",
@@ -465,7 +475,12 @@
       "replicationNum": "副本數",
       "updateSpecific": "是否更新特定字段",
       "updateSpecificTooltip": "2.0新特性(1.x不生效)，打開開關可以提升批量更新固定字段性能",
-      "uniqueKeyType": "唯一鍵類型(Aggregate/Unique)"
+      "uniqueKeyType": "唯一鍵類型(Aggregate/Unique)",
+      "prompt": "添加",
+      "tableProperties": "表屬性",
+      "tablePropertiesTip": "表屬性，例如：{replication_num: 3, storage_format: v2}",
+      "propKey": "屬性名",
+      "propValue": "屬性值"
     }
   },
   "dataTypes": {
