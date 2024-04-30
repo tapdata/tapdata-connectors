@@ -331,5 +331,14 @@ public class TidbSourceTest {
 
    }
 
+   @Test
+   void test(){
+      String databaseName = "ods_cs2y_cisdb";
+      String grantSql ="GRANT ALL PRIVILEGES ON `ods_%`.* TO 'di_tapdata'@'%'";
+      if(databaseName.contains(
+              (grantSql.substring(grantSql.indexOf("`")+1, grantSql.indexOf("`" + ".")).trim().replaceAll("%", "")))) {
+         System.out.println("22");
+      }
+   }
 
 }

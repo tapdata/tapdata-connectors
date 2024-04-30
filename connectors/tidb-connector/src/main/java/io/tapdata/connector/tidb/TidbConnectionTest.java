@@ -123,10 +123,6 @@ public class TidbConnectionTest extends CommonDbTest {
         }
     }
 
-    @Override
-    public Boolean testWritePrivilege() {
-        return WriteOrReadPrivilege("write");
-    }
 
     private boolean WriteOrReadPrivilege(String mark) {
         String databaseName = tidbConfig.getDatabase();
@@ -185,6 +181,16 @@ public class TidbConnectionTest extends CommonDbTest {
         } else if (grantSql.contains("`" + databaseName + "`" + ".")) {
             String table = grantSql.substring(grantSql.indexOf(databaseName + "."), grantSql.indexOf("TO")).trim();
             if (privilege) {
+                tableList.add(table);
+            }
+        } else if (databaseName.contains(
+                (grantSql.substring(grantSql.indexOf("`")+1, grantSql.indexOf("`" + ".")).trim().replaceAll("%", "")))) {
+            if (grantSql.contains("`" + ".* TO")) {
+                if (privilege) {
+                    return true;
+                }
+            } else {
+                String table = grantSql.substring(grantSql.indexOf("`" + "."), grantSql.indexOf("TO")).trim();
                 tableList.add(table);
             }
         }
