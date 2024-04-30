@@ -1462,9 +1462,9 @@ public class MongodbConnector extends ConnectorBase {
 		if (mongodbStreamReader == null) {
 			mongodbStreamReader = createStreamReader();
 		}
-		return new MongoCdcOffset(
-				null == opLogStreamReader ? null : opLogStreamReader.streamOffset(offsetStartTime),
-				mongodbStreamReader.streamOffset(offsetStartTime));
+		Object opLogOffset = null == opLogStreamReader ? null : opLogStreamReader.streamOffset(offsetStartTime);
+		Object cdcOffset = mongodbStreamReader.streamOffset(offsetStartTime);
+		return new MongoCdcOffset(opLogOffset, cdcOffset).toOffset();
 	}
 
 	/**
@@ -1485,13 +1485,13 @@ public class MongodbConnector extends ConnectorBase {
 	 */
 	protected void streamRead(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
 		int size = tableList.size();
-		streamReadOpLog(connectorContext, tableList, offset instanceof MongoCdcOffset ? ((MongoCdcOffset) offset).getOpLogOffset() : null, eventBatchSize, consumer);
+		MongoCdcOffset mongoCdcOffset = MongoCdcOffset.fromOffset(offset);
+		streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), eventBatchSize, consumer);
 		if (size == tableList.size() || !tableList.isEmpty()) {
 			if (mongodbStreamReader == null) {
 				mongodbStreamReader = createStreamReader();
 			}
-			Object cdcOffset = offset instanceof MongoCdcOffset ?  ((MongoCdcOffset) offset).getCdcOffset() : offset;
-			doStreamRead(mongodbStreamReader, connectorContext, tableList, cdcOffset, eventBatchSize, consumer);
+			doStreamRead(mongodbStreamReader, connectorContext, tableList, mongoCdcOffset.getCdcOffset(), eventBatchSize, consumer);
 		}
 	}
 
