@@ -332,13 +332,15 @@ public class TidbSourceTest {
    }
 
    @Test
-   void test(){
+   void testTidbReadPrivilege(){
       String databaseName = "ods_cs2y_cisdb";
       String grantSql ="GRANT ALL PRIVILEGES ON `ods_%`.* TO 'di_tapdata'@'%'";
-      if(databaseName.contains(
-              (grantSql.substring(grantSql.indexOf("`")+1, grantSql.indexOf("`" + ".")).trim().replaceAll("%", "")))) {
-         System.out.println("22");
-      }
+      TidbConfig tidbConfig = new TidbConfig();
+      tidbConfig.setJdbcDriver("com.mysql.cj.jdbc.Driver");
+      TidbConnectionTest tidbConnectionTest = new TidbConnectionTest(tidbConfig,
+              Mockito.mock(Consumer.class),Mockito.mock(ConnectionOptions.class));
+     Boolean actualData =  tidbConnectionTest.testWriteOrReadPrivilege(grantSql,new ArrayList<>(),databaseName,"read");
+     Assert.assertTrue(actualData);
    }
 
 }
