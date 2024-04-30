@@ -215,14 +215,14 @@ public class MysqlReader implements Closeable {
             String offsetStr = "";
             JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
             String deploymentMode = mysqlConfig.getDeploymentMode();
-            if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
+            if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
                 if (offset instanceof MysqlStreamOffset) {
                     Map<String, String> offset1 = ((MysqlStreamOffset) offset).getOffset();
                     AtomicReference<String> os = new AtomicReference<>();
-                    offset1.forEach((k,v)->os.set(v));
+                    offset1.forEach((k, v) -> os.set(v));
                     HashMap map = jsonParser.fromJson(os.get(), HashMap.class);
                     Integer ts = (Integer) map.get("ts_sec");
-                    if (null != ts){
+                    if (null != ts) {
                         offset = TimeUnit.SECONDS.toMillis(new Long(ts));
                     }
                 }
@@ -353,7 +353,7 @@ public class MysqlReader implements Closeable {
             embeddedEngine.run();
             if (null != throwableAtomicReference.get()) {
                 Throwable e = ErrorKit.getLastCause(throwableAtomicReference.get());
-                ((MysqlExceptionCollector)exceptionCollector).setMysqlConfig(mysqlConfig);
+                ((MysqlExceptionCollector) exceptionCollector).setMysqlConfig(mysqlConfig);
                 exceptionCollector.collectTerminateByServer(e);
                 exceptionCollector.collectOffsetInvalid(offset, e);
                 exceptionCollector.collectCdcConfigInvalid(e);
@@ -676,20 +676,22 @@ public class MysqlReader implements Closeable {
         if (null == tapField) return value;
         TapType tapType = tapField.getTapType();
         LocalDateTime dt = LocalDateTime.now();
-        ZonedDateTime fromZonedDateTime = dt.atZone(DB_TIME_ZONE.toZoneId());
+        ZonedDateTime fromZonedDateTime = dt.atZone(TimeZone.getDefault().toZoneId());
         ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
         if (tapType instanceof TapDateTime) {
             long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
+            int fraction = ((TapDateTime) tapType).getFraction();
             if (value instanceof Long) {
-                int fraction = ((TapDateTime) tapType).getFraction();
                 if (fraction > 3) {
-                    value = ((Long) value) / (long) Math.pow(10, 6 - fraction);
+                    value = ((Long) value + diff * 1000) / (long) Math.pow(10, 6 - fraction);
                 } else {
-                    value = ((Long) value) / (long) Math.pow(10, 3 - fraction);
+                    value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
                 }
             } else if (value instanceof String) {
                 try {
-                    value = Instant.parse((CharSequence) value).getEpochSecond() + (TimeZone.getDefault().getRawOffset() + diff) / 1000;
+                    Instant instant = Instant.parse((CharSequence) value);
+                    long milliOffset = DB_TIME_ZONE.getRawOffset() + diff;
+                    value = instant.getEpochSecond() * (long) Math.pow(10, fraction) + instant.getNano() / (long) Math.pow(10, 9 - fraction) + milliOffset * (long) Math.pow(10, fraction - 3);
                 } catch (Exception ignored) {
                 }
             }
