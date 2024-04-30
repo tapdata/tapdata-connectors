@@ -1,6 +1,6 @@
 {
   "properties": {
-    "name": "AWS ClickHouse",
+    "name": "Aws Clickhouse",
     "icon": "icons/clickhouse.png",
     "id": "aws-clickhouse",
     "doc": "${doc}",
