@@ -22,6 +22,7 @@ import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -124,9 +125,10 @@ class MongodbConnectorTest {
         void testNormal() {
             Object offset = mongodbConnector.streamOffset(connectorContext, offsetStartTime);
             Assertions.assertNotNull(offset);
-            Assertions.assertEquals(MongoCdcOffset.class.getName(), offset.getClass().getName());
-            Assertions.assertEquals(0L, ((MongoCdcOffset)offset).getOpLogOffset());
-            Assertions.assertEquals(0L, ((MongoCdcOffset)offset).getCdcOffset());
+            Assertions.assertEquals(HashMap.class.getName(), offset.getClass().getName());
+            MongoCdcOffset o = MongoCdcOffset.fromOffset(offset);
+            Assertions.assertEquals(0L, o.getOpLogOffset());
+            Assertions.assertEquals(0L, o.getCdcOffset());
             verify(opLogStreamReader).streamOffset(offsetStartTime);
             verify(mongoConfig, times(0)).getDatabase();
             verify(mongodbStreamReader).streamOffset(offsetStartTime);
@@ -137,9 +139,10 @@ class MongodbConnectorTest {
             when(mongodbConnector.createStreamReader()).thenReturn(mongodbStreamReader);
             Object offset = mongodbConnector.streamOffset(connectorContext, offsetStartTime);
             Assertions.assertNotNull(offset);
-            Assertions.assertEquals(MongoCdcOffset.class.getName(), offset.getClass().getName());
-            Assertions.assertEquals(0L, ((MongoCdcOffset)offset).getOpLogOffset());
-            Assertions.assertEquals(0L, ((MongoCdcOffset)offset).getCdcOffset());
+            Assertions.assertEquals(HashMap.class.getName(), offset.getClass().getName());
+            MongoCdcOffset o = MongoCdcOffset.fromOffset(offset);
+            Assertions.assertEquals(0L, o.getOpLogOffset());
+            Assertions.assertEquals(0L, o.getCdcOffset());
             verify(opLogStreamReader).streamOffset(offsetStartTime);
             verify(mongodbStreamReader).streamOffset(offsetStartTime);
             verify(mongoConfig, times(0)).getDatabase();
@@ -150,9 +153,10 @@ class MongodbConnectorTest {
             ReflectionTestUtils.setField(mongodbConnector, "opLogStreamReader", null);
             Object offset = mongodbConnector.streamOffset(connectorContext, offsetStartTime);
             Assertions.assertNotNull(offset);
-            Assertions.assertEquals(MongoCdcOffset.class.getName(), offset.getClass().getName());
-            Assertions.assertNull(((MongoCdcOffset)offset).getOpLogOffset());
-            Assertions.assertEquals(0L, ((MongoCdcOffset)offset).getCdcOffset());
+            Assertions.assertEquals(HashMap.class.getName(), offset.getClass().getName());
+            MongoCdcOffset o = MongoCdcOffset.fromOffset(offset);
+            Assertions.assertNull(o.getOpLogOffset());
+            Assertions.assertEquals(0L, o.getCdcOffset());
             verify(opLogStreamReader, times(0)).streamOffset(offsetStartTime);
             verify(mongodbStreamReader).streamOffset(offsetStartTime);
             verify(mongoConfig).getDatabase();
@@ -166,9 +170,10 @@ class MongodbConnectorTest {
                 mol.when(MongodbOpLogStreamV3Reader::of).thenReturn(opLogStreamReader);
                 Object offset = mongodbConnector.streamOffset(connectorContext, offsetStartTime);
                 Assertions.assertNotNull(offset);
-                Assertions.assertEquals(MongoCdcOffset.class.getName(), offset.getClass().getName());
-                Assertions.assertEquals(0L, ((MongoCdcOffset)offset).getOpLogOffset());
-                Assertions.assertEquals(0L, ((MongoCdcOffset)offset).getCdcOffset());
+                Assertions.assertEquals(HashMap.class.getName(), offset.getClass().getName());
+                MongoCdcOffset o = MongoCdcOffset.fromOffset(offset);
+                Assertions.assertEquals(0L, o.getOpLogOffset());
+                Assertions.assertEquals(0L, o.getCdcOffset());
                 verify(opLogStreamReader).streamOffset(offsetStartTime);
                 verify(mongodbStreamReader).streamOffset(offsetStartTime);
                 verify(mongoConfig).getDatabase();
