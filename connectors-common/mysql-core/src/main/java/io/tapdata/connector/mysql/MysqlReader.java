@@ -678,8 +678,8 @@ public class MysqlReader implements Closeable {
         LocalDateTime dt = LocalDateTime.now();
         ZonedDateTime fromZonedDateTime = dt.atZone(TimeZone.getDefault().toZoneId());
         ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
+        long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
         if (tapType instanceof TapDateTime) {
-            long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
             int fraction = ((TapDateTime) tapType).getFraction();
             if (value instanceof Long) {
                 if (fraction > 3) {
@@ -691,12 +691,12 @@ public class MysqlReader implements Closeable {
                 try {
                     Instant instant = Instant.parse((CharSequence) value);
                     long milliOffset = DB_TIME_ZONE.getRawOffset() + diff;
-                    value = instant.getEpochSecond() * (long) Math.pow(10, fraction) + instant.getNano() / (long) Math.pow(10, 9 - fraction) + milliOffset * (long) Math.pow(10, fraction - 3);
+                    value = instant.getEpochSecond() * (long) Math.pow(10, fraction) + instant.getNano() / (long) Math.pow(10, 9 - fraction) + (long) (milliOffset * Math.pow(10, fraction - 3));
                 } catch (Exception ignored) {
                 }
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
-            value = (Integer) value * 24 * 60 * 60 * 1000L;
+            value = (Integer) value * 24 * 60 * 60 * 1000L + diff;
         }
         return value;
     }
