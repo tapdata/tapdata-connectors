@@ -49,6 +49,8 @@ import io.tapdata.pdk.apis.partition.splitter.TypeSplitterMap;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -129,19 +131,12 @@ public class MysqlConnector extends CommonDbConnector {
 
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
             if (tapDateTimeValue.getValue() != null && tapDateTimeValue.getValue().getTimeZone() == null) {
-                if ("timestamp".equals(tapDateTimeValue.getOriginType())) {
-                    tapDateTimeValue.getValue().setTimeZone(timezone);
-                }
+                tapDateTimeValue.getValue().setTimeZone(TimeZone.getDefault());
             }
             return formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS");
         });
         //date类型通过jdbc读取时，会自动转换为当前时区的时间，所以设置为当前时区
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
-            if (tapDateValue.getValue() != null && tapDateValue.getValue().getTimeZone() == null) {
-                tapDateValue.getValue().setTimeZone(TimeZone.getDefault());
-            }
-            return formatTapDateTime(tapDateValue.getValue(), "yyyy-MM-dd");
-        });
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toFormatString("yyyy-MM-dd"));
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
         codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> {
             if (tapYearValue.getValue() != null && tapYearValue.getValue().getTimeZone() == null) {
@@ -424,15 +419,20 @@ public class MysqlConnector extends CommonDbConnector {
                     value = resultSet.getString(i + 1);
                 } else if ("DATE".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                     value = resultSet.getString(i + 1);
-                } else {
+                } else if ("DATETIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                     try {
                         value = resultSet.getObject(i + 1);
+                        if (value instanceof LocalDateTime) {
+                            value = ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000));
+                        }
                     } catch (Exception ignore) {
                         value = resultSet.getString(i + 1);
                     }
                     if (null == value && dateTypeSet.contains(columnName)) {
                         value = resultSet.getString(i + 1);
                     }
+                } else {
+                    value = resultSet.getObject(i + 1);
                 }
                 if (value != null && dateTypeSet.contains(columnName)) {
                     String valueS = value.toString();
