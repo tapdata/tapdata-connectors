@@ -8,6 +8,7 @@ import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.connector.mysql.constant.MysqlTestItem;
 import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.constant.ConnectionTypeEnum;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.Capability;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
@@ -123,9 +124,31 @@ public class TidbConnectionTest extends CommonDbTest {
         }
     }
 
+
     @Override
-    public Boolean testWritePrivilege() {
-        return WriteOrReadPrivilege("write");
+    protected Boolean testWritePrivilege() {
+        try {
+            List<String> sqls = new ArrayList<>();
+            String schemaPrefix = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? ("`" + commonDbConfig.getSchema() + "`.") : "";
+            if (jdbcContext.queryAllTables(Arrays.asList(TEST_WRITE_TABLE, TEST_WRITE_TABLE.toUpperCase())).size() > 0) {
+                sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
+            }
+            //create
+            sqls.add(String.format(TEST_CREATE_TABLE, schemaPrefix + TEST_WRITE_TABLE));
+            //insert
+            sqls.add(String.format(TEST_WRITE_RECORD, schemaPrefix + TEST_WRITE_TABLE));
+            //update
+            sqls.add(String.format(TEST_UPDATE_RECORD, schemaPrefix + TEST_WRITE_TABLE));
+            //delete
+            sqls.add(String.format(TEST_DELETE_RECORD, schemaPrefix + TEST_WRITE_TABLE));
+            //drop
+            sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
+            jdbcContext.batchExecute(sqls);
+            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
+        } catch (Exception e) {
+            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, e.getMessage()));
+        }
+        return true;
     }
 
     private boolean WriteOrReadPrivilege(String mark) {
@@ -185,6 +208,16 @@ public class TidbConnectionTest extends CommonDbTest {
         } else if (grantSql.contains("`" + databaseName + "`" + ".")) {
             String table = grantSql.substring(grantSql.indexOf(databaseName + "."), grantSql.indexOf("TO")).trim();
             if (privilege) {
+                tableList.add(table);
+            }
+        } else if (databaseName.contains(
+                (grantSql.substring(grantSql.indexOf("`")+1, grantSql.indexOf("`" + ".")).trim().replaceAll("%", "")))) {
+            if (grantSql.contains("`" + ".* TO")) {
+                if (privilege) {
+                    return true;
+                }
+            } else {
+                String table = grantSql.substring(grantSql.indexOf("`" + "."), grantSql.indexOf("TO")).trim();
                 tableList.add(table);
             }
         }
