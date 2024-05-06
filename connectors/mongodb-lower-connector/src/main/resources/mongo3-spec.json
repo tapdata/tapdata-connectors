@@ -1,7 +1,7 @@
 {
   "properties": {
     "name": "MongoDB Below 3.4",
-    "icon": "icons/mongo3.png",
+    "icon": "icons/mongodb3.png",
     "doc" : "${doc}",
     "tags" : ["schema-free","Database"],
     "id": "mongodb3",
@@ -48,7 +48,7 @@
             {
               "label": "${dataForm_form_options_standardMode}",
               "value": false,
-              "disabled": true
+              "disabled": false
             }
           ],
           "default": true,
@@ -267,6 +267,14 @@
               "fileNameField": "sslCAFile",
               "required": true,
               "x-index": 120
+            },
+            "mongodbLoadSchemaSampleSize": {
+              "title": "${load_schema_sample_size}",
+              "type": "string",
+              "default": 1000,
+              "x-decorator": "FormItem",
+              "x-component": "InputNumber",
+              "x-index": 130
             }
           }
         }
@@ -292,7 +300,7 @@
                 "visible": "{{$deps[0].length>0}}"
               }
             }
-          }
+          }, "x-index": 1
         },
         "enableSaveDeleteData": {
           "title": "${saveData}",
@@ -312,7 +320,7 @@
                 "visible": "{{$deps[0].length>0}}"
               }
             }
-          }
+          }, "x-index": 2
         },
         "enableFillingModifiedData": {
           "title": "${FillingModifiedData}",
@@ -332,7 +340,7 @@
                 "visible": "{{!$deps[0].length}}"
               }
             }
-          }
+          }, "x-index": 3
         },
         "noCursorTimeout": {
           "title": "${noCursorTimeout}",
@@ -352,7 +360,51 @@
                 "visible": "{{$deps[0].length>0}}"
               }
             }
-          }
+          }, "x-index": 4
+        },
+        "skipDeletedEventsOnFilling": {
+          "title": "${skipDeletedEventsOnFilling}",
+          "type": "boolean",
+          "x-component": "Switch",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "layout": "horizontal",
+            "tooltip": "${skipDeletedEventsOnFillingTips}"
+          },
+          "default": true,
+          "x-reactions": {
+            "dependencies": [
+              "$outputs", ".enableFillingModifiedData"
+            ],
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0].length>0 && $deps[1]}}"
+              }
+            }
+          },
+          "x-index": 5
+        },
+        "preImage": {
+          "title": "${preImage}",
+          "type": "boolean",
+          "x-component": "Switch",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "layout": "horizontal",
+            "tooltip": "${preImageTips}"
+          },
+          "default": false,
+          "x-reactions": {
+            "dependencies": [
+              "$outputs"
+            ],
+            "fulfill": {
+              "state": {
+                "visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0}}"
+              }
+            }
+          },
+          "x-index": 6
         },
         "shardCollection": {
           "type": "boolean",
@@ -376,6 +428,29 @@
             }
           },
           "x-index": 79
+        },
+        "timeSeriesCollection": {
+          "type": "boolean",
+          "title": "${timeSeriesCollection}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "default": false,
+          "x-decorator-props": {
+            "layout": "horizontal",
+            "colon": false,
+            "tooltip": "${timeSeriesCollectionTip}"
+          },
+          "x-reactions": {
+            "dependencies": [
+              "$inputs"
+            ],
+            "fulfill": {
+              "state": {
+                "visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 5 && $deps[0].length>0}}"
+              }
+            }
+          },
+          "x-index": 80
         }
       }
     }
@@ -383,11 +458,12 @@
   "messages": {
     "default": "en_US",
     "en_US": {
+      "load_schema_sample_size": "Number of sampling records (rows) for Mongodb loading model",
       "doc": "docs/mongodb3_en_US.md",
       "isUri": "Connection method",
       "isUrlTips1": "Configure MongoDB database in URI mode. Batch input is supported",
       "isUrlTips2": "Tapdata will connect to a separate server in your network which provides an TSL/SSL tunnel to your database. This method is necessary if your database is in an inaccessible subnet",
-      "uriTips": "MongoDB Atlas database connection URI example:\nmongodb+srv://<username>:<password>@atlascluster.bo1rp4b.mongodb.net/<databaseName>?retryWrites=true&w=majority",
+      "uriTips": "MongoDB database connection URI example:\nThe username and password in the URI must be url encoded and then spliced into the connection string\nReplica set: mongodb://192.168.0.100:27017/mydb?replicaSet=xxx\n Authenticated replica set: mongodb://admin:password@192.168.0.100:27017/mydb?replicaSet=xxx&authSource=admin\nMulti-node replica set: mongodb://192.168.0.1:27017,192.168.0.2:27017, 192.168.0.3:27017/mydb?replicaSet=xxx\nSharded set: mongodb://192.168.0.100:27017/mydb\nMultiple mongos: mongodb://192.168.0.1:27017,192.168.0.2:27017, 192.168.0.3:27017/mydb",
       "dataForm_form_options_URIMode": "URI Mode",
       "dataForm_form_options_standardMode": "Standard Mode",
       "dataForm_form_databaseUri": "Database URI",
@@ -409,18 +485,25 @@
       "dataForm_form_sslCA": "Certificate Authority",
       "saveData": "Save Delete Data",
       "FillingModifiedData": "Filling Modified Data",
+      "skipDeletedEventsOnFilling": "Skip Deleted Events On Filling",
+      "skipDeletedEventsOnFillingTips": "The following conditions can cause delta exceptions when shutting down:\n1. Tasks use non-_id to make business judgments;\n2. Change the source field type to subdocument and modify the corresponding attributes;\n3. The source changes the field type to an embedded array and has a 'pull' operation;",
       "noCursorTimeout": "No Cursor Timeout",
       "syncIndex": "Sync Index",
       "schemaLimit": "Fields Load Limit For Each Collection",
       "node_shard_collection": " Synchronize Partition Properties ",
-      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster "
+      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster ",
+      "timeSeriesCollection" : "Synchronize Time Series Collections",
+      "timeSeriesCollectionTip": "When the source table is a TimeSeries collection, it is synchronized to a TimeSeries collection. Only the source table is supported from MongoDB to MongoDB, and the version is MongoDB5.0 or above.",
+      "preImage": "Document Preimages",
+      "preImageTips": "Enable the preimage function:\\n1. Only MongoDB6.0 and above support enabling it;\\n2. Confirm that the collection has enabled changeStreamPreAndPostImages;\\n3. Confirm the expiration time of the preimage"
     },
     "zh_CN": {
+      "load_schema_sample_size": "Mongodb加载模型采样记录数(行)",
       "doc": "docs/mongodb3_zh_CN.md",
       "isUri": "连接方式",
       "isUrlTips1": "以URI方式配置MongoDB数据库，支持批量输入",
       "isUrlTips2": "Tapdata 将连接网络中的单独服务器，该服务器提供到数据库的TSL/SSL通道。如果您的数据库位于不可访问的子网中，则可尝试使用此方法",
-      "uriTips": "MongoDB Atlas 数据库连接 URI 示范 :\nmongodb+srv://<用户名>:<密码>@atlascluster.bo1rp4b.mongodb.net/<数据库名>?retryWrites=true&w=majority",
+      "uriTips": "MongoDB 数据库连接 URI 示范 :\nURI中的用户名和密码必须做 url encode 编码后在拼接到连接串中\n副本集 : mongodb://192.168.0.100:27017/mydb?replicaSet=xxx\n启用认证的副本集 : mongodb://admin:password@192.168.0.100:27017/mydb?replicaSet=xxx&authSource=admin\n多节点副本集 : mongodb://192.168.0.1:27017,192.168.0.2:27017,192.168.0.3:27017/mydb?replicaSet=xxx\n分片集 : mongodb://192.168.0.100:27017/mydb\n多个mongos : mongodb://192.168.0.1:27017,192.168.0.2:27017,192.168.0.3:27017/mydb",
       "dataForm_form_options_URIMode": "URI模式",
       "dataForm_form_options_standardMode": "标准模式",
       "dataForm_form_databaseUri": "数据库 URI",
@@ -442,18 +525,25 @@
       "dataForm_form_sslCA": "证书颁发机构",
       "saveData": "保存删除数据",
       "FillingModifiedData": "补充更新数据的完整字段",
+      "skipDeletedEventsOnFilling": "补充时跳过已删除的事件",
+      "skipDeletedEventsOnFillingTips": "关闭时以下情况会导致增量异常：\n1. 任务使用非 _id 做业务判断；\n2. 源变更字段类型为子文档，并修改对应属性；\n3. 源变更字段类型为内嵌数组，并有 'pull' 操作；",
       "noCursorTimeout": "禁用游标超时",
       "syncIndex": "同步索引",
       "schemaLimit": "每张表加载的字段数限制",
       "node_shard_collection": "同步分区属性",
-      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效"
+      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效",
+      "preImage": "文档原像",
+      "preImageTips": "启用原像功能：\n1. 只有MongoDB6.0及以上才支持开启；\n2.确认集合已开启changeStreamPreAndPostImages；\n3.确认原像的过期时间",
+      "timeSeriesCollection": "时间序列集合属性",
+      "timeSeriesCollectionTip": "源表为TimeSeries集合时同步为TimeSeries集合，仅支持源表为MongoDB到MongoDB，且版本为MongoDB5.0以上"
     },
     "zh_TW": {
+      "load_schema_sample_size": "Mongodb加載模型採樣記錄數（行）",
       "doc": "docs/mongodb3_zh_TW.md",
       "isUri": "連接方式",
       "isUrlTips1": "以URI方式配置MongoDB數據庫，支持批量輸入",
       "isUrlTips2": "Tapdata 將連接奧網絡中的單獨服務器，該服務器提供到數據庫的TSL/SSL通道。如果您的數據庫位於不可訪問的子網中，則可嘗試使用此方法",
-      "uriTips": "MongoDB Atlas 數據庫連接 URI 示範 :\nmongodb+srv://<用戶名>:<密碼>@atlascluster.bo1rp4b.mongodb.net/<數據庫名>?retryWrites=true&w=majority",
+      "uriTips": "MongoDB 數據庫連接 URI 示範 :\nURI中的用戶名和密碼必須做 url encode 編碼後在拼接到連接串中\n副本集 : mongodb://192.168.0.100:27017/mydb?replicaSet=xxx\n啟用認證的副本集 : mongodb://admin:password@192.168.0.100:27017/mydb?replicaSet=xxx&authSource=admin\n多節點副本集 : mongodb://192.168.0.1:27017,192.168.0.2:27017,192.168.0.3:27017/mydb?replicaSet=xxx\n分片集 : mongodb://192.168.0.100:27017/mydb\n多個mongos : mongodb://192.168.0.1:27017,192.168.0.2:27017,192.168.0.3:27017/mydb",
       "dataForm_form_options_URIMode": "URI模式",
       "dataForm_form_options_standardMode": "標準模式",
       "dataForm_form_databaseUri": "數據庫 URI",
@@ -475,11 +565,18 @@
       "dataForm_form_sslCA": "證書頒發機構",
       "saveData": "保存刪除數據",
       "FillingModifiedData": "補充更新數據的完整字段",
+      "skipDeletedEventsOnFilling": "補充時跳過已刪除的事件",
+      "skipDeletedEventsOnFillingTips": "關閉時以下情況會導致增量異常：\n1. 任務使用非 _id 做業務判斷；\n2. 來源變更欄位類型為子文檔，並修改對應屬性；\n3. 來源變更欄位類型為內嵌數組，並有 'pull' 操作；",
       "noCursorTimeout": "禁用游標超時",
       "syncIndex": "同步索引",
       "schemaLimit": "每张表加載的字段數限制",
       "node_shard_collection": "同步分區内容",
-      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效"
+      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效",
+      "preImage": "文檔原像",
+      "preImageTips": "啟用原像功能：\n1. 只有MongoDB6.0以上才支援開啟；\n2.確認集合已開啟changeStreamPreAndPostImages；\n3.確認原像的過期時間",
+      "timeSeriesCollection": "時間序列集合屬性",
+      "timeSeriesCollectionTip": "源表為TimeSeries集合時同步為TimeSeries集合，僅支持源表為MongoDB到MongoDB，且版本為MongoDB5.0以上"
+
     }
   },
   "dataTypes": {
