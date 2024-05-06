@@ -29,6 +29,7 @@ public class RegisterMain {
 		Dws(BASE_PATH + "connectors/dist/dws-connector-v1.0-SNAPSHOT.jar", "all", "dws", "basic", "jdbc"),
 		Mongodb(BASE_PATH + "connectors/dist/mongodb-connector-v1.0-SNAPSHOT.jar", "all", "mongodb", "basic", "jdbc"),
 		Mongodb_Atlas(BASE_PATH + "connectors/dist/mongodb-atlas-connector-v1.0-SNAPSHOT.jar", "all", "mongodb-atlas"),
+		Mongodb_Lower(BASE_PATH + "connectors/dist/mongodb-lower-connector-v1.0-SNAPSHOT.jar", "all", "mongodb-lower"),
 		Elasticsearch(BASE_PATH + "connectors/dist/elasticsearch-connector-v1.0-SNAPSHOT.jar", "all", "elasticsearch"),
 		Oceanbase(BASE_PATH + "connectors/dist/oceanbase-mysql-connector-v1.0-SNAPSHOT.jar", "all", "oceanbase"),
 		Doris(BASE_PATH + "connectors/dist/doris-connector-v1.0-SNAPSHOT.jar", "all", "doris"),
