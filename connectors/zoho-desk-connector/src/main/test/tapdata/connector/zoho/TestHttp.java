@@ -8,11 +8,11 @@ import java.util.Map;
 
 public class TestHttp {
     public static void main(String[] args) {
-        HttpEntity<String,Object> form = HttpEntity.create().build("","");
-        HttpEntity<String,Object> body = HttpEntity.create().build("","");
-        HttpEntity<String,String> header = HttpEntity.create().build("Authorization","Zoho-oauthtoken 1000.4c15607cdb92a91c3acc96e19c400021.cb2dd3413de77e2bf0e88b261e8ae6be");
+        HttpEntity form = HttpEntity.create().build("","");
+        HttpEntity body = HttpEntity.create().build("","");
+        HttpNormalEntity header = HttpEntity.create().build("Authorization","Zoho-oauthtoken 1000.4c15607cdb92a91c3acc96e19c400021.cb2dd3413de77e2bf0e88b261e8ae6be");
 
-        HttpEntity<String,String> resetFull1 = HttpEntity.create().build("ticketID","10504000000165033");
+        HttpNormalEntity resetFull1 = HttpEntity.create().build("ticketID","10504000000165033");
         ZoHoHttp hoHttp = ZoHoHttp.create(
                 "https://desk.zoho.com.cn/api/v1/tickets/{ticketID}",
                 HttpType.POST,
@@ -22,7 +22,7 @@ public class TestHttp {
 //        Map<String, Object> post = hoHttp.post();
 
 
-        HttpEntity<String,String> resetFull = HttpEntity.create().build("ticketID","10504000000165033");
+        HttpNormalEntity resetFull = HttpEntity.create().build("ticketID","10504000000165033");
         ZoHoHttp get = ZoHoHttp.create(
                 "https://desk.zoho.com.cn/api/v1/tickets/{ticketID}",
                 HttpType.GET,

@@ -28,4 +28,11 @@ public class ZoHoString {
         }
         return builder.toString();
     }
+
+    public static String replace(String str, String source, String target) {
+        while (str.contains(source)) {
+            str = str.replace(source, target);
+        }
+        return str;
+    }
 }

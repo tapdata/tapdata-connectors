@@ -3,6 +3,7 @@ package io.tapdata.zoho.service.zoho.loader;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.zoho.entity.HttpEntity;
+import io.tapdata.zoho.entity.HttpNormalEntity;
 import io.tapdata.zoho.entity.HttpResult;
 import io.tapdata.zoho.entity.HttpType;
 import io.tapdata.zoho.utils.Checker;
@@ -26,7 +27,7 @@ public class TeamsOpenApi extends ZoHoStarter implements ZoHoBase {
     public static final String GET_URL = "/api/v1/teams/{team_id}";
 
     public List<Map<String,Object>> page(){
-        HttpEntity<String, String> header = requestHeard();
+        HttpNormalEntity header = requestHeard();
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,LIST_URL), HttpType.GET,header).header(header);
         HttpResult httpResult = this.readyAccessToken(http);
         TapLogger.debug(TAG,"Get all teams succeed.");
@@ -35,8 +36,8 @@ public class TeamsOpenApi extends ZoHoStarter implements ZoHoBase {
     }
 
     public Map<String,Object> get(String teamId){
-        HttpEntity<String, String> header = requestHeard();
-        HttpEntity<String,String> resetFull = HttpEntity.create().build("team_id",teamId);
+        HttpNormalEntity header = requestHeard();
+        HttpNormalEntity resetFull = HttpNormalEntity.create().build("team_id",teamId);
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,GET_URL), HttpType.GET,header).header(header).resetFull(resetFull);
         HttpResult httpResult = this.readyAccessToken(http);
         TapLogger.debug(TAG,"Get all teams succeed.");

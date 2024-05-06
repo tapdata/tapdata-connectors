@@ -28,4 +28,21 @@ public class ZoHoOffset {
     public void setTableUpdateTimeMap(Map<String, Long> tableUpdateTimeMap) {
         this.tableUpdateTimeMap = tableUpdateTimeMap;
     }
+
+    public Object offset() {
+        Map<String, Object> o = new HashMap<>();
+        o.put("tableUpdateTimeMap", tableUpdateTimeMap);
+        return o;
+    }
+
+    public static ZoHoOffset from(Object o) {
+        ZoHoOffset offset = new ZoHoOffset();
+        if (o instanceof Map) {
+            offset.setTableUpdateTimeMap((Map<String, Long>)((Map<String, Object>)o).get("tableUpdateTimeMap"));
+        }
+        if (null == offset.getTableUpdateTimeMap()) {
+            offset.setTableUpdateTimeMap(new HashMap<>());
+        }
+        return offset;
+    }
 }

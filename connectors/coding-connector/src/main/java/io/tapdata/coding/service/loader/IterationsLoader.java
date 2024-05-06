@@ -65,7 +65,7 @@ public class IterationsLoader extends CodingStarter implements CodingLoader<Iter
         super(tapConnectionContext, accessToken);
     }
 
-    public HttpEntity<String, Object> commandSetter(String command, HttpEntity<String, Object> requestBody) {
+    public HttpEntity commandSetter(String command, HttpEntity requestBody) {
         if (Checker.isEmpty(command)) {
             throw new CoreException("Command must be not null or not empty.");
         }
@@ -120,9 +120,9 @@ public class IterationsLoader extends CodingStarter implements CodingLoader<Iter
 
         List<Map> matterList = new ArrayList<>();
         do {
-            HttpEntity<String, String> header = HttpEntity.create()
+            HttpNormalEntity header = HttpEntity.create()
                     .builder("Authorization", token);
-            HttpEntity<String, Object> body = HttpEntity.create()
+            HttpEntity body = HttpEntity.create()
                     .builder("Action", "DescribeIterationList")
                     .builder("ProjectName", projectName)
                     .builder("Limit", tableSize)
@@ -206,9 +206,9 @@ public class IterationsLoader extends CodingStarter implements CodingLoader<Iter
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
         final int maxLimit = 500;//@TODO 最大分页数
         if (param.limit() > maxLimit) param.limit(maxLimit);
-        HttpEntity<String, String> header = HttpEntity.create()
+        HttpNormalEntity header = HttpEntity.create()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity body = HttpEntity.create()
                 .builderIfNotAbsent("Action", "DescribeIterationList")
                 .builder("ProjectName", contextConfig.getProjectName())
                 .builder("Offset", param.offset())

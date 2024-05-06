@@ -62,8 +62,8 @@ public class DescribeCodingProjects implements Command {
 
         String upToken = token.toUpperCase();
         token = (upToken.startsWith("TOKEN ") ? token : "token " + token);
-        HttpEntity<String, String> header = HttpEntity.create().builder("Authorization", token);
-        HttpEntity<String, Object> body = IterationsLoader.create(tapConnectionContext, accessToken, argMap)
+        HttpNormalEntity header = HttpEntity.create().builder("Authorization", token);
+        HttpEntity body = IterationsLoader.create(tapConnectionContext, accessToken, argMap)
                 .commandSetter(command, HttpEntity.create());
         if ("DescribeIterationList".equals(command) && Checker.isNotEmpty(projectName)) {
             body.builder("ProjectName", projectName);

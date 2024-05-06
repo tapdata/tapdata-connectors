@@ -85,9 +85,9 @@ public class ProjectMembersLoader extends CodingStarter implements CodingLoader<
         final int maxLimit = 500;//@TODO 最大分页数
         if (param.limit() > maxLimit) param.limit(maxLimit);
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
-        HttpEntity<String, String> header = HttpEntity.create()
+        HttpNormalEntity header = HttpEntity.create()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity body = HttpEntity.create()
                 .builder("Action", "DescribeProjectMembers")
                 .builder("ProjectId", this.currentProjectId)
                 .builder("PageNumber", param.offset())

@@ -195,8 +195,8 @@ public class Issues implements SchemaStart {
     }
 
     private Map<Integer, Map<String, Object>> getIssueCustomFieldMap(String issueType, ContextConfig contextConfig) {
-        HttpEntity<String, String> heard = HttpEntity.create().builder("Authorization", accessToken.get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpNormalEntity heard = HttpEntity.create().builder("Authorization", accessToken.get());
+        HttpEntity body = HttpEntity.create()
                 .builder("Action", "DescribeProjectIssueFieldList")
                 .builder("ProjectName", contextConfig.getProjectName())
                 .builder("IssueType", issueType);

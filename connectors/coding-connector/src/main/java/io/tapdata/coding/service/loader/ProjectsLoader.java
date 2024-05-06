@@ -43,9 +43,9 @@ public class ProjectsLoader extends CodingStarter implements CodingLoader<Projec
 
     public List<Map<String, Object>> userProjectList(Integer userId) {
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
-        HttpEntity<String, String> header = HttpEntity.create()
+        HttpNormalEntity header = HttpEntity.create()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity body = HttpEntity.create()
                 .builderIfNotAbsent("Action", "DescribeUserProjects")
                 .builder("userId", userId);
         Map<String, Object> post = CodingHttp.create(
@@ -70,9 +70,9 @@ public class ProjectsLoader extends CodingStarter implements CodingLoader<Projec
 
     public Map<String, Object> myselfInfo() {
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
-        HttpEntity<String, String> header = HttpEntity.create()
+        HttpNormalEntity header = HttpEntity.create()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity body = HttpEntity.create()
                 .builderIfNotAbsent("Action", "DescribeCodingCurrentUser");
         Map<String, Object> post = CodingHttp.create(
                 header.getEntity(),
@@ -120,9 +120,9 @@ public class ProjectsLoader extends CodingStarter implements CodingLoader<Projec
     @Override
     public Map<String, Object> get(ProjectParam param) {
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
-        HttpEntity<String, String> header = HttpEntity.create()
+        HttpNormalEntity header = HttpEntity.create()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity body = HttpEntity.create()
                 .builderIfNotAbsent("Action", "DescribeProjectByName")
                 .builder("ProjectName", contextConfig.getProjectName());
         Map<String, Object> resultMap = CodingHttp.create(
@@ -150,9 +150,9 @@ public class ProjectsLoader extends CodingStarter implements CodingLoader<Projec
         final int maxLimit = 500;//@TODO 最大分页数
         if (param.limit() > maxLimit) param.limit(maxLimit);
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
-        HttpEntity<String, String> header = HttpEntity.create()
+        HttpNormalEntity header = HttpEntity.create()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity body = HttpEntity.create()
                 .builderIfNotAbsent("Action", "DescribeCodingProjects")
                 .builder("ProjectName", contextConfig.getProjectName())
                 .builderIfNotAbsent("PageNumber", param.offset())

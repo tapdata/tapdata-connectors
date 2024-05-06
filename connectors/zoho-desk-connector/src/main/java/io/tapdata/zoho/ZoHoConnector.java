@@ -9,7 +9,6 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.message.CommandInfo;
@@ -29,7 +28,7 @@ import io.tapdata.zoho.service.zoho.loader.ZoHoConnectionTest;
 import io.tapdata.zoho.service.zoho.loader.ZoHoStarter;
 import io.tapdata.zoho.service.zoho.schema.Schema;
 import io.tapdata.zoho.service.zoho.schema.Schemas;
-import io.tapdata.zoho.service.zoho.schemaLoader.SchemaLoader;
+import io.tapdata.zoho.service.zoho.impl.SchemaLoader;
 import io.tapdata.zoho.utils.Checker;
 
 import java.util.*;
@@ -59,50 +58,30 @@ import java.util.function.Consumer;
 @TapConnectorClass("spec.json")
 public class ZoHoConnector extends ConnectorBase {
 	private static final String TAG = ZoHoConnector.class.getSimpleName();
-
-	private final Object streamReadLock = new Object();
-	private final long streamExecutionGap = 5000;//util: ms
-	private int batchReadMaxPageSize = 100;//ZoHo ticket page size 1~100,
-
-	//private Long lastTimePoint;
-	//private List<Integer> lastTimeSplitIssueCode = new ArrayList<>();//hash code list
+	//ZoHo ticket page size 1~100,
+	private static final int BATCH_READ_MAX_PAGE_SIZE = 100;
 
 	@Override
-	public void onStart(TapConnectionContext connectionContext) throws Throwable {
-		//TicketLoader.create(connectionContext).verifyConnectionConfig();
-		//DataMap connectionConfig = connectionContext.getConnectionConfig();
-		//String streamReadType = connectionConfig.getString("streamReadType");
-		//if (Checker.isEmpty(streamReadType)){
-		//	throw new CoreException("Error in connection parameter [streamReadType], please go to verify");
-		//}
-		//switch (streamReadType){
-		//	//case "Polling":this.connectorFunctions.supportStreamRead(this::streamRead);break;
-		//	case "WebHook":this.connectorFunctions.supportRawDataCallbackFilterFunction(this::rawDataCallbackFilterFunction);break;
-		//	default:
-		//		throw new CoreException("Error in connection parameters [streamReadType],just be [WebHook], please go to verify");
-		//}
+	public void onStart(TapConnectionContext connectionContext) {
+
 	}
 
 	@Override
-	public void onStop(TapConnectionContext connectionContext) throws Throwable {
+	public void onStop(TapConnectionContext connectionContext) {
 		synchronized (this) {
 			this.notify();
 		}
 	}
 
-	//private ConnectorFunctions connectorFunctions;
 	@Override
 	public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
 		connectorFunctions.supportBatchRead(this::batchRead)
 				.supportBatchCount(this::batchCount)
 				.supportTimestampToStreamOffset(this::timestampToStreamOffset)
-				//.supportStreamRead(this::streamRead)
-				//.supportRawDataCallbackFilterFunction(this::rawDataCallbackFilterFunction)
 				.supportRawDataCallbackFilterFunctionV2(this::rawDataCallbackFilterFunction)
 				.supportCommandCallbackFunction(this::handleCommand)
 				.supportErrorHandleFunction(this::errorHandle)
 		;
-		//this.connectorFunctions = connectorFunctions;
 	}
 
 	private CommandResult handleCommand(TapConnectionContext tapConnectionContext,  CommandInfo commandInfo) {
@@ -110,35 +89,6 @@ public class ZoHoConnector extends ConnectorBase {
 	}
 
 	private List<TapEvent> rawDataCallbackFilterFunction(TapConnectorContext connectorContext, List<String> tables, Map<String, Object> eventData){
-		return this.rawDataCallbackFilterFunctionV3(connectorContext, tables, eventData);
-	}
-
-	private List<TapEvent> rawDataCallbackFilterFunctionV2(TapConnectorContext connectorContext, List<String> tables, Map<String, Object> eventData){
-		if (Checker.isEmpty(eventData)){
-			TapLogger.debug(TAG,"WebHook of ZoHo patch body is empty, Data callback has been over.");
-			return null;
-		}
-		Object listObj = eventData.get("array");
-		if (Checker.isEmpty(listObj) || !(listObj instanceof List)){
-			TapLogger.debug(TAG,"WebHook of ZoHo patch body is empty, Data callback has been over.");
-			return null;
-		}
-		List<Map<String,Object>> dataEventList = (List<Map<String, Object>>)listObj;
-
-
-		if (Checker.isEmpty(tables) || tables.isEmpty()) return null;
-		List<SchemaLoader> loaders = SchemaLoader.loaders(connectorContext,this);
-		List<TapEvent> events = new ArrayList<>();
-		for (SchemaLoader loader : loaders) {
-			if (Checker.isEmpty(loader)) continue;
-			//events.addAll(loader.configSchema(connectorContext).rawDataCallbackFilterFunction(eventData));
-
-			loader.out();
-		}
-		return Checker.isEmpty(events) || events.isEmpty()?null:events;
-	}
-
-	private List<TapEvent> rawDataCallbackFilterFunctionV3(TapConnectorContext connectorContext, List<String> tables, Map<String, Object> eventData){
 		if (Checker.isEmpty(eventData)){
 			TapLogger.debug(TAG,"WebHook of ZoHo patch body is empty, Data callback has been over.");
 			return null;
@@ -179,67 +129,16 @@ public class ZoHoConnector extends ConnectorBase {
 		});
 		return events[0].isEmpty()?null:events[0];
 	}
-	private List<TapEvent> rawDataCallbackFilterFunctionV1(TapConnectorContext connectorContext, Map<String, Object> eventData) {
-		if (Checker.isEmpty(eventData)){
-			TapLogger.debug(TAG,"WebHook of ZoHo patch body is empty, Data callback has been over.");
-			return null;
-		}
-		Object listObj = eventData.get("array");//array
-		if (Checker.isEmpty(listObj) || !(listObj instanceof List)){
-			TapLogger.debug(TAG,"WebHook of ZoHo patch body is empty, Data callback has been over.");
-			return null;
-		}
-		List<Map<String,Object>> dataEventList = (List<Map<String, Object>>)listObj;
-		final List<TapEvent>[] events = new List[]{new ArrayList<>()};
-		//@TODO BiConsumer<List<TapEvent>, Object> consumer;
-		//@TODO 获取筛选条件
-		TicketLoader ticketLoader = TicketLoader.create(connectorContext);
-		String modeName = connectorContext.getConnectionConfig().getString("connectionMode");
-		ConnectionMode instance = ConnectionMode.getInstanceByName(connectorContext, modeName);
-		if (null == instance){
-			throw new CoreException("Connection Mode must be not empty or not null.");
-		}
-		dataEventList.forEach(eventMap->{
-			EventBaseEntity instanceByEventType = EventBaseEntity.getInstanceByEventType(eventMap);
-			if (Checker.isEmpty(instanceByEventType)){
-				TapLogger.debug(TAG,"An event type with unknown origin was found and cannot be processed .");
-				return;
-			}
-			events[0].add(instanceByEventType.outputTapEvent("Tickets",instance));
-			//consumer.accept(events[0], offsetState);
-			//if (events[0].size() == readSize){
-			//	consumer.accept(events[0], offsetState);
-			//	events[0] = new ArrayList<>();
-			//}
-		});
-		//if (events[0].size()>0){
-			//	consumer.accept(events[0], offsetState);
-		//}
-		return events[0];
-	}
-
-	private void streamRead(
-			TapConnectorContext nodeContext,
-			List<String> tableList,
-			Object offsetState,
-			int recordSize,
-			StreamReadConsumer consumer ) {
-		while (isAlive()){
-			synchronized (this) {
-				try {
-					this.wait(streamExecutionGap);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
-			}
-		}
-	}
 
 	private Object timestampToStreamOffset(TapConnectorContext tapConnectorContext, Long time) {
 		long date = time != null ? time: System.currentTimeMillis();
 		List<Schema> schemas = Schemas.allSupportSchemas();
-		if (Checker.isEmpty(schemas) || schemas.isEmpty()) return ZoHoOffset.create(new HashMap<String,Long>());
-		return ZoHoOffset.create(new HashMap<String,Long>(){{schemas.forEach(schema -> put(schema.schemaName(), date));}});
+		if (null == schemas || schemas.isEmpty()) {
+			return ZoHoOffset.create(new HashMap<>());
+		}
+		HashMap<String, Long> map = new HashMap<>();
+		schemas.forEach(schema -> map.put(schema.schemaName(), date));
+		return ZoHoOffset.create(map);
 	}
 
 	@Override
@@ -250,7 +149,6 @@ public class ZoHoConnector extends ConnectorBase {
 			throw new CoreException("Connection Mode is not empty or not null.");
 		}
 		List<TapTable> tapTables = connectionMode.discoverSchema(tables, tableSize);
-		//List<TapTable> tapTables = connectionMode.discoverSchemaV1(tables, tableSize);
 		if (null != tapTables && !tapTables.isEmpty()){
 			consumer.accept(tapTables);
 		}
@@ -259,13 +157,9 @@ public class ZoHoConnector extends ConnectorBase {
 	@Override
 	public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws Throwable {
 		ConnectionOptions connectionOptions = ConnectionOptions.create();
-
 		ZoHoConnectionTest testConnection= ZoHoConnectionTest.create(connectionContext);
 		TestItem testItem = testConnection.testToken();
 		consumer.accept(testItem);
-		//if (testItem.getResult()==TestItem.RESULT_FAILED){
-		//	return connectionOptions;
-		//}
 		return connectionOptions;
 	}
 
@@ -276,25 +170,17 @@ public class ZoHoConnector extends ConnectorBase {
 			Object offset,
 			int batchCount,
 			BiConsumer<List<TapEvent>, Object> consumer) {
-		//if (Checker.isEmpty(offset)) offset = ZoHoOffset.create(new HashMap<>());
-//		TokenLoader.create(connectorContext).addTokenToStateMap();
-//		Long readEnd = System.currentTimeMillis();
-//		ZoHoOffset zoHoOffset =  new ZoHoOffset();
-//		//current read end as next read begin
-//		zoHoOffset.setTableUpdateTimeMap(new HashMap<String,Long>(){{ put(table.getId(),readEnd);}});
-//		this.read(connectorContext,batchCount,zoHoOffset,consumer,table.getId());
 		if (Checker.isEmpty(table) || Checker.isEmpty(connectorContext)) return ;
-		SchemaLoader loader = SchemaLoader.loader(table.getId(),connectorContext,this);
+		SchemaLoader loader = SchemaLoader.loader(table.getId(),this);
 		if (Checker.isNotEmpty(loader)){
-			loader.configSchema(connectorContext).batchRead(offset,batchCount,consumer);
+			loader.configSchema(connectorContext).batchRead(ZoHoOffset.from(offset),batchCount,consumer);
 			loader.out();
 		}
 	}
 
 	private long batchCount(TapConnectorContext tapConnectorContext, TapTable tapTable) throws Throwable {
-		//return TicketLoader.create(tapConnectorContext).count();
 		if (Checker.isEmpty(tapTable) || Checker.isEmpty(tapConnectorContext)) return 0;
-		SchemaLoader loader = SchemaLoader.loader(tapTable.getId(),tapConnectorContext,this);
+		SchemaLoader loader = SchemaLoader.loader(tapTable.getId(),this);
 		if (Checker.isNotEmpty(loader)){
 			long count = loader.configSchema(tapConnectorContext).batchCount();
 			loader.out();
@@ -310,28 +196,6 @@ public class ZoHoConnector extends ConnectorBase {
 		return (null == schemas || schemas.isEmpty())?0:schemas.size();
 	}
 
-	/**
-	 * 分页读取事项列表，并依次查询事项详情
-	 * @param nodeContext
-	 * @param readSize
-	 * @param consumer
-	 *
-	 *
-	 * ZoHo提供的分页查询条件
-	 * -from                     integer                 Index number, starting from which the tickets must be fetched
-	 * -limit                    integer[1-100]          Number of tickets to fetch  ,pageSize
-	 * -departmentId             long                    ID of the department from which the tickets must be fetched (Please note that this key will be deprecated soon and replaced by the departmentIds key.)
-	 * -departmentIds            List<Long>              Departments from which the tickets need to be queried'
-	 * -viewId                   long                    ID of the view to apply while fetching the resources
-	 * -assignee                 string(MaxLen:100)      assignee - Key that filters tickets by assignee. Values allowed are Unassigned or a valid assigneeId. Multiple assigneeIds can be passed as comma-separated values.
-	 * -channel                  string(MaxLen:100)      Filter by channel through which the tickets originated. You can include multiple values by separating them with a comma
-	 * -status                   string(MaxLen:100)      Filter by resolution status of the ticket. You can include multiple values by separating them with a comma
-	 * -sortBy                   string(MaxLen:100)      Sort by a specific attribute: responseDueDate or customerResponseTime or createdTime or ticketNumber. The default sorting order is ascending. A - prefix denotes descending order of sorting.
-	 * -receivedInDays           integer                 Fetches recent tickets, based on customer response time. Values allowed are 15, 30 , 90.
-	 * -include                  string(MaxLen:100)      Additional information related to the tickets. Values allowed are: contacts, products, departments, team, isRead and assignee. You can pass multiple values by separating them with commas in the API request.
-	 * -fields                   string(MaxLen:100)      Key that returns the values of mentioned fields (both pre-defined and custom) in your portal. All field types except multi-text are supported. Standard, non-editable fields are supported too. These fields include: statusType, webUrl, layoutId. Maximum of 30 fields is supported as comma separated values.
-	 * -priority                 string(MaxLen:100)      Key that filters tickets by priority. Multiple priority levels can be passed as comma-separated values.
-	 */
 	public void read(TapConnectorContext nodeContext,
 					 int readSize,
 					 Object offsetState,
@@ -339,8 +203,8 @@ public class ZoHoConnector extends ConnectorBase {
 					 String table ){
 		TicketLoader ticketLoader = TicketLoader.create(nodeContext);
 		final List<TapEvent>[] events = new List[]{new ArrayList<>()};
-		int pageSize = Math.min(readSize, this.batchReadMaxPageSize);
-		HttpEntity<String, Object> tickPageParam = ticketLoader.getTickPageParam()
+		int pageSize = Math.min(readSize, this.BATCH_READ_MAX_PAGE_SIZE);
+		HttpEntity tickPageParam = ticketLoader.getTickPageParam()
 				.build("limit", pageSize);//分页数
 		int fromPageIndex = 1;//从第几个工单开始分页
 		String modeName = nodeContext.getConnectionConfig().getString("connectionMode");

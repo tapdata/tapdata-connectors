@@ -3,6 +3,7 @@ package io.tapdata.zoho.service.zoho.loader;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.zoho.entity.HttpEntity;
+import io.tapdata.zoho.entity.HttpNormalEntity;
 import io.tapdata.zoho.entity.HttpResult;
 import io.tapdata.zoho.entity.HttpType;
 import io.tapdata.zoho.enums.ZoHoTestItem;
@@ -25,7 +26,7 @@ public class ZoHoConnectionTest extends ZoHoStarter implements ZoHoBase {
         try {
             //随便掉一个接口看看accessToken是否过期
             String url = "/api/v1/organizations";
-            HttpEntity<String,String> heard = HttpEntity.create().build("Authorization",accessTokenFromConfig());
+            HttpNormalEntity heard = HttpNormalEntity.create().build("Authorization",accessTokenFromConfig());
             ZoHoHttp get = ZoHoHttp.create(String.format(ZO_HO_BASE_URL, url), HttpType.GET, heard);
             HttpResult httpResult = get.get();
             if (httpResult.isInvalidOauth()){

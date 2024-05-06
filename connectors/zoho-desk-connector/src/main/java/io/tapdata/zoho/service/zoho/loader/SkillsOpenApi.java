@@ -4,6 +4,7 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.zoho.entity.HttpEntity;
+import io.tapdata.zoho.entity.HttpNormalEntity;
 import io.tapdata.zoho.entity.HttpResult;
 import io.tapdata.zoho.entity.HttpType;
 import io.tapdata.zoho.utils.Checker;
@@ -32,7 +33,7 @@ public class SkillsOpenApi extends ZoHoStarter implements ZoHoBase  {
         return page(departmentId,from, limit,null,null,null);
     }
     public List<Map<String,Object>> page(String departmentId,Integer from,Integer limit,String status,String searchString,String skillTypeId){
-        HttpEntity<String,Object> form = HttpEntity.create();
+        HttpEntity form = HttpEntity.create();
         if (Checker.isNotEmpty(departmentId)) {
             TapLogger.info(TAG,"When you request a Skill page ,the department id must be not null or empty.");
             throw new CoreException("When you request a Skill page ,the department id must be not null or empty.");
@@ -46,8 +47,8 @@ public class SkillsOpenApi extends ZoHoStarter implements ZoHoBase  {
         return page(form.build("from",from).build("limit",limit));
     }
 
-    private List<Map<String,Object>> page(HttpEntity<String,Object> form){
-        HttpEntity<String, String> header = requestHeard();
+    private List<Map<String,Object>> page(HttpEntity form){
+        HttpNormalEntity header = requestHeard();
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,LIST_URL), HttpType.GET,header).header(header).form(form);
         HttpResult httpResult = this.readyAccessToken(http);
         TapLogger.debug(TAG,"Get product page succeed.");

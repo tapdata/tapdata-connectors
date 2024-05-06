@@ -76,9 +76,9 @@ public class IssueFieldsLoader extends CodingStarter implements CodingLoader<Iss
     @Override
     public CodingHttp codingHttp(IssueFieldParam param) {
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
-        HttpEntity<String, String> header = HttpEntity.create()
+        HttpNormalEntity header = HttpEntity.create()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity body = HttpEntity.create()
                 .builderIfNotAbsent("Action", "DescribeProjectIssueFieldList")
                 .builder("ProjectName", contextConfig.getProjectName())
                 .builder("IssueType", param.issueType());//@TODO

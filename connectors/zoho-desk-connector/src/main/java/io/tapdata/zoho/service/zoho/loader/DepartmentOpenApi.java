@@ -4,6 +4,7 @@ import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.zoho.entity.ContextConfig;
 import io.tapdata.zoho.entity.HttpEntity;
+import io.tapdata.zoho.entity.HttpNormalEntity;
 import io.tapdata.zoho.entity.HttpResult;
 import io.tapdata.zoho.entity.HttpType;
 import io.tapdata.zoho.utils.Checker;
@@ -43,9 +44,9 @@ public class DepartmentOpenApi extends ZoHoStarter implements ZoHoBase {
             TapLogger.debug(TAG,"Department Id can not be null or not be empty.");
         }
         String accessToken = this.accessTokenFromConfig();
-        HttpEntity<String,String> header = HttpEntity.create()
+        HttpNormalEntity header = HttpNormalEntity.create()
                 .build("Authorization",accessToken);
-        HttpEntity<String,String> resetFull = HttpEntity.create().build("department_id",departmentId);
+        HttpNormalEntity resetFull = HttpNormalEntity.create().build("department_id",departmentId);
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,GET_URI), HttpType.GET,header).resetFull(resetFull);
         HttpResult httpResult = this.readyAccessToken(http);
         TapLogger.debug(TAG,"Get Department list succeed.");
@@ -80,7 +81,7 @@ public class DepartmentOpenApi extends ZoHoStarter implements ZoHoBase {
     public List<Map<String,Object>> list(String searchStr,String chatStatus,Integer from,Integer limit,Boolean isEnabled){
         if (Checker.isEmpty(from) || from < MIN_FROM) from = MIN_FROM;
         if (Checker.isEmpty(limit) || limit < MIN_PAGE_LIMIT || limit > MAX_PAGE_LIMIT) limit = DEFAULT_PAGE_LIMIT;
-        HttpEntity<String,Object> form = HttpEntity.create();
+        HttpEntity form = HttpEntity.create();
         form.build("from",from).build("limit",limit);
         if (Checker.isNotEmpty(searchStr)){
             form.build("searchStr",searchStr);
@@ -93,8 +94,8 @@ public class DepartmentOpenApi extends ZoHoStarter implements ZoHoBase {
         }
         return this.list(form);
     }
-    private List<Map<String,Object>> list(HttpEntity<String,Object> form){
-        HttpEntity<String, String> header = requestHeard();
+    private List<Map<String,Object>> list(HttpEntity form){
+        HttpNormalEntity header = requestHeard();
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,LIST_URI), HttpType.GET,header).header(header).form(form);
         HttpResult httpResult = this.readyAccessToken(http);
         TapLogger.debug(TAG,"Get department list succeed.");
@@ -107,7 +108,7 @@ public class DepartmentOpenApi extends ZoHoStarter implements ZoHoBase {
     }
 
     public int getDepartmentCount(){
-        HttpEntity<String, String> header = requestHeard();
+        HttpNormalEntity header = requestHeard();
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,GET_DEPARTMENT_COUNT), HttpType.GET,header);
         HttpResult httpResult = this.readyAccessToken(http);
         TapLogger.debug(TAG,"Get Department list succeed.");

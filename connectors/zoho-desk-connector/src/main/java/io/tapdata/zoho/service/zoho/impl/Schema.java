@@ -1,9 +1,11 @@
-package io.tapdata.zoho.service.zoho.schemaLoader;
+package io.tapdata.zoho.service.zoho.impl;
 
-import cn.hutool.core.date.DateUtil;
 import io.tapdata.zoho.ZoHoConnector;
+import io.tapdata.zoho.entity.ZoHoOffset;
+import java.util.HashMap;
 
 public class Schema {
+
     ZoHoConnector zoHoConnector;
 
     public synchronized boolean isAlive() {
@@ -18,9 +20,10 @@ public class Schema {
         zoHoConnector = null;
     }
 
-    public Long parseZoHoDatetime(String referenceTimeStr){
-        return DateUtil.parse(
-                referenceTimeStr.replaceAll("Z", "").replaceAll("T", " "),
-                "yyyy-MM-dd HH:mm:ss.SSS").getTime();
+    public ZoHoOffset initOffset(Object offsetState) {
+        if (!(offsetState instanceof ZoHoOffset)) {
+            return ZoHoOffset.create(new HashMap<>());
+        }
+        return (ZoHoOffset) offsetState;
     }
 }

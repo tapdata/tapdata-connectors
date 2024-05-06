@@ -42,7 +42,7 @@ public class TokenLoader extends ZoHoStarter implements ZoHoBase {
     }
 
     public HttpResult refresh(String refreshToken,String clientId,String clientSecret){
-        HttpEntity<String,Object> form = HttpEntity.create()
+        HttpEntity form = HttpEntity.create()
                 .build("refresh_token",refreshToken)
                 .build("client_id",clientId)
                 .build("client_secret",clientSecret)
@@ -66,7 +66,7 @@ public class TokenLoader extends ZoHoStarter implements ZoHoBase {
         return this.getToken(contextConfig.clientId(),contextConfig.clientSecret(),contextConfig.generateCode());
     }
     public TokenEntity getToken(String clientId,String clientSecret,String generateCode){
-        HttpEntity<String,Object> form = HttpEntity.create()
+        HttpEntity form = HttpEntity.create()
                 .build("code",generateCode)
                 .build("client_id",clientId)
                 .build("client_secret",clientSecret)

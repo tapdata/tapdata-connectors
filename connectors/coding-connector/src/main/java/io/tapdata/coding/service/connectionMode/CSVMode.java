@@ -62,9 +62,9 @@ public class CSVMode implements ConnectionMode {
     @Override
     public Map<String, Object> attributeAssignment(Map<String, Object> stringObjectMap) {
         Object code = stringObjectMap.get("Code");
-        HttpEntity<String, String> header = HttpEntity.create().builder("Authorization", accessToken.get());
+        HttpNormalEntity header = HttpEntity.create().builder("Authorization", accessToken.get());
         String projectName = contextConfig.getProjectName();
-        HttpEntity<String, Object> issueDetialBody = HttpEntity.create()
+        HttpEntity issueDetialBody = HttpEntity.create()
                 .builder("Action", "DescribeIssue")
                 .builder("ProjectName", projectName);
         String teamName = contextConfig.getTeamName();
@@ -113,8 +113,8 @@ public class CSVMode implements ConnectionMode {
     }
 
     private Map<Integer, Map<String, Object>> getIssueCustomFieldMap(String issueType, ContextConfig contextConfig) {
-        HttpEntity<String, String> heard = HttpEntity.create().builder("Authorization", accessToken.get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpNormalEntity heard = HttpEntity.create().builder("Authorization", accessToken.get());
+        HttpEntity body = HttpEntity.create()
                 .builder("Action", "DescribeProjectIssueFieldList")
                 .builder("ProjectName", contextConfig.getProjectName())
                 .builder("IssueType", issueType);

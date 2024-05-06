@@ -57,9 +57,9 @@ public class DocumentMode implements ConnectionMode {
     @Override
     public Map<String, Object> attributeAssignment(Map<String, Object> stringObjectMap) {
         Object code = stringObjectMap.get("Code");
-        HttpEntity<String, String> header = HttpEntity.create().builder("Authorization", accessToken.get());
+        HttpNormalEntity header = HttpEntity.create().builder("Authorization", accessToken.get());
         String projectName = contextConfig.getProjectName();
-        HttpEntity<String, Object> issueDetialBody = HttpEntity.create()
+        HttpEntity issueDetialBody = HttpEntity.create()
                 .builder("Action", "DescribeIssue")
                 .builder("ProjectName", projectName);
         String teamName = contextConfig.getTeamName();

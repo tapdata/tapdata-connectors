@@ -69,9 +69,9 @@ public class CommentsLoader extends CodingStarter implements CodingLoader<Commen
     public CodingHttp codingHttp(CommentParam param) {
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
         param.action("DescribeIterationList");
-        HttpEntity<String, String> header = HttpEntity.create()
+        HttpNormalEntity header = HttpEntity.create()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity body = HttpEntity.create()
                 .builderIfNotAbsent("Action", "DescribeIssueCommentList")
                 .builder("ProjectName", contextConfig.getProjectName())
                 .builder("IssueCode", param.issueCode());

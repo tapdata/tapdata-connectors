@@ -1,13 +1,16 @@
 package io.tapdata.zoho.service.zoho.loader;
 
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
+import io.tapdata.zoho.entity.AbstractEntity;
 import io.tapdata.zoho.entity.ContextConfig;
 import io.tapdata.zoho.entity.HttpEntity;
+import io.tapdata.zoho.entity.HttpNormalEntity;
 import io.tapdata.zoho.entity.HttpResult;
 import io.tapdata.zoho.entity.RefreshTokenEntity;
 import io.tapdata.zoho.enums.HttpCode;
@@ -20,18 +23,18 @@ import static io.tapdata.base.ConnectorBase.toJson;
 
 public class ZoHoStarter {
     private static final String TAG = ZoHoStarter.class.getSimpleName();
-
+    protected Log log;
     protected TapConnectionContext tapConnectionContext;
     protected boolean isVerify;
     public ZoHoStarter(TapConnectionContext tapConnectionContext){
         this.tapConnectionContext = tapConnectionContext;
-        this.isVerify = Boolean.FALSE;
+        this.log = tapConnectionContext.getLog();
     }
 
-    public HttpEntity<String,String> requestHeard(){
+    public HttpNormalEntity requestHeard(){
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
         String accessToken = this.accessTokenFromConfig();
-        HttpEntity<String,String> header = HttpEntity.create().build("Authorization",accessToken);
+        HttpNormalEntity header = HttpNormalEntity.create().build("Authorization",accessToken);
         String orgId = contextConfig.orgId();
         if (Checker.isNotEmpty(orgId)){
             header.build("orgId",orgId);
@@ -80,6 +83,7 @@ public class ZoHoStarter {
         }
         this.isVerify = Boolean.TRUE;
     }
+
     public ContextConfig veryContextConfigAndNodeConfig(){
         this.verifyConnectionConfig();
         DataMap connectionConfigConfigMap = this.tapConnectionContext.getConnectionConfig();
@@ -178,13 +182,13 @@ public class ZoHoStarter {
      * 没过期直接返回执行结果
      * */
     public HttpResult readyAccessToken(ZoHoHttp http){
-        HttpEntity header = http.getHeard();
+        HttpNormalEntity header = http.getHeard();
         HttpResult httpResult = http.http();
         if (Checker.isEmpty(httpResult) ) {
-            TapLogger.debug(TAG,"Try to send once HTTP request, but AccessToken is timeout.");
+            log.debug("Try to send once HTTP request, but AccessToken is timeout.");
         }
         String code = httpResult.getCode();
-        header.build("Authorization",http.getHeard());
+        //header.build("Authorization", http.getHeard());
         if (HttpCode.INVALID_OAUTH.getCode().equals(code)){
             //重新获取超时的AccessToken，并添加到stateMap
             String newAccessToken = this.refreshAndBackAccessToken();

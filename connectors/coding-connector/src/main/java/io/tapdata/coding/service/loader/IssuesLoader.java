@@ -166,7 +166,7 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
     }
 
     public Map<String, Object> readIssueDetail(
-            HttpEntity<String, Object> issueDetailBody,
+            HttpEntity issueDetailBody,
             CodingHttp authorization,
             HttpRequest requestDetail,
             Integer code,
@@ -203,8 +203,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
         }
         Map<Integer, String> customFieldMap = new HashMap<>();
 
-        HttpEntity<String, String> heard = new HttpEntity<String, String>().builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = new HttpEntity<String, Object>()
+        HttpNormalEntity heard = new HttpNormalEntity().builder("Authorization", this.accessToken().get());
+        HttpEntity body = new HttpEntity()
                 .builder("Action", "DescribeProjectIssueFieldList")
                 .builder("ProjectName", contextConfig.getProjectName())
                 .builder("IssueType", issueType);
@@ -241,8 +241,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
     }
 
     public List<Map<String, Object>> getAllIssueType() {
-        HttpEntity<String, String> header = new HttpEntity<String, String>().builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> pageBody = new HttpEntity<String, Object>().builder("Action", "DescribeTeamIssueTypeList");
+        HttpNormalEntity header = new HttpNormalEntity().builder("Authorization", this.accessToken().get());
+        HttpEntity pageBody = new HttpEntity().builder("Action", "DescribeTeamIssueTypeList");
         Map<String, Object> issueResponse = CodingHttp.create(
                 header.getEntity(),
                 pageBody.getEntity(),
@@ -295,8 +295,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
     @Override
     public CodingHttp codingHttp(IssueParam param) {
         param.action("DescribeIterationList");
-        HttpEntity<String, String> header = new HttpEntity<String, String>().builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = new HttpEntity<String, Object>()
+        HttpNormalEntity header = new HttpNormalEntity().builder("Authorization", this.accessToken().get());
+        HttpEntity body = new HttpEntity()
                 .builderIfNotAbsent("Action", "DescribeIssueListWithPage")
                 .builder("ProjectName", this.codingConfig.getProjectName())
                 .builder("IssueType", param.issueType().getName())
@@ -313,9 +313,9 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
 
     @Override
     public Map<String, Object> get(IssueParam param) {
-        HttpEntity<String, String> header = new HttpEntity<String, String>()
+        HttpNormalEntity header = new HttpNormalEntity()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = new HttpEntity<String, Object>()
+        HttpEntity body = new HttpEntity()
                 .builderIfNotAbsent("Action", "DescribeIssue")
                 .builder("ProjectName", this.codingConfig.getProjectName())
                 .builder("IssueCode", param.issueCode());
@@ -364,8 +364,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
         verifyConnectionConfig();
         DataMap connectionConfig = this.tapConnectionContext.getConnectionConfig();
         String token = accessToken().get();
-        HttpEntity<String, String> header = new HttpEntity<String, String>().builder("Authorization", token);
-        HttpEntity<String, Object> body = new HttpEntity<String, Object>()
+        HttpNormalEntity header = new HttpNormalEntity().builder("Authorization", token);
+        HttpEntity body = new HttpEntity()
                 .builder("Action", "DescribeIssueListWithPage")
                 .builder("ProjectName", connectionConfig.getString("projectName"))
                 .builder("PageSize", 1)
@@ -472,8 +472,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
         Map<String, Object> issueDetail = issueMap;
         this.composeIssue(codingConfig.getProjectName(), codingConfig.getTeamName(), issueMap);
         if (!DELETED_EVENT.equals(eventType)) {
-            HttpEntity<String, String> header = new HttpEntity<String, String>().builder("Authorization", this.codingConfig.getToken());
-            HttpEntity<String, Object> issueDetialBody = new HttpEntity<String, Object>()
+            HttpNormalEntity header = new HttpNormalEntity().builder("Authorization", this.codingConfig.getToken());
+            HttpEntity issueDetialBody = new HttpEntity()
                     .builder("Action", "DescribeIssue")
                     .builder("ProjectName", this.codingConfig.getProjectName());
             CodingHttp authorization = CodingHttp.create(header.getEntity(), String.format(CodingStarter.OPEN_API_URL, this.codingConfig.getTeamName()));
@@ -518,8 +518,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
     public void defineHttpAttributes(Long readStartTime,
                                      Long readEndTime,
                                      int readSize,
-                                     HttpEntity<String, String> header,
-                                     HttpEntity<String, Object> pageBody,
+                                     HttpNormalEntity header,
+                                     HttpEntity pageBody,
                                      boolean isStreamRead) {
         List<Map<String, Object>> coditions = io.tapdata.entity.simplify.TapSimplify.list(map(
                 entry("Key", this.sortKey(isStreamRead)),
@@ -549,7 +549,7 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
 
     }
 
-    public void defineHttpAttributesV2(int readSize, HttpEntity<String, String> header, HttpEntity<String, Object> pageBody, boolean isStreamRead) {
+    public void defineHttpAttributesV2(int readSize, HttpNormalEntity header, HttpEntity pageBody, boolean isStreamRead) {
         List<Map<String, Object>> coditions = io.tapdata.entity.simplify.TapSimplify.list();
         header.builder("Authorization", this.accessToken().get());
         String projectName = codingConfig.getProjectName();
@@ -589,8 +589,8 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
         String teamName = codingConfig.getTeamName();
         List<TapEvent> events = new ArrayList<>();
         CodingOffset offset = (CodingOffset) (Checker.isEmpty(offsetState) ? new CodingOffset() : offsetState);
-        HttpEntity<String, String> header = new HttpEntity<>();
-        HttpEntity<String, Object> pageBody = new HttpEntity<>();
+        HttpNormalEntity header = new HttpEntity<>();
+        HttpEntity pageBody = new HttpEntity<>();
         this.defineHttpAttributes(readStartTime, readEndTime, readSize, header, pageBody, false);
         AtomicInteger total = new AtomicInteger(-1);
         Map<Object, Object> offsetMap = Optional.ofNullable(offset.offset()).orElse(new HashMap<>());
@@ -737,9 +737,9 @@ public class IssuesLoader extends CodingStarter implements CodingLoader<IssuePar
         }
         int currentQueryCount = 0, queryIndex = 0;
         final List<TapEvent>[] events = new List[]{new CopyOnWriteArrayList()};
-        HttpEntity<String, String> header = new HttpEntity<String, String>().builder("Authorization", this.accessToken().get());
+        HttpNormalEntity header = new HttpNormalEntity().builder("Authorization", this.accessToken().get());
         String projectName = this.codingConfig.getProjectName();
-        HttpEntity<String, Object> pageBody = new HttpEntity<String, Object>()
+        HttpEntity pageBody = new HttpEntity()
                 .builder("Action", "DescribeIssueListWithPage")
                 .builder("ProjectName", projectName)
                 .builder("SortKey", "UPDATED_AT")

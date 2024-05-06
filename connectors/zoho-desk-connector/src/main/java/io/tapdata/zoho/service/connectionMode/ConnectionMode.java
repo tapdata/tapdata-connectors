@@ -3,6 +3,8 @@ package io.tapdata.zoho.service.connectionMode;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONNull;
 import cn.hutool.json.JSONObject;
+import com.sun.tools.corba.se.idl.StringGen;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.zoho.service.zoho.loader.ZoHoBase;
@@ -40,19 +42,20 @@ public interface ConnectionMode {
             }
         }
     }
-    public static ConnectionMode getInstanceByName(TapConnectionContext connectionContext, String name){
-        if (Checker.isEmpty(name)) return null;
-        Class clz = null;
-        try {
-            clz = Class.forName("io.tapdata.zoho.service.connectionMode.impl."+name);
-            return ((ConnectionMode)clz.newInstance()).config(connectionContext);
-        } catch (ClassNotFoundException e) {
-            e.printStackTrace();
-        } catch (InstantiationException e1) {
-            e1.printStackTrace();
-        } catch (IllegalAccessException e2) {
-            e2.printStackTrace();
+    static ConnectionMode getInstanceByName(TapConnectionContext connectionContext, String name){
+        if (Checker.isEmpty(name)) {
+            throw new CoreException("Instance name must not be empty");
         }
-        return null;
+        String className = String.format("io.tapdata.zoho.service.connectionMode.impl.%s", name);
+        try {
+            Class<ConnectionMode> clz = (Class<ConnectionMode>) Class.forName(className);
+            return clz.newInstance().config(connectionContext);
+        } catch (ClassNotFoundException e) {
+            throw new CoreException("Class not fund, need: {}", className);
+        } catch (InstantiationException e1) {
+            throw new CoreException("Failed to Instantiation, message: {}", e1.getMessage());
+        } catch (IllegalAccessException e2) {
+            throw new CoreException("Can not access class: {}", className);
+        }
     }
 }

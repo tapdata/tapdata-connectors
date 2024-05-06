@@ -2,6 +2,7 @@ package io.tapdata.zoho.service.zoho.loader;
 
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.zoho.entity.HttpEntity;
+import io.tapdata.zoho.entity.HttpNormalEntity;
 import io.tapdata.zoho.entity.HttpResult;
 import io.tapdata.zoho.entity.HttpType;
 import io.tapdata.zoho.utils.Checker;
@@ -48,7 +49,7 @@ public class WebHookOpenApi extends ZoHoStarter implements ZoHoBase  {
     //get of WebHook is GET
     public Map<String,Object> get(String webHookId){
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,GET_URL), HttpType.GET,requestHeard())
-                .resetFull(HttpEntity.create().build("webhook_id",webHookId));
+                .resetFull(HttpNormalEntity.create().build("webhook_id",webHookId));
         Object data = this.readyAccessToken(http).getResult();
         return Checker.isEmpty(data)? Collections.emptyMap():((Map<String,Object>)data);
     }
@@ -56,7 +57,7 @@ public class WebHookOpenApi extends ZoHoStarter implements ZoHoBase  {
     //Delete of WebHook is DELETE
     public boolean delete(String webHookId){
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,DELETE_URL), HttpType.GET,requestHeard())
-                .resetFull(HttpEntity.create().build("webhook_id",webHookId));
+                .resetFull(HttpNormalEntity.create().build("webhook_id",webHookId));
         HttpResult httpResult = this.readyAccessToken(http);
         Integer httpCode = httpResult.httpCode();
         return Checker.isEmpty(httpCode) && httpCode.equals(200);
@@ -68,7 +69,7 @@ public class WebHookOpenApi extends ZoHoStarter implements ZoHoBase  {
         Object webHookId = webHook.get("id");
         if (Checker.isEmpty(webHookId)) return null;
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,UPDATE_URL), HttpType.POST,requestHeard())
-                .resetFull(HttpEntity.create().build("webhook_id",String.valueOf(webHookId)))
+                .resetFull(HttpNormalEntity.create().build("webhook_id",String.valueOf(webHookId)))
                 .body(HttpEntity.create().addAll(webHook));
         Object data = this.readyAccessToken(http).getResult();
         return Checker.isEmpty(data)? Collections.emptyMap():((Map<String,Object>)data);

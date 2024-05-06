@@ -4,6 +4,7 @@ import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.zoho.entity.ContextConfig;
 import io.tapdata.zoho.entity.HttpEntity;
+import io.tapdata.zoho.entity.HttpNormalEntity;
 import io.tapdata.zoho.entity.HttpResult;
 import io.tapdata.zoho.entity.HttpType;
 import io.tapdata.zoho.utils.Checker;
@@ -35,8 +36,8 @@ public class ProductsOpenApi extends ZoHoStarter implements ZoHoBase {
         if (Checker.isEmpty(productId)){
             TapLogger.debug(TAG,"Department Id can not be null or not be empty.");
         }
-        HttpEntity<String, String> header = requestHeard();
-        HttpEntity<String,String> resetFull = HttpEntity.create().build("product_id",productId);
+        HttpNormalEntity header = requestHeard();
+        HttpNormalEntity resetFull = HttpNormalEntity.create().build("product_id",productId);
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,GET_PRODUCT_URL), HttpType.GET,header).resetFull(resetFull);
         HttpResult httpResult = this.readyAccessToken(http);
         TapLogger.debug(TAG,"Get Product list succeed.");
@@ -59,7 +60,7 @@ public class ProductsOpenApi extends ZoHoStarter implements ZoHoBase {
             String fields,
             List<String> include
     ){
-        HttpEntity<String,Object> form = HttpEntity.create();
+        HttpEntity form = HttpEntity.create();
         if (Checker.isEmpty(from) || from < MIN_FROM) from = MIN_FROM;
         if (Checker.isEmpty(limit) || limit < MIN_PAGE_LIMIT || limit > MAX_PAGE_LIMIT) limit = DEFAULT_PAGE_LIMIT;
         form.build("from",from);
@@ -77,8 +78,8 @@ public class ProductsOpenApi extends ZoHoStarter implements ZoHoBase {
     public List<Map<String,Object>> page(Integer from,Integer limit,String sortBy){
         return page(from, limit,null,0L,null,null,sortBy,null,null);
     }
-    private List<Map<String,Object>> list(HttpEntity<String,Object> form){
-        HttpEntity<String, String> header = requestHeard();
+    private List<Map<String,Object>> list(HttpEntity form){
+        HttpNormalEntity header = requestHeard();
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,LIST_PRODUCT_URL), HttpType.GET,header).header(header).form(form);
         HttpResult httpResult = this.readyAccessToken(http);
         TapLogger.debug(TAG,"Get product page succeed.");

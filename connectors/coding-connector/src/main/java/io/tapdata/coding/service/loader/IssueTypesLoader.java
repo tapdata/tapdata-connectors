@@ -63,9 +63,9 @@ public class IssueTypesLoader extends CodingStarter implements CodingLoader<Issu
     @Override
     public CodingHttp codingHttp(IssueTypeParam param) {
         ContextConfig contextConfig = this.veryContextConfigAndNodeConfig();
-        HttpEntity<String, String> header = HttpEntity.create()
+        HttpNormalEntity header = HttpEntity.create()
                 .builder("Authorization", this.accessToken().get());
-        HttpEntity<String, Object> body = HttpEntity.create()
+        HttpEntity body = HttpEntity.create()
                 .builderIfNotAbsent("Action", "DescribeProjectIssueTypeList")
                 .builder("ProjectName", contextConfig.getProjectName());
         return CodingHttp.create(

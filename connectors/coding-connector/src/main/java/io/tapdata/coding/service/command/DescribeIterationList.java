@@ -48,8 +48,8 @@ public class DescribeIterationList implements Command {
         }
         IterationsLoader loader = IterationsLoader.create(tapConnectionContext, accessToken, argMap);
         loader.verifyConnectionConfig();
-        HttpEntity<String, Object> body = loader.commandSetter(command, HttpEntity.create());
-        HttpEntity<String, String> header = HttpEntity.create().builder("Authorization", accessToken.get());
+        HttpEntity body = loader.commandSetter(command, HttpEntity.create());
+        HttpNormalEntity header = HttpEntity.create().builder("Authorization", accessToken.get());
         if ("DescribeIterationList".equals(command) && Checker.isNotEmpty(projectName)) {
             body.builder("ProjectName", projectName);
         }
