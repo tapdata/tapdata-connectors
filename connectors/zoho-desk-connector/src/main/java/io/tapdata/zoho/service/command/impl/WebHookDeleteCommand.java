@@ -1,11 +1,11 @@
-package io.tapdata.zoho.service.commandMode.impl;
+package io.tapdata.zoho.service.command.impl;
 
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.entity.CommandResult;
 import io.tapdata.pdk.apis.entity.message.CommandInfo;
 import io.tapdata.zoho.entity.CommandResultV2;
-import io.tapdata.zoho.service.commandMode.CommandMode;
-import io.tapdata.zoho.service.commandMode.ConfigContextChecker;
+import io.tapdata.zoho.service.command.CommandMode;
+import io.tapdata.zoho.service.command.ConfigContextChecker;
 
 import java.util.Map;
 //command -> WebHookDelete

@@ -6,7 +6,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.zoho.entity.ZoHoOffset;
-import io.tapdata.zoho.service.connectionMode.ConnectionMode;
+import io.tapdata.zoho.service.connection.ConnectionMode;
 import io.tapdata.zoho.service.zoho.loader.TeamsOpenApi;
 import io.tapdata.zoho.service.zoho.schema.Schemas;
 import io.tapdata.zoho.utils.Checker;

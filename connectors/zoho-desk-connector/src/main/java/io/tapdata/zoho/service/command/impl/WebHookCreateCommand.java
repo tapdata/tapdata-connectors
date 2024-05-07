@@ -1,13 +1,12 @@
-package io.tapdata.zoho.service.commandMode.impl;
+package io.tapdata.zoho.service.command.impl;
 
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.entity.CommandResult;
 import io.tapdata.pdk.apis.entity.message.CommandInfo;
 import io.tapdata.zoho.annonation.LanguageEnum;
 import io.tapdata.zoho.entity.CommandResultV2;
-import io.tapdata.zoho.enums.HttpCode;
-import io.tapdata.zoho.service.commandMode.CommandMode;
-import io.tapdata.zoho.service.commandMode.ConfigContextChecker;
+import io.tapdata.zoho.service.command.CommandMode;
+import io.tapdata.zoho.service.command.ConfigContextChecker;
 import io.tapdata.zoho.service.zoho.loader.WebHookOpenApi;
 import io.tapdata.zoho.utils.Checker;
 
@@ -19,31 +18,34 @@ import static io.tapdata.entity.simplify.TapSimplify.map;
 
 //command -> WebHookCreate
 public class WebHookCreateCommand extends ConfigContextChecker<Object> implements CommandMode {
-    Map<String,Object> defaultSubscriptions = new HashMap<>();
+    public static final String INCLUDE_PREV_STATE = "includePrevState";
+    Map<String, Object> defaultSubscriptions = new HashMap<>();
+
     {
-        defaultSubscriptions.put("Contact_Delete",null);
-        defaultSubscriptions.put("Agent_Delete",null);
-        defaultSubscriptions.put("Account_Delete",null);
-        defaultSubscriptions.put("Agent_Add",null);
-        defaultSubscriptions.put("Ticket_Delete",null);
-        defaultSubscriptions.put("Ticket_Comment_Add",null);
-        defaultSubscriptions.put("Ticket_Attachment_Update",null);
-        defaultSubscriptions.put("Ticket_Add",null);
-        defaultSubscriptions.put("Contact_Add",null);
-        defaultSubscriptions.put("Department_Add",null);
-        defaultSubscriptions.put("Ticket_Comment_Update",null);
-        defaultSubscriptions.put("Ticket_Attachment_Add",null);
-        defaultSubscriptions.put("Ticket_Attachment_Delete",null);
-        defaultSubscriptions.put("Department_Update",map(entry("includePrevState",true)));
-        defaultSubscriptions.put("Ticket_Update",map(entry("includePrevState",true)));
-        defaultSubscriptions.put("Agent_Update",map(entry("includePrevState",true)));
-        defaultSubscriptions.put("Contact_Update",map(entry("includePrevState",true)));
-        defaultSubscriptions.put("Ticket_Thread_Add",map(entry("includePrevState",true)));
+        defaultSubscriptions.put("Contact_Delete", null);
+        defaultSubscriptions.put("Agent_Delete", null);
+        defaultSubscriptions.put("Account_Delete", null);
+        defaultSubscriptions.put("Agent_Add", null);
+        defaultSubscriptions.put("Ticket_Delete", null);
+        defaultSubscriptions.put("Ticket_Comment_Add", null);
+        defaultSubscriptions.put("Ticket_Attachment_Update", null);
+        defaultSubscriptions.put("Ticket_Add", null);
+        defaultSubscriptions.put("Contact_Add", null);
+        defaultSubscriptions.put("Department_Add", null);
+        defaultSubscriptions.put("Ticket_Comment_Update", null);
+        defaultSubscriptions.put("Ticket_Attachment_Add", null);
+        defaultSubscriptions.put("Ticket_Attachment_Delete", null);
+        defaultSubscriptions.put("Department_Update", map(entry(INCLUDE_PREV_STATE, true)));
+        defaultSubscriptions.put("Ticket_Update", map(entry(INCLUDE_PREV_STATE, true)));
+        defaultSubscriptions.put("Agent_Update", map(entry(INCLUDE_PREV_STATE, true)));
+        defaultSubscriptions.put("Contact_Update", map(entry(INCLUDE_PREV_STATE, true)));
+        defaultSubscriptions.put("Ticket_Thread_Add", map(entry(INCLUDE_PREV_STATE, true)));
     }
+
     @Override
     public CommandResult command(TapConnectionContext connectionContext, CommandInfo commandInfo) {
         String language = commandInfo.getLocale();
-        this.language(Checker.isEmpty(language)? LanguageEnum.EN.getLanguage():language);
+        this.language(Checker.isEmpty(language) ? LanguageEnum.EN.getLanguage() : language);
         Map<String, Object> webHook = WebHookOpenApi.create(connectionContext).create(commandInfo.getArgMap());
         return this.commandResult(webHook);
     }
@@ -88,8 +90,6 @@ public class WebHookCreateCommand extends ConfigContextChecker<Object> implement
          *   "name": "ZoHo8082",
          *   "description": ""
          * */
-        Object subscriptions = context.get("subscriptions");
-
         Object url = context.get("url");
         return Checker.isNotEmpty(url);
     }
@@ -97,9 +97,6 @@ public class WebHookCreateCommand extends ConfigContextChecker<Object> implement
     @Override
     protected CommandResultV2 commandResult(Object entity) {
         Map<String, Object> stringObjectHashMap = new HashMap<>();
-//        stringObjectHashMap.put("accessToken", map(entry("data", token.accessToken())));
-//        stringObjectHashMap.put("refreshToken",map(entry("data", token.refreshToken())));
-//        stringObjectHashMap.put("getTokenMsg", map(entry("data", HttpCode.message(this.language,token.code()))));
-        return CommandResultV2.create(map(entry("setValue",stringObjectHashMap)));
+        return CommandResultV2.create(map(entry(SET_VALUE, stringObjectHashMap)));
     }
 }

@@ -2,7 +2,7 @@ package io.tapdata.zoho.service.zoho.webHook;
 
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.TapLogger;
-import io.tapdata.zoho.service.connectionMode.ConnectionMode;
+import io.tapdata.zoho.service.connection.ConnectionMode;
 import io.tapdata.zoho.utils.Checker;
 
 import java.util.Map;

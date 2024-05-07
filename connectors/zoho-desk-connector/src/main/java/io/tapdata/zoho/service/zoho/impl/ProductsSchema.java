@@ -4,7 +4,7 @@ import cn.hutool.core.collection.CollUtil;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.zoho.entity.ZoHoOffset;
-import io.tapdata.zoho.service.connectionMode.ConnectionMode;
+import io.tapdata.zoho.service.connection.ConnectionMode;
 import io.tapdata.zoho.service.zoho.loader.ProductsOpenApi;
 import io.tapdata.zoho.service.zoho.schema.Schemas;
 

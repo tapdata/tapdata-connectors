@@ -1,11 +1,11 @@
 package io.tapdata.zoho.service.zoho.loader;
 
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.zoho.entity.HttpEntity;
 import io.tapdata.zoho.entity.HttpNormalEntity;
 import io.tapdata.zoho.entity.HttpResult;
 import io.tapdata.zoho.entity.HttpType;
+import io.tapdata.zoho.service.zoho.param.PageParam;
 import io.tapdata.zoho.utils.Checker;
 import io.tapdata.zoho.utils.ZoHoHttp;
 
@@ -15,8 +15,6 @@ import java.util.List;
 import java.util.Map;
 
 public class ContractsOpenApi extends ZoHoStarter implements ZoHoBase {
-    private static final String TAG = TicketCommentsOpenApi.class.getSimpleName();
-
     protected ContractsOpenApi(TapConnectionContext tapConnectionContext) {
         super(tapConnectionContext);
     }
@@ -34,15 +32,24 @@ public class ContractsOpenApi extends ZoHoStarter implements ZoHoBase {
     public static final int DEFAULT_PAGE_LIMIT = 50;
 
     public List<Map<String, Object>> page(Integer from, Integer limit, String sortBy) {
-        return page(from, limit, null, null, null, sortBy, null, null, null);
+        return page(PageParam.of().withFrom(from).withLimit(limit).withSortBy(sortBy));
     }
 
     public List<Map<String, Object>> page(Integer from, Integer limit) {
-        return page(from, limit, null, null, null, null, null, null, null);
+        return page(PageParam.of().withFrom(from).withLimit(limit));
     }
 
-    public List<Map<String, Object>> page(Integer from, Integer limit, String viewId, String departmentId, String accountId, String sortBy, String ownerId, String contractName, String include) {
+    public List<Map<String, Object>> page(PageParam pageParam) {
         HttpEntity form = HttpEntity.create();
+        Integer from = pageParam.getFrom();
+        Integer limit = pageParam.getLimit();
+        String viewId = pageParam.getViewId();
+        String departmentId = pageParam.getDepartmentId();
+        String accountId = pageParam.getAccountId();
+        String sortBy = pageParam.getSortBy();
+        String ownerId = pageParam.getOwnerId();
+        String contractName = pageParam.getContractName();
+        String include = pageParam.getInclude();
         if (Checker.isNotEmpty(viewId)) form.build("viewId", viewId);
         if (Checker.isNotEmpty(departmentId)) form.build("departmentId", departmentId);
         if (Checker.isNotEmpty(accountId)) form.build("accountId", accountId);
@@ -59,9 +66,13 @@ public class ContractsOpenApi extends ZoHoStarter implements ZoHoBase {
         HttpNormalEntity header = requestHeard();
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL, LIST_URL), HttpType.GET, header).header(header).form(form);
         HttpResult httpResult = this.readyAccessToken(http);
-        log.debug("Get Contracts page succeed.");
-        Object data = ((Map<String, Object>) httpResult.getResult()).get("data");
-        return Checker.isEmpty(data) ? new ArrayList<>() : (List<Map<String, Object>>) data;
+        log.debug("Get Contracts page succeed");
+        Object data = parseWithDefault(httpResult.getResult()).get("data");
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (data instanceof List) {
+            result.addAll((List<Map<String, Object>>) data);
+        }
+        return result;
     }
 
     public Map<String, Object> get(String contractId) {
@@ -69,7 +80,7 @@ public class ContractsOpenApi extends ZoHoStarter implements ZoHoBase {
         HttpNormalEntity resetFull = HttpNormalEntity.create().build("contract_id", contractId);
         ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL, GET_URL), HttpType.GET, header).header(header).resetFull(resetFull);
         HttpResult httpResult = this.readyAccessToken(http);
-        log.debug("Get a Contract succeed.");
+        log.debug("Get Contract info succeed");
         Object result = httpResult.getResult();
         return Checker.isEmpty(result) ? Collections.emptyMap() : (Map<String, Object>) result;
     }

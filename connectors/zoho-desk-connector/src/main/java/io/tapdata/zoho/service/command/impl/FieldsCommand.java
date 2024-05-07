@@ -1,4 +1,4 @@
-package io.tapdata.zoho.service.commandMode.impl;
+package io.tapdata.zoho.service.command.impl;
 
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.entity.message.CommandInfo;
@@ -6,8 +6,8 @@ import io.tapdata.pdk.apis.entity.CommandResult;
 import io.tapdata.zoho.annonation.LanguageEnum;
 import io.tapdata.zoho.entity.CommandResultV2;
 import io.tapdata.zoho.enums.FieldModelType;
-import io.tapdata.zoho.service.commandMode.CommandMode;
-import io.tapdata.zoho.service.commandMode.ConfigContextChecker;
+import io.tapdata.zoho.service.command.CommandMode;
+import io.tapdata.zoho.service.command.ConfigContextChecker;
 import io.tapdata.zoho.service.zoho.loader.OrganizationFieldLoader;
 import io.tapdata.zoho.utils.Checker;
 
@@ -20,11 +20,13 @@ public class FieldsCommand extends ConfigContextChecker<Object> implements Comma
     public CommandResult command(TapConnectionContext connectionContext, CommandInfo commandInfo) {
         String language = commandInfo.getLocale();
         this.language(Checker.isEmpty(language)? LanguageEnum.EN.getLanguage():language);
-        return new CommandResult()
-                .result(
-                        (Map<String, Object>) OrganizationFieldLoader.create(connectionContext)
-                                .allOrganizationFields(FieldModelType.TICKETS).getResult()
-                );
+        CommandResult commandResult = new CommandResult();
+        return commandResult.result(
+                        OrganizationFieldLoader.create(connectionContext)
+                                .allOrganizationFields(FieldModelType.TICKETS)
+                                .getResult(),
+                        CommandResult.CODE_OK,
+                        "succeed");
     }
 
     @Override

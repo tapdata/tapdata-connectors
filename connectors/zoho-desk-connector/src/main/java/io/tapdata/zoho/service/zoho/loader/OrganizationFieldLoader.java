@@ -1,7 +1,10 @@
 package io.tapdata.zoho.service.zoho.loader;
 
 import io.tapdata.pdk.apis.context.TapConnectionContext;
-import io.tapdata.zoho.entity.*;
+import io.tapdata.zoho.entity.HttpEntity;
+import io.tapdata.zoho.entity.HttpNormalEntity;
+import io.tapdata.zoho.entity.HttpResult;
+import io.tapdata.zoho.entity.HttpType;
 import io.tapdata.zoho.enums.FieldModelType;
 import io.tapdata.zoho.enums.HttpCode;
 import io.tapdata.zoho.utils.Checker;
@@ -13,54 +16,56 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 public class OrganizationFieldLoader extends ZoHoStarter implements ZoHoBase {
-    private static final String TAG = TicketLoader.class.getSimpleName();
+    public static final String API_NAME = "apiName";
+    public static final String DATA = "data";
     protected OrganizationFieldLoader(TapConnectionContext tapConnectionContext) {
         super(tapConnectionContext);
     }
-    public static OrganizationFieldLoader create(TapConnectionContext tapConnectionContext){
+
+    public static OrganizationFieldLoader create(TapConnectionContext tapConnectionContext) {
         return new OrganizationFieldLoader(tapConnectionContext);
     }
 
-    public HttpResult allOrganizationFields(FieldModelType model){
-        if (Checker.isEmpty(model)){
+    public HttpResult allOrganizationFields(FieldModelType model) {
+        if (Checker.isEmpty(model)) {
             return null;
         }
         HttpNormalEntity header = requestHeard();
-        HttpEntity form = HttpEntity.create().build("module",model.getModel());
-        ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL,"/api/v1/organizationFields"), HttpType.GET,header).form(form);
+        HttpEntity form = HttpEntity.create().build("module", model.getModel());
+        ZoHoHttp http = ZoHoHttp.create(String.format(ZO_HO_BASE_URL, "/api/v1/organizationFields"), HttpType.GET, header).form(form);
         HttpResult httpResult = this.readyAccessToken(http);
         String code = httpResult.getCode();
-        if (HttpCode.SUCCEED.getCode().equals(code)){
-            Map<String,Object> resultObj = (Map<String,Object>)httpResult.getResult();
+        if (HttpCode.SUCCEED.getCode().equals(code)) {
+            Map<String, Object> resultObj = (Map<String, Object>) httpResult.getResult();
             if (Checker.isEmpty(resultObj)) return null;
-            Object fieldListObj = resultObj.get("data");
+            Object fieldListObj = resultObj.get(DATA);
             if (Checker.isEmpty(fieldListObj)) return null;
             return httpResult;
         }
         return null;
     }
+
     /**
      * 获取当前组织下的系统字段和自定义字段
-     *
-     * **/
-    public Map<String,Map<String,Object>> organizationFields(FieldModelType model){
-        Map<String,Map<String,Object>> fieldMap = new HashMap<>();
+     **/
+    public Map<String, Map<String, Object>> organizationFields(FieldModelType model) {
+        Map<String, Map<String, Object>> fieldMap = new HashMap<>();
         HttpResult get = this.allOrganizationFields(model);
-        if (!Checker.isEmpty(get)){
-            List<Map<String,Object>> fieldArr = (List<Map<String,Object>>)(((Map<String,Object>)get.getResult()).get("data"));
-            fieldMap = fieldArr.stream().collect(Collectors.toMap(field->(String)field.get("apiName"), field -> field));
+        if (!Checker.isEmpty(get)) {
+            List<Map<String, Object>> fieldArr = (List<Map<String, Object>>) (((Map<String, Object>) get.getResult()).get(DATA));
+            fieldMap = fieldArr.stream().collect(Collectors.toMap(field -> (String) field.get(API_NAME), field -> field));
         }
         return fieldMap;
     }
+
     /**
      * 获取当前组织下的自定义字段
-     *
-     * **/
-    public Map<String,Map<String,Object>> customFieldMap(FieldModelType model){
-        Map<String,Map<String,Object>> fieldMap = new HashMap<>();
+     **/
+    public Map<String, Map<String, Object>> customFieldMap(FieldModelType model) {
+        Map<String, Map<String, Object>> fieldMap = new HashMap<>();
         HttpResult get = this.allOrganizationFields(model);
-        if (!Checker.isEmpty(get)){
-            List<Map<String,Object>> fieldArr = (List<Map<String,Object>>)(((Map<String,Object>)get.getResult()).get("data"));
+        if (!Checker.isEmpty(get)) {
+            List<Map<String, Object>> fieldArr = (List<Map<String, Object>>) (((Map<String, Object>) get.getResult()).get(DATA));
             /**
              * {
              *     "data": [
@@ -93,8 +98,8 @@ public class OrganizationFieldLoader extends ZoHoStarter implements ZoHoBase {
              *      ]
              * }
              * */
-            fieldMap = fieldArr.stream().filter(field -> (Boolean)field.get("isCustomField"))
-                    .collect(Collectors.toMap(field->(String)field.get("apiName"), field -> field));
+            fieldMap = fieldArr.stream().filter(field -> (Boolean) field.get("isCustomField"))
+                    .collect(Collectors.toMap(field -> (String) field.get(API_NAME), field -> field));
         }
         return fieldMap;
     }

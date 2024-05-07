@@ -1,4 +1,4 @@
-package io.tapdata.zoho.service.commandMode;
+package io.tapdata.zoho.service.command;
 
 import io.tapdata.zoho.entity.CommandResultV2;
 

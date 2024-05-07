@@ -3,8 +3,8 @@ package io.tapdata.zoho.service.zoho.webHook.doMain;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.zoho.service.zoho.webHook.EventBaseEntity;
-import io.tapdata.zoho.service.connectionMode.ConnectionMode;
-import io.tapdata.zoho.service.connectionMode.impl.CSVMode;
+import io.tapdata.zoho.service.connection.ConnectionMode;
+import io.tapdata.zoho.service.connection.impl.CSVMode;
 
 import java.util.Map;
 
