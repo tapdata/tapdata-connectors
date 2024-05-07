@@ -34,9 +34,7 @@ import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import org.apache.commons.collections4.CollectionUtils;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.TimeZone;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -68,7 +66,7 @@ public class TidbConnector extends CommonDbConnector {
         tapLogger = tapConnectionContext.getLog();
         started.set(true);
         if (tapConnectionContext instanceof TapConnectorContext) {
-            this.tidbCdcService =  new TidbCdcService(tidbConfig,tapLogger,started);
+            this.tidbCdcService = new TidbCdcService(tidbConfig, tapLogger, started);
         }
         commonSqlMaker = new CommonSqlMaker('`');
         tidbReader = new TidbReader(tidbJdbcContext);
@@ -140,7 +138,7 @@ public class TidbConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        tidbCdcService.readBinlog(nodeContext,tableList,offsetState,consumer);
+        tidbCdcService.readBinlog(nodeContext, tableList, offsetState, consumer);
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
@@ -175,7 +173,18 @@ public class TidbConnector extends CommonDbConnector {
     }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
-        new TidbRecordWriter(tidbJdbcContext, tapTable).write(tapRecordEvents, consumer, this::isAlive);
+        String insertDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
+        if (insertDmlPolicy == null) {
+            insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
+        }
+        String updateDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
+        if (updateDmlPolicy == null) {
+            updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
+        }
+        new TidbRecordWriter(tidbJdbcContext, tapTable)
+                .setInsertPolicy(insertDmlPolicy)
+                .setUpdatePolicy(updateDmlPolicy)
+                .write(tapRecordEvents, consumer, this::isAlive);
     }
 
     @Override
