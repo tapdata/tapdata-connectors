@@ -173,7 +173,7 @@ public class TapEventBuilder {
                 }
                 return rStringValue;
             } else if (ftype.startsWith("rlongstring")) {
-                String rStringValue = cacheRString.get(ftype);
+                String rStringValue = cacheRLongString.get(ftype);
                 if (null == rStringValue) {
                     if (ftype.endsWith(")")) {
                         rStringValue = randomString(Integer.parseInt(ftype.substring(12, ftype.length() - 1)));
