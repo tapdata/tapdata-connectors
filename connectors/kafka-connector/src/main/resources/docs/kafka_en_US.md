@@ -19,45 +19,45 @@ Please follow the instructions below to ensure that the Kafka database is succes
 >2. Otherwise, subscribe and consume from each partition of the topic 'latest offset'.
 >3. If there is a message consumption record before, it will be restored to the previous' offset 'to start consumption
  #### **2.2 node connection**
-    |Whether source | target | can be linked|
-    | ------------- | ------------- | ---------- |
-    |Kafka | elasticsearch | yes|
-    |Kafka | redis | yes|
-    |Kafka | table | yes|
-    |Kafka | collection | yes|
-    |Kafka | memory | yes|
-    |Elasticsearch | Kafka | yes|
-    |Table | Kafka | yes|
-    |Redis | Kafka | yes|
-    |Collection | Kafka | yes|
-    |Memory | Kafka | yes|
-    ##### **2.3 data migration**
-    |Whether source | target | can be linked|
-    | ---------- | ---------- | ---------- |
-    |Kafka | MySQL | yes|
-    |Kafka | Oracle | yes|
-    |Kafka | mongodb | yes|
-    |Kafka | DB2 | yes|
-    |Kafka | Postgres | yes|
-    |Kafka | MSSQL | yes|
-    |Kafka | base 8s | yes|
-    |Kafka | Sybase ASE | yes|
-    |MySQL | Kafka | yes|
-    |Oracle | Kafka | yes|
-    |Mongodb | Kafka | yes|
-    |DB2 | Kafka | yes|
-    |Postgres | Kafka | yes|
-    |Sybase ASE | Kafka | yes|
-    |Base 8s | Kafka | yes|
-    |MSSQL | Kafka | yes|
-    ###**3. configuration**
-    #####**3.1 public configuration**
-    |Field name (UI form parameter name) | type | whether it is required | remarks | default value | verification | UI form field name | UI form field component|
-    | ---------------------- | ------ | -------- | ------------------- | ------ | ---------------------------------------------------------------------------------------- | ---------------- | ------------------------- |
-    |Kafkabootstrapservers | string | is | broker address list | - | host1:port, host2:port, host3:port (such as 192.168.1.1:9092192.168.1.2:9092192.168.1.3:9092) | host list | ` < input type= "text" / > `|
-    |Databasetype | string | is | database type | - | fixed value: Kafka | none ` <input type= "hidden" / > `|
-    | connection_ Type | string | is | link type | - | enumeration value: source \ | target \ | source_ and_ Target | link type ` < select / > `|
-    |Kafkapatterntopics | string | is | topic name regular expression, | - | text length is greater than 0, less than 256 | topic regular expression | ` <input type= "text" / > `|
+|Whether source | target | can be linked|
+| ------------- | ------------- | ---------- |
+|Kafka | elasticsearch | yes|
+|Kafka | redis | yes|
+|Kafka | table | yes|
+|Kafka | collection | yes|
+|Kafka | memory | yes|
+|Elasticsearch | Kafka | yes|
+|Table | Kafka | yes|
+|Redis | Kafka | yes|
+|Collection | Kafka | yes|
+|Memory | Kafka | yes|
+##### **2.3 data migration**
+|Whether source | target | can be linked|
+| ---------- | ---------- | ---------- |
+|Kafka | MySQL | yes|
+|Kafka | Oracle | yes|
+|Kafka | mongodb | yes|
+|Kafka | DB2 | yes|
+|Kafka | Postgres | yes|
+|Kafka | MSSQL | yes|
+|Kafka | base 8s | yes|
+|Kafka | Sybase ASE | yes|
+|MySQL | Kafka | yes|
+|Oracle | Kafka | yes|
+|Mongodb | Kafka | yes|
+|DB2 | Kafka | yes|
+|Postgres | Kafka | yes|
+|Sybase ASE | Kafka | yes|
+|Base 8s | Kafka | yes|
+|MSSQL | Kafka | yes|
+### **3. configuration**
+##### **3.1 public configuration**
+|Field name (UI form parameter name) | type | whether it is required | remarks | default value | verification | UI form field name | UI form field component|
+| ---------------------- | ------ | -------- | ------------------- | ------ | ---------------------------------------------------------------------------------------- | ---------------- | ------------------------- |
+|Kafkabootstrapservers | string | is | broker address list | - | host1:port, host2:port, host3:port (such as 192.168.1.1:9092192.168.1.2:9092192.168.1.3:9092) | host list | ` < input type= "text" / > `|
+|Databasetype | string | is | database type | - | fixed value: Kafka | none ` <input type= "hidden" / > `|
+| connection_ Type | string | is | link type | - | enumeration value: source \ | target \ | source_ and_ Target | link type ` < select / > `|
+|Kafkapatterntopics | string | is | topic name regular expression, | - | text length is greater than 0, less than 256 | topic regular expression | ` <input type= "text" / > `|
 ##### **3.2 Source (Kafka Consumer)**
 |Field name (UI form parameter name) | type | whether it is required | remarks | default value | verification | UI form field name | UI form field component|
 | ------------------------ | ------- | -------- | ----------------------------------------------------------------------------------- | ------ | --------------------- | -------------------- | ---------------- |
