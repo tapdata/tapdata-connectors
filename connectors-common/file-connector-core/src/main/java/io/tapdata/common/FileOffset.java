@@ -2,9 +2,10 @@ package io.tapdata.common;
 
 import io.tapdata.file.TapFile;
 
+import java.io.Serializable;
 import java.util.Map;
 
-public class FileOffset {
+public class FileOffset implements Serializable {
 
     private String path;
     private int sheetNum;
