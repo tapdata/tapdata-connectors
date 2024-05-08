@@ -304,6 +304,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 		running.compareAndSet(true, false);
 		if (mongoClient != null) {
 			mongoClient.close();
+			mongoClient = null;
 		}
 	}
 }
