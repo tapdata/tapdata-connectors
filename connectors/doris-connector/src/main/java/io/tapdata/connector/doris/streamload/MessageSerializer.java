@@ -9,7 +9,7 @@ import io.tapdata.entity.schema.TapTable;
  * @create 2022-12-26 12:36
  **/
 public interface MessageSerializer {
-	byte[] serialize(TapTable table, TapRecordEvent recordEvent) throws Throwable;
+	byte[] serialize(TapTable table, TapRecordEvent recordEvent, boolean isAgg) throws Throwable;
 	byte[] lineEnd();
 	default byte[] batchStart(){
 		return new byte[0];

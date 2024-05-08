@@ -236,12 +236,12 @@ public abstract class NormalWriteRecorder {
         }
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
-        Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
             case "insert_on_nonexists":
                 insertUpdate(after, lastBefore, listResult);
                 break;
             default:
+                Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
                 justUpdate(lastAfter, lastBefore, listResult);
                 break;
         }

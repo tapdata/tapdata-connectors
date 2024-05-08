@@ -97,10 +97,13 @@ public class MysqlReader implements Closeable {
     private TimeZone DB_TIME_ZONE;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     private final ExceptionCollector exceptionCollector;
+    private String dropTransactionId = null;
+    private final MysqlConfig mysqlConfig;
     protected Log tapLogger;
 
     public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, Supplier<Boolean> isAlive) {
         this.mysqlJdbcContext = mysqlJdbcContext;
+        this.mysqlConfig = (MysqlConfig) mysqlJdbcContext.getConfig();
         this.isAlive = isAlive;
         this.tapLogger = tapLogger;
         this.exceptionCollector = new MysqlExceptionCollector();
@@ -204,7 +207,6 @@ public class MysqlReader implements Closeable {
 
     public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
                            Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) throws Throwable {
-        MysqlConfig mysqlConfig = new MysqlConfig().load(tapConnectorContext.getConnectionConfig());
         MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         try {
             initDebeziumServerName(tapConnectorContext);
@@ -213,14 +215,14 @@ public class MysqlReader implements Closeable {
             String offsetStr = "";
             JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
             String deploymentMode = mysqlConfig.getDeploymentMode();
-            if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
+            if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
                 if (offset instanceof MysqlStreamOffset) {
                     Map<String, String> offset1 = ((MysqlStreamOffset) offset).getOffset();
                     AtomicReference<String> os = new AtomicReference<>();
-                    offset1.forEach((k,v)->os.set(v));
+                    offset1.forEach((k, v) -> os.set(v));
                     HashMap map = jsonParser.fromJson(os.get(), HashMap.class);
                     Integer ts = (Integer) map.get("ts_sec");
-                    if (null != ts){
+                    if (null != ts) {
                         offset = TimeUnit.SECONDS.toMillis(new Long(ts));
                     }
                 }
@@ -278,11 +280,17 @@ public class MysqlReader implements Closeable {
 //                builder.with("database.serverTimezone", mysqlJdbcContext.queryTimeZone());
 //            }
             List<String> dbTableNames = tables.stream().map(t -> mysqlConfig.getDatabase() + "." + t).collect(Collectors.toList());
+            if (mysqlConfig.getDoubleActive()) {
+                dbTableNames.add(mysqlConfig.getDatabase() + "._tap_double_active");
+            }
             builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, mysqlConfig.getDatabase());
             builder.with(MySqlConnectorConfig.TABLE_INCLUDE_LIST, String.join(",", dbTableNames));
             builder.with(EmbeddedEngine.OFFSET_STORAGE, "io.tapdata.connector.mysql.PdkPersistenceOffsetBackingStore");
             if (StringUtils.isNotBlank(offsetStr)) {
                 builder.with("pdk.offset.string", offsetStr);
+            }
+            if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
+                builder.with("provide.transaction.metadata", true);
             }
 			/*
 				todo At present, the schema loading logic will load the schema of all current tables each time it is started. When there is ddl in the historical data, it will cause a parsing error
@@ -345,7 +353,7 @@ public class MysqlReader implements Closeable {
             embeddedEngine.run();
             if (null != throwableAtomicReference.get()) {
                 Throwable e = ErrorKit.getLastCause(throwableAtomicReference.get());
-                ((MysqlExceptionCollector)exceptionCollector).setMysqlConfig(mysqlConfig);
+                ((MysqlExceptionCollector) exceptionCollector).setMysqlConfig(mysqlConfig);
                 exceptionCollector.collectTerminateByServer(e);
                 exceptionCollector.collectOffsetInvalid(offset, e);
                 exceptionCollector.collectCdcConfigInvalid(e);
@@ -512,6 +520,21 @@ public class MysqlReader implements Closeable {
             }
             return null;
         }).orElse(source.getString("table"));
+        //双活情形下，需要过滤_tap_double_active记录的同事务数据
+        if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
+            if ("_tap_double_active".equals(table)) {
+                dropTransactionId = String.valueOf(record.sourceOffset().get("transaction_id"));
+                return null;
+            } else {
+                if (null != dropTransactionId) {
+                    if (dropTransactionId.equals(String.valueOf(record.sourceOffset().get("transaction_id")))) {
+                        return null;
+                    } else {
+                        dropTransactionId = null;
+                    }
+                }
+            }
+        }
         String op = value.getString("op");
         MysqlOpType mysqlOpType = MysqlOpType.fromOp(op);
         if (null == mysqlOpType) {
@@ -653,25 +676,27 @@ public class MysqlReader implements Closeable {
         if (null == tapField) return value;
         TapType tapType = tapField.getTapType();
         LocalDateTime dt = LocalDateTime.now();
-        ZonedDateTime fromZonedDateTime = dt.atZone(DB_TIME_ZONE.toZoneId());
+        ZonedDateTime fromZonedDateTime = dt.atZone(TimeZone.getDefault().toZoneId());
         ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
+        long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
         if (tapType instanceof TapDateTime) {
-            long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
+            int fraction = ((TapDateTime) tapType).getFraction();
             if (value instanceof Long) {
-                int fraction = ((TapDateTime) tapType).getFraction();
                 if (fraction > 3) {
-                    value = ((Long) value) / (long) Math.pow(10, 6 - fraction);
+                    value = ((Long) value + diff * 1000) / (long) Math.pow(10, 6 - fraction);
                 } else {
-                    value = ((Long) value) / (long) Math.pow(10, 3 - fraction);
+                    value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
                 }
             } else if (value instanceof String) {
                 try {
-                    value = Instant.parse((CharSequence) value).getEpochSecond() + (TimeZone.getDefault().getRawOffset() + diff) / 1000;
+                    Instant instant = Instant.parse((CharSequence) value);
+                    long milliOffset = DB_TIME_ZONE.getRawOffset() + diff;
+                    value = instant.getEpochSecond() * (long) Math.pow(10, fraction) + instant.getNano() / (long) Math.pow(10, 9 - fraction) + (long) (milliOffset * Math.pow(10, fraction - 3));
                 } catch (Exception ignored) {
                 }
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
-            value = (Integer) value * 24 * 60 * 60 * 1000L;
+            value = (Integer) value * 24 * 60 * 60 * 1000L + diff;
         }
         return value;
     }

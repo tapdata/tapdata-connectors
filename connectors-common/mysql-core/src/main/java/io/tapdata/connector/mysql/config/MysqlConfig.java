@@ -31,8 +31,10 @@ public class MysqlConfig extends CommonDbConfig {
     @Override
     public MysqlConfig load(Map<String, Object> map) {
         MysqlConfig config = (MysqlConfig) super.load(map);
-        setUser(EmptyKit.isBlank(getUser()) ? (String) map.get("username") : getUser());
-        setExtParams(EmptyKit.isBlank(getExtParams()) ? (String) map.get("addtionalString") : getExtParams());
+        if (EmptyKit.isNotEmpty(map)) {
+            setUser(EmptyKit.isBlank(getUser()) ? (String) map.get("username") : getUser());
+            setExtParams(EmptyKit.isBlank(getExtParams()) ? (String) map.get("addtionalString") : getExtParams());
+        }
         setSchema(getDatabase());
         String deploymentMode = config.getDeploymentMode();
         DeployModeEnum deployModeEnum = DeployModeEnum.fromString(deploymentMode);

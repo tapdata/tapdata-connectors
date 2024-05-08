@@ -32,7 +32,17 @@
           "x-decorator-props": {
             "tooltip": "${pdServerTip}"
           },
-          "x-index": 1
+          "x-index": 1,
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0]!=='target' ? 'visible':'hidden'}}"
+              }
+            }
+          }
         },
         "host": {
           "type": "string",

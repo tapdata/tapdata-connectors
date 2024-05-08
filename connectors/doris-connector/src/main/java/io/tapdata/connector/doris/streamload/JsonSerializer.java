@@ -27,12 +27,12 @@ public class JsonSerializer implements MessageSerializer {
 	}
 
 	@Override
-	public byte[] serialize(TapTable table, TapRecordEvent recordEvent) throws Throwable {
+	public byte[] serialize(TapTable table, TapRecordEvent recordEvent, boolean isAgg) throws Throwable {
 		String jsonString;
 		if (recordEvent instanceof TapInsertRecordEvent) {
 			final TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
 			final Map<String, Object> after = insertRecordEvent.getAfter();
-			jsonString = toJsonString(table, after, false);
+			jsonString = toJsonString(table, after, false, isAgg);
 		} else if (recordEvent instanceof TapUpdateRecordEvent) {
 			final TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
 			Map<String, Object> after = updateRecordEvent.getAfter();
@@ -40,11 +40,11 @@ public class JsonSerializer implements MessageSerializer {
 //			before = before == null ? after : before;
 //			jsonString = toJsonString(table, before, false);
 //			jsonString += LINE_END;
-			jsonString = toJsonString(table, after, false);
+			jsonString = toJsonString(table, after, false, isAgg);
 		} else {
 			final TapDeleteRecordEvent deleteRecordEvent = (TapDeleteRecordEvent) recordEvent;
 			final Map<String, Object> before = deleteRecordEvent.getBefore();
-			jsonString = toJsonString(table, before, true);
+			jsonString = toJsonString(table, before, true, isAgg);
 		}
 		return jsonString.getBytes(StandardCharsets.UTF_8);
 	}
@@ -64,16 +64,17 @@ public class JsonSerializer implements MessageSerializer {
 		return "]".getBytes(StandardCharsets.UTF_8);
 	}
 
-	private String toJsonString(TapTable tapTable, Map<String, Object> record, boolean delete) throws JsonProcessingException {
+	private String toJsonString(TapTable tapTable, Map<String, Object> record, boolean delete, boolean isAgg) throws JsonProcessingException {
 		if (null == tapTable) throw new IllegalArgumentException("TapTable cannot be null");
-		if (null == record) throw new IllegalArgumentException("Record cannot be null");
 		LinkedHashMap<String, Object> linkedRecord = new LinkedHashMap<>();
 		for (String field : tapTable.getNameFieldMap().keySet()) {
-			Object value = record.get(field);
-			if (null == value) {
-//				linkedRecord.put(field, null);
-			} else {
-				linkedRecord.put(field, value.toString());
+			if (record.containsKey(field) || isAgg) {
+				Object value = record.get(field);
+				if (null == value) {
+					linkedRecord.put(field, null);
+				} else {
+					linkedRecord.put(field, value.toString());
+				}
 			}
 		}
 		linkedRecord.put(Constants.DORIS_DELETE_SIGN, delete ? 1 : 0);
