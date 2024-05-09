@@ -11,6 +11,7 @@ import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
@@ -28,6 +29,7 @@ import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
+import org.apache.commons.collections4.CollectionUtils;
 
 import java.io.IOException;
 import java.sql.SQLException;
@@ -55,10 +57,10 @@ public class DorisConnector extends CommonDbConnector {
         this.dorisConfig = new DorisConfig().load(tapConnectionContext.getConnectionConfig());
         isConnectorStarted(tapConnectionContext, connectorContext -> dorisConfig.load(connectorContext.getNodeConfig()));
         dorisJdbcContext = new DorisJdbcContext(dorisConfig);
-//        if (!dorisJdbcContext.queryVersion().contains("2.")) {
-//            dorisConfig.setUpdateSpecific(false);
-//            dorisConfig.setUniqueKeyType("Unique");
-//        }
+        if (!dorisJdbcContext.queryVersion().contains("2.")) {
+            dorisConfig.setUpdateSpecific(false);
+            dorisConfig.setUniqueKeyType("Unique");
+        }
         commonDbConfig = dorisConfig;
         jdbcContext = dorisJdbcContext;
         commonSqlMaker = new DorisSqlMaker();
@@ -87,7 +89,7 @@ public class DorisConnector extends CommonDbConnector {
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
         connectorFunctions.supportWriteRecord(this::writeRecord);
-        connectorFunctions.supportCreateTableV2(this::createDorisTable);
+        connectorFunctions.supportCreateTableV2(this::createTableV2);
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
@@ -171,123 +173,57 @@ public class DorisConnector extends CommonDbConnector {
         }
     }
 
-    protected CreateTableOptions createDorisTable(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
+    @Override
+    protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
         TapTable tapTable = createTableEvent.getTable();
         CreateTableOptions createTableOptions = new CreateTableOptions();
         if (jdbcContext.queryAllTables(Collections.singletonList(tapTable.getId())).size() > 0) {
             createTableOptions.setTableExists(true);
             return createTableOptions;
         }
+        String sql;
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
-        DorisTableType uniqueType = DorisTableType.valueOf(dorisConfig.getUniqueKeyType());
-        StringBuilder stringBuilder = new StringBuilder();
-        stringBuilder.append("CREATE TABLE IF NOT EXISTS ").append(getSchemaAndTable(tapTable.getId())).append("(");
-        //generate column definition
-        if (uniqueType == DorisTableType.Duplicate) {
-            if (EmptyKit.isEmpty(primaryKeys)) {
-                if (EmptyKit.isEmpty(dorisConfig.getDuplicateKey())) {
-                    stringBuilder.append(commonSqlMaker.buildColumnDefinition(tapTable, true));
-                } else {
-                    stringBuilder.append(((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, dorisConfig.getDuplicateKey(), false));
-                }
-            } else {
-                stringBuilder.append(((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, primaryKeys, false));
-            }
-        } else {
-            if (EmptyKit.isEmpty(primaryKeys)) {
-                stringBuilder.append(commonSqlMaker.buildColumnDefinition(tapTable, true));
-            } else {
-                stringBuilder.append(((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, primaryKeys, uniqueType == DorisTableType.Aggregate));
-            }
-        }
-        //generate key definition
-        stringBuilder.append(") ").append(uniqueType).append(" KEY (`");
-        if (EmptyKit.isEmpty(primaryKeys)) {
+        DorisTableType uniqueType = Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType()) ? DorisTableType.Aggregate : DorisTableType.Unique;
+        long bucket = (EmptyKit.isNotNull(tapTable.getTableAttr()) && EmptyKit.isNotNull((tapTable.getTableAttr().get("capacity")))) ?
+                (Math.min(Long.parseLong(tapTable.getTableAttr().get("capacity").toString()) / 1000000L, 14) + 2) : 16;
+        if (CollectionUtils.isEmpty(primaryKeys)) {
+            //append mode
             if (EmptyKit.isEmpty(dorisConfig.getDuplicateKey())) {
-                stringBuilder.append(String.join("`,`", tapTable.getNameFieldMap().keySet()));
+                Collection<String> allColumns = tapTable.getNameFieldMap().keySet();
+                sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
+                        "(" + commonSqlMaker.buildColumnDefinition(tapTable, true) + ") " +
+                        uniqueType + " KEY (`" + String.join("`,`", allColumns) + "`) " +
+                        "DISTRIBUTED BY HASH(`" + String.join("`,`", allColumns) + "`) BUCKETS " + bucket + " " +
+                        "PROPERTIES(\"replication_num\" = \"" +
+                        dorisConfig.getReplicationNum().toString() +
+                        "\"" + (uniqueType == DorisTableType.Unique ? ", \"enable_unique_key_merge_on_write\" = \"true\", \"store_row_column\" = \"true\"" : "") + ")";
             } else {
-                stringBuilder.append(String.join("`,`", dorisConfig.getDuplicateKey()));
+                sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
+                        "(" + ((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, dorisConfig.getDuplicateKey(), false) + ") " +
+                        "DUPLICATE KEY (`" + String.join("`,`", dorisConfig.getDuplicateKey()) + "`) " +
+                        "DISTRIBUTED BY HASH(`" + String.join("`,`", dorisConfig.getDistributedKey()) + "`) BUCKETS " + bucket + " " +
+                        "PROPERTIES(\"replication_num\" = \"" +
+                        dorisConfig.getReplicationNum().toString() +
+                        "\")";
             }
         } else {
-            stringBuilder.append(String.join("`,`", primaryKeys));
+            sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
+                    "(" + ((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, primaryKeys, uniqueType == DorisTableType.Aggregate) + ") " +
+                    uniqueType + " KEY (`" + String.join("`,`", primaryKeys) + "`) " +
+                    "DISTRIBUTED BY HASH(`" + String.join("`,`", primaryKeys) + "`) BUCKETS " + bucket + " " +
+                    "PROPERTIES(\"replication_num\" = \"" +
+                    dorisConfig.getReplicationNum().toString() +
+                    "\"" + (uniqueType == DorisTableType.Unique ? ", \"enable_unique_key_merge_on_write\" = \"true\", \"store_row_column\" = \"true\"" : "") + ")";
         }
-        stringBuilder.append("`) DISTRIBUTED BY HASH(`");
-        //generate distributed key
-        if (EmptyKit.isEmpty(primaryKeys)) {
-            if (EmptyKit.isEmpty(dorisConfig.getDistributedKey())) {
-                stringBuilder.append(String.join("`,`", tapTable.getNameFieldMap().keySet()));
-            } else {
-                stringBuilder.append(String.join("`,`", dorisConfig.getDistributedKey()));
-            }
-        } else {
-            stringBuilder.append(String.join("`,`", primaryKeys));
-        }
-        //generate bucket
-        stringBuilder.append("`) BUCKETS ").append(dorisConfig.getBucket()).append(" PROPERTIES(");
-        //generate properties
-        stringBuilder.append(dorisConfig.getTableProperties().stream().map(v -> "\"" + v.get("propKey") + "\"=\"" + v.get("propValue") + "\"").collect(Collectors.joining(", ")));
-        stringBuilder.append(")");
         createTableOptions.setTableExists(false);
         try {
-            dorisJdbcContext.execute(stringBuilder.toString());
+            dorisJdbcContext.execute(sql);
             return createTableOptions;
         } catch (Exception e) {
             exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
-            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed | Error: " + e.getMessage() + " | Sql: " + stringBuilder, e);
+            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed | Error: " + e.getMessage() + " | Sql: " + sql, e);
         }
     }
-
-//    @Override
-//    protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
-//        TapTable tapTable = createTableEvent.getTable();
-//        CreateTableOptions createTableOptions = new CreateTableOptions();
-//        if (jdbcContext.queryAllTables(Collections.singletonList(tapTable.getId())).size() > 0) {
-//            createTableOptions.setTableExists(true);
-//            return createTableOptions;
-//        }
-//        String sql;
-//        Collection<String> primaryKeys = tapTable.primaryKeys(true);
-//        DorisTableType uniqueType = Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType()) ? DorisTableType.Aggregate : DorisTableType.Unique;
-//        long bucket = (EmptyKit.isNotNull(tapTable.getTableAttr()) && EmptyKit.isNotNull((tapTable.getTableAttr().get("capacity")))) ?
-//                (Math.min(Long.parseLong(tapTable.getTableAttr().get("capacity").toString()) / 1000000L, 14) + 2) : 16;
-//        if (CollectionUtils.isEmpty(primaryKeys)) {
-//            //append mode
-//            if (EmptyKit.isEmpty(dorisConfig.getDuplicateKey())) {
-//                Collection<String> allColumns = tapTable.getNameFieldMap().keySet();
-//                sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
-//                        "(" + commonSqlMaker.buildColumnDefinition(tapTable, true) + ") " +
-//                        uniqueType + " KEY (`" + String.join("`,`", allColumns) + "`) " +
-//                        "DISTRIBUTED BY HASH(`" + String.join("`,`", allColumns) + "`) BUCKETS " + bucket + " " +
-//                        "PROPERTIES(\"replication_num\" = \"" +
-//                        dorisConfig.getReplicationNum().toString() +
-//                        "\"" + (uniqueType == DorisTableType.Unique ? ", \"enable_unique_key_merge_on_write\" = \"true\", \"store_row_column\" = \"true\"" : "") + ")";
-//            } else {
-//                sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
-//                        "(" + ((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, dorisConfig.getDuplicateKey(), false) + ") " +
-//                        "DUPLICATE KEY (`" + String.join("`,`", dorisConfig.getDuplicateKey()) + "`) " +
-//                        "DISTRIBUTED BY HASH(`" + String.join("`,`", dorisConfig.getDistributedKey()) + "`) BUCKETS " + bucket + " " +
-//                        "PROPERTIES(\"replication_num\" = \"" +
-//                        dorisConfig.getReplicationNum().toString() +
-//                        "\")";
-//            }
-//        } else {
-//            sql = "CREATE TABLE IF NOT EXISTS " + getSchemaAndTable(tapTable.getId()) +
-//                    "(" + ((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, primaryKeys, uniqueType == DorisTableType.Aggregate) + ") " +
-//                    uniqueType + " KEY (`" + String.join("`,`", primaryKeys) + "`) " +
-//                    "DISTRIBUTED BY HASH(`" + String.join("`,`", primaryKeys) + "`) BUCKETS " + bucket + " " +
-//                    "PROPERTIES(\"replication_num\" = \"" +
-//                    dorisConfig.getReplicationNum().toString() +
-//                    "\"" + (uniqueType == DorisTableType.Unique ? ", \"enable_unique_key_merge_on_write\" = \"true\", \"store_row_column\" = \"true\"" : "") + ")";
-//        }
-//        createTableOptions.setTableExists(false);
-//        try {
-//            dorisJdbcContext.execute(sql);
-//            return createTableOptions;
-//        } catch (Exception e) {
-//            exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
-//            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed | Error: " + e.getMessage() + " | Sql: " + sql, e);
-//        }
-//    }
 
     //the second method to load schema instead of mysql
     @Override
@@ -302,14 +238,20 @@ public class DorisConnector extends CommonDbConnector {
 
     @Override
     public void onStop(TapConnectionContext connectionContext) {
-        ErrorKit.ignoreAnyError(() -> {
-            for (DorisStreamLoader dorisStreamLoader : dorisStreamLoaderMap.values()) {
-                if (EmptyKit.isNotNull(dorisStreamLoader)) {
-                    dorisStreamLoader.shutdown();
+        try {
+            ErrorKit.ignoreAnyError(() -> {
+                for (DorisStreamLoader dorisStreamLoader : dorisStreamLoaderMap.values()) {
+                    if (EmptyKit.isNotNull(dorisStreamLoader)) {
+                        dorisStreamLoader.shutdown();
+                    }
                 }
+            });
+            if (EmptyKit.isNotNull(dorisJdbcContext)) {
+                dorisJdbcContext.close();
             }
-        });
-        EmptyKit.closeQuietly(dorisJdbcContext);
+        } catch (Exception e) {
+            TapLogger.error(TAG, "Release connector failed, error: " + e.getMessage() + "\n" + getStackString(e));
+        }
     }
 
     private boolean checkStreamLoad() {

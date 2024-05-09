@@ -1491,6 +1491,7 @@ public class MongodbConnector extends ConnectorBase {
 			if (mongodbStreamReader == null) {
 				mongodbStreamReader = createStreamReader();
 			}
+			mongodbStreamReader.onStart(mongoConfig);
 			doStreamRead(mongodbStreamReader, connectorContext, tableList, mongoCdcOffset.getCdcOffset(), eventBatchSize, consumer);
 		}
 	}

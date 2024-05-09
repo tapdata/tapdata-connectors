@@ -86,7 +86,7 @@ public class DorisStreamLoader {
             TapLogger.debug(TAG, "Batch events length is: {}", tapRecordEvents.size());
             WriteListResult<TapRecordEvent> listResult = writeListResult();
             this.tapTable = table;
-            boolean isAgg = DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType());
+            boolean isAgg = dorisConfig.getUpdateSpecific() && DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType());
             for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
                 byte[] bytes = messageSerializer.serialize(table, tapRecordEvent, isAgg);
                 if (needFlush(tapRecordEvent, bytes.length, isAgg)) {
@@ -163,11 +163,11 @@ public class DorisStreamLoader {
             if (CollectionUtils.isEmpty(primaryKeys)) {
                 putBuilder.enableAppend();
             } else {
-                if (DorisTableType.Unique.toString().equals(dorisConfig.getUniqueKeyType())) {
+                if (Boolean.TRUE.equals(dorisConfig.getUpdateSpecific()) && DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType())) {
+                    putBuilder.enableAppend();
+                } else {
                     putBuilder.enableDelete();
                     putBuilder.addPartialHeader();
-                } else {
-                    putBuilder.enableAppend();
                 }
             }
             HttpPut httpPut = putBuilder.build();
