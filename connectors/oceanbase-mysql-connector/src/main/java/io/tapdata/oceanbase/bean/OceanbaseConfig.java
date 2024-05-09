@@ -8,7 +8,6 @@ import java.util.Map;
 
 public class OceanbaseConfig extends MysqlConfig implements Serializable {
     private static final long serialVersionUID = 1L;
-    private String databaseUrlPattern = "jdbc:mysql://%s:%s/%s?rewriteBatchedStatements=true&useSSL=false";
 
     private String tenant;
     private int rpcPort;
@@ -18,21 +17,13 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
     public OceanbaseConfig() {
         setEscapeChar('`');
         setDbType("oceanbase");
-        setJdbcDriver("com.mysql.jdbc.Driver");
+        setJdbcDriver("com.oceanbase.jdbc.Driver");
     }
 
     public OceanbaseConfig load(Map<String, Object> map) {
         OceanbaseConfig config = (OceanbaseConfig) super.load(map);
         setSchema(getDatabase());
         return config;
-    }
-
-    public String getDatabaseUrl() {
-        String url = this.databaseUrlPattern;
-        if (StringUtils.isNotBlank(getExtParams())) {
-            url += "?" + getExtParams();
-        }
-        return String.format(url, this.getHost(), this.getPort(), this.getDatabase());
     }
 
     public String getTenant() {
