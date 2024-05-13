@@ -5,6 +5,7 @@ import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.DateTime;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.Projection;
 import io.tapdata.pdk.apis.entity.QueryOperator;
@@ -151,6 +152,41 @@ public class CommonSqlMaker {
             }
             builder.append(filter.getOperators().stream().map(v -> queryOperatorToString(v, String.valueOf(escapeChar))).collect(Collectors.joining(" AND "))).append(' ');
         }
+    }
+
+    public  String buildCommandWhereSql(TapAdvanceFilter filter, String defaultWhereSql) {
+        if (null == defaultWhereSql) {
+            defaultWhereSql = "";
+        }
+        if (null == filter) {
+            return defaultWhereSql;
+        }
+        DataMap match = filter.getMatch();
+        if (null == match || match.isEmpty()) {
+            return defaultWhereSql;
+        }
+        Object customCommandObj = match.get("customCommand");
+        Object params = getMap(customCommandObj, "params");
+        if (null == params) {
+            return defaultWhereSql;
+        }
+        Object sql = getMap(params, "sql");
+        if (null == sql) {
+            return defaultWhereSql;
+        }
+        String whereSql = String.valueOf(sql);
+        if (whereSql.trim().toUpperCase().startsWith("WHERE ")) {
+            return whereSql;
+        }
+        return "where " + whereSql;
+    }
+
+    public static Object getMap(Object map, String key) {
+        if (map instanceof Map) {
+            Map<String, Object> m = (Map<String, Object>)map;
+            return m.get(key);
+        }
+        return null;
     }
 
     public String queryOperatorToString(QueryOperator operator, String quote) {

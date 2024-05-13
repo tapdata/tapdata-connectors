@@ -38,6 +38,7 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
+import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import io.tapdata.pdk.apis.functions.connector.source.GetReadPartitionOptions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import io.tapdata.pdk.apis.partition.FieldMinMaxValue;
@@ -172,6 +173,8 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportTransactionBeginFunction(this::begin);
         connectorFunctions.supportTransactionCommitFunction(this::commit);
         connectorFunctions.supportTransactionRollbackFunction(this::rollback);
+        connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
+
     }
 
     private void rollback(TapConnectorContext tapConnectorContext) {
@@ -550,6 +553,52 @@ public class MysqlConnector extends CommonDbConnector {
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("TABLE_ROWS")));
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("DATA_LENGTH")));
         return tableInfo;
+    }
+
+    private String buildHashSql(TapAdvanceFilter filter, TapTable table) {
+        StringBuilder sql = new StringBuilder("select sum(mod(cast(conv(substring(md5(CONCAT_WS('',");
+        LinkedHashMap<String, TapField> nameFieldMap = table.getNameFieldMap();
+        Iterator<Map.Entry<String, TapField>> entryIterator = nameFieldMap.entrySet().iterator();
+        while (entryIterator.hasNext()) {
+            Map.Entry<String, TapField> next = entryIterator.next();
+            TapField field = nameFieldMap.get(next.getKey());
+            byte type = next.getValue().getTapType().getType();
+            String fieldName = next.getKey();
+            if (type == TapType.TYPE_NUMBER && (field.getDataType().toLowerCase().contains("double") ||
+                    field.getDataType().toLowerCase().contains("decimal") ||
+                    field.getDataType().contains("float"))) {
+                sql.append("TRUNCATE(" + "`" + fieldName + "`" + ",0)").append(",");
+                continue;
+            }
+
+            if(type == TapType.TYPE_BOOLEAN && field.getDataType().toLowerCase().contains("bit")){
+                sql.append("CAST(" + "`" + fieldName + "`" + " AS unsigned)").append(",");
+                continue;
+            }
+
+            switch (type) {
+                case TapType.TYPE_DATETIME:
+                    sql.append("round(UNIX_TIMESTAMP( CAST(").append("`" + fieldName + "`").append(" as char(19)) )),");
+                    break;
+                case TapType.TYPE_BINARY:
+                    break;
+                default:
+                    sql.append("`" + fieldName + "`").append(",");
+                    break;
+            }
+        }
+        sql = new StringBuilder(sql.substring(0, sql.length() - 1));
+        sql.append(")), 1, 16), 16, 10) as unsigned), 64)) as md5 from ").append(table.getName() +" ");
+        sql.append(commonSqlMaker.buildCommandWhereSql(filter,""));
+        return sql.toString();
+    }
+
+    protected void queryTableHash(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<TapHashResult<String>> consumer) throws Throwable {
+        String sql = buildHashSql(filter, table);
+        jdbcContext.query(sql, resultSet -> {
+            if (isAlive() && resultSet.next()) {
+                consumer.accept(TapHashResult.create().withHash(resultSet.getString(1)));
+            }});
     }
 
 }
