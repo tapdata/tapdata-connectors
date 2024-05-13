@@ -2,6 +2,7 @@ package io.tapdata.connector.mysql;
 
 import io.debezium.config.Configuration;
 import io.debezium.connector.mysql.MySqlConnectorConfig;
+import io.debezium.type.TapIllegalDate;
 import io.debezium.embedded.EmbeddedEngine;
 import io.debezium.engine.DebeziumEngine;
 import io.tapdata.common.ddl.DDLFactory;
@@ -507,7 +508,7 @@ public class MysqlReader implements Closeable {
         }
     }
 
-    private MysqlStreamEvent wrapDML(SourceRecord record) {
+    protected MysqlStreamEvent wrapDML(SourceRecord record) {
         TapRecordEvent tapRecordEvent = null;
         MysqlStreamEvent mysqlStreamEvent;
         Schema valueSchema = record.valueSchema();
@@ -541,6 +542,23 @@ public class MysqlReader implements Closeable {
             tapLogger.debug("Unrecognized operation type: " + op + ", will skip it, record: " + record);
             return null;
         }
+        Map<String, TapIllegalDate> invalidMap = new HashMap<>();
+        if (null != value.schema().field("invalid")){
+            Struct invalid = value.getStruct("invalid");
+            for (Field field : invalid.schema().fields()) {
+                byte[] bytes = invalid.getBytes(field.name());
+                try {
+                    Object o = TapIllegalDate.byteToIllegalDate(bytes);
+                    if (o instanceof TapIllegalDate){
+                        invalidMap.put(field.name(),(TapIllegalDate) o);
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException("byte to tap illegal date error",e);
+                } catch (ClassNotFoundException e) {
+                    throw new RuntimeException("byte to tap illegal date error",e);
+                }
+            }
+        }
         Map<String, Object> before = null;
         Map<String, Object> after = null;
         switch (mysqlOpType) {
@@ -549,6 +567,11 @@ public class MysqlReader implements Closeable {
                 if (null == valueSchema.field("after"))
                     throw new RuntimeException("Found insert record does not have after: " + record);
                 after = struct2Map(value.getStruct("after"), table);
+                if (!EmptyKit.isEmpty(invalidMap)){
+                    after.putAll(invalidMap);
+                    tapRecordEvent.setContainsIllegalDate(true);
+                    tapRecordEvent.setIllegalDateFiledName(invalidMap.keySet().stream().collect(Collectors.toList()));
+                }
                 ((TapInsertRecordEvent) tapRecordEvent).setAfter(after);
                 break;
             case UPDATE:
@@ -560,6 +583,11 @@ public class MysqlReader implements Closeable {
                 if (null == valueSchema.field("after"))
                     throw new RuntimeException("Found update record does not have after: " + record);
                 after = struct2Map(value.getStruct("after"), table);
+                if (!EmptyKit.isEmpty(invalidMap)){
+                    after.putAll(invalidMap);
+                    tapRecordEvent.setContainsIllegalDate(true);
+                    tapRecordEvent.setIllegalDateFiledName(invalidMap.keySet().stream().collect(Collectors.toList()));
+                }
                 ((TapUpdateRecordEvent) tapRecordEvent).setAfter(after);
                 break;
             case DELETE:
@@ -640,7 +668,7 @@ public class MysqlReader implements Closeable {
         }
     }
 
-    private Map<String, Object> struct2Map(Struct struct, String table) {
+    protected Map<String, Object> struct2Map(Struct struct, String table) {
         if (null == struct) return null;
         Map<String, Object> result = new HashMap<>();
         Schema schema = struct.schema();
@@ -654,6 +682,9 @@ public class MysqlReader implements Closeable {
                     continue;
                 } else if (field.schema().type() == Schema.Type.INT32 && value instanceof Integer && Integer.MIN_VALUE == ((Integer) value)) {
                     result.put(fieldName, null);
+                    continue;
+                } else if (field.schema().name().equals("illegalDate")) {
+                    result.put(fieldName, value);
                     continue;
                 }
             }
