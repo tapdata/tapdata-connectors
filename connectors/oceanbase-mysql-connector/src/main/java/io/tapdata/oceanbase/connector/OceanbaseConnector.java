@@ -45,7 +45,6 @@ import java.util.function.Consumer;
 public class OceanbaseConnector extends MysqlConnector {
 
     private String connectionTimezone;
-    private OceanbaseConfig oceanbaseConfig;
 
     /**
      * The method invocation life circle is below,
@@ -63,10 +62,10 @@ public class OceanbaseConnector extends MysqlConnector {
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
         //Assume below tests are successfully, below tests are recommended, but not required.
         //Connection test
-        oceanbaseConfig = new OceanbaseConfig().load(connectionContext.getConnectionConfig());
+        mysqlConfig = new OceanbaseConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         try (
-                OceanbaseTest oceanbaseTest = new OceanbaseTest(oceanbaseConfig, consumer)
+                OceanbaseTest oceanbaseTest = new OceanbaseTest((OceanbaseConfig) mysqlConfig, consumer)
         ) {
             oceanbaseTest.testOneByOne();
             return connectionOptions;
@@ -151,9 +150,9 @@ public class OceanbaseConnector extends MysqlConnector {
 
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
-        oceanbaseConfig = new OceanbaseConfig().load(tapConnectionContext.getConnectionConfig());
-        mysqlJdbcContext = new MysqlJdbcContextV2(oceanbaseConfig);
-        commonDbConfig = oceanbaseConfig;
+        mysqlConfig = new OceanbaseConfig().load(tapConnectionContext.getConnectionConfig());
+        mysqlJdbcContext = new MysqlJdbcContextV2(mysqlConfig);
+        commonDbConfig = mysqlConfig;
         jdbcContext = mysqlJdbcContext;
         tapLogger = tapConnectionContext.getLog();
         commonSqlMaker = new CommonSqlMaker('`');
@@ -197,7 +196,7 @@ public class OceanbaseConnector extends MysqlConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        OceanbaseReader oceanbaseReader = new OceanbaseReader(oceanbaseConfig);
+        OceanbaseReader oceanbaseReader = new OceanbaseReader((OceanbaseConfig) mysqlConfig);
         oceanbaseReader.init(tableList, nodeContext.getTableMap(), offsetState, recordSize, consumer);
         oceanbaseReader.start(this::isAlive);
     }
