@@ -790,8 +790,6 @@ public class KafkaService extends AbstractMqService {
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			tapLogger.error("error occur when await", e);
-		}finally {
-			ErrorKit.ignoreAnyError(customDDLCalculatorQueue::close);
 		}
 	}
 

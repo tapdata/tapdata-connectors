@@ -128,8 +128,12 @@ public class CustomParseUtil {
 		String op = MapUtils.getString(record, "op", "invalid");
 		if (OP_DDL_TYPE.equals(op)) {
 			Integer type = MapUtils.getInteger(record, "type");
-			Function<Map<String, Object>, TapBaseEvent> mapTapBaseEventFunction = HANDLER_MAP_DDL.get(type);
-			return mapTapBaseEventFunction.apply(record);
+			if (HANDLER_MAP_DDL.containsKey(type)) {
+				Function<Map<String, Object>, TapBaseEvent> mapTapBaseEventFunction = HANDLER_MAP_DDL.get(type);
+				return mapTapBaseEventFunction.apply(record);
+			} else {
+				throw new RuntimeException("ddl type not support");
+			}
 		} else {
 			if (HANDLER_MAP_DML.containsKey(op)) {
 				return HANDLER_MAP_DML.get(op).apply(record);
