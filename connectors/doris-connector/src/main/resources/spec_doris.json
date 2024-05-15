@@ -411,7 +411,10 @@
             "add": {
               "type": "void",
               "title": "${prompt}",
-              "x-component": "ArrayItems.Addition"
+              "x-component": "ArrayItems.Addition",
+              "x-component-props": {
+                "defaultValue": { "propKey": "", "propValue": "" }
+              }
             }
           }
         },
