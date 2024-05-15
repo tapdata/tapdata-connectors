@@ -4,6 +4,7 @@ package io.tapdata.mongodb;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.mongodb.batch.ErrorHandler;
 import io.tapdata.mongodb.batch.MongoBatchReader;
 import io.tapdata.mongodb.entity.MongoCdcOffset;
@@ -28,6 +29,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.BiConsumer;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -466,6 +468,15 @@ class MongodbConnectorTest {
             verify(sourceRunner).shutdown();
             Assertions.assertNull(mongodbConnector.sourceRunner);
             Assertions.assertNull(mongodbConnector.sourceRunnerFuture);
+        }
+    }
+    @Nested
+    class OnstartTest{
+        @Test
+        void testOnstartWithEx() throws Throwable {
+            when(connectorContext.getConnectionConfig()).thenReturn(mock(DataMap.class));
+            doCallRealMethod().when(mongodbConnector).onStart(connectorContext);
+            assertThrows(RuntimeException.class, ()->mongodbConnector.onStart(connectorContext));
         }
     }
 }
