@@ -706,7 +706,7 @@ public class MySqlStreamingChangeEventSource implements StreamingChangeEventSour
      */
     protected void handleDelete(Event event) throws InterruptedException {
         handleChange(event, "delete", DeleteRowsEventData.class, x -> taskContext.getSchema().getTableId(x.getTableId()), DeleteRowsEventData::getRows,
-                (tableId, row) -> eventDispatcher.dispatchDataChangeEvent(tableId, new MySqlChangeRecordEmitter(offsetContext, clock, Operation.DELETE, row, null)));
+                (tableId, row) -> eventDispatcher.dispatchDataChangeEvent(tableId, new TapMySqlChangeRecordEmitter(offsetContext, clock, Operation.DELETE, row, null)));
     }
 
     private <T extends EventData, U> void handleChange(Event event, String changeType, Class<T> eventDataClass, TableIdProvider<T> tableIdProvider,

@@ -7,6 +7,7 @@ package io.debezium.relational;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import io.debezium.data.Envelope;
 import org.apache.kafka.connect.data.Schema;
@@ -64,8 +65,11 @@ public abstract class RelationalChangeRecordEmitter extends AbstractChangeRecord
         }
     }
 
-    protected Map<Boolean, Struct> illegalValueFromMap(TableSchema tableSchema){
-        return null;
+    protected Map<Boolean, Struct> beforeIllegalValueFromMap(TableSchema tableSchema){
+        throw new UnsupportedOperationException();
+    }
+    protected Map<Boolean, Struct> afterIllegalValueFromMap(TableSchema tableSchema){
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -74,9 +78,9 @@ public abstract class RelationalChangeRecordEmitter extends AbstractChangeRecord
         Object[] newColumnValues = getNewColumnValues();
         Struct newKey = tableSchema.keyFromColumnData(newColumnValues);
         Struct newValue = tableSchema.valueFromColumnData(newColumnValues);
-        Map<Boolean, Struct> booleanStructMap = illegalValueFromMap(tableSchema);
+        Map<Boolean, Struct> booleanStructMap = afterIllegalValueFromMap(tableSchema);
         Struct invalidValue = booleanStructMap.get(true);
-        Struct envelope = refactorEnvelopIfNeed(tableSchema, invalidValue, null, newValue, "create");
+        Struct envelope = refactorEnvelopIfNeed(tableSchema, null, invalidValue, null, newValue, "create");
 
         if (skipEmptyMessages() && (newColumnValues == null || newColumnValues.length == 0)) {
             // This case can be hit on UPDATE / DELETE when there's no primary key defined while using certain decoders
@@ -108,8 +112,10 @@ public abstract class RelationalChangeRecordEmitter extends AbstractChangeRecord
 
         Struct newValue = tableSchema.valueFromColumnData(newColumnValues);
         Struct oldValue = tableSchema.valueFromColumnData(oldColumnValues);
-        Map<Boolean, Struct> booleanStructMap = illegalValueFromMap(tableSchema);
-        Struct invalidValue = booleanStructMap.get(true);
+        Map<Boolean, Struct> beforeStructMap = beforeIllegalValueFromMap(tableSchema);
+        Map<Boolean, Struct> afterStructMap = afterIllegalValueFromMap(tableSchema);
+        Struct beforeInvalidValue = beforeStructMap.get(true);
+        Struct afterInvalidValue = afterStructMap.get(true);
 
         if (skipEmptyMessages() && (newColumnValues == null || newColumnValues.length == 0)) {
             logger.warn("no new values found for table '{}' from update message at '{}'; skipping record", tableSchema, getOffset().getSourceInfo());
@@ -118,7 +124,7 @@ public abstract class RelationalChangeRecordEmitter extends AbstractChangeRecord
         // some configurations does not provide old values in case of updates
         // in this case we handle all updates as regular ones
         if (oldKey == null || Objects.equals(oldKey, newKey)) {
-            Struct envelope = refactorEnvelopIfNeed(tableSchema, invalidValue, oldValue, newValue, "update");
+            Struct envelope = refactorEnvelopIfNeed(tableSchema, beforeInvalidValue, afterInvalidValue, oldValue, newValue, "update");
             receiver.changeRecord(tableSchema, Operation.UPDATE, newKey, envelope, getOffset(), null);
         }
         // PK update -> emit as delete and re-insert with new key
@@ -126,28 +132,48 @@ public abstract class RelationalChangeRecordEmitter extends AbstractChangeRecord
             ConnectHeaders headers = new ConnectHeaders();
             headers.add(PK_UPDATE_NEWKEY_FIELD, newKey, tableSchema.keySchema());
 
-            Struct envelope = refactorEnvelopIfNeed(tableSchema, invalidValue, oldValue, newValue, "delete");
+            Struct envelope = refactorEnvelopIfNeed(tableSchema, beforeInvalidValue, afterInvalidValue, oldValue, newValue, "delete");
             receiver.changeRecord(tableSchema, Operation.DELETE, oldKey, envelope, getOffset(), headers);
 
             headers = new ConnectHeaders();
             headers.add(PK_UPDATE_OLDKEY_FIELD, oldKey, tableSchema.keySchema());
 
-            envelope = refactorEnvelopIfNeed(tableSchema, invalidValue, oldValue, newValue, "create");
+            envelope = refactorEnvelopIfNeed(tableSchema, beforeInvalidValue, afterInvalidValue, oldValue, newValue, "create");
             receiver.changeRecord(tableSchema, Operation.CREATE, newKey, envelope, getOffset(), headers);
         }
     }
 
-    private Struct refactorEnvelopIfNeed(TableSchema tableSchema, Struct invalidValue, Struct oldValue, Struct newValue, String op) {
+    private Struct refactorEnvelopIfNeed(TableSchema tableSchema, Struct beforeInvalidValue, Struct afterInvalidValue, Struct oldValue, Struct newValue, String op) {
         Struct envelope;
-        if (null != invalidValue){
+        if (null != beforeInvalidValue || null != afterInvalidValue){
             Schema schema = tableSchema.getEnvelopeSchema().schema();
-            Envelope envelopeValid = Envelope.defineSchema()
-                    .withName(schema.name())
-                    .withSchema(schema.field(Envelope.FieldName.BEFORE).schema(),"before")
-                    .withSchema(schema.field(Envelope.FieldName.AFTER).schema(),"after")
-                    .withSource(schema.field(Envelope.FieldName.SOURCE).schema())
-                    .withSchema(invalidValue.schema(),"invalid")
-                    .build();
+            Envelope envelopeValid;
+            if (beforeInvalidValue == null){
+                 envelopeValid = Envelope.defineSchema()
+                        .withName(schema.name())
+                        .withSchema(schema.field(Envelope.FieldName.BEFORE).schema(),"before")
+                        .withSchema(schema.field(Envelope.FieldName.AFTER).schema(),"after")
+                        .withSource(schema.field(Envelope.FieldName.SOURCE).schema())
+                        .withSchema(afterInvalidValue.schema(),"afterInvalid")
+                        .build();
+            }else if (afterInvalidValue == null){
+                 envelopeValid = Envelope.defineSchema()
+                        .withName(schema.name())
+                        .withSchema(schema.field(Envelope.FieldName.BEFORE).schema(),"before")
+                        .withSchema(schema.field(Envelope.FieldName.AFTER).schema(),"after")
+                        .withSource(schema.field(Envelope.FieldName.SOURCE).schema())
+                        .withSchema(beforeInvalidValue.schema(),"beforeInvalid")
+                        .build();
+            }else {
+                envelopeValid = Envelope.defineSchema()
+                        .withName(schema.name())
+                        .withSchema(schema.field(Envelope.FieldName.BEFORE).schema(),"before")
+                        .withSchema(schema.field(Envelope.FieldName.AFTER).schema(),"after")
+                        .withSource(schema.field(Envelope.FieldName.SOURCE).schema())
+                        .withSchema(beforeInvalidValue.schema(),"beforeInvalid")
+                        .withSchema(afterInvalidValue.schema(),"afterInvalid")
+                        .build();
+            }
             switch (op){
                 case "create":
                     envelope = envelopeValid.create(newValue, getOffset().getSourceInfo(), getClock().currentTimeAsInstant());
@@ -162,7 +188,11 @@ public abstract class RelationalChangeRecordEmitter extends AbstractChangeRecord
                     envelope = envelopeValid.create(newValue, getOffset().getSourceInfo(), getClock().currentTimeAsInstant());
                     break;
             }
-            envelope.put("invalid", invalidValue);
+            if (beforeInvalidValue != null){
+                envelope.put("beforeInvalid", beforeInvalidValue);
+            }if (afterInvalidValue != null){
+                envelope.put("afterInvalid", afterInvalidValue);
+            }
         }else {
             switch (op){
                 case "create":
@@ -186,12 +216,15 @@ public abstract class RelationalChangeRecordEmitter extends AbstractChangeRecord
         Struct oldKey = tableSchema.keyFromColumnData(oldColumnValues);
         Struct oldValue = tableSchema.valueFromColumnData(oldColumnValues);
 
+        Map<Boolean, Struct> afterStructMap = afterIllegalValueFromMap(tableSchema);
+        Struct afterInvalidValue = afterStructMap.get(true);
+
         if (skipEmptyMessages() && (oldColumnValues == null || oldColumnValues.length == 0)) {
             logger.warn("no old values found for table '{}' from delete message at '{}'; skipping record", tableSchema, getOffset().getSourceInfo());
             return;
         }
 
-        Struct envelope = tableSchema.getEnvelopeSchema().delete(oldValue, getOffset().getSourceInfo(), getClock().currentTimeAsInstant());
+        Struct envelope = refactorEnvelopIfNeed(tableSchema, null, afterInvalidValue, oldValue, null, "delete");
         receiver.changeRecord(tableSchema, Operation.DELETE, oldKey, envelope, getOffset(), null);
     }
 

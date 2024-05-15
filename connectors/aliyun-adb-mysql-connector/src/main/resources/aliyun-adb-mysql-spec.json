@@ -26,6 +26,9 @@
       },
       {
         "id": "api_server_supported"
+      },
+      {
+        "id": "illegal_date_acceptable"
       }
     ],
     "connection": {

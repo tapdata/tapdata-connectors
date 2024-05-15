@@ -17,7 +17,10 @@
 	  {
 		"id": "dml_update_policy",
 		"alternatives": ["ignore_on_nonexists", "insert_on_nonexists"]
-	  }
+	  },
+		{
+			"id": "illegal_date_acceptable"
+		}
 	],
     "supportDDL": {
       "events": [
