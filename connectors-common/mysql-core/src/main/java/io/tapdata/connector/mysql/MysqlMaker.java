@@ -297,7 +297,7 @@ public class MysqlMaker implements SqlMaker {
         if ((null != tapField.getNullable() && !tapField.getNullable()) || (null != tapField.getPrimaryKeyPos() && tapField.getPrimaryKeyPos() > 0)) {
             fieldSql += " NOT NULL";
         } else {
-            fieldSql += " NULL";
+            fieldSql += " ";
         }
 
         // default value
