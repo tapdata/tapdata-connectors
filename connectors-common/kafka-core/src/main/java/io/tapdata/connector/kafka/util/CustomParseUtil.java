@@ -132,13 +132,13 @@ public class CustomParseUtil {
 				Function<Map<String, Object>, TapBaseEvent> mapTapBaseEventFunction = HANDLER_MAP_DDL.get(type);
 				return mapTapBaseEventFunction.apply(record);
 			} else {
-				throw new RuntimeException("ddl type not support");
+				throw new RuntimeException("ddl type" + type + " is not support");
 			}
 		} else {
 			if (HANDLER_MAP_DML.containsKey(op)) {
 				return HANDLER_MAP_DML.get(op).apply(record);
 			} else {
-				throw new RuntimeException("op type not support");
+				throw new RuntimeException("op type" + op + "is not support");
 			}
 		}
 	}
