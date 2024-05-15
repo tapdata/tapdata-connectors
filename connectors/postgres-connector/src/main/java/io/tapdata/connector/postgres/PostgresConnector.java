@@ -18,6 +18,8 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.type.TapNumber;
+import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
@@ -32,11 +34,10 @@ import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import io.tapdata.pdk.apis.entity.ConnectionOptions;
-import io.tapdata.pdk.apis.entity.TestItem;
-import io.tapdata.pdk.apis.entity.WriteListResult;
+import io.tapdata.pdk.apis.entity.*;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
+import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import org.postgresql.geometric.*;
 import org.postgresql.jdbc.PgArray;
 import org.postgresql.jdbc.PgSQLXML;
@@ -182,6 +183,9 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
         connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
+        connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
+
+
     }
 
     //clear resource outer and jdbc context
@@ -399,6 +403,71 @@ public class PostgresConnector extends CommonDbConnector {
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("size")));
         tableInfo.setStorageSize(new BigDecimal(dataMap.getString("rowcount")).longValue());
         return tableInfo;
+    }
+
+
+    private String buildHashSql(TapAdvanceFilter filter, TapTable table) {
+        StringBuilder sql = new StringBuilder("select SUM(MOD(" +
+                " (select n.md5 from (" +
+                "  select case when t.num < 0 then t.num + 18446744073709551616 when t.num > 0 then t.num end as md5" +
+                "  from (select (cast(");
+        sql.append("CAST(( 'x' || SUBSTRING(MD5(CONCAT_WS('', ");
+        LinkedHashMap<String, TapField> nameFieldMap = table.getNameFieldMap();
+        java.util.Iterator<Map.Entry<String, TapField>> entryIterator = nameFieldMap.entrySet().iterator();
+        while (entryIterator.hasNext()) {
+            Map.Entry<String, TapField> next = entryIterator.next();
+            String fieldName = next.getKey();
+            TapField field = nameFieldMap.get(next.getKey());
+            byte type = next.getValue().getTapType().getType();
+            if (type == TapType.TYPE_NUMBER && (field.getDataType().toLowerCase().contains("real") ||
+                    field.getDataType().toLowerCase().contains("double") ||
+                    field.getDataType().toLowerCase().contains("numeric") ||
+                    field.getDataType().toLowerCase().contains("float"))) {
+                sql.append(String.format("trunc(\"%s\")", fieldName)).append(",");
+                continue;
+            }
+
+            if (type == TapType.TYPE_STRING && field.getDataType().toLowerCase().contains("character(")) {
+                 sql.append(String.format("TRIM( \"%s\" )", fieldName)).append(",");
+                 continue;
+            }
+
+            if(type == TapType.TYPE_BOOLEAN && field.getDataType().toLowerCase().contains("boolean")){
+                sql.append(String.format("CAST( \"%s\" as int )", fieldName)).append(",");
+                continue;
+            }
+
+            if(type == TapType.TYPE_TIME && field.getDataType().toLowerCase().contains("with time zone")){
+                sql.append(String.format("SUBSTRING(cast(\"%s\" as varchar) FROM 1 FOR 8)", fieldName)).append(",");
+                continue;
+            }
+
+            switch (type) {
+                case TapType.TYPE_DATETIME:
+                    sql.append(String.format("EXTRACT(epoch FROM CAST(date_trunc('second',\"%s\" ) AS TIMESTAMP))", fieldName)).append(",");
+                    break;
+                case TapType.TYPE_BINARY:
+                    break;
+                default:
+                    sql.append(String.format("\"%s\"", fieldName)).append(",");
+                    break;
+            }
+        }
+        sql = new StringBuilder(sql.substring(0, sql.length() - 1));
+        sql.append(" )) FROM 1 FOR 16)) AS bit(64)) as BIGINT)) AS num " +
+                "  FROM ").append("\"" + table.getName() + "\"  ");
+        sql.append(commonSqlMaker.buildCommandWhereSql(filter,""));
+        sql.append(") t) n),64))");
+        return sql.toString();
+    }
+
+    protected void queryTableHash(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<TapHashResult<String>> consumer) throws SQLException {
+        String sql = buildHashSql(filter, table);
+        jdbcContext.query(sql, resultSet -> {
+            if (isAlive() && resultSet.next()) {
+                consumer.accept(TapHashResult.create().withHash(resultSet.getString(1)));
+            }
+        });
     }
 
 }
