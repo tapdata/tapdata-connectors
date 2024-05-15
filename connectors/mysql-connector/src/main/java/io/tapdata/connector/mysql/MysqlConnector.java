@@ -17,6 +17,7 @@ import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.codec.ToTapValueCodec;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.*;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
@@ -160,13 +161,13 @@ public class MysqlConnector extends CommonDbConnector {
                     originDate = ((TapIllegalDate) value).getOriginDate();
                 }
                 if (tapType instanceof TapDate){
-                    return new TapDateValue(new DateTime(originDate, 2));
+                    return new TapDateValue(new DateTime(originDate, DateTime.DATE_TYPE));
                 } else if (tapType instanceof TapTime){
-                    return new TapTimeValue();
+                    return new TapTimeValue(new DateTime(originDate, DateTime.TIME_TYPE));
                 } else if (tapType instanceof TapYear){
-                    return new TapYearValue(new DateTime(originDate, 2));
+                    return new TapYearValue(new DateTime(originDate, DateTime.YEAR_TYPE));
                 } else {
-                    return new TapDateTimeValue(new DateTime(originDate, 6));
+                    return new TapDateTimeValue(new DateTime(originDate, DateTime.DATETIME_TYPE));
                 }
             }
         });
@@ -433,9 +434,15 @@ public class MysqlConnector extends CommonDbConnector {
                 .write(tapRecordEvents, consumer, this::isAlive);
     }
 
-
-    private Map<String, Object> filterTimeForMysql(ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet) throws SQLException {
+    private Map<String, Object> filterTimeForMysql(
+            ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet) throws SQLException {
+        return filterTimeForMysql(resultSet, metaData, dateTypeSet, null, null);
+    }
+    private Map<String, Object> filterTimeForMysql(
+            ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet, TapRecordEvent recordEvent,
+            IllegalDateConsumer illegalDateConsumer) throws SQLException {
         Map<String, Object> data = new HashMap<>();
+        List<String> illegalDateFieldName = new ArrayList<>();
         for (int i = 0; i < metaData.getColumnCount(); i++) {
             String columnName = metaData.getColumnName(i + 1);
             try {
@@ -463,7 +470,11 @@ public class MysqlConnector extends CommonDbConnector {
                     String valueS = value.toString();
                     // 如果是0000开头的时间，或者包含 -00, 就认为是null
                     if (valueS.startsWith("0000") || valueS.contains("-00")) {
-//                        value = null;
+                        if (null == illegalDateConsumer || null == recordEvent){
+                            value = null;
+                        }else {
+                            value = buildIllegalDate(recordEvent, illegalDateConsumer, valueS, illegalDateFieldName, columnName);
+                        }
                     }
                 }
                 data.put(columnName, value);
@@ -471,7 +482,34 @@ public class MysqlConnector extends CommonDbConnector {
                 throw new RuntimeException("Read column value failed, column name: " + columnName + ", data: " + data + "; Error: " + e.getMessage(), e);
             }
         }
-        return data;
+        if (null != illegalDateConsumer && null != recordEvent && !EmptyKit.isEmpty(illegalDateFieldName)) {
+            illegalDateConsumer.buildIllegalDateFieldName(recordEvent, illegalDateFieldName);
+        }
+            return data;
+    }
+
+    private static Object buildIllegalDate(TapRecordEvent recordEvent, IllegalDateConsumer illegalDateConsumer,
+                                           String valueS, List<String> illegalDateFieldName, String columnName) {
+        Object value;
+        TapIllegalDate date = new TapIllegalDate();
+        StringBuilder sb = new StringBuilder();
+        String str = valueS.replaceAll("T", "-")
+                .replaceAll(" ", "-")
+                .replaceAll(":", "-")
+                .replaceAll("\\.", "-")
+                .replaceAll("Z", "");
+        sb.append(str);
+        date.setOriginDate(sb.toString());
+        date.setOriginDateType(Integer.class);
+        value =  date;
+        illegalDateConsumer.containsIllegalDate(recordEvent,true);
+        illegalDateFieldName.add(columnName);
+        return value;
+    }
+
+    interface IllegalDateConsumer {
+        void containsIllegalDate(TapRecordEvent event, boolean containsIllegalDate);
+        void buildIllegalDateFieldName(TapRecordEvent event, List<String> illegalDateFieldName);
     }
 
     private void batchReadV2(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
@@ -488,7 +526,20 @@ public class MysqlConnector extends CommonDbConnector {
             Set<String> dateTypeSet = dateFields(tapTable);
             ResultSetMetaData metaData = resultSet.getMetaData();
             while (isAlive() && resultSet.next()) {
-                tapEvents.add(insertRecordEvent(filterTimeForMysql(resultSet, metaData, dateTypeSet), tapTable.getId()));
+                TapInsertRecordEvent tapInsertRecordEvent = new TapInsertRecordEvent().init();
+                Map<String, Object> data = filterTimeForMysql(resultSet, metaData, dateTypeSet, tapInsertRecordEvent, new IllegalDateConsumer() {
+                    @Override
+                    public void containsIllegalDate(TapRecordEvent event, boolean containsIllegalDate) {
+                        event.setContainsIllegalDate(containsIllegalDate);
+                    }
+
+                    @Override
+                    public void buildIllegalDateFieldName(TapRecordEvent event, List<String> illegalDateFieldName) {
+                        ((TapInsertRecordEvent)event).setAfterIllegalDateFieldName(illegalDateFieldName);
+                    }
+                });
+                tapInsertRecordEvent.after(data).table(tapTable.getId());
+                tapEvents.add(tapInsertRecordEvent);
                 if (tapEvents.size() == eventBatchSize) {
                     eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
                     tapEvents = list();

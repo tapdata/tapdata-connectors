@@ -18,51 +18,52 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class TapMySqlChangeRecordEmitter extends MySqlChangeRecordEmitter{
-    private Map<TapIllegalDate, Integer> illegalDateIntegerMap;
+    private Map<TapIllegalDate, Integer> beforeIllegalDateIntegerMap;
+    private Map<TapIllegalDate, Integer> afterIllegalDateIntegerMap;
     public TapMySqlChangeRecordEmitter(OffsetContext offset, Clock clock, Envelope.Operation operation, Serializable[] before, Serializable[] after) {
         super(offset, clock, operation, before, after);
 
-        this.illegalDateIntegerMap = new HashMap<>();
+        this.beforeIllegalDateIntegerMap = new HashMap<>();
+        this.afterIllegalDateIntegerMap = new HashMap<>();
         if (null != before) {
             int beforeIndex = 0;
-            for (Serializable serializable : before) {
-                if (serializable instanceof TapIllegalDate){
-                    if (Integer.class == ((TapIllegalDate) serializable).getOriginDateType()){
-                        serializable = Integer.MIN_VALUE;
-                    }else if (String.class == ((TapIllegalDate) serializable).getOriginDateType()){
-                        serializable = new String();
-                    }else {
-                        serializable = Long.MIN_VALUE;
-                    }
-                    before[beforeIndex] = serializable;
-                }
-                beforeIndex++;
-            }
+            buildIllegalMap(before, beforeIndex, beforeIllegalDateIntegerMap);
         }
         if (null != after){
             int afterIndex = 0;
-            for (Serializable serializable : after) {
-                if (serializable instanceof TapIllegalDate){
-                    illegalDateIntegerMap.put((TapIllegalDate) serializable, afterIndex);
-                    if ("integer".equals(((TapIllegalDate) serializable).getOriginDateType())){
-                        serializable = Integer.MIN_VALUE;
-                    }else {
-                        serializable = Long.MIN_VALUE;
-                    }
-                    after[afterIndex] = serializable;
-                }
-                afterIndex++;
-            }
+            buildIllegalMap(after, afterIndex, afterIllegalDateIntegerMap);
         }
     }
 
-    public Map<TapIllegalDate, Integer> getIllegalDateIntegerMap() {
-        return illegalDateIntegerMap;
+    private void buildIllegalMap(Serializable[] serializables, int beforeIndex, Map<TapIllegalDate, Integer> illegalDateIntegerMap) {
+        for (Serializable serializable : serializables) {
+            if (serializable instanceof TapIllegalDate){
+                illegalDateIntegerMap.put((TapIllegalDate) serializable, beforeIndex);
+                if (Integer.class == ((TapIllegalDate) serializable).getOriginDateType()){
+                    serializable = Integer.MIN_VALUE;
+                }else if (String.class == ((TapIllegalDate) serializable).getOriginDateType()){
+                    serializable = new String();
+                }else {
+                    serializable = Long.MIN_VALUE;
+                }
+                serializables[beforeIndex] = serializable;
+            }
+            beforeIndex++;
+        }
     }
-    private Map<TapIllegalDate, Integer> illegalDateSchemaMap = new HashMap<>();
+
+
 
     @Override
-    protected Map<Boolean,Struct> illegalValueFromMap(TableSchema tableSchema) {
+    protected Map<Boolean,Struct> beforeIllegalValueFromMap(TableSchema tableSchema) {
+        return illegalValueFromMap(tableSchema, beforeIllegalDateIntegerMap);
+    }
+    @Override
+    protected Map<Boolean,Struct> afterIllegalValueFromMap(TableSchema tableSchema) {
+        return illegalValueFromMap(tableSchema, afterIllegalDateIntegerMap);
+    }
+    protected Map<Boolean,Struct> illegalValueFromMap(TableSchema tableSchema, Map<TapIllegalDate, Integer> illegalDateIntegerMap) {
+        Map<TapIllegalDate, Integer> illegalDateSchemaMap = new HashMap<>();
         Map<Boolean,Struct> res = new HashMap();
         Schema schema = tableSchema.valueSchema();
         SchemaBuilder schemaBuilder = SchemaBuilder.struct();
