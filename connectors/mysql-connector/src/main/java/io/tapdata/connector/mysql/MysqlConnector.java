@@ -593,7 +593,7 @@ public class MysqlConnector extends CommonDbConnector {
         return sql.toString();
     }
 
-    protected void queryTableHash(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<TapHashResult<String>> consumer) throws Throwable {
+    protected void queryTableHash(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<TapHashResult<String>> consumer) throws SQLException {
         String sql = buildHashSql(filter, table);
         jdbcContext.query(sql, resultSet -> {
             if (isAlive() && resultSet.next()) {
