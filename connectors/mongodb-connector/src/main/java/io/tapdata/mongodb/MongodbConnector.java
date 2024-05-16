@@ -1128,6 +1128,7 @@ public class MongodbConnector extends ConnectorBase {
 
 	public void onStart(TapConnectionContext connectionContext) throws Throwable {
 		MongodbUtil.initMongoDBConfig(connectionContext);
+		exceptionCollector = new MongodbExceptionCollector();
 		final DataMap connectionConfig = connectionContext.getConnectionConfig();
 		if (MapUtils.isEmpty(connectionConfig)) {
 			throw new RuntimeException("connection config cannot be empty");
@@ -1146,7 +1147,6 @@ public class MongodbConnector extends ConnectorBase {
 				throw new RuntimeException(String.format("create mongodb connection failed %s", e.getMessage()), e);
 			}
 		}
-		exceptionCollector = new MongodbExceptionCollector();
 		mongodbExecuteCommandFunction.setLog(connectionContext.getLog());
 	}
 
