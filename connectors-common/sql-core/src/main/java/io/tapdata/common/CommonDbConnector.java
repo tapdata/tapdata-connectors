@@ -478,7 +478,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return sb.toString();
     }
 
-    private String getCreateTableSql(TapTable tapTable, Boolean commentInField) {
+    protected String getCreateTableSql(TapTable tapTable, Boolean commentInField) {
         char escapeChar = commonDbConfig.getEscapeChar();
         StringBuilder sb = new StringBuilder("create table ");
         sb.append(getSchemaAndTable(tapTable.getId())).append('(').append(commonSqlMaker.buildColumnDefinition(tapTable, commentInField));

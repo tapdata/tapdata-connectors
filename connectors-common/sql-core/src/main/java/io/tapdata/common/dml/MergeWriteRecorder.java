@@ -43,19 +43,19 @@ public class MergeWriteRecorder extends NormalWriteRecorder {
         int pos = 1;
         if (!containsNull) {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+                setObject(pos++, after, key);
             }
         } else {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+                setObject(pos++, after, key);
+                setObject(pos++, after, key);
             }
         }
         for (String key : allColumn.stream().filter(col -> !uniqueCondition.contains(col)).collect(Collectors.toList())) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setObject(pos++, after, key);
         }
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setObject(pos++, after, key);
         }
     }
 
@@ -100,16 +100,17 @@ public class MergeWriteRecorder extends NormalWriteRecorder {
         int pos = 1;
         if (!containsNull) {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+                setObject(pos++, after, key);
+
             }
         } else {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+                setObject(pos++, after, key);
+                setObject(pos++, after, key);
             }
         }
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setObject(pos++, after, key);
         }
     }
 
@@ -154,19 +155,19 @@ public class MergeWriteRecorder extends NormalWriteRecorder {
         int pos = 1;
         if (!containsNull) {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
+                setObject(pos++, before, key);
             }
         } else {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
+                setObject(pos++, before, key);
+                setObject(pos++, before, key);
             }
         }
         for (String key : allColumn.stream().filter(col -> !uniqueCondition.contains(col)).collect(Collectors.toList())) {
-            preparedStatement.setObject(pos++, filterValue(all.get(key), columnTypeMap.get(key)));
+            setObject(pos++, all, key);
         }
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(all.get(key), columnTypeMap.get(key)));
+            setObject(pos++, all, key);
         }
     }
 
