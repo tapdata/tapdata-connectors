@@ -16,6 +16,7 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
+import org.mockito.internal.verification.Times;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.ResultSet;
@@ -145,7 +146,17 @@ public class MysqlConnectorTest {
             metaData = mock(ResultSetMetaData.class);
             dateTypeSet = new HashSet<>();
             recordEvent = new TapInsertRecordEvent();
-            illegalDateConsumer = mock(MysqlConnector.IllegalDateConsumer.class);
+//            illegalDateConsumer = mock(MysqlConnector.IllegalDateConsumer.class);
+            illegalDateConsumer = new MysqlConnector.IllegalDateConsumer() {
+                @Override
+                public void containsIllegalDate(TapRecordEvent event, boolean containsIllegalDate) {
+                    event.setContainsIllegalDate(containsIllegalDate);
+                }
+                @Override
+                public void buildIllegalDateFieldName(TapRecordEvent event, List<String> illegalDateFieldName) {
+                    ((TapInsertRecordEvent)event).setAfterIllegalDateFieldName(illegalDateFieldName);
+                }
+            };
         }
         @Test
         @DisplayName("test filterTimeForMysql method for TIME")
@@ -221,20 +232,25 @@ public class MysqlConnectorTest {
             when(metaData.getColumnName(1)).thenReturn("_datetime");
             when(metaData.getColumnTypeName(1)).thenReturn("DATETIME");
             when(resultSet.getObject(1)).thenReturn("2024-00-00 00:00:00");
-            illegalDateConsumer = new MysqlConnector.IllegalDateConsumer() {
-                @Override
-                public void containsIllegalDate(TapRecordEvent event, boolean containsIllegalDate) {
-                    event.setContainsIllegalDate(containsIllegalDate);
-                }
-                @Override
-                public void buildIllegalDateFieldName(TapRecordEvent event, List<String> illegalDateFieldName) {
-                    ((TapInsertRecordEvent)event).setAfterIllegalDateFieldName(illegalDateFieldName);
-                }
-            };
             Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
             assertInstanceOf(TapIllegalDate.class,actual.get("_datetime"));
             assertTrue(recordEvent.getContainsIllegalDate());
             assertEquals("_datetime",((TapInsertRecordEvent)recordEvent).getAfterIllegalDateFieldName().get(0));
+        }
+        @Test
+        @DisplayName("test filterTimeForMysql method for TIMESTAMP when value is illegal and getObject return null")
+        void test7() throws SQLException {
+            mysqlConnector = mock(MysqlConnector.class);
+            dateTypeSet.add("_timestamp");
+            when(metaData.getColumnCount()).thenReturn(1);
+            when(metaData.getColumnName(1)).thenReturn("_timestamp");
+            when(metaData.getColumnTypeName(1)).thenReturn("TIMESTAMP");
+            when(resultSet.getObject(1)).thenReturn(null);
+            when(resultSet.getString(1)).thenReturn("0000-00-00 00:00:00");
+            doCallRealMethod().when(mysqlConnector).filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
+            Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
+            assertInstanceOf(TapIllegalDate.class,actual.get("_timestamp"));
+            assertEquals("_timestamp",((TapInsertRecordEvent)recordEvent).getAfterIllegalDateFieldName().get(0));
         }
     }
 
