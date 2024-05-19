@@ -364,14 +364,25 @@
             {"propKey": "store_row_column", "propValue": "true"}
           ],
           "x-component": "ArrayItems",
-          "x-reactions": {
-            "dependencies": ["$inputs"],
-            "fulfill": {
-              "state": {
-                "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            },
+            {
+              "dependencies": [".uniqueKeyType"],
+              "fulfill": {
+                "state": {
+                  "value":
+                  "{{{Aggregate: [{\"propKey\":\"replication_num\",\"propValue\":\"2\"}],Unique: [{\"propKey\":\"replication_num\",\"propValue\":\"2\"},{\"propKey\":\"enable_unique_key_merge_on_write\",\"propValue\":\"true\"},{\"propKey\":\"store_row_column\",\"propValue\":\"true\"}],Duplicate: [{\"propKey\":\"replication_num\",\"propValue\":\"2\"}]}[$deps[0]]}}"
+                }
               }
             }
-          },
+          ],
           "x-index": 5,
           "items": {
             "type": "object",
