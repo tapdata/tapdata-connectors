@@ -61,7 +61,7 @@ import java.util.function.Consumer;
 public class ZoHoConnector extends ConnectorBase {
 	private static final String TAG = ZoHoConnector.class.getSimpleName();
 
-	private static final int batchReadMaxPageSize = 100;//ZoHo ticket page size 1~100,
+	private int batchReadMaxPageSize = 100;//ZoHo ticket page size 1~100,
 
 
 	@Override
