@@ -3,6 +3,8 @@ package io.tapdata.connector.doris.bean;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.kit.EmptyKit;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -15,12 +17,13 @@ public class DorisConfig extends CommonDbConfig {
     private String dorisHttp;
     private List<String> duplicateKey;
     private List<String> distributedKey;
-    private Integer replicationNum = 1;
     private Integer writeByteBufferCapacity = 10240;
     private String writeFormat = "json";
     private String timezone;
-    private Boolean updateSpecific = false;
     private String uniqueKeyType = "Unique";
+    private int bucket = 2;
+    private List<LinkedHashMap<String, String>> tableProperties = new ArrayList<>();
+    private Boolean jdbcCompletion = false;
 
     //customize
     public DorisConfig() {
@@ -74,14 +77,6 @@ public class DorisConfig extends CommonDbConfig {
         this.distributedKey = distributedKey;
     }
 
-    public Integer getReplicationNum() {
-        return replicationNum;
-    }
-
-    public void setReplicationNum(Integer replicationNum) {
-        this.replicationNum = replicationNum;
-    }
-
     public Integer getWriteByteBufferCapacity() {
         return writeByteBufferCapacity;
     }
@@ -106,20 +101,36 @@ public class DorisConfig extends CommonDbConfig {
         this.timezone = timezone;
     }
 
-    public Boolean getUpdateSpecific() {
-        return updateSpecific;
-    }
-
-    public void setUpdateSpecific(Boolean updateSpecific) {
-        this.updateSpecific = updateSpecific;
-    }
-
     public String getUniqueKeyType() {
         return uniqueKeyType;
     }
 
     public void setUniqueKeyType(String uniqueKeyType) {
         this.uniqueKeyType = uniqueKeyType;
+    }
+
+    public int getBucket() {
+        return bucket;
+    }
+
+    public void setBucket(int bucket) {
+        this.bucket = bucket;
+    }
+
+    public List<LinkedHashMap<String, String>> getTableProperties() {
+        return tableProperties;
+    }
+
+    public void setTableProperties(List<LinkedHashMap<String, String>> tableProperties) {
+        this.tableProperties = tableProperties;
+    }
+
+    public Boolean getJdbcCompletion() {
+        return jdbcCompletion;
+    }
+
+    public void setJdbcCompletion(Boolean jdbcCompletion) {
+        this.jdbcCompletion = jdbcCompletion;
     }
 
     public enum WriteFormat {
