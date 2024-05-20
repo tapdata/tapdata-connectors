@@ -7,8 +7,15 @@ import com.oceanbase.clogproxy.client.listener.RecordListener;
 import com.oceanbase.oms.logmessage.DataMessage;
 import com.oceanbase.oms.logmessage.LogMessage;
 import io.netty.util.BooleanSupplier;
+import io.tapdata.common.ddl.DDLFactory;
+import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
+import io.tapdata.common.ddl.type.DDLParserType;
+import io.tapdata.common.ddl.wrapper.DDLWrapperConfig;
+import io.tapdata.connector.mysql.ddl.ccj.MysqlDDLWrapper;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
+import io.tapdata.entity.event.ddl.TapDDLUnknownEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
@@ -19,6 +26,7 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.oceanbase.bean.OceanbaseConfig;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.util.DateUtil;
+import org.apache.commons.lang3.StringUtils;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -38,6 +46,8 @@ public class OceanbaseReader {
     private Object offsetState;
     private int recordSize;
     private final Map<String, String> dataFormatMap = new HashMap<>();
+    private DDLParserType ddlParserType = DDLParserType.MYSQL_CCJ_SQL_PARSER;
+    private static final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("`");
 
     public OceanbaseReader(OceanbaseConfig oceanbaseConfig) {
         this.oceanbaseConfig = oceanbaseConfig;
@@ -87,6 +97,39 @@ public class OceanbaseReader {
                                 eventList.set(new ArrayList<>());
                             }
                             break;
+                        case "DDL": {
+                            String ddlStr = message.getFieldList().get(0).getValue().toString();
+                            if (StringUtils.isNotBlank(ddlStr)) {
+                                try {
+                                    DDLFactory.ddlToTapDDLEvent(
+                                            ddlParserType,
+                                            ddlStr,
+                                            DDL_WRAPPER_CONFIG,
+                                            tableMap,
+                                            tapDDLEvent -> {
+                                                tapDDLEvent.setTime(System.currentTimeMillis());
+                                                tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
+                                                tapDDLEvent.setOriginDDL(ddlStr);
+                                                eventList.get().add(tapDDLEvent);
+                                            }, (ddl, wrapper) -> {
+                                                boolean unIgnoreTable = true;
+                                                if (wrapper instanceof MysqlDDLWrapper) {
+                                                    String tableName = ((MysqlDDLWrapper) wrapper).getTableName(ddl);
+                                                    unIgnoreTable = null == tableList || tableList.contains(tableName);
+                                                }
+                                                return unIgnoreTable;
+                                            }
+                                    );
+                                } catch (Throwable e) {
+                                    TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
+                                    tapDDLEvent.setTime(System.currentTimeMillis());
+                                    tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
+                                    tapDDLEvent.setOriginDDL(ddlStr);
+                                    eventList.get().add(tapDDLEvent);
+                                }
+                            }
+                            break;
+                        }
                         default:
                             break;
                     }

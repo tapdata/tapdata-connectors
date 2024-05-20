@@ -2,6 +2,9 @@ package io.tapdata.connector.mysql.ddl.ccj;
 
 import io.tapdata.common.ddl.alias.DbDataTypeAlias;
 import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
+import io.tapdata.kit.StringKit;
+import net.sf.jsqlparser.schema.Table;
+import net.sf.jsqlparser.statement.alter.Alter;
 
 public abstract class MysqlDDLWrapper extends CCJBaseDDLWrapper {
 
@@ -40,5 +43,10 @@ public abstract class MysqlDDLWrapper extends CCJBaseDDLWrapper {
         } else {
             return null;
         }
+    }
+
+    public String getTableName(Alter ddl) {
+        Table table = ddl.getTable();
+        return StringKit.removeHeadTail(table.getName(), ccjddlWrapperConfig.getSplit(), null);
     }
 }

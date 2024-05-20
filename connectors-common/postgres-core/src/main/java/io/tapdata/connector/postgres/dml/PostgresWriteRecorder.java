@@ -89,6 +89,9 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         if (value instanceof String) {
             return ((String) value).replace("\u0000", "");
         }
+        if(value instanceof Boolean && dataType.contains("int")){
+            return Boolean.TRUE.equals(value) ? 1 : 0;
+        }
         return value;
     }
 }

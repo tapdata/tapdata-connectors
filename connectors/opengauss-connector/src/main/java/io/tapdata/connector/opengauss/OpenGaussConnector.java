@@ -101,6 +101,7 @@ public class OpenGaussConnector extends PostgresConnector {
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
         codecRegistry.registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
+        connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
     }
 
 }

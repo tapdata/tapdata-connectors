@@ -217,5 +217,89 @@ class TapEventBuilderTest {
 			assertNotNull(after.get("title"));
 			assertEquals(defaultValue, after.get("title"));
 		}
+
+		@Test
+		@DisplayName("Test generate insert record event: rlongstring type")
+		void testRLongString() {
+			TapTable table = new TapTable("dummy_test")
+					.add(new TapField("str", "rlongstring"))
+					.add(new TapField("str_1", "rlongstring"))
+					.add(new TapField("str1", "rlongstring(100)"));
+
+			TapInsertRecordEvent tapInsertRecordEvent = tapEventBuilder.generateInsertRecordEvent(table);
+
+			assertNotNull(tapInsertRecordEvent);
+			Map<String, Object> after = tapInsertRecordEvent.getAfter();
+			assertNotNull(after);
+			assertEquals(table.getNameFieldMap().size(), after.size());
+			assertTrue(after.containsKey("str"));
+			assertNotNull(after.get("str"));
+			assertInstanceOf(String.class, after.get("str"));
+			assertEquals(TapEventBuilder.LONG_RANDOM_STRING_LENGTH, after.get("str").toString().length());
+			assertTrue(after.containsKey("str_1"));
+			assertNotNull(after.get("str_1"));
+			assertInstanceOf(String.class, after.get("str_1"));
+			assertEquals(after.get("str"), after.get("str_1"));
+			assertTrue(after.containsKey("str1"));
+			assertNotNull(after.get("str1"));
+			assertInstanceOf(String.class, after.get("str1"));
+			assertEquals(100, after.get("str1").toString().length());
+		}
+
+		@Test
+		@DisplayName("Test generate insert record event: rlongbinary type")
+		void testRLongBinary() {
+			TapTable table = new TapTable("dummy_test")
+					.add(new TapField("bin", "rlongbinary"))
+					.add(new TapField("bin_1", "rlongbinary"))
+					.add(new TapField("bin1", "rlongbinary(100)"));
+
+			TapInsertRecordEvent tapInsertRecordEvent = tapEventBuilder.generateInsertRecordEvent(table);
+
+			assertNotNull(tapInsertRecordEvent);
+			Map<String, Object> after = tapInsertRecordEvent.getAfter();
+			assertNotNull(after);
+			assertEquals(table.getNameFieldMap().size(), after.size());
+			assertTrue(after.containsKey("bin"));
+			assertNotNull(after.get("bin"));
+			assertInstanceOf(byte[].class, after.get("bin"));
+			assertEquals(TapEventBuilder.LONG_RANDOM_STRING_LENGTH, ((byte[])after.get("bin")).length);
+			assertTrue(after.containsKey("bin_1"));
+			assertNotNull(after.get("bin_1"));
+			assertInstanceOf(byte[].class, after.get("bin_1"));
+			assertEquals(after.get("bin"), after.get("bin_1"));
+			assertTrue(after.containsKey("bin1"));
+			assertNotNull(after.get("bin1"));
+			assertInstanceOf(byte[].class, after.get("bin1"));
+			assertEquals(100, ((byte[])after.get("bin1")).length);
+		}
+
+		@Test
+		@DisplayName("Test generate insert record event: rdatetime type")
+		void testRDatetime() {
+			TapTable table = new TapTable("dummy_test")
+					.add(new TapField("date", "rdatetime"))
+					.add(new TapField("date_1", "rdatetime"))
+					.add(new TapField("date1", "rdatetime(3)"));
+
+			TapInsertRecordEvent tapInsertRecordEvent = tapEventBuilder.generateInsertRecordEvent(table);
+
+			assertNotNull(tapInsertRecordEvent);
+			Map<String, Object> after = tapInsertRecordEvent.getAfter();
+			assertNotNull(after);
+			assertEquals(table.getNameFieldMap().size(), after.size());
+			assertTrue(after.containsKey("date"));
+			assertNotNull(after.get("date"));
+			assertInstanceOf(Timestamp.class, after.get("date"));
+			assertEquals(((Timestamp) after.get("date")).getNanos(), (long) ((long) ((Timestamp) after.get("date")).getNanos() / Math.pow(10, 9 - TapEventBuilder.DEFAULT_RANDOM_DATE_FRACTION)) * Math.pow(10, 9 - TapEventBuilder.DEFAULT_RANDOM_DATE_FRACTION));
+			assertTrue(after.containsKey("date_1"));
+			assertNotNull(after.get("date_1"));
+			assertInstanceOf(Timestamp.class, after.get("date_1"));
+			assertEquals(after.get("date"), after.get("date_1"));
+			assertTrue(after.containsKey("date1"));
+			assertNotNull(after.get("date1"));
+			assertInstanceOf(Timestamp.class, after.get("date1"));
+			assertEquals(((Timestamp) after.get("date1")).getNanos(), (long) ((long) ((Timestamp) after.get("date1")).getNanos() / Math.pow(10, 6)) * Math.pow(10, 6));
+		}
 	}
 }
