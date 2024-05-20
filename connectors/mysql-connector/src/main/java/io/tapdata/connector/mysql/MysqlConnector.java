@@ -438,7 +438,7 @@ public class MysqlConnector extends CommonDbConnector {
             ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet) throws SQLException {
         return filterTimeForMysql(resultSet, metaData, dateTypeSet, null, null);
     }
-    private Map<String, Object> filterTimeForMysql(
+    protected Map<String, Object> filterTimeForMysql(
             ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet, TapRecordEvent recordEvent,
             IllegalDateConsumer illegalDateConsumer) throws SQLException {
         Map<String, Object> data = new HashMap<>();
@@ -449,6 +449,11 @@ public class MysqlConnector extends CommonDbConnector {
                 Object value;
                 if ("TIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                     value = resultSet.getString(i + 1);
+                } else if ("TIMESTAMP".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                    value = resultSet.getObject(i + 1);
+                    if (value == null) {
+                        value = resultSet.getString(i + 1);
+                    }
                 } else if ("DATE".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                     value = resultSet.getString(i + 1);
                 } else if ("DATETIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
@@ -488,7 +493,7 @@ public class MysqlConnector extends CommonDbConnector {
             return data;
     }
 
-    private static Object buildIllegalDate(TapRecordEvent recordEvent, IllegalDateConsumer illegalDateConsumer,
+    protected static Object buildIllegalDate(TapRecordEvent recordEvent, IllegalDateConsumer illegalDateConsumer,
                                            String valueS, List<String> illegalDateFieldName, String columnName) {
         Object value;
         TapIllegalDate date = new TapIllegalDate();
