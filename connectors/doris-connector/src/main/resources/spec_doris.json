@@ -378,7 +378,7 @@
               "fulfill": {
                 "state": {
                   "value":
-                  "{{{Aggregate: [{\"propKey\":\"replication_num\",\"propValue\":\"2\"}],Unique: [{\"propKey\":\"replication_num\",\"propValue\":\"2\"},{\"propKey\":\"enable_unique_key_merge_on_write\",\"propValue\":\"true\"},{\"propKey\":\"store_row_column\",\"propValue\":\"true\"}],Duplicate: [{\"propKey\":\"replication_num\",\"propValue\":\"2\"}]}[$deps[0]]}}"
+                  "{{{Aggregate: [{\"propKey\":\"replication_num\",\"propValue\":\"1\"}],Unique: [{\"propKey\":\"replication_num\",\"propValue\":\"1\"},{\"propKey\":\"enable_unique_key_merge_on_write\",\"propValue\":\"true\"},{\"propKey\":\"store_row_column\",\"propValue\":\"true\"}],Duplicate: [{\"propKey\":\"replication_num\",\"propValue\":\"1\"}]}[$deps[0]]}}"
                 }
               }
             }
