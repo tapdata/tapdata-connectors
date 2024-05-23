@@ -363,10 +363,8 @@ public class MongodbMergeOperate {
 	public static void upsertMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult) {
 		final String targetPath = currentProperty.getTargetPath();
 		final MergeBundle.EventOperation operation = mergeBundle.getOperation();
-		final Document filter = filter(
-				MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
-				currentProperty.getJoinKeys()
-		);
+		Map<String, Object> filterMap = buildFilterMap(operation, mergeBundle.getAfter(), mergeBundle.getBefore());
+		final Document filter = filter(filterMap, currentProperty.getJoinKeys());
 		mergeResult.getFilter().putAll(filter);
 		switch (operation) {
 			case INSERT:
