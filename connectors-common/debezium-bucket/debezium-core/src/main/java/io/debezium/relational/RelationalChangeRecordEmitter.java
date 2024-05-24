@@ -5,6 +5,7 @@
  */
 package io.debezium.relational;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -66,10 +67,10 @@ public abstract class RelationalChangeRecordEmitter extends AbstractChangeRecord
     }
 
     protected Map<Boolean, Struct> beforeIllegalValueFromMap(TableSchema tableSchema){
-        throw new UnsupportedOperationException();
+        return new HashMap<>();
     }
     protected Map<Boolean, Struct> afterIllegalValueFromMap(TableSchema tableSchema){
-        throw new UnsupportedOperationException();
+        return new HashMap<>();
     }
 
     @Override
