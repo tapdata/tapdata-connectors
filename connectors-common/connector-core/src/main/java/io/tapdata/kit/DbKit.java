@@ -198,6 +198,7 @@ public class DbKit {
             lastAfter.put(entry.getKey(), entry.getValue());
         }
         if (EmptyKit.isEmpty(lastAfter)) {
+            uniqueCondition.forEach(after::remove);
             return after;
         }
         return lastAfter;

@@ -11,8 +11,9 @@ import io.tapdata.entity.schema.TapField;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class ClickhouseDDLSqlGenerator implements DDLSqlGenerator {
 
@@ -109,7 +110,7 @@ public class ClickhouseDDLSqlGenerator implements DDLSqlGenerator {
         if (null != primaryChange && null != primaryChange.getAfter() && primaryChange.getAfter() > 0) {
             sql.append(" key");
         }
-        return Collections.singletonList(sql.toString());
+        return Stream.of(sql.toString()).collect(Collectors.toList());
     }
 
     @Override
@@ -133,7 +134,7 @@ public class ClickhouseDDLSqlGenerator implements DDLSqlGenerator {
         if (StringUtils.isBlank(after)) {
             throw new RuntimeException("CK Append alter column name ddl sql failed, new column name is blank");
         }
-        return Collections.singletonList(String.format(ALTER_TABLE_PREFIX, config.getDatabase(), tableId) + " rename column `" + before + "` to `" + after + "`");
+        return Stream.of(String.format(ALTER_TABLE_PREFIX, config.getDatabase(), tableId) + " rename column `" + before + "` to `" + after + "`").collect(Collectors.toList());
     }
 
     @Override
@@ -149,6 +150,6 @@ public class ClickhouseDDLSqlGenerator implements DDLSqlGenerator {
         if (StringUtils.isBlank(fieldName)) {
             throw new RuntimeException("CK Append drop column ddl sql failed, field name is blank");
         }
-        return Collections.singletonList(String.format(ALTER_TABLE_PREFIX, config.getDatabase(), tableId) + " drop column`" + fieldName + "`");
+        return Stream.of(String.format(ALTER_TABLE_PREFIX, config.getDatabase(), tableId) + " drop column`" + fieldName + "`").collect(Collectors.toList());
     }
 }
