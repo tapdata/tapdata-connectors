@@ -87,7 +87,6 @@
         },
         "haHost": {
           "default": "",
-          "required": true,
           "type": "string",
           "title": "${haHost}",
           "x-decorator": "FormItem",
