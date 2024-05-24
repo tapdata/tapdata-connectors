@@ -2,7 +2,9 @@ package io.tapdata.common;
 
 import io.tapdata.entity.utils.DataMap;
 
-public class CommonDbOffset {
+import java.io.Serializable;
+
+public class CommonDbOffset implements Serializable {
 
     private Long offsetSize;
     private DataMap columnValue;
