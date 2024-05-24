@@ -86,6 +86,7 @@
           "x-index": 70
         },
         "haHost": {
+          "default": "",
           "required": true,
           "type": "string",
           "title": "${haHost}",
@@ -95,7 +96,6 @@
           "x-index": 75
         },
         "haPort": {
-          "required": true,
           "type": "string",
           "default": 8001,
           "title": "${haPort}",
