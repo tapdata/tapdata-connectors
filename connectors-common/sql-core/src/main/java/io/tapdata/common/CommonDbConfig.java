@@ -39,6 +39,7 @@ public class CommonDbConfig implements Serializable {
     private Boolean hashSplit = false;
     private int maxSplit = 20;
     private Boolean doubleActive = false;
+    private Boolean oldVersionTimezone = false;
 
     private Boolean useSSL = false;
     private String sslCa;
@@ -242,6 +243,14 @@ public class CommonDbConfig implements Serializable {
 
     public void setDoubleActive(Boolean doubleActive) {
         this.doubleActive = doubleActive;
+    }
+
+    public Boolean getOldVersionTimezone() {
+        return oldVersionTimezone;
+    }
+
+    public void setOldVersionTimezone(Boolean oldVersionTimezone) {
+        this.oldVersionTimezone = oldVersionTimezone;
     }
 
     public Boolean getUseSSL() {
