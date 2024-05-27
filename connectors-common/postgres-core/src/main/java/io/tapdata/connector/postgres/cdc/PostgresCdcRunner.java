@@ -28,7 +28,6 @@ import java.nio.ByteBuffer;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -52,7 +51,11 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 
     public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext) throws SQLException {
         this.postgresConfig = (PostgresConfig) postgresJdbcContext.getConfig();
-        this.timeZone = postgresJdbcContext.queryTimeZone();
+        if (postgresConfig.getOldVersionTimezone()) {
+            this.timeZone = postgresJdbcContext.queryTimeZone();
+        } else {
+            this.timeZone = TimeZone.getTimeZone(postgresConfig.getTimezone());
+        }
     }
 
     public PostgresCdcRunner useSlot(String slotName) {
@@ -147,7 +150,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 continue;
             }
             if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
-                eventList.add(new HeartbeatEvent().init().referenceTime(((Struct)sr.value()).getInt64("ts_ms")));
+                eventList.add(new HeartbeatEvent().init().referenceTime(((Struct) sr.value()).getInt64("ts_ms")));
                 continue;
             } else if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
                 continue;

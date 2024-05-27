@@ -94,6 +94,7 @@ public class PostgresDebeziumConfig {
                 .with("timestamp.timezone", timeZone.getRawOffset())
                 .with("timestampTZ.type", "io.tapdata.connector.postgres.converters.TimestampTZConverter")
                 .with("timestampTZ.schema.name", "io.debezium.postgresql.type.TimestampTZ")
+                .with("timestampTZ.timezone", postgresConfig.getOldVersionTimezone() ? 0 : TimeZone.getDefault().getRawOffset())
                 .with("time.type", "io.tapdata.connector.postgres.converters.TimeConverter")
                 .with("time.schema.name", "io.debezium.postgresql.type.Time")
                 .with("time.timezone", timeZone.getRawOffset())

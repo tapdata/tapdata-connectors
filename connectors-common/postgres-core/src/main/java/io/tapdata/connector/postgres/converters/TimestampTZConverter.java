@@ -11,6 +11,7 @@ public class TimestampTZConverter extends BaseTapdataConverter {
 
     @Override
     SchemaBuilder initSchemaBuilder(Properties props) {
+        milliSecondOffset = Long.parseLong(props.getProperty("timezone"));
         return SchemaBuilder.int64().name(props.getProperty("schema.name"));
     }
 
@@ -27,6 +28,6 @@ public class TimestampTZConverter extends BaseTapdataConverter {
     @Override
     Object convert(Object data) {
         Instant instant = ((OffsetDateTime) data).toInstant();
-        return (instant.getEpochSecond() * 1000000 + instant.getNano() / 1000) / (long) Math.pow(10, 6 - column.scale().orElse(6));
+        return (instant.getEpochSecond() * 1000000 + milliSecondOffset * 1000 + instant.getNano() / 1000) / (long) Math.pow(10, 6 - column.scale().orElse(6));
     }
 }
