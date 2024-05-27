@@ -105,7 +105,7 @@ public class CommonDbConfig implements Serializable {
         if (EmptyKit.isBlank(timezone)) {
             timezone = "+00:00";
         }
-        sysZoneId = TimeZone.getTimeZone(timezone).toZoneId();
+        sysZoneId = TimeZone.getTimeZone("GMT" + timezone).toZoneId();
         if (useSSL && EmptyKit.isNotEmpty(map) && map.containsKey("useSSL")) {
             try {
                 generateSSlFile();
