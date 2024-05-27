@@ -9,8 +9,12 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -85,6 +89,11 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         }
         if ("uuid".equalsIgnoreCase(dataType)) {
             return value instanceof UUID ? value : UUID.fromString(String.valueOf(value));
+        }
+        if (dataType.endsWith("with time zone") && value instanceof LocalDateTime) {
+            Timestamp timestamp = Timestamp.valueOf(((LocalDateTime) value));
+            timestamp.setTime(timestamp.getTime() + TimeZone.getDefault().getRawOffset());
+            return timestamp;
         }
         if (value instanceof String) {
             return ((String) value).replace("\u0000", "");

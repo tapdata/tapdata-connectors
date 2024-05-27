@@ -502,7 +502,12 @@ public class PostgresConnector extends CommonDbConnector {
             for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
                 Object value = entry.getValue();
                 if (value instanceof Timestamp) {
-                    entry.setValue(((Timestamp) value).toLocalDateTime().atZone(postgresConfig.getSysZoneId()));
+                    if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                        continue;
+                    }
+                    if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
+                        entry.setValue(((Timestamp) value).toLocalDateTime().atZone(postgresConfig.getSysZoneId()));
+                    }
                 } else if (value instanceof Date) {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getSysZoneId()));
                 } else if (value instanceof Time) {

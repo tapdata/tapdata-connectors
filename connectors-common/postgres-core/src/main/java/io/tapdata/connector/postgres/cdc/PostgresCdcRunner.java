@@ -54,7 +54,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         if (postgresConfig.getOldVersionTimezone()) {
             this.timeZone = postgresJdbcContext.queryTimeZone();
         } else {
-            this.timeZone = TimeZone.getTimeZone(postgresConfig.getTimezone());
+            this.timeZone = TimeZone.getTimeZone("GMT" + postgresConfig.getTimezone());
         }
     }
 
