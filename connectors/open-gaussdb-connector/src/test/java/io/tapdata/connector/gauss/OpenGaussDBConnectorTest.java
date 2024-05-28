@@ -45,6 +45,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -1446,7 +1447,7 @@ public class OpenGaussDBConnectorTest {
                     Object offset = connector.timestampToStreamOffset(connectorContext, 100L);
                     gt.verify(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class), any(TestAccept.class)), times(1));
                     Assertions.assertNotNull(offset);
-                    Assertions.assertEquals(CdcOffset.class.getName(), offset.getClass().getName());
+                    Assertions.assertEquals(HashMap.class.getName(), offset.getClass().getName());
                 } finally {
                     verify(connectorContext, times(1)).getLog();
                     verify(connectorContext, times(1)).getTableMap();
@@ -1473,7 +1474,7 @@ public class OpenGaussDBConnectorTest {
                     Object offset = connector.timestampToStreamOffset(connectorContext, null);
                     gt.verify(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class), any(TestAccept.class)), times(1));
                     Assertions.assertNotNull(offset);
-                    Assertions.assertEquals(CdcOffset.class.getName(), offset.getClass().getName());
+                    Assertions.assertEquals(HashMap.class.getName(), offset.getClass().getName());
                 } finally {
                     verify(connectorContext, times(1)).getLog();
                     verify(connectorContext, times(1)).getTableMap();
@@ -1500,7 +1501,7 @@ public class OpenGaussDBConnectorTest {
                     Object offset = connector.timestampToStreamOffset(connectorContext, null);
                     gt.verify(() -> GaussDBTest.instance(any(GaussDBConfig.class), any(Consumer.class), any(TestAccept.class)), times(1));
                     Assertions.assertNotNull(offset);
-                    Assertions.assertEquals(CdcOffset.class.getName(), offset.getClass().getName());
+                    Assertions.assertEquals(HashMap.class.getName(), offset.getClass().getName());
                 } finally {
                     verify(connectorContext, times(1)).getLog();
                     verify(connectorContext, times(0)).getTableMap();
