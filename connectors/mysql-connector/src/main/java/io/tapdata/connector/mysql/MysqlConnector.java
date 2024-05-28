@@ -179,6 +179,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
+        connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportCreateIndex(this::createIndex);
         connectorFunctions.supportQueryIndexes(this::queryIndexes);

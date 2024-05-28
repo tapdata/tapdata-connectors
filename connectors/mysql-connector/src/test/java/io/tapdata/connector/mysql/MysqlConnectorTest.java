@@ -132,6 +132,15 @@ public class MysqlConnectorTest {
         map.put(name,numberTapField);
     }
 
+    @Test
+    void testRegisterCapabilitiesCountByPartitionFilter(){
+        MysqlConnector mysqlConnector = new MysqlConnector();
+        ConnectorFunctions connectorFunctions = new ConnectorFunctions();
+        TapCodecsRegistry codecRegistry = new TapCodecsRegistry();
+        ReflectionTestUtils.invokeMethod(mysqlConnector,"registerCapabilities",connectorFunctions,codecRegistry);
+        Assertions.assertNotNull(connectorFunctions.getCountByPartitionFilterFunction());
+    }
+
     @Nested
     class FilterTimeForMysqlTest{
         MysqlConnector mysqlConnector = new MysqlConnector();

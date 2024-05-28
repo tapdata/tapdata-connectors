@@ -86,6 +86,7 @@ public class DorisConnector extends CommonDbConnector {
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
+        connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportCreateTableV2(this::createDorisTable);
         connectorFunctions.supportClearTable(this::clearTable);
