@@ -43,6 +43,7 @@ public class CommonDbConfig implements Serializable {
     private Boolean doubleActive = false;
     private Boolean oldVersionTimezone = false;
     protected String timezone = "+00:00";
+    protected ZoneId zoneId;
     protected ZoneId sysZoneId;
 
     private Boolean useSSL = false;
@@ -85,7 +86,7 @@ public class CommonDbConfig implements Serializable {
             if (EmptyKit.isBlank(timezone)) {
                 timezone = "+00:00";
             }
-            sysZoneId = TimeZone.getTimeZone(timezone).toZoneId();
+            zoneId = TimeZone.getTimeZone(timezone).toZoneId();
             return this;
         } catch (Exception e) {
             throw new IllegalArgumentException("json string is not valid for db config");
@@ -105,7 +106,7 @@ public class CommonDbConfig implements Serializable {
         if (EmptyKit.isBlank(timezone)) {
             timezone = "+00:00";
         }
-        sysZoneId = TimeZone.getTimeZone("GMT" + timezone).toZoneId();
+        zoneId = TimeZone.getTimeZone("GMT" + timezone).toZoneId();
         if (useSSL && EmptyKit.isNotEmpty(map) && map.containsKey("useSSL")) {
             try {
                 generateSSlFile();
@@ -271,6 +272,14 @@ public class CommonDbConfig implements Serializable {
 
     public void setTimezone(String timezone) {
         this.timezone = timezone;
+    }
+
+    public ZoneId getZoneId() {
+        return zoneId;
+    }
+
+    public void setZoneId(ZoneId zoneId) {
+        this.zoneId = zoneId;
     }
 
     public ZoneId getSysZoneId() {

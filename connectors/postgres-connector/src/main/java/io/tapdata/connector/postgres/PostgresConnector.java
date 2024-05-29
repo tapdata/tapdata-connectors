@@ -182,7 +182,7 @@ public class PostgresConnector extends CommonDbConnector {
             if (postgresConfig.getOldVersionTimezone()) {
                 return tapTimeValue.getValue().toTime();
             } else {
-                return tapTimeValue.getValue().toInstant().atZone(postgresConfig.getSysZoneId()).toLocalTime();
+                return tapTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalTime();
             }
         });
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
@@ -193,7 +193,7 @@ public class PostgresConnector extends CommonDbConnector {
                     TimeZone timeZone = tapDateTimeValue.getValue().getTimeZone();
                     return tapDateTimeValue.getValue().toInstant().atZone(EmptyKit.isNull(timeZone) ? ZoneId.of("+00:00") : tapDateTimeValue.getValue().getTimeZone().toZoneId()).toLocalDateTime();
                 } else {
-                    return tapDateTimeValue.getValue().toInstant().atZone(postgresConfig.getSysZoneId()).toLocalDateTime();
+                    return tapDateTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalDateTime();
                 }
             }
         });
@@ -201,7 +201,7 @@ public class PostgresConnector extends CommonDbConnector {
             if (postgresConfig.getOldVersionTimezone()) {
                 return tapDateValue.getValue().toSqlDate();
             } else {
-                return tapDateValue.getValue().toInstant().atZone(postgresConfig.getSysZoneId()).toLocalDate();
+                return tapDateValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalDate();
             }
         });
         codecRegistry.registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
@@ -506,12 +506,12 @@ public class PostgresConnector extends CommonDbConnector {
                         continue;
                     }
                     if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
-                        entry.setValue(((Timestamp) value).toLocalDateTime().atZone(postgresConfig.getSysZoneId()));
+                        entry.setValue(((Timestamp) value).toLocalDateTime().atZone(postgresConfig.getZoneId()));
                     }
                 } else if (value instanceof Date) {
-                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getSysZoneId()));
+                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getZoneId()));
                 } else if (value instanceof Time) {
-                    entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getSysZoneId()));
+                    entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getZoneId()));
                 }
             }
         }
