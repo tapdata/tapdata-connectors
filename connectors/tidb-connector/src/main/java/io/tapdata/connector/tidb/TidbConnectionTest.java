@@ -68,6 +68,8 @@ public class TidbConnectionTest extends CommonDbTest {
     public Boolean testOneByOne() {
         if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
             testFunctionMap.put("testPbserver", this::testPbserver);
+            testFunctionMap.put("testTidbCdcserver", this::testTidbCdcserver);
+
         }
         testFunctionMap.put("testVersion", this::testVersion);
         if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
@@ -86,6 +88,24 @@ public class TidbConnectionTest extends CommonDbTest {
      */
     public Boolean testPbserver() {
         URI uri = URI.create("http://" + tidbConfig.getPdServer());
+        try {
+            NetUtil.validateHostPortWithSocket(uri.getHost(), uri.getPort());
+            consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_SUCCESSFULLY));
+            return true;
+        } catch (Exception e) {
+            consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_FAILED, e.getMessage()));
+            return false;
+        }
+
+    }
+
+    /**
+     * check Tidncdc server
+     *
+     * @return
+     */
+    public Boolean testTidbCdcserver() {
+        URI uri = URI.create("http://" + tidbConfig.getCdcServer());
         try {
             NetUtil.validateHostPortWithSocket(uri.getHost(), uri.getPort());
             consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_SUCCESSFULLY));

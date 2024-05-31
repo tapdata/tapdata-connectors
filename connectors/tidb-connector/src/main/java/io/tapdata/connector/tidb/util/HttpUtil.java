@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.PropertyNamingStrategy;
 import com.alibaba.fastjson.serializer.SerializeConfig;
 import io.tapdata.connector.tidb.util.pojo.ChangeFeed;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.kit.ErrorKit;
 import org.apache.http.HttpEntity;
 import org.apache.http.client.config.RequestConfig;
@@ -23,13 +24,16 @@ public class HttpUtil implements AutoCloseable {
     private final CloseableHttpClient httpClient;
     private boolean isChangeFeedClosed;
 
-    public HttpUtil() {
+    protected Log tapLogger;
+
+    public HttpUtil(Log tapLogger) {
         httpClient = HttpClientBuilder.create().build();
+        this.tapLogger = tapLogger;
     }
 
     public Boolean deleteChangefeed(String changefeedId, String cdcUrl) throws IOException {
         // cdcUrl = "192.168.1.179:8300";
-        String url = "http://" + cdcUrl + "/api/v1/changefeeds/" + changefeedId;
+        String url = "http://" + cdcUrl + "/api/v2/changefeeds/" + changefeedId;
         HttpDelete httpDelete = new HttpDelete(url);
         RequestConfig requestConfig = RequestConfig.custom()
                 .setConnectTimeout(200000)
@@ -40,16 +44,18 @@ public class HttpUtil implements AutoCloseable {
         try (
                 CloseableHttpResponse response = httpClient.execute(httpDelete)
         ) {
-            if (response.getStatusLine().getStatusCode() == 202) {
-                isChangeFeedClosed = true;
+            if (response.getStatusLine().getStatusCode() == 200) {
+                tapLogger.info("delete Changefeed is success changefeedId:{}",changefeedId);
                 return true;
+            }else {
+                tapLogger.error("delete Changefeed is fail errMsg:{}",EntityUtils.toString(response.getEntity()));
             }
         }
         return false;
     }
 
     public Boolean createChangefeed(ChangeFeed changefeed, String cdcUrl) throws IOException {
-        String url = "http://" + cdcUrl + "/api/v1/changefeeds";
+        String url = "http://" + cdcUrl + "/api/v2/changefeeds";
         HttpPost httpPost = new HttpPost(url);
         SerializeConfig config = new SerializeConfig();
         config.propertyNamingStrategy = PropertyNamingStrategy.SnakeCase;
@@ -59,27 +65,23 @@ public class HttpUtil implements AutoCloseable {
                 CloseableHttpResponse response = httpClient.execute(httpPost)
         ) {
             HttpEntity responseEntity = response.getEntity();
-            System.out.println("响应状态为:" + response.getStatusLine());
-            if (responseEntity != null) {
-                System.out.println("响应内容长度为:" + responseEntity.getContentLength());
-                System.out.println("响应内容为:" + EntityUtils.toString(responseEntity));
-                System.out.println("code"+response.getStatusLine().getStatusCode());
-            }
-            if (response.getStatusLine().getStatusCode() == 202) {
-                isChangeFeedClosed = false;
+            if (responseEntity != null && response.getStatusLine().getStatusCode() == 200) {
+                tapLogger.info("Create Changefeed is success changefeedId:{}",changefeed.getChangefeedId());
                 return true;
+            }else {
+                tapLogger.info("Create Changefeed is fail errorMsg:{}",EntityUtils.toString(responseEntity));
+                throw new IOException("Tidb stream fail reasoon:"+EntityUtils.toString(responseEntity));
             }
         }
-        return false;
     }
 public  Boolean resumeChangefeed(String changefeedId,String cdcUrl)throws IOException{
-    String url ="http://"+ cdcUrl+"/api/v1/changefeeds/"+changefeedId+"/resume";
+    String url ="http://"+ cdcUrl+"/api/v2/changefeeds/"+changefeedId+"/resume";
     HttpPost httpPost = new HttpPost(url);
     httpPost.setHeader("Content-Type", "application/json;charset=utf8");
     try (
             CloseableHttpResponse response = httpClient.execute(httpPost)
     ) {
-        if (response.getStatusLine().getStatusCode() == 202) {
+        if (response.getStatusLine().getStatusCode() == 200) {
             isChangeFeedClosed = false;
             return true;
         }
@@ -87,7 +89,7 @@ public  Boolean resumeChangefeed(String changefeedId,String cdcUrl)throws IOExce
     return false;
 }
     public  Boolean pauseChangefeed(String changefeedId,String cdcUrl)throws IOException{
-        String url ="http://"+ cdcUrl+"/api/v1/changefeeds/"+changefeedId+"/pause";
+        String url ="http://"+ cdcUrl+"/api/v2/changefeeds/"+changefeedId+"/pause";
         HttpPost httpPost = new HttpPost(url);
         httpPost.setHeader("Content-Type", "application/json;charset=utf8");
         try (

@@ -44,6 +44,27 @@
             }
           }
         },
+         "cdcServer": {
+              "type": "string",
+              "title": "${cdcServer}",
+              "x-decorator": "FormItem",
+              "x-component": "Input",
+              "required": true,
+              "x-decorator-props": {
+                "tooltip": "${cdcServerTip}"
+              },
+              "x-index": 2,
+              "x-reactions": {
+                "dependencies": [
+                  "__TAPDATA.connection_type"
+                ],
+                "fulfill": {
+                  "state": {
+                    "display": "{{$deps[0]!=='target' ? 'visible':'hidden'}}"
+                  }
+                }
+              }
+            },
         "host": {
           "type": "string",
           "title": "${host}",
@@ -54,7 +75,7 @@
           "x-decorator-props": {
             "tooltip": "${hostTip}"
           },
-          "x-index": 2
+          "x-index": 3
         },
         "port": {
           "type": "string",
@@ -67,7 +88,7 @@
           "x-decorator-props": {
             "tooltip": "${portTip}"
           },
-          "x-index": 3
+          "x-index": 4
         },
         "database": {
           "type": "string",
@@ -79,7 +100,7 @@
           "x-decorator-props": {
             "tooltip": "${databaseTip}"
           },
-          "x-index": 4
+          "x-index": 5
         },
         "user": {
           "type": "string",
@@ -87,7 +108,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_username",
-          "x-index": 5
+          "x-index": 6
         },
         "password": {
           "type": "string",
@@ -95,7 +116,7 @@
           "x-decorator": "FormItem",
           "x-component": "Password",
           "apiServerKey": "database_password",
-          "x-index": 6
+          "x-index": 7
         },
         "OPTIONAL_FIELDS": {
           "type": "void",
@@ -109,7 +130,7 @@
               "x-decorator-props": {
                 "tooltip": "${extParamsTip}"
               },
-              "x-index": 7
+              "x-index": 8
             },
             "timezone": {
               "type": "string",
@@ -231,69 +252,8 @@
                 }
               ],
               "x-index": 8
-            },
-            "mqUsername": {
-              "type": "string",
-              "title": "${mqUsername}",
-              "x-decorator": "FormItem",
-              "x-component": "Input",
-              "apiServerKey": "mq_username",
-              "x-index": 15
-            },
-            "mqPassword": {
-              "type": "string",
-              "title": "${mqPassword}",
-              "x-decorator": "FormItem",
-              "x-component": "Password",
-              "apiServerKey": "mq_password",
-              "x-index": 14
-            },
-            "mqTopic": {
-              "required": true,
-              "type": "string",
-              "title": "${mqTopic}",
-              "x-decorator": "FormItem",
-              "x-component": "Input",
-              "apiServerKey": "mq_topics",
-              "x-index": 11
-            },
-            "nameSrvAddr": {
-              "required": true,
-              "type": "string",
-              "title": "${nameSrvAddr}",
-              "x-decorator": "FormItem",
-              "x-component": "Input",
-              "apiServerKey": "mq_nameSrvAddr",
-              "x-index": 10
-            },
-            "ticdcUrl": {
-              "required": true,
-              "type": "string",
-              "title": "${ticdcUrl}",
-              "x-decorator": "FormItem",
-              "x-component": "Input",
-              "apiServerKey": "ticdc_url",
-              "x-index": 13
-            },
-            "enableIncrement": {
-              "type": "boolean",
-              "title": "${enableIncrement}",
-              "default": false,
-              "x-decorator": "FormItem",
-              "x-component": "Switch",
-              "apiServerKey": "enableIncrement",
-              "x-reactions": [
-                {
-                  "target": "*(nameSrvAddr,mqTopic,mqUsername,mqPassword,changefeedId,ticdcUrl)",
-                  "fulfill": {
-                    "state": {
-                      "visible": "{{$self.value===true}}"
-                    }
-                  }
-                }
-              ],
-              "x-index": 9
             }
+
           }
         }
       }
@@ -317,12 +277,8 @@
       "timezone": "Timezone for Datetime",
       "timezoneTip": "Specify the time zone, otherwise the database time zone will be used by default",
       "doc": "docs/tidb_en_US.md",
-      "ticdcUrl": "ticdc Url",
-      "mqUsername": "Kafka User Name",
-      "mqPassword": "KafkaPassword",
-      "nameSrvAddr": "DB Host",
-      "mqTopic": "KafkaTopic",
-      "enableIncrement": "enableIncrement"
+      "cdcServer": "tidbCdc Url",
+      "cdcServerTip": "Fill in the tidbCdc Server address to test the availability of Tidb"
     },
     "zh_CN": {
       "pdServer": "PDServer 地址",
@@ -340,12 +296,8 @@
       "timezone": "时间类型的时区",
       "timezoneTip": "指定时区，否则默认使用数据库时区",
       "doc": "docs/tidb_zh_CN.md",
-      "ticdcUrl": "ticdc 地址",
-      "mqUsername": "kafka账号",
-      "mqPassword": "kafka密码",
-      "nameSrvAddr": "kafka地址",
-      "mqTopic": "kafka主题",
-      "enableIncrement": "启动增量"
+      "cdcServer": "tidbCdc Server 地址",
+      "cdcServerTip": "填写tidbCdc Server地址，测试Tidb可用性"
     },
     "zh_TW": {
       "pdServer": "PDServer 地址",
@@ -363,12 +315,8 @@
       "timezone": "时间类型的时区",
       "timezoneTip": "指定時區，否則默認使用數據庫時區",
       "doc": "docs/tidb_zh_TW.md",
-      "ticdcUrl": "ticdc 地址",
-      "mqUsername": "kafka賬號",
-      "mqPassword": "kafka密碼",
-      "nameSrvAddr": "kafka地址",
-      "mqTopic": "kafka主題",
-      "enableIncrement": "启动增量"
+      "cdcServer": "tidbCdc Server 地址",
+      "pdServerTip": "填寫tidbCdc Server地址，測試Tidb可用性"
     }
   },
   "dataTypes": {
