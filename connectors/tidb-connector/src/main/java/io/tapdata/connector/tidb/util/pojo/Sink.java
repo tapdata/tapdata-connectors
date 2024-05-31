@@ -5,6 +5,8 @@ public class Sink {
 
     private String  protocol;
 
+    private String terminator;
+
     public String getDateSeparator() {
         return dateSeparator;
     }
@@ -19,5 +21,13 @@ public class Sink {
 
     public void setProtocol(String protocol) {
         this.protocol = protocol;
+    }
+
+    public String getTerminator() {
+        return terminator;
+    }
+
+    public void setTerminator(String terminator) {
+        this.terminator = terminator;
     }
 }
