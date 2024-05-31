@@ -62,6 +62,11 @@ public class CustomDocumentTest {
             assertNotNull(parse1.get("valDate"));
             assertInstanceOf(String.class, parse1.get("valDate"));
             assertEquals("test", parse1.get("valDate"));
+
+            Document parse2 = CustomDocument.parse("{\"valDate\":{\"$dateTime\":{\"seconds\":\"test error string\"}}}");
+            assertNotNull(parse2);
+            assertNotNull(parse2.get("valDate"));
+            assertInstanceOf(Document.class, parse2.get("valDate"));
         }
     }
 }
