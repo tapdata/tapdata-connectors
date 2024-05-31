@@ -33,6 +33,7 @@
   - `$precision`: 長度（默認：`4`）
 - `rstring[($byte)]`: 指定長度的隨機字符
   - `$byte`: 字節長度（默認：`64`）
+- `rdatetime[($byte)]`: 指定精度的日期
 - `rlongstring[($byte)]`: 指定長度的隨機長字符
   - `$byte`: 字節長度（默認：`1000`）
 - `rlongbinary[($byte)]`: 指定長度的隨機二進制
