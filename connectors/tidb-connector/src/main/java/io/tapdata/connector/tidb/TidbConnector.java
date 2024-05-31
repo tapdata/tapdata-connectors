@@ -171,7 +171,7 @@ public class TidbConnector extends CommonDbConnector {
             sink.setProtocol("canal-json");
             replicaConfig.setSink(sink);
             changefeed.setReplicaConfig(replicaConfig);
-            changefeed.setStartTs((long)offsetState<<18);
+            changefeed.setStartTs((long)offsetState);
             httpUtil.createChangefeed(changefeed, tidbConfig.getCdcServer());
         }
     }
