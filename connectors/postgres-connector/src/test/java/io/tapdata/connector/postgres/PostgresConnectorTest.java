@@ -1,3 +1,5 @@
+package io.tapdata.connector.postgres;
+
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
 import io.tapdata.connector.postgres.PostgresConnector;

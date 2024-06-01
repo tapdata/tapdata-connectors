@@ -90,6 +90,7 @@ public class TidbConnector extends CommonDbConnector {
         connectorFunctions.supportGetTableNamesFunction(this::getTableNames);
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilter);
+        connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
 
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);

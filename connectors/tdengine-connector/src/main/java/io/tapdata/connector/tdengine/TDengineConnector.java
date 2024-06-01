@@ -131,6 +131,7 @@ public class TDengineConnector extends CommonDbConnector {
         // query
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
+        connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
 
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);

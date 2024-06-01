@@ -35,6 +35,7 @@
   - `$precision`: length (default: `4`)
 - `rstring[($byte)]`: random characters of specified length
   - `$byte`: length in bytes (default: `64`)
+- `rdatetime[($byte)]`: date + time of specified precision
 - `rlongstring[($byte)]`: random long characters of specified length
   - `$byte`: length in bytes (default: `1000`）
 - `rlongbinary[($byte)]`: random binary of specified length
