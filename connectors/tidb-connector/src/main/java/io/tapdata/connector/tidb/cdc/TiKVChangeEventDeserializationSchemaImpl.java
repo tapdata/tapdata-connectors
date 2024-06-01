@@ -68,7 +68,7 @@ public class TiKVChangeEventDeserializationSchemaImpl implements TiKVChangeEvent
         Object[] tikvValues;
         Map<String, Object> before;
         Map<String, Object> after;
-        long eventTime = rowRecord.getCommitTs() >> 18;
+        long eventTime = rowRecord.getStartTs() >> 18;
         switch (rowRecord.getOpType()) {
             case PUT:
                 tikvValues =
@@ -106,7 +106,7 @@ public class TiKVChangeEventDeserializationSchemaImpl implements TiKVChangeEvent
             tapRecordEvent.setTableId(tableName);
             tapRecordEvent.setReferenceTime(eventTime);
 
-            long offset = rowRecord.getCommitTs() >> 18;
+            long offset = rowRecord.getStartTs() >> 18;
             TidbStreamEvent tidbStreamEvent = new TidbStreamEvent(tapRecordEvent, offset);
             while (!TidbCdcService.getLogMap().get(database + tapContextId).offer(tidbStreamEvent, 1, TimeUnit.SECONDS)) {
                 Thread.sleep(50);

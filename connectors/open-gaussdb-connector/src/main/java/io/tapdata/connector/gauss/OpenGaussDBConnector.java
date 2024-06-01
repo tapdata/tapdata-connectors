@@ -7,6 +7,7 @@ import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.gauss.cdc.CdcOffset;
 import io.tapdata.connector.gauss.cdc.GaussDBRunner;
+import io.tapdata.connector.gauss.cdc.GaussDBStreamConsumer;
 import io.tapdata.connector.gauss.core.GaussColumn;
 import io.tapdata.connector.gauss.core.GaussDBConfig;
 import io.tapdata.connector.gauss.core.GaussDBDDLSqlGenerator;
@@ -384,7 +385,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 buildSlot(connectorContext, false);
             }
         });
-        return new CdcOffset();
+        return new CdcOffset().toOffset();
     }
 
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
@@ -408,7 +409,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         cdcRunner.supplierIsAlive(this::isAlive);
         cdcRunner.offset(offsetState);
         cdcRunner.waitTime(flushLsn);
-        cdcRunner.registerConsumer(consumer, recordSize);
+        cdcRunner.registerConsumer(new GaussDBStreamConsumer(consumer), recordSize);
         cdcRunner.startCdcRunner();
         checkThrowable();
     }

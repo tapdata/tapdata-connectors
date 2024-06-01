@@ -36,6 +36,7 @@ public class OpenGaussConnector extends PostgresConnector {
         // query
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
+        connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
         // ddl
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);

@@ -63,6 +63,8 @@
 		<module>open-gaussdb-connector</module>
 		<module>aws-clickhouse-connector</module>
 		<module>mongodb-lower-connector</module>
+        <module>mock-source-connector</module>
+		<module>mock-target-connector</module>
 	</modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>

@@ -50,7 +50,6 @@ public class DummyConnector extends ConnectorBase {
 
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Throwable {
-        connectionContext.getLog().info("Start dummy connector");
 
         config = IDummyConfig.connectionConfig(connectionContext);
         builder = config.getTapEventBuilder();
@@ -103,7 +102,7 @@ public class DummyConnector extends ConnectorBase {
 //        connectorFunctions.supportQueryByAdvanceFilter(this::supportQueryByAdvanceFilter);
     }
 
-    private void dropTable(TapConnectorContext connectorContext, TapDropTableEvent dropTableEvent) {
+    protected void dropTable(TapConnectorContext connectorContext, TapDropTableEvent dropTableEvent) {
 
     }
 
@@ -138,11 +137,11 @@ public class DummyConnector extends ConnectorBase {
         return null == schemas ? 0 : schemas.size();
     }
 
-    private long supportBatchCount(TapConnectorContext nodeContext, TapTable table) throws Throwable {
+    protected long supportBatchCount(TapConnectorContext nodeContext, TapTable table) throws Throwable {
         return config.getInitialTotals();
     }
 
-    private void supportBatchRead(TapConnectorContext connectorContext, TapTable table, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventConsumer) throws Throwable {
+    protected void supportBatchRead(TapConnectorContext connectorContext, TapTable table, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventConsumer) throws Throwable {
         connectorContext.getLog().info("Start {} batch read", table.getName());
 
         // Generate specified amount of data
@@ -166,7 +165,7 @@ public class DummyConnector extends ConnectorBase {
         connectorContext.getLog().info("Compile {} batch read", table.getName());
     }
 
-    private void queryByAdvanceFilter(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
+    protected void queryByAdvanceFilter(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
         builder.reset(null, SyncStage.Initial);
         int batchSize = null != filter.getBatchSize() && filter.getBatchSize().compareTo(0) > 0 ? filter.getBatchSize() : BATCH_ADVANCE_READ_LIMIT;
         FilterResults filterResults = new FilterResults();
@@ -185,7 +184,7 @@ public class DummyConnector extends ConnectorBase {
         }
     }
 
-    private void supportStreamRead(TapConnectorContext connectorContext, List<String> tableList, Object offsetState, int eventBatchSize, StreamReadConsumer eventConsumer) throws Throwable {
+    protected void supportStreamRead(TapConnectorContext connectorContext, List<String> tableList, Object offsetState, int eventBatchSize, StreamReadConsumer eventConsumer) throws Throwable {
         connectorContext.getLog().info("Start {} stream read", tableList);
 
         Integer incrementalInterval = config.getIncrementalInterval();
@@ -228,7 +227,7 @@ public class DummyConnector extends ConnectorBase {
         connectorContext.getLog().info("Compile {} batch read", tableList);
     }
 
-    private Object supportTimestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
+    protected Object supportTimestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if (null == offsetStartTime) {
             offsetStartTime = System.currentTimeMillis();
         }
@@ -240,7 +239,7 @@ public class DummyConnector extends ConnectorBase {
         return offset;
     }
 
-    private void supportWriteRecord(TapConnectorContext connectorContext, List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
+    protected void supportWriteRecord(TapConnectorContext connectorContext, List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
         if (null != recordEvents) {
             AtomicLong insert = new AtomicLong();
             AtomicLong update = new AtomicLong();
@@ -276,13 +275,13 @@ public class DummyConnector extends ConnectorBase {
         }
     }
 
-    private void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) {
+    protected void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) {
         if (writeLog) {
             tapConnectorContext.getLog().info("Show field DDL: {}", tapFieldBaseEvent.toString());
         }
     }
 
-    private void getTableNames(TapConnectionContext tapConnectionContext, int batchSize, Consumer<List<String>> listConsumer) {
+    protected void getTableNames(TapConnectionContext tapConnectionContext, int batchSize, Consumer<List<String>> listConsumer) {
         List<String> batchList = new ArrayList<>();
         for (String table : schemas.keySet()) {
             batchList.add(table);

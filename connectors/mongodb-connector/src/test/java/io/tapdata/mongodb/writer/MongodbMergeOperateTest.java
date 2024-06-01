@@ -1,14 +1,19 @@
 package io.tapdata.mongodb.writer;
 
+import io.tapdata.mongodb.entity.MergeBundle;
 import io.tapdata.mongodb.entity.MergeFilter;
 import io.tapdata.mongodb.entity.MergeResult;
 import io.tapdata.mongodb.merge.MergeFilterManager;
+import io.tapdata.pdk.apis.entity.merge.MergeTableProperties;
 import org.bson.Document;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -86,6 +91,30 @@ class MongodbMergeOperateTest {
 				assertEquals(1, mergeResult.getFilter().getInteger("id"));
 				assertEquals(3, mergeResult.getFilter().getInteger("id2"));
 			}
+		}
+	}
+
+	@Nested
+	class upsertMergeTest {
+		@Test
+		@DisplayName("test upsert merge, op: u, before: empty, after: {id: 1, _str: 'test1'}, expect filter: {id: 1}")
+		void testFilter() {
+			Map<String, Object> before = new HashMap<>();
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("_str", "test1");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE, before, after);
+			MergeTableProperties mergeTableProperties = new MergeTableProperties();
+			Map<String, String> joinKey = new HashMap<>();
+			joinKey.put("source", "id");
+			joinKey.put("target", "id");
+			List<Map<String, String>> joinKeys = new ArrayList<>();
+			joinKeys.add(joinKey);
+			mergeTableProperties.setJoinKeys(joinKeys);
+			MergeResult mergeResult = new MergeResult();
+			MongodbMergeOperate.upsertMerge(mergeBundle, mergeTableProperties, mergeResult);
+			Document filter = mergeResult.getFilter();
+			assertEquals(1, filter.getInteger("id"));
 		}
 	}
 }

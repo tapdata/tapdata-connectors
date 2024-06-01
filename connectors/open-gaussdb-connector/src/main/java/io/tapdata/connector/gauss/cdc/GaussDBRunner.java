@@ -327,7 +327,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
 
     public GaussDBRunner offset(Object offsetState) {
         if (EmptyKit.isNull(offsetState) || !(offsetState instanceof CdcOffset)) {
-            this.offset = new CdcOffset();
+            this.offset = CdcOffset.fromOffset(offsetState);
         } else {
             this.offset = (CdcOffset) offsetState;
         }
