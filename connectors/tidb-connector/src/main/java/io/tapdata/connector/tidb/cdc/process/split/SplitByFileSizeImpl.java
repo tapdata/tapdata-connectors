@@ -11,12 +11,14 @@ import java.util.stream.Collectors;
 
 public class SplitByFileSizeImpl implements SplitStage<File> {
     final int partitionBatch;
+
     public SplitByFileSizeImpl(int partitionBatch) {
         if (partitionBatch <= 0) {
             partitionBatch = 1;
         }
         this.partitionBatch = partitionBatch;
     }
+
     @Override
     public List<List<File>> splitToPieces(List<File> data, int eachPieceSize) {
         AtomicLong totalMemorySize = new AtomicLong();
@@ -39,7 +41,7 @@ public class SplitByFileSizeImpl implements SplitStage<File> {
         long minSize = 0;
         int location = 0;
         while (location != partitionBatch) {
-            location ++;
+            location++;
             List<File> partition = new ArrayList<>();
             long currentSize = 0;
             int size = sortedFiles.size();
@@ -48,7 +50,6 @@ public class SplitByFileSizeImpl implements SplitStage<File> {
                     continue;
                 }
                 File file = sortedFiles.get(index);
-                String name = file.getName();
                 long length = file.length();
                 long expectedSize = currentSize + length;
                 if (expectedSize > partitionSize) {
@@ -60,7 +61,7 @@ public class SplitByFileSizeImpl implements SplitStage<File> {
                     }
                     File lastAppropriateGoals = null;
                     Integer lastAppropriateGoalsIndex = null;
-                    for (int indexReverse = size-1; indexReverse > index; indexReverse--) {
+                    for (int indexReverse = size - 1; indexReverse > index; indexReverse--) {
                         if (removedFiles.contains(index)) {
                             continue;
                         }

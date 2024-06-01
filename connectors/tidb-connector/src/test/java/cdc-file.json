@@ -1,0 +1,234 @@
+{
+  "1.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717057508946,
+    "ts": 1717057509940,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4
+    },
+    "mysqlType": {
+      "no_w_id": "int",
+      "no_d_id": "int",
+      "no_o_id": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "1",
+        "no_d_id": "1",
+        "no_o_id": "1"
+      }
+    ]
+  },
+  "2.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717057741246,
+    "ts": 1717057742241,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4
+    },
+    "mysqlType": {
+      "no_o_id": "int",
+      "no_w_id": "int",
+      "no_d_id": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "2",
+        "no_d_id": "2",
+        "no_o_id": "2"
+      }
+    ]
+  },
+  "3.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717060105196,
+    "ts": 1717060105640,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4
+    },
+    "mysqlType": {
+      "no_w_id": "int",
+      "no_d_id": "int",
+      "no_o_id": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "3",
+        "no_d_id": "2",
+        "no_o_id": "3"
+      }
+    ]
+  },
+  "4.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "UPDATE",
+    "es": 1717060117995,
+    "ts": 1717060118641,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4
+    },
+    "mysqlType": {
+      "no_w_id": "int",
+      "no_d_id": "int",
+      "no_o_id": "int"
+    },
+    "old": [
+      {
+        "no_w_id": "2",
+        "no_d_id": "2",
+        "no_o_id": "2"
+      }
+    ],
+    "data": [
+      {
+        "no_w_id": "2",
+        "no_d_id": "2",
+        "no_o_id": "44"
+      }
+    ]
+  },
+  "5.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "DELETE",
+    "es": 1717060127046,
+    "ts": 1717060127640,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4
+    },
+    "mysqlType": {
+      "no_d_id": "int",
+      "no_o_id": "int",
+      "no_w_id": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "3",
+        "no_d_id": "2",
+        "no_o_id": "3"
+      }
+    ]
+  },
+  "6.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717060875895,
+    "ts": 1717060876440,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4,
+      "new_col": 4
+    },
+    "mysqlType": {
+      "no_o_id": "int",
+      "new_col": "int",
+      "no_w_id": "int",
+      "no_d_id": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "3",
+        "no_d_id": "3",
+        "no_o_id": "3",
+        "new_col": null
+      }
+    ]
+  },
+  "7.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717061851445,
+    "ts": 1717061852441,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4,
+      "new_col": 4,
+      "char_col": 12
+    },
+    "mysqlType": {
+      "char_col": "varchar",
+      "no_w_id": "int",
+      "no_d_id": "int",
+      "no_o_id": "int",
+      "new_col": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "9",
+        "no_d_id": "2",
+        "no_o_id": "3",
+        "new_col": null,
+        "char_col": "ccc"
+      }
+    ]
+  }
+}

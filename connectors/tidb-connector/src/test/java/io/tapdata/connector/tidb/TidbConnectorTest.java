@@ -33,8 +33,8 @@ public class TidbConnectorTest {
         ChangeFeed changefeed = new ChangeFeed();
         String changeFeedId = UUID.randomUUID().toString().replaceAll("-", "");
         if (Pattern.matches("^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$", changeFeedId)) {
-            changefeed.setSinkUri("file:///tidbCdc" + "/lemon");
-            changefeed.setChangefeedId("lemon-replication-task12");
+            changefeed.setSinkUri("file:///Users/xiao/Documents/GitHub/kit/tidb/json1?protocol=canal-json");
+            changefeed.setChangefeedId("simple-replication-task7");
             changefeed.setForceReplicate(true);
             changefeed.setSyncDdl(true);
             JSONObject jsonObject = new JSONObject();
@@ -53,7 +53,7 @@ public class TidbConnectorTest {
             sink.setProtocol("canal-json");
             replicaConfig.setSink(sink);
             changefeed.setReplicaConfig(replicaConfig);
-            httpUtil.createChangefeed(changefeed, "1.94.175.148:8300");
+            httpUtil.createChangefeed(changefeed, "127.0.0.1:8300");
         }
     }
 
