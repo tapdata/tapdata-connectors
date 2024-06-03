@@ -69,8 +69,9 @@ public class HttpUtil implements AutoCloseable {
                 tapLogger.info("Create Changefeed is success changefeedId:{}",changefeed.getChangefeedId());
                 return true;
             }else {
-                tapLogger.info("Create Changefeed is fail errorMsg:{}",EntityUtils.toString(responseEntity));
-                throw new IOException("Tidb stream fail reasoon:"+EntityUtils.toString(responseEntity));
+                String toString = EntityUtils.toString(responseEntity);
+                tapLogger.info("Create Changefeed is fail errorMsg:{}", toString);
+                throw new IOException("Tidb stream fail reasoon:" + toString);
             }
         }
     }

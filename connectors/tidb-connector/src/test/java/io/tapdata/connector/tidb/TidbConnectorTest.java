@@ -34,18 +34,18 @@ public class TidbConnectorTest {
         String changeFeedId = UUID.randomUUID().toString().replaceAll("-", "");
         if (Pattern.matches("^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$", changeFeedId)) {
             changefeed.setSinkUri("file:///Users/xiao/Documents/GitHub/kit/tidb/json1?protocol=canal-json");
-            changefeed.setChangefeedId("simple-replication-task7");
+            changefeed.setChangefeedId("simple-replication-task9");
             changefeed.setForceReplicate(true);
             changefeed.setSyncDdl(true);
             JSONObject jsonObject = new JSONObject();
             List<String> tableList = new ArrayList();
-            tableList.add("test");
+            tableList.add("*");
             List rules = new ArrayList();
             for(String table:tableList) {
                 String rule = "test"+"."+table;
                 rules.add(rule);
             }
-            jsonObject.put("rules",rules.toArray());
+            jsonObject.put("rules", rules.toArray());
             ReplicaConfig replicaConfig = new ReplicaConfig();
             replicaConfig.setFilter(jsonObject);
             Sink sink = new Sink();
@@ -61,6 +61,6 @@ public class TidbConnectorTest {
     @Test
     void testDelete() throws IOException {
         HttpUtil   httpUtil = new HttpUtil(new TapLog());
-        httpUtil.deleteChangefeed("lemon-replication-task9", "1.94.175.148:8300");
+        httpUtil.deleteChangefeed("simple-replication-task9", "127.0.0.1:8300");
     }
 }

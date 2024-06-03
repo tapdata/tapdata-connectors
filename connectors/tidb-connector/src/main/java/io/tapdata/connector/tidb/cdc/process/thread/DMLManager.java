@@ -40,8 +40,8 @@ class DMLManager implements Activity {
     Log log;
 
     protected DMLManager(ProcessHandler handler,
-                       String basePath,
-                       int threadCount) {
+                         String basePath,
+                         int threadCount) {
         if (threadCount > 10 || threadCount < 1) threadCount = 3;
         this.handler = handler;
         this.throwableCollector = handler.processInfo.throwableCollector;
@@ -64,7 +64,7 @@ class DMLManager implements Activity {
             basePath = "";
         }
         if (basePath.endsWith(File.separator)) {
-          basePath = basePath.substring(0, basePath.length() - File.separator.length());
+            basePath = basePath.substring(0, basePath.length() - File.separator.length());
         }
         this.basePath = basePath;
     }
@@ -95,7 +95,7 @@ class DMLManager implements Activity {
 
     /**
      * base path: ${tap-dir}/${ProcessHandler.BASE_CDC_DATA_DIR}
-     * */
+     */
     public List<File> scanAllJson(File databaseDir) {
         List<File> files = new ArrayList<>();
         if (!databaseDir.exists() || !databaseDir.isDirectory()) {
@@ -154,8 +154,6 @@ class DMLManager implements Activity {
             data.forEach((key, list) -> {
                 map.put(key, sort(new ArrayList<>(list)));
             });
-            //after all thread and sort read result by ts
-            //log when read end
         });
         try {
             completableFuture.get();
@@ -186,19 +184,21 @@ class DMLManager implements Activity {
             this.reader.readLineByLine(file, line -> {
                 DMLObject dmlObject = TapSimplify.fromJson(line, DMLObject.class);
                 String table = dmlObject.getTable();
+                DDLManager.VersionInfo versionInfo = handler.tableVersionMap.get(table);
+                if (null != versionInfo) {
+                    dmlObject.setTableColumnInfo(versionInfo.info);
+                } else {
+                    log.debug("Can not find table version info from ddl object");
+                }
                 ConcurrentLinkedQueue<DMLObject> linkedQueue = data.computeIfAbsent(table, key -> new ConcurrentLinkedQueue<>());
                 linkedQueue.add(dmlObject);
             });
             try {
                 FileUtils.delete(file);
             } catch (IOException e) {
-                System.out.println("delete failed, message: " + e.getMessage());
+                log.error("A read complete file delete failed in cdc, file: {}, message: {}", file.getPath(), e.getMessage());
             }
         }
-    }
-
-    protected void joinResultToTableList() {
-
     }
 
     protected String getFullBasePath() {

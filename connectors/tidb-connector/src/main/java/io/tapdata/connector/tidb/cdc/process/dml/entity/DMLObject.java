@@ -2,7 +2,7 @@ package io.tapdata.connector.tidb.cdc.process.dml.entity;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.tapdata.connector.tidb.cdc.process.TiData;
-import io.tapdata.connector.tidb.cdc.process.ddl.entity.DDLObject;
+import io.tapdata.connector.tidb.cdc.process.ddl.convert.Convert;
 
 import java.util.List;
 import java.util.Map;
@@ -24,8 +24,11 @@ public class DMLObject extends TiData {
     @JsonProperty("isDdl")
     Boolean isDdl;
 
+    /**
+     * @see DMLType
+     * */
     @JsonProperty("type")
-    DMLType type;
+    String type;
 
     @JsonProperty("es")
     Long es;
@@ -47,6 +50,8 @@ public class DMLObject extends TiData {
 
     @JsonProperty("data")
     List<Map<String, Object>> data;
+
+    Map<String, Convert> tableColumnInfo;
 
     public Long getId() {
         return id;
@@ -88,11 +93,11 @@ public class DMLObject extends TiData {
         isDdl = ddl;
     }
 
-    public DMLType getType() {
+    public String getType() {
         return type;
     }
 
-    public void setType(DMLType type) {
+    public void setType(String type) {
         this.type = type;
     }
 
@@ -150,5 +155,13 @@ public class DMLObject extends TiData {
 
     public void setData(List<Map<String, Object>> data) {
         this.data = data;
+    }
+
+    public Map<String, Convert> getTableColumnInfo() {
+        return tableColumnInfo;
+    }
+
+    public void setTableColumnInfo(Map<String, Convert> info) {
+        this.tableColumnInfo = info;
     }
 }

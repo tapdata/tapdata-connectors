@@ -1,22 +1,17 @@
 package io.tapdata.connector.tidb;
 
-import com.alibaba.fastjson.JSONObject;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
-import io.tapdata.common.util.FileUtil;
 import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
-import io.tapdata.connector.tidb.cdc.TidbCdcService;
+import io.tapdata.connector.tidb.cdc.process.thread.ProcessHandler;
 import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.connector.tidb.ddl.TidbDDLSqlGenerator;
 import io.tapdata.connector.tidb.dml.TidbReader;
 import io.tapdata.connector.tidb.dml.TidbRecordWriter;
 import io.tapdata.connector.tidb.util.HttpUtil;
-import io.tapdata.connector.tidb.util.pojo.ChangeFeed;
-import io.tapdata.connector.tidb.util.pojo.ReplicaConfig;
-import io.tapdata.connector.tidb.util.pojo.Sink;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
@@ -25,7 +20,14 @@ import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.schema.value.TapArrayValue;
+import io.tapdata.entity.schema.value.TapBooleanValue;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapMapValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
+import io.tapdata.entity.schema.value.TapValue;
+import io.tapdata.entity.schema.value.TapYearValue;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
@@ -33,20 +35,23 @@ import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import io.tapdata.pdk.apis.entity.*;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
+import io.tapdata.pdk.apis.entity.FilterResults;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.io.FileUtils;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.regex.Pattern;
 
 
 @TapConnectorClass("spec_tidb.json")
@@ -56,10 +61,7 @@ public class TidbConnector extends CommonDbConnector {
     private TidbJdbcContext tidbJdbcContext;
     private TimeZone timezone;
     private TidbReader tidbReader;
-    private HttpUtil httpUtil;
-
-    String  changeFeedId;
-
+    AtomicReference<Throwable> throwableCatch;
     String filePath;
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
@@ -84,6 +86,7 @@ public class TidbConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
+        throwableCatch = new AtomicReference<>();
     }
 
     @Override
@@ -147,33 +150,32 @@ public class TidbConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        httpUtil = new HttpUtil(tapLogger);
-        ChangeFeed changefeed = new ChangeFeed();
-        changeFeedId = UUID.randomUUID().toString().replaceAll("-", "");
-        String filePathTemp = "tidbCdcData"+"/"+nodeContext.getId();
-        filePath = filePathTemp;
-        if (Pattern.matches("^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$", changeFeedId)) {
-            changefeed.setSinkUri("file:///" + filePath);
-            changefeed.setChangefeedId(changeFeedId);
-            changefeed.setForceReplicate(true);
-            changefeed.setSyncDdl(true);
-            JSONObject jsonObject = new JSONObject();
-            List rules = new ArrayList();
-            for (String table : tableList) {
-                String rule = tidbConfig.getDatabase() + "." + table;
-                rules.add(rule);
+        String feedId = (String) nodeContext.getStateMap().get("feed-id");
+        if (null == feedId) {
+            feedId = UUID.randomUUID().toString().replaceAll("-", "");
+            nodeContext.getStateMap().put("feed-id", feedId);
+        }
+        ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
+                .withCdcServer(tidbConfig.getCdcServer())
+                .withFeedId(feedId)
+                .withAlive(this::isAlive)
+                .withTapConnectorContext(nodeContext)
+                .withCdcTable(tableList)
+                .withThrowableCollector(throwableCatch)
+                .withCdcOffset(offsetState)
+                .withDatabase(tidbConfig.getDatabase());
+        ProcessHandler handler = new ProcessHandler(info, consumer);
+        handler.init();
+        try {
+            handler.doActivity();
+            while (isAlive()) {
+                if (null != throwableCatch.get()) {
+                    throw throwableCatch.get();
+                }
+                Thread.sleep(1000);
             }
-            jsonObject.put("rules", rules.toArray());
-            ReplicaConfig replicaConfig = new ReplicaConfig();
-            replicaConfig.setFilter(jsonObject);
-            Sink sink = new Sink();
-            sink.setDateSeparator("none");
-            sink.setProtocol("canal-json");
-            sink.setTerminator(",");
-            replicaConfig.setSink(sink);
-            changefeed.setReplicaConfig(replicaConfig);
-            changefeed.setStartTs((long)offsetState);
-            httpUtil.createChangefeed(changefeed, tidbConfig.getCdcServer());
+        } finally {
+            handler.close();
         }
     }
 
@@ -189,19 +191,15 @@ public class TidbConnector extends CommonDbConnector {
     public void onStop(TapConnectionContext connectionContext) throws Exception {
         started.set(false);
         EmptyKit.closeQuietly(tidbJdbcContext);
-        if (EmptyKit.isNotNull(httpUtil)) {
-            if (EmptyKit.isNotNull(changeFeedId)) {
-                httpUtil.deleteChangefeed(changeFeedId, tidbConfig.getCdcServer());
-            }
-            FileUtils.deleteDirectory(new File(filePath));
-            EmptyKit.closeQuietly(httpUtil);
-        }
     }
 
     private void onDestroy(TapConnectorContext connectorContext) throws Throwable {
-        if (EmptyKit.isNotNull(changeFeedId)) {
-            httpUtil.deleteChangefeed(changeFeedId, tidbConfig.getCdcServer());
-            FileUtils.deleteDirectory(new File(filePath));
+        String feedId = (String) connectorContext.getStateMap().get("feed-id");
+        if (EmptyKit.isNotNull(feedId)) {
+            try (HttpUtil httpUtil = new HttpUtil(connectorContext.getLog())) {
+                httpUtil.deleteChangefeed(feedId, tidbConfig.getCdcServer());
+                FileUtils.deleteDirectory(new File(filePath));
+            }
         }
     }
 

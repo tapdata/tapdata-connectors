@@ -1,7 +1,6 @@
 package io.tapdata.connector.tidb.cdc.process.thread;
 
 
-import io.tapdata.connector.tidb.cdc.process.dml.entity.DMLObject;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;
@@ -13,6 +12,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 class DMLManagerTest {
@@ -22,6 +22,7 @@ class DMLManagerTest {
         }
 
     }
+
     class Consumer extends StreamReadConsumer {
         @Override
         public void accept(List<TapEvent> events, Object offset) {
@@ -68,6 +69,8 @@ class DMLManagerTest {
         });
         Consumer consumer = new Consumer();
         ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
+                .withCdcServer("127.0.0.1:8300")
+                .withFeedId(UUID.randomUUID().toString().replaceAll("-", ""))
                 .withAlive(() -> true)
                 .withTapConnectorContext(context)
                 .withCdcTable(null)

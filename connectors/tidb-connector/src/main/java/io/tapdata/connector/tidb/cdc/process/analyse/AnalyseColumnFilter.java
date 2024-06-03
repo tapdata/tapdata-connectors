@@ -7,6 +7,6 @@ import java.util.Map;
  * @description CsvAnalyseFilter create by Gavin
  * @create 2023/8/9 15:22
  **/
-public interface CsvAnalyseFilter {
-    boolean filter(Map<String, Object> before, Map<String, Object> after, Map<String, Object> cdcInfo);
+public interface AnalyseColumnFilter<T> {
+    boolean filter(Map<String, Object> before, Map<String, Object> after, T cdcInfo);
 }

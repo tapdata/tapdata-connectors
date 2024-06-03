@@ -1,26 +1,22 @@
 package io.tapdata.connector.tidb.cdc.process.thread;
 
 import io.tapdata.common.util.FileUtil;
-import io.tapdata.connector.tidb.cdc.process.TiData;
 import io.tapdata.connector.tidb.cdc.process.analyse.csv.NormalFileReader;
+import io.tapdata.connector.tidb.cdc.process.ddl.convert.Convert;
 import io.tapdata.connector.tidb.cdc.process.ddl.entity.DDLObject;
-import io.tapdata.connector.tidb.cdc.process.dml.entity.DMLObject;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;
 import org.apache.commons.collections4.CollectionUtils;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Supplier;
 
 class DDLManager implements Activity {
     public static final String TABLE_VERSION_FILE_NAME_MATCH = "(schema_)([\\d]{18})(_)([\\d]{10})(\\.json)";
@@ -91,12 +87,12 @@ class DDLManager implements Activity {
             try {
                 DDLObject ddlObject = TapSimplify.fromJson(tableDDL, DDLObject.class);
                 if (null == ddlObject.getTableVersion()) {
-                    // @todo log or throw exception
+                    log.warn("A cdc ddl data not contains TableVersion, ddl: {}", tableDDL);
                     continue;
                 }
                 schemaJsonFile.add(ddlObject);
             } catch (Exception e) {
-                //@todo
+                log.warn("A cdc ddl data can not be parse as a Json Object, ddl: {}", tableDDL);
             }
         }
         if (schemaJsonFile.isEmpty()) return;
@@ -134,7 +130,13 @@ class DDLManager implements Activity {
         //旧版本没有DML数据则更新到新版本模型，DML开始监听新模型的cdc数据
         handler.getTapEventManager().emit(newDDLTableVersion);
         synchronized (handler.tableVersionLock) {
-            handler.tableVersionMap.put(tableName, String.valueOf(newDDLTableVersion.getTableVersion()));
+            handler.tableVersionMap.put(
+                    tableName,
+                    new VersionInfo(
+                            String.valueOf(newDDLTableVersion.getTableVersion()),
+                            newDDLTableVersion.getTableColumns()
+                    )
+            );
         }
     }
 
@@ -148,5 +150,21 @@ class DDLManager implements Activity {
     public void close() throws Exception {
         cancelSchedule(this.scheduledFuture, log);
         this.scheduledFuture = null;
+    }
+
+    public static class VersionInfo {
+        String version;
+        Map<String, Convert> info;
+
+        public VersionInfo(String v, List<Map<String, Object>> info) {
+            this.version = v;
+            this.info = new HashMap<>();
+            if (CollectionUtils.isNotEmpty(info)) {
+                for (Map<String, Object> convertInfo : info) {
+                    String columnName = String.valueOf(convertInfo.get(Convert.COLUMN_NAME));
+                    this.info.put(columnName, Convert.instance(convertInfo));
+                }
+            }
+        }
     }
 }
