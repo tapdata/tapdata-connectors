@@ -1,8 +1,14 @@
 package io.tapdata.mongodb;
 
 
+import com.mongodb.Function;
+import com.mongodb.ServerAddress;
+import com.mongodb.ServerCursor;
+import com.mongodb.client.*;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapIndex;
+import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.mongodb.batch.ErrorHandler;
@@ -15,21 +21,21 @@ import io.tapdata.mongodb.reader.MongodbStreamReader;
 import io.tapdata.mongodb.reader.StreamWithOpLogCollection;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
+import org.bson.BsonValue;
+import org.bson.Document;
+import org.junit.jupiter.api.*;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -477,6 +483,55 @@ class MongodbConnectorTest {
             when(connectorContext.getConnectionConfig()).thenReturn(mock(DataMap.class));
             doCallRealMethod().when(mongodbConnector).onStart(connectorContext);
             assertThrows(RuntimeException.class, ()->mongodbConnector.onStart(connectorContext));
+        }
+    }
+
+    @Nested
+    @DisplayName("Method queryIndexes test")
+    class QueryIndexesTest {
+
+        private TapConnectorContext tapConnectorContext;
+        private TapTable tapTable;
+
+        @BeforeEach
+        void setUp() {
+            tapConnectorContext = mock(TapConnectorContext.class);
+            tapTable = new TapTable("test");
+            doCallRealMethod().when(mongodbConnector).queryIndexes(any(), any(), any());
+        }
+
+        @Test
+        void testMainProcess() {
+            List<Document> listIndexes = new ArrayList<>();
+            listIndexes.add(new Document("name", "_id_").append("key", new Document("_id", 1)));
+            listIndexes.add(new Document("name", "uid_1").append("key", new Document("uid", 1)));
+            listIndexes.add(new Document("name", "sub.sid1_1_sub.sid2_-1").append("key", new Document("sub.sid1", 1).append("sub.sid2", -1)));
+            Iterator<Document> iterator = listIndexes.iterator();
+            MongoCursor<Document> mongoCursor = mock(MongoCursor.class);
+            when(mongoCursor.next()).thenAnswer(invocationOnMock -> iterator.next());
+            when(mongoCursor.hasNext()).thenAnswer(invocationOnMock -> iterator.hasNext());
+            ListIndexesIterable<Document> listIndexesIterable = mock(ListIndexesIterable.class);
+            when(listIndexesIterable.iterator()).thenReturn(mongoCursor);
+            doCallRealMethod().when(listIndexesIterable).forEach(any(Consumer.class));
+            MongoCollection<Document> mongoCollection = mock(MongoCollection.class);
+            when(mongoCollection.listIndexes()).thenReturn(listIndexesIterable);
+            MongoDatabase mongoDatabase = mock(MongoDatabase.class);
+            when(mongoDatabase.getCollection(tapTable.getId())).thenReturn(mongoCollection);
+            ReflectionTestUtils.setField(mongodbConnector, "mongoDatabase", mongoDatabase);
+            mongodbConnector.queryIndexes(tapConnectorContext, tapTable, indexes -> {
+                assertEquals(3, indexes.size());
+                TapIndex tapIndex = indexes.get(0);
+                assertEquals(listIndexes.get(0).getString("name"), tapIndex.getName());
+                List<TapIndexField> indexFields = tapIndex.getIndexFields();
+                assertEquals(1, indexFields.size());
+                assertEquals("_id", indexFields.get(0).getName());
+                assertTrue(indexFields.get(0).getFieldAsc());
+                tapIndex = indexes.get(2);
+                assertEquals(listIndexes.get(2).getString("name"), tapIndex.getName());
+                indexFields = tapIndex.getIndexFields();
+                assertEquals("sub.sid2", indexFields.get(1).getName());
+                assertFalse(indexFields.get(1).getFieldAsc());
+            });
         }
     }
 }
