@@ -242,7 +242,7 @@
     "default": "en_US",
     "en_US": {
       "pdServer": "PDServer address",
-      "pdServerTip": "Fill in the PD-Server address to test the availability of Tidb, should start with a protocol, such as: or https://${ip:port}",
+      "pdServerTip": "Fill in the PD-Server address to test the availability of Tidb, should start with a protocol, such as: or https://{ip:port}",
       "host": "DB Address",
       "hostTip": "The address of the database, it can be an IP address or a domain name, for example: 192.168.1.200",
       "port": "Port",
@@ -259,7 +259,7 @@
     },
     "zh_CN": {
       "pdServer": "PDServer 地址",
-      "pdServerTip": "填写PD-Server地址，测试Tidb可用性，请指定对应的协议，如 http://${IP:端口} 或者 https://${IP:端口}",
+      "pdServerTip": "填写PD-Server地址，测试Tidb可用性，请指定对应的协议，如 http://{IP:端口} 或者 https://{IP:端口}",
       "host": "数据库地址",
       "hostTip": "数据库的地址，它可以是IP地址或者域名，例如：192.168.1.200",
       "port": "端口",
@@ -276,7 +276,7 @@
     },
     "zh_TW": {
       "pdServer": "PDServer 地址",
-      "pdServerTip": "填寫PD-Server地址，測試Tidb可用性，請指定對應的協定，如 http://${IP:埠} 或者 https://${IP:埠}",
+      "pdServerTip": "填寫PD-Server地址，測試Tidb可用性，請指定對應的協定，如 http://{IP:埠} 或者 https://{IP:埠}",
       "host": "数据库地址",
       "hostTip": "数据库的地址，它可以是IP地址或者域名，例如：192.168.1.200",
       "port": "端口",
