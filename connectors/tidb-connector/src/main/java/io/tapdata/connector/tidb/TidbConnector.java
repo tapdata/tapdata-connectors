@@ -171,7 +171,7 @@ public class TidbConnector extends CommonDbConnector {
                         throw throwableCatch.get();
                     }
                     handler.aliveCheck();
-                    Thread.sleep(1000);
+                    Thread.sleep(3000);
                 }
         }
     }

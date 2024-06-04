@@ -6,6 +6,7 @@ import io.tapdata.connector.tidb.cdc.util.ProcessSearch;
 import io.tapdata.connector.tidb.cdc.util.ResourcesLoader;
 import io.tapdata.connector.tidb.cdc.util.ZipUtils;
 import io.tapdata.connector.tidb.config.TidbConfig;
+import io.tapdata.connector.tidb.util.HttpUtil;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -68,7 +69,13 @@ public class TiCDCShellManager implements Activity {
     }
 
     public void checkAlive() {
-        doActivity();
+        try(HttpUtil util = new HttpUtil(log)) {
+            if (util.queryChangefeedsList(shellConfig.cdcServerIpPort) <= 0) {
+                doActivity();
+            }
+        } catch (Exception e) {
+            log.debug("Unable query TiDB cdc process, server: {}, message: {}", shellConfig.cdcServerIpPort, e.getMessage());
+        }
     }
 
     protected String setProperties(String cmd, String key, Object value) {
@@ -106,7 +113,7 @@ public class TiCDCShellManager implements Activity {
     public String getAllRunningCdcInfo() {
         List<String> server = ProcessSearch.getProcesses(log,
                 getCdcToolPath(),
-                getDatabaseTag(),
+                shellConfig.cdcServerIpPort,
                 "server",
                 "--pd=",
                 "--addr=",
@@ -189,7 +196,7 @@ public class TiCDCShellManager implements Activity {
             //This machine is running on an x86 architecture
             return "cdc_x86";
         } else {
-            throw new CoreException("UnSupport architecture: {}", osArch);
+            return "cdc";
         }
     }
 
