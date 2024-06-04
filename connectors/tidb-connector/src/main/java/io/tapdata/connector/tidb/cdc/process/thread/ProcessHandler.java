@@ -124,7 +124,7 @@ public final class ProcessHandler implements Activity {
     }
 
     public void aliveCheck() {
-        shellManager.doActivity();
+        shellManager.checkAlive();
     }
 
     protected void startFeedProcess() {
