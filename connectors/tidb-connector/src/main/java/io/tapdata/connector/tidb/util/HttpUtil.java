@@ -2,6 +2,7 @@ package io.tapdata.connector.tidb.util;
 
 
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.PropertyNamingStrategy;
 import com.alibaba.fastjson.serializer.SerializeConfig;
 import io.tapdata.connector.tidb.util.pojo.ChangeFeed;
@@ -11,6 +12,7 @@ import org.apache.http.HttpEntity;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpDelete;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -22,7 +24,6 @@ import java.io.IOException;
 public class HttpUtil implements AutoCloseable {
 
     private final CloseableHttpClient httpClient;
-    private boolean isChangeFeedClosed;
 
     protected Log tapLogger;
 
@@ -75,40 +76,31 @@ public class HttpUtil implements AutoCloseable {
             }
         }
     }
-public  Boolean resumeChangefeed(String changefeedId,String cdcUrl)throws IOException{
-    String url ="http://"+ cdcUrl+"/api/v2/changefeeds/"+changefeedId+"/resume";
-    HttpPost httpPost = new HttpPost(url);
-    httpPost.setHeader("Content-Type", "application/json;charset=utf8");
-    try (
-            CloseableHttpResponse response = httpClient.execute(httpPost)
-    ) {
-        if (response.getStatusLine().getStatusCode() == 200) {
-            isChangeFeedClosed = false;
-            return true;
-        }
-    }
-    return false;
-}
-    public  Boolean pauseChangefeed(String changefeedId,String cdcUrl)throws IOException{
-        String url ="http://"+ cdcUrl+"/api/v2/changefeeds/"+changefeedId+"/pause";
-        HttpPost httpPost = new HttpPost(url);
-        httpPost.setHeader("Content-Type", "application/json;charset=utf8");
+
+
+    public int queryChangefeedsList(String cdcUrl) throws IOException {
+        String url = "http://" + cdcUrl + "/api/v2/changefeeds";
+        HttpGet httpGet = new HttpGet(url);
         try (
-                CloseableHttpResponse response = httpClient.execute(httpPost)
+                CloseableHttpResponse response = httpClient.execute(httpGet)
         ) {
-            if (response.getStatusLine().getStatusCode() == 202) {
-                isChangeFeedClosed = false;
-                return true;
+            HttpEntity responseEntity = response.getEntity();
+            if (responseEntity != null && response.getStatusLine().getStatusCode() == 200) {
+                String toString = EntityUtils.toString(responseEntity);
+                JSONObject jsonObject = JSON.parseObject(toString);
+                int taskNum= (int) jsonObject.get("total");
+                tapLogger.info("Query changefeedsList is success  task count:{}",taskNum);
+                return taskNum;
+            }else {
+                String toString = EntityUtils.toString(responseEntity);
+                tapLogger.error("Query ChangefeedsList is fail errorMsg:{}", toString);
+                throw new IOException("Query ChangefeedsList is fail reason:" + toString);
             }
         }
-        return false;
     }
 
     public void close() {
         ErrorKit.ignoreAnyError(httpClient::close);
-    }
-    public boolean isChangeFeedClosed() {
-        return isChangeFeedClosed;
     }
 }
 

@@ -33,8 +33,8 @@ public class TidbConnectorTest {
         ChangeFeed changefeed = new ChangeFeed();
         String changeFeedId = UUID.randomUUID().toString().replaceAll("-", "");
         if (Pattern.matches("^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$", changeFeedId)) {
-            changefeed.setSinkUri("file:///Users/xiao/Documents/GitHub/kit/tidb/json1?protocol=canal-json");
-            changefeed.setChangefeedId("simple-replication-task9");
+            changefeed.setSinkUri("file:///tidbCDC888?protocol=canal-json");
+            changefeed.setChangefeedId("simple-replication-task");
             changefeed.setForceReplicate(true);
             changefeed.setSyncDdl(true);
             JSONObject jsonObject = new JSONObject();
@@ -53,7 +53,7 @@ public class TidbConnectorTest {
             sink.setProtocol("canal-json");
             replicaConfig.setSink(sink);
             changefeed.setReplicaConfig(replicaConfig);
-            httpUtil.createChangefeed(changefeed, "127.0.0.1:8300");
+            httpUtil.createChangefeed(changefeed, "123.60.132.254:8300");
         }
     }
 
@@ -62,5 +62,12 @@ public class TidbConnectorTest {
     void testDelete() throws IOException {
         HttpUtil   httpUtil = new HttpUtil(new TapLog());
         httpUtil.deleteChangefeed("simple-replication-task9", "127.0.0.1:8300");
+    }
+
+
+    @Test
+    void queryChangefeedlist() throws IOException {
+        HttpUtil httpUtil = new HttpUtil(new TapLog());
+        httpUtil.queryChangefeedsList("123.60.132.254:8300");
     }
 }
