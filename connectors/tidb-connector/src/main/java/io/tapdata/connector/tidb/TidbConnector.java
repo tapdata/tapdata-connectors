@@ -3,7 +3,6 @@ package io.tapdata.connector.tidb;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
-import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.tidb.cdc.process.thread.ProcessHandler;
@@ -223,13 +222,11 @@ public class TidbConnector extends CommonDbConnector {
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext databaseContext, Consumer<TestItem> consumer) {
         tidbConfig = new TidbConfig().load(databaseContext.getConnectionConfig());
-        KafkaConfig kafkaConfig = (KafkaConfig) new KafkaConfig().load(databaseContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(tidbConfig.getConnectionString());
         try (
                 TidbConnectionTest connectionTest = new TidbConnectionTest(tidbConfig, consumer, connectionOptions)
         ) {
-            connectionTest.setKafkaConfig(kafkaConfig);
             connectionTest.testOneByOne();
         }
         return connectionOptions;

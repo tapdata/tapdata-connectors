@@ -2,6 +2,7 @@ package io.tapdata.connector.tidb.cdc.process.thread;
 
 import io.tapdata.common.util.FileUtil;
 import io.tapdata.entity.logger.Log;
+import org.apache.commons.collections4.CollectionUtils;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -35,7 +36,7 @@ public interface Activity extends AutoCloseable {
 
     default List<File> scanAllCdcTableDir(List<String> cdcTable, File databaseDir, Supplier<Boolean> alive) {
         List<File> tableDirs = new ArrayList<>();
-        if (org.apache.commons.collections.CollectionUtils.isEmpty(cdcTable)) {
+        if (CollectionUtils.isEmpty(cdcTable)) {
             File[] tableFiles = databaseDir.listFiles(File::isDirectory);
             if (null != tableFiles && tableFiles.length > 0) {
                 tableDirs.addAll(new ArrayList<>(Arrays.asList(tableFiles)));
