@@ -176,16 +176,15 @@ public class TiCDCShellManager implements Activity {
     }
 
     protected String cdcFileName() {
-        // 获取操作系统的架构属性
         String osArch = System.getProperty("os.arch").toLowerCase();
-
-        // 判断架构类型
         if (osArch.contains("arm")) {
             //"This machine is running on an ARM architecture
             return "cdc_arm";
-        } else if (osArch.contains("amd64") || osArch.contains("x86_64")) {
+        } else if (osArch.contains("amd64")) {
             //This machine is running on an x86-64 (AMD64) architecture
             return "cdc_amd";
+        } else if(osArch.contains("x86_64")) {
+            return "cdc_x86_64";
         } else if (osArch.contains("x86")) {
             //This machine is running on an x86 architecture
             return "cdc_x86";
