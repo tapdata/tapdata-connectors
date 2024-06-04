@@ -1,4 +1,4 @@
-package io.tapdata.elasticsearch.utils;
+package io.tapdata.connector.elasticsearch.utils;
 
 import io.tapdata.connector.elasticsearch.ElasticsearchConfig;
 import io.tapdata.connector.elasticsearch.ElasticsearchHttpContext;
