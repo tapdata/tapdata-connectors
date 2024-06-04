@@ -127,7 +127,7 @@ class TapEventManager implements Activity {
 
     protected void handleDML(DMLObject dmlObject) {
         log.debug("Find a DML: " + TapSimplify.toJson(dmlObject));
-        Long ts = Optional.ofNullable(dmlObject.getTs()).orElse(System.currentTimeMillis());
+        Long ts = getTOSTime(dmlObject.getTs());
         String table = dmlObject.getTable();
         Map<String, Long> offsetMap = TiOffset.computeIfAbsent(table, offset, ts, dmlObject.getTableVersion());
         Long lastTs = TiOffset.getTs(offsetMap);

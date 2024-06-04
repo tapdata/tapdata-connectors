@@ -16,15 +16,6 @@ public class TidbConfig extends MysqlConfig implements Serializable {
     private String mqTopic;
     private String mqUsername;
     private String mqPassword;
-    private String cdcServer;
-
-    public String getCdcServer() {
-        return cdcServer;
-    }
-
-    public void setCdcServer(String cdcServer) {
-        this.cdcServer = cdcServer;
-    }
 
     public String getNameSrvAddr() {
         return nameSrvAddr;

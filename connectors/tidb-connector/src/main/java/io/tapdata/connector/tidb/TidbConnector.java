@@ -7,6 +7,7 @@ import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.tidb.cdc.process.thread.ProcessHandler;
+import io.tapdata.connector.tidb.cdc.process.thread.TiCDCShellManager;
 import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.connector.tidb.ddl.TidbDDLSqlGenerator;
 import io.tapdata.connector.tidb.dml.TidbReader;
@@ -61,7 +62,7 @@ public class TidbConnector extends CommonDbConnector {
     private TidbJdbcContext tidbJdbcContext;
     private TimeZone timezone;
     private TidbReader tidbReader;
-    AtomicReference<Throwable> throwableCatch;
+    AtomicReference<Throwable> throwableCatch = new AtomicReference<>();
     String filePath;
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
@@ -86,7 +87,6 @@ public class TidbConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
-        throwableCatch = new AtomicReference<>();
     }
 
     @Override
@@ -156,33 +156,31 @@ public class TidbConnector extends CommonDbConnector {
             nodeContext.getStateMap().put("feed-id", feedId);
         }
         ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
-                .withCdcServer(tidbConfig.getCdcServer())
                 .withFeedId(feedId)
                 .withAlive(this::isAlive)
                 .withTapConnectorContext(nodeContext)
                 .withCdcTable(tableList)
                 .withThrowableCollector(throwableCatch)
                 .withCdcOffset(offsetState)
+                .withTiDBConfig(tidbConfig)
+                .withGcTtl(86400)
                 .withDatabase(tidbConfig.getDatabase());
-        ProcessHandler handler = new ProcessHandler(info, consumer);
-        handler.init();
-        try {
-            handler.doActivity();
-            while (isAlive()) {
-                if (null != throwableCatch.get()) {
-                    throw throwableCatch.get();
+        try (ProcessHandler handler = new ProcessHandler(info, consumer)) {
+                handler.doActivity();
+                while (isAlive()) {
+                    if (null != throwableCatch.get()) {
+                        throw throwableCatch.get();
+                    }
+                    handler.aliveCheck();
+                    Thread.sleep(1000);
                 }
-                Thread.sleep(1000);
-            }
-        } finally {
-            handler.close();
         }
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if (null == offsetStartTime) {
             MysqlBinlogPosition mysqlBinlogPosition = tidbJdbcContext.readBinlogPosition();
-            return mysqlBinlogPosition.getPosition() >> 18;
+            return mysqlBinlogPosition.getPosition();
         }
         return offsetStartTime;
     }
@@ -195,10 +193,14 @@ public class TidbConnector extends CommonDbConnector {
 
     private void onDestroy(TapConnectorContext connectorContext) throws Throwable {
         String feedId = (String) connectorContext.getStateMap().get("feed-id");
+        String cdcServer = (String) connectorContext.getStateMap().get("cdc-server");
+        String filePath = (String) connectorContext.getStateMap().get("cdc-file-path");
         if (EmptyKit.isNotNull(feedId)) {
             try (HttpUtil httpUtil = new HttpUtil(connectorContext.getLog())) {
-                httpUtil.deleteChangefeed(feedId, tidbConfig.getCdcServer());
+                httpUtil.deleteChangefeed(feedId, cdcServer);
                 FileUtils.deleteDirectory(new File(filePath));
+            } catch (Exception e) {
+                connectorContext.getLog().warn("Clean cdc resources failed, message: {}", e.getMessage(), e);
             }
         }
     }

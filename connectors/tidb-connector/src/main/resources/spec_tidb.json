@@ -44,27 +44,6 @@
             }
           }
         },
-         "cdcServer": {
-              "type": "string",
-              "title": "${cdcServer}",
-              "x-decorator": "FormItem",
-              "x-component": "Input",
-              "required": true,
-              "x-decorator-props": {
-                "tooltip": "${cdcServerTip}"
-              },
-              "x-index": 2,
-              "x-reactions": {
-                "dependencies": [
-                  "__TAPDATA.connection_type"
-                ],
-                "fulfill": {
-                  "state": {
-                    "display": "{{$deps[0]!=='target' ? 'visible':'hidden'}}"
-                  }
-                }
-              }
-            },
         "host": {
           "type": "string",
           "title": "${host}",
@@ -263,7 +242,7 @@
     "default": "en_US",
     "en_US": {
       "pdServer": "PDServer address",
-      "pdServerTip": "Fill in the PD-Server address to test the availability of Tidb",
+      "pdServerTip": "Fill in the PD-Server address to test the availability of Tidb, should start with a protocol, such as: or https://${ip:port}",
       "host": "DB Address",
       "hostTip": "The address of the database, it can be an IP address or a domain name, for example: 192.168.1.200",
       "port": "Port",
@@ -276,13 +255,11 @@
       "extParamsTip": "Additional connection parameters in URI, you can write according to personalized scenarios",
       "timezone": "Timezone for Datetime",
       "timezoneTip": "Specify the time zone, otherwise the database time zone will be used by default",
-      "doc": "docs/tidb_en_US.md",
-      "cdcServer": "tidbCdc Url",
-      "cdcServerTip": "Fill in the tidbCdc Server address to test the availability of Tidb"
+      "doc": "docs/tidb_en_US.md"
     },
     "zh_CN": {
       "pdServer": "PDServer 地址",
-      "pdServerTip": "填写PD-Server地址，测试Tidb可用性",
+      "pdServerTip": "填写PD-Server地址，测试Tidb可用性，请指定对应的协议，如 http://${IP:端口} 或者 https://${IP:端口}",
       "host": "数据库地址",
       "hostTip": "数据库的地址，它可以是IP地址或者域名，例如：192.168.1.200",
       "port": "端口",
@@ -295,13 +272,11 @@
       "extParamsTip": "URI额外的连接参数，可以根据个性化场景书写",
       "timezone": "时间类型的时区",
       "timezoneTip": "指定时区，否则默认使用数据库时区",
-      "doc": "docs/tidb_zh_CN.md",
-      "cdcServer": "tidbCdc Server 地址",
-      "cdcServerTip": "填写tidbCdc Server地址，测试Tidb可用性"
+      "doc": "docs/tidb_zh_CN.md"
     },
     "zh_TW": {
       "pdServer": "PDServer 地址",
-      "pdServerTip": "填寫PD-Server地址，測試Tidb可用性",
+      "pdServerTip": "填寫PD-Server地址，測試Tidb可用性，請指定對應的協定，如 http://${IP:埠} 或者 https://${IP:埠}",
       "host": "数据库地址",
       "hostTip": "数据库的地址，它可以是IP地址或者域名，例如：192.168.1.200",
       "port": "端口",
@@ -314,9 +289,7 @@
       "extParamsTip": "URI額外的連接參數，可以根據個性化場景書寫",
       "timezone": "时间类型的时区",
       "timezoneTip": "指定時區，否則默認使用數據庫時區",
-      "doc": "docs/tidb_zh_TW.md",
-      "cdcServer": "tidbCdc Server 地址",
-      "pdServerTip": "填寫tidbCdc Server地址，測試Tidb可用性"
+      "doc": "docs/tidb_zh_TW.md"
     }
   },
   "dataTypes": {

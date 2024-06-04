@@ -2,6 +2,7 @@ package io.tapdata.connector.tidb.cdc.process.thread;
 
 import com.alibaba.fastjson.JSONObject;
 import io.tapdata.common.util.FileUtil;
+import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.connector.tidb.util.HttpUtil;
 import io.tapdata.connector.tidb.util.pojo.ChangeFeed;
 import io.tapdata.connector.tidb.util.pojo.ReplicaConfig;
@@ -16,6 +17,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -24,13 +26,13 @@ import java.util.function.Supplier;
 
 public final class ProcessHandler implements Activity {
     private final ScheduledExecutorService scheduledExecutorService;
-    protected static final String BASE_CDC_DATA_DIR = "run-resources/ti-db/cdc/%s"; //"/Users/xiao/Documents/GitHub/kit/tidb/%s"
     public final Object tableVersionLock = new Object();
     final ProcessInfo processInfo;
     final ConcurrentHashMap<String, DDLManager.VersionInfo> tableVersionMap;
 
     final DDLManager ddlManager;
     final DMLManager dmlManager;
+    final TiCDCShellManager shellManager;
     final TapEventManager tapEventManager;
     final Log log;
     final String basePath;
@@ -44,6 +46,16 @@ public final class ProcessHandler implements Activity {
         this.ddlManager = new DDLManager(this, basePath);
         this.dmlManager = new DMLManager(this, basePath, 3);
         this.log = processInfo.nodeContext.getLog();
+        this.shellManager = new TiCDCShellManager(new TiCDCShellManager.ShellConfig()
+                .withCdcServerIpPort("127.0.0.1:8300")
+                .withGcTtl(processInfo.gcTtl)
+                .withLocalStrongPath(BASE_CDC_CACHE_DATA_DIR)
+                .withPdIpPorts(processInfo.tidbConfig.getPdServer())
+                .withLogDir(BASE_CDC_LOG_DIR)
+                .withLogLevel(TiCDCShellManager.LogLevel.INFO)
+                .withClusterId(UUID.randomUUID().toString().replace("-", ""))
+                .withTapConnectionContext(processInfo.nodeContext)
+                .withTiDBConfig(processInfo.tidbConfig));
     }
 
     protected String judgeTableVersion(String tableName) {
@@ -90,11 +102,6 @@ public final class ProcessHandler implements Activity {
 
     @Override
     public void init() {
-        try {
-            stopFeedProcess();
-        } catch (Exception e) {
-            throw new CoreException("The remaining resources cannot be released, message: {}", e.getMessage(), e);
-        }
         this.ddlManager.init();
         this.dmlManager.init();
         this.tapEventManager.init();
@@ -102,10 +109,22 @@ public final class ProcessHandler implements Activity {
 
     @Override
     public void doActivity() {
+        init();
+        shellManager.doActivity();
+        processInfo.withCdcServer(shellManager.shellConfig.cdcServerIpPort);
+        try {
+            stopFeedProcess();
+        } catch (Exception e) {
+            throw new CoreException("The remaining resources cannot be released, message: {}", e.getMessage(), e);
+        }
         startFeedProcess();
         this.ddlManager.doActivity();
         this.dmlManager.doActivity();
         this.tapEventManager.doActivity();
+    }
+
+    public void aliveCheck() {
+        shellManager.doActivity();
     }
 
     protected void startFeedProcess() {
@@ -163,25 +182,19 @@ public final class ProcessHandler implements Activity {
 
     public static class ProcessInfo {
         String database;
-        String cdcPath;
-        String hostPd;
-        int portPd;
-        String hostAddr;
-        int portAddr;
-        String hostAdvertiseAddr;
-        int portAdvertiseAddr;
-        String dataDir;
-        String logFilePath;
         int gcTtl;
         List<String> cdcTable;
         AtomicReference<Throwable> throwableCollector;
         Supplier<Boolean> alive;
         TapConnectorContext nodeContext;
         Object cdcOffset;
-        int batchSize;
         String feedId;
         String cdcServer;
-
+        TidbConfig tidbConfig;
+        public ProcessInfo withTiDBConfig(TidbConfig tidbConfig) {
+            this.tidbConfig = tidbConfig;
+            return this;
+        }
         public ProcessInfo withCdcServer(String cdcServer) {
             this.cdcServer = cdcServer;
             return this;
@@ -189,11 +202,6 @@ public final class ProcessHandler implements Activity {
 
         public ProcessInfo withFeedId(String feedId) {
             this.feedId = feedId;
-            return this;
-        }
-
-        public ProcessInfo withCdcBatchSize(int batchSize) {
-            this.batchSize = batchSize;
             return this;
         }
 
@@ -209,51 +217,6 @@ public final class ProcessHandler implements Activity {
 
         public ProcessInfo withDatabase(String database) {
             this.database = database;
-            return this;
-        }
-
-        public ProcessInfo withCdcPath(String cdcPath) {
-            this.cdcPath = cdcPath;
-            return this;
-        }
-
-        public ProcessInfo withPdHost(String hostPd) {
-            this.hostPd = hostPd;
-            return this;
-        }
-
-        public ProcessInfo withPdPort(int portPd) {
-            this.portPd = portPd;
-            return this;
-        }
-
-        public ProcessInfo withAddrHost(String hostAddr) {
-            this.hostAddr = hostAddr;
-            return this;
-        }
-
-        public ProcessInfo withAddrPort(int portAddr) {
-            this.portAddr = portAddr;
-            return this;
-        }
-
-        public ProcessInfo withAdvertiseAddrHost(String hostAdvertiseAddr) {
-            this.hostAdvertiseAddr = hostAdvertiseAddr;
-            return this;
-        }
-
-        public ProcessInfo withAdvertiseAddrPort(int portAdvertiseAddr) {
-            this.portAdvertiseAddr = portAdvertiseAddr;
-            return this;
-        }
-
-        public ProcessInfo withDataDir(String dataDir) {
-            this.dataDir = dataDir;
-            return this;
-        }
-
-        public ProcessInfo withLogFilePath(String logFilePath) {
-            this.logFilePath = logFilePath;
             return this;
         }
 

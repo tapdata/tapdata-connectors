@@ -12,7 +12,15 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.function.Supplier;
 
 public interface Activity extends AutoCloseable {
+    //"/Users/xiao/Documents/GitHub/kit/tidb/%s"
+    String BASE_CDC_SOURCE_DIR = "run-resources/ti-db";
+    String BASE_CDC_TOOL_DIR = "run-resources/ti-db/tool";
+    String BASE_CDC_CACHE_DATA_DIR = "run-resources/ti-db/data";
+    String BASE_CDC_LOG_DIR = "run-resources/ti-db/log";
+    String BASE_CDC_DATA_DIR = "run-resources/ti-db/cdc/%s";
+
     void init();
+
     void doActivity();
 
     default void cancelSchedule(ScheduledFuture<?> future, Log log) {
@@ -44,5 +52,13 @@ public interface Activity extends AutoCloseable {
             }
         }
         return tableDirs;
+    }
+
+    default long getTOSTime() {
+        return getTOSTime(System.currentTimeMillis());
+    }
+    default long getTOSTime(Long time) {
+        if (null == time) return getTOSTime();
+        return time >> 18;
     }
 }
