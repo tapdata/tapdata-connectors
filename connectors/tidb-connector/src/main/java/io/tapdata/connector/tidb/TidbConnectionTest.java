@@ -4,7 +4,6 @@ import com.alibaba.fastjson.JSONObject;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.common.ddl.DDLFactory;
 import io.tapdata.common.ddl.type.DDLParserType;
-import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.connector.mysql.constant.MysqlTestItem;
 import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.constant.ConnectionTypeEnum;
@@ -36,7 +35,6 @@ import static io.tapdata.base.ConnectorBase.testItem;
 public class TidbConnectionTest extends CommonDbTest {
     public static final String TAG = TidbConnectionTest.class.getSimpleName();
     private final TidbConfig tidbConfig;
-    private KafkaConfig kafkaConfig;
     private final static String PB_SERVER_SUCCESS = "Check PDServer host port is valid";
     private final static String IC_CONFIGURATION_ENABLED = " Check  Incremental is enable";
     protected static final String CHECK_DATABASE_PRIVILEGES_SQL = "SHOW GRANTS FOR CURRENT_USER";
@@ -60,9 +58,6 @@ public class TidbConnectionTest extends CommonDbTest {
         jdbcContext = new TidbJdbcContext(tidbConfig);
     }
 
-    public void setKafkaConfig(KafkaConfig kafkaConfig) {
-        this.kafkaConfig = kafkaConfig;
-    }
 
     @Override
     public Boolean testOneByOne() {
@@ -70,12 +65,6 @@ public class TidbConnectionTest extends CommonDbTest {
             testFunctionMap.put("testPbserver", this::testPbserver);
         }
         testFunctionMap.put("testVersion", this::testVersion);
-        if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
-            TidbConfig tidbConfig = (TidbConfig) commonDbConfig;
-            if (tidbConfig.getEnableIncrement()) {
-                testFunctionMap.put("testKafkaHostPort", this::testKafkaHostPort);
-            }
-        }
         return super.testOneByOne();
     }
 
@@ -424,18 +413,6 @@ public class TidbConnectionTest extends CommonDbTest {
         }
     }
 
-    /**
-     * check kafka
-     */
 
-    public Boolean testKafkaHostPort() {
-        try (
-                TicdcKafkaService ticdcKafkaService = new TicdcKafkaService(kafkaConfig, tidbConfig);
-        ) {
-            TestItem testHostAndPort = ticdcKafkaService.testHostAndPort();
-            consumer.accept(testHostAndPort);
-            return testHostAndPort.getResult() != TestItem.RESULT_FAILED;
-        }
-    }
 
 }
