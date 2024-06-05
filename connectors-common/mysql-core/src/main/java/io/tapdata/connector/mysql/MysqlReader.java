@@ -2,6 +2,7 @@ package io.tapdata.connector.mysql;
 
 import io.debezium.config.Configuration;
 import io.debezium.connector.mysql.MySqlConnectorConfig;
+import io.debezium.type.TapIllegalDate;
 import io.debezium.embedded.EmbeddedEngine;
 import io.debezium.engine.DebeziumEngine;
 import io.tapdata.common.ddl.DDLFactory;
@@ -507,7 +508,7 @@ public class MysqlReader implements Closeable {
         }
     }
 
-    private MysqlStreamEvent wrapDML(SourceRecord record) {
+    protected MysqlStreamEvent wrapDML(SourceRecord record) {
         TapRecordEvent tapRecordEvent = null;
         MysqlStreamEvent mysqlStreamEvent;
         Schema valueSchema = record.valueSchema();
@@ -541,6 +542,40 @@ public class MysqlReader implements Closeable {
             tapLogger.debug("Unrecognized operation type: " + op + ", will skip it, record: " + record);
             return null;
         }
+        Map<String, TapIllegalDate> beforeInvalidMap = new HashMap<>();
+        if (null != value.schema().field("beforeInvalid")){
+            Struct invalid = value.getStruct("beforeInvalid");
+            for (Field field : invalid.schema().fields()) {
+                byte[] bytes = invalid.getBytes(field.name());
+                try {
+                    Object o = TapIllegalDate.byteToIllegalDate(bytes);
+                    if (o instanceof TapIllegalDate){
+                        beforeInvalidMap.put(field.name(),(TapIllegalDate) o);
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException("byte to tap illegal date error",e);
+                } catch (ClassNotFoundException e) {
+                    throw new RuntimeException("byte to tap illegal date error",e);
+                }
+            }
+        }
+        Map<String, TapIllegalDate> afterInvalidMap = new HashMap<>();
+        if (null != value.schema().field("afterInvalid")){
+            Struct invalid = value.getStruct("afterInvalid");
+            for (Field field : invalid.schema().fields()) {
+                byte[] bytes = invalid.getBytes(field.name());
+                try {
+                    Object o = TapIllegalDate.byteToIllegalDate(bytes);
+                    if (o instanceof TapIllegalDate){
+                        afterInvalidMap.put(field.name(),(TapIllegalDate) o);
+                    }
+                } catch (IOException e) {
+                    throw new RuntimeException("byte to tap illegal date error",e);
+                } catch (ClassNotFoundException e) {
+                    throw new RuntimeException("byte to tap illegal date error",e);
+                }
+            }
+        }
         Map<String, Object> before = null;
         Map<String, Object> after = null;
         switch (mysqlOpType) {
@@ -549,17 +584,34 @@ public class MysqlReader implements Closeable {
                 if (null == valueSchema.field("after"))
                     throw new RuntimeException("Found insert record does not have after: " + record);
                 after = struct2Map(value.getStruct("after"), table);
+                if (!EmptyKit.isEmpty(afterInvalidMap)){
+                    after.putAll(afterInvalidMap);
+                    tapRecordEvent.setContainsIllegalDate(true);
+                    ((TapInsertRecordEvent)tapRecordEvent).setAfterIllegalDateFieldName(afterInvalidMap.keySet().stream().collect(Collectors.toList()));
+                }
                 ((TapInsertRecordEvent) tapRecordEvent).setAfter(after);
                 break;
             case UPDATE:
                 tapRecordEvent = new TapUpdateRecordEvent().init();
                 if (null != valueSchema.field("before")) {
                     before = struct2Map(value.getStruct("before"), table);
+                    if (!EmptyKit.isEmpty(beforeInvalidMap)){
+                        before.putAll(beforeInvalidMap);
+                        tapRecordEvent.setContainsIllegalDate(true);
+                        ((TapUpdateRecordEvent) tapRecordEvent).setBeforeIllegalDateFieldName(beforeInvalidMap.keySet().stream().collect(Collectors.toList()));
+                    }
                     ((TapUpdateRecordEvent) tapRecordEvent).setBefore(before);
                 }
                 if (null == valueSchema.field("after"))
                     throw new RuntimeException("Found update record does not have after: " + record);
                 after = struct2Map(value.getStruct("after"), table);
+                if (!EmptyKit.isEmpty(beforeInvalidMap) || !EmptyKit.isEmpty(afterInvalidMap)){
+                    before.putAll(beforeInvalidMap);
+                    after.putAll(afterInvalidMap);
+                    tapRecordEvent.setContainsIllegalDate(true);
+                    ((TapUpdateRecordEvent) tapRecordEvent).setBeforeIllegalDateFieldName(beforeInvalidMap.keySet().stream().collect(Collectors.toList()));
+                    ((TapUpdateRecordEvent) tapRecordEvent).setAfterIllegalDateFieldName(afterInvalidMap.keySet().stream().collect(Collectors.toList()));
+                }
                 ((TapUpdateRecordEvent) tapRecordEvent).setAfter(after);
                 break;
             case DELETE:
@@ -568,6 +620,11 @@ public class MysqlReader implements Closeable {
                     throw new RuntimeException("Found delete record does not have before: " + record);
                 before = struct2Map(value.getStruct("before"), table);
                 ((TapDeleteRecordEvent) tapRecordEvent).setBefore(before);
+                if (!EmptyKit.isEmpty(beforeInvalidMap)){
+                    before.putAll(beforeInvalidMap);
+                    tapRecordEvent.setContainsIllegalDate(true);
+                    ((TapDeleteRecordEvent)tapRecordEvent).setBeforeIllegalDateFieldName(beforeInvalidMap.keySet().stream().collect(Collectors.toList()));
+                }
                 break;
             default:
                 break;
@@ -640,7 +697,7 @@ public class MysqlReader implements Closeable {
         }
     }
 
-    private Map<String, Object> struct2Map(Struct struct, String table) {
+    protected Map<String, Object> struct2Map(Struct struct, String table) {
         if (null == struct) return null;
         Map<String, Object> result = new HashMap<>();
         Schema schema = struct.schema();
@@ -654,6 +711,9 @@ public class MysqlReader implements Closeable {
                     continue;
                 } else if (field.schema().type() == Schema.Type.INT32 && value instanceof Integer && Integer.MIN_VALUE == ((Integer) value)) {
                     result.put(fieldName, null);
+                    continue;
+                } else if (field.schema().name().equals("illegalDate")) {
+                    result.put(fieldName, value);
                     continue;
                 }
             }

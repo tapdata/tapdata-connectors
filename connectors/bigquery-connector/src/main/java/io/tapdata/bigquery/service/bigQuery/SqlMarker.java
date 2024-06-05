@@ -32,7 +32,7 @@ public class SqlMarker {
             this.bigQuery();
         } catch (Throwable e) {
             bigQueryExceptionCollector.collectUserPwdInvalid(credentialsJson,e);
-            TapLogger.error(TAG, "Unable to create a connection through Service Account Credentials. Please check whether the Service Account is correct or invalid. ");
+            throw new RuntimeException("Unable to create a connection through Service Account Credentials. Please check whether the Service Account is correct or invalid.",e);
         }
     }
 

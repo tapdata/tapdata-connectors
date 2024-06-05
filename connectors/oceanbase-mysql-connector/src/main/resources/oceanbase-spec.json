@@ -24,6 +24,11 @@
         ]
       }
     ],
+    "supportDDL": {
+      "events": [
+        "new_field_event", "alter_field_name_event", "alter_field_attributes_event", "drop_field_event"
+      ]
+    },
     "connection": {
       "type": "object",
       "properties": {
@@ -242,7 +247,7 @@
       "rpcPort": "RPC Port",
       "logProxyPort": "Log Proxy Port",
       "timezone": "timezone",
-      "doc": "docs/mysql_en_US.md"
+      "doc": "docs/oceanbase_mysql_en_US.md"
     },
     "zh_CN": {
       "host": "地址",
@@ -255,7 +260,7 @@
       "rpcPort": "RPC端口",
       "logProxyPort": "日志代理端口",
       "timezone": "时区",
-      "doc": "docs/mysql_zh_CN.md"
+      "doc": "docs/oceanbase_mysql_zh_CN.md"
     },
     "zh_TW": {
       "host": "地址",
@@ -268,7 +273,7 @@
       "rpcPort": "RPC端口",
       "logProxyPort": "日誌代理端口",
       "timezone": "時區",
-      "doc": "docs/mysql_zh_TW.md"
+      "doc": "docs/oceanbase_mysql_zh_TW.md"
     }
   },
   "dataTypes": {

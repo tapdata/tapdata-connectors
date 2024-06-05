@@ -35,6 +35,12 @@
   - `$precision`: length (default: `4`)
 - `rstring[($byte)]`: random characters of specified length
   - `$byte`: length in bytes (default: `64`)
+- `rdatetime[($fraction)]`: date + time of specified precision
+  - `$fraction`: time precision (default: `0`, range 0-9 integers)
+- `rlongstring[($byte)]`: random long characters of specified length
+  - `$byte`: length in bytes (default: `1000`)
+- `rlongbinary[($byte)]`: random binary of specified length
+  - `$byte`: length in bytes (default: `1000`)
 
 #### Field default values
 

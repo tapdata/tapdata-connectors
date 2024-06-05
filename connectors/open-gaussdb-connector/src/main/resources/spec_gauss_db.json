@@ -86,7 +86,7 @@
           "x-index": 70
         },
         "haHost": {
-          "required": true,
+          "default": "",
           "type": "string",
           "title": "${haHost}",
           "x-decorator": "FormItem",
@@ -95,7 +95,6 @@
           "x-index": 75
         },
         "haPort": {
-          "required": true,
           "type": "string",
           "default": 8001,
           "title": "${haPort}",

@@ -24,6 +24,8 @@ public class RegisterMain {
 	private enum ConnectorEnums {
 		// Empty(BASE_PATH + "connectors/dist/empty-connector-v1.1-SNAPSHOT.jar", "all", "empty"),
 		Dummy(BASE_PATH + "connectors/dist/dummy-connector-v1.0-SNAPSHOT.jar", "all", "dummy", "basic"),
+		Mock_Source(BASE_PATH + "connectors/dist/mock-source-connector-v1.0-SNAPSHOT.jar", "all", "mock-source", "basic"),
+		Mock_Target(BASE_PATH + "connectors/dist/mock-target-connector-v1.0-SNAPSHOT.jar", "all", "mock-target", "basic"),
 		Mysql(BASE_PATH + "connectors/dist/mysql-connector-v1.0-SNAPSHOT.jar", "all", "mysql", "basic", "jdbc"),
 		Postgres(BASE_PATH + "connectors/dist/postgres-connector-v1.0-SNAPSHOT.jar", "all", "postgres", "basic", "jdbc"),
 		Dws(BASE_PATH + "connectors/dist/dws-connector-v1.0-SNAPSHOT.jar", "all", "dws", "basic", "jdbc"),
