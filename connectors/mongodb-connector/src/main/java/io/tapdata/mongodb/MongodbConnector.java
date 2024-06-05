@@ -66,6 +66,7 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
@@ -85,6 +86,7 @@ public class MongodbConnector extends ConnectorBase {
 	private static final int SAMPLE_SIZE_BATCH_SIZE = 1000;
 	public static final String COLLECTION_ID_FIELD = "_id";
 	public static final String TAG = MongodbConnector.class.getSimpleName();
+	public static final String UNIQUE_KEY = "unique";
 	private final AtomicBoolean isShutDown = new AtomicBoolean(false);
 	protected MongodbConfig mongoConfig;
 	protected MongoClient mongoClient;
@@ -513,6 +515,50 @@ public class MongodbConnector extends ConnectorBase {
 //        connectorFunctions.supportStreamOffset((connectorContext, tableList, offsetStartTime, offsetOffsetTimeConsumer) -> streamOffset(connectorContext, tableList, offsetStartTime, offsetOffsetTimeConsumer));
 		connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
 		connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
+		connectorFunctions.supportQueryIndexes(this::queryIndexes);
+	}
+
+	protected void queryIndexes(TapConnectorContext tapConnectorContext, TapTable tapTable, Consumer<List<TapIndex>> listConsumer) {
+		if (null == tapTable.getId()) {
+			throw new IllegalArgumentException("Table id cannot be empty");
+		}
+		MongoCollection<Document> collection = mongoDatabase.getCollection(tapTable.getId());
+		List<TapIndex> tapIndices = new ArrayList<>();
+		for (Document index : collection.listIndexes()) {
+			Object keyObj = index.get("key");
+			if (!(keyObj instanceof Document)) {
+				continue;
+			}
+			Document keys = (Document) keyObj;
+			TapIndex tapIndex = new TapIndex().name(index.getString("name"));
+			AtomicBoolean haveOid = new AtomicBoolean();
+			AtomicInteger keyCounter = new AtomicInteger();
+			keys.forEach((k, v) -> {
+				TapIndexField tapIndexField = new TapIndexField().name(k);
+				if (v instanceof Integer) {
+					tapIndexField.fieldAsc(v.equals(1));
+				} else {
+					tapIndexField.fieldAsc(true);
+				}
+				tapIndex.indexField(tapIndexField);
+				if (k.equals("_id")) {
+					haveOid.set(true);
+				}
+				keyCounter.incrementAndGet();
+			});
+			if (Boolean.TRUE.equals(index.get(UNIQUE_KEY))) {
+				tapIndex.unique(true);
+			} else {
+				tapIndex.unique(false);
+			}
+			if (haveOid.get() && keyCounter.get() == 1) {
+				// In MongoDB, each table has an index of _id, and it is unique.
+				// However, in the return value of listIndexes, the index does not have a unique attribute, so the number of keys in the _id index is used to determine whether it is an index of _id.
+				tapIndex.unique(true);
+			}
+			tapIndices.add(tapIndex);
+		}
+		listConsumer.accept(tapIndices);
 	}
 
 	private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {

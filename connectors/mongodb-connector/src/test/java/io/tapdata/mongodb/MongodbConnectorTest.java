@@ -1,6 +1,6 @@
 package io.tapdata.mongodb;
 
-
+import com.mongodb.client.*;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -9,8 +9,8 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapIndex;
-import io.tapdata.entity.schema.TapIndexEx;
 import io.tapdata.entity.schema.TapIndexField;
+import io.tapdata.entity.schema.TapIndexEx;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.mongodb.batch.ErrorHandler;
@@ -29,18 +29,12 @@ import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TapExecuteCommand;
 import org.bson.Document;
 import org.bson.conversions.Bson;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.BiConsumer;
@@ -50,6 +44,19 @@ import java.util.function.Supplier;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class MongodbConnectorTest {
     MongodbConnector mongodbConnector;
@@ -694,6 +701,109 @@ class MongodbConnectorTest {
             when(mongoClient.getDatabase("test")).thenThrow(RuntimeException.class);
             doCallRealMethod().when(mongodbConnector).getTableInfo(tapConnectorContext,tableName);
             assertThrows(RuntimeException.class, ()->mongodbConnector.getTableInfo(tapConnectorContext,tableName));
+        }
+    }
+
+    @Nested
+    @DisplayName("Method queryIndexes test")
+    class QueryIndexesTest {
+
+        private TapConnectorContext tapConnectorContext;
+        private TapTable tapTable;
+
+        @BeforeEach
+        void setUp() {
+            tapConnectorContext = mock(TapConnectorContext.class);
+            tapTable = new TapTable("test");
+            doCallRealMethod().when(mongodbConnector).queryIndexes(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("test main process")
+        void test1() {
+            List<Document> listIndexes = new ArrayList<>();
+            listIndexes.add(new Document("name", "_id_").append("key", new Document("_id", 1)));
+            listIndexes.add(new Document("name", "uid_1").append("key", new Document("uid", 1)));
+            listIndexes.add(new Document("name", "sub.sid1_1_sub.sid2_-1").append("key", new Document("sub.sid1", 1).append("sub.sid2", -1)));
+            Iterator<Document> iterator = listIndexes.iterator();
+            MongoCursor<Document> mongoCursor = mock(MongoCursor.class);
+            when(mongoCursor.next()).thenAnswer(invocationOnMock -> iterator.next());
+            when(mongoCursor.hasNext()).thenAnswer(invocationOnMock -> iterator.hasNext());
+            ListIndexesIterable<Document> listIndexesIterable = mock(ListIndexesIterable.class);
+            when(listIndexesIterable.iterator()).thenReturn(mongoCursor);
+            doCallRealMethod().when(listIndexesIterable).forEach(any(Consumer.class));
+            MongoCollection<Document> mongoCollection = mock(MongoCollection.class);
+            when(mongoCollection.listIndexes()).thenReturn(listIndexesIterable);
+            MongoDatabase mongoDatabase = mock(MongoDatabase.class);
+            when(mongoDatabase.getCollection(tapTable.getId())).thenReturn(mongoCollection);
+            ReflectionTestUtils.setField(mongodbConnector, "mongoDatabase", mongoDatabase);
+            mongodbConnector.queryIndexes(tapConnectorContext, tapTable, indexes -> {
+                assertEquals(3, indexes.size());
+                TapIndex tapIndex = indexes.get(0);
+                assertEquals(listIndexes.get(0).getString("name"), tapIndex.getName());
+                List<TapIndexField> indexFields = tapIndex.getIndexFields();
+                assertEquals(1, indexFields.size());
+                assertEquals("_id", indexFields.get(0).getName());
+                assertTrue(indexFields.get(0).getFieldAsc());
+                tapIndex = indexes.get(2);
+                assertEquals(listIndexes.get(2).getString("name"), tapIndex.getName());
+                indexFields = tapIndex.getIndexFields();
+                assertEquals("sub.sid2", indexFields.get(1).getName());
+                assertFalse(indexFields.get(1).getFieldAsc());
+            });
+        }
+
+        @Test
+        @DisplayName("test other index key value: text")
+        void test2() {
+            List<Document> listIndexes = new ArrayList<>();
+            listIndexes.add(new Document("name", "content_text").append("key", new Document("content", "text")));
+            Iterator<Document> iterator = listIndexes.iterator();
+            MongoCursor<Document> mongoCursor = mock(MongoCursor.class);
+            when(mongoCursor.next()).thenAnswer(invocationOnMock -> iterator.next());
+            when(mongoCursor.hasNext()).thenAnswer(invocationOnMock -> iterator.hasNext());
+            ListIndexesIterable<Document> listIndexesIterable = mock(ListIndexesIterable.class);
+            when(listIndexesIterable.iterator()).thenReturn(mongoCursor);
+            doCallRealMethod().when(listIndexesIterable).forEach(any(Consumer.class));
+            MongoCollection<Document> mongoCollection = mock(MongoCollection.class);
+            when(mongoCollection.listIndexes()).thenReturn(listIndexesIterable);
+            MongoDatabase mongoDatabase = mock(MongoDatabase.class);
+            when(mongoDatabase.getCollection(tapTable.getId())).thenReturn(mongoCollection);
+            ReflectionTestUtils.setField(mongodbConnector, "mongoDatabase", mongoDatabase);
+            mongodbConnector.queryIndexes(tapConnectorContext, tapTable, indexes -> {
+                assertEquals(1, indexes.size());
+                TapIndex tapIndex = indexes.get(0);
+                assertEquals(listIndexes.get(0).getString("name"), tapIndex.getName());
+                List<TapIndexField> indexFields = tapIndex.getIndexFields();
+                assertEquals(1, indexFields.size());
+                assertEquals("content", indexFields.get(0).getName());
+                assertTrue(indexFields.get(0).getFieldAsc());
+            });
+        }
+
+        @Test
+        @DisplayName("test unique index")
+        void test3() {
+            List<Document> listIndexes = new ArrayList<>();
+            listIndexes.add(new Document("name", "uid_1").append("key", new Document("uid", 1)).append("unique", true));
+            listIndexes.add(new Document("name", "uid1_1").append("key", new Document("uid1", 1)));
+            Iterator<Document> iterator = listIndexes.iterator();
+            MongoCursor<Document> mongoCursor = mock(MongoCursor.class);
+            when(mongoCursor.next()).thenAnswer(invocationOnMock -> iterator.next());
+            when(mongoCursor.hasNext()).thenAnswer(invocationOnMock -> iterator.hasNext());
+            ListIndexesIterable<Document> listIndexesIterable = mock(ListIndexesIterable.class);
+            when(listIndexesIterable.iterator()).thenReturn(mongoCursor);
+            doCallRealMethod().when(listIndexesIterable).forEach(any(Consumer.class));
+            MongoCollection<Document> mongoCollection = mock(MongoCollection.class);
+            when(mongoCollection.listIndexes()).thenReturn(listIndexesIterable);
+            MongoDatabase mongoDatabase = mock(MongoDatabase.class);
+            when(mongoDatabase.getCollection(tapTable.getId())).thenReturn(mongoCollection);
+            ReflectionTestUtils.setField(mongodbConnector, "mongoDatabase", mongoDatabase);
+            mongodbConnector.queryIndexes(tapConnectorContext, tapTable, indexes -> {
+                assertEquals(2, indexes.size());
+                assertTrue(indexes.get(0).getUnique());
+                assertFalse(indexes.get(1).getUnique());
+            });
         }
     }
 }
