@@ -118,6 +118,7 @@ public class MongodbConnector extends ConnectorBase {
 			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
 			exceptionCollector.collectReadPrivileges(e);
 			exceptionCollector.collectWritePrivileges(e);
+			throw e;
 		}
 		return collection;
 	}
@@ -566,7 +567,7 @@ public class MongodbConnector extends ConnectorBase {
 		return createTableOptions;
 	}
 
-	private void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
+	protected void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
 		if (null == indexList || indexList.isEmpty()) return;
 		indexList.forEach(index -> {
 			log.info("find index: {}" + index.getName());
@@ -626,15 +627,10 @@ public class MongodbConnector extends ConnectorBase {
                 try {
                     targetCollection.createIndex(dIndex.get("key", Document.class), indexOptions);
                 } catch (Exception ignored) {
-                    exceptionCollector.collectTerminateByServer(ignored);
-                    exceptionCollector.collectWritePrivileges(ignored);
-                    TapLogger.warn(TAG, "create index failed 1: " + ignored.getMessage());
+                    log.warn("create index failed 1: " + ignored.getMessage());
                 }
             } catch (Exception ignored) {
-                exceptionCollector.collectTerminateByServer(ignored);
-                exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),ignored);
-                exceptionCollector.collectWritePrivileges(ignored);
-                TapLogger.warn(TAG, "create index failed 2: " + ignored.getMessage());
+                log.warn("create index failed 2: " + ignored.getMessage());
                 // TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
             }
 		});
@@ -780,7 +776,7 @@ public class MongodbConnector extends ConnectorBase {
 		}
 	}
 
-	private void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, Consumer<ExecuteResult> executeResultConsumer) {
+	protected void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, Consumer<ExecuteResult> executeResultConsumer) {
 		try {
 			Map<String, Object> executeObj = tapExecuteCommand.getParams();
 			String command = tapExecuteCommand.getCommand();
@@ -803,11 +799,11 @@ public class MongodbConnector extends ConnectorBase {
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
 			exceptionCollector.collectWritePrivileges(e);
-			executeResultConsumer.accept(new ExecuteResult<>().error(e));
+			throw e;
 		}
 	}
 
-	private FieldMinMaxValue queryFieldMinMaxValue(TapConnectorContext connectorContext, TapTable table, TapAdvanceFilter partitionFilter, String fieldName) {
+	protected FieldMinMaxValue queryFieldMinMaxValue(TapConnectorContext connectorContext, TapTable table, TapAdvanceFilter partitionFilter, String fieldName) {
 		MongoCollection<Document> collection = getMongoCollection(table.getId());
 		TapIndexEx partitionIndex = table.partitionIndex();
 		if (partitionIndex == null)
@@ -875,6 +871,7 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
+			throw e;
 		}
 		return fieldMinMaxValue;
 	}
@@ -1081,7 +1078,7 @@ public class MongodbConnector extends ConnectorBase {
 		return retryOptions;
 	}
 
-	private void createIndex(TapConnectorContext tapConnectorContext, TapTable table, TapCreateIndexEvent tapCreateIndexEvent) {
+	protected void createIndex(TapConnectorContext tapConnectorContext, TapTable table, TapCreateIndexEvent tapCreateIndexEvent) {
 		try {
 		final List<TapIndex> indexList = tapCreateIndexEvent.getIndexList();
 		if (CollectionUtils.isNotEmpty(indexList)) {
@@ -1113,16 +1110,13 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
 			exceptionCollector.throwWriteExIfNeed(null,e);
+			throw e;
 		}
 	}
 
 	private String memoryFetcher(List<String> mapKeys, String level) {
 		ParagraphFormatter paragraphFormatter = new ParagraphFormatter(MongodbConnector.class.getSimpleName());
-		try {
 		paragraphFormatter.addRow("MongoConfig", mongoConfig != null ? mongoConfig.getDatabase() : null);
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
-		}
 		return paragraphFormatter.toString();
 	}
 
@@ -1382,7 +1376,7 @@ public class MongodbConnector extends ConnectorBase {
 	 * @param connectorContext
 	 * @return
 	 */
-	private long batchCount(TapConnectorContext connectorContext, TapTable table) throws Throwable {
+	protected long batchCount(TapConnectorContext connectorContext, TapTable table) throws Throwable {
 //        MongoCollection<Document> collection = getMongoCollection(table.getId());
 //        return collection.countDocuments();
 		Long collectionNotAggregateCountByTableName = null;
@@ -1391,6 +1385,7 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
+			throw e;
 		}
 		return collectionNotAggregateCountByTableName;
 //		return getCollectionNotAggregateCountByTableName(mongoClient, mongoConfig.getDatabase(), table.getId(), null);
@@ -1564,6 +1559,7 @@ public class MongodbConnector extends ConnectorBase {
 			mongodbStreamReader.onStart(mongoConfig);
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
+			throw e;
 		}
 		return mongodbStreamReader;
 	}
@@ -1595,6 +1591,7 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
+			throw e;
 		}
 	}
 
@@ -1616,29 +1613,36 @@ public class MongodbConnector extends ConnectorBase {
 			mongodbWriter.onDestroy();
 			mongodbWriter = null;
 		}
+		closeOpLogThreadSource();
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
+			throw e;
 		}
-		closeOpLogThreadSource();
 	}
 	protected void closeOpLogThreadSource() {
 		try {
 			Optional.ofNullable(sourceRunnerFuture).ifPresent(f -> f.cancel(true));
 		} catch (Exception e) {
 			exceptionCollector.collectTerminateByServer(e);
+			throw e;
 		} finally {
 			sourceRunnerFuture = null;
+			shutdownSourceRunner();
 		}
+	}
+
+	private void shutdownSourceRunner() {
 		try {
 			Optional.ofNullable(sourceRunner).ifPresent(ThreadPoolExecutor::shutdown);
 		} catch (Exception e) {
 			exceptionCollector.collectTerminateByServer(e);
+			throw e;
 		} finally {
 			sourceRunner = null;
 		}
 	}
 
-	private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
+	protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
 		TableInfo tableInfo = new TableInfo();
 		try {
 			String database = mongoConfig.getDatabase();
@@ -1650,6 +1654,7 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
+			throw e;
 		}
 		return tableInfo;
 	}

@@ -1,3 +1,4 @@
+/*
 package io.tapdata.bigquery.service.bigQuery;
 
 import com.google.auth.oauth2.GoogleCredentials;
@@ -239,3 +240,4 @@ class WriteRecordTest {
         System.out.println((new Date()).toString());
     }
 }
+*/

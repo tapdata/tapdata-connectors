@@ -1,8 +1,16 @@
 package io.tapdata.mongodb;
 
 
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapIndex;
+import io.tapdata.entity.schema.TapIndexEx;
+import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.mongodb.batch.ErrorHandler;
@@ -14,39 +22,40 @@ import io.tapdata.mongodb.reader.MongodbOpLogStreamV3Reader;
 import io.tapdata.mongodb.reader.MongodbStreamReader;
 import io.tapdata.mongodb.reader.StreamWithOpLogCollection;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
+import io.tapdata.pdk.apis.entity.ExecuteResult;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.TapExecuteCommand;
+import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doCallRealMethod;
-import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 class MongodbConnectorTest {
     MongodbConnector mongodbConnector;
     TapConnectorContext connectorContext;
     MongodbConfig mongoConfig;
+    MongoClient mongoClient;
     MongodbStreamReader mongodbStreamReader;
     MongodbStreamReader opLogStreamReader;
     MongodbExceptionCollector exceptionCollector;
@@ -59,6 +68,8 @@ class MongodbConnectorTest {
         connectorContext = mock(TapConnectorContext.class);
         mongoConfig = mock(MongodbConfig.class);
         ReflectionTestUtils.setField(mongodbConnector, "mongoConfig", mongoConfig);
+        mongoClient = mock(MongoClient.class);
+        ReflectionTestUtils.setField(mongodbConnector,"mongoClient",mongoClient);
         mongodbStreamReader = mock(MongodbStreamReader.class);
         ReflectionTestUtils.setField(mongodbConnector, "mongodbStreamReader", mongodbStreamReader);
         opLogStreamReader = mock(MongodbStreamReader.class);
@@ -463,7 +474,7 @@ class MongodbConnectorTest {
             doAnswer(a -> {
                 throw new Exception("failed");
             }).when(sourceRunner).shutdown();
-            Assertions.assertDoesNotThrow(mongodbConnector::closeOpLogThreadSource);
+            assertThrows(Exception.class,mongodbConnector::closeOpLogThreadSource);
             verify(sourceRunnerFuture).cancel(true);
             verify(sourceRunner).shutdown();
             Assertions.assertNull(mongodbConnector.sourceRunner);
@@ -477,6 +488,212 @@ class MongodbConnectorTest {
             when(connectorContext.getConnectionConfig()).thenReturn(mock(DataMap.class));
             doCallRealMethod().when(mongodbConnector).onStart(connectorContext);
             assertThrows(RuntimeException.class, ()->mongodbConnector.onStart(connectorContext));
+        }
+    }
+    @Nested
+    class getMongoCollection{
+        private MongoDatabase mongoDatabase;
+        private String table;
+        @BeforeEach
+        void beforeEach(){
+            table = "table";
+            mongoDatabase = mock(MongoDatabase.class);
+            ReflectionTestUtils.setField(mongodbConnector,"mongoDatabase",mongoDatabase);
+        }
+        @Test
+        void testGetMongoCollectionWithEx(){
+            when(mongoDatabase.getCollection(table)).thenThrow(RuntimeException.class);
+            when(mongoConfig.getUri()).thenReturn("mongodb://127.0.0.1:27017/test");
+            doCallRealMethod().when(mongodbConnector).getMongoCollection(table);
+            assertThrows(RuntimeException.class,()->mongodbConnector.getMongoCollection(table));
+        }
+    }
+    @Nested
+    class executeCommand{
+        private TapExecuteCommand tapExecuteCommand;
+        private Consumer<ExecuteResult> executeResultConsumer;
+        private MongodbExecuteCommandFunction mongodbExecuteCommandFunction;
+        @BeforeEach
+        void beforeEach(){
+            tapExecuteCommand = mock(TapExecuteCommand.class);
+            executeResultConsumer = mock(Consumer.class);
+            mongodbExecuteCommandFunction = mock(MongodbExecuteCommandFunction.class);
+        }
+        @Test
+        void testExecuteCommandWithEx(){
+            Map<String, Object> executeObj = new HashMap<>();
+            executeObj.put("database","test");
+            when(tapExecuteCommand.getParams()).thenReturn(executeObj);
+            when(tapExecuteCommand.getCommand()).thenReturn("executeQuery");
+            doThrow(new RuntimeException()).when(mongodbExecuteCommandFunction).executeQuery(anyMap(),any(MongoClient.class),any(Consumer.class),any(Supplier.class));
+            doCallRealMethod().when(mongodbConnector).executeCommand(connectorContext,tapExecuteCommand,executeResultConsumer);
+            assertThrows(RuntimeException.class,()->mongodbConnector.executeCommand(connectorContext,tapExecuteCommand,executeResultConsumer));
+        }
+    }
+    @Nested
+    class queryFieldMinMaxValue{
+        private TapTable table;
+        private TapAdvanceFilter partitionFilter;
+        private String fieldName;
+        @BeforeEach
+        void beforeEach(){
+            table = mock(TapTable.class);
+            partitionFilter = mock(TapAdvanceFilter.class);
+            fieldName = "field";
+            when(table.getId()).thenReturn("table");
+        }
+        @Test
+        void testQueryFieldMinMaxValueWithEx(){
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(mongodbConnector.getMongoCollection("table")).thenReturn(collection);
+            TapIndexEx partitionIndex = mock(TapIndexEx.class);
+            when(table.partitionIndex()).thenReturn(partitionIndex);
+            List<TapIndexField> indexFields = new ArrayList<>();
+            TapIndexField indexField = mock(TapIndexField.class);
+            when(indexField.getName()).thenReturn(fieldName);
+            indexFields.add(indexField);
+            when(partitionIndex.getIndexFields()).thenReturn(indexFields);
+            when(collection.find(any(Bson.class))).thenThrow(RuntimeException.class);
+            doCallRealMethod().when(mongodbConnector).queryFieldMinMaxValue(connectorContext,table,partitionFilter,fieldName);
+            assertThrows(RuntimeException.class,()->mongodbConnector.queryFieldMinMaxValue(connectorContext,table,partitionFilter,fieldName));
+        }
+    }
+    @Nested
+    class batchCount{
+        private TapTable table;
+        @Test
+        void testBatchCountWithEx() throws Throwable {
+            try (MockedStatic<MongodbConnector> mb = Mockito
+                    .mockStatic(MongodbConnector.class)) {
+                table = mock(TapTable.class);
+                when(table.getId()).thenReturn("collectionName");
+                when(mongoConfig.getDatabase()).thenReturn("database");
+                mb.when(()->MongodbConnector.getCollectionNotAggregateCountByTableName(mongoClient,"database","collectionName",null)).thenThrow(RuntimeException.class);
+                doCallRealMethod().when(mongodbConnector).batchCount(connectorContext,table);
+                assertThrows(RuntimeException.class,()->mongodbConnector.batchCount(connectorContext,table));
+            }
+        }
+    }
+    @Nested
+    class createIndex{
+        private TapTable table;
+        private List<TapIndex> indexList;
+        private Log log;
+        private MongoDatabase mongoDatabase;
+        @BeforeEach
+        void beforeEach(){
+            table = mock(TapTable.class);
+            when(table.getName()).thenReturn("table");
+            indexList = new ArrayList<>();
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("__t__test");
+            indexList.add(tapIndex);
+            log = mock(Log.class);
+            mongoDatabase = mock(MongoDatabase.class);
+            ReflectionTestUtils.setField(mongodbConnector,"mongoDatabase",mongoDatabase);
+        }
+        @Test
+        void testCreateIndexWithExWhenGetCollection(){
+            try (MockedStatic<Document> mb = Mockito
+                    .mockStatic(Document.class)) {
+                mb.when(()->Document.parse("test")).thenReturn(mock(Document.class));
+                when(mongoDatabase.getCollection("table")).thenThrow(RuntimeException.class);
+                doCallRealMethod().when(mongodbConnector).createIndex(table,indexList,log);
+                mongodbConnector.createIndex(table,indexList,log);
+                verify(log).warn(anyString());
+            }
+        }
+        @Test
+        void testCreateIndexWithExWhenCreateIndex(){
+            try (MockedStatic<Document> mb = Mockito
+                    .mockStatic(Document.class)) {
+                Document document = mock(Document.class);
+                mb.when(()->Document.parse("test")).thenReturn(document);
+                MongoCollection<Document> targetCollection = mock(MongoCollection.class);
+                when(mongoDatabase.getCollection("table")).thenReturn(targetCollection);
+                when(targetCollection.createIndex(any(),any(IndexOptions.class))).thenThrow(RuntimeException.class);
+                doCallRealMethod().when(mongodbConnector).createIndex(table,indexList,log);
+                mongodbConnector.createIndex(table,indexList,log);
+                verify(log).warn(anyString());
+            }
+        }
+    }
+    @Nested
+    class createIndexWithTapCreateIndexEvent{
+        private TapTable table;
+        private TapCreateIndexEvent tapCreateIndexEvent;
+        private MongoDatabase mongoDatabase;
+        @BeforeEach
+        void beforeEach(){
+            table = mock(TapTable.class);
+            when(table.getName()).thenReturn("test");
+            tapCreateIndexEvent = mock(TapCreateIndexEvent.class);
+            mongoDatabase = mock(MongoDatabase.class);
+            ReflectionTestUtils.setField(mongodbConnector,"mongoDatabase",mongoDatabase);
+        }
+        @Test
+        void testCreateIndexEventWithEx(){
+            List<TapIndex> indexList = new ArrayList<>();
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("index");
+            List<TapIndexField> indexFields = new ArrayList<>();
+            indexFields.add(mock(TapIndexField.class));
+            tapIndex.setIndexFields(indexFields);
+            indexList.add(tapIndex);
+            when(tapCreateIndexEvent.getIndexList()).thenReturn(indexList);
+            when(mongoDatabase.getCollection("test")).thenThrow(RuntimeException.class);
+            when(mongoConfig.getUri()).thenReturn("mongodb://127.0.0.1:27017/test");
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
+            assertThrows(RuntimeException.class,()->mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent));
+        }
+    }
+    @Nested
+    class createStreamReader{
+
+        @Test
+        void testCreateStreamReaderWithEx(){
+            when(mongoConfig.getDatabase()).thenReturn("database");
+            when(mongoClient.getDatabase("database")).thenThrow(RuntimeException.class);
+            doCallRealMethod().when(mongodbConnector).createStreamReader();
+            assertThrows(RuntimeException.class,()->mongodbConnector.createStreamReader());
+        }
+    }
+    @Nested
+    class getTableNames{
+        private int batchSize;
+        private Consumer<List<String>> listConsumer;
+        @Test
+        void testGetTableNamesWithEx() throws Throwable {
+            when(mongoConfig.getDatabase()).thenReturn("database");
+            when(mongoClient.getDatabase("database")).thenThrow(RuntimeException.class);
+            doCallRealMethod().when(mongodbConnector).getTableNames(connectorContext,batchSize,listConsumer);
+            assertThrows(RuntimeException.class,()->mongodbConnector.getTableNames(connectorContext,batchSize,listConsumer));
+        }
+    }
+    @Nested
+    class onStop{
+        @Test
+        void testOnStopWithEx() throws Throwable {
+            doThrow(RuntimeException.class).when(mongoClient).close();
+            doCallRealMethod().when(mongodbConnector).onStop(connectorContext);
+            assertThrows(RuntimeException.class,()->mongodbConnector.onStop(connectorContext));
+        }
+    }
+    @Nested
+    class GetTableInfoTest{
+        private TapConnectionContext tapConnectorContext;
+        private String tableName;
+        @BeforeEach
+        void beforeEach(){
+            tapConnectorContext = mock(TapConnectorContext.class);
+            tableName = "table";
+        }
+        @Test
+        void testGetTableInfoWithEx() throws Throwable {
+            when(mongoConfig.getDatabase()).thenReturn("test");
+            when(mongoClient.getDatabase("test")).thenThrow(RuntimeException.class);
+            doCallRealMethod().when(mongodbConnector).getTableInfo(tapConnectorContext,tableName);
+            assertThrows(RuntimeException.class, ()->mongodbConnector.getTableInfo(tapConnectorContext,tableName));
         }
     }
 }
