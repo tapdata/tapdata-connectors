@@ -719,7 +719,8 @@ class MongodbConnectorTest {
         }
 
         @Test
-        void testMainProcess() {
+        @DisplayName("test main process")
+        void test1() {
             List<Document> listIndexes = new ArrayList<>();
             listIndexes.add(new Document("name", "_id_").append("key", new Document("_id", 1)));
             listIndexes.add(new Document("name", "uid_1").append("key", new Document("uid", 1)));
@@ -749,6 +750,59 @@ class MongodbConnectorTest {
                 indexFields = tapIndex.getIndexFields();
                 assertEquals("sub.sid2", indexFields.get(1).getName());
                 assertFalse(indexFields.get(1).getFieldAsc());
+            });
+        }
+
+        @Test
+        @DisplayName("test other index key value: text")
+        void test2() {
+            List<Document> listIndexes = new ArrayList<>();
+            listIndexes.add(new Document("name", "content_text").append("key", new Document("content", "text")));
+            Iterator<Document> iterator = listIndexes.iterator();
+            MongoCursor<Document> mongoCursor = mock(MongoCursor.class);
+            when(mongoCursor.next()).thenAnswer(invocationOnMock -> iterator.next());
+            when(mongoCursor.hasNext()).thenAnswer(invocationOnMock -> iterator.hasNext());
+            ListIndexesIterable<Document> listIndexesIterable = mock(ListIndexesIterable.class);
+            when(listIndexesIterable.iterator()).thenReturn(mongoCursor);
+            doCallRealMethod().when(listIndexesIterable).forEach(any(Consumer.class));
+            MongoCollection<Document> mongoCollection = mock(MongoCollection.class);
+            when(mongoCollection.listIndexes()).thenReturn(listIndexesIterable);
+            MongoDatabase mongoDatabase = mock(MongoDatabase.class);
+            when(mongoDatabase.getCollection(tapTable.getId())).thenReturn(mongoCollection);
+            ReflectionTestUtils.setField(mongodbConnector, "mongoDatabase", mongoDatabase);
+            mongodbConnector.queryIndexes(tapConnectorContext, tapTable, indexes -> {
+                assertEquals(1, indexes.size());
+                TapIndex tapIndex = indexes.get(0);
+                assertEquals(listIndexes.get(0).getString("name"), tapIndex.getName());
+                List<TapIndexField> indexFields = tapIndex.getIndexFields();
+                assertEquals(1, indexFields.size());
+                assertEquals("content", indexFields.get(0).getName());
+                assertTrue(indexFields.get(0).getFieldAsc());
+            });
+        }
+
+        @Test
+        @DisplayName("test unique index")
+        void test3() {
+            List<Document> listIndexes = new ArrayList<>();
+            listIndexes.add(new Document("name", "uid_1").append("key", new Document("uid", 1)).append("unique", true));
+            listIndexes.add(new Document("name", "uid1_1").append("key", new Document("uid1", 1)));
+            Iterator<Document> iterator = listIndexes.iterator();
+            MongoCursor<Document> mongoCursor = mock(MongoCursor.class);
+            when(mongoCursor.next()).thenAnswer(invocationOnMock -> iterator.next());
+            when(mongoCursor.hasNext()).thenAnswer(invocationOnMock -> iterator.hasNext());
+            ListIndexesIterable<Document> listIndexesIterable = mock(ListIndexesIterable.class);
+            when(listIndexesIterable.iterator()).thenReturn(mongoCursor);
+            doCallRealMethod().when(listIndexesIterable).forEach(any(Consumer.class));
+            MongoCollection<Document> mongoCollection = mock(MongoCollection.class);
+            when(mongoCollection.listIndexes()).thenReturn(listIndexesIterable);
+            MongoDatabase mongoDatabase = mock(MongoDatabase.class);
+            when(mongoDatabase.getCollection(tapTable.getId())).thenReturn(mongoCollection);
+            ReflectionTestUtils.setField(mongodbConnector, "mongoDatabase", mongoDatabase);
+            mongodbConnector.queryIndexes(tapConnectorContext, tapTable, indexes -> {
+                assertEquals(2, indexes.size());
+                assertTrue(indexes.get(0).getUnique());
+                assertFalse(indexes.get(1).getUnique());
             });
         }
     }

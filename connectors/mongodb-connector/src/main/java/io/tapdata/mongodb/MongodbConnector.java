@@ -536,9 +536,9 @@ public class MongodbConnector extends ConnectorBase {
 			keys.forEach((k, v) -> {
 				TapIndexField tapIndexField = new TapIndexField().name(k);
 				if (v instanceof Integer) {
-					tapIndexField.fieldAsc((Integer) v == 1);
+					tapIndexField.fieldAsc(v.equals(1));
 				} else {
-					return;
+					tapIndexField.fieldAsc(true);
 				}
 				tapIndex.indexField(tapIndexField);
 				if (k.equals("_id")) {
@@ -548,6 +548,8 @@ public class MongodbConnector extends ConnectorBase {
 			});
 			if (Boolean.TRUE.equals(index.get(UNIQUE_KEY))) {
 				tapIndex.unique(true);
+			} else {
+				tapIndex.unique(false);
 			}
 			if (haveOid.get() && keyCounter.get() == 1) {
 				// In MongoDB, each table has an index of _id, and it is unique.
