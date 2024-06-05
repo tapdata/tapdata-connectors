@@ -256,6 +256,10 @@ public class TiCDCShellManager implements Activity {
             return this;
         }
 
+        public String getPdIpPorts() {
+            return this.pdIpPorts;
+        }
+
         public ShellConfig withCdcServerIpPort(String cdcServerIpPort) {
             this.cdcServerIpPort = cdcServerIpPort;
             return this;

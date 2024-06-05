@@ -223,7 +223,9 @@ public class TidbConnector extends CommonDbConnector {
                     if (httpUtil.queryChangeFeedsList(cdcServer) <= 0) {
                         log.debug("There is not any change feed with cdc server: {}, will stop cdc server", cdcServer);
                         String killCmd = "kill -9 ${pid}";
-                        String pdServer = connectorContext.getConnectionConfig().getString("pdServer");
+                        TiCDCShellManager.ShellConfig config = new TiCDCShellManager.ShellConfig();
+                        config.withPdIpPorts(connectorContext.getConnectionConfig().getString("pdServer"));
+                        String pdServer = config.getPdIpPorts();
                         List<String> processes = ProcessSearch.getProcesses(log, TiCDCShellManager.getCdcPsGrepFilter(pdServer, cdcServer));
                         if (!processes.isEmpty()) {
                             StringJoiner joiner = new StringJoiner(" ");
