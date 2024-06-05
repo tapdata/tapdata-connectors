@@ -18,34 +18,24 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 class TapEventManager implements Activity {
     final AnalyseTapEventFromDMLObject dmlEventParser;
     final AnalyseTapEventFromDDLObject ddlEventParser;
-    LinkedBlockingQueue<TiData> data;
-    ScheduledFuture<?> scheduledFuture;
     final ProcessHandler handler;
     final AtomicReference<Throwable> throwableCollector;
     final StreamReadConsumer consumer;
     final Log log;
-    final Object emitLock;
     final KVReadOnlyMap<TapTable> tableMap;
     Map<String, Map<String, Long>> offset;
 
 
-    protected TapEventManager(ProcessHandler handler, int maxQueueSize, StreamReadConsumer consumer) {
+    protected TapEventManager(ProcessHandler handler, StreamReadConsumer consumer) {
         this.handler = handler;
-        if (maxQueueSize < 1 || maxQueueSize > 5000) maxQueueSize = 500;
-        this.data = new LinkedBlockingQueue<>(maxQueueSize);
         this.throwableCollector = handler.processInfo.throwableCollector;
         this.consumer = consumer;
         this.log = handler.processInfo.nodeContext.getLog();
-        this.emitLock = new Object();
         this.dmlEventParser = new AnalyseTapEventFromDMLObject();
         this.ddlEventParser = new AnalyseTapEventFromDDLObject(handler.processInfo.nodeContext.getTableMap());
         this.tableMap = handler.processInfo.nodeContext.getTableMap();
@@ -60,15 +50,13 @@ class TapEventManager implements Activity {
         return new HashMap<>();
     }
 
-    public void emit(Map<String, List<? extends TiData>> dataMap) {
-        synchronized (this.emitLock) {
-            dataMap.forEach((table, dataList) -> data.addAll(dataList));
-        }
-    }
-
     public void emit(TiData tiData) {
-        synchronized (this.emitLock) {
-            data.add(tiData);
+        if (tiData instanceof DMLObject) {
+            handleDML((DMLObject) tiData);
+        } else if (tiData instanceof DDLObject) {
+            handleDDL((DDLObject) tiData);
+        } else {
+            log.warn("Unrecognized incremental events: {}, neither DDL nor DML", TapSimplify.toJson(tiData));
         }
     }
 
@@ -79,29 +67,10 @@ class TapEventManager implements Activity {
 
     @Override
     public void doActivity() {
-        cancelSchedule(this.scheduledFuture, log);
-        this.scheduledFuture = this.handler.getScheduledExecutorService().scheduleWithFixedDelay(() -> {
-            try {
-                while (!data.isEmpty()) {
-                    TiData poll = data.poll();
-                    if (poll instanceof DMLObject) {
-                        handleDML((DMLObject) poll);
-                    } else if (poll instanceof DDLObject) {
-                        handleDDL((DDLObject) poll);
-                    } else {
-                        log.warn("Unrecognized incremental events: {}, neither DDL nor DML", TapSimplify.toJson(poll));
-                    }
-                }
-            } catch (Throwable t) {
-                synchronized (throwableCollector) {
-                    throwableCollector.set(t);
-                }
-            }
-        }, 2, 1, TimeUnit.SECONDS);
+        //do nothing
     }
 
     protected void handleDDL(DDLObject ddlObject) {
-        log.debug("find a DDL: " + TapSimplify.toJson(ddlObject));
         Long tableVersion = ddlObject.getTableVersion();
         String table = ddlObject.getTable();
         Long lastTableVersion = TiOffset.getVersion(offset, table);
@@ -114,20 +83,18 @@ class TapEventManager implements Activity {
             return;
         }
         TiOffset.updateVersion(offset, table, tableVersion);
-        TapEvent ddlResult = this.ddlEventParser.analyse(ddlObject, null);
+        TapEvent ddlResult = this.ddlEventParser.analyse(ddlObject, null, log);
         if (null != ddlResult) {
             ddlResult.setTime(System.currentTimeMillis());
             List<TapEvent> ddl = new ArrayList<>();
             ddl.add(ddlResult);
             consumer.accept(ddl, this.offset);
-            log.debug("Accept a DDL: " + TapSimplify.toJson(ddlObject));
         }
 
     }
 
     protected void handleDML(DMLObject dmlObject) {
-        log.debug("Find a DML: " + TapSimplify.toJson(dmlObject));
-        Long ts = getTOSTime(dmlObject.getTs());
+        Long ts = Activity.getTOSTime(dmlObject.getTs());
         String table = dmlObject.getTable();
         Map<String, Long> offsetMap = TiOffset.computeIfAbsent(table, offset, ts, dmlObject.getTableVersion());
         Long lastTs = TiOffset.getTs(offsetMap);
@@ -139,17 +106,15 @@ class TapEventManager implements Activity {
                     TapSimplify.toJson(dmlObject));
             return;
         }
-        List<TapEvent> tapRecordEvents = dmlEventParser.analyse(dmlObject, null);
+        List<TapEvent> tapRecordEvents = dmlEventParser.analyse(dmlObject, null, log);
         if (CollectionUtils.isNotEmpty(tapRecordEvents)) {
             consumer.accept(tapRecordEvents, this.offset);
-            log.debug("Accept a DML: " + TapSimplify.toJson(dmlObject));
         }
     }
 
     @Override
     public void close() throws Exception {
-        cancelSchedule(this.scheduledFuture, log);
-        this.scheduledFuture = null;
+        //do nothing
     }
 
     public static class TiOffset {
@@ -185,32 +150,22 @@ class TapEventManager implements Activity {
             if (offset instanceof Map) {
                 try {
                     Map<String, Map<String, Long>> o = (Map<String, Map<String, Long>>) offset;
-                    long min = System.currentTimeMillis();
+                    long min = Activity.getTOSTime();
                     List<String> table = new ArrayList<>(o.keySet());
-                    Long logicalClock = null;
                     for (String tab : table) {
                         Map<String, Long> info = o.get(tab);
                         Long ts = info.get("offset");
                         if (null == ts) continue;
                         if (ts.compareTo(min) < 0) {
                             min = ts;
-                            logicalClock = info.get("tableVersion");
                         }
                     }
-                    return generateTSO(min, logicalClock);
+                    return min;
                 } catch (Exception e) {
                     return null;
                 }
             }
             return null;
-        }
-        public static Long generateTSO(long cdcOffset, Long logicalClock) {
-            if (null == logicalClock) return null;
-            long timeHighBits = cdcOffset >> 32; // 高32位
-            long timeLowBits = cdcOffset << 32; // 低32位
-            long logicalClockBits = logicalClock & 0xFFFFFFFFL; // 逻辑时钟的低32位
-
-            return timeHighBits | timeLowBits | logicalClockBits;
         }
     }
 }

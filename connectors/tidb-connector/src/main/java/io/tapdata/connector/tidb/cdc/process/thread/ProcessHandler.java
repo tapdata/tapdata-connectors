@@ -40,12 +40,20 @@ public final class ProcessHandler implements Activity {
     public ProcessHandler(ProcessInfo processInfo, StreamReadConsumer consumer) {
         this.processInfo = processInfo;
         this.tableVersionMap = new ConcurrentHashMap<>();
+        this.log = processInfo.nodeContext.getLog();
         this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
-        this.tapEventManager = new TapEventManager(this, 500, consumer);
+        this.tapEventManager = new TapEventManager(this, consumer);
         this.basePath = String.format(BASE_CDC_DATA_DIR, processInfo.feedId);
         this.ddlManager = new DDLManager(this, basePath);
-        this.dmlManager = new DMLManager(this, basePath, 3);
-        this.log = processInfo.nodeContext.getLog();
+        int threadCount = 5;
+        if (CollectionUtils.isNotEmpty(processInfo.cdcTable)) {
+            int tableCount = processInfo.cdcTable.size();
+            threadCount = tableCount / 5 + (tableCount % 5 > 0 ? 1 : 0);
+            if (threadCount > 5) {
+                threadCount = 5;
+            }
+        }
+        this.dmlManager = new DMLManager(this, basePath, threadCount);
         this.shellManager = new TiCDCShellManager(new TiCDCShellManager.ShellConfig()
                 .withCdcServerIpPort(processInfo.cdcServer)
                 .withGcTtl(processInfo.gcTtl)
@@ -124,7 +132,7 @@ public final class ProcessHandler implements Activity {
     }
 
     protected void startFeedProcess() {
-        try(HttpUtil httpUtil = new HttpUtil(log)) {
+        try (HttpUtil httpUtil = new HttpUtil(log)) {
             ChangeFeed changefeed = new ChangeFeed();
             changefeed.setSinkUri(String.format("file://%s?protocol=canal-json", new File(basePath).getAbsolutePath()));
             changefeed.setChangefeedId(processInfo.feedId);
@@ -165,7 +173,7 @@ public final class ProcessHandler implements Activity {
     }
 
     protected void stopFeedProcess() {
-        try(HttpUtil httpUtil = new HttpUtil(log)) {
+        try (HttpUtil httpUtil = new HttpUtil(log)) {
             if (Boolean.TRUE.equals(httpUtil.deleteChangeFeed(processInfo.feedId, processInfo.cdcServer))) {
                 log.debug("Stop cdc succeed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
             } else {
@@ -187,10 +195,12 @@ public final class ProcessHandler implements Activity {
         String feedId;
         String cdcServer;
         TidbConfig tidbConfig;
+
         public ProcessInfo withTiDBConfig(TidbConfig tidbConfig) {
             this.tidbConfig = tidbConfig;
             return this;
         }
+
         public ProcessInfo withCdcServer(String cdcServer) {
             this.cdcServer = cdcServer;
             return this;

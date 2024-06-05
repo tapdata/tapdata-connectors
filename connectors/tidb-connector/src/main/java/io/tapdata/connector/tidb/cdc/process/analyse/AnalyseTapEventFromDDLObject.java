@@ -7,6 +7,7 @@ import io.tapdata.common.ddl.wrapper.DDLWrapperConfig;
 import io.tapdata.connector.tidb.cdc.process.ddl.entity.DDLObject;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
@@ -23,7 +24,7 @@ public class AnalyseTapEventFromDDLObject implements AnalyseRecord<DDLObject, Ta
     }
 
     @Override
-    public TapEvent analyse(DDLObject record, AnalyseColumnFilter<DDLObject> filter) {
+    public TapEvent analyse(DDLObject record, AnalyseColumnFilter<DDLObject> filter, Log log) {
         AtomicReference<TapEvent> mysqlStreamEvents = new AtomicReference<>();
         String ddlSql = record.getQuery();
         try {
@@ -34,7 +35,7 @@ public class AnalyseTapEventFromDDLObject implements AnalyseRecord<DDLObject, Ta
                     tapTableMap,
                     tapDDLEvent -> {
                         mysqlStreamEvents.set(tapDDLEvent);
-                        TapLogger.info("TAG", "Read DDL: " + ddlSql + ", about to be packaged as some event(s)");
+                        log.info("Read DDL: {}, about to be packaged as some event(s)", ddlSql);
                     }
             );
         } catch (Throwable e) {

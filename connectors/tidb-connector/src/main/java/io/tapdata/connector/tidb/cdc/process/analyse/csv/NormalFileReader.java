@@ -8,42 +8,17 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.StringJoiner;
+import java.util.function.Supplier;
 
 public class NormalFileReader {
-
-    public List<String> read(String csvPath, boolean negate) {
-        List<String> lines = new ArrayList<>();
-        try (
-                FileInputStream inputStream = new FileInputStream(csvPath);
-                InputStreamReader inputStreamReader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-                BufferedReader bufferedReader = new BufferedReader(inputStreamReader);
-        ) {
-            String line = null;
-            while (null != (line = bufferedReader.readLine())) {
-                if ("".equals(line.trim())) continue;
-                lines.add(line.length() > 300 ? (line.substring(0, 300) + "...") : line);
-            }
-        } catch (Exception e) {
-            throw new CoreException("Monitor can not handle csv line, msg: " + e.getMessage());
-        }
-        if (negate && lines.size() > 1) {
-            Collections.reverse(lines);
-        }
-        return lines;
-    }
-
-    public void readLineByLine(File file, ReadConsumer<String> consumer) {
+    public void readLineByLine(File file, ReadConsumer<String> consumer, Supplier<Boolean> alive) {
         try (
                 FileInputStream inputStream = new FileInputStream(file);
                 InputStreamReader inputStreamReader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
                 BufferedReader bufferedReader = new BufferedReader(inputStreamReader);
         ) {
             String line = null;
-            while (null != (line = bufferedReader.readLine())) {
+            while (null != (line = bufferedReader.readLine()) && alive.get()) {
                 if ("".equals(line.trim())) continue;
                 consumer.accept(line);
             }
@@ -52,7 +27,7 @@ public class NormalFileReader {
         }
     }
 
-    public String readAll(File file) {
+    public String readAll(File file, Supplier<Boolean> alive) {
         StringBuilder builder = new StringBuilder();
         try (
                 FileInputStream inputStream = new FileInputStream(file);
@@ -60,29 +35,11 @@ public class NormalFileReader {
                 BufferedReader bufferedReader = new BufferedReader(inputStreamReader);
         ) {
             String line = null;
-            while (null != (line = bufferedReader.readLine())) {
+            while (null != (line = bufferedReader.readLine()) && alive.get()) {
                 builder.append(line);
             }
         } catch (Exception e) {
             throw new CoreException("Monitor can not handle cdc data line, msg: " + e.getMessage());
-        }
-        return builder.toString();
-    }
-
-
-    public static final int MAX_READ_LINE = 50;
-    public String readString(String csvPath, boolean negate) {
-        List<String> read = read(csvPath, negate);
-        StringJoiner builder = new StringJoiner("\n");
-        int lines = 0;
-        if (null != read && !read.isEmpty()) {
-            for (String s : read) {
-                builder.add(s);
-                lines++;
-                if (lines >= MAX_READ_LINE) break;
-            }
-        } else {
-            builder.add("-");
         }
         return builder.toString();
     }

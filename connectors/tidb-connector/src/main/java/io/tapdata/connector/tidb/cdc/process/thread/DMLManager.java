@@ -1,10 +1,8 @@
 package io.tapdata.connector.tidb.cdc.process.thread;
 
 import io.tapdata.common.util.FileUtil;
-import io.tapdata.connector.tidb.cdc.process.TiData;
 import io.tapdata.connector.tidb.cdc.process.analyse.csv.NormalFileReader;
 import io.tapdata.connector.tidb.cdc.process.dml.entity.DMLObject;
-import io.tapdata.connector.tidb.cdc.process.split.SplitByFileSizeImpl;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;
 import org.apache.commons.io.FileUtils;
@@ -13,23 +11,20 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
-class DMLManager implements Activity {
+public class DMLManager implements Activity {
     public static final String DML_DATA_FILE_NAME_MATCH = "(CDC)([\\d]*)(\\.json)";
     final ProcessHandler handler;
     final int threadCount;
-    ConcurrentHashMap<String, ConcurrentLinkedQueue<DMLObject>> data;
     private final String database;
     private final List<String> table;
     String basePath;
@@ -46,19 +41,14 @@ class DMLManager implements Activity {
         this.handler = handler;
         this.throwableCollector = handler.processInfo.throwableCollector;
         this.threadCount = threadCount;
-        this.data = new ConcurrentHashMap<>();
-        this.table = handler.processInfo.cdcTable;
+        this.table = null == handler.processInfo.cdcTable ? new ArrayList<>() : handler.processInfo.cdcTable;
         this.database = handler.processInfo.database;
         this.alive = handler.processInfo.alive;
         this.reader = new NormalFileReader();
-
+        this.log = handler.processInfo.nodeContext.getLog();
+        this.reader.setLog(log);
         withBasePath(basePath);
     }
-
-    public ConcurrentHashMap<String, ConcurrentLinkedQueue<DMLObject>> getData() {
-        return data;
-    }
-
     protected void withBasePath(String basePath) {
         if (null == basePath) {
             basePath = "";
@@ -88,28 +78,36 @@ class DMLManager implements Activity {
         }, 1, 1, TimeUnit.SECONDS);
     }
 
-    public List<List<File>> splitToPieces(List<File> jsonFilePath) {
-        SplitByFileSizeImpl splitByFileSize = new SplitByFileSizeImpl(threadCount);
-        return splitByFileSize.splitToPieces(jsonFilePath, 0);
+    protected String getFullBasePath() {
+        return FileUtil.paths(basePath, database);
     }
 
-    /**
-     * base path: ${tap-dir}/${ProcessHandler.BASE_CDC_DATA_DIR}
-     */
-    public List<File> scanAllJson(File databaseDir) {
-        List<File> files = new ArrayList<>();
-        if (!databaseDir.exists() || !databaseDir.isDirectory()) {
-            return files;
+    protected void readOnce() {
+        //get all file
+        File path = new File(getFullBasePath());
+        if (!path.isDirectory()) {
+            return;
         }
-        List<File> tableDirs = scanAllCdcTableDir(table, databaseDir, handler.processInfo.alive);
-        if (tableDirs.isEmpty()) {
-            return files;
+        LinkedBlockingQueue<File> jsonFilePath = new LinkedBlockingQueue<>(scanAllTableDir(path));
+        if (!alive.get() || jsonFilePath.isEmpty()) {
+            return;
         }
+        CompletableFuture<Void>[] all = new CompletableFuture[this.threadCount];
+        for (int index = 0; index < this.threadCount; index++) {
+            all[index] = CompletableFuture.runAsync(() -> doOnce(jsonFilePath));
+        }
+        CompletableFuture<Void> completableFuture = CompletableFuture.allOf(all);
+        try {
+            completableFuture.get();
+        } catch (InterruptedException | ExecutionException interruptedException) {
+            throwableCollector.set(interruptedException);
+        }
+    }
 
-        for (File tableDir : tableDirs) {
-            if (!alive.get()) {
-                break;
-            }
+    public void doOnce(LinkedBlockingQueue<File> jsonFilePath) {
+        while (alive.get() && !jsonFilePath.isEmpty()) {
+            File tableDir = jsonFilePath.poll();
+            if (null == tableDir) continue;
             String tableNameFromDir = tableDir.getName();
             String tableVersion = handler.judgeTableVersion(tableNameFromDir);
             if (null == tableVersion) {
@@ -122,87 +120,45 @@ class DMLManager implements Activity {
                         && f.isFile()
                         && f.getName().matches(DML_DATA_FILE_NAME_MATCH));
                 if (null != jsonFiles && jsonFiles.length > 0) {
-                    files.addAll(new ArrayList<>(Arrays.asList(jsonFiles)));
+                    new ArrayList<>(Arrays.asList(jsonFiles))
+                            .stream()
+                            .sorted((j1, j2) -> j1.getName().compareToIgnoreCase(j2.getName()))
+                            .forEach(this::readJsonAndCommit);
                 }
             }
         }
-        return files;
     }
 
-    protected void readOnce() {
-        //get all file
-        File path = new File(getFullBasePath());
-        if (!path.isDirectory()) {
-            return;
-        }
-        List<File> jsonFilePath = scanAllJson(path);
-        if (!alive.get() || jsonFilePath.isEmpty()) {
-            return;
-        }
-        List<List<File>> partition = splitToPieces(jsonFilePath);
-        // each thread do read once()
-        CompletableFuture<Void>[] all = new CompletableFuture[partition.size()];
-        for (int index = 0; index < partition.size(); index++) {
-            int finalIndex = index;
-            all[index] = CompletableFuture.runAsync(() -> readPartition(partition.get(finalIndex)));
-        }
-        CompletableFuture<Void> completableFuture = CompletableFuture.allOf(all);
-
-
-        Map<String, List<? extends TiData>> map = new HashMap<>();
-        completableFuture.thenRun(() -> {
-            data.forEach((key, list) -> {
-                map.put(key, sort(new ArrayList<>(list)));
-            });
-        });
+    protected void readJsonAndCommit(File file) {
+        this.reader.readLineByLine(file, line -> {
+            DMLObject dmlObject = TapSimplify.fromJson(line, DMLObject.class);
+            String table = dmlObject.getTable();
+            DDLManager.VersionInfo versionInfo = handler.tableVersionMap.get(table);
+            if (null != versionInfo) {
+                dmlObject.setTableColumnInfo(versionInfo.info);
+            } else {
+                log.debug("Can not find table version info from ddl object, dml info: {}", line);
+            }
+            handler.getTapEventManager().emit(dmlObject);
+        }, alive);
         try {
-            completableFuture.get();
-        } catch (InterruptedException | ExecutionException interruptedException) {
-            throwableCollector.set(interruptedException);
-        } finally {
-            handler.getTapEventManager().emit(map);
-            data.clear();
+            FileUtils.delete(file);
+        } catch (IOException e) {
+            log.error("A read complete file delete failed in cdc, file: {}, message: {}", file.getPath(), e.getMessage());
         }
     }
 
-    public List<DMLObject> sort(List<DMLObject> arr) {
-        if (null == arr) return new ArrayList<>();
-        if (arr.isEmpty()) return arr;
-        arr.sort((d1, d2) -> {
-            if (null == d1 || null == d1.getTs()) return -1;
-            if (null == d2 || null == d2.getTs()) return 1;
-            return d1.getTs().compareTo(d2.getTs());
-        });
-        return arr;
-    }
-
-    protected void readPartition(List<File> jsonFileList) {
-        if (!alive.get()) {
-            return;
-        }
-        for (File file : jsonFileList) {
-            this.reader.readLineByLine(file, line -> {
-                DMLObject dmlObject = TapSimplify.fromJson(line, DMLObject.class);
-                String table = dmlObject.getTable();
-                DDLManager.VersionInfo versionInfo = handler.tableVersionMap.get(table);
-                if (null != versionInfo) {
-                    dmlObject.setTableColumnInfo(versionInfo.info);
-                } else {
-                    log.debug("Can not find table version info from ddl object");
-                }
-                ConcurrentLinkedQueue<DMLObject> linkedQueue = data.computeIfAbsent(table, key -> new ConcurrentLinkedQueue<>());
-                linkedQueue.add(dmlObject);
-            });
-            try {
-                FileUtils.delete(file);
-            } catch (IOException e) {
-                log.error("A read complete file delete failed in cdc, file: {}, message: {}", file.getPath(), e.getMessage());
-            }
-        }
-    }
-
-    protected String getFullBasePath() {
-        return FileUtil.paths(basePath, database);
+    /**
+     * base path: ${tap-dir}/${ProcessHandler.BASE_CDC_DATA_DIR}
+     */
+    public List<File> scanAllTableDir(File databaseDir) {
+        File[] files = databaseDir.listFiles(f -> f.exists() && f.isDirectory());
+        return null != files ?
+                new ArrayList<>(Arrays.asList(files))
+                        .stream()
+                        .filter(f -> table.isEmpty() || table.contains(f.getName()))
+                        .collect(Collectors.toList())
+                : new ArrayList<>();
     }
 
     @Override

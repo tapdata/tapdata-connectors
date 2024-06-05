@@ -3,6 +3,7 @@ package io.tapdata.connector.tidb;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
+import io.tapdata.common.util.FileUtil;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.tidb.cdc.process.thread.ProcessHandler;
@@ -69,7 +70,6 @@ public class TidbConnector extends CommonDbConnector {
     private TimeZone timezone;
     private TidbReader tidbReader;
     AtomicReference<Throwable> throwableCatch = new AtomicReference<>();
-    String filePath;
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
 
@@ -201,9 +201,12 @@ public class TidbConnector extends CommonDbConnector {
     public void onStop(TapConnectionContext connectionContext) throws Exception {
         started.set(false);
         EmptyKit.closeQuietly(tidbJdbcContext);
+        if (connectionContext instanceof TapConnectorContext) {
+            cleanCDC((TapConnectorContext) connectionContext);
+        }
     }
 
-    private void onDestroy(TapConnectorContext connectorContext) throws Throwable {
+    protected void cleanCDC(TapConnectorContext connectorContext) {
         Log log = connectorContext.getLog();
         String feedId = (String) connectorContext.getStateMap().get("feed-id");
         String cdcServer = (String) connectorContext.getStateMap().get("cdc-server");
@@ -212,28 +215,31 @@ public class TidbConnector extends CommonDbConnector {
             try (HttpUtil httpUtil = new HttpUtil(connectorContext.getLog())) {
                 log.debug("Start to delete change feed: {}", feedId);
                 ErrorKit.ignoreAnyError(() -> httpUtil.deleteChangeFeed(feedId, cdcServer));
-                log.debug("Start to clean cdc data dir: {}", filePath);
-                ErrorKit.ignoreAnyError(() -> FileUtils.deleteDirectory(new File(filePath)));
+                String finalFilePath = FileUtil.paths(filePath, feedId);
+                log.debug("Start to clean cdc data dir: {}", finalFilePath);
+                ErrorKit.ignoreAnyError(() -> new File(finalFilePath).delete());
                 log.debug("Start to check cdc server heath: {}", cdcServer);
                 ErrorKit.ignoreAnyError(() -> {
                     if (!httpUtil.checkAlive(cdcServer)) {
                         return;
                     }
                     log.debug("Cdc server is alive, will check change feed list");
-                    if (httpUtil.queryChangeFeedsList(cdcServer) <= 0) {
-                        log.debug("There is not any change feed with cdc server: {}, will stop cdc server", cdcServer);
-                        String killCmd = "kill -9 ${pid}";
-                        TiCDCShellManager.ShellConfig config = new TiCDCShellManager.ShellConfig();
-                        config.withPdIpPorts(connectorContext.getConnectionConfig().getString("pdServer"));
-                        String pdServer = config.getPdIpPorts();
-                        List<String> processes = ProcessSearch.getProcesses(log, TiCDCShellManager.getCdcPsGrepFilter(pdServer, cdcServer));
-                        if (!processes.isEmpty()) {
-                            StringJoiner joiner = new StringJoiner(" ");
-                            processes.forEach(joiner::add);
-                            ProcessLauncher.execCmdWaitResult(
-                                    TiCDCShellManager.setProperties(killCmd, "pid", joiner.toString()),
-                                    "stop cdc server failed, message: {}",
-                                    log);
+                    synchronized (TiCDCShellManager.PROCESS_LOCK) {
+                        if (httpUtil.queryChangeFeedsList(cdcServer) <= 0) {
+                            log.debug("There is not any change feed with cdc server: {}, will stop cdc server", cdcServer);
+                            String killCmd = "kill -9 ${pid}";
+                            TiCDCShellManager.ShellConfig config = new TiCDCShellManager.ShellConfig();
+                            config.withPdIpPorts(connectorContext.getConnectionConfig().getString("pdServer"));
+                            String pdServer = config.getPdIpPorts();
+                            List<String> processes = ProcessSearch.getProcesses(log, TiCDCShellManager.getCdcPsGrepFilter(pdServer, cdcServer));
+                            if (!processes.isEmpty()) {
+                                StringJoiner joiner = new StringJoiner(" ");
+                                processes.forEach(joiner::add);
+                                ProcessLauncher.execCmdWaitResult(
+                                        TiCDCShellManager.setProperties(killCmd, "pid", joiner.toString()),
+                                        "stop cdc server failed, message: {}",
+                                        log);
+                            }
                         }
                     }
                 });
@@ -241,6 +247,10 @@ public class TidbConnector extends CommonDbConnector {
                 connectorContext.getLog().warn("Clean cdc resources failed, message: {}", e.getMessage(), e);
             }
         }
+    }
+
+    private void onDestroy(TapConnectorContext connectorContext) throws Throwable {
+        cleanCDC(connectorContext);
     }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {

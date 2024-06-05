@@ -55,10 +55,10 @@ public interface Activity extends AutoCloseable {
         return tableDirs;
     }
 
-    default long getTOSTime() {
+    static long getTOSTime() {
         return getTOSTime(System.currentTimeMillis());
     }
-    default long getTOSTime(Long time) {
+    static long getTOSTime(Long time) {
         if (null == time) return getTOSTime();
         return time >> 18;
     }

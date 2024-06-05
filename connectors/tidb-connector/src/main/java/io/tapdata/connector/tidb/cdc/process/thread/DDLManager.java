@@ -39,6 +39,7 @@ class DDLManager implements Activity {
         this.log = handler.processInfo.nodeContext.getLog();
         this.currentTableVersion = new ConcurrentHashMap<>();
         this.reader = new NormalFileReader();
+        this.reader.setLog(log);
     }
 
     @Override
@@ -83,7 +84,7 @@ class DDLManager implements Activity {
         if (null == schemaJson || schemaJson.length <= 0) return;
         List<DDLObject> schemaJsonFile = new ArrayList<>();
         for (File file : schemaJson) {
-            String tableDDL = this.reader.readAll(file);
+            String tableDDL = this.reader.readAll(file, handler.processInfo.alive);
             try {
                 DDLObject ddlObject = TapSimplify.fromJson(tableDDL, DDLObject.class);
                 if (null == ddlObject.getTableVersion()) {

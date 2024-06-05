@@ -4,6 +4,7 @@ import io.tapdata.connector.tidb.cdc.process.ddl.convert.Convert;
 import io.tapdata.connector.tidb.cdc.process.dml.entity.DMLObject;
 import io.tapdata.connector.tidb.cdc.process.dml.entity.DMLType;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
@@ -17,7 +18,7 @@ public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, Li
     public static final DefaultConvert DEFAULT_CONVERT = new DefaultConvert();
 
     @Override
-    public List<TapEvent> analyse(DMLObject dmlObject, AnalyseColumnFilter<DMLObject> filter) {
+    public List<TapEvent> analyse(DMLObject dmlObject, AnalyseColumnFilter<DMLObject> filter, Log log) {
         DMLType type = DMLType.parse(dmlObject.getType());
         switch (type) {
             case INSERT:
@@ -27,7 +28,7 @@ public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, Li
             case DELETE:
                 return getDeleteEvent(dmlObject, filter);
             default:
-                //@todo un know event type
+                log.warn("Un know dml type: {}, dml info: {}", dmlObject.getType(), TapSimplify.toJson(dmlObject));
         }
         return new ArrayList<>();
     }
