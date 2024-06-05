@@ -1,9 +1,5 @@
 package io.tapdata.mongodb;
 
-
-import com.mongodb.Function;
-import com.mongodb.ServerAddress;
-import com.mongodb.ServerCursor;
 import com.mongodb.client.*;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
@@ -14,9 +10,7 @@ import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
-import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexEx;
-import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.mongodb.batch.ErrorHandler;
@@ -35,30 +29,17 @@ import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TapExecuteCommand;
 import org.bson.Document;
 import org.bson.conversions.Bson;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
-import org.bson.BsonValue;
-import org.bson.Document;
 import org.junit.jupiter.api.*;
-import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.*;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
