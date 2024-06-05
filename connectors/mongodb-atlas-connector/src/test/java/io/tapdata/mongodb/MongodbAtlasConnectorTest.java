@@ -19,6 +19,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -104,7 +105,7 @@ public class MongodbAtlasConnectorTest {
             ReflectionTestUtils.setField(mongodbAtlasConnector, "canListCollections", false);
             ReflectionTestUtils.setField(mongodbAtlasConnector, "exceptionCollector", mock(MongodbExceptionCollector.class));
             when(mongoDatabase.runCommand(any())).thenThrow(new MongoClientException(""));
-            Assertions.assertThrows(MongoClientException.class,()->mongodbAtlasConnector.tableCount(mock(TapConnectionContext.class)));
+            assertThrows(MongoClientException.class,()->mongodbAtlasConnector.tableCount(mock(TapConnectionContext.class)));
         }
     }
     @Nested
@@ -215,7 +216,7 @@ public class MongodbAtlasConnectorTest {
                     "\"firstBatch\": [{\"name\": \"tapdata\", \"type\": \"collection\"}, {\"name\": \"tapdata_2\", \"type\": \"view\"}, {\"name\": \"system.test\", \"type\": \"collection\"}]}}");
             when(mongoDatabase.runCommand(any())).thenThrow(new MongoClientException(""));
             List<String> result = new ArrayList<>();
-            mongodbAtlasConnector.getTableNames(mock(TapConnectionContext.class),10, result::addAll);
+            assertThrows(MongoClientException.class,()->mongodbAtlasConnector.getTableNames(mock(TapConnectionContext.class),10, result::addAll));
             Assertions.assertEquals(0,result.size());
         }
     }

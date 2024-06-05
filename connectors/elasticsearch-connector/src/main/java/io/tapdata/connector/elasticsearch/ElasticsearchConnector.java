@@ -89,7 +89,7 @@ public class ElasticsearchConnector extends ConnectorBase {
             return tapTable;
         }
     }
-    private void initConnection(TapConnectionContext connectorContext) {
+    protected void initConnection(TapConnectionContext connectorContext) {
         elasticsearchConfig = new ElasticsearchConfig().load(connectorContext.getConnectionConfig());
         elasticsearchConfig.load(connectorContext.getNodeConfig());
         exceptionCollector = new ElasticsearchExceptionCollector();
@@ -99,6 +99,7 @@ public class ElasticsearchConnector extends ConnectorBase {
         }catch (Throwable e){
             exceptionCollector.collectTerminateByServer(e);
             exceptionCollector.collectUserPwdInvalid(elasticsearchConfig.getUser(),e);
+            throw e;
         }
     }
 
@@ -204,7 +205,7 @@ public class ElasticsearchConnector extends ConnectorBase {
         new ElasticsearchRecordWriter(elasticsearchHttpContext, tapTable).log(connectorContext.getLog()).write(tapRecordEvents, writeListResultConsumer);
     }
 
-    private void createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
+    protected void createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
         TapTable tapTable = tapCreateTableEvent.getTable();
         try{
             if (!elasticsearchHttpContext.existsIndex(tapTable.getId().toLowerCase())) {
@@ -273,6 +274,7 @@ public class ElasticsearchConnector extends ConnectorBase {
         }catch (Throwable e){
             exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
             exceptionCollector.collectUserPwdInvalid(elasticsearchConfig.getUser(),e);
+            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed | Error: " + e.getMessage(), e);
         }
     }
 
