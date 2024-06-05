@@ -18,12 +18,12 @@ public class ProcessLauncher {
         }
     }
 
-    public static String execCmd(String cmd, String errorMsg, Log log) {
+    public static String execCmdWaitResult(String cmd, String errorMsg, Log log) {
         StringBuilder sb = new StringBuilder();
         BufferedReader br = null;
         try {
             Process p = Runtime.getRuntime().exec(cmd);
-            //p.waitFor();
+            p.waitFor();
             br = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line;
             while ((line = br.readLine()) != null) {

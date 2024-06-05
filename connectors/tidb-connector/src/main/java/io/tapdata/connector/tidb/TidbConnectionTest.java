@@ -75,7 +75,10 @@ public class TidbConnectionTest extends CommonDbTest {
      */
     public Boolean testPbserver() {
         try {
-            URI uri = URI.create(tidbConfig.getPdServer());
+            String pdServer = tidbConfig.getPdServer().startsWith("http") ?
+                    tidbConfig.getPdServer()
+                    : "http://" + tidbConfig.getPdServer();
+            URI uri = URI.create(pdServer);
             String protocol = uri.toURL().getProtocol();
             if (StringUtils.isBlank(protocol)) {
                 consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_FAILED,"PD server is illegal, should start with a protocol"));

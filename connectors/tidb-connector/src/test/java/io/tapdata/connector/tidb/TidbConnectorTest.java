@@ -53,7 +53,7 @@ public class TidbConnectorTest {
             sink.setProtocol("canal-json");
             replicaConfig.setSink(sink);
             changefeed.setReplicaConfig(replicaConfig);
-            httpUtil.createChangefeed(changefeed, "123.60.132.254:8300");
+            httpUtil.createChangeFeed(changefeed, "123.60.132.254:8300");
         }
     }
 
@@ -61,13 +61,13 @@ public class TidbConnectorTest {
     @Test
     void testDelete() throws IOException {
         HttpUtil   httpUtil = new HttpUtil(new TapLog());
-        httpUtil.deleteChangefeed("simple-replication-task9", "127.0.0.1:8300");
+        httpUtil.deleteChangeFeed("simple-replication-task9", "127.0.0.1:8300");
     }
 
 
     @Test
     void queryChangefeedlist() throws IOException {
         HttpUtil httpUtil = new HttpUtil(new TapLog());
-        httpUtil.queryChangefeedsList("123.60.132.254:8300");
+        httpUtil.queryChangeFeedsList("123.60.132.254:8300");
     }
 }

@@ -12,18 +12,6 @@ public class ProcessSearch {
     private ProcessSearch() {
     }
 
-    public static void main(String[] args) {
-        // 关键字列表，可以根据需要修改
-        List<String> keywords = new ArrayList<>();
-        keywords.add("/Applications/Google");
-        keywords.add("Chrome.app/Contents/Frameworks/Google");
-        keywords.add("Chrome");
-        //keywords.add("java");
-        keywords.add("Framework.framework/Versions/125.0.6422.113/Helpers/Google");
-        List<String> processes = getProcesses(null, (String[]) keywords.toArray());
-        processes.forEach(System.out::println);
-    }
-
     public static String[] getCommand(String command) {
         String os = System.getProperty("os.name").toLowerCase();
         if (os.contains("win")) {
@@ -35,11 +23,10 @@ public class ProcessSearch {
 
     protected static String getSearchCommand(Log log, String... keywords) {
         String os = System.getProperty("os.name").toLowerCase();
-        String command = "";
         if (os.contains("win")) {
-            return  "tasklist";
+            return "tasklist";
         } else if (os.contains("nix") || os.contains("nux") || os.contains("mac")) {
-            return  "ps -e" + grep(keywords);
+            return "ps -e" + grep(keywords);
         } else {
             log.warn("Unsupported operating system: {}", os);
             return null;
@@ -48,11 +35,12 @@ public class ProcessSearch {
 
     protected static String grep(String... keywords) {
         if (null == keywords || keywords.length == 0) return "";
-        StringJoiner joiner = new StringJoiner("/ && /");
+        if (keywords.length == 1) return " | grep " + keywords[0] + " | grep -v grep ";
+        StringJoiner joiner = new StringJoiner(" && ");
         for (String keyword : keywords) {
             joiner.add(keyword);
         }
-        return " | awk /" + joiner.toString() + "/";
+        return " | awk " + joiner.toString() + "";
     }
 
     public static List<String> getProcesses(Log log, String... keywords) {

@@ -1,6 +1,5 @@
 package io.tapdata.connector.tidb.util;
 
-
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.PropertyNamingStrategy;
@@ -32,8 +31,7 @@ public class HttpUtil implements AutoCloseable {
         this.tapLogger = tapLogger;
     }
 
-    public Boolean deleteChangefeed(String changefeedId, String cdcUrl) throws IOException {
-        // cdcUrl = "192.168.1.179:8300";
+    public Boolean deleteChangeFeed(String changefeedId, String cdcUrl) throws IOException {
         String url = "http://" + cdcUrl + "/api/v2/changefeeds/" + changefeedId;
         HttpDelete httpDelete = new HttpDelete(url);
         RequestConfig requestConfig = RequestConfig.custom()
@@ -46,16 +44,16 @@ public class HttpUtil implements AutoCloseable {
                 CloseableHttpResponse response = httpClient.execute(httpDelete)
         ) {
             if (response.getStatusLine().getStatusCode() == 200) {
-                tapLogger.info("delete Changefeed is success changefeedId:{}",changefeedId);
+                tapLogger.debug("Delete change feed succeed change feedId: {}", changefeedId);
                 return true;
-            }else {
-                tapLogger.error("delete Changefeed is fail errMsg:{}",EntityUtils.toString(response.getEntity()));
+            } else {
+                tapLogger.warn("Delete change feed failed error message: {}", EntityUtils.toString(response.getEntity()));
             }
         }
         return false;
     }
 
-    public Boolean createChangefeed(ChangeFeed changefeed, String cdcUrl) throws IOException {
+    public Boolean createChangeFeed(ChangeFeed changefeed, String cdcUrl) throws IOException {
         String url = "http://" + cdcUrl + "/api/v2/changefeeds";
         HttpPost httpPost = new HttpPost(url);
         SerializeConfig config = new SerializeConfig();
@@ -67,18 +65,16 @@ public class HttpUtil implements AutoCloseable {
         ) {
             HttpEntity responseEntity = response.getEntity();
             if (responseEntity != null && response.getStatusLine().getStatusCode() == 200) {
-                tapLogger.info("Create Changefeed is success changefeedId:{}",changefeed.getChangefeedId());
+                tapLogger.info("Create change feed succeed, change feed id: {}", changefeed.getChangefeedId());
                 return true;
-            }else {
-                String toString = EntityUtils.toString(responseEntity);
-                tapLogger.info("Create Changefeed is fail errorMsg:{}", toString);
-                throw new IOException("Tidb stream fail reasoon:" + toString);
+            } else {
+                throw new IOException("TiDB stream failed: " + (null == responseEntity ? "" : EntityUtils.toString(responseEntity)));
             }
         }
     }
 
 
-    public int queryChangefeedsList(String cdcUrl) throws IOException {
+    public int queryChangeFeedsList(String cdcUrl) throws IOException {
         String url = "http://" + cdcUrl + "/api/v2/changefeeds";
         HttpGet httpGet = new HttpGet(url);
         try (
@@ -88,14 +84,23 @@ public class HttpUtil implements AutoCloseable {
             if (responseEntity != null && response.getStatusLine().getStatusCode() == 200) {
                 String toString = EntityUtils.toString(responseEntity);
                 JSONObject jsonObject = JSON.parseObject(toString);
-                int taskNum= (int) jsonObject.get("total");
-                tapLogger.info("Query changefeedsList is success  task count:{}",taskNum);
+                int taskNum = (int) jsonObject.get("total");
+                tapLogger.debug("Query change feeds list succeed, task count: {}", taskNum);
                 return taskNum;
-            }else {
-                String toString = EntityUtils.toString(responseEntity);
-                tapLogger.error("Query ChangefeedsList is fail errorMsg:{}", toString);
-                throw new IOException("Query ChangefeedsList is fail reason:" + toString);
+            } else {
+                throw new IOException("Query change feeds list failed, message: " + (null == responseEntity ? "" : EntityUtils.toString(responseEntity)));
             }
+        }
+    }
+
+    public boolean checkAlive(String serverUrl) {
+        String url = "http://" + serverUrl + "/api/v2/health";
+        HttpGet httpGet = new HttpGet(url);
+        try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
+            HttpEntity responseEntity = response.getEntity();
+            return responseEntity != null && response.getStatusLine().getStatusCode() == 200;
+        } catch (Exception e) {
+            return false;
         }
     }
 

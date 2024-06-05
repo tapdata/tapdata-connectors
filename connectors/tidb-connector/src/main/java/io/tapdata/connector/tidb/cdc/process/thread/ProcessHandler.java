@@ -47,7 +47,7 @@ public final class ProcessHandler implements Activity {
         this.dmlManager = new DMLManager(this, basePath, 3);
         this.log = processInfo.nodeContext.getLog();
         this.shellManager = new TiCDCShellManager(new TiCDCShellManager.ShellConfig()
-                .withCdcServerIpPort("127.0.0.1:8300")
+                .withCdcServerIpPort(processInfo.cdcServer)
                 .withGcTtl(processInfo.gcTtl)
                 .withLocalStrongPath(BASE_CDC_CACHE_DATA_DIR)
                 .withPdIpPorts(processInfo.tidbConfig.getPdServer())
@@ -112,11 +112,7 @@ public final class ProcessHandler implements Activity {
         init();
         shellManager.doActivity();
         processInfo.withCdcServer(shellManager.shellConfig.cdcServerIpPort);
-        try {
-            stopFeedProcess();
-        } catch (Exception e) {
-            throw new CoreException("The remaining resources cannot be released, message: {}", e.getMessage(), e);
-        }
+        stopFeedProcess();
         startFeedProcess();
         this.ddlManager.doActivity();
         this.dmlManager.doActivity();
@@ -158,10 +154,10 @@ public final class ProcessHandler implements Activity {
             if (null != minOffset) {
                 changefeed.setStartTs(minOffset);
             }
-            if (httpUtil.createChangefeed(changefeed, processInfo.cdcServer)) {
-                log.info("Cdc start from: {}", minOffset);
+            if (httpUtil.createChangeFeed(changefeed, processInfo.cdcServer)) {
+                log.info("TiCDC start successfully from: {}", minOffset);
             } else {
-                throw new CoreException("start failed");
+                throw new CoreException("TiCDC server start change feed failed, server: {}, change feed id: {}", processInfo.cdcServer, changefeed);
             }
         } catch (Exception e) {
             throw new CoreException("Failed start cdc feed process, feed id: {}, message: {}", processInfo.feedId, e.getMessage(), e);
@@ -170,13 +166,13 @@ public final class ProcessHandler implements Activity {
 
     protected void stopFeedProcess() {
         try(HttpUtil httpUtil = new HttpUtil(log)) {
-            if (httpUtil.deleteChangefeed(processInfo.feedId, processInfo.cdcServer)) {
-                log.info("Stop cdc succeed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
+            if (Boolean.TRUE.equals(httpUtil.deleteChangeFeed(processInfo.feedId, processInfo.cdcServer))) {
+                log.debug("Stop cdc succeed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
             } else {
                 throw new CoreException("Stop cdc failed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
             }
         } catch (Exception e) {
-            log.error("Failed to stop cdc feed process, feed id: {}, message: {}", processInfo.feedId, e.getMessage());
+            log.warn("Failed to stop cdc feed process, feed id: {}, message: {}", processInfo.feedId, e.getMessage());
         }
     }
 
