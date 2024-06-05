@@ -44,6 +44,7 @@ public final class ProcessHandler implements Activity {
         this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
         this.tapEventManager = new TapEventManager(this, consumer);
         this.basePath = String.format(BASE_CDC_DATA_DIR, processInfo.feedId);
+        processInfo.nodeContext.getStateMap().put("cdc-file-path", basePath);
         this.ddlManager = new DDLManager(this, basePath);
         int threadCount = 5;
         if (CollectionUtils.isNotEmpty(processInfo.cdcTable)) {

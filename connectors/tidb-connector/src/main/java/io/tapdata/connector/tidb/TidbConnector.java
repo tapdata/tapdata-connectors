@@ -10,6 +10,7 @@ import io.tapdata.connector.tidb.cdc.process.thread.ProcessHandler;
 import io.tapdata.connector.tidb.cdc.process.thread.TiCDCShellManager;
 import io.tapdata.connector.tidb.cdc.util.ProcessLauncher;
 import io.tapdata.connector.tidb.cdc.util.ProcessSearch;
+import io.tapdata.connector.tidb.cdc.util.ZipUtils;
 import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.connector.tidb.ddl.TidbDDLSqlGenerator;
 import io.tapdata.connector.tidb.dml.TidbReader;
@@ -49,6 +50,7 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.File;
 import java.util.Iterator;
@@ -215,9 +217,10 @@ public class TidbConnector extends CommonDbConnector {
             try (HttpUtil httpUtil = new HttpUtil(connectorContext.getLog())) {
                 log.debug("Start to delete change feed: {}", feedId);
                 ErrorKit.ignoreAnyError(() -> httpUtil.deleteChangeFeed(feedId, cdcServer));
-                String finalFilePath = FileUtil.paths(filePath, feedId);
-                log.debug("Start to clean cdc data dir: {}", finalFilePath);
-                ErrorKit.ignoreAnyError(() -> new File(finalFilePath).delete());
+                if (StringUtils.isNotBlank(filePath)) {
+                    log.debug("Start to clean cdc data dir: {}", filePath);
+                    ZipUtils.deleteFile(filePath, log);
+                }
                 log.debug("Start to check cdc server heath: {}", cdcServer);
                 ErrorKit.ignoreAnyError(() -> {
                     if (!httpUtil.checkAlive(cdcServer)) {

@@ -70,7 +70,6 @@ public class TiCDCShellManager implements Activity {
                 }
             } finally {
                 shellConfig.context.getStateMap().put("cdc-server", shellConfig.cdcServerIpPort);
-                shellConfig.context.getStateMap().put("cdc-file-path", shellConfig.localStrongPath);
             }
         }
     }
