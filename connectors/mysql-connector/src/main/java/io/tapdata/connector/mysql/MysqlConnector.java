@@ -526,7 +526,7 @@ public class MysqlConnector extends CommonDbConnector {
             String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> "`" + c + "`").collect(Collectors.joining(","));
             sql = String.format("SELECT %s FROM `" + mysqlConfig.getDatabase() + "`.`" + tapTable.getId() + "`", columns);
         }
-        mysqlJdbcContext.query(sql, resultSet -> {
+        mysqlJdbcContext.queryWithStream(sql, resultSet -> {
             List<TapEvent> tapEvents = list();
             //get all column names
             Set<String> dateTypeSet = dateFields(tapTable);
