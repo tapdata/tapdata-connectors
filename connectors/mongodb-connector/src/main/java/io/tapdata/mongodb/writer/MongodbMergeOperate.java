@@ -156,6 +156,7 @@ public class MongodbMergeOperate {
 				break;
 		}
 
+		boolean recursiveOnce = false;
 		if (CollectionUtils.isNotEmpty(mergeLookupResults)) {
 			for (MergeLookupResult mergeLookupResult : mergeLookupResults) {
 				final Map<String, Object> data = mergeLookupResult.getData();
@@ -170,13 +171,14 @@ public class MongodbMergeOperate {
 						mergeLookupResult.getProperty(),
 						mergeResults,
 						mergeLookupResult.getMergeLookupResults(),
-						mergeResult,
+						recursiveOnce ? null : mergeResult,
 						unsetResult,
 						updateJoinKeys,
 						mergeLookupResult.getSharedJoinKeys(),
 						properties,
 						mergeFilter
 				);
+				recursiveOnce = true;
 			}
 			return;
 		}
@@ -184,7 +186,9 @@ public class MongodbMergeOperate {
 		if (mergeResult != null) {
 			mergeResults.add(mergeResult);
 		}
-		mergeFilter.removeLast();
+		if (mergeFilter.isAppend()) {
+			mergeFilter.removeLast();
+		}
 	}
 
 	private static MergeResult updateIntoArrayMergeIfNeed(MergeBundle mergeBundle, MergeTableProperties properties, MergeResult mergeResult, MergeFilter mergeFilter) {

@@ -1,4 +1,4 @@
-package io.tapdata.elasticsearch.utils;
+package io.tapdata.connector.elasticsearch.utils;
 
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesRequest;
 import org.elasticsearch.client.GetAliasesResponse;

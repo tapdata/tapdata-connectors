@@ -1,8 +1,8 @@
-package io.tapdata.elasticsearch;
+package io.tapdata.connector.elasticsearch;
 
 import com.alibaba.fastjson.JSON;
-import io.tapdata.elasticsearch.utils.Connector;
-import io.tapdata.elasticsearch.utils.Indices;
+import io.tapdata.connector.elasticsearch.utils.Connector;
+import io.tapdata.connector.elasticsearch.utils.Indices;
 import org.slf4j.LoggerFactory;
 
 /**
