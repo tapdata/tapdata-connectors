@@ -14,6 +14,7 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.commons.collections4.CollectionUtils;
 
 import java.io.File;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +26,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 public final class ProcessHandler implements Activity {
+    public static final String CDC_FILE_PATH = "cdc-file-path";
+    public static final String FEED_ID = "feed-id";
+    public static final String CDC_SERVER = "cdc-server";
     private final ScheduledExecutorService scheduledExecutorService;
     public final Object tableVersionLock = new Object();
     final ProcessInfo processInfo;
@@ -43,8 +47,9 @@ public final class ProcessHandler implements Activity {
         this.log = processInfo.nodeContext.getLog();
         this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
         this.tapEventManager = new TapEventManager(this, consumer);
-        this.basePath = String.format(BASE_CDC_DATA_DIR, processInfo.feedId);
-        processInfo.nodeContext.getStateMap().put("cdc-file-path", basePath);
+        String pdServerPath = pdServerPath(processInfo.tidbConfig.getPdServer());
+        this.basePath = String.format(BASE_CDC_DATA_DIR, pdServerPath, processInfo.feedId);
+        processInfo.nodeContext.getStateMap().put(ProcessHandler.CDC_FILE_PATH, basePath);
         this.ddlManager = new DDLManager(this, basePath);
         int threadCount = 5;
         if (CollectionUtils.isNotEmpty(processInfo.cdcTable)) {
@@ -58,13 +63,22 @@ public final class ProcessHandler implements Activity {
         this.shellManager = new TiCDCShellManager(new TiCDCShellManager.ShellConfig()
                 .withCdcServerIpPort(processInfo.cdcServer)
                 .withGcTtl(processInfo.gcTtl)
-                .withLocalStrongPath(BASE_CDC_CACHE_DATA_DIR)
+                .withLocalStrongPath(FileUtil.paths(BASE_CDC_CACHE_DATA_DIR, pdServerPath))
                 .withPdIpPorts(processInfo.tidbConfig.getPdServer())
-                .withLogDir(BASE_CDC_LOG_DIR)
+                .withLogDir(FileUtil.paths(BASE_CDC_LOG_DIR, pdServerPath + ".log"))
                 .withLogLevel(TiCDCShellManager.LogLevel.INFO)
                 .withClusterId(UUID.randomUUID().toString().replace("-", ""))
                 .withTapConnectionContext(processInfo.nodeContext)
                 .withTiDBConfig(processInfo.tidbConfig));
+    }
+
+    public static String pdServerPath(String pdServer) {
+        try {
+            URL url = new URL(pdServer);
+            return String.format("%s_%s", url.getHost().replaceAll("\\.", "_"), url.getPort());
+        } catch (Exception e) {
+            return "temp";
+        }
     }
 
     protected String judgeTableVersion(String tableName) {

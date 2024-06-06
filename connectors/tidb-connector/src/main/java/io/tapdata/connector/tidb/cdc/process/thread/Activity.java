@@ -5,6 +5,7 @@ import io.tapdata.entity.logger.Log;
 import org.apache.commons.collections4.CollectionUtils;
 
 import java.io.File;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -18,7 +19,7 @@ public interface Activity extends AutoCloseable {
     String BASE_CDC_TOOL_DIR = "run-resources/ti-db/tool";
     String BASE_CDC_CACHE_DATA_DIR = "run-resources/ti-db/data";
     String BASE_CDC_LOG_DIR = "run-resources/ti-db/log";
-    String BASE_CDC_DATA_DIR = "run-resources/ti-db/cdc-json/%s";
+    String BASE_CDC_DATA_DIR = "run-resources/ti-db/cdc-json/%s/%s";
 
     void init();
 
@@ -61,6 +62,15 @@ public interface Activity extends AutoCloseable {
 
     static long getTOSTime(Long time) {
         if (null == time) return getTOSTime();
-        return time >> 18;
+        return time << 18;
+    }
+
+    static long timestamp(String time) {
+        try {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            return sdf.parse(time).getTime();
+        } catch (Exception e) {
+            return System.currentTimeMillis();
+        }
     }
 }

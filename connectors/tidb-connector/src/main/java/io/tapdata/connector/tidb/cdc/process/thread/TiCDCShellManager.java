@@ -58,20 +58,20 @@ public class TiCDCShellManager implements Activity {
             try {
                 if (null == runningCdcInfo) {
                     loadCdcFile();
-                    String[] command = ProcessSearch.getCommand(getCmdAfterSetProperties());
                     List<Integer> allCdcUsePort = getAllCdcUsePort();
                     int availablePort = 8300;
                     if (!allCdcUsePort.isEmpty()) {
                         availablePort = allCdcUsePort.get(0) + 1;
                     }
                     shellConfig.withCdcServerIpPort(String.format("127.0.0.1:%d", AvailablePorts.getAvailable(availablePort)));
+                    String[] command = ProcessSearch.getCommand(getCmdAfterSetProperties());
                     ProcessLauncher.startProcessInBackground(command);
                     checkAliveAndWait();
                 } else {
                     shellConfig.withCdcServerIpPort(runningCdcInfo);
                 }
             } finally {
-                shellConfig.context.getStateMap().put("cdc-server", shellConfig.cdcServerIpPort);
+                shellConfig.context.getStateMap().put(ProcessHandler.CDC_SERVER, shellConfig.cdcServerIpPort);
             }
         }
     }

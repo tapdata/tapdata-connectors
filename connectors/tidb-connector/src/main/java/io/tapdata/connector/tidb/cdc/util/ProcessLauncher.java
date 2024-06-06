@@ -23,7 +23,7 @@ public class ProcessLauncher {
         BufferedReader br = null;
         try {
             Process p = Runtime.getRuntime().exec(cmd);
-            p.waitFor();
+            //p.waitFor();
             br = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line;
             while ((line = br.readLine()) != null) {

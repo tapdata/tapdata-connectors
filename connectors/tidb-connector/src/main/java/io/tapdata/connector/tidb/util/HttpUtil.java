@@ -35,9 +35,9 @@ public class HttpUtil implements AutoCloseable {
         String url = "http://" + cdcUrl + "/api/v2/changefeeds/" + changefeedId;
         HttpDelete httpDelete = new HttpDelete(url);
         RequestConfig requestConfig = RequestConfig.custom()
-                .setConnectTimeout(200000)
-                .setConnectionRequestTimeout(200000)
-                .setSocketTimeout(200000)
+                .setConnectTimeout(10000)
+                .setConnectionRequestTimeout(10000)
+                .setSocketTimeout(10000)
                 .setRedirectsEnabled(true).build();
         httpDelete.setConfig(requestConfig);
         try (

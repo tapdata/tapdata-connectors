@@ -3,8 +3,10 @@ package io.tapdata.connector.tidb;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
+import io.tapdata.common.util.FileUtil;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
+import io.tapdata.connector.tidb.cdc.process.thread.Activity;
 import io.tapdata.connector.tidb.cdc.process.thread.ProcessHandler;
 import io.tapdata.connector.tidb.cdc.process.thread.TiCDCShellManager;
 import io.tapdata.connector.tidb.cdc.util.ProcessLauncher;
@@ -165,12 +167,12 @@ public class TidbConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        String feedId = (String) nodeContext.getStateMap().get("feed-id");
+        String feedId = (String) nodeContext.getStateMap().get(ProcessHandler.FEED_ID);
         if (null == feedId) {
             feedId = UUID.randomUUID().toString().replaceAll("-", "");
-            nodeContext.getStateMap().put("feed-id", feedId);
+            nodeContext.getStateMap().put(ProcessHandler.FEED_ID, feedId);
         }
-        String cdcServer = String.valueOf(Optional.ofNullable(nodeContext.getStateMap().get("cdc-server")).orElse("127.0.0.1:8300"));
+        String cdcServer = String.valueOf(Optional.ofNullable(nodeContext.getStateMap().get(ProcessHandler.CDC_SERVER)).orElse("127.0.0.1:8300"));
         ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
                 .withCdcServer(cdcServer)
                 .withFeedId(feedId)
@@ -203,7 +205,7 @@ public class TidbConnector extends CommonDbConnector {
             MysqlBinlogPosition mysqlBinlogPosition = tidbJdbcContext.readBinlogPosition();
             return mysqlBinlogPosition.getPosition();
         }
-        return offsetStartTime;
+        return Activity.getTOSTime(offsetStartTime);
     }
 
     @Override
@@ -211,15 +213,15 @@ public class TidbConnector extends CommonDbConnector {
         started.set(false);
         EmptyKit.closeQuietly(tidbJdbcContext);
         if (connectionContext instanceof TapConnectorContext) {
-            cleanCDC((TapConnectorContext) connectionContext);
+            cleanCDC((TapConnectorContext) connectionContext, false);
         }
     }
 
-    protected void cleanCDC(TapConnectorContext connectorContext) {
+    protected void cleanCDC(TapConnectorContext connectorContext, boolean stopServer) {
         Log log = connectorContext.getLog();
-        String feedId = (String) connectorContext.getStateMap().get("feed-id");
-        String cdcServer = (String) connectorContext.getStateMap().get("cdc-server");
-        String filePath = (String) connectorContext.getStateMap().get("cdc-file-path");
+        String feedId = (String) connectorContext.getStateMap().get(ProcessHandler.FEED_ID);
+        String cdcServer = (String) connectorContext.getStateMap().get(ProcessHandler.CDC_SERVER);
+        String filePath = (String) connectorContext.getStateMap().get(ProcessHandler.CDC_FILE_PATH);
         if (EmptyKit.isNotNull(feedId) && EmptyKit.isNotEmpty(cdcServer)) {
             try (HttpUtil httpUtil = new HttpUtil(connectorContext.getLog())) {
                 log.debug("Start to delete change feed: {}", feedId);
@@ -227,6 +229,9 @@ public class TidbConnector extends CommonDbConnector {
                 if (StringUtils.isNotBlank(filePath)) {
                     log.debug("Start to clean cdc data dir: {}", filePath);
                     ErrorKit.ignoreAnyError(() -> ZipUtils.deleteFile(filePath, log));
+                }
+                if (!stopServer) {
+                    return;
                 }
                 log.debug("Start to check cdc server heath: {}", cdcServer);
                 ErrorKit.ignoreAnyError(() -> {
@@ -250,6 +255,8 @@ public class TidbConnector extends CommonDbConnector {
                                         "stop cdc server failed, message: {}",
                                         log);
                             }
+                            ErrorKit.ignoreAnyError(() -> ZipUtils.deleteFile(FileUtil.paths(Activity.BASE_CDC_CACHE_DATA_DIR, ProcessHandler.pdServerPath(pdServer)), log));
+                            ErrorKit.ignoreAnyError(() -> ZipUtils.deleteFile(FileUtil.paths(Activity.BASE_CDC_LOG_DIR, ProcessHandler.pdServerPath(pdServer) + ".log"), log));
                         }
                     }
                 });
@@ -260,7 +267,7 @@ public class TidbConnector extends CommonDbConnector {
     }
 
     private void onDestroy(TapConnectorContext connectorContext) throws Throwable {
-        cleanCDC(connectorContext);
+        cleanCDC(connectorContext, true);
     }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
