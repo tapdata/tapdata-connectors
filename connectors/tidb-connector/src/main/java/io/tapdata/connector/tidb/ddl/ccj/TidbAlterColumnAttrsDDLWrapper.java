@@ -35,7 +35,9 @@ public class TidbAlterColumnAttrsDDLWrapper extends TidbDDLWrapper {
             return;
         }
         for (AlterExpression alterExpression : alterExpressions) {
-            if (alterExpression.getOperation() != AlterOperation.ALTER) {
+            if (alterExpression.getOperation() != AlterOperation.CHANGE
+                    && alterExpression.getOperation() != AlterOperation.MODIFY
+                    && alterExpression.getOperation() != AlterOperation.ALTER) {
                 continue;
             }
             List<AlterExpression.ColumnDataType> colDataTypeList = alterExpression.getColDataTypeList();

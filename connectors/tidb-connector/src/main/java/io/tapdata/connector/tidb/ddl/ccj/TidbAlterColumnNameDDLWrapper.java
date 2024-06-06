@@ -35,7 +35,23 @@ public class TidbAlterColumnNameDDLWrapper extends TidbDDLWrapper {
             return;
         }
         AlterExpression alterExpression = alterExpressions.get(0);
-        if (alterExpression.getOperation() == AlterOperation.RENAME) {
+        if (alterExpression.getOperation() == AlterOperation.CHANGE) {
+            List<AlterExpression.ColumnDataType> colDataTypeList = alterExpression.getColDataTypeList();
+            if (null == colDataTypeList || colDataTypeList.size() <= 0) {
+                return;
+            }
+            AlterExpression.ColumnDataType columnDataType = colDataTypeList.get(0);
+            if (null == columnDataType || EmptyKit.isBlank(columnDataType.getColumnName())) {
+                return;
+            }
+            String before = StringKit.removeHeadTail(alterExpression.getColumnOldName(), ccjddlWrapperConfig.getSplit(), null);
+            String after = StringKit.removeHeadTail(columnDataType.getColumnName(), ccjddlWrapperConfig.getSplit(), null);
+            if (after.equals(before)) {
+                return;
+            }
+            tapAlterFieldNameEvent.nameChange(ValueChange.create(before, after));
+            consumer.accept(tapAlterFieldNameEvent);
+        } else if (alterExpression.getOperation() == AlterOperation.RENAME) {
             String columnName = alterExpression.getColumnName();
             String columnOldName = alterExpression.getColumnOldName();
             if (EmptyKit.isBlank(columnName) || EmptyKit.isBlank(columnOldName)) {

@@ -38,8 +38,8 @@ class TapEventManager implements Activity {
         this.log = handler.processInfo.nodeContext.getLog();
         this.dmlEventParser = new AnalyseTapEventFromDMLObject();
         this.ddlEventParser = new AnalyseTapEventFromDDLObject(handler.processInfo.nodeContext.getTableMap());
-        this.tableMap = handler.processInfo.nodeContext.getTableMap();
         this.offset = parseOffset(handler.processInfo.cdcOffset);
+        this.tableMap = handler.processInfo.nodeContext.getTableMap();
     }
 
     protected Map<String, Map<String, Long>> parseOffset(Object cdcOffset) {
@@ -83,14 +83,8 @@ class TapEventManager implements Activity {
             return;
         }
         TiOffset.updateVersion(offset, table, tableVersion);
-        TapEvent ddlResult = this.ddlEventParser.analyse(ddlObject, null, log);
-        if (null != ddlResult) {
-            ddlResult.setTime(System.currentTimeMillis());
-            List<TapEvent> ddl = new ArrayList<>();
-            ddl.add(ddlResult);
-            consumer.accept(ddl, this.offset);
-        }
-
+        this.ddlEventParser.withConsumer(consumer, offset);
+        this.ddlEventParser.analyse(ddlObject, null, log);
     }
 
     protected void handleDML(DMLObject dmlObject) {
