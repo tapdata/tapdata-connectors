@@ -43,7 +43,7 @@ public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, Li
                 filter.filter(null, afterData, dmlObject);
             }
             events.add(TapSimplify.insertRecordEvent(afterData, dmlObject.getTable())
-                    .referenceTime(dmlObject.getTs()));
+                    .referenceTime(dmlObject.getEs()));
         });
         return events;
     }
@@ -61,7 +61,7 @@ public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, Li
                 filter.filter(beforeData, afterData, dmlObject);
             }
             events.add(TapSimplify.updateDMLEvent(beforeData, afterData, dmlObject.getTable())
-                    .referenceTime(dmlObject.getTs()));
+                    .referenceTime(dmlObject.getEs()));
         }
         return events;
     }
@@ -77,7 +77,7 @@ public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, Li
                 filter.filter(null, afterData, dmlObject);
             }
             events.add(TapSimplify.deleteDMLEvent(afterData, dmlObject.getTable())
-                    .referenceTime(dmlObject.getTs()));
+                    .referenceTime(dmlObject.getEs()));
         });
         return events;
     }
@@ -91,7 +91,7 @@ public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, Li
             if (null == value) continue;
             Convert convert = mysqlType.get(column);
             if (null == convert) continue;
-            data.put(column,  DEFAULT_CONVERT.convert(value, convert));
+            data.put(column, DEFAULT_CONVERT.convert(value, convert));
         }
         return data;
     }

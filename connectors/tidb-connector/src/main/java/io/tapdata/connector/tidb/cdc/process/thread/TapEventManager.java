@@ -94,15 +94,15 @@ class TapEventManager implements Activity {
     }
 
     protected void handleDML(DMLObject dmlObject) {
-        Long ts = Activity.getTOSTime(dmlObject.getTs());
+        Long es = Activity.getTOSTime(dmlObject.getEs());
         String table = dmlObject.getTable();
-        Map<String, Long> offsetMap = TiOffset.computeIfAbsent(table, offset, ts, dmlObject.getTableVersion());
-        Long lastTs = TiOffset.getTs(offsetMap);
-        if (null != lastTs && lastTs.compareTo(ts) > 0) {
+        Map<String, Long> offsetMap = TiOffset.computeIfAbsent(table, offset, es, dmlObject.getTableVersion());
+        Long lastEs = TiOffset.getEs(offsetMap);
+        if (null != lastEs && lastEs.compareTo(es) > 0) {
             log.debug("Skip a history dml event, table: {}, cdc offset: {}, last offset: {}, data: {}",
                     table,
-                    ts,
-                    lastTs,
+                    es,
+                    lastEs,
                     TapSimplify.toJson(dmlObject));
             return;
         }
@@ -131,7 +131,7 @@ class TapEventManager implements Activity {
             });
         }
 
-        public static Long getTs(Map<String, Long> offsetMap) {
+        public static Long getEs(Map<String, Long> offsetMap) {
             return offsetMap.get("offset");
         }
 
@@ -139,14 +139,16 @@ class TapEventManager implements Activity {
             Map<String, Long> tableOffset = Optional.ofNullable(offset.get(table)).orElse(new HashMap<>());
             return tableOffset.get("tableVersion");
         }
+
         public static void updateVersion(Map<String, Map<String, Long>> offset, String table, Long tableVersion) {
             Map<String, Long> tableOffset = Optional.ofNullable(offset.get(table)).orElse(new HashMap<>());
             tableOffset.put("tableVersion", tableVersion);
             offset.put(table, tableOffset);
         }
+
         public static Long getMinOffset(Object offset) {
             if (null == offset) return null;
-            if (offset instanceof Number) return ((Number)offset).longValue();
+            if (offset instanceof Number) return ((Number) offset).longValue();
             if (offset instanceof Map) {
                 try {
                     Map<String, Map<String, Long>> o = (Map<String, Map<String, Long>>) offset;

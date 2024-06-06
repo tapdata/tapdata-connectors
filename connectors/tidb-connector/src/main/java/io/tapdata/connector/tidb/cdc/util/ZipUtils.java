@@ -119,7 +119,7 @@ public class ZipUtils {
                 }
             });
         } catch (IOException e) {
-            log.warn("File remove failed, message: {}", e.getMessage());
+            log.debug("File remove failed, message: {}", e.getMessage(), e);
         }
     }
 }

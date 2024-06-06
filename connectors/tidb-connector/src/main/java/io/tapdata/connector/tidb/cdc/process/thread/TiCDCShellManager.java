@@ -18,6 +18,7 @@ import java.util.Comparator;
 import java.util.List;
 
 public class TiCDCShellManager implements Activity {
+    public static final int CDC_TOOL_NOT_EXISTS = 1000010;
     public static final Object PROCESS_LOCK = new Object();
     public static final String CDC_CMD = "${cdc_tool_path} server " +
             "--pd=${pd_ip_ports} " +
@@ -32,6 +33,7 @@ public class TiCDCShellManager implements Activity {
         String filter = setProperties("' server --pd=${pd_ip_ports} --addr=${cdc_server_ip_port} '", "pd_ip_ports", pdServer);
         return setProperties(filter, "cdc_server_ip_port", cdcServer);
     }
+
     public static String getPdServerGrepFilter(String pdServer) {
         return setProperties("' server --pd=${pd_ip_ports} '", "pd_ip_ports", pdServer);
     }
@@ -88,7 +90,7 @@ public class TiCDCShellManager implements Activity {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
-                waitTimes --;
+                waitTimes--;
             }
             log.info("TiCDC server start succeed, server: {}", shellConfig.cdcServerIpPort);
         }
@@ -126,9 +128,7 @@ public class TiCDCShellManager implements Activity {
     }
 
     public String getCdcToolPath() {
-        String cdcToolName = cdcFileName();
-        String toolPath = FileUtil.paths("run-resources", "ti-db", "tool");
-        return new File(FileUtil.paths(toolPath, cdcToolName)).getAbsolutePath();
+        return new File(FileUtil.paths("run-resources", "ti-db", "tool", "cdc")).getAbsolutePath();
     }
 
     @Override
@@ -156,7 +156,7 @@ public class TiCDCShellManager implements Activity {
             }
             allCdcPort.sort(Comparator.reverseOrder());
         }
-            return allCdcPort;
+        return allCdcPort;
     }
 
     protected String getInfoFromCmdLine(String cmdLine, String pix, String suf) {
@@ -179,18 +179,39 @@ public class TiCDCShellManager implements Activity {
 
     protected void loadCdcFile() {
         String toolPath = FileUtil.paths("run-resources", "ti-db", "tool");
+        File toolDir = new File(toolPath);
+        if ((!toolDir.exists() || !toolDir.isDirectory()) && !toolDir.mkdirs()) {
+            log.warn("Can not make cdc work dir: {}", toolDir.getAbsolutePath());
+        }
         String cdcToolName = cdcFileName();
-        File file = new File(FileUtil.paths(toolPath, cdcToolName));
+        File file = new File(getCdcToolPath());
         if (!file.exists() || !file.isFile()) {
+            log.info("File {} does not exist, resource files will be found from the default configuration based on system architecture or custom directories",
+                    file.getAbsolutePath());
             String zipName = FileUtil.paths("ti-cdc", cdcToolName + ".zip");
             try {
                 ResourcesLoader.unzipSources(zipName, toolPath, log);
             } catch (CoreException e) {
-                if (e.getCode() == ResourcesLoader.ZIP_NOT_EXISTS) {
-                    ZipUtils.unzip(FileUtil.paths(toolPath, zipName), toolPath);
-                    return;
+                if (e.getCode() != ResourcesLoader.ZIP_NOT_EXISTS) {
+                    throw new CoreException(CDC_TOOL_NOT_EXISTS, e.getMessage());
                 }
-                throw e;
+                String paths = FileUtil.paths(toolPath, zipName);
+                log.info("No available TiCDC resources found, sources name: {}, going to directory {} to match custom resources soon",
+                        zipName, paths);
+                File f = new File(paths);
+                if (f.exists() || !f.isFile()) {
+                    log.warn("File {} does not exist, please manually add it", f.getAbsolutePath());
+                } else {
+                    try {
+                        ZipUtils.unzip(paths, toolPath);
+                    } catch (Exception e1) {
+                        log.warn("Unzip custom resources filed, message: {}", e1.getMessage());
+                    }
+                }
+            }
+            File cdcTool = new File(getCdcToolPath());
+            if (!cdcTool.exists() || !cdcTool.isFile()) {
+                log.error("TiCDC must not start normally, TiCDC server depends on {}, make sure this file in you file system", cdcTool.getAbsolutePath());
             }
         }
     }
@@ -211,10 +232,6 @@ public class TiCDCShellManager implements Activity {
         } else {
             return "cdc";
         }
-    }
-
-    public String getDatabaseTag() {
-        return String.format("%s.%d", shellConfig.tidbConfig.getHost(), shellConfig.tidbConfig.getPort());
     }
 
     public static class ShellConfig {

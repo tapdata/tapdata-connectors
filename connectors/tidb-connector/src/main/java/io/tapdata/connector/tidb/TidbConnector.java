@@ -3,7 +3,6 @@ package io.tapdata.connector.tidb;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
-import io.tapdata.common.util.FileUtil;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.tidb.cdc.process.thread.ProcessHandler;
@@ -17,6 +16,7 @@ import io.tapdata.connector.tidb.dml.TidbReader;
 import io.tapdata.connector.tidb.dml.TidbRecordWriter;
 import io.tapdata.connector.tidb.util.HttpUtil;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
@@ -47,13 +47,12 @@ import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
+import io.tapdata.pdk.apis.functions.PDKMethod;
+import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import org.apache.commons.collections4.CollectionUtils;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 
-import java.io.File;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
@@ -95,6 +94,14 @@ public class TidbConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
+    }
+
+    protected RetryOptions errorHandle(TapConnectionContext tapConnectionContext, PDKMethod pdkMethod, Throwable throwable) {
+        RetryOptions retryOptions = super.errorHandle(tapConnectionContext, pdkMethod, throwable);
+        retryOptions.setNeedRetry(
+                !(throwable instanceof CoreException && ((CoreException) throwable).getCode() == TiCDCShellManager.CDC_TOOL_NOT_EXISTS)
+        );
+        return retryOptions;
     }
 
     @Override
@@ -213,13 +220,13 @@ public class TidbConnector extends CommonDbConnector {
         String feedId = (String) connectorContext.getStateMap().get("feed-id");
         String cdcServer = (String) connectorContext.getStateMap().get("cdc-server");
         String filePath = (String) connectorContext.getStateMap().get("cdc-file-path");
-        if (EmptyKit.isNotNull(feedId)) {
+        if (EmptyKit.isNotNull(feedId) && EmptyKit.isNotEmpty(cdcServer)) {
             try (HttpUtil httpUtil = new HttpUtil(connectorContext.getLog())) {
                 log.debug("Start to delete change feed: {}", feedId);
                 ErrorKit.ignoreAnyError(() -> httpUtil.deleteChangeFeed(feedId, cdcServer));
                 if (StringUtils.isNotBlank(filePath)) {
                     log.debug("Start to clean cdc data dir: {}", filePath);
-                    ZipUtils.deleteFile(filePath, log);
+                    ErrorKit.ignoreAnyError(() -> ZipUtils.deleteFile(filePath, log));
                 }
                 log.debug("Start to check cdc server heath: {}", cdcServer);
                 ErrorKit.ignoreAnyError(() -> {

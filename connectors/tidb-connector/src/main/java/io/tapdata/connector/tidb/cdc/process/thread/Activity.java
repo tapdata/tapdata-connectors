@@ -18,7 +18,7 @@ public interface Activity extends AutoCloseable {
     String BASE_CDC_TOOL_DIR = "run-resources/ti-db/tool";
     String BASE_CDC_CACHE_DATA_DIR = "run-resources/ti-db/data";
     String BASE_CDC_LOG_DIR = "run-resources/ti-db/log";
-    String BASE_CDC_DATA_DIR = "run-resources/ti-db/cdc/%s";
+    String BASE_CDC_DATA_DIR = "run-resources/ti-db/cdc-json/%s";
 
     void init();
 
@@ -28,7 +28,7 @@ public interface Activity extends AutoCloseable {
         if (Objects.nonNull(future)) {
             try {
                 future.cancel(true);
-            } catch (Exception e1){
+            } catch (Exception e1) {
                 log.warn("Scheduled cancel failed: {}", e1.getMessage());
             }
         }
@@ -58,6 +58,7 @@ public interface Activity extends AutoCloseable {
     static long getTOSTime() {
         return getTOSTime(System.currentTimeMillis());
     }
+
     static long getTOSTime(Long time) {
         if (null == time) return getTOSTime();
         return time >> 18;

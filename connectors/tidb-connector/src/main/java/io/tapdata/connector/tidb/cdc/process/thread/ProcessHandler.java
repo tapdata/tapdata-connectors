@@ -175,6 +175,9 @@ public final class ProcessHandler implements Activity {
 
     protected void stopFeedProcess() {
         try (HttpUtil httpUtil = new HttpUtil(log)) {
+            if (!httpUtil.checkAlive(processInfo.cdcServer)) {
+                return;
+            }
             if (Boolean.TRUE.equals(httpUtil.deleteChangeFeed(processInfo.feedId, processInfo.cdcServer))) {
                 log.debug("Stop cdc succeed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
             } else {

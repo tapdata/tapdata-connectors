@@ -1,6 +1,5 @@
 package io.tapdata.connector.tidb.cdc.util;
 
-
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
 
@@ -15,7 +14,10 @@ import java.util.zip.ZipInputStream;
 
 public class ResourcesLoader {
     public static final int ZIP_NOT_EXISTS = 404;
-    private ResourcesLoader() { }
+
+    private ResourcesLoader() {
+    }
+
     public static void unzipSources(String zipName, String outPath, Log log) {
         ClassLoader classLoader = ResourcesLoader.class.getClassLoader();
         try (InputStream inputStream = classLoader.getResourceAsStream(zipName)) {
