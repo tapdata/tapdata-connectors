@@ -128,6 +128,7 @@ public class MongodbAtlasConnector extends MongodbConnector {
         }catch (Exception e){
             exceptionCollector.collectTerminateByServer(e);
             exceptionCollector.collectReadPrivileges(e);
+            throw e;
         }
     }
 

@@ -4,7 +4,7 @@
     "icon": "icons/mock-target.png",
     "doc" : "${doc}",
     "id": "mock-target",
-    "authentication": "Beta",
+    "authentication": "Alpha",
     "tags": ["schema-free","Database"]
   },
   "configOptions": {

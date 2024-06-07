@@ -35,6 +35,8 @@
   - `$precision`: 长度（默认：`4`）
 - `rstring[($byte)]`: 指定长度的随机字符
   - `$byte`: 字节长度（默认：`64`）
+- `rdatetime[($fraction)]`: 指定精度的日期
+  - `$fraction`: 时间精度（默认：`0`，范围 0-9 整数）
 - `rlongstring[($byte)]`: 指定长度的随机长字符
   - `$byte`: 字节长度（默认：`1000`）
 - `rlongbinary[($byte)]`: 指定长度的随机二进制
