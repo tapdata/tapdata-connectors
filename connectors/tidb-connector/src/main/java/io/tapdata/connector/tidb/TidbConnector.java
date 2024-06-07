@@ -37,6 +37,7 @@ import io.tapdata.entity.schema.value.TapValue;
 import io.tapdata.entity.schema.value.TapYearValue;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -55,6 +56,7 @@ import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
@@ -97,6 +99,7 @@ public class TidbConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
     }
 
+    @Override
     protected RetryOptions errorHandle(TapConnectionContext tapConnectionContext, PDKMethod pdkMethod, Throwable throwable) {
         RetryOptions retryOptions = super.errorHandle(tapConnectionContext, pdkMethod, throwable);
         retryOptions.setNeedRetry(
@@ -166,12 +169,8 @@ public class TidbConnector extends CommonDbConnector {
 
     }
 
-    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        String feedId = (String) nodeContext.getStateMap().get(ProcessHandler.FEED_ID);
-        if (null == feedId) {
-            feedId = UUID.randomUUID().toString().replaceAll("-", "");
-            nodeContext.getStateMap().put(ProcessHandler.FEED_ID, feedId);
-        }
+    protected void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
+        String feedId = genericFeedId(nodeContext.getStateMap());
         String cdcServer = String.valueOf(Optional.ofNullable(nodeContext.getStateMap().get(ProcessHandler.CDC_SERVER)).orElse("127.0.0.1:8300"));
         ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
                 .withCdcServer(cdcServer)
@@ -184,23 +183,42 @@ public class TidbConnector extends CommonDbConnector {
                 .withTiDBConfig(tidbConfig)
                 .withGcTtl(86400)
                 .withDatabase(tidbConfig.getDatabase());
-        try (ProcessHandler handler = new ProcessHandler(info, consumer)) {
-                handler.doActivity();
-                while (isAlive()) {
-                    if (null != throwableCatch.get()) {
-                        throw throwableCatch.get();
-                    }
-                    handler.aliveCheck();
-                    try {
-                        Thread.sleep(3000);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
+        try (ProcessHandler handler = ProcessHandler.of(info, consumer)) {
+            handler.doActivity();
+            doWait(handler);
+        } catch (Exception e) {
+            throw new CoreException("TiCDC execute failed, message: {}", e.getMessage(), e);
         }
     }
 
-    private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
+    protected String genericFeedId(KVMap<Object> kvMap) {
+        String feedId = (String) kvMap.get(ProcessHandler.FEED_ID);
+        if (null == feedId) {
+            String id = UUID.randomUUID().toString();
+            while (id.contains("-")) {
+                id = id.replace("-", "");
+            }
+            feedId = id;
+            kvMap.put(ProcessHandler.FEED_ID, feedId);
+        }
+        return feedId;
+    }
+
+    protected void doWait(ProcessHandler handler) {
+        while (isAlive()) {
+            if (null != throwableCatch.get()) {
+                throw new CoreException("TiCDC execute with error, message: {}", throwableCatch.get().getMessage(), throwableCatch.get());
+            }
+            handler.aliveCheck();
+            try {
+                Thread.sleep(3000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    protected Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if (null == offsetStartTime) {
             MysqlBinlogPosition mysqlBinlogPosition = tidbJdbcContext.readBinlogPosition();
             return mysqlBinlogPosition.getPosition();
@@ -221,18 +239,49 @@ public class TidbConnector extends CommonDbConnector {
     public void onStop(TapConnectionContext connectionContext) throws Exception {
         started.set(false);
         EmptyKit.closeQuietly(tidbJdbcContext);
-        if (connectionContext instanceof TapConnectorContext) {
-            cleanCDC((TapConnectorContext) connectionContext, false);
+        ErrorKit.ignoreAnyError(() -> cleanCDC(connectionContext, false));
+    }
+
+    protected void checkTiServerAndStop(HttpUtil httpUtil, String cdcServer, TapConnectorContext connectorContext) throws IOException {
+        Log log = connectorContext.getLog();
+        if (!httpUtil.checkAlive(cdcServer)) {
+            return;
+        }
+        log.debug("Cdc server is alive, will check change feed list");
+        synchronized (TiCDCShellManager.PROCESS_LOCK) {
+            if (httpUtil.queryChangeFeedsList(cdcServer) <= 0) {
+                log.debug("There is not any change feed with cdc server: {}, will stop cdc server", cdcServer);
+                String killCmd = "kill -9 ${pid}";
+                TiCDCShellManager.ShellConfig config = new TiCDCShellManager.ShellConfig();
+                config.withPdIpPorts(connectorContext.getConnectionConfig().getString("pdServer"));
+                String pdServer = config.getPdIpPorts();
+                List<String> processes = ProcessSearch.getProcesses(log, TiCDCShellManager.getCdcPsGrepFilter(pdServer, cdcServer));
+                if (!processes.isEmpty()) {
+                    StringJoiner joiner = new StringJoiner(" ");
+                    processes.forEach(joiner::add);
+                    ProcessLauncher.execCmdWaitResult(
+                            TiCDCShellManager.setProperties(killCmd, "pid", joiner.toString()),
+                            "stop cdc server failed, message: {}",
+                            log);
+                }
+                ErrorKit.ignoreAnyError(() -> ZipUtils.deleteFile(FileUtil.paths(Activity.BASE_CDC_CACHE_DATA_DIR, ProcessHandler.pdServerPath(pdServer)), log));
+                ErrorKit.ignoreAnyError(() -> ZipUtils.deleteFile(FileUtil.paths(Activity.BASE_CDC_LOG_DIR, ProcessHandler.pdServerPath(pdServer) + ".log"), log));
+            }
         }
     }
 
-    protected void cleanCDC(TapConnectorContext connectorContext, boolean stopServer) {
+    protected void cleanCDC(TapConnectionContext connectionContext, boolean stopServer) {
+        if (!(connectionContext instanceof TapConnectorContext)) {
+            return;
+        }
+        TapConnectorContext connectorContext = (TapConnectorContext) connectionContext;
         Log log = connectorContext.getLog();
-        String feedId = (String) connectorContext.getStateMap().get(ProcessHandler.FEED_ID);
-        String cdcServer = (String) connectorContext.getStateMap().get(ProcessHandler.CDC_SERVER);
-        String filePath = (String) connectorContext.getStateMap().get(ProcessHandler.CDC_FILE_PATH);
+        KVMap<Object> stateMap = connectorContext.getStateMap();
+        String feedId = (String) stateMap.get(ProcessHandler.FEED_ID);
+        String cdcServer = (String) stateMap.get(ProcessHandler.CDC_SERVER);
+        String filePath = (String) stateMap.get(ProcessHandler.CDC_FILE_PATH);
         if (EmptyKit.isNotNull(feedId) && EmptyKit.isNotEmpty(cdcServer)) {
-            try (HttpUtil httpUtil = new HttpUtil(connectorContext.getLog())) {
+            try (HttpUtil httpUtil = HttpUtil.of(log)) {
                 log.debug("Start to delete change feed: {}", feedId);
                 ErrorKit.ignoreAnyError(() -> httpUtil.deleteChangeFeed(feedId, cdcServer));
                 if (StringUtils.isNotBlank(filePath)) {
@@ -243,40 +292,13 @@ public class TidbConnector extends CommonDbConnector {
                     return;
                 }
                 log.debug("Start to check cdc server heath: {}", cdcServer);
-                ErrorKit.ignoreAnyError(() -> {
-                    if (!httpUtil.checkAlive(cdcServer)) {
-                        return;
-                    }
-                    log.debug("Cdc server is alive, will check change feed list");
-                    synchronized (TiCDCShellManager.PROCESS_LOCK) {
-                        if (httpUtil.queryChangeFeedsList(cdcServer) <= 0) {
-                            log.debug("There is not any change feed with cdc server: {}, will stop cdc server", cdcServer);
-                            String killCmd = "kill -9 ${pid}";
-                            TiCDCShellManager.ShellConfig config = new TiCDCShellManager.ShellConfig();
-                            config.withPdIpPorts(connectorContext.getConnectionConfig().getString("pdServer"));
-                            String pdServer = config.getPdIpPorts();
-                            List<String> processes = ProcessSearch.getProcesses(log, TiCDCShellManager.getCdcPsGrepFilter(pdServer, cdcServer));
-                            if (!processes.isEmpty()) {
-                                StringJoiner joiner = new StringJoiner(" ");
-                                processes.forEach(joiner::add);
-                                ProcessLauncher.execCmdWaitResult(
-                                        TiCDCShellManager.setProperties(killCmd, "pid", joiner.toString()),
-                                        "stop cdc server failed, message: {}",
-                                        log);
-                            }
-                            ErrorKit.ignoreAnyError(() -> ZipUtils.deleteFile(FileUtil.paths(Activity.BASE_CDC_CACHE_DATA_DIR, ProcessHandler.pdServerPath(pdServer)), log));
-                            ErrorKit.ignoreAnyError(() -> ZipUtils.deleteFile(FileUtil.paths(Activity.BASE_CDC_LOG_DIR, ProcessHandler.pdServerPath(pdServer) + ".log"), log));
-                        }
-                    }
-                });
-            } catch (Exception e) {
-                connectorContext.getLog().warn("Clean cdc resources failed, message: {}", e.getMessage(), e);
+                ErrorKit.ignoreAnyError(() -> this.checkTiServerAndStop(httpUtil, cdcServer, connectorContext));
             }
         }
     }
 
-    private void onDestroy(TapConnectorContext connectorContext) throws Throwable {
-        cleanCDC(connectorContext, true);
+    protected void onDestroy(TapConnectorContext connectorContext) {
+        ErrorKit.ignoreAnyError(() -> cleanCDC(connectorContext, true));
     }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
@@ -328,11 +350,12 @@ public class TidbConnector extends CommonDbConnector {
         }
     }
 
+    @Override
     protected TapField makeTapField(DataMap dataMap) {
         return new MysqlColumn(dataMap).getTapField();
     }
 
-    private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
+    private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
         DataMap dataMap = tidbJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("TABLE_ROWS")));

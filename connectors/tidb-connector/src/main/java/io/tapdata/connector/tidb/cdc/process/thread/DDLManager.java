@@ -1,7 +1,7 @@
 package io.tapdata.connector.tidb.cdc.process.thread;
 
 import io.tapdata.common.util.FileUtil;
-import io.tapdata.connector.tidb.cdc.process.analyse.csv.NormalFileReader;
+import io.tapdata.connector.tidb.cdc.process.analyse.NormalFileReader;
 import io.tapdata.connector.tidb.cdc.process.ddl.convert.Convert;
 import io.tapdata.connector.tidb.cdc.process.ddl.entity.DDLObject;
 import io.tapdata.entity.logger.Log;

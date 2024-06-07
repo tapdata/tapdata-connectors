@@ -33,8 +33,8 @@ import static io.tapdata.base.ConnectorBase.testItem;
  * @author lemon
  */
 public class TidbConnectionTest extends CommonDbTest {
-    public static final String TAG = TidbConnectionTest.class.getSimpleName();
     private final TidbConfig tidbConfig;
+    private static final String TI_DB_GC_LIFE_TIME = "TiCDC GC Life Time";
     private final static String PB_SERVER_SUCCESS = "Check PDServer host port is valid";
     private final static String IC_CONFIGURATION_ENABLED = " Check  Incremental is enable";
     protected static final String CHECK_DATABASE_PRIVILEGES_SQL = "SHOW GRANTS FOR CURRENT_USER";
@@ -80,10 +80,6 @@ public class TidbConnectionTest extends CommonDbTest {
                     tidbConfig.getPdServer()
                     : "http://" + tidbConfig.getPdServer();
             URI uri = URI.create(pdServer);
-            String protocol = uri.toURL().getProtocol();
-            if (StringUtils.isBlank(protocol)) {
-                consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_FAILED,"PD server is illegal, should start with a protocol"));
-            }
             NetUtil.validateHostPortWithSocket(uri.getHost(), uri.getPort());
             consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_SUCCESSFULLY));
             return true;
@@ -91,7 +87,6 @@ public class TidbConnectionTest extends CommonDbTest {
             consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_FAILED, e.getMessage()));
             return false;
         }
-
     }
 
     @Override
@@ -225,16 +220,16 @@ public class TidbConnectionTest extends CommonDbTest {
         try {
             String gcLifeTime = ((TidbJdbcContext) jdbcContext).queryGcLifeTime();
             if (spilt(gcLifeTime)) {
-                consumer.accept(testItem("TiCDC GC Life Time", TestItem.RESULT_SUCCESSFULLY, gcLifeTime));
+                consumer.accept(testItem(TI_DB_GC_LIFE_TIME, TestItem.RESULT_SUCCESSFULLY, gcLifeTime));
             } else {
-                consumer.accept(testItem("TiCDC GC Life Time", TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
+                consumer.accept(testItem(TI_DB_GC_LIFE_TIME, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
                         String.format("The current value is %s, the recommended value is 24h, which can be set through the command: SET GLOBAL tidb_gc_life_time = '24h'",
                                 gcLifeTime)
                 ));
             }
             return true;
         } catch (Exception e) {
-            consumer.accept(testItem("TiCDC GC Life Time", TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(testItem(TI_DB_GC_LIFE_TIME, TestItem.RESULT_FAILED, e.getMessage()));
             return false;
         }
     }

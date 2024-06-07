@@ -4,11 +4,9 @@ import io.tapdata.common.CommonDbConfig;
 import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 
 import java.io.Serializable;
-import java.sql.Date;
 import java.sql.SQLException;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class TidbJdbcContext extends MysqlJdbcContextV2 implements Serializable {

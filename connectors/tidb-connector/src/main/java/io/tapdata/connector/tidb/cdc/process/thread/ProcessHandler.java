@@ -41,6 +41,10 @@ public final class ProcessHandler implements Activity {
     final Log log;
     final String basePath;
 
+    public static ProcessHandler of(ProcessInfo processInfo, StreamReadConsumer consumer) {
+        return new ProcessHandler(processInfo, consumer);
+    }
+
     public ProcessHandler(ProcessInfo processInfo, StreamReadConsumer consumer) {
         this.processInfo = processInfo;
         this.tableVersionMap = new ConcurrentHashMap<>();
@@ -147,7 +151,7 @@ public final class ProcessHandler implements Activity {
     }
 
     protected void startFeedProcess() {
-        try (HttpUtil httpUtil = new HttpUtil(log)) {
+        try (HttpUtil httpUtil = HttpUtil.of(log)) {
             ChangeFeed changefeed = new ChangeFeed();
             changefeed.setSinkUri(String.format("file://%s?protocol=canal-json", new File(basePath).getAbsolutePath()));
             changefeed.setChangefeedId(processInfo.feedId);
@@ -188,7 +192,7 @@ public final class ProcessHandler implements Activity {
     }
 
     protected void stopFeedProcess() {
-        try (HttpUtil httpUtil = new HttpUtil(log)) {
+        try (HttpUtil httpUtil = HttpUtil.of(log)) {
             if (!httpUtil.checkAlive(processInfo.cdcServer)) {
                 return;
             }

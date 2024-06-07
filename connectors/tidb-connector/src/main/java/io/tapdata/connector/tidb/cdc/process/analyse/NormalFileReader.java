@@ -1,4 +1,4 @@
-package io.tapdata.connector.tidb.cdc.process.analyse.csv;
+package io.tapdata.connector.tidb.cdc.process.analyse;
 
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;

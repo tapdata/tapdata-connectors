@@ -78,7 +78,7 @@ public class TiCDCShellManager implements Activity {
 
     protected void checkAliveAndWait() {
         int waitTimes = 5;
-        try (HttpUtil httpUtil = new HttpUtil(log)) {
+        try (HttpUtil httpUtil = HttpUtil.of(log)) {
             while (!httpUtil.checkAlive(shellConfig.cdcServerIpPort)) {
                 if (waitTimes < 0) {
                     log.warn("After five second, TiCDC server not alive, server: {}", shellConfig.cdcServerIpPort);
@@ -97,7 +97,7 @@ public class TiCDCShellManager implements Activity {
     }
 
     public void checkAlive() {
-        try (HttpUtil util = new HttpUtil(log)) {
+        try (HttpUtil util = HttpUtil.of(log)) {
             if (!util.checkAlive(shellConfig.cdcServerIpPort)) {
                 doActivity();
             }

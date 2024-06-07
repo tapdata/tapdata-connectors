@@ -29,7 +29,11 @@ public class HttpUtil implements AutoCloseable {
 
     protected Log tapLogger;
 
-    public HttpUtil(Log tapLogger) {
+    public static HttpUtil of(Log tapLogger) {
+        return new HttpUtil(tapLogger);
+    }
+
+    private HttpUtil(Log tapLogger) {
         httpClient = HttpClientBuilder.create().build();
         this.tapLogger = tapLogger;
     }
