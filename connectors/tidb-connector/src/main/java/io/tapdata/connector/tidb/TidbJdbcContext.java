@@ -34,4 +34,17 @@ public class TidbJdbcContext extends MysqlJdbcContextV2 implements Serializable 
         });
         return null != safePointCollector.get() ? safePointCollector.get() : System.currentTimeMillis();
     }
+
+    public String queryGcLifeTime() throws SQLException {
+        AtomicReference<String> gcLifeTimeCollector = new AtomicReference<>();
+        query("SHOW GLOBAL VARIABLES like 'tidb_gc_life_time'", r -> {
+            while (r.next()) {
+                if ("tidb_gc_life_time".equalsIgnoreCase(r.getString("Variable_name"))) {
+                    gcLifeTimeCollector.set(r.getString("Value"));
+                    break;
+                }
+            }
+        });
+        return gcLifeTimeCollector.get();
+    }
 }

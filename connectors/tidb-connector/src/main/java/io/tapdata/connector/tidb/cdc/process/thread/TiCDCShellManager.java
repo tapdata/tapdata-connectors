@@ -25,7 +25,7 @@ public class TiCDCShellManager implements Activity {
             "--addr=${cdc_server_ip_port} " +
             "--cluster-id=${cluster_id} " +
             "--data-dir=${local_strong_path} " +
-            "--gc-ttl=${gc_ttl} " +
+            //"--gc-ttl=${gc_ttl} " +
             "--log-level=${log_level} " +
             "--log-file=${log_dir} ";
 
@@ -120,7 +120,7 @@ public class TiCDCShellManager implements Activity {
         cmd = setProperties(cmd, "cdc_server_ip_port", shellConfig.cdcServerIpPort);
         cmd = setProperties(cmd, "cluster_id", shellConfig.clusterId);
         cmd = setProperties(cmd, "local_strong_path", new File(shellConfig.localStrongPath).getAbsolutePath());
-        cmd = setProperties(cmd, "gc_ttl", shellConfig.gcTtl);
+        //cmd = setProperties(cmd, "gc_ttl", shellConfig.gcTtl);
         cmd = setProperties(cmd, "log_level", shellConfig.logLevel.name);
         cmd = setProperties(cmd, "log_dir", new File(shellConfig.logDir).getAbsolutePath());
         log.info(cmd);

@@ -53,6 +53,11 @@ public class TidbConnectionTest extends CommonDbTest {
 
     public TidbConnectionTest(TidbConfig tidbConfig, Consumer<TestItem> consumer, ConnectionOptions connectionOptions) {
         super(tidbConfig, consumer);
+        if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
+            testFunctionMap.put("testPbserver", this::testPbserver);
+            testFunctionMap.put("testGcLifeTime", this::testGcLifeTime);
+        }
+        testFunctionMap.put("testVersion", this::testVersion);
         this.tidbConfig = tidbConfig;
         this.connectionOptions = connectionOptions;
         jdbcContext = new TidbJdbcContext(tidbConfig);
@@ -61,10 +66,6 @@ public class TidbConnectionTest extends CommonDbTest {
 
     @Override
     public Boolean testOneByOne() {
-        if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
-            testFunctionMap.put("testPbserver", this::testPbserver);
-        }
-        testFunctionMap.put("testVersion", this::testVersion);
         return super.testOneByOne();
     }
 
@@ -220,6 +221,42 @@ public class TidbConnectionTest extends CommonDbTest {
         return false;
     }
 
+    protected Boolean testGcLifeTime() {
+        try {
+            String gcLifeTime = ((TidbJdbcContext) jdbcContext).queryGcLifeTime();
+            if (spilt(gcLifeTime)) {
+                consumer.accept(testItem("TiCDC GC Life Time", TestItem.RESULT_SUCCESSFULLY, gcLifeTime));
+            } else {
+                consumer.accept(testItem("TiCDC GC Life Time", TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
+                        String.format("The current value is %s, the recommended value is 24h, which can be set through the command: SET GLOBAL tidb_gc_life_time = '24h'",
+                                gcLifeTime)
+                ));
+            }
+            return true;
+        } catch (Exception e) {
+            consumer.accept(testItem("TiCDC GC Life Time", TestItem.RESULT_FAILED, e.getMessage()));
+            return false;
+        }
+    }
+
+    protected boolean spilt(String gcLifeTime) {
+        String[] split = gcLifeTime.split("[a-z|A-Z]");
+        if (split.length <= 2) {
+            //3m0s
+            return false;
+        } else if (split.length > 3) {
+            //1d0h3m0s
+            return true;
+        }
+        //2h3m0s
+        String h = split[split.length - 3];
+        try {
+            //2h3m0s 32h3m0s
+            return Integer.parseInt(h) >= 24;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     @Override
     public Boolean testReadPrivilege() {
