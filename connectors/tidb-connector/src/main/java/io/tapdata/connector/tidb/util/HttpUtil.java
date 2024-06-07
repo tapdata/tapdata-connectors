@@ -5,7 +5,9 @@ import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.PropertyNamingStrategy;
 import com.alibaba.fastjson.serializer.SerializeConfig;
 import io.tapdata.connector.tidb.util.pojo.ChangeFeed;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.ErrorKit;
 import org.apache.http.HttpEntity;
 import org.apache.http.client.config.RequestConfig;
@@ -19,9 +21,10 @@ import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
+import java.util.Map;
 
 public class HttpUtil implements AutoCloseable {
-
+    public static final int ERROR_START_TS_BEFORE_GC = 100012;
     private final CloseableHttpClient httpClient;
 
     protected Log tapLogger;
@@ -68,7 +71,12 @@ public class HttpUtil implements AutoCloseable {
                 tapLogger.info("Create change feed succeed, change feed id: {}", changefeed.getChangefeedId());
                 return true;
             } else {
-                throw new IOException("TiDB stream failed: " + (null == responseEntity ? "" : EntityUtils.toString(responseEntity)));
+                String msg = null == responseEntity ? "{}" : EntityUtils.toString(responseEntity);
+                Map<String, String> result = TapSimplify.fromJson(msg, Map.class);
+                if ("CDC:ErrStartTsBeforeGC".equalsIgnoreCase(result.get("error_code"))) {
+                    throw new CoreException(ERROR_START_TS_BEFORE_GC, "TiDB stream failed: {}", msg);
+                }
+                throw new IOException("TiDB stream failed: " + msg);
             }
         }
     }

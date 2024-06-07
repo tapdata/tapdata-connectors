@@ -4,12 +4,34 @@ import io.tapdata.common.CommonDbConfig;
 import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 
 import java.io.Serializable;
+import java.sql.Date;
+import java.sql.SQLException;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class TidbJdbcContext extends MysqlJdbcContextV2 implements Serializable {
+    public static final String SAFE_GC_POINT_SQL = "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM mysql.tidb WHERE VARIABLE_NAME IN ('tikv_gc_safe_point', 'tikv_gc_enable')";
 
     public TidbJdbcContext(CommonDbConfig config) {
         super(config);
     }
 
 
+    public long querySafeGcPoint() throws SQLException {
+        AtomicReference<Long> safePointCollector = new AtomicReference<>();
+        query(SAFE_GC_POINT_SQL, r -> {
+            while (r.next()) {
+                if ("tikv_gc_safe_point".equalsIgnoreCase(r.getString("VARIABLE_NAME"))) {
+                    String variableValue = r.getString("VARIABLE_VALUE");
+                    DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd-HH:mm:ss.SSS Z");
+                    ZonedDateTime zonedDateTime = ZonedDateTime.parse(variableValue, formatter);
+                    safePointCollector.set(zonedDateTime.toInstant().toEpochMilli());
+                    break;
+                }
+            }
+        });
+        return null != safePointCollector.get() ? safePointCollector.get() : System.currentTimeMillis();
+    }
 }

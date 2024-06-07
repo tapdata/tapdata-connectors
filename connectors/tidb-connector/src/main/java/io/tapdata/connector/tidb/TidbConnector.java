@@ -67,7 +67,6 @@ import java.util.function.Consumer;
 
 @TapConnectorClass("spec_tidb.json")
 public class TidbConnector extends CommonDbConnector {
-    private static final String TAG = TidbConnector.class.getSimpleName();
     private TidbConfig tidbConfig;
     private TidbJdbcContext tidbJdbcContext;
     private TimeZone timezone;
@@ -102,6 +101,7 @@ public class TidbConnector extends CommonDbConnector {
         RetryOptions retryOptions = super.errorHandle(tapConnectionContext, pdkMethod, throwable);
         retryOptions.setNeedRetry(
                 !(throwable instanceof CoreException && ((CoreException) throwable).getCode() == TiCDCShellManager.CDC_TOOL_NOT_EXISTS)
+                && !(throwable instanceof CoreException && ((CoreException) throwable).getCode() == HttpUtil.ERROR_START_TS_BEFORE_GC)
         );
         return retryOptions;
     }
@@ -204,6 +204,15 @@ public class TidbConnector extends CommonDbConnector {
         if (null == offsetStartTime) {
             MysqlBinlogPosition mysqlBinlogPosition = tidbJdbcContext.readBinlogPosition();
             return mysqlBinlogPosition.getPosition();
+        }
+        long safeGcPoint = tidbJdbcContext.querySafeGcPoint();
+        if (offsetStartTime.compareTo(safeGcPoint) <= 0) {
+            connectorContext.getLog().warn("Fail to create or maintain change feed because start-ts {} is earlier than or equal to GC safe point at {}. " +
+                            "Extending the GC lifecycle can prevent future GC from cleaning up data prematurely. You can set the GC lifecycle to a longer time. " +
+                            "For example, set to 24 hours: SET GLOBAL tidb_gc_life_time = '24h'; ",
+                    offsetStartTime,
+                    safeGcPoint);
+            offsetStartTime = safeGcPoint + 1;
         }
         return Activity.getTOSTime(offsetStartTime);
     }

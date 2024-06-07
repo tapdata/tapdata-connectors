@@ -48,7 +48,7 @@ public class AnalyseTapEventFromDDLObject implements AnalyseRecord<DDLObject, Li
                         l.add(tapDDLEvent);
                         this.consumer.accept(l, offset);
                         //mysqlStreamEvents.add(tapDDLEvent);
-                        log.info("Read DDL: {}, about to be packaged as some event(s)", ddlSql);
+                        log.debug("Read DDL: {}, about to be packaged as some event(s)", ddlSql);
                     }
             );
         } catch (Throwable e) {
