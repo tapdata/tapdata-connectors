@@ -2,11 +2,16 @@ package io.tapdata.connector.tidb;
 
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.connector.mysql.MysqlJdbcContextV2;
+import io.tapdata.connector.mysql.config.MysqlConfig;
+import io.tapdata.kit.EmptyKit;
 
 import java.io.Serializable;
 import java.sql.SQLException;
+import java.text.DecimalFormat;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class TidbJdbcContext extends MysqlJdbcContextV2 implements Serializable {
@@ -44,5 +49,20 @@ public class TidbJdbcContext extends MysqlJdbcContextV2 implements Serializable 
             }
         });
         return gcLifeTimeCollector.get();
+    }
+
+    public TimeZone queryTimeZone() throws SQLException {
+        if (EmptyKit.isNotBlank(((MysqlConfig) getConfig()).getTimezone())) {
+            return TimeZone.getTimeZone(ZoneId.of(((MysqlConfig) getConfig()).getTimezone()));
+        }
+        AtomicReference<Long> timeOffset = new AtomicReference<>();
+        queryWithNext("SELECT ROUND(TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) / 3600) AS timeoffset",
+                resultSet -> timeOffset.set(resultSet.getLong(1)));
+        DecimalFormat decimalFormat = new DecimalFormat("00");
+        if (timeOffset.get() >= 0) {
+            return TimeZone.getTimeZone(ZoneId.of("+" + decimalFormat.format(timeOffset.get()) + ":00"));
+        } else {
+            return TimeZone.getTimeZone(ZoneId.of(decimalFormat.format(timeOffset.get()) + ":00"));
+        }
     }
 }
