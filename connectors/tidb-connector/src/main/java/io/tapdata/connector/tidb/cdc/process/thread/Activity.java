@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ScheduledFuture;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 public interface Activity extends AutoCloseable {
@@ -35,7 +36,7 @@ public interface Activity extends AutoCloseable {
         }
     }
 
-    default List<File> scanAllCdcTableDir(List<String> cdcTable, File databaseDir, Supplier<Boolean> alive) {
+    default List<File> scanAllCdcTableDir(List<String> cdcTable, File databaseDir, BooleanSupplier alive) {
         List<File> tableDirs = new ArrayList<>();
         if (CollectionUtils.isEmpty(cdcTable)) {
             File[] tableFiles = databaseDir.listFiles(File::isDirectory);
@@ -44,7 +45,7 @@ public interface Activity extends AutoCloseable {
             }
         } else {
             for (String tableName : cdcTable) {
-                if (!alive.get()) {
+                if (!alive.getAsBoolean()) {
                     break;
                 }
                 File file = new File(FileUtil.paths(databaseDir.getAbsolutePath(), tableName));

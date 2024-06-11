@@ -33,9 +33,9 @@ public class AnalyseTapEventFromDDLObject implements AnalyseRecord<DDLObject, Li
     }
 
     @Override
-    public List<TapEvent> analyse(DDLObject record, AnalyseColumnFilter<DDLObject> filter, Log log) {
+    public List<TapEvent> analyse(DDLObject ddlObject, AnalyseColumnFilter<DDLObject> filter, Log log) {
         List<TapEvent> mysqlStreamEvents = new ArrayList<>();
-        String ddlSql = record.getQuery();
+        String ddlSql = ddlObject.getQuery();
         try {
             DDLFactory.ddlToTapDDLEvent(
                     DDLParserType.TIDB_CCJ_SQL_PARSER,
@@ -47,7 +47,6 @@ public class AnalyseTapEventFromDDLObject implements AnalyseRecord<DDLObject, Li
                         List<TapEvent> l = new ArrayList<>();
                         l.add(tapDDLEvent);
                         this.consumer.accept(l, offset);
-                        //mysqlStreamEvents.add(tapDDLEvent);
                         log.debug("Read DDL: {}, about to be packaged as some event(s)", ddlSql);
                     }
             );

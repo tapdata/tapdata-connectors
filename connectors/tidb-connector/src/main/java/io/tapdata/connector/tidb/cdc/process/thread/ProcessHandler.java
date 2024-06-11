@@ -2,6 +2,7 @@ package io.tapdata.connector.tidb.cdc.process.thread;
 
 import com.alibaba.fastjson.JSONObject;
 import io.tapdata.common.util.FileUtil;
+import io.tapdata.connector.tidb.cdc.util.ReplaceUtil;
 import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.connector.tidb.util.HttpUtil;
 import io.tapdata.connector.tidb.util.pojo.ChangeFeed;
@@ -18,11 +19,13 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 public final class ProcessHandler implements Activity {
@@ -79,7 +82,7 @@ public final class ProcessHandler implements Activity {
     public static String pdServerPath(String pdServer) {
         try {
             URL url = new URL(pdServer);
-            return String.format("%s_%s", url.getHost().replaceAll("\\.", "_"), url.getPort());
+            return String.format("%s_%s", ReplaceUtil.replaceAll(url.getHost(), ".", "_"), url.getPort());
         } catch (Exception e) {
             return "temp";
         }
@@ -211,12 +214,17 @@ public final class ProcessHandler implements Activity {
         int gcTtl;
         List<String> cdcTable;
         AtomicReference<Throwable> throwableCollector;
-        Supplier<Boolean> alive;
+        BooleanSupplier alive;
         TapConnectorContext nodeContext;
         Object cdcOffset;
         String feedId;
         String cdcServer;
         TidbConfig tidbConfig;
+        TimeZone timezone;
+        public ProcessInfo withZone(TimeZone timezone) {
+            this.timezone = timezone;
+            return this;
+        }
 
         public ProcessInfo withTiDBConfig(TidbConfig tidbConfig) {
             this.tidbConfig = tidbConfig;
@@ -263,7 +271,7 @@ public final class ProcessHandler implements Activity {
             return this;
         }
 
-        public ProcessInfo withAlive(Supplier<Boolean> alive) {
+        public ProcessInfo withAlive(BooleanSupplier alive) {
             this.alive = alive;
             return this;
         }

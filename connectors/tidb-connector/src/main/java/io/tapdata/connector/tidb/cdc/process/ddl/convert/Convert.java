@@ -1,6 +1,15 @@
 package io.tapdata.connector.tidb.cdc.process.ddl.convert;
 
+import io.tapdata.entity.error.CoreException;
+
+import java.text.ParsePosition;
+import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.TemporalAccessor;
 import java.util.Map;
+import java.util.TimeZone;
 
 public interface Convert {
     String COLUMN_NAME = "ColumnName";
@@ -18,7 +27,29 @@ public interface Convert {
         }
     }
 
-    static Convert instance(Map<String, Object> convertInfo) {
+    default Object covertToDateTime(Object fromValue, int precision, String format, TimeZone timezone) {
+        if (fromValue instanceof String) {
+            try {
+                SimpleDateFormat f = new SimpleDateFormat(String.format(format, Convert.timePrecision(precision)));
+                f.setTimeZone(timezone);
+                return f.parse((String) fromValue, new ParsePosition(precision));
+            } catch (Exception e) {
+                throw new CoreException(101, e, e.getMessage());
+            }
+        }
+        return fromValue;
+    }
+
+    static String timePrecision(int precision) {
+        if (precision <= 0) return "";
+        StringBuilder builder = new StringBuilder(".");
+        for (int index = 0; index < precision; index++) {
+            builder.append("s");
+        }
+        return builder.toString();
+    }
+
+    static Convert instance(Map<String, Object> convertInfo, TimeZone timezone) {
         String columnType = String.valueOf(convertInfo.get(COLUMN_TYPE)).toUpperCase();
         String columnPrecision = String.valueOf(convertInfo.get(COLUMN_PRECISION));
         String columnScale = String.valueOf(convertInfo.get(COLUMN_SCALE));
@@ -59,7 +90,7 @@ public interface Convert {
             case "BIGINT UNSIGNED":
                 return new LongConvert(true);
             case "BIGINT":
-                 return new LongConvert(false);
+                return new LongConvert(false);
             case "DECIMAL":
                 return new DecimalConvert(columnPrecision, columnScale);
             case "FLOAT":
@@ -71,13 +102,13 @@ public interface Convert {
             case "DOUBLE UNSIGNED":
                 return new DoubleConvert(true, columnPrecision, columnScale);
             case "TIMESTAMP":
-                return new TimestampConvert();
+                return new TimestampConvert(columnPrecision, timezone);
             case "DATETIME":
-                return new DateTimeConvert();
+                return new DateTimeConvert(columnPrecision, timezone);
             case "TIME":
-                return new TimeConvert();
+                return new TimeConvert(columnPrecision, timezone);
             case "DATE":
-                return new DateConvert();
+                return new DateConvert(timezone);
             case "YEAR UNSIGNED":
                 return new YearConvert(true);
             case "YEAR":

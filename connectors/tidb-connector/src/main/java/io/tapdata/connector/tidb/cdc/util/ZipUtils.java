@@ -25,6 +25,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 public class ZipUtils {
+    private ZipUtils(){}
     public static final int COMMON_ILLEGAL_PARAMETERS = 10000;
     public static final int CLI_UNZIP_DIR_IS_FILE = 30011;
 

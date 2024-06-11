@@ -173,6 +173,7 @@ public class TidbConnector extends CommonDbConnector {
         String feedId = genericFeedId(nodeContext.getStateMap());
         String cdcServer = String.valueOf(Optional.ofNullable(nodeContext.getStateMap().get(ProcessHandler.CDC_SERVER)).orElse("127.0.0.1:8300"));
         ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
+                .withZone(timezone)
                 .withCdcServer(cdcServer)
                 .withFeedId(feedId)
                 .withAlive(this::isAlive)
@@ -207,7 +208,7 @@ public class TidbConnector extends CommonDbConnector {
     protected void doWait(ProcessHandler handler) {
         while (isAlive()) {
             if (null != throwableCatch.get()) {
-                throw new CoreException("TiCDC execute with error, message: {}", throwableCatch.get().getMessage(), throwableCatch.get());
+                throw new CoreException(0, throwableCatch.get(), "TiCDC execute with error, message: {}", throwableCatch.get().getMessage());
             }
             handler.aliveCheck();
             try {
@@ -218,21 +219,25 @@ public class TidbConnector extends CommonDbConnector {
         }
     }
 
-    protected Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
-        if (null == offsetStartTime) {
-            MysqlBinlogPosition mysqlBinlogPosition = tidbJdbcContext.readBinlogPosition();
-            return mysqlBinlogPosition.getPosition();
+    protected Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
+        try {
+            if (null == offsetStartTime) {
+                MysqlBinlogPosition mysqlBinlogPosition = tidbJdbcContext.readBinlogPosition();
+                return mysqlBinlogPosition.getPosition();
+            }
+            long safeGcPoint = tidbJdbcContext.querySafeGcPoint();
+            if (offsetStartTime.compareTo(safeGcPoint) <= 0) {
+                connectorContext.getLog().warn("Fail to create or maintain change feed because start-ts {} is earlier than or equal to GC safe point at {}. " +
+                                "Extending the GC lifecycle can prevent future GC from cleaning up data prematurely. You can set the GC lifecycle to a longer time. " +
+                                "For example, set to 24 hours: SET GLOBAL tidb_gc_life_time = '24h'; ",
+                        offsetStartTime,
+                        safeGcPoint);
+                offsetStartTime = safeGcPoint + 1;
+            }
+            return Activity.getTOSTime(offsetStartTime);
+        } catch (Throwable e) {
+            throw new CoreException("Read TiDB stream offset failed, message: {}", e.getMessage(), e);
         }
-        long safeGcPoint = tidbJdbcContext.querySafeGcPoint();
-        if (offsetStartTime.compareTo(safeGcPoint) <= 0) {
-            connectorContext.getLog().warn("Fail to create or maintain change feed because start-ts {} is earlier than or equal to GC safe point at {}. " +
-                            "Extending the GC lifecycle can prevent future GC from cleaning up data prematurely. You can set the GC lifecycle to a longer time. " +
-                            "For example, set to 24 hours: SET GLOBAL tidb_gc_life_time = '24h'; ",
-                    offsetStartTime,
-                    safeGcPoint);
-            offsetStartTime = safeGcPoint + 1;
-        }
-        return Activity.getTOSTime(offsetStartTime);
     }
 
     @Override

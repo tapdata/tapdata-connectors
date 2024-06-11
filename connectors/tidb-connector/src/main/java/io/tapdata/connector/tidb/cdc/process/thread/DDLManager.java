@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -39,7 +40,6 @@ class DDLManager implements Activity {
         this.log = handler.processInfo.nodeContext.getLog();
         this.currentTableVersion = new ConcurrentHashMap<>();
         this.reader = new NormalFileReader();
-        this.reader.setLog(log);
     }
 
     @Override
@@ -135,7 +135,8 @@ class DDLManager implements Activity {
                     tableName,
                     new VersionInfo(
                             String.valueOf(newDDLTableVersion.getTableVersion()),
-                            newDDLTableVersion.getTableColumns()
+                            newDDLTableVersion.getTableColumns(),
+                            handler.processInfo.timezone
                     )
             );
         }
@@ -157,13 +158,13 @@ class DDLManager implements Activity {
         String version;
         Map<String, Convert> info;
 
-        public VersionInfo(String v, List<Map<String, Object>> info) {
+        public VersionInfo(String v, List<Map<String, Object>> info, TimeZone timezone) {
             this.version = v;
             this.info = new HashMap<>();
             if (CollectionUtils.isNotEmpty(info)) {
                 for (Map<String, Object> convertInfo : info) {
                     String columnName = String.valueOf(convertInfo.get(Convert.COLUMN_NAME));
-                    this.info.put(columnName, Convert.instance(convertInfo));
+                    this.info.put(columnName, Convert.instance(convertInfo, timezone));
                 }
             }
         }

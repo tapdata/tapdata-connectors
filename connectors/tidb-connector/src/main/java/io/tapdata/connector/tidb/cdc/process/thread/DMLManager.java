@@ -18,7 +18,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Supplier;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 public class DMLManager implements Activity {
@@ -29,7 +29,7 @@ public class DMLManager implements Activity {
     private final List<String> table;
     String basePath;
     final AtomicReference<Throwable> throwableCollector;
-    final Supplier<Boolean> alive;
+    final BooleanSupplier alive;
     final NormalFileReader reader;
     ScheduledFuture<?> scheduledFuture;
     Log log;
@@ -46,7 +46,6 @@ public class DMLManager implements Activity {
         this.alive = handler.processInfo.alive;
         this.reader = new NormalFileReader();
         this.log = handler.processInfo.nodeContext.getLog();
-        this.reader.setLog(log);
         withBasePath(basePath);
     }
     protected void withBasePath(String basePath) {
@@ -89,7 +88,7 @@ public class DMLManager implements Activity {
             return;
         }
         LinkedBlockingQueue<File> jsonFilePath = new LinkedBlockingQueue<>(scanAllTableDir(path));
-        if (!alive.get() || jsonFilePath.isEmpty()) {
+        if (!alive.getAsBoolean() || jsonFilePath.isEmpty()) {
             return;
         }
         CompletableFuture<Void>[] all = new CompletableFuture[this.threadCount];
@@ -105,7 +104,7 @@ public class DMLManager implements Activity {
     }
 
     public void doOnce(LinkedBlockingQueue<File> jsonFilePath) {
-        while (alive.get() && !jsonFilePath.isEmpty()) {
+        while (alive.getAsBoolean() && !jsonFilePath.isEmpty()) {
             File tableDir = jsonFilePath.poll();
             if (null == tableDir) continue;
             String tableNameFromDir = tableDir.getName();

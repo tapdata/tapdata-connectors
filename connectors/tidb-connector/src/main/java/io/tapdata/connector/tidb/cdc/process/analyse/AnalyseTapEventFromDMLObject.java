@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, List<TapEvent>> {
     public static final DefaultConvert DEFAULT_CONVERT = new DefaultConvert();
@@ -39,9 +40,7 @@ public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, Li
         if (CollectionUtils.isEmpty(data)) return events;
         data.forEach(eData -> {
             Map<String, Object> afterData = parseData(eData, dmlObject.getTableColumnInfo());
-            if (null != filter) {
-                filter.filter(null, afterData, dmlObject);
-            }
+            Optional.ofNullable(filter).ifPresent(f -> f.filter(null, afterData, dmlObject));
             events.add(TapSimplify.insertRecordEvent(afterData, dmlObject.getTable())
                     .referenceTime(dmlObject.getEs()));
         });
@@ -50,16 +49,14 @@ public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, Li
 
     protected List<TapEvent> getUpdateEvent(DMLObject dmlObject, AnalyseColumnFilter<DMLObject> filter) {
         List<TapEvent> events = new ArrayList<>();
-        List<Map<String, Object>> old = dmlObject.getOld();
+        List<Map<String, Object>> old = Optional.ofNullable(dmlObject.getOld()).orElse(new ArrayList<>());
         List<Map<String, Object>> data = dmlObject.getData();
         Map<String, Convert> columnInfo = dmlObject.getTableColumnInfo();
         if (CollectionUtils.isEmpty(data)) return events;
         for (int index = 0; index < data.size(); index++) {
             Map<String, Object> afterData = parseData(data.get(index), columnInfo);
-            Map<String, Object> beforeData = parseData(old.get(index), columnInfo);
-            if (null != filter) {
-                filter.filter(beforeData, afterData, dmlObject);
-            }
+            Map<String, Object> beforeData = old.size() < index + 1 ? null : parseData(old.get(index), columnInfo);
+            Optional.ofNullable(filter).ifPresent(f -> f.filter(beforeData, afterData, dmlObject));
             events.add(TapSimplify.updateDMLEvent(beforeData, afterData, dmlObject.getTable())
                     .referenceTime(dmlObject.getEs()));
         }
@@ -73,9 +70,7 @@ public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, Li
         if (CollectionUtils.isEmpty(data)) return events;
         data.forEach(eData -> {
             Map<String, Object> afterData = parseData(eData, dmlObject.getTableColumnInfo());
-            if (null != filter) {
-                filter.filter(null, afterData, dmlObject);
-            }
+            Optional.ofNullable(filter).ifPresent(f -> f.filter(null, afterData, dmlObject));
             events.add(TapSimplify.deleteDMLEvent(afterData, dmlObject.getTable())
                     .referenceTime(dmlObject.getEs()));
         });
@@ -83,14 +78,13 @@ public class AnalyseTapEventFromDMLObject implements AnalyseRecord<DMLObject, Li
     }
 
     protected Map<String, Object> parseData(Map<String, Object> data, Map<String, Convert> mysqlType) {
-        if (MapUtils.isEmpty(data)) return new HashMap<>();
+        if (MapUtils.isEmpty(data)) return data;
         if (MapUtils.isEmpty(mysqlType)) mysqlType = new HashMap<>();
         List<String> columns = new ArrayList<>(data.keySet());
         for (String column : columns) {
+            if (null == data.get(column) || null == mysqlType.get(column)) continue;
             Object value = data.get(column);
-            if (null == value) continue;
             Convert convert = mysqlType.get(column);
-            if (null == convert) continue;
             data.put(column, DEFAULT_CONVERT.convert(value, convert));
         }
         return data;
