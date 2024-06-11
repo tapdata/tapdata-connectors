@@ -1,6 +1,7 @@
 package io.tapdata.connector.mysql;
 
 import com.mysql.cj.exceptions.StatementIsClosedException;
+import io.debezium.type.TapIllegalDate;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
@@ -22,8 +23,10 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
-import io.debezium.type.TapIllegalDate;
-import io.tapdata.entity.schema.type.*;
+import io.tapdata.entity.schema.type.TapDate;
+import io.tapdata.entity.schema.type.TapTime;
+import io.tapdata.entity.schema.type.TapType;
+import io.tapdata.entity.schema.type.TapYear;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
@@ -53,7 +56,9 @@ import io.tapdata.pdk.apis.partition.splitter.TypeSplitterMap;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -75,7 +80,7 @@ public class MysqlConnector extends CommonDbConnector {
     protected MysqlReader mysqlReader;
     protected MysqlWriter mysqlWriter;
     protected String version;
-    protected TimeZone timezone;
+    protected ZoneId zoneId;
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
@@ -117,7 +122,11 @@ public class MysqlConnector extends CommonDbConnector {
             }
             this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext, this::isAlive);
             this.mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
-            this.timezone = mysqlJdbcContext.queryTimeZone();
+            if (mysqlConfig.getOldVersionTimezone()) {
+                this.zoneId = mysqlJdbcContext.queryTimeZone().toZoneId();
+            } else {
+                this.zoneId = mysqlConfig.getZoneId();
+            }
             ddlSqlGenerator = new MysqlDDLSqlGenerator(version, ((TapConnectorContext) tapConnectionContext).getTableMap());
         }
         fieldDDLHandlers = new BiClassHandlers<>();
@@ -140,16 +149,9 @@ public class MysqlConnector extends CommonDbConnector {
             return tapDateTimeValue.getValue().isContainsIllegal() ? tapDateTimeValue.getValue().getIllegalDate() : formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS");
         });
         //date类型通过jdbc读取时，会自动转换为当前时区的时间，所以设置为当前时区
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
-            return tapDateValue.getValue().isContainsIllegal() ? tapDateValue.getValue().getIllegalDate() : tapDateValue.getValue().toFormatString("yyyy-MM-dd");
-        });
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().isContainsIllegal() ? tapDateValue.getValue().getIllegalDate() : tapDateValue.getValue().toFormatString("yyyy-MM-dd"));
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
-        codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> {
-            if (tapYearValue.getValue() != null && tapYearValue.getValue().getTimeZone() == null) {
-                tapYearValue.getValue().setTimeZone(timezone);
-            }
-            return formatTapDateTime(tapYearValue.getValue(), "yyyy");
-        });
+        codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
 
         codecRegistry.registerFromTapValue(TapBooleanValue.class, "tinyint(1)", TapValue::getValue);
 
@@ -157,14 +159,14 @@ public class MysqlConnector extends CommonDbConnector {
             @Override
             public TapValue<?, ?> toTapValue(Object value, TapType tapType) {
                 String originDate = null;
-                if (value instanceof TapIllegalDate){
+                if (value instanceof TapIllegalDate) {
                     originDate = ((TapIllegalDate) value).getOriginDate();
                 }
-                if (tapType instanceof TapDate){
+                if (tapType instanceof TapDate) {
                     return new TapDateValue(new DateTime(originDate, DateTime.DATE_TYPE));
-                } else if (tapType instanceof TapTime){
+                } else if (tapType instanceof TapTime) {
                     return new TapTimeValue(new DateTime(originDate, DateTime.TIME_TYPE));
-                } else if (tapType instanceof TapYear){
+                } else if (tapType instanceof TapYear) {
                     return new TapYearValue(new DateTime(originDate, DateTime.YEAR_TYPE));
                 } else {
                     return new TapDateTimeValue(new DateTime(originDate, DateTime.DATETIME_TYPE));
@@ -439,6 +441,7 @@ public class MysqlConnector extends CommonDbConnector {
             ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet) throws SQLException {
         return filterTimeForMysql(resultSet, metaData, dateTypeSet, null, null);
     }
+
     protected Map<String, Object> filterTimeForMysql(
             ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet, TapRecordEvent recordEvent,
             IllegalDateConsumer illegalDateConsumer) throws SQLException {
@@ -452,16 +455,24 @@ public class MysqlConnector extends CommonDbConnector {
                     value = resultSet.getString(i + 1);
                 } else if ("TIMESTAMP".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                     value = resultSet.getObject(i + 1);
-                    if (value == null) {
-                        value = resultSet.getString(i + 1);
-                    }
                 } else if ("DATE".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                    value = resultSet.getString(i + 1);
+                    if (mysqlConfig.getOldVersionTimezone()) {
+                        value = resultSet.getString(i + 1);
+                    } else {
+                        value = resultSet.getObject(i + 1);
+                        if (value instanceof java.sql.Date) {
+                            value = ((java.sql.Date) value).toLocalDate().atStartOfDay(zoneId);
+                        }
+                    }
                 } else if ("DATETIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                     try {
                         value = resultSet.getObject(i + 1);
                         if (value instanceof LocalDateTime) {
-                            value = ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000));
+                            if (mysqlConfig.getOldVersionTimezone()) {
+                                value = ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000));
+                            } else {
+                                value = ((LocalDateTime) value).atZone(zoneId);
+                            }
                         }
                     } catch (Exception ignore) {
                         value = resultSet.getString(i + 1);
@@ -476,9 +487,9 @@ public class MysqlConnector extends CommonDbConnector {
                     String valueS = value.toString();
                     // 如果是0000开头的时间，或者包含 -00, 就认为是null
                     if (valueS.startsWith("0000") || valueS.contains("-00")) {
-                        if (null == illegalDateConsumer || null == recordEvent){
+                        if (null == illegalDateConsumer || null == recordEvent) {
                             value = null;
-                        }else {
+                        } else {
                             value = buildIllegalDate(recordEvent, illegalDateConsumer, valueS, illegalDateFieldName, columnName);
                         }
                     }
@@ -491,11 +502,11 @@ public class MysqlConnector extends CommonDbConnector {
         if (null != illegalDateConsumer && null != recordEvent && !EmptyKit.isEmpty(illegalDateFieldName)) {
             illegalDateConsumer.buildIllegalDateFieldName(recordEvent, illegalDateFieldName);
         }
-            return data;
+        return data;
     }
 
     protected static Object buildIllegalDate(TapRecordEvent recordEvent, IllegalDateConsumer illegalDateConsumer,
-                                           String valueS, List<String> illegalDateFieldName, String columnName) {
+                                             String valueS, List<String> illegalDateFieldName, String columnName) {
         Object value;
         TapIllegalDate date = new TapIllegalDate();
         StringBuilder sb = new StringBuilder();
@@ -507,14 +518,15 @@ public class MysqlConnector extends CommonDbConnector {
         sb.append(str);
         date.setOriginDate(sb.toString());
         date.setOriginDateType(Integer.class);
-        value =  date;
-        illegalDateConsumer.containsIllegalDate(recordEvent,true);
+        value = date;
+        illegalDateConsumer.containsIllegalDate(recordEvent, true);
         illegalDateFieldName.add(columnName);
         return value;
     }
 
     interface IllegalDateConsumer {
         void containsIllegalDate(TapRecordEvent event, boolean containsIllegalDate);
+
         void buildIllegalDateFieldName(TapRecordEvent event, List<String> illegalDateFieldName);
     }
 
@@ -541,7 +553,7 @@ public class MysqlConnector extends CommonDbConnector {
 
                     @Override
                     public void buildIllegalDateFieldName(TapRecordEvent event, List<String> illegalDateFieldName) {
-                        ((TapInsertRecordEvent)event).setAfterIllegalDateFieldName(illegalDateFieldName);
+                        ((TapInsertRecordEvent) event).setAfterIllegalDateFieldName(illegalDateFieldName);
                     }
                 });
                 tapInsertRecordEvent.after(data).table(tapTable.getId());
@@ -650,7 +662,7 @@ public class MysqlConnector extends CommonDbConnector {
                 continue;
             }
 
-            if(type == TapType.TYPE_BOOLEAN && field.getDataType().toLowerCase().contains("bit")){
+            if (type == TapType.TYPE_BOOLEAN && field.getDataType().toLowerCase().contains("bit")) {
                 sql.append("CAST(" + "`" + fieldName + "`" + " AS unsigned)").append(",");
                 continue;
             }
@@ -667,8 +679,8 @@ public class MysqlConnector extends CommonDbConnector {
             }
         }
         sql = new StringBuilder(sql.substring(0, sql.length() - 1));
-        sql.append(")), 1, 16), 16, 10) as unsigned), 64)) as md5 from ").append(table.getName() +" ");
-        sql.append(commonSqlMaker.buildCommandWhereSql(filter,""));
+        sql.append(")), 1, 16), 16, 10) as unsigned), 64)) as md5 from ").append(table.getName() + " ");
+        sql.append(commonSqlMaker.buildCommandWhereSql(filter, ""));
         return sql.toString();
     }
 
@@ -677,7 +689,8 @@ public class MysqlConnector extends CommonDbConnector {
         jdbcContext.query(sql, resultSet -> {
             if (isAlive() && resultSet.next()) {
                 consumer.accept(TapHashResult.create().withHash(resultSet.getString(1)));
-            }});
+            }
+        });
     }
 
 }
