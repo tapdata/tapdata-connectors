@@ -1,0 +1,31 @@
+{
+  "Table": "products1",
+  "Schema": "test",
+  "Version": 1,
+  "TableVersion": 450116318093639703,
+  "Query": "CREATE TABLE `products1` (`no_w_id` INT(11) NOT NULL,`no_d_id` INT(11) NOT NULL,`no_o_id` INT(11) NOT NULL,PRIMARY KEY(`no_w_id`))",
+  "Type": 3,
+  "TableColumns": [
+    {
+      "ColumnName": "no_w_id",
+      "ColumnType": "INT",
+      "ColumnPrecision": "11",
+      "ColumnNullable": "false",
+      "ColumnIsPk": "true"
+    },
+    {
+      "ColumnName": "no_d_id",
+      "ColumnType": "INT",
+      "ColumnPrecision": "11",
+      "ColumnNullable": "false"
+    },
+    {
+      "ColumnName": "no_o_id",
+      "ColumnType": "INT",
+      "ColumnPrecision": "11",
+      "ColumnNullable": "false"
+    }
+  ],
+  "TableColumnsTotal": 3
+
+}

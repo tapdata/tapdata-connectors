@@ -5,9 +5,7 @@ public class DoubleConvert implements Convert {
     int precision;
     int scale;
     public DoubleConvert(boolean unsigned) {
-        this.unsigned = unsigned;
-        this.precision = 1;
-        this.scale = 0;
+        this(unsigned, 1, 0);
     }
 
     public DoubleConvert(boolean unsigned, int precision, int scale) {

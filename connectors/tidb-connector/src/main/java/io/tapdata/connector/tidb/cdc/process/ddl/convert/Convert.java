@@ -4,10 +4,6 @@ import io.tapdata.entity.error.CoreException;
 
 import java.text.ParsePosition;
 import java.text.SimpleDateFormat;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.TemporalAccessor;
 import java.util.Map;
 import java.util.TimeZone;
 
@@ -44,7 +40,7 @@ public interface Convert {
         if (precision <= 0) return "";
         StringBuilder builder = new StringBuilder(".");
         for (int index = 0; index < precision; index++) {
-            builder.append("s");
+            builder.append("S");
         }
         return builder.toString();
     }

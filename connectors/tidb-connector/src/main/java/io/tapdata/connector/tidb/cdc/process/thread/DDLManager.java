@@ -10,14 +10,16 @@ import org.apache.commons.collections4.CollectionUtils;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TimeZone;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 class DDLManager implements Activity {
     public static final String TABLE_VERSION_FILE_NAME_MATCH = "(schema_)([\\d]{18})(_)([\\d]{10})(\\.json)";
@@ -27,7 +29,6 @@ class DDLManager implements Activity {
     private final ProcessHandler handler;
     private ScheduledFuture<?> scheduledFuture;
     final NormalFileReader reader;
-    private final ConcurrentHashMap<String, String> currentTableVersion;
     final Log log;
     final AtomicReference<Throwable> throwableCollector;
 
@@ -38,13 +39,12 @@ class DDLManager implements Activity {
         this.basePath = basePath;
         this.throwableCollector = handler.processInfo.throwableCollector;
         this.log = handler.processInfo.nodeContext.getLog();
-        this.currentTableVersion = new ConcurrentHashMap<>();
         this.reader = new NormalFileReader();
     }
 
     @Override
     public void init() {
-
+        // nothing need to do
     }
 
     @Override
@@ -65,24 +65,20 @@ class DDLManager implements Activity {
             for (File tableDir : tableDirs) {
                 scanTableDDL(tableDir);
             }
-        } catch (Throwable t) {
+        } catch (Exception t) {
             synchronized (throwableCollector) {
                 throwableCollector.set(t);
             }
         }
     }
 
-    //"${basePath}/${database}/${table}/meta"
-    protected void scanTableDDL(File tableDir) {
-        if (!tableDir.exists() || !tableDir.isDirectory()) return;
-        String tableName = tableDir.getName();
-        File metaDir = new File(FileUtil.paths(tableDir.getAbsolutePath(), "meta"));
+    protected List<DDLObject> getSchemaJsonFile(File metaDir) {
         File[] schemaJson = metaDir.listFiles(f -> {
             String name = f.getName();
             return f.isFile() && name.matches(TABLE_VERSION_FILE_NAME_MATCH);
         });
-        if (null == schemaJson || schemaJson.length <= 0) return;
         List<DDLObject> schemaJsonFile = new ArrayList<>();
+        if (null == schemaJson || schemaJson.length <= 0) return schemaJsonFile;
         for (File file : schemaJson) {
             String tableDDL = this.reader.readAll(file, handler.processInfo.alive);
             try {
@@ -96,12 +92,17 @@ class DDLManager implements Activity {
                 log.warn("A cdc ddl data can not be parse as a Json Object, ddl: {}", tableDDL);
             }
         }
+        return schemaJsonFile.stream().filter(Objects::nonNull).collect(Collectors.toList());
+    }
+
+    //"${basePath}/${database}/${table}/meta"
+    protected void scanTableDDL(File tableDir) {
+        if (!tableDir.exists() || !tableDir.isDirectory()) return;
+        String tableName = tableDir.getName();
+        File metaDir = new File(FileUtil.paths(tableDir.getAbsolutePath(), "meta"));
+        List<DDLObject> schemaJsonFile = getSchemaJsonFile(metaDir);
         if (schemaJsonFile.isEmpty()) return;
-        schemaJsonFile.sort((s1, s2) -> {
-            if (null == s1 || null == s1.getTableVersion()) return -1;
-            if (null == s2 || null == s2.getTableVersion()) return 1;
-            return s1.getTableVersion().compareTo(s2.getTableVersion());
-        });
+        schemaJsonFile.sort(Comparator.comparing(DDLObject::getTableVersion));
         DDLObject newDDLTableVersion;
         String oldDDLTableVersion = handler.judgeTableVersion(tableName);
         if (null == oldDDLTableVersion) {

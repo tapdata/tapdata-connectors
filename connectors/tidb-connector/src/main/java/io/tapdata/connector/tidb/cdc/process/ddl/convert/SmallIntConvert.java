@@ -11,8 +11,8 @@ public class SmallIntConvert implements Convert {
         if (null == fromValue) return null;
         if (fromValue instanceof String) {
             return parse((String) fromValue);
-        } else if (fromValue instanceof Short) {
-            return fromValue;
+        } else if (fromValue instanceof Number) {
+            return ((Number)fromValue).shortValue();
         }
         return 0;
     }

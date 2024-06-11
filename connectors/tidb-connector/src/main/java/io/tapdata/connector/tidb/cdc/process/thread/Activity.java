@@ -5,17 +5,14 @@ import io.tapdata.entity.logger.Log;
 import org.apache.commons.collections4.CollectionUtils;
 
 import java.io.File;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ScheduledFuture;
 import java.util.function.BooleanSupplier;
-import java.util.function.Supplier;
 
 public interface Activity extends AutoCloseable {
-    //"/Users/xiao/Documents/GitHub/kit/tidb/%s"
     String BASE_CDC_SOURCE_DIR = "run-resources/ti-db";
     String BASE_CDC_TOOL_DIR = "run-resources/ti-db/tool";
     String BASE_CDC_CACHE_DATA_DIR = "run-resources/ti-db/data";
@@ -64,14 +61,5 @@ public interface Activity extends AutoCloseable {
     static long getTOSTime(Long time) {
         if (null == time) return getTOSTime();
         return time << 18;
-    }
-
-    static long timestamp(String time) {
-        try {
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-            return sdf.parse(time).getTime();
-        } catch (Exception e) {
-            return System.currentTimeMillis();
-        }
     }
 }
