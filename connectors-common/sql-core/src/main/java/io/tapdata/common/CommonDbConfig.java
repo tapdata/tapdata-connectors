@@ -86,7 +86,7 @@ public class CommonDbConfig implements Serializable {
             if (EmptyKit.isBlank(timezone)) {
                 timezone = "+00:00";
             }
-            zoneId = TimeZone.getTimeZone(timezone).toZoneId();
+            zoneId = TimeZone.getTimeZone("GMT" + timezone).toZoneId();
             return this;
         } catch (Exception e) {
             throw new IllegalArgumentException("json string is not valid for db config");
