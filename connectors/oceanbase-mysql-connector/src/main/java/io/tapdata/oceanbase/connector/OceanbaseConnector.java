@@ -165,7 +165,7 @@ public class OceanbaseConnector extends MysqlConnector {
         if (tapConnectionContext instanceof TapConnectorContext) {
             this.connectionTimezone = tapConnectionContext.getConnectionConfig().getString("timezone");
             if ("Database Timezone".equals(this.connectionTimezone) || StringUtils.isBlank(this.connectionTimezone)) {
-                this.timezone = mysqlJdbcContext.queryTimeZone();
+                this.zoneId = mysqlJdbcContext.queryTimeZone().toZoneId();
             }
             ddlSqlGenerator = new MysqlDDLSqlGenerator(version, ((TapConnectorContext) tapConnectionContext).getTableMap());
         }
