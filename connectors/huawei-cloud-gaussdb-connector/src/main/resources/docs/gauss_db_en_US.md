@@ -1,6 +1,11 @@
 ## **Connection Configuration Help**
 ### Database version 
-  HuaWei Open GaussDB Standby 8.1 postgres version 9.2
+  Huawei Cloud GaussDB Master Backup 2.8 (Enterprise Edition)
+  
+    - Support for self built GaussDB version: 505.1
+    
+    - Postgres kernel version 9.2
+    
 ### **1. Necessary inspections**
 
 1. Enable logical replication

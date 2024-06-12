@@ -10,7 +10,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <name>HuaWei GaussDB Connector</name>
-    <artifactId>open-gaussdb-connector</artifactId>
+    <artifactId>huawei-cloud-gaussdb-connector</artifactId>
     <version>1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 

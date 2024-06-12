@@ -1,6 +1,11 @@
 ## **连接配置帮助**
 ### 数据库版本 
-  HuaWei Open GaussDB 主备8.1 postgres版本9.2
+  华为云 GaussDB 主备2.8（企业版）
+  
+    - 支持自建GaussDB版本：505.1
+    
+    - postgres内核版本9.2
+    
 ### **1. 必要的检查**
 1. 开启逻辑复制
 
