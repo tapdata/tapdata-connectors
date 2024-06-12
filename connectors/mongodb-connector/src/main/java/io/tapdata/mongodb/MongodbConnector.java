@@ -1136,6 +1136,9 @@ public class MongodbConnector extends ConnectorBase {
 
 				final List<TapIndexField> indexFields = tapIndex.getIndexFields();
 				if (CollectionUtils.isNotEmpty(indexFields)) {
+					if (indexFields.size() == 1 && "_id".equals(indexFields.stream().findFirst().get().getName())) {
+						continue;
+					}
 					final MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
 					Document keys = new Document();
 					for (TapIndexField indexField : indexFields) {

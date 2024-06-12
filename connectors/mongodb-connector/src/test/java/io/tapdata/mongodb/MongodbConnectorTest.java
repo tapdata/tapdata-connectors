@@ -32,6 +32,7 @@ import org.bson.conversions.Bson;
 import org.junit.jupiter.api.*;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
+import org.mockito.internal.verification.Times;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.*;
@@ -652,6 +653,45 @@ class MongodbConnectorTest {
             when(mongoConfig.getUri()).thenReturn("mongodb://127.0.0.1:27017/test");
             doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
             assertThrows(RuntimeException.class,()->mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent));
+        }
+        @Test
+        @DisplayName("test create index method when indexFields only contains _id")
+        void test1(){
+            List<TapIndex> indexList = new ArrayList<>();
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("index");
+            List<TapIndexField> indexFields = new ArrayList<>();
+            TapIndexField indexField = new TapIndexField();
+            indexField.setName("_id");
+            indexFields.add(indexField);
+            tapIndex.setIndexFields(indexFields);
+            indexList.add(tapIndex);
+            when(tapCreateIndexEvent.getIndexList()).thenReturn(indexList);
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
+            mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent);
+            verify(mongoDatabase,new Times(0)).getCollection("test");
+        }
+        @Test
+        @DisplayName("test create index method when indexFields contains _id and other field")
+        void test2(){
+            List<TapIndex> indexList = new ArrayList<>();
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("index");
+            List<TapIndexField> indexFields = new ArrayList<>();
+            TapIndexField indexField = new TapIndexField();
+            indexField.setName("_id");
+            indexFields.add(indexField);
+            TapIndexField indexField1 = new TapIndexField();
+            indexField1.setName("_id");
+            indexFields.add(indexField1);
+            tapIndex.setIndexFields(indexFields);
+            indexList.add(tapIndex);
+            when(tapCreateIndexEvent.getIndexList()).thenReturn(indexList);
+            MongoCollection collection = mock(MongoCollection.class);
+            when(mongoDatabase.getCollection("test")).thenReturn(collection);
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
+            mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent);
+            verify(collection,new Times(1)).createIndex(any(Document.class),any(IndexOptions.class));
         }
     }
     @Nested
