@@ -30,8 +30,16 @@ import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 
 import java.io.IOException;
+import java.sql.Date;
 import java.sql.SQLException;
-import java.util.*;
+import java.sql.Time;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -47,7 +55,6 @@ public class DorisConnector extends CommonDbConnector {
     private DorisJdbcContext dorisJdbcContext;
     private DorisConfig dorisConfig;
     private final Map<String, DorisStreamLoader> dorisStreamLoaderMap = new ConcurrentHashMap<>();
-
 
 
     @Override
@@ -132,8 +139,20 @@ public class DorisConnector extends CommonDbConnector {
             return "null";
         });
         codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
+            if (dorisConfig.getOldVersionTimezone()) {
+                return tapDateTimeValue.getValue().toTimestamp();
+            } else {
+                return tapDateTimeValue.getValue().toInstant().atZone(dorisConfig.getZoneId());
+            }
+        });
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
+            if (dorisConfig.getOldVersionTimezone()) {
+                return tapDateValue.getValue().toSqlDate();
+            } else {
+                return tapDateValue.getValue().toInstant().atZone(dorisConfig.getZoneId()).toLocalDate();
+            }
+        });
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
 
@@ -324,5 +343,26 @@ public class DorisConnector extends CommonDbConnector {
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("TABLE_ROWS")));
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("DATA_LENGTH")));
         return tableInfo;
+    }
+
+    @Override
+    protected void processDataMap(DataMap dataMap, TapTable tapTable) {
+        if (!dorisConfig.getOldVersionTimezone()) {
+            for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
+                Object value = entry.getValue();
+                if (value instanceof Timestamp) {
+                    if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                        continue;
+                    }
+                    if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().startsWith("timestamp")) {
+                        entry.setValue(((Timestamp) value).toLocalDateTime().atZone(dorisConfig.getZoneId()));
+                    }
+                } else if (value instanceof java.sql.Date) {
+                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(dorisConfig.getZoneId()));
+                } else if (value instanceof Time) {
+                    entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(dorisConfig.getZoneId()));
+                }
+            }
+        }
     }
 }
