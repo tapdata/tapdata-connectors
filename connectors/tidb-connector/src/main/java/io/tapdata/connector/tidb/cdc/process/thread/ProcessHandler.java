@@ -26,7 +26,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
-import java.util.function.Supplier;
 
 public final class ProcessHandler implements Activity {
     public static final String CDC_FILE_PATH = "cdc-file-path";
@@ -111,7 +110,6 @@ public final class ProcessHandler implements Activity {
     public void close() throws Exception {
         closeOnce(this.ddlManager);
         closeOnce(this.dmlManager);
-        closeOnce(this.tapEventManager);
         try {
             scheduledExecutorService.shutdownNow();
         } catch (Exception e) {
@@ -134,7 +132,6 @@ public final class ProcessHandler implements Activity {
     public void init() {
         this.ddlManager.init();
         this.dmlManager.init();
-        this.tapEventManager.init();
     }
 
     @Override
@@ -146,7 +143,6 @@ public final class ProcessHandler implements Activity {
         startFeedProcess();
         this.ddlManager.doActivity();
         this.dmlManager.doActivity();
-        this.tapEventManager.doActivity();
     }
 
     public void aliveCheck() {

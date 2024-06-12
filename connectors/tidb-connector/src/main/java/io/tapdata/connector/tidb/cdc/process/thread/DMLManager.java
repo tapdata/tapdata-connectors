@@ -60,7 +60,7 @@ public class DMLManager implements Activity {
 
     @Override
     public void init() {
-
+        // do nothing
     }
 
     @Override

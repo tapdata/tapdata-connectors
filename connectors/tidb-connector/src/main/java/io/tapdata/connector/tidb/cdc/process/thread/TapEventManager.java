@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
-class TapEventManager implements Activity {
+class TapEventManager {
     final AnalyseTapEventFromDMLObject dmlEventParser;
     final AnalyseTapEventFromDDLObject ddlEventParser;
     final ProcessHandler handler;
@@ -60,16 +60,6 @@ class TapEventManager implements Activity {
         }
     }
 
-    @Override
-    public void init() {
-
-    }
-
-    @Override
-    public void doActivity() {
-        //do nothing
-    }
-
     protected void handleDDL(DDLObject ddlObject) {
         Long tableVersion = ddlObject.getTableVersion();
         String table = ddlObject.getTable();
@@ -104,11 +94,6 @@ class TapEventManager implements Activity {
         if (CollectionUtils.isNotEmpty(tapRecordEvents)) {
             consumer.accept(tapRecordEvents, this.offset);
         }
-    }
-
-    @Override
-    public void close() throws Exception {
-        //do nothing
     }
 
     public static class TiOffset {
