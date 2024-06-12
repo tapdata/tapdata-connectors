@@ -8,14 +8,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 
 public class ProcessLauncher {
-    private ProcessLauncher() {}
-    public static Process run(String[] cmd) {
-        Runtime runtime = Runtime.getRuntime();
-        try {
-            return doRun(runtime.exec(cmd));
-        } catch (IOException e) {
-            throw new CoreException("Cdc tool can not running, fail start process: {}", e.getMessage(), e);
-        }
+    private ProcessLauncher() {
     }
 
     public static String execCmdWaitResult(String cmd, String errorMsg, Log log) {
@@ -64,7 +57,7 @@ public class ProcessLauncher {
         try {
             return doRun(processBuilder.start());
         } catch (IOException e) {
-          throw new CoreException("Cdc tool can not running, fail start process: {}", e.getMessage(), e);
+            throw new CoreException("Cdc tool can not running, fail start process: {}", e.getMessage(), e);
         }
     }
 }
