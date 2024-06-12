@@ -1,6 +1,11 @@
 ## **連接配寘幫助**
 ### 資料庫版本
-  HuaWei Open GaussDB 主備8.1 postgres版本9.2
+ 華為雲GaussDB主備2.8（企業版）
+ 
+    - 支持自建GaussDB版本：505.1
+    
+    - postgres內核版本9.2
+    
 ### **1. 必要的檢查**
 1. 開啟邏輯複製
 
