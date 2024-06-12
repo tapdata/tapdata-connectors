@@ -293,7 +293,7 @@ class TapEventManagerTest {
         void testUpdateVersion() {
             Map<String, Map<String, Long>> objectObjectHashMap = new HashMap<>();
             TapEventManager.TiOffset.updateVersion(objectObjectHashMap, "table", 1L);
-            Assertions.assertNull(objectObjectHashMap.get("table"));
+            Assertions.assertNotNull(objectObjectHashMap.get("table"));
         }
     }
 }

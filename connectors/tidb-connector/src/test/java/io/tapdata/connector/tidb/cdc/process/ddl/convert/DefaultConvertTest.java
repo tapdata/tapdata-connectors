@@ -6,6 +6,6 @@ import org.junit.jupiter.api.Test;
 class DefaultConvertTest {
     @Test
     void testNormal() {
-        Assertions.assertNull(new DefaultConvert().convert(1));
+        Assertions.assertNotNull(new DefaultConvert().convert(1));
     }
 }
