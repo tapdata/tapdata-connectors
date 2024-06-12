@@ -11,7 +11,6 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TimeZone;
@@ -98,7 +97,7 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         if (value instanceof String) {
             return ((String) value).replace("\u0000", "");
         }
-        if(value instanceof Boolean && dataType.contains("int")){
+        if (value instanceof Boolean && dataType.contains("int")) {
             return Boolean.TRUE.equals(value) ? 1 : 0;
         }
         return value;

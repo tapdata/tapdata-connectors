@@ -24,7 +24,7 @@ public class TimeTZConverter extends BaseTapdataConverter {
     }
 
     @Override
-    Object convert(Object data) {
+    Object convert(Object data, RelationalColumn column) {
         OffsetTime offsetTime = (OffsetTime) data;
         return offsetTime.toLocalTime().toSecondOfDay() * 1000000L + offsetTime.getNano() / 1000;
     }

@@ -25,7 +25,7 @@ public class TimestampConverter extends BaseTapdataConverter {
     }
 
     @Override
-    Object convert(Object data) {
+    Object convert(Object data, RelationalColumn column) {
         Instant instant = (Instant) data;
         return (instant.getEpochSecond() * 1000000 - milliSecondOffset * 1000 + instant.getNano() / 1000) / (long) Math.pow(10, 6 - column.scale().orElse(6));
     }

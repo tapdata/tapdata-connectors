@@ -27,7 +27,7 @@ public class GeometryConverter extends BaseTapdataConverter {
     }
 
     @Override
-    Object convert(Object data) {
+    Object convert(Object data, RelationalColumn field) {
         return data.toString();
     }
 }
