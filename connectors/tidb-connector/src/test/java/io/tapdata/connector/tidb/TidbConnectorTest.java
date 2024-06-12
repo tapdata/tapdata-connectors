@@ -1,6 +1,5 @@
 package io.tapdata.connector.tidb;
 
-import com.alibaba.fastjson.JSONObject;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.tidb.cdc.process.thread.ProcessHandler;
 import io.tapdata.connector.tidb.cdc.process.thread.TiCDCShellManager;
@@ -10,13 +9,10 @@ import io.tapdata.connector.tidb.cdc.util.ZipUtils;
 import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.connector.tidb.dml.TidbReader;
 import io.tapdata.connector.tidb.util.HttpUtil;
-import io.tapdata.connector.tidb.util.pojo.ChangeFeed;
-import io.tapdata.connector.tidb.util.pojo.ReplicaConfig;
-import io.tapdata.connector.tidb.util.pojo.Sink;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.entity.logger.TapLog;
+import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.kit.EmptyKit;
@@ -34,15 +30,13 @@ import org.mockito.MockedStatic;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.TimeZone;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Pattern;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doCallRealMethod;
@@ -545,6 +539,51 @@ public class TidbConnectorTest {
                 Object offset = connector.timestampToStreamOffset(nodeContext, 10L);
                 Assertions.assertNotNull(offset);
                 Assertions.assertEquals(10L << 18, offset);
+            }
+        }
+
+        @Nested
+        class processDataMap {
+            DataMap dataMap;
+            TapTable tapTable;
+            @BeforeEach
+            void init() {
+                dataMap = new DataMap();
+                tapTable = mock(TapTable.class);
+
+                doCallRealMethod().when(connector).processDataMap(dataMap, tapTable);
+            }
+
+            @Test
+            void testNormal() {
+                Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+            }
+            @Test
+            void test1() {
+                dataMap.put("t", new Timestamp(System.currentTimeMillis()));
+                dataMap.put("t2", 2);
+                Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+            }
+            @Test
+            void test2() {
+                ReflectionTestUtils.setField(connector, "timezone", null);
+                dataMap.put("t", new Timestamp(System.currentTimeMillis()));
+                Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+            }
+        }
+
+        @Nested
+        class initTimeZone {
+            @Test
+            void testNormal() {
+                doCallRealMethod().when(connector).initTimeZone();
+                Assertions.assertDoesNotThrow(connector::initTimeZone);
+            }
+            @Test
+            void test1() {
+                tidbConfig.setTimezone("+08:00");
+                doCallRealMethod().when(connector).initTimeZone();
+                Assertions.assertDoesNotThrow(connector::initTimeZone);
             }
         }
     }
