@@ -34,7 +34,13 @@ import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.codec.binary.Base64;
 
+import java.sql.Date;
 import java.sql.SQLException;
+import java.sql.Time;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -177,14 +183,18 @@ public class ClickhouseConnector extends CommonDbConnector {
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
 //        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime());
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
-            DateTime datetime = tapDateTimeValue.getValue();
-//            datetime.setTimeZone(TimeZone.getTimeZone(this.connectionTimezone));
-            return datetime.toTimestamp();
+            if (clickhouseConfig.getOldVersionTimezone()) {
+                return tapDateTimeValue.getValue().toTimestamp();
+            } else {
+                return tapDateTimeValue.getValue().toInstant().atZone(clickhouseConfig.getZoneId()).toLocalDateTime();
+            }
         });
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
-            DateTime datetime = tapDateValue.getValue();
-//            datetime.setTimeZone(TimeZone.getTimeZone(this.connectionTimezone));
-            return datetime.toSqlDate();
+            if (clickhouseConfig.getOldVersionTimezone()) {
+                return tapDateValue.getValue().toSqlDate();
+            } else {
+                return tapDateValue.getValue().toInstant().atZone(clickhouseConfig.getZoneId()).toLocalDate();
+            }
         });
 
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
@@ -362,6 +372,24 @@ public class ClickhouseConnector extends CommonDbConnector {
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("NUM_ROWS")));
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("AVG_ROW_LEN")));
         return tableInfo;
+    }
+
+    @Override
+    protected void processDataMap(DataMap dataMap, TapTable tapTable) {
+        if (!clickhouseConfig.getOldVersionTimezone()) {
+            for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
+                Object value = entry.getValue();
+                if (value instanceof java.sql.Date) {
+                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(clickhouseConfig.getZoneId()));
+                } else if (value instanceof Time) {
+                    entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(clickhouseConfig.getZoneId()));
+                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().equals("Date32")) {
+                    entry.setValue(LocalDate.parse((String) value).atStartOfDay(clickhouseConfig.getZoneId()));
+                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().equals("DateTime64")) {
+                    entry.setValue(LocalDateTime.parse((String) value).atZone(clickhouseConfig.getZoneId()));
+                }
+            }
+        }
     }
 
 }
