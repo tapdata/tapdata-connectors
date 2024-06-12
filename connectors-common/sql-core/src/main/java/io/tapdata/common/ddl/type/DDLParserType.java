@@ -16,7 +16,7 @@ public enum DDLParserType {
     ORACLE_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.oracle.ddl.ccj.OracleWrapperType", ""),
     MSSQL_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.mssql.ddl.ccj.MssqlWrapperType", ""),
     DAMENG_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.dameng.ddl.ccj.DamengWrapperType", ""),
-    TIDB_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.tidb.ddl.ccj.TidblWrapperType", "");
+    TIDB_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.tidb.ddl.ccj.TidbWrapperType", "");
 
 
     private final String desc;

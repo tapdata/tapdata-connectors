@@ -1,0 +1,442 @@
+{
+  "1.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717057508946,
+    "ts": 1717057509940,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4
+    },
+    "mysqlType": {
+      "no_w_id": "int",
+      "no_d_id": "int",
+      "no_o_id": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "1",
+        "no_d_id": "1",
+        "no_o_id": "1"
+      }
+    ]
+  },
+  "2.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717057741246,
+    "ts": 1717057742241,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4
+    },
+    "mysqlType": {
+      "no_o_id": "int",
+      "no_w_id": "int",
+      "no_d_id": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "2",
+        "no_d_id": "2",
+        "no_o_id": "2"
+      }
+    ]
+  },
+  "3.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717060105196,
+    "ts": 1717060105640,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4
+    },
+    "mysqlType": {
+      "no_w_id": "int",
+      "no_d_id": "int",
+      "no_o_id": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "3",
+        "no_d_id": "2",
+        "no_o_id": "3"
+      }
+    ]
+  },
+  "4.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "UPDATE",
+    "es": 1717060117995,
+    "ts": 1717060118641,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4
+    },
+    "mysqlType": {
+      "no_w_id": "int",
+      "no_d_id": "int",
+      "no_o_id": "int"
+    },
+    "old": [
+      {
+        "no_w_id": "2",
+        "no_d_id": "2",
+        "no_o_id": "2"
+      }
+    ],
+    "data": [
+      {
+        "no_w_id": "2",
+        "no_d_id": "2",
+        "no_o_id": "44"
+      }
+    ]
+  },
+  "5.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "DELETE",
+    "es": 1717060127046,
+    "ts": 1717060127640,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4
+    },
+    "mysqlType": {
+      "no_d_id": "int",
+      "no_o_id": "int",
+      "no_w_id": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "3",
+        "no_d_id": "2",
+        "no_o_id": "3"
+      }
+    ]
+  },
+  "6.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717060875895,
+    "ts": 1717060876440,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4,
+      "new_col": 4
+    },
+    "mysqlType": {
+      "no_o_id": "int",
+      "new_col": "int",
+      "no_w_id": "int",
+      "no_d_id": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "3",
+        "no_d_id": "3",
+        "no_o_id": "3",
+        "new_col": null
+      }
+    ]
+  },
+  "7.json": {
+    "id": 0,
+    "database": "test",
+    "table": "products1",
+    "pkNames": [
+      "no_w_id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717061851445,
+    "ts": 1717061852441,
+    "sql": "",
+    "sqlType": {
+      "no_w_id": 4,
+      "no_d_id": 4,
+      "no_o_id": 4,
+      "new_col": 4,
+      "char_col": 12
+    },
+    "mysqlType": {
+      "char_col": "varchar",
+      "no_w_id": "int",
+      "no_d_id": "int",
+      "no_o_id": "int",
+      "new_col": "int"
+    },
+    "old": null,
+    "data": [
+      {
+        "no_w_id": "9",
+        "no_d_id": "2",
+        "no_o_id": "3",
+        "new_col": null,
+        "char_col": "ccc"
+      }
+    ]
+  },
+  "full_table": {
+    "id": 0,
+    "database": "test",
+    "table": "full_table",
+    "pkNames": [
+      "id"
+    ],
+    "isDdl": false,
+    "type": "INSERT",
+    "es": 1717388319889,
+    "ts": 1717388320913,
+    "sql": "",
+    "sqlType": {
+      "f_char_0": 1,
+      "f_char": 1,
+      "f_char_2": 1,
+      "f_varchar": 12,
+      "f_varchar_2": 12,
+      "f_tinytext": 2005,
+      "f_text": 2005,
+      "f_mediumtext": 2005,
+      "f_longtext": 2005,
+      "f_json": 12,
+      "f_binary": 2004,
+      "f_binary_2": 2004,
+      "f_varbinary": 2004,
+      "f_varbinary_2": 2004,
+      "f_tinyblob": 2004,
+      "f_blob": 2004,
+      "f_mediumblob": 2004,
+      "f_longblob": 2004,
+      "f_bit": -7,
+      "f_bit_2": -7,
+      "f_tinyint": -6,
+      "f_tinyint_2": -6,
+      "f_tinyint_3": -6,
+      "f_tinyint_4": -6,
+      "f_smallint": 5,
+      "f_smallint_2": 5,
+      "f_smallint_3": 5,
+      "f_smallint_4": 5,
+      "f_mediumint_0": 4,
+      "f_mediumint_1": 4,
+      "f_mediumint_2": 4,
+      "f_mediumint_3": 4,
+      "f_mediumint_4": 4,
+      "f_int_0": 4,
+      "f_int_1": 4,
+      "f_int_2": 4,
+      "f_int_3": 4,
+      "f_int_4": 4,
+      "f_bigint_0": -5,
+      "f_bigint_1": -5,
+      "f_bigint_3": -5,
+      "f_decimal_0": 3,
+      "f_decimal_1": 3,
+      "f_decimal_2": 3,
+      "f_float_0": 7,
+      "f_float_1": 7,
+      "f_float_2": 7,
+      "f_double_0": 8,
+      "f_double_1": 8,
+      "f_double_2": 8,
+      "f_date": 91,
+      "f_time": 92,
+      "f_datetime": 93,
+      "f_datetime_1": 93,
+      "f_timestamp": 93,
+      "f_timestamp_0": 93,
+      "f_year_0": 12,
+      "f_enum": 4,
+      "f_set_0": -7,
+      "f_INTEGER": 4,
+      "f_BOOLEAN": -6,
+      "id": 4
+    },
+    "mysqlType": {
+      "f_char": "char",
+      "f_mediumtext": "mediumtext",
+      "f_mediumint_0": "mediumint",
+      "f_int_0": "int",
+      "f_float_2": "float unsigned",
+      "id": "int",
+      "f_int_4": "int unsigned",
+      "f_bigint_3": "bigint unsigned",
+      "f_double_1": "double",
+      "f_varchar": "varchar",
+      "f_mediumblob": "mediumblob",
+      "f_tinyint_3": "tinyint unsigned",
+      "f_smallint_2": "smallint",
+      "f_smallint_3": "smallint unsigned",
+      "f_datetime": "datetime",
+      "f_int_3": "int unsigned",
+      "f_double_2": "double unsigned",
+      "f_tinyint_2": "tinyint",
+      "f_smallint_4": "smallint unsigned",
+      "f_mediumint_3": "mediumint unsigned",
+      "f_mediumint_4": "mediumint unsigned",
+      "f_int_1": "int",
+      "f_bit_2": "bit",
+      "f_tinyint": "tinyint",
+      "f_year_0": "year",
+      "f_char_0": "char",
+      "f_char_2": "char",
+      "f_varbinary_2": "varbinary",
+      "f_time": "time",
+      "f_timestamp": "timestamp",
+      "f_tinytext": "tinytext",
+      "f_binary": "binary",
+      "f_varbinary": "varbinary",
+      "f_float_0": "float",
+      "f_decimal_0": "decimal",
+      "f_double_0": "double",
+      "f_json": "json",
+      "f_binary_2": "binary",
+      "f_bit": "bit",
+      "f_float_1": "float",
+      "f_enum": "enum",
+      "f_varchar_2": "varchar",
+      "f_tinyint_4": "tinyint unsigned",
+      "f_int_2": "int",
+      "f_decimal_2": "decimal unsigned",
+      "f_set_0": "set",
+      "f_BOOLEAN": "tinyint",
+      "f_text": "text",
+      "f_smallint": "smallint",
+      "f_mediumint_1": "mediumint",
+      "f_mediumint_2": "mediumint",
+      "f_bigint_1": "bigint",
+      "f_longtext": "longtext",
+      "f_longblob": "longblob",
+      "f_datetime_1": "datetime",
+      "f_INTEGER": "int",
+      "f_tinyblob": "tinyblob",
+      "f_blob": "blob",
+      "f_bigint_0": "bigint",
+      "f_decimal_1": "decimal",
+      "f_timestamp_0": "timestamp",
+      "f_date": "date"
+    },
+    "old": null,
+    "data": [
+      {
+        "f_char_0": "1",
+        "f_char": null,
+        "f_char_2": null,
+        "f_varchar": null,
+        "f_varchar_2": null,
+        "f_tinytext": null,
+        "f_text": null,
+        "f_mediumtext": null,
+        "f_longtext": null,
+        "f_json": null,
+        "f_binary": null,
+        "f_binary_2": null,
+        "f_varbinary": null,
+        "f_varbinary_2": null,
+        "f_tinyblob": null,
+        "f_blob": null,
+        "f_mediumblob": null,
+        "f_longblob": null,
+        "f_bit": null,
+        "f_bit_2": null,
+        "f_tinyint": null,
+        "f_tinyint_2": null,
+        "f_tinyint_3": null,
+        "f_tinyint_4": null,
+        "f_smallint": null,
+        "f_smallint_2": null,
+        "f_smallint_3": null,
+        "f_smallint_4": null,
+        "f_mediumint_0": null,
+        "f_mediumint_1": null,
+        "f_mediumint_2": null,
+        "f_mediumint_3": null,
+        "f_mediumint_4": null,
+        "f_int_0": null,
+        "f_int_1": null,
+        "f_int_2": null,
+        "f_int_3": null,
+        "f_int_4": null,
+        "f_bigint_0": null,
+        "f_bigint_1": null,
+        "f_bigint_3": null,
+        "f_decimal_0": null,
+        "f_decimal_1": null,
+        "f_decimal_2": null,
+        "f_float_0": null,
+        "f_float_1": null,
+        "f_float_2": null,
+        "f_double_0": null,
+        "f_double_1": null,
+        "f_double_2": null,
+        "f_date": null,
+        "f_time": null,
+        "f_datetime": null,
+        "f_datetime_1": null,
+        "f_timestamp": null,
+        "f_timestamp_0": null,
+        "f_year_0": null,
+        "f_enum": null,
+        "f_set_0": null,
+        "f_INTEGER": null,
+        "f_BOOLEAN": null,
+        "id": "1"
+      }
+    ]
+  }
+}
