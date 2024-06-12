@@ -57,7 +57,10 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.sql.Timestamp;
+import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.TimeZone;
@@ -85,6 +88,8 @@ public class TidbConnector extends CommonDbConnector {
         jdbcContext = tidbJdbcContext;
         if (EmptyKit.isBlank(tidbConfig.getTimezone())) {
             timezone = tidbJdbcContext.queryTimeZone();
+        } else {
+            timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
         }
         tapLogger = tapConnectionContext.getLog();
         started.set(true);
@@ -366,6 +371,16 @@ public class TidbConnector extends CommonDbConnector {
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("TABLE_ROWS")));
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("DATA_LENGTH")));
         return tableInfo;
+    }
+
+    @Override
+    protected void processDataMap(DataMap dataMap, TapTable tapTable) throws RuntimeException {
+        for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof Timestamp && null != timezone) {
+                entry.setValue(((Timestamp) value).toLocalDateTime().atZone(timezone.toZoneId()));
+            }
+        }
     }
 }
 
