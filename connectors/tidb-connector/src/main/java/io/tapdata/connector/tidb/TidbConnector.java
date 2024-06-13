@@ -81,12 +81,11 @@ public class TidbConnector extends CommonDbConnector {
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
 
-    protected void initTimeZone() throws SQLException {
+    protected void initTimeZone() {
         if (EmptyKit.isBlank(tidbConfig.getTimezone())) {
-            timezone = tidbJdbcContext.queryTimeZone();
-        } else {
-            timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
+            tidbConfig.setTimezone("+00:00");
         }
+        timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
     }
 
     @Override
