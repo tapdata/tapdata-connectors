@@ -119,13 +119,17 @@
             "timezone": {
               "type": "string",
               "title": "${timezone}",
-              "default": "+00:00",
+              "default": "",
               "x-decorator": "FormItem",
               "x-decorator-props": {
                 "tooltip": "${timezoneTip}"
               },
               "x-component": "Select",
               "enum": [
+                {
+                  "label": "Database Timezone",
+                  "value": ""
+                },
                 {
                   "label": "UTC -11",
                   "value": "-11:00"
@@ -231,7 +235,7 @@
                   "value": "+14:00"
                 }
               ],
-              "x-index": 8
+              "x-index": 9
             }
 
           }

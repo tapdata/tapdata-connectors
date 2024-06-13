@@ -30,6 +30,7 @@ import org.mockito.MockedStatic;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
@@ -575,12 +576,12 @@ public class TidbConnectorTest {
         @Nested
         class initTimeZone {
             @Test
-            void testNormal() {
+            void testNormal() throws SQLException {
                 doCallRealMethod().when(connector).initTimeZone();
                 Assertions.assertDoesNotThrow(connector::initTimeZone);
             }
             @Test
-            void test1() {
+            void test1() throws SQLException {
                 tidbConfig.setTimezone("+08:00");
                 doCallRealMethod().when(connector).initTimeZone();
                 Assertions.assertDoesNotThrow(connector::initTimeZone);
