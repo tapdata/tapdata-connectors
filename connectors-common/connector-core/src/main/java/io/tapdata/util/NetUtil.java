@@ -29,10 +29,8 @@ public class NetUtil {
         if (port <= 0 || port >= 65536)
             throw new IllegalArgumentException("Port must greater than 0 and smaller then 65536");
         timeoutMs = timeoutMs <= 1000 ? DEFAULT_SOCKET_TIMEOUT_MS : timeoutMs;
-        try {
-            Socket s = new Socket();
+        try (Socket s = new Socket()) {
             s.connect(new InetSocketAddress(host, port), timeoutMs);
-            s.close();
         } catch (IOException e) {
             throw new IOException("Unable connect to " + host + ":" + port + ", reason: " + e.getMessage(), e);
         }

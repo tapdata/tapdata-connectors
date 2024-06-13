@@ -277,17 +277,24 @@ public class HudiWrite extends HiveJdbcWrite {
             insertColumnSql.append(String.format(" where not exists (select * from `%s`.`%s` where ", database, tapTable.getId()));
             primaryKeys.forEach(k -> insertColumnSql.append(k).append("=?").append(" and "));
         }
-        pstmt = getConnection().prepareStatement(StringUtils.removeEnd(insertColumnSql.toString()," and ")+")");
-        if (MapUtils.isNotEmpty(after)) {
-            for (String fieldName : tapTable.getNameFieldMap().keySet()) {
-                if (!after.containsKey(fieldName)) continue;
-                pstmt.setObject(parameterIndex++, after.get(fieldName));
+        boolean executeSuccess = false;
+        try {
+            pstmt = getConnection().prepareStatement(StringUtils.removeEnd(insertColumnSql.toString()," and ")+")");
+            if (MapUtils.isNotEmpty(after)) {
+                for (String fieldName : tapTable.getNameFieldMap().keySet()) {
+                    if (!after.containsKey(fieldName)) continue;
+                    pstmt.setObject(parameterIndex++, after.get(fieldName));
+                }
+                for (String primaryKey : primaryKeys) {
+                    pstmt.setObject(parameterIndex++, after.get(primaryKey));
+                }
             }
-            for (String primaryKey : primaryKeys) {
-                pstmt.setObject(parameterIndex++, after.get(primaryKey));
-            }
+            executeSuccess = pstmt.execute();
+        } catch (SQLException e) {
+            throw e;
+        } finally {
+            pstmt.close();
         }
-        boolean executeSuccess = pstmt.execute();
         insertColumnSql.setLength(0);
         if (executeSuccess){
             return 1;
@@ -323,15 +330,21 @@ public class HudiWrite extends HiveJdbcWrite {
             queryRecordSql.append(String.format(QUERY_RECORD_SQL, database, tapTable.getId()));
             primaryKeys.forEach(k -> queryRecordSql.append(k).append("=?").append(" and "));
         }
-        pstmt = getConnection().prepareStatement(StringUtils.removeEnd(queryRecordSql.toString()," and "));
-        if (MapUtils.isNotEmpty(after)) {
-            for (String primaryKey : primaryKeys) {
-                pstmt.setObject(parameterIndex++, after.get(primaryKey));
+        try {
+            pstmt = getConnection().prepareStatement(StringUtils.removeEnd(queryRecordSql.toString()," and "));
+            if (MapUtils.isNotEmpty(after)) {
+                for (String primaryKey : primaryKeys) {
+                    pstmt.setObject(parameterIndex++, after.get(primaryKey));
+                }
             }
-        }
-        ResultSet resultSet = pstmt.executeQuery();
-        if (resultSet.next()){
-            return true;
+            ResultSet resultSet = pstmt.executeQuery();
+            if (resultSet.next()){
+                return true;
+            }
+        } catch (SQLException e) {
+            throw e;
+        } finally {
+            pstmt.close();
         }
         return false;
     }
@@ -346,14 +359,21 @@ public class HudiWrite extends HiveJdbcWrite {
             insertColumnSql.append(String.format(UPDATE_INSERT_SQL, database, tapTable.getId()));
             after.keySet().stream().forEach(k->insertColumnSql.append("?,"));
         }
-        pstmt = getConnection().prepareStatement(StringUtils.removeEnd(insertColumnSql.toString(),",")+")");
-        if (MapUtils.isNotEmpty(after)) {
-            for (String fieldName : tapTable.getNameFieldMap().keySet()) {
-                if (!after.containsKey(fieldName)) continue;
-                pstmt.setObject(parameterIndex++, after.get(fieldName));
+        boolean executeSuccess = false;
+        try {
+            pstmt = getConnection().prepareStatement(StringUtils.removeEnd(insertColumnSql.toString(),",")+")");
+            if (MapUtils.isNotEmpty(after)) {
+                for (String fieldName : tapTable.getNameFieldMap().keySet()) {
+                    if (!after.containsKey(fieldName)) continue;
+                    pstmt.setObject(parameterIndex++, after.get(fieldName));
+                }
             }
+            executeSuccess = pstmt.execute();
+        } catch (SQLException e) {
+            throw e;
+        } finally {
+            pstmt.close();
         }
-        boolean executeSuccess = pstmt.execute();
         if (executeSuccess){
             return 1;
         }
@@ -364,21 +384,27 @@ public class HudiWrite extends HiveJdbcWrite {
         if (morTableMap.containsKey(database+"."+tapTable.getId())) return morTableMap.get(database+"."+tapTable.getId());
         PreparedStatement pstmt = null;
         String queryTableSql = String.format(QUERY_TABLE_TYPE, database, tapTable.getId());
-        pstmt = getConnection().prepareStatement(queryTableSql);
-        ResultSet resultSet = pstmt.executeQuery();
-        while (resultSet.next()){
-            String colName = resultSet.getString(1);
-            if(null == colName || (null != colName && !"Table Properties".equals(colName))) continue;
-            String tableProperties = resultSet.getString(2);
-            Pattern pattern = Pattern.compile("type=(...)");
-             Matcher matcher = pattern.matcher(tableProperties);
-            if(matcher.find()){
-                String tableType = matcher.group(1);
-                if ("mor".equals(tableType)) {
-                    morTableMap.put(database+"."+tapTable.getId(),true);
-                    return true;
+        try {
+            pstmt = getConnection().prepareStatement(queryTableSql);
+            ResultSet resultSet = pstmt.executeQuery();
+            while (resultSet.next()){
+                String colName = resultSet.getString(1);
+                if(null == colName || (null != colName && !"Table Properties".equals(colName))) continue;
+                String tableProperties = resultSet.getString(2);
+                Pattern pattern = Pattern.compile("type=(...)");
+                 Matcher matcher = pattern.matcher(tableProperties);
+                if(matcher.find()){
+                    String tableType = matcher.group(1);
+                    if ("mor".equals(tableType)) {
+                        morTableMap.put(database+"."+tapTable.getId(),true);
+                        return true;
+                    }
                 }
             }
+        } catch (SQLException e) {
+            throw e;
+        } finally {
+            pstmt.close();
         }
         return false;
     }

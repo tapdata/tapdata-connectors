@@ -25,6 +25,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import static com.sun.xml.internal.ws.streaming.XMLStreamWriterUtil.getOutputStream;
+
 public class SmbFileStorage implements TapFileStorage {
 
     private SmbConfig smbConfig;
@@ -133,24 +135,31 @@ public class SmbFileStorage implements TapFileStorage {
     @Override
     public TapFile saveFile(String path, InputStream is, boolean canReplace) throws IOException {
         if (!isFileExist(path) || canReplace) {
-            File file = share.openFile(path, new HashSet<>(Collections.singletonList(AccessMask.GENERIC_ALL)), null,
-                    SMB2ShareAccess.ALL, SMB2CreateDisposition.FILE_OVERWRITE_IF, null);
-            OutputStream os = file.getOutputStream();
-            int bytesRead;
-            byte[] buffer = new byte[8192];
-            while ((bytesRead = is.read(buffer, 0, 8192)) != -1) {
-                os.write(buffer, 0, bytesRead);
+            try (
+                    File file = share.openFile(path, new HashSet<>(Collections.singletonList(AccessMask.GENERIC_ALL)), null,
+                            SMB2ShareAccess.ALL, SMB2CreateDisposition.FILE_OVERWRITE_IF, null);
+                    OutputStream os = file.getOutputStream()
+                    ){
+                int bytesRead;
+                byte[] buffer = new byte[8192];
+                while ((bytesRead = is.read(buffer, 0, 8192)) != -1) {
+                    os.write(buffer, 0, bytesRead);
+                }
+                os.flush();
             }
-            os.flush();
-            os.close();
         }
         return getFile(path);
     }
 
     @Override
     public OutputStream openFileOutputStream(String path, boolean append) {
-        return share.openFile(path, new HashSet<>(Collections.singletonList(AccessMask.GENERIC_ALL)), null,
-                SMB2ShareAccess.ALL, append ? SMB2CreateDisposition.FILE_OPEN_IF : SMB2CreateDisposition.FILE_OVERWRITE_IF, null).getOutputStream();
+        try (
+                File file = share.openFile(path, new HashSet<>(Collections.singletonList(AccessMask.GENERIC_ALL)), null,
+                        SMB2ShareAccess.ALL, append ? SMB2CreateDisposition.FILE_OPEN_IF : SMB2CreateDisposition.FILE_OVERWRITE_IF, null);
+                ){
+            return file.getOutputStream();
+        }
+
     }
 
     @Override

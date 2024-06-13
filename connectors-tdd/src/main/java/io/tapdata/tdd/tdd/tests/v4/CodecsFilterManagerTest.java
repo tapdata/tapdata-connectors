@@ -20,6 +20,8 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -131,9 +133,18 @@ public class CodecsFilterManagerTest extends PDKTestBaseV2 {
         });
     }
 
+    private static Random random;
+
+    static {
+        try {
+            random = SecureRandom.getInstanceStrong();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public List<Map<String,Object>> testRecord(final Map<String, TapField> fieldMap, final int recordCount){
         List<Map<String,Object>> records = new ArrayList<>();
-        Random random = new Random();
         for (int index = 0; index < recordCount; index++) {
             Map<String, Object> record = new HashMap<>();
             fieldMap.forEach((key, field) -> {

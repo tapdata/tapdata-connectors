@@ -18,6 +18,12 @@
     </modules>
 
     <properties>
+        <snoar.coverage.exclusions>
+            connectors-common/debezium-bucket/**
+        </snoar.coverage.exclusions>
+        <snoar.exclusions>
+            connectors-common/debezium-bucket/**
+        </snoar.exclusions>
         <sonar.test.exclusions>
             **/src/test/**,
             tapdata-cli/**

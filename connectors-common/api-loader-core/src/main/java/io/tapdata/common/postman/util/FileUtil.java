@@ -12,13 +12,11 @@ public class FileUtil {
     public static String readString(String path) {
         File file = new File(path);
         StringBuilder result = new StringBuilder();
-        try {
-            BufferedReader br = new BufferedReader(new FileReader(file));
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
             String s = null;
             while (Objects.nonNull((s = br.readLine()))) {
                 result.append(System.lineSeparator()).append(s);
             }
-            br.close();
         } catch (Exception ignored) {
         }
         return result.toString();

@@ -182,10 +182,6 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                         throw fail;
                     }
                 }
-            } catch (Throwable e) {
-                if (null != errorRecord) writeListResult.addError(errorRecord, e);
-                throw e;
-            } finally {
                 if (!recordsOneBatch.isEmpty()) {
                     try {
                         commitBatch(clientPerformer, 1, recordsOneBatch, deleteEventsKeys);
@@ -202,6 +198,9 @@ public class HuDiWriteBySparkClient extends HudiWrite {
                         throw fail;
                     }
                 }
+            } catch (Throwable e) {
+                if (null != errorRecord) writeListResult.addError(errorRecord, e);
+                throw e;
             }
         });
         return writeListResult;
