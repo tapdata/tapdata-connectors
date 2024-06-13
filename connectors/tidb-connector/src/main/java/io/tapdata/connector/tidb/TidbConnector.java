@@ -57,6 +57,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.ZoneId;
 import java.util.List;
@@ -80,11 +81,12 @@ public class TidbConnector extends CommonDbConnector {
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
 
-    protected void initTimeZone() {
+    protected void initTimeZone() throws SQLException {
         if (EmptyKit.isBlank(tidbConfig.getTimezone())) {
-            tidbConfig.setTimezone("+00:00");
+            timezone = tidbJdbcContext.queryTimeZone();
+        } else {
+            timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
         }
-        timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
     }
 
     @Override
