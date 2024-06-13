@@ -24,9 +24,6 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-
-import static com.sun.xml.internal.ws.streaming.XMLStreamWriterUtil.getOutputStream;
-
 public class SmbFileStorage implements TapFileStorage {
 
     private SmbConfig smbConfig;
