@@ -388,11 +388,6 @@ public class MongodbMergeOperate {
 					setOperateDoc.putAll(after);
 				}
 				final Document update = mergeResult.getUpdate();
-				if (update.containsKey("$set")) {
-					update.get("$set", Document.class).putAll(setOperateDoc);
-				} else {
-					update.put("$set", setOperateDoc);
-				}
 				if (removeFields != null) {
 					if (EmptyKit.isNotEmpty(targetPath)) {
 						for (Map.Entry<String, Object> entry : removeFields.entrySet()) {
@@ -418,6 +413,12 @@ public class MongodbMergeOperate {
 							update.put("$unset", unsetOperateDoc);
 						}
 					}
+				}
+				setOperateDoc = filterSetDocByUnsetDoc(setOperateDoc, unsetOperateDoc);
+				if (update.containsKey("$set")) {
+					update.get("$set", Document.class).putAll(setOperateDoc);
+				} else {
+					update.put("$set", setOperateDoc);
 				}
 				if (operation == MergeBundle.EventOperation.INSERT) {
 					mergeResult.getUpdateOptions().upsert(true);
@@ -841,5 +842,31 @@ public class MongodbMergeOperate {
 			}
 			mergeResult.getFilter().put(entry.getKey(), entry.getValue());
 		}
+	}
+
+	protected static Document filterSetDocByUnsetDoc(Document setDoc, Document unsetDoc) {
+		if (MapUtils.isEmpty(setDoc) || MapUtils.isEmpty(unsetDoc)) {
+			return setDoc;
+		}
+		Document filterSetDoc = new Document();
+		for (String key : unsetDoc.keySet()) {
+			setDoc.remove(key);
+			String[] split = key.split("\\.");
+			if (split.length > 1) {
+				String parentKey = null;
+				for (String s : split) {
+					if (StringUtils.isBlank(parentKey)) {
+						parentKey = s;
+					} else {
+						parentKey = parentKey + "." + s;
+					}
+					Object obj = setDoc.get(parentKey);
+					if (obj instanceof Map && ((Map<?, ?>) obj).isEmpty()) {
+						setDoc.remove(parentKey);
+					}
+				}
+			}
+		}
+		return filterSetDoc;
 	}
 }
