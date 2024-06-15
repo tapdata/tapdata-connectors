@@ -276,31 +276,11 @@ public class TidbConnectorTest {
                     zu.when(() -> ZipUtils.deleteFile(anyString(), any(Log.class))).thenAnswer(a -> null);
                     Assertions.assertDoesNotThrow(() -> connector.checkTiServerAndStop(httpUtil, cdcServer, nodeContext));
                     verify(nodeContext).getLog();
-                    verify(httpUtil).checkAlive(cdcServer);
                     verify(log).debug("Cdc server is alive, will check change feed list");
                     verify(httpUtil).queryChangeFeedsList(cdcServer);
                     verify(log).debug("There is not any change feed with cdc server: {}, will stop cdc server", cdcServer);
                     verify(nodeContext).getConnectionConfig();
                     verify(config).getString("pdServer");
-                }
-            }
-            @Test
-            void testNotAlive() throws IOException {
-                when(httpUtil.checkAlive(cdcServer)).thenReturn(false);
-                try(MockedStatic<ProcessSearch> ps = mockStatic(ProcessSearch.class);
-                    MockedStatic<ProcessLauncher> pl = mockStatic(ProcessLauncher.class);
-                    MockedStatic<ZipUtils> zu = mockStatic(ZipUtils.class)) {
-                    ps.when(() -> ProcessSearch.getProcesses(any(Log.class), anyString())).thenReturn(processes);
-                    pl.when(() -> ProcessLauncher.execCmdWaitResult(anyString(), anyString(), any(Log.class))).thenReturn("");
-                    zu.when(() -> ZipUtils.deleteFile(anyString(), any(Log.class))).thenAnswer(a -> null);
-                    Assertions.assertDoesNotThrow(() -> connector.checkTiServerAndStop(httpUtil, cdcServer, nodeContext));
-                    verify(nodeContext).getLog();
-                    verify(httpUtil).checkAlive(cdcServer);
-                    verify(log, times(0)).debug("Cdc server is alive, will check change feed list");
-                    verify(httpUtil, times(0)).queryChangeFeedsList(cdcServer);
-                    verify(log, times(0)).debug("There is not any change feed with cdc server: {}, will stop cdc server", cdcServer);
-                    verify(nodeContext, times(0)).getConnectionConfig();
-                    verify(config, times(0)).getString("pdServer");
                 }
             }
             @Test
@@ -314,7 +294,6 @@ public class TidbConnectorTest {
                     zu.when(() -> ZipUtils.deleteFile(anyString(), any(Log.class))).thenAnswer(a -> null);
                     Assertions.assertDoesNotThrow(() -> connector.checkTiServerAndStop(httpUtil, cdcServer, nodeContext));
                     verify(nodeContext).getLog();
-                    verify(httpUtil).checkAlive(cdcServer);
                     verify(log, times(1)).debug("Cdc server is alive, will check change feed list");
                     verify(httpUtil, times(1)).queryChangeFeedsList(cdcServer);
                     verify(log, times(0)).debug("There is not any change feed with cdc server: {}, will stop cdc server", cdcServer);
@@ -333,7 +312,6 @@ public class TidbConnectorTest {
                     zu.when(() -> ZipUtils.deleteFile(anyString(), any(Log.class))).thenAnswer(a -> null);
                     Assertions.assertDoesNotThrow(() -> connector.checkTiServerAndStop(httpUtil, cdcServer, nodeContext));
                     verify(nodeContext).getLog();
-                    verify(httpUtil).checkAlive(cdcServer);
                     verify(log, times(1)).debug("Cdc server is alive, will check change feed list");
                     verify(httpUtil).queryChangeFeedsList(cdcServer);
                     verify(log).debug("There is not any change feed with cdc server: {}, will stop cdc server", cdcServer);

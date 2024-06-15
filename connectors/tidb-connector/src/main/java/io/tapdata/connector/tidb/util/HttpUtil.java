@@ -41,12 +41,7 @@ public class HttpUtil implements AutoCloseable {
     public Boolean deleteChangeFeed(String changefeedId, String cdcUrl) throws IOException {
         String url = "http://" + cdcUrl + "/api/v2/changefeeds/" + changefeedId;
         HttpDelete httpDelete = new HttpDelete(url);
-        RequestConfig requestConfig = RequestConfig.custom()
-                .setConnectTimeout(10000)
-                .setConnectionRequestTimeout(10000)
-                .setSocketTimeout(10000)
-                .setRedirectsEnabled(true).build();
-        httpDelete.setConfig(requestConfig);
+        httpDelete.setConfig(config());
         try (
                 CloseableHttpResponse response = httpClient.execute(httpDelete)
         ) {
@@ -63,6 +58,7 @@ public class HttpUtil implements AutoCloseable {
     public Boolean createChangeFeed(ChangeFeed changefeed, String cdcUrl) throws IOException {
         String url = "http://" + cdcUrl + "/api/v2/changefeeds";
         HttpPost httpPost = new HttpPost(url);
+        httpPost.setConfig(config());
         SerializeConfig config = new SerializeConfig();
         config.propertyNamingStrategy = PropertyNamingStrategy.SnakeCase;
         httpPost.setEntity(new StringEntity(JSON.toJSONString(changefeed, config), "UTF-8"));
@@ -89,6 +85,7 @@ public class HttpUtil implements AutoCloseable {
     public int queryChangeFeedsList(String cdcUrl) throws IOException {
         String url = "http://" + cdcUrl + "/api/v2/changefeeds";
         HttpGet httpGet = new HttpGet(url);
+        httpGet.setConfig(config());
         try (
                 CloseableHttpResponse response = httpClient.execute(httpGet)
         ) {
@@ -108,12 +105,21 @@ public class HttpUtil implements AutoCloseable {
     public boolean checkAlive(String serverUrl) {
         String url = "http://" + serverUrl + "/api/v2/health";
         HttpGet httpGet = new HttpGet(url);
+        httpGet.setConfig(config());
         try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
             HttpEntity responseEntity = response.getEntity();
             return responseEntity != null && response.getStatusLine().getStatusCode() == 200;
         } catch (Exception e) {
             return false;
         }
+    }
+
+    protected RequestConfig config() {
+        return RequestConfig.custom()
+                .setConnectTimeout(10000)
+                .setConnectionRequestTimeout(10000)
+                .setSocketTimeout(10000)
+                .setRedirectsEnabled(true).build();
     }
 
     public void close() {

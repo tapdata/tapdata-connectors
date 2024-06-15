@@ -4,7 +4,8 @@
 请遵循以下说明以确保在 Tapdata 中成功添加和使用 TiDB 数据库以及成功部署TiKV服务以及以及PD服务
 
 ### **2. 支持版本**
-TiDB 5.4+
+
+ - TiDB 5.4+ 支持CDC (TiDB需部署在TapData内网（同网段）环境下)
 
 ### **3. 先决条件（作为源）**
 3.1配置连接示例
@@ -36,3 +37,10 @@ GRANT ALL PRIVILEGES ON <DATABASE_NAME>.<TABLE_NAME> TO 'user' IDENTIFIED BY 'pa
 ```
 GRANT PROCESS ON *.* TO 'user' IDENTIFIED BY 'password';
 ```
+
+### **5. 注意事项
+
+TiCDC只复制至少有一个有效索引的表。有效索引定义如下：
+
+ - 主键（primary key）是一个有效的索引。
+ - 如果索引的每一列都明确定义为不可为NULL（NOT NULL），并且索引没有虚拟生成列（虚拟生成列），则唯一索引（unique index）是有效的。
