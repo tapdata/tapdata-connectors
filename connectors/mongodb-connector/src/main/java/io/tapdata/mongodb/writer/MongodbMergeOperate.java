@@ -848,7 +848,6 @@ public class MongodbMergeOperate {
 		if (MapUtils.isEmpty(setDoc) || MapUtils.isEmpty(unsetDoc)) {
 			return setDoc;
 		}
-		Document filterSetDoc = new Document();
 		for (String key : unsetDoc.keySet()) {
 			setDoc.remove(key);
 			String[] split = key.split("\\.");
@@ -867,6 +866,6 @@ public class MongodbMergeOperate {
 				}
 			}
 		}
-		return filterSetDoc;
+		return setDoc;
 	}
 }
