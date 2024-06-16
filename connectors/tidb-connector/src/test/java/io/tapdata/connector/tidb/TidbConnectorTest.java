@@ -192,6 +192,7 @@ public class TidbConnectorTest {
                 when(connector.genericFeedId(kvMap)).thenReturn("feed-id");
                 when(nodeContext.getStateMap()).thenReturn(kvMap);
                 when(kvMap.get(ProcessHandler.CDC_SERVER)).thenReturn("");
+                doNothing().when(log).info(anyString(), anyString());
 
                 doCallRealMethod().when(connector).streamRead(nodeContext, tableList, offsetState, recordSize, consumer);
             }

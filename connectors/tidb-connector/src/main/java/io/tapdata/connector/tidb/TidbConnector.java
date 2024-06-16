@@ -182,6 +182,7 @@ public class TidbConnector extends CommonDbConnector {
     protected void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
         String feedId = genericFeedId(nodeContext.getStateMap());
         String cdcServer = String.valueOf(Optional.ofNullable(nodeContext.getStateMap().get(ProcessHandler.CDC_SERVER)).orElse("127.0.0.1:8300"));
+        nodeContext.getLog().info("Source timezone: {}", timezone.toZoneId().toString());
         ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
                 .withZone(timezone)
                 .withCdcServer(cdcServer)
