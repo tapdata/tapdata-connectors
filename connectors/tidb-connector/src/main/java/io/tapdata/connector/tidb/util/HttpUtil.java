@@ -15,6 +15,7 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
@@ -40,8 +41,7 @@ public class HttpUtil implements AutoCloseable {
 
     public Boolean deleteChangeFeed(String changefeedId, String cdcUrl) throws IOException {
         String url = "http://" + cdcUrl + "/api/v2/changefeeds/" + changefeedId;
-        HttpDelete httpDelete = new HttpDelete(url);
-        httpDelete.setConfig(config());
+        HttpDelete httpDelete = (HttpDelete) config(new HttpDelete(url));
         try (
                 CloseableHttpResponse response = httpClient.execute(httpDelete)
         ) {
@@ -57,8 +57,7 @@ public class HttpUtil implements AutoCloseable {
 
     public Boolean createChangeFeed(ChangeFeed changefeed, String cdcUrl) throws IOException {
         String url = "http://" + cdcUrl + "/api/v2/changefeeds";
-        HttpPost httpPost = new HttpPost(url);
-        httpPost.setConfig(config());
+        HttpPost httpPost = (HttpPost) config(new HttpPost(url));
         SerializeConfig config = new SerializeConfig();
         config.propertyNamingStrategy = PropertyNamingStrategy.SnakeCase;
         httpPost.setEntity(new StringEntity(JSON.toJSONString(changefeed, config), "UTF-8"));
@@ -84,8 +83,7 @@ public class HttpUtil implements AutoCloseable {
 
     public int queryChangeFeedsList(String cdcUrl) throws IOException {
         String url = "http://" + cdcUrl + "/api/v2/changefeeds";
-        HttpGet httpGet = new HttpGet(url);
-        httpGet.setConfig(config());
+        HttpGet httpGet = (HttpGet) config(new HttpGet(url));
         try (
                 CloseableHttpResponse response = httpClient.execute(httpGet)
         ) {
@@ -104,8 +102,7 @@ public class HttpUtil implements AutoCloseable {
 
     public boolean checkAlive(String serverUrl) {
         String url = "http://" + serverUrl + "/api/v2/health";
-        HttpGet httpGet = new HttpGet(url);
-        httpGet.setConfig(config());
+        HttpGet httpGet = (HttpGet) config(new HttpGet(url));
         try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
             HttpEntity responseEntity = response.getEntity();
             return responseEntity != null && response.getStatusLine().getStatusCode() == 200;
@@ -114,12 +111,16 @@ public class HttpUtil implements AutoCloseable {
         }
     }
 
-    protected RequestConfig config() {
-        return RequestConfig.custom()
-                .setConnectTimeout(10000)
-                .setConnectionRequestTimeout(10000)
-                .setSocketTimeout(10000)
-                .setRedirectsEnabled(true).build();
+    protected HttpRequestBase config(HttpRequestBase requestBase) {
+        RequestConfig.Builder custom = RequestConfig.custom();
+        custom.setConnectTimeout(10000);
+        custom.setConnectTimeout(10000);
+        custom.setConnectionRequestTimeout(10000);
+        custom.setSocketTimeout(10000);
+        custom.setRedirectsEnabled(true);
+        RequestConfig build = custom.build();
+        requestBase.setConfig(build);
+        return requestBase;
     }
 
     public void close() {
