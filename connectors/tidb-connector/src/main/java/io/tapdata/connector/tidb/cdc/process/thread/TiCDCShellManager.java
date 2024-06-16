@@ -50,8 +50,21 @@ public class TiCDCShellManager implements Activity {
         //do nothing
     }
 
+    protected void checkDir(String path) {
+        File logDir = new File(path);
+        if (!logDir.exists() && logDir.mkdirs()) {
+            log.debug("TiCDC file dir not exists, make dir succeed: {}", logDir.getAbsolutePath());
+            return;
+        }
+        if (logDir.isFile() && logDir.delete() && logDir.mkdirs()) {
+            log.debug("TiCDC file dir is file, after delete this file make dir succeed: {}", logDir.getAbsolutePath());
+        }
+    }
+
     @Override
     public void doActivity() {
+        checkDir(BASE_CDC_LOG_DIR);
+        checkDir(new File(shellConfig.localStrongPath).getAbsolutePath());
         synchronized (PROCESS_LOCK) {
             String runningCdcInfo = getAllRunningCdcInfo();
             try {

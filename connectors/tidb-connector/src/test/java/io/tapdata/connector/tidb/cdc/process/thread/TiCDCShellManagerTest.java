@@ -8,12 +8,18 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedConstruction;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import java.io.File;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TiCDCShellManagerTest {
@@ -132,6 +138,33 @@ class TiCDCShellManagerTest {
         @Test
         void testOther() {
             testOne("ddd", "cdc");
+        }
+    }
+    @Nested
+    class CheckFile {
+        @BeforeEach
+        void init() {
+            doNothing().when(log).debug(anyString(), anyString());
+            doCallRealMethod().when(manager).checkDir(anyString());
+        }
+        @Test
+        void test1() {
+            File f = new File("txt");
+            try {
+                f.mkdirs();
+                manager.checkDir("txt");
+            } finally {
+                f.delete();
+            }
+        }
+        @Test
+        void test2() {
+            File f = new File("txt");
+            try {
+                manager.checkDir("txt");
+            } finally {
+                f.delete();
+            }
         }
     }
 }
