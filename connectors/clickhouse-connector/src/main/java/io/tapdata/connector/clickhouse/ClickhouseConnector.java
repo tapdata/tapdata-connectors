@@ -32,6 +32,7 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
+import io.tapdata.util.DateUtil;
 import org.apache.commons.codec.binary.Base64;
 
 import java.sql.Date;
@@ -39,7 +40,6 @@ import java.sql.SQLException;
 import java.sql.Time;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.*;
@@ -60,6 +60,7 @@ public class ClickhouseConnector extends CommonDbConnector {
     private ExecutorService executorService;
     private Long lastMergeTime;
     private final Map<String, TapTable> tapTableMap = new ConcurrentHashMap<>();
+    private Map<String, String> dataFormatMap = new HashMap<>();
 
     @Override
     public void onStart(TapConnectionContext connectionContext) throws SQLException {
@@ -383,10 +384,15 @@ public class ClickhouseConnector extends CommonDbConnector {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(clickhouseConfig.getZoneId()));
                 } else if (value instanceof Time) {
                     entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(clickhouseConfig.getZoneId()));
-                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().equals("Date32")) {
+                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().startsWith("Date32")) {
                     entry.setValue(LocalDate.parse((String) value).atStartOfDay(clickhouseConfig.getZoneId()));
-                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().equals("DateTime64")) {
-                    entry.setValue(LocalDateTime.parse((String) value).atZone(clickhouseConfig.getZoneId()));
+                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().startsWith("DateTime64")) {
+                    String dataFormat = dataFormatMap.get(tapTable.getId() + "." + entry.getKey());
+                    if (EmptyKit.isNull(dataFormat)) {
+                        dataFormat = DateUtil.determineDateFormat((String) value);
+                        dataFormatMap.put(tapTable.getId() + "." + entry.getKey(), dataFormat);
+                    }
+                    entry.setValue(DateUtil.parseInstantWithZone((String) value, dataFormat, clickhouseConfig.getZoneId()));
                 }
             }
         }
