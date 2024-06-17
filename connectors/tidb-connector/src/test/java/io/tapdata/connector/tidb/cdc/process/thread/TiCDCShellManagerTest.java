@@ -8,12 +8,23 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
+
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class TiCDCShellManagerTest {
@@ -133,5 +144,56 @@ class TiCDCShellManagerTest {
         void testOther() {
             testOne("ddd", "cdc");
         }
+    }
+    @Nested
+    class CheckFile {
+        @BeforeEach
+        void init() {
+            doNothing().when(log).debug(anyString(), anyString());
+            doCallRealMethod().when(manager).checkDir(anyString());
+        }
+        @Test
+        void notExists() {
+            try(MockedStatic<java.nio.file.Files> fs = mockStatic(java.nio.file.Files.class)) {
+                fs.when(() -> java.nio.file.Files.exists(any(Path.class))).thenReturn(false);
+                fs.when(() -> java.nio.file.Files.createDirectories(any(Path.class))).thenReturn(mock(Path.class));
+                fs.when(() -> java.nio.file.Files.isDirectory(any(Path.class))).thenReturn(false);
+                fs.when(() -> java.nio.file.Files.delete(any(Path.class))).thenAnswer(a -> null);
+                Assertions.assertDoesNotThrow(() -> manager.checkDir("txt"));
+            }
+        }
+        @Test
+        void notDirectory() {
+            try(MockedStatic<java.nio.file.Files> fs = mockStatic(java.nio.file.Files.class)) {
+                fs.when(() -> java.nio.file.Files.exists(any(Path.class))).thenReturn(true);
+                fs.when(() -> java.nio.file.Files.createDirectories(any(Path.class))).thenReturn(mock(Path.class));
+                fs.when(() -> java.nio.file.Files.isDirectory(any(Path.class))).thenReturn(false);
+                fs.when(() -> java.nio.file.Files.delete(any(Path.class))).thenAnswer(a -> null);
+                Assertions.assertDoesNotThrow(() -> manager.checkDir("txt"));
+            }
+        }
+        @Test
+        void isDirectory() {
+            try(MockedStatic<java.nio.file.Files> fs = mockStatic(java.nio.file.Files.class)) {
+                fs.when(() -> java.nio.file.Files.exists(any(Path.class))).thenReturn(true);
+                fs.when(() -> java.nio.file.Files.createDirectories(any(Path.class))).thenReturn(mock(Path.class));
+                fs.when(() -> java.nio.file.Files.isDirectory(any(Path.class))).thenReturn(true);
+                fs.when(() -> java.nio.file.Files.delete(any(Path.class))).thenAnswer(a -> null);
+                Assertions.assertDoesNotThrow(() -> manager.checkDir("txt"));
+            }
+        }
+        @Test
+        void isDeleteFailed() {
+            try(MockedStatic<java.nio.file.Files> fs = mockStatic(java.nio.file.Files.class)) {
+                fs.when(() -> java.nio.file.Files.exists(any(Path.class))).thenReturn(true);
+                fs.when(() -> java.nio.file.Files.createDirectories(any(Path.class))).thenReturn(mock(Path.class));
+                fs.when(() -> java.nio.file.Files.isDirectory(any(Path.class))).thenReturn(false);
+                fs.when(() -> java.nio.file.Files.delete(any(Path.class))).thenAnswer(a -> {
+                    throw new IOException("");
+                });
+                Assertions.assertDoesNotThrow(() -> manager.checkDir("txt"));
+            }
+        }
+
     }
 }
