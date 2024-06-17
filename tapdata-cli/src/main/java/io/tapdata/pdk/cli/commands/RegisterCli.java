@@ -25,6 +25,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.output.WriterOutputStream;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.poi.ss.formula.functions.T;
+import org.voovan.tools.collection.ArraySet;
 import picocli.CommandLine;
 
 import java.io.ByteArrayInputStream;
@@ -307,14 +308,14 @@ public class RegisterCli extends CommonCli {
     }
 
     protected Collection<File> getAllJarFiles(File[] paths) {
-        Set<File> path = new HashSet<>();
+        List<File> path = new ArrayList<>();
         for (File s : paths) {
             fileTypeDirector(s, path);
         }
         return path;
     }
 
-    protected void fileTypeDirector(File f, Set<File> pathSet) {
+    protected void fileTypeDirector(File f, List<File> pathSet) {
         int i = fileType(f);
         switch (i) {
             case 1:

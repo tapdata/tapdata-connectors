@@ -1,15 +1,21 @@
 package io.tapdata.connector.tidb.util.pojo;
 
+import com.alibaba.fastjson.JSONObject;
+
 public class ChangeFeed {
     private Long startTs;
     private String sinkUri;
     // synchronize DDL
     private Boolean syncDdl;
-    private String changeFeedId;
+    private String changefeedId;
 
-    public String getChangeFeedId() {
-        return changeFeedId;
-    }
+    private ReplicaConfig replicaConfig;
+
+
+
+
+
+
 
     //Synchronize tables without valid indexes
     public Boolean forceReplicate;
@@ -38,9 +44,6 @@ public class ChangeFeed {
         this.forceReplicate = forceReplicate;
     }
 
-    public void setStarTs(Long startTs) {
-        this.startTs = startTs;
-    }
 
     public String getSinkUri() {
         return sinkUri;
@@ -62,17 +65,31 @@ public class ChangeFeed {
         this.sinkUri = sinkUri;
     }
 
+    public ReplicaConfig getReplicaConfig() {
+        return replicaConfig;
+    }
+
+    public void setReplicaConfig(ReplicaConfig replicaConfig) {
+        this.replicaConfig = replicaConfig;
+    }
+
+    public String getChangefeedId() {
+        return changefeedId;
+    }
+
+    public void setChangefeedId(String changefeedId) {
+        this.changefeedId = changefeedId;
+    }
+
+
 
     public ChangeFeed() {
     }
 
-    public void setChangeFeedId(String changeFeedId) {
-        this.changeFeedId = changeFeedId;
-    }
 
     public ChangeFeed(String sinkUri, Boolean syncDdl, String changeFeedId, Boolean ignoreIneligibleTable) {
         this.sinkUri = sinkUri;
         this.syncDdl = syncDdl;
-        this.changeFeedId = changeFeedId;
+        this.changefeedId = changeFeedId;
     }
 }

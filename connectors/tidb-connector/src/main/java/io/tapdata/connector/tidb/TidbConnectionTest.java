@@ -4,7 +4,6 @@ import com.alibaba.fastjson.JSONObject;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.common.ddl.DDLFactory;
 import io.tapdata.common.ddl.type.DDLParserType;
-import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.connector.mysql.constant.MysqlTestItem;
 import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.constant.ConnectionTypeEnum;
@@ -34,9 +33,8 @@ import static io.tapdata.base.ConnectorBase.testItem;
  * @author lemon
  */
 public class TidbConnectionTest extends CommonDbTest {
-    public static final String TAG = TidbConnectionTest.class.getSimpleName();
     private final TidbConfig tidbConfig;
-    private KafkaConfig kafkaConfig;
+    private static final String TI_DB_GC_LIFE_TIME = "TiCDC GC Life Time";
     private final static String PB_SERVER_SUCCESS = "Check PDServer host port is valid";
     private final static String IC_CONFIGURATION_ENABLED = " Check  Incremental is enable";
     protected static final String CHECK_DATABASE_PRIVILEGES_SQL = "SHOW GRANTS FOR CURRENT_USER";
@@ -55,27 +53,19 @@ public class TidbConnectionTest extends CommonDbTest {
 
     public TidbConnectionTest(TidbConfig tidbConfig, Consumer<TestItem> consumer, ConnectionOptions connectionOptions) {
         super(tidbConfig, consumer);
+        if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
+            testFunctionMap.put("testPbserver", this::testPbserver);
+            testFunctionMap.put("testGcLifeTime", this::testGcLifeTime);
+        }
+        testFunctionMap.put("testVersion", this::testVersion);
         this.tidbConfig = tidbConfig;
         this.connectionOptions = connectionOptions;
         jdbcContext = new TidbJdbcContext(tidbConfig);
     }
 
-    public void setKafkaConfig(KafkaConfig kafkaConfig) {
-        this.kafkaConfig = kafkaConfig;
-    }
 
     @Override
     public Boolean testOneByOne() {
-        if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
-            testFunctionMap.put("testPbserver", this::testPbserver);
-        }
-        testFunctionMap.put("testVersion", this::testVersion);
-        if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
-            TidbConfig tidbConfig = (TidbConfig) commonDbConfig;
-            if (tidbConfig.getEnableIncrement()) {
-                testFunctionMap.put("testKafkaHostPort", this::testKafkaHostPort);
-            }
-        }
         return super.testOneByOne();
     }
 
@@ -85,8 +75,11 @@ public class TidbConnectionTest extends CommonDbTest {
      * @return
      */
     public Boolean testPbserver() {
-        URI uri = URI.create("http://" + tidbConfig.getPdServer());
         try {
+            String pdServer = tidbConfig.getPdServer().startsWith("http") ?
+                    tidbConfig.getPdServer()
+                    : "http://" + tidbConfig.getPdServer();
+            URI uri = URI.create(pdServer);
             NetUtil.validateHostPortWithSocket(uri.getHost(), uri.getPort());
             consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_SUCCESSFULLY));
             return true;
@@ -94,7 +87,6 @@ public class TidbConnectionTest extends CommonDbTest {
             consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_FAILED, e.getMessage()));
             return false;
         }
-
     }
 
     @Override
@@ -224,6 +216,42 @@ public class TidbConnectionTest extends CommonDbTest {
         return false;
     }
 
+    protected Boolean testGcLifeTime() {
+        try {
+            String gcLifeTime = ((TidbJdbcContext) jdbcContext).queryGcLifeTime();
+            if (spilt(gcLifeTime)) {
+                consumer.accept(testItem(TI_DB_GC_LIFE_TIME, TestItem.RESULT_SUCCESSFULLY, gcLifeTime));
+            } else {
+                consumer.accept(testItem(TI_DB_GC_LIFE_TIME, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
+                        String.format("The current value is %s, the recommended value is 24h, which can be set through the command: SET GLOBAL tidb_gc_life_time = '24h'",
+                                gcLifeTime)
+                ));
+            }
+            return true;
+        } catch (Exception e) {
+            consumer.accept(testItem(TI_DB_GC_LIFE_TIME, TestItem.RESULT_FAILED, e.getMessage()));
+            return false;
+        }
+    }
+
+    protected boolean spilt(String gcLifeTime) {
+        String[] split = gcLifeTime.split("[a-z|A-Z]");
+        if (split.length <= 2) {
+            //3m0s
+            return false;
+        } else if (split.length > 3) {
+            //1d0h3m0s
+            return true;
+        }
+        //2h3m0s
+        String h = split[split.length - 3];
+        try {
+            //2h3m0s 32h3m0s
+            return Integer.parseInt(h) >= 24;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     @Override
     public Boolean testReadPrivilege() {
@@ -420,18 +448,6 @@ public class TidbConnectionTest extends CommonDbTest {
         }
     }
 
-    /**
-     * check kafka
-     */
 
-    public Boolean testKafkaHostPort() {
-        try (
-                TicdcKafkaService ticdcKafkaService = new TicdcKafkaService(kafkaConfig, tidbConfig);
-        ) {
-            TestItem testHostAndPort = ticdcKafkaService.testHostAndPort();
-            consumer.accept(testHostAndPort);
-            return testHostAndPort.getResult() != TestItem.RESULT_FAILED;
-        }
-    }
 
 }

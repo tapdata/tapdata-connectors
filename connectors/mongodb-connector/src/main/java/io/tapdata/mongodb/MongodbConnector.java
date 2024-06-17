@@ -66,6 +66,7 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
@@ -85,6 +86,7 @@ public class MongodbConnector extends ConnectorBase {
 	private static final int SAMPLE_SIZE_BATCH_SIZE = 1000;
 	public static final String COLLECTION_ID_FIELD = "_id";
 	public static final String TAG = MongodbConnector.class.getSimpleName();
+	public static final String UNIQUE_KEY = "unique";
 	private final AtomicBoolean isShutDown = new AtomicBoolean(false);
 	protected MongodbConfig mongoConfig;
 	protected MongoClient mongoClient;
@@ -118,6 +120,7 @@ public class MongodbConnector extends ConnectorBase {
 			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
 			exceptionCollector.collectReadPrivileges(e);
 			exceptionCollector.collectWritePrivileges(e);
+			throw e;
 		}
 		return collection;
 	}
@@ -512,6 +515,50 @@ public class MongodbConnector extends ConnectorBase {
 //        connectorFunctions.supportStreamOffset((connectorContext, tableList, offsetStartTime, offsetOffsetTimeConsumer) -> streamOffset(connectorContext, tableList, offsetStartTime, offsetOffsetTimeConsumer));
 		connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
 		connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
+		connectorFunctions.supportQueryIndexes(this::queryIndexes);
+	}
+
+	protected void queryIndexes(TapConnectorContext tapConnectorContext, TapTable tapTable, Consumer<List<TapIndex>> listConsumer) {
+		if (null == tapTable.getId()) {
+			throw new IllegalArgumentException("Table id cannot be empty");
+		}
+		MongoCollection<Document> collection = mongoDatabase.getCollection(tapTable.getId());
+		List<TapIndex> tapIndices = new ArrayList<>();
+		for (Document index : collection.listIndexes()) {
+			Object keyObj = index.get("key");
+			if (!(keyObj instanceof Document)) {
+				continue;
+			}
+			Document keys = (Document) keyObj;
+			TapIndex tapIndex = new TapIndex().name(index.getString("name"));
+			AtomicBoolean haveOid = new AtomicBoolean();
+			AtomicInteger keyCounter = new AtomicInteger();
+			keys.forEach((k, v) -> {
+				TapIndexField tapIndexField = new TapIndexField().name(k);
+				if (v instanceof Integer) {
+					tapIndexField.fieldAsc(v.equals(1));
+				} else {
+					tapIndexField.fieldAsc(true);
+				}
+				tapIndex.indexField(tapIndexField);
+				if (k.equals("_id")) {
+					haveOid.set(true);
+				}
+				keyCounter.incrementAndGet();
+			});
+			if (Boolean.TRUE.equals(index.get(UNIQUE_KEY))) {
+				tapIndex.unique(true);
+			} else {
+				tapIndex.unique(false);
+			}
+			if (haveOid.get() && keyCounter.get() == 1) {
+				// In MongoDB, each table has an index of _id, and it is unique.
+				// However, in the return value of listIndexes, the index does not have a unique attribute, so the number of keys in the _id index is used to determine whether it is an index of _id.
+				tapIndex.unique(true);
+			}
+			tapIndices.add(tapIndex);
+		}
+		listConsumer.accept(tapIndices);
 	}
 
 	private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
@@ -566,7 +613,7 @@ public class MongodbConnector extends ConnectorBase {
 		return createTableOptions;
 	}
 
-	private void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
+	protected void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
 		if (null == indexList || indexList.isEmpty()) return;
 		indexList.forEach(index -> {
 			log.info("find index: {}" + index.getName());
@@ -626,15 +673,10 @@ public class MongodbConnector extends ConnectorBase {
                 try {
                     targetCollection.createIndex(dIndex.get("key", Document.class), indexOptions);
                 } catch (Exception ignored) {
-                    exceptionCollector.collectTerminateByServer(ignored);
-                    exceptionCollector.collectWritePrivileges(ignored);
-                    TapLogger.warn(TAG, "create index failed 1: " + ignored.getMessage());
+                    log.warn("create index failed 1: " + ignored.getMessage());
                 }
             } catch (Exception ignored) {
-                exceptionCollector.collectTerminateByServer(ignored);
-                exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),ignored);
-                exceptionCollector.collectWritePrivileges(ignored);
-                TapLogger.warn(TAG, "create index failed 2: " + ignored.getMessage());
+                log.warn("create index failed 2: " + ignored.getMessage());
                 // TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
             }
 		});
@@ -780,7 +822,7 @@ public class MongodbConnector extends ConnectorBase {
 		}
 	}
 
-	private void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, Consumer<ExecuteResult> executeResultConsumer) {
+	protected void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, Consumer<ExecuteResult> executeResultConsumer) {
 		try {
 			Map<String, Object> executeObj = tapExecuteCommand.getParams();
 			String command = tapExecuteCommand.getCommand();
@@ -803,11 +845,11 @@ public class MongodbConnector extends ConnectorBase {
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
 			exceptionCollector.collectWritePrivileges(e);
-			executeResultConsumer.accept(new ExecuteResult<>().error(e));
+			throw e;
 		}
 	}
 
-	private FieldMinMaxValue queryFieldMinMaxValue(TapConnectorContext connectorContext, TapTable table, TapAdvanceFilter partitionFilter, String fieldName) {
+	protected FieldMinMaxValue queryFieldMinMaxValue(TapConnectorContext connectorContext, TapTable table, TapAdvanceFilter partitionFilter, String fieldName) {
 		MongoCollection<Document> collection = getMongoCollection(table.getId());
 		TapIndexEx partitionIndex = table.partitionIndex();
 		if (partitionIndex == null)
@@ -875,6 +917,7 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
+			throw e;
 		}
 		return fieldMinMaxValue;
 	}
@@ -1081,7 +1124,7 @@ public class MongodbConnector extends ConnectorBase {
 		return retryOptions;
 	}
 
-	private void createIndex(TapConnectorContext tapConnectorContext, TapTable table, TapCreateIndexEvent tapCreateIndexEvent) {
+	protected void createIndex(TapConnectorContext tapConnectorContext, TapTable table, TapCreateIndexEvent tapCreateIndexEvent) {
 		try {
 		final List<TapIndex> indexList = tapCreateIndexEvent.getIndexList();
 		if (CollectionUtils.isNotEmpty(indexList)) {
@@ -1093,6 +1136,9 @@ public class MongodbConnector extends ConnectorBase {
 
 				final List<TapIndexField> indexFields = tapIndex.getIndexFields();
 				if (CollectionUtils.isNotEmpty(indexFields)) {
+					if (indexFields.size() == 1 && "_id".equals(indexFields.stream().findFirst().get().getName())) {
+						continue;
+					}
 					final MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
 					Document keys = new Document();
 					for (TapIndexField indexField : indexFields) {
@@ -1113,16 +1159,13 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
 			exceptionCollector.throwWriteExIfNeed(null,e);
+			throw e;
 		}
 	}
 
 	private String memoryFetcher(List<String> mapKeys, String level) {
 		ParagraphFormatter paragraphFormatter = new ParagraphFormatter(MongodbConnector.class.getSimpleName());
-		try {
 		paragraphFormatter.addRow("MongoConfig", mongoConfig != null ? mongoConfig.getDatabase() : null);
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
-		}
 		return paragraphFormatter.toString();
 	}
 
@@ -1382,7 +1425,7 @@ public class MongodbConnector extends ConnectorBase {
 	 * @param connectorContext
 	 * @return
 	 */
-	private long batchCount(TapConnectorContext connectorContext, TapTable table) throws Throwable {
+	protected long batchCount(TapConnectorContext connectorContext, TapTable table) throws Throwable {
 //        MongoCollection<Document> collection = getMongoCollection(table.getId());
 //        return collection.countDocuments();
 		Long collectionNotAggregateCountByTableName = null;
@@ -1391,6 +1434,7 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
+			throw e;
 		}
 		return collectionNotAggregateCountByTableName;
 //		return getCollectionNotAggregateCountByTableName(mongoClient, mongoConfig.getDatabase(), table.getId(), null);
@@ -1564,6 +1608,7 @@ public class MongodbConnector extends ConnectorBase {
 			mongodbStreamReader.onStart(mongoConfig);
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
+			throw e;
 		}
 		return mongodbStreamReader;
 	}
@@ -1595,6 +1640,7 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
+			throw e;
 		}
 	}
 
@@ -1616,29 +1662,36 @@ public class MongodbConnector extends ConnectorBase {
 			mongodbWriter.onDestroy();
 			mongodbWriter = null;
 		}
+		closeOpLogThreadSource();
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
+			throw e;
 		}
-		closeOpLogThreadSource();
 	}
 	protected void closeOpLogThreadSource() {
 		try {
 			Optional.ofNullable(sourceRunnerFuture).ifPresent(f -> f.cancel(true));
 		} catch (Exception e) {
 			exceptionCollector.collectTerminateByServer(e);
+			throw e;
 		} finally {
 			sourceRunnerFuture = null;
+			shutdownSourceRunner();
 		}
+	}
+
+	private void shutdownSourceRunner() {
 		try {
 			Optional.ofNullable(sourceRunner).ifPresent(ThreadPoolExecutor::shutdown);
 		} catch (Exception e) {
 			exceptionCollector.collectTerminateByServer(e);
+			throw e;
 		} finally {
 			sourceRunner = null;
 		}
 	}
 
-	private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
+	protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
 		TableInfo tableInfo = new TableInfo();
 		try {
 			String database = mongoConfig.getDatabase();
@@ -1650,6 +1703,7 @@ public class MongodbConnector extends ConnectorBase {
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
+			throw e;
 		}
 		return tableInfo;
 	}

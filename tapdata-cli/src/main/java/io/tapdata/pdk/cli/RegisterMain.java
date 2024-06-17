@@ -95,7 +95,7 @@ public class RegisterMain {
 		LarkBitable(BASE_PATH + "connectors/dist/lark-bitable-connector-v1.0-SNAPSHOT.jar", "all", "lark-bitable"),
 		AzureCosmosDB(BASE_PATH + "connectors/dist/azure-cosmosdb-connector-v1.0-SNAPSHOT.jar","all","azure-cosmosdb"),
 		HuDi(BASE_PATH + "connectors/dist/hudi-connector-v1.0-SNAPSHOT.jar", "all", "hudi"),
-		HuaWeiOpenGaussDB(BASE_PATH + "connectors/dist/open-gaussdb-connector-v1.0-SNAPSHOT.jar", "all", "huawei-gauss-db")
+		HuaWeiOpenGaussDB(BASE_PATH + "connectors/dist/huawei-cloud-gaussdb-connector-v1.0-SNAPSHOT.jar", "all", "huawei-gauss-db")
 		;
 
 		private final String path;
