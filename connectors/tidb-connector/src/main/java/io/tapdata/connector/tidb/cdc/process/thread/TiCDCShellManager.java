@@ -13,6 +13,10 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 
 import java.io.File;
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -52,12 +56,20 @@ public class TiCDCShellManager implements Activity {
 
     protected void checkDir(String path) {
         File logDir = new File(path);
-        if (!logDir.exists() && logDir.mkdirs()) {
-            log.debug("TiCDC file dir not exists, make dir succeed: {}", logDir.getAbsolutePath());
-            return;
-        }
-        if (logDir.isFile() && logDir.delete() && logDir.mkdirs()) {
-            log.debug("TiCDC file dir is file, after delete this file make dir succeed: {}", logDir.getAbsolutePath());
+        Path toPath = logDir.toPath();
+        try {
+            if (!java.nio.file.Files.exists(toPath)) {
+                java.nio.file.Files.createDirectories(toPath);
+                log.debug("TiCDC file dir not exists, make dir succeed: {}", logDir.getAbsolutePath());
+                return;
+            }
+            if (!java.nio.file.Files.isDirectory(toPath)) {
+                java.nio.file.Files.delete(toPath);
+                java.nio.file.Files.createDirectories(toPath);
+                log.debug("TiCDC file dir is file, after delete this file make dir succeed: {}", logDir.getAbsolutePath());
+            }
+        } catch (IOException e) {
+            log.debug("TiCDC file dir is file, after delete this file make dir failed: {}", logDir.getAbsolutePath());
         }
     }
 

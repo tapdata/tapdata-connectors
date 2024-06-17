@@ -7,7 +7,7 @@ Please follow the instructions below to ensure that TiDB database is successfull
 
 ### **2. Supported versions**
 
- -TiDB 5.4+ Support CDC (TiDB needs to be deployed in the TapData intranet (same network segment) environment)
+ -TiDB version 5.4 or above support CDC (TiDB needs to be deployed in the TapData intranet (same network segment) environment)
 
 ### **3. Prerequisites (as source)**
 3.1 Example of configuration connection
