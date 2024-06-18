@@ -22,40 +22,8 @@
     <dependencies>
         <dependency>
             <groupId>io.tapdata</groupId>
-            <artifactId>postgres-core</artifactId>
+            <artifactId>vastbase-core</artifactId>
             <version>1.0-SNAPSHOT</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.postgresql</groupId>
-                    <artifactId>postgresql</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>io.debezium</groupId>
-                    <artifactId>debezium-connector-postgres</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>io.debezium</groupId>
-            <artifactId>debezium-connector-postgres</artifactId>
-            <version>${debezium.version}</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.postgresql</groupId>
-                    <artifactId>postgresql</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>io.tapdata</groupId>
-            <artifactId>postgres-connector</artifactId>
-            <version>1.0-SNAPSHOT</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>io.tapdata</groupId>
-                    <artifactId>postgres-core</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
         <dependency>
             <groupId>cn.com.vastdata</groupId>
