@@ -3,10 +3,15 @@ package io.tapdata.connector.doris;
 import cn.hutool.http.HttpUtil;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.doris.bean.DorisConfig;
+import io.tapdata.connector.doris.streamload.DorisStreamLoader;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.entity.TestItem;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.util.EntityUtils;
 
+import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -92,7 +97,17 @@ public class DorisTest extends CommonDbTest {
 
     protected Boolean testStreamLoadPrivilege() {
         try {
-            if (HttpUtil.get("http://" + ((DorisConfig) commonDbConfig).getDorisHttp()).contains("Doris</title>")) {
+            boolean testResult = false;
+            if (((DorisConfig) commonDbConfig).getUseHTTPS()) {
+                CloseableHttpClient client = io.tapdata.connector.doris.streamload.HttpUtil.generationHttpClient();
+                HttpGet httpGet = new HttpGet();
+                httpGet.setURI(new URI("https://" + ((DorisConfig) commonDbConfig).getDorisHttp()));
+                testResult=EntityUtils.toString(client.execute(httpGet).getEntity()).contains("Doris</title>");
+            } else {
+                testResult = HttpUtil.get("http://" + ((DorisConfig) commonDbConfig).getDorisHttp()).contains("Doris</title>");
+            }
+
+            if (testResult) {
                 consumer.accept(testItem(STREAM_WRITE, TestItem.RESULT_SUCCESSFULLY, "StreamLoad Service is available"));
             } else {
                 consumer.accept(testItem(STREAM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "port of StreamLoad Service is not right"));
