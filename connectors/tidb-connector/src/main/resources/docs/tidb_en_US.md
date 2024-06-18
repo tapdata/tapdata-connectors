@@ -12,13 +12,13 @@ Please follow the instructions below to ensure that TiDB database is successfull
     
     1. Please go to **https://tiup-mirrors.pingcap.com/cdc-v${ti-db-version}-linux-${system-architecture}.tar.gz** , Download the corresponding version of the incremental startup tool
        
-        - ti-db-version: The version corresponding to TiDB, for example: 8.0.0
+        - ${ti-db-version}: The version corresponding to TiDB, for example: 8.0.0
         
-        - system-architecture: Corresponding operating system architecture, such as amd64 or arm64
+        - ${system-architecture}: Corresponding operating system architecture, such as amd64 or arm64
     
     2. After downloading and decompressing, name it **cdc** and place it in the **{tapData_dir}/run-resource/ti-db/tool** environment directory
     
-**{engine dir}/run-resource/ti-db/tool/cdc** Must have read, write, and execute permissions
+**{tapDatadir}/run-resource/ti-db/tool/cdc** Must have read, write, and execute permissions
 
 ### **3. Prerequisites (as source)**
 3.1 Example of configuration connection
