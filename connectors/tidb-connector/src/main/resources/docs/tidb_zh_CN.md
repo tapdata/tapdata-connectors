@@ -11,9 +11,9 @@
     
     1. 请前往 ***https://tiup-mirrors.pingcap.com/cdc-v${ti-db-version}-linux-${system-architecture}.tar.gz*** ，下载对应版本的增量启动工具
     
-        - ti-db-version: TiDB对应的版本，例如：8.0.0
+        - ${ti-db-version}: TiDB对应的版本，例如：8.0.0
     
-        - system-architecture: 对应的操作系统架构，例如：amd64 或者 arm64
+        - ${system-architecture}: 对应的操作系统架构，例如：amd64 或者 arm64
     
     2. 下载后解压后命名成**cdc**，放置在 **{tapData_dir}/run-resource/ti-db/tool** 环境目录下
 
