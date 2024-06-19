@@ -206,15 +206,15 @@ public final class ProcessHandler implements Activity {
                 break;
             }
             createChangeFeed(httpUtil, changefeed, minOffset);
-            sleep();
+            sleep(3000L);
             waitTimes--;
         } while (!httpUtil.queryChangeFeedsList(shellManager.shellConfig.cdcServerIpPort, processInfo.feedId));
     }
 
-    protected void sleep() {
+    protected void sleep(long time) {
         try {
             //sleep 1s to wait start process complete
-            Thread.sleep(3000);
+            Thread.sleep(time);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
