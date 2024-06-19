@@ -65,7 +65,7 @@ class ProcessSearchTest {
             try {
                 System.setProperty("os.name", "nix");
                 String cmd = ProcessSearch.getSearchCommand(log, "cmd");
-                Assertions.assertEquals("ps -e | grep cmd | grep -v grep ", cmd);
+                Assertions.assertEquals("ps -ef | grep cmd | grep -v grep ", cmd);
             } finally {
                 System.setProperty("os.name", property);
                 Assertions.assertEquals(property, System.getProperty("os.name"));
@@ -77,7 +77,7 @@ class ProcessSearchTest {
             try {
                 System.setProperty("os.name", "nux");
                 String cmd = ProcessSearch.getSearchCommand(log, "cmd");
-                Assertions.assertEquals("ps -e | grep cmd | grep -v grep ", cmd);
+                Assertions.assertEquals("ps -ef | grep cmd | grep -v grep ", cmd);
             } finally {
                 System.setProperty("os.name", property);
                 Assertions.assertEquals(property, System.getProperty("os.name"));
@@ -89,7 +89,7 @@ class ProcessSearchTest {
             try {
                 System.setProperty("os.name", "mac");
                 String cmd = ProcessSearch.getSearchCommand(log, "cmd");
-                Assertions.assertEquals("ps -e | grep cmd | grep -v grep ", cmd);
+                Assertions.assertEquals("ps -ef | grep cmd | grep -v grep ", cmd);
             } finally {
                 System.setProperty("os.name", property);
                 Assertions.assertEquals(property, System.getProperty("os.name"));
@@ -114,7 +114,7 @@ class ProcessSearchTest {
             try {
                 System.setProperty("os.name", "mac");
                 String cmd = ProcessSearch.getSearchCommand(log, "cmd", "cmd");
-                Assertions.assertEquals("ps -e | awk cmd && cmd", cmd);
+                Assertions.assertEquals("ps -ef | awk cmd && cmd", cmd);
             } finally {
                 System.setProperty("os.name", property);
                 Assertions.assertEquals(property, System.getProperty("os.name"));
@@ -126,7 +126,7 @@ class ProcessSearchTest {
             try {
                 System.setProperty("os.name", "mac");
                 String cmd = ProcessSearch.getSearchCommand(log);
-                Assertions.assertEquals("ps -e", cmd);
+                Assertions.assertEquals("ps -ef", cmd);
             } finally {
                 System.setProperty("os.name", property);
                 Assertions.assertEquals(property, System.getProperty("os.name"));
@@ -138,7 +138,7 @@ class ProcessSearchTest {
             try {
                 System.setProperty("os.name", "mac");
                 String cmd = ProcessSearch.getSearchCommand(log, null);
-                Assertions.assertEquals("ps -e", cmd);
+                Assertions.assertEquals("ps -ef", cmd);
             } finally {
                 System.setProperty("os.name", property);
                 Assertions.assertEquals(property, System.getProperty("os.name"));
