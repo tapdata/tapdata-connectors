@@ -195,5 +195,66 @@ class TiCDCShellManagerTest {
             }
         }
 
+        @Nested
+        class testPermission {
+            File file;
+            @BeforeEach
+            void init() {
+                file = mock(File.class);
+                when(file.getAbsolutePath()).thenReturn("");
+                doCallRealMethod().when(manager).permission(file);
+                doNothing().when(log).warn(anyString(), anyString());
+                when(file.canRead()).thenReturn(false, true);
+                when(file.setReadable(true)).thenReturn(true);
+
+                when(file.canWrite()).thenReturn(false, true);
+                when(file.setWritable(true)).thenReturn(true);
+
+                when(file.canExecute()).thenReturn(false, true);
+                when(file.setExecutable(true)).thenReturn(true);
+            }
+            @Test
+            void testNormal() {
+                Assertions.assertDoesNotThrow(() -> manager.permission(file));
+            }
+            @Test
+            void test1() {
+                when(file.canRead()).thenReturn(false, false);
+                Assertions.assertDoesNotThrow(() -> manager.permission(file));
+            }
+            @Test
+            void test2() {
+                when(file.canWrite()).thenReturn(false, false);
+                Assertions.assertDoesNotThrow(() -> manager.permission(file));
+            }
+            @Test
+            void test3() {
+                when(file.canExecute()).thenReturn(false, false);
+                Assertions.assertDoesNotThrow(() -> manager.permission(file));
+            }
+
+            @Test
+            void test11() {
+                when(file.canRead()).thenReturn(true, false);
+                Assertions.assertDoesNotThrow(() -> manager.permission(file));
+            }
+            @Test
+            void test21() {
+                when(file.canWrite()).thenReturn(true, false);
+                Assertions.assertDoesNotThrow(() -> manager.permission(file));
+            }
+            @Test
+            void test31() {
+                when(file.canExecute()).thenReturn(true, false);
+                Assertions.assertDoesNotThrow(() -> manager.permission(file));
+            }
+            @Test
+            void test4() {
+                when(file.setReadable(true)).thenAnswer(a -> {
+                    throw new Exception("");
+                });
+                Assertions.assertDoesNotThrow(() -> manager.permission(file));
+            }
+        }
     }
 }

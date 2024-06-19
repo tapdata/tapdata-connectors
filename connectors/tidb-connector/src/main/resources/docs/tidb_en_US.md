@@ -2,12 +2,23 @@
 
 ### **1. TiDB installation instructions**
 
-
 Please follow the instructions below to ensure that TiDB database is successfully.as well as successful deployment of TiKV service and PD service
 
 ### **2. Supported versions**
 
- -TiDB version 5.4 or above support CDC (TiDB needs to be deployed in the TapData intranet (same network segment) environment)
+ - TiDB version above 5.4.0 and below 8.0.0 support CDC
+ 
+ - If TiDB version 8.0.0 or above needs to support CDC:
+    
+    1. Please go to **https://tiup-mirrors.pingcap.com/cdc-v${ti-db-version}-linux-${system-architecture}.tar.gz** , Download the corresponding version of the incremental startup tool
+       
+        - ${ti-db-version}: The version corresponding to TiDB, for example: 8.0.0
+        
+        - ${system-architecture}: Corresponding operating system architecture, such as amd64 or arm64
+    
+    2. After downloading and decompressing, name it **cdc** and place it in the **{tapData_dir}/run-resource/ti-db/tool** environment directory
+    
+**{tapDatadir}/run-resource/ti-db/tool/cdc** Must have read, write, and execute permissions
 
 ### **3. Prerequisites (as source)**
 3.1 Example of configuration connection
@@ -47,8 +58,10 @@ GRANT PROCESS ON *.* TO 'user' IDENTIFIED BY 'password';
 
 ### **5.Attention
 
+1. TiDB needs to be deployed in the TapData intranet (same network segment) environment
 
-TiCDC only replicates tables that have at least one valid index. A valid index is defined as follows:
+2. TiCDC only replicates tables with at least one valid primary key index. A valid index is defined as follows:
 ﻿
- - A primary key (PRIMARY KEY) is a valid index.
- - A unique index (UNIQUE INDEX) is valid if every column of the index is explicitly defined as non-nullable (NOT NULL) and the index does not have a virtual generated column (VIRTUAL GENERATED COLUMNS).
+    - A primary key (PRIMARY KEY) is a valid index
+    
+    - A unique index (UNIQUE INDEX) is valid if every column of the index is explicitly defined as non-nullable (NOT NULL) and the index does not have a virtual generated column (VIRTUAL GENERATED COLUMNS)
