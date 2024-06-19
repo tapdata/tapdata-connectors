@@ -18,8 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mockStatic;
 
@@ -190,6 +189,48 @@ class MongodbMergeOperateTest {
 					mergeFilter
 			);
 			assertEquals(3, mergeResults.size());
+		}
+	}
+
+	@Nested
+	@DisplayName("Method filterSetDocByUnsetDoc test")
+	class filterSetDocByUnsetDocTest {
+		@Test
+		@DisplayName("main process test")
+		void test1() {
+			Document setDoc = new Document()
+					.append("id", 1)
+					.append("name", "test")
+					.append("desc.city", "shanghai")
+					.append("sub1", new Document())
+					.append("sub2", new Document("f1", "test"));
+			Document unsetDoc = new Document()
+					.append("desc.city", true)
+					.append("sub1.f1", true)
+					.append("sub2.f1", true);
+			Document actual = MongodbMergeOperate.filterSetDocByUnsetDoc(setDoc, unsetDoc);
+			assertSame(actual, setDoc);
+			assertEquals(3, actual.size());
+			assertTrue(actual.containsKey("id"));
+			assertTrue(actual.containsKey("name"));
+			assertTrue(actual.containsKey("sub2"));
+		}
+
+		@Test
+		@DisplayName("input set doc is null")
+		void test2() {
+			Document actual = MongodbMergeOperate.filterSetDocByUnsetDoc(null, new Document());
+			assertNull(actual);
+		}
+
+		@Test
+		@DisplayName("input unset doc is null")
+		void test3() {
+			Document setDoc = new Document()
+					.append("id", 1)
+					.append("name", "test");
+			Document actual = MongodbMergeOperate.filterSetDocByUnsetDoc(setDoc, null);
+			assertEquals(setDoc, actual);
 		}
 	}
 }
