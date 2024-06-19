@@ -14,9 +14,7 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -236,7 +234,25 @@ public class TiCDCShellManager implements Activity {
             if (!cdcTool.exists() || !cdcTool.isFile()) {
                 log.error("TiCDC must not start normally, TiCDC server depends on {}, make sure this file in you file system", cdcTool.getAbsolutePath());
             }
+        } else {
+            log.info("File {} exists, will use {} to execute and start TiCDC server",
+                    file.getAbsolutePath());
         }
+        permission(file);
+    }
+
+    protected void permission(File file) {
+        try {
+            if (!file.canRead()) file.setReadable(true);
+            if (!file.canWrite()) file.setWritable(true);
+            if (!file.canExecute()) file.setExecutable(true);
+        } catch (Exception e) {
+            log.warn("Auto set permission failed,  message: {}", e.getMessage());
+        }
+
+        if (!file.canRead()) log.warn("File {} requires read permission, but lacks this permission", file.getAbsolutePath());
+        if (!file.canWrite()) log.warn("File {} requires write permission, but lacks this permission", file.getAbsolutePath());
+        if (!file.canExecute()) log.warn("File {} requires execute permission, but lacks this permission", file.getAbsolutePath());
     }
 
     protected String cdcFileName() {
