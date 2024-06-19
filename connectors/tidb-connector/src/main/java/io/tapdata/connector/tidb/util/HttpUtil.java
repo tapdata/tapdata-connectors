@@ -67,6 +67,7 @@ public class HttpUtil implements AutoCloseable {
         ) {
             HttpEntity responseEntity = response.getEntity();
             if (responseEntity != null && response.getStatusLine().getStatusCode() == 200) {
+                tapLogger.debug("Create change feed succeed, request body: {}", EntityUtils.toString(responseEntity));
                 tapLogger.info("Create change feed succeed, change feed id: {}", changefeed.getChangefeedId());
                 return true;
             } else {
