@@ -36,9 +36,24 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * @Description:
  */
 @Slf4j
-public class UploadFileService {
+public class UploadFileService implements Uploader {
+  boolean latest;
+  String hostAndPort;
+  String accessCode;
+  String ak;
+  String sk;
+  PrintUtil printUtil;
 
-  public static void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, boolean latest, String hostAndPort, String accessCode, String ak, String sk, PrintUtil printUtil) {
+  public UploadFileService(PrintUtil printUtil, String hostAndPort, String ak, String sk, String accessCode, boolean latest) {
+    this.printUtil = printUtil;
+    this.latest = latest;
+    this.hostAndPort = hostAndPort;
+    this.ak = ak;
+    this.sk = sk;
+    this.accessCode = accessCode;
+  }
+
+  public void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons) {
 
     boolean cloud = StringUtils.isNotBlank(ak);
 

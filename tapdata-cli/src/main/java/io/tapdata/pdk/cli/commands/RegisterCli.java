@@ -11,7 +11,9 @@ import io.tapdata.pdk.apis.entity.Capability;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.spec.TapNodeSpecification;
 import io.tapdata.pdk.cli.CommonCli;
+import io.tapdata.pdk.cli.services.UploadFileService;
 import io.tapdata.pdk.cli.services.UploadServiceWithProcess;
+import io.tapdata.pdk.cli.services.Uploader;
 import io.tapdata.pdk.cli.utils.PrintUtil;
 import io.tapdata.pdk.core.connector.TapConnector;
 import io.tapdata.pdk.core.connector.TapConnectorManager;
@@ -81,10 +83,15 @@ public class RegisterCli extends CommonCli {
     @CommandLine.Option(names = {"-X", "--X"}, required = false, description = "Output detailed logs, true or false")
     private boolean showAllMessage = false;
 
+    @CommandLine.Option(names = {"-p", "--P"}, required = false, description = "Need show upload speed of progress")
+    private boolean showProcess = false;
 
     public Integer execute() throws Exception {
+        long registerStart = System.currentTimeMillis();
         printUtil = new PrintUtil(showAllMessage);
-        UploadServiceWithProcess uploadService = new UploadServiceWithProcess(printUtil, tmUrl, ak, sk, authToken, latest);
+        Uploader uploadService = showProcess ?
+                new UploadServiceWithProcess(printUtil, tmUrl, ak, sk, authToken, latest)
+                : new UploadFileService(printUtil, tmUrl, ak, sk, authToken, latest);
         List<String> filterTypes = generateSkipTypes();
         if (!filterTypes.isEmpty()) {
             printUtil.print(PrintUtil.TYPE.TIP, String.format("* Starting to register data sources, plan to skip data sources that are not within the registration scope.\n* The types of data sources that need to be registered are: %s", filterTypes));
@@ -94,205 +101,209 @@ public class RegisterCli extends CommonCli {
         StringJoiner unUploaded = new StringJoiner("\n");
         files = getAllJarFile(files);
         try {
-            CommonUtils.setProperty("refresh_local_jars", "true");
-            PrintStream out = System.out;
             try {
-                System.setOut(new PrintStream(new ByteArrayOutputStream() {
-                    @Override
-                    public void write(int b) {
-                        if (showAllMessage) {
-                            super.write(b);
-                        }
-                    }
-                }));
-                TapConnectorManager.getInstance().start(Arrays.asList(files));
-            } finally {
-                System.setOut(out);
-            }
-
-            try {
-                printUtil.print(PrintUtil.TYPE.INFO, "Register connector to: " + tmUrl);
-                for (File file : files) {
-                    printUtil.print(PrintUtil.TYPE.APPEND, String.format("* Register Connector: %s  Starting", file.getName()));
-                    List<String> jsons = new ArrayList<>();
-                    TapConnector connector = TapConnectorManager.getInstance().getTapConnectorByJarName(file.getName());
-                    Collection<TapNodeInfo> tapNodeInfoCollection = connector.getTapNodeClassFactory().getConnectorTapNodeInfos();
-                    Map<String, InputStream> inputStreamMap = new HashMap<>();
-                    boolean needUpload = true;
-                    String connectionType = "";
-                    for (TapNodeInfo nodeInfo : tapNodeInfoCollection) {
-                        TapNodeSpecification specification = nodeInfo.getTapNodeSpecification();
-                        String authentication = specification.getManifest().get("Authentication");
-                        connectionType = authentication;
-                        if (needSkip(authentication, filterTypes)) {
-                            needUpload = false;
-                            printUtil.print(PrintUtil.TYPE.IGNORE, String.format("... Skipped with (%s)", connectionType));
-                            break;
-                        }
-                        needUpload = true;
-                        String iconPath = specification.getIcon();
-                        if (StringUtils.isNotBlank(iconPath)) {
-                            InputStream is = nodeInfo.readResource(iconPath);
-                            if (is != null) {
-                                inputStreamMap.put(iconPath, is);
+                CommonUtils.setProperty("refresh_local_jars", "true");
+                PrintStream out = System.out;
+                try {
+                    System.setOut(new PrintStream(new ByteArrayOutputStream() {
+                        @Override
+                        public void write(int b) {
+                            if (showAllMessage) {
+                                super.write(b);
                             }
                         }
+                    }));
+                    TapConnectorManager.getInstance().start(Arrays.asList(files));
+                } finally {
+                    System.setOut(out);
+                }
 
-                        JSONObject o = (JSONObject) JSON.toJSON(specification);
-                        DataSourceQCType qcType = DataSourceQCType.parse(specification.getManifest().get("Authentication"));
-                        qcType = (null == qcType) ? DataSourceQCType.Alpha : qcType;
-                        o.put("qcType", qcType);
+                try {
+                    printUtil.print(PrintUtil.TYPE.INFO, "Register connector to: " + tmUrl);
+                    for (File file : files) {
+                        printUtil.print(PrintUtil.TYPE.APPEND, String.format("* Register Connector: %s  Starting", file.getName()));
+                        List<String> jsons = new ArrayList<>();
+                        TapConnector connector = TapConnectorManager.getInstance().getTapConnectorByJarName(file.getName());
+                        Collection<TapNodeInfo> tapNodeInfoCollection = connector.getTapNodeClassFactory().getConnectorTapNodeInfos();
+                        Map<String, InputStream> inputStreamMap = new HashMap<>();
+                        boolean needUpload = true;
+                        String connectionType = "";
+                        for (TapNodeInfo nodeInfo : tapNodeInfoCollection) {
+                            TapNodeSpecification specification = nodeInfo.getTapNodeSpecification();
+                            String authentication = specification.getManifest().get("Authentication");
+                            connectionType = authentication;
+                            if (needSkip(authentication, filterTypes)) {
+                                needUpload = false;
+                                printUtil.print(PrintUtil.TYPE.IGNORE, String.format("... Skipped with (%s)", connectionType));
+                                break;
+                            }
+                            needUpload = true;
+                            String iconPath = specification.getIcon();
+                            if (StringUtils.isNotBlank(iconPath)) {
+                                InputStream is = nodeInfo.readResource(iconPath);
+                                if (is != null) {
+                                    inputStreamMap.put(iconPath, is);
+                                }
+                            }
 
-                        String pdkAPIVersion = specification.getManifest().get("PDK-API-Version");
-                        int pdkAPIBuildNumber = CommonUtils.getPdkBuildNumer(pdkAPIVersion);
-                        o.put("pdkAPIVersion", pdkAPIVersion);
-                        o.put("pdkAPIBuildNumber", pdkAPIBuildNumber);
-                        o.put("beta", "beta".equals(authentication));
-                        String nodeType = null;
-                        switch (nodeInfo.getNodeType()) {
-                            case TapNodeInfo.NODE_TYPE_SOURCE:
-                                nodeType = "source";
-                                break;
-                            case TapNodeInfo.NODE_TYPE_SOURCE_TARGET:
-                                nodeType = "source_and_target";
-                                break;
-                            case TapNodeInfo.NODE_TYPE_TARGET:
-                                nodeType = "target";
-                                break;
-                            case TapNodeInfo.NODE_TYPE_PROCESSOR:
-                                nodeType = "processor";
-                                break;
-                            default:
-                                throw new IllegalArgumentException("Unknown node type " + nodeInfo.getNodeType());
-                        }
-                        o.put("type", nodeType);
-                        // get the version info and group info from jar
-                        o.put("version", nodeInfo.getNodeClass().getPackage().getImplementationVersion());
-                        o.put("group", nodeInfo.getNodeClass().getPackage().getImplementationVendor());
+                            JSONObject o = (JSONObject) JSON.toJSON(specification);
+                            DataSourceQCType qcType = DataSourceQCType.parse(specification.getManifest().get("Authentication"));
+                            qcType = (null == qcType) ? DataSourceQCType.Alpha : qcType;
+                            o.put("qcType", qcType);
 
-                        TapNodeContainer nodeContainer = JSON.parseObject(IOUtils.toString(nodeInfo.readResource(nodeInfo.getNodeClass().getAnnotation(TapConnectorClass.class).value())), TapNodeContainer.class);
-                        if (nodeContainer.getDataTypes() == null) {
-                            try (InputStream dataTypeInputStream = this.getClass().getClassLoader().getResourceAsStream("default-data-types.json")) {
-                                if (dataTypeInputStream != null) {
-                                    String dataTypesJson = org.apache.commons.io.IOUtils.toString(dataTypeInputStream, StandardCharsets.UTF_8);
-                                    if (StringUtils.isNotBlank(dataTypesJson)) {
-                                        TapNodeContainer container = InstanceFactory.instance(JsonParser.class).fromJson(dataTypesJson, TapNodeContainer.class);
-                                        if (container != null && container.getDataTypes() != null)
-                                            nodeContainer.setDataTypes(container.getDataTypes());
+                            String pdkAPIVersion = specification.getManifest().get("PDK-API-Version");
+                            int pdkAPIBuildNumber = CommonUtils.getPdkBuildNumer(pdkAPIVersion);
+                            o.put("pdkAPIVersion", pdkAPIVersion);
+                            o.put("pdkAPIBuildNumber", pdkAPIBuildNumber);
+                            o.put("beta", "beta".equals(authentication));
+                            String nodeType = null;
+                            switch (nodeInfo.getNodeType()) {
+                                case TapNodeInfo.NODE_TYPE_SOURCE:
+                                    nodeType = "source";
+                                    break;
+                                case TapNodeInfo.NODE_TYPE_SOURCE_TARGET:
+                                    nodeType = "source_and_target";
+                                    break;
+                                case TapNodeInfo.NODE_TYPE_TARGET:
+                                    nodeType = "target";
+                                    break;
+                                case TapNodeInfo.NODE_TYPE_PROCESSOR:
+                                    nodeType = "processor";
+                                    break;
+                                default:
+                                    throw new IllegalArgumentException("Unknown node type " + nodeInfo.getNodeType());
+                            }
+                            o.put("type", nodeType);
+                            // get the version info and group info from jar
+                            o.put("version", nodeInfo.getNodeClass().getPackage().getImplementationVersion());
+                            o.put("group", nodeInfo.getNodeClass().getPackage().getImplementationVendor());
+
+                            TapNodeContainer nodeContainer = JSON.parseObject(IOUtils.toString(nodeInfo.readResource(nodeInfo.getNodeClass().getAnnotation(TapConnectorClass.class).value())), TapNodeContainer.class);
+                            if (nodeContainer.getDataTypes() == null) {
+                                try (InputStream dataTypeInputStream = this.getClass().getClassLoader().getResourceAsStream("default-data-types.json")) {
+                                    if (dataTypeInputStream != null) {
+                                        String dataTypesJson = org.apache.commons.io.IOUtils.toString(dataTypeInputStream, StandardCharsets.UTF_8);
+                                        if (StringUtils.isNotBlank(dataTypesJson)) {
+                                            TapNodeContainer container = InstanceFactory.instance(JsonParser.class).fromJson(dataTypesJson, TapNodeContainer.class);
+                                            if (container != null && container.getDataTypes() != null)
+                                                nodeContainer.setDataTypes(container.getDataTypes());
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Map<String, Object> messsages = nodeContainer.getMessages();
-                        String replacePath = null;//"replace_default";
-                        Map<String, Object> replaceConfig = needReplaceKeyWords(nodeInfo, replacePath);
-                        if (messsages != null) {
-                            Set<String> keys = messsages.keySet();
-                            for (String key : keys) {
-                                if (!key.equalsIgnoreCase("default")) {
-                                    Map<String, Object> messagesForLan = (Map<String, Object>) messsages.get(key);
-                                    if (messagesForLan != null) {
-                                        Object docPath = messagesForLan.get("doc");
-                                        if (docPath instanceof String) {
-                                            String docPathStr = (String) docPath;
-                                            if (!inputStreamMap.containsKey(docPathStr)) {
-                                                Optional.ofNullable(nodeInfo.readResource(docPathStr)).ifPresent(stream -> {
-                                                    InputStream inputStream = stream;
-                                                    if (null != replaceConfig) {
-                                                        Scanner scanner = null;
-                                                        try {
-                                                            scanner = new Scanner(stream, "UTF-8");
-                                                            StringBuilder docTxt = new StringBuilder();
-                                                            while (scanner.hasNextLine()) {
-                                                                docTxt.append(scanner.nextLine()).append("\n");
-                                                            }
-                                                            String finalTxt = docTxt.toString();
-                                                            for (Map.Entry<String, Object> entry : replaceConfig.entrySet()) {
-                                                                finalTxt = finalTxt.replaceAll(entry.getKey(), String.valueOf(entry.getValue()));
-                                                            }
-                                                            inputStream = new ByteArrayInputStream(finalTxt.getBytes(StandardCharsets.UTF_8));
-                                                        } catch (Exception e) {
-                                                        } finally {
+                            Map<String, Object> messsages = nodeContainer.getMessages();
+                            String replacePath = null;//"replace_default";
+                            Map<String, Object> replaceConfig = needReplaceKeyWords(nodeInfo, replacePath);
+                            if (messsages != null) {
+                                Set<String> keys = messsages.keySet();
+                                for (String key : keys) {
+                                    if (!key.equalsIgnoreCase("default")) {
+                                        Map<String, Object> messagesForLan = (Map<String, Object>) messsages.get(key);
+                                        if (messagesForLan != null) {
+                                            Object docPath = messagesForLan.get("doc");
+                                            if (docPath instanceof String) {
+                                                String docPathStr = (String) docPath;
+                                                if (!inputStreamMap.containsKey(docPathStr)) {
+                                                    Optional.ofNullable(nodeInfo.readResource(docPathStr)).ifPresent(stream -> {
+                                                        InputStream inputStream = stream;
+                                                        if (null != replaceConfig) {
+                                                            Scanner scanner = null;
                                                             try {
-                                                                if (null != scanner) scanner.close();
-                                                            } catch (Exception ignore) {
+                                                                scanner = new Scanner(stream, "UTF-8");
+                                                                StringBuilder docTxt = new StringBuilder();
+                                                                while (scanner.hasNextLine()) {
+                                                                    docTxt.append(scanner.nextLine()).append("\n");
+                                                                }
+                                                                String finalTxt = docTxt.toString();
+                                                                for (Map.Entry<String, Object> entry : replaceConfig.entrySet()) {
+                                                                    finalTxt = finalTxt.replaceAll(entry.getKey(), String.valueOf(entry.getValue()));
+                                                                }
+                                                                inputStream = new ByteArrayInputStream(finalTxt.getBytes(StandardCharsets.UTF_8));
+                                                            } catch (Exception e) {
+                                                            } finally {
+                                                                try {
+                                                                    if (null != scanner) scanner.close();
+                                                                } catch (Exception ignore) {
+                                                                }
                                                             }
                                                         }
-                                                    }
-                                                    inputStreamMap.put(docPathStr, inputStream);
-                                                });
+                                                        inputStreamMap.put(docPathStr, inputStream);
+                                                    });
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
-                        }
-                        o.put("expression", JSON.toJSONString(nodeContainer.getDataTypes()));
-                        if (nodeContainer.getMessages() != null) {
-                            o.put("messages", nodeContainer.getMessages());
-                        }
+                            o.put("expression", JSON.toJSONString(nodeContainer.getDataTypes()));
+                            if (nodeContainer.getMessages() != null) {
+                                o.put("messages", nodeContainer.getMessages());
+                            }
 
-                        io.tapdata.pdk.apis.TapConnector connector1 = (io.tapdata.pdk.apis.TapConnector) nodeInfo.getNodeClass().getConstructor().newInstance();
-                        ConnectorFunctions connectorFunctions = new ConnectorFunctions();
-                        TapCodecsRegistry codecRegistry = new TapCodecsRegistry();
-                        connector1.registerCapabilities(connectorFunctions, codecRegistry);
+                            io.tapdata.pdk.apis.TapConnector connector1 = (io.tapdata.pdk.apis.TapConnector) nodeInfo.getNodeClass().getConstructor().newInstance();
+                            ConnectorFunctions connectorFunctions = new ConnectorFunctions();
+                            TapCodecsRegistry codecRegistry = new TapCodecsRegistry();
+                            connector1.registerCapabilities(connectorFunctions, codecRegistry);
 
-                        List<Capability> capabilities = connectorFunctions.getCapabilities();
-                        DataMap dataMap = nodeContainer.getConfigOptions();
-                        if (dataMap != null) {
-                            List<Map<String, Object>> capabilityList = (List<Map<String, Object>>) dataMap.get("capabilities");
+                            List<Capability> capabilities = connectorFunctions.getCapabilities();
+                            DataMap dataMap = nodeContainer.getConfigOptions();
+                            if (dataMap != null) {
+                                List<Map<String, Object>> capabilityList = (List<Map<String, Object>>) dataMap.get("capabilities");
 
-                            if (CollectionUtils.isNotEmpty(capabilityList)) {
-                                for (Map<String, Object> capabilityFromSpec : capabilityList) {
-                                    String capabilityId = (String) capabilityFromSpec.get("id");
-                                    if (capabilityId != null) {
-                                        List<String> alternatives = (List<String>) capabilityFromSpec.get("alternatives");
-                                        capabilities.add(Capability.create(capabilityId).alternatives(alternatives).type(Capability.TYPE_OTHER));
+                                if (CollectionUtils.isNotEmpty(capabilityList)) {
+                                    for (Map<String, Object> capabilityFromSpec : capabilityList) {
+                                        String capabilityId = (String) capabilityFromSpec.get("id");
+                                        if (capabilityId != null) {
+                                            List<String> alternatives = (List<String>) capabilityFromSpec.get("alternatives");
+                                            capabilities.add(Capability.create(capabilityId).alternatives(alternatives).type(Capability.TYPE_OTHER));
+                                        }
                                     }
+                                }
+
+                                Map<String, Object> supportDDL = (Map<String, Object>) dataMap.get("supportDDL");
+                                if (supportDDL != null) {
+                                    List<String> ddlEvents = (List<String>) supportDDL.get("events");
+                                    if (ddlEvents != null) {
+                                        for (String ddlEvent : ddlEvents) {
+                                            capabilities.add(Capability.create(ddlEvent).type(Capability.TYPE_DDL));
+                                        }
+                                    }
+                                }
+
+                            }
+                            if (CollectionUtils.isNotEmpty(capabilities)) {
+                                o.put("capabilities", capabilities);
+                                if (null != dataMap) {
+                                    dataMap.remove("capabilities");
                                 }
                             }
 
-                            Map<String, Object> supportDDL = (Map<String, Object>) dataMap.get("supportDDL");
-                            if (supportDDL != null) {
-                                List<String> ddlEvents = (List<String>) supportDDL.get("events");
-                                if (ddlEvents != null) {
-                                    for (String ddlEvent : ddlEvents) {
-                                        capabilities.add(Capability.create(ddlEvent).type(Capability.TYPE_DDL));
-                                    }
-                                }
-                            }
-
-                        }
-                        if (CollectionUtils.isNotEmpty(capabilities)) {
-                            o.put("capabilities", capabilities);
-                            if (null != dataMap) {
-                                dataMap.remove("capabilities");
-                            }
+                            Map<Class<?>, String> tapTypeDataTypeMap = codecRegistry.getTapTypeDataTypeMap();
+                            o.put("tapTypeDataTypeMap", JSON.toJSONString(tapTypeDataTypeMap));
+                            String jsonString = o.toJSONString();
+                            jsons.add(jsonString);
                         }
 
-                        Map<Class<?>, String> tapTypeDataTypeMap = codecRegistry.getTapTypeDataTypeMap();
-                        o.put("tapTypeDataTypeMap", JSON.toJSONString(tapTypeDataTypeMap));
-                        String jsonString = o.toJSONString();
-                        jsons.add(jsonString);
+                        if (!needUpload) {
+                            unUploaded.add(String.format("\t- %s's source types is [%s]", file.getName(), connectionType));
+                            continue;
+                        }
+                        if (file.isFile()) {
+                            printUtil.print(PrintUtil.TYPE.INFO, " => uploading ");
+                            uploadService.upload(inputStreamMap, file, jsons);
+                            printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s | (%s) Completed", file.getName(), connectionType));
+                        } else {
+                            printUtil.print(PrintUtil.TYPE.DEBUG, "File " + file + " doesn't exists");
+                            printUtil.print(PrintUtil.TYPE.DEBUG, file.getName() + " registered failed");
+                        }
                     }
-
-                    if (!needUpload) {
-                        unUploaded.add(String.format("\t- %s's source types is [%s]", file.getName(), connectionType));
-                        continue;
-                    }
-                    if (file.isFile()) {
-                        printUtil.print(PrintUtil.TYPE.INFO, " => uploading ");
-                        uploadService.upload(inputStreamMap, file, jsons);
-                        printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s | (%s) Completed", file.getName(), connectionType));
-                    } else {
-                        printUtil.print(PrintUtil.TYPE.DEBUG, "File " + file + " doesn't exists");
-                        printUtil.print(PrintUtil.TYPE.DEBUG, file.getName() + " registered failed");
+                } finally {
+                    if (unUploaded.toString().length() > 0) {
+                        printUtil.print(PrintUtil.TYPE.DEBUG, String.format("[INFO] Some connector that are not in the scope are registered this time: \n%s\nThe data connector type that needs to be registered is: %s\n", unUploaded.toString(), filterTypes));
                     }
                 }
             } finally {
-                if (unUploaded.toString().length() > 0) {
-                    printUtil.print(PrintUtil.TYPE.DEBUG, String.format("[INFO] Some connector that are not in the scope are registered this time: \n%s\nThe data connector type that needs to be registered is: %s\n", unUploaded.toString(), filterTypes));
-                }
+                printUtil.print(PrintUtil.TYPE.INFO, "Register all connector cost time: " + String.format("%.2fs", ((System.currentTimeMillis() - registerStart) / 1000.00)));
             }
             System.exit(0);
         } catch (Throwable throwable) {

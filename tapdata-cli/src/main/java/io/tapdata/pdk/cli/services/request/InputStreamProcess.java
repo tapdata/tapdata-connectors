@@ -52,13 +52,13 @@ public class InputStreamProcess extends ProgressRequestBody<InputStream> {
 
     @Override
     public void writeTo(BufferedSink sink) throws IOException {
-        long totalBytes = contentLength;
-        byte[] buffer = new byte[1024];
-        long uploadedBytes = 0;
+        //long totalBytes = contentLength;
+        byte[] buffer = new byte[10240];
+        //long uploadedBytes = 0;
         int bytesRead;
         while ((bytesRead = file.read(buffer)) != -1) {
             sink.write(buffer, 0, bytesRead);
-            uploadedBytes += bytesRead;
+            //uploadedBytes += bytesRead;
             //progressListener.onProgress(fileName, uploadedBytes, totalBytes, printUtil);
         }
     }
