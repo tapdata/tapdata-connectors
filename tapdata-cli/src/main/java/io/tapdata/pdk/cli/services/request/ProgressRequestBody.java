@@ -36,22 +36,15 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
             int progressWidth = 50;
             double progress = (double) uploadedBytes / totalBytes;
             int progressInWidth = (int) (progress * progressWidth);
-            StringBuilder builder = new StringBuilder("\r  [");
-            boolean start = false;
+            StringBuilder builder = new StringBuilder("\r  ⎢");
             for (int i = 0; i < progressWidth; i++) {
                 if (i < progressInWidth) {
-                    builder.append("=");
+                    builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) █|@"));
                 } else {
-                    if (!start) {
-                        builder.append("➤");
-                        start = true;
-                        continue;
-                    }
-                    if (i < progressWidth - 1)
-                        builder.append(" ");
+                    builder.append(" ");
                 }
             }
-            builder.append("] ").append(top).append(" ");
+            builder.append("⎥ ").append(top).append(" ");
             String ps = CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) " +String.format("%.2f%%\r", progress * 100) + "|@");
             builder.append(ps);
             printUtil.print0(builder.toString());

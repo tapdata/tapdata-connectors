@@ -2,6 +2,7 @@ package io.tapdata.pdk.cli.services.request;
 
 import io.tapdata.pdk.cli.utils.PrintUtil;
 import okio.BufferedSink;
+import picocli.CommandLine;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -25,7 +26,10 @@ public class FileProcess extends ProgressRequestBody<File> {
             byte[] buffer = new byte[1024];
             long uploadedBytes = 0;
             int bytesRead;
-            String[] tops = new String[]{"⌾", "✔︎"};
+            String[] tops = new String[]{
+                CommandLine.Help.Ansi.AUTO.string("@|bold,fg(196) ⌾|@"),
+                CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) ✔|@︎")
+            };
             while ((bytesRead = fis.read(buffer)) != -1) {
                 sink.write(buffer, 0, bytesRead);
                 uploadedBytes += bytesRead;
