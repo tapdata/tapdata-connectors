@@ -4,6 +4,7 @@ import org.apache.http.Header;
 import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
 import org.apache.http.ProtocolException;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.TrustAllStrategy;
 import org.apache.http.impl.client.*;
@@ -19,6 +20,7 @@ import javax.net.ssl.SSLContext;
  * @Date 7/14/22
  */
 public class HttpUtil {
+    public static final int CONNECT_TIMEOUT = 120000;
     private final HttpClientBuilder httpClientBuilder = HttpClients
             .custom()
             .setRedirectStrategy(new DefaultRedirectStrategy() {
@@ -66,6 +68,12 @@ public class HttpUtil {
                     }
                 }
             });
+            RequestConfig requestConfig = RequestConfig.custom()
+                    .setConnectTimeout(CONNECT_TIMEOUT)
+                    .setConnectionRequestTimeout(CONNECT_TIMEOUT)
+                    .setSocketTimeout(CONNECT_TIMEOUT)
+                    .build();
+            custom.setDefaultRequestConfig(requestConfig);
             CloseableHttpClient httpClient = custom
                     .build();
             return httpClient;
