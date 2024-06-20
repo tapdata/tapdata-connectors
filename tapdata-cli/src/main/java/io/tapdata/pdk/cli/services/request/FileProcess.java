@@ -28,7 +28,7 @@ public class FileProcess extends ProgressRequestBody<File> {
             int bytesRead;
             String[] tops = new String[]{
                 CommandLine.Help.Ansi.AUTO.string("@|bold,fg(196) ⌾|@"),
-                CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) ✔|@︎")
+                CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) ✔|@")
             };
             while ((bytesRead = fis.read(buffer)) != -1) {
                 sink.write(buffer, 0, bytesRead);

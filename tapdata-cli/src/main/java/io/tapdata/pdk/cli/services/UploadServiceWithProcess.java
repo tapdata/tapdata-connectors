@@ -26,6 +26,7 @@ import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -229,12 +230,13 @@ public class UploadServiceWithProcess {
 
         try (Response response = client.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                System.err.println("Upload failed: " + response);
+                printUtil.print(PrintUtil.TYPE.ERROR, "Upload failed: " + response);
                 return;
             }
             result(response.body().string(), file.getName());
         } catch (IOException e) {
-            e.printStackTrace();
+            printUtil.print(PrintUtil.TYPE.WARN, e.getMessage());
+            printUtil.print(PrintUtil.TYPE.DEBUG, Arrays.toString(e.getStackTrace()));
         }
     }
 
