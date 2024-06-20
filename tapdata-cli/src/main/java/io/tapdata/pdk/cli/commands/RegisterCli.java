@@ -11,7 +11,7 @@ import io.tapdata.pdk.apis.entity.Capability;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.spec.TapNodeSpecification;
 import io.tapdata.pdk.cli.CommonCli;
-import io.tapdata.pdk.cli.services.UploadFileService;
+import io.tapdata.pdk.cli.services.UploadServiceWithProcess;
 import io.tapdata.pdk.cli.utils.PrintUtil;
 import io.tapdata.pdk.core.connector.TapConnector;
 import io.tapdata.pdk.core.connector.TapConnectorManager;
@@ -22,10 +22,7 @@ import io.tapdata.pdk.core.utils.CommonUtils;
 import io.tapdata.pdk.core.utils.IOUtils;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.io.output.WriterOutputStream;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.poi.ss.formula.functions.T;
-import org.voovan.tools.collection.ArraySet;
 import picocli.CommandLine;
 
 import java.io.ByteArrayInputStream;
@@ -33,12 +30,19 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.PrintStream;
-import java.io.Writer;
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Scanner;
+import java.util.Set;
+import java.util.StringJoiner;
 
 @CommandLine.Command(
         description = "Push PDK jar file into TM",
@@ -80,6 +84,7 @@ public class RegisterCli extends CommonCli {
 
     public Integer execute() throws Exception {
         printUtil = new PrintUtil(showAllMessage);
+        UploadServiceWithProcess uploadService = new UploadServiceWithProcess(printUtil, tmUrl, ak, sk, authToken, latest);
         List<String> filterTypes = generateSkipTypes();
         if (!filterTypes.isEmpty()) {
             printUtil.print(PrintUtil.TYPE.TIP, String.format("* Starting to register data sources, plan to skip data sources that are not within the registration scope.\n* The types of data sources that need to be registered are: %s", filterTypes));
@@ -277,7 +282,7 @@ public class RegisterCli extends CommonCli {
                     }
                     if (file.isFile()) {
                         printUtil.print(PrintUtil.TYPE.INFO, " => uploading ");
-                        UploadFileService.upload(inputStreamMap, file, jsons, latest, tmUrl, authToken, ak, sk, printUtil);
+                        uploadService.upload(inputStreamMap, file, jsons);
                         printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s | (%s) Completed", file.getName(), connectionType));
                     } else {
                         printUtil.print(PrintUtil.TYPE.DEBUG, "File " + file + " doesn't exists");

@@ -47,6 +47,13 @@ public class PrintUtil {
         System.out.println(message);
     }
 
+    public void print0(String message) {
+        System.out.print(message);
+    }
+    public void print1(String message, Object params) {
+        System.out.printf(message, params);
+    }
+
     public enum TYPE {
         WARN,
         DEBUG,
