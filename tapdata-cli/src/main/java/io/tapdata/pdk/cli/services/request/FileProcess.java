@@ -34,41 +34,38 @@ public class FileProcess extends ProgressRequestBody<File> {
             long uploadedBytes = 0;
             int bytesRead;
             int step = logTimes;
-            long onceStart = start;
-            String realTime = null;
             while ((bytesRead = fis.read(buffer)) != -1) {
                 sink.write(buffer, 0, bytesRead);
-                try {
-                    uploadedBytes += bytesRead;
-                    if (step > 0) {
-                        step--;
-                        continue;
-                    }
-                    realTime = calculate(onceStart, bytesRead);
-                    progressListener.onProgress(tops[0], calculate(start, uploadedBytes), realTime, uploadedBytes, totalBytes, printUtil);
-                    step = logTimes;
-                } finally {
-                    onceStart = System.nanoTime();
+                uploadedBytes += bytesRead;
+                if (step > 0) {
+                    step--;
+                    continue;
                 }
+                double avg = avg(start, uploadedBytes);
+                progressListener.onProgress(tops[0], withUint(avg, 0), calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
+                step = logTimes;
             }
-            if (null == realTime) {
-                realTime = calculate(start, totalBytes);
-            }
-            progressListener.onProgress(tops[1], calculate(start, totalBytes), realTime, uploadedBytes, totalBytes, printUtil);
+            double avg = avg(start, totalBytes);
+            progressListener.onProgress(tops[1], withUint(avg, 0), "", uploadedBytes, totalBytes, printUtil);
         }
         printUtil.print(PrintUtil.TYPE.TIP, "\n  this connector file upload succeed, next will upload doc and icon, please wait");
     }
 
-    protected String calculate(long start, long uploadedBytes) {
+    protected double avg(long start, long uploadedBytes) {
         long now = System.nanoTime() - start;
-        return withUint((uploadedBytes * 1.00) / now * 1000000000, 0);
+        return (uploadedBytes * 1000000000.000000000D) / now;
     }
 
+    protected String calculate(double avg, long uploadedBytes, long total) {
+        long surplus = total - uploadedBytes;
+        double surplusTime = surplus / avg;
+        return String.format("%.2fs", surplusTime);
+    }
 
     protected String withUint(double number, int unitIndex) {
-        long newNumber = ((Double)number).longValue() >> 10;
+        double newNumber = number / 1024;
         if (unitIndex < UNIT.length - 1 && newNumber > 1) {
-            return withUint(number / 1024, unitIndex + 1);
+            return withUint(newNumber, unitIndex + 1);
         }
         return String.format("%.2f", number) + UNIT[unitIndex];
     }

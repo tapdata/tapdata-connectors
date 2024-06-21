@@ -32,7 +32,7 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
     public abstract void writeTo(BufferedSink sink) throws IOException;
 
     interface ProgressListener {
-        default void onProgress(String top, String avg, String inTime, long uploadedBytes, long totalBytes, PrintUtil printUtil) {
+        default void onProgress(String top, String avg, String surplus, long uploadedBytes, long totalBytes, PrintUtil printUtil) {
             int progressWidth = 50;
             double progress = (double) uploadedBytes / totalBytes;
             int progressInWidth = (int) (progress * progressWidth);
@@ -46,7 +46,7 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
             }
             builder.append("⎥ ").append(top).append(" ");
             String ps = CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) " + String.format("%.2f%%", progress * 100) + "|@");
-            builder.append(ps).append(" IO-speed: ").append(inTime).append(" | Avg-speed: ").append(avg).append("\r");
+            builder.append(ps).append(" Avg-speed: ").append(avg).append(" | Remaining-time： ").append(surplus).append("\r");
             printUtil.print0(builder.toString());
         }
     }
