@@ -46,7 +46,11 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
             }
             builder.append("⎥ ").append(top).append(" ");
             String ps = CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) " + String.format("%.2f%%", progress * 100) + "|@");
-            builder.append(ps).append(" Avg-speed: ").append(avg).append(" | Remaining-time： ").append(surplus).append("\r");
+            builder.append(ps).append(" Avg-speed: ").append(avg);
+            if (null != surplus) {
+                builder.append(" | Remaining-time： ").append(surplus);
+            }
+            builder.append("\r");
             printUtil.print0(builder.toString());
         }
     }

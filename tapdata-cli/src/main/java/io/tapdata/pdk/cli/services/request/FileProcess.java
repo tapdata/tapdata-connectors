@@ -46,7 +46,7 @@ public class FileProcess extends ProgressRequestBody<File> {
                 step = logTimes;
             }
             double avg = avg(start, totalBytes);
-            progressListener.onProgress(tops[1], withUint(avg, 0), "", uploadedBytes, totalBytes, printUtil);
+            progressListener.onProgress(tops[1], withUint(avg, 0), null, uploadedBytes, totalBytes, printUtil);
         }
         printUtil.print(PrintUtil.TYPE.TIP, "\n  this connector file upload succeed, next will upload doc and icon, please wait");
     }
