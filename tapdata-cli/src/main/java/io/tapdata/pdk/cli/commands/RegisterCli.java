@@ -45,6 +45,8 @@ import java.util.Optional;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 @CommandLine.Command(
         description = "Push PDK jar file into TM",
@@ -113,9 +115,10 @@ public class RegisterCli extends CommonCli {
                             }
                         }
                     }));
-                    TapConnectorManager.getInstance().start(Arrays.asList(files));
+                    loadJar(files, out, System.out);
                 } finally {
                     System.setOut(out);
+                    printUtil.print0("\rAll submitted connectors from file system load completed " + CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) ⎷ |@") + "\n");
                 }
 
                 try {
@@ -292,6 +295,17 @@ public class RegisterCli extends CommonCli {
                             printUtil.print(PrintUtil.TYPE.INFO, " => uploading ");
                             uploadService.upload(inputStreamMap, file, jsons);
                             printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s | (%s) Completed", file.getName(), connectionType));
+                            Collection<String> strings = connector.associatingIds();
+                            new Thread(() -> {
+                                for (String id : strings) {
+                                    try {
+                                        TapConnectorManager.getInstance().releaseAssociateId(id);
+                                    } catch (Exception e) {
+                                        System.out.println(e.getMessage());
+                                        printUtil.print(PrintUtil.TYPE.DEBUG, "Release associate" + id + " failed, message: " + e.getMessage());
+                                    }
+                                }
+                            }).start();
                         } else {
                             printUtil.print(PrintUtil.TYPE.DEBUG, "File " + file + " doesn't exists");
                             printUtil.print(PrintUtil.TYPE.DEBUG, file.getName() + " registered failed");
@@ -315,6 +329,73 @@ public class RegisterCli extends CommonCli {
             System.exit(-1);
         }
         return 0;
+    }
+
+    protected void load(List<File> f, PrintStream out, PrintStream newOut) {
+        final AtomicBoolean over = new AtomicBoolean(false);
+        new Thread(() -> {
+            try {
+                TapConnectorManager.getInstance().start(f);
+            } finally {
+                over.compareAndSet(false, true);
+            }
+        }).start();
+        int a = 0;
+        printUtil.print0("\n");
+        while (!over.get()) {
+            StringBuilder builder = new StringBuilder("\rLoading all submitted connectors from file system, please wait ");
+            if (a > 3) {
+                a = 0;
+            }
+            switch (a) {
+                case 0: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) / |@")); break;
+                case 1: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) - |@")); break;
+                case 2: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) \\ |@")); break;
+                case 3: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) | |@")); break;
+            }
+            a++;
+            builder.append("\r");
+            synchronized (this) {
+                try {
+                    System.setOut(out);
+                    printUtil.print0(builder.toString());
+                } finally {
+                    System.setOut(newOut);
+                }
+            }
+            try {
+                Thread.sleep(500);
+            } catch (Exception e) {}
+        }
+    }
+
+    protected void loadJar(File[] f, PrintStream out, PrintStream newOut) {
+        if (f.length / 20 > 1) {
+            load(Arrays.asList(f), out, newOut);
+            return;
+        }
+        List<List<File>> arr = spilt(f, 20);
+        load(arr.get(0), out, newOut);
+        new Thread(() -> {
+            for (int index = 1; index < arr.size(); index++) {
+                TapConnectorManager.getInstance().start(arr.get(index));
+            }
+        }).start();
+    }
+
+    protected List<List<File>> spilt(File[] f, int eachCount) {
+        int size = f.length / eachCount + (f.length % eachCount > 0 ? 1 : 0);
+        List<List<File>> arr = new ArrayList<>();
+        int index = 0;
+        for (int x = 0; x < size; x++) {
+            List<File> fx = new ArrayList<>();
+            arr.add(fx);
+            for (int y = 0; y < eachCount; y++) {
+                fx.add(f[index]);
+                index++;
+            }
+        }
+        return arr;
     }
 
     public File[] getAllJarFile(File[] paths) {

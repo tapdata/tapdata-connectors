@@ -53,7 +53,7 @@ public class InputStreamProcess extends ProgressRequestBody<InputStream> {
     @Override
     public void writeTo(BufferedSink sink) throws IOException {
         //long totalBytes = contentLength;
-        byte[] buffer = new byte[10240];
+        byte[] buffer = new byte[2048];
         //long uploadedBytes = 0;
         int bytesRead;
         while ((bytesRead = file.read(buffer)) != -1) {
