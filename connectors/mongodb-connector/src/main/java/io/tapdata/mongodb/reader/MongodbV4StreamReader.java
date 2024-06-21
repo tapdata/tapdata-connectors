@@ -14,6 +14,7 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
 import io.tapdata.exception.TapPdkRetryableEx;
+import io.tapdata.exception.TapRuntimeException;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
@@ -305,15 +306,13 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 			for(String tableName : tableList){
 				try {
 					openChangeStream(tableName);
-				}catch (Exception e){
-					if(e instanceof MongoException ){
-						if (((MongoException) e).getCode() == 26){
-							mongoDatabase.createCollection(tableName);
-							openChangeStream(tableName);
-							return;
-						}
+				}catch (MongoException e){
+					if (e.getCode() == 26){
+						mongoDatabase.createCollection(tableName);
+						openChangeStream(tableName);
+						return;
 					}
-					throw new RuntimeException(tableName+" failed to enable changeStreamPreAndPostImages",e);
+					throw new MongoException(tableName + " failed to enable changeStreamPreAndPostImages", e);
 				}
 			}
 		}

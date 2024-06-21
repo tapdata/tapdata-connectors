@@ -74,7 +74,7 @@ class MongodbV4StreamReaderTest {
 		void testError(){
 			MongoException mongoException = new MongoException(27,"error");
 			when(mongoDatabase.runCommand(any())).thenThrow(mongoException);
-			Assertions.assertThrows(RuntimeException.class,()->mongodbV4StreamReader.openChangeStreamPreAndPostImages(Arrays.asList("test")));
+			Assertions.assertThrows(MongoException.class,()->mongodbV4StreamReader.openChangeStreamPreAndPostImages(Arrays.asList("test")));
 		}
 
 	}
