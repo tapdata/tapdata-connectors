@@ -115,7 +115,7 @@ public class RegisterCli extends CommonCli {
                             }
                         }
                     }));
-                    loadJar(files, out, System.out);
+                    load(Arrays.asList(files), out, System.out);
                 } finally {
                     System.setOut(out);
                     printUtil.print0("\rAll submitted connectors from file system load completed " + CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) ⎷ |@") + "\n");
@@ -367,35 +367,6 @@ public class RegisterCli extends CommonCli {
                 Thread.sleep(500);
             } catch (Exception e) {}
         }
-    }
-
-    protected void loadJar(File[] f, PrintStream out, PrintStream newOut) {
-        if (f.length / 20 > 1) {
-            load(Arrays.asList(f), out, newOut);
-            return;
-        }
-        List<List<File>> arr = spilt(f, 20);
-        load(arr.get(0), out, newOut);
-        new Thread(() -> {
-            for (int index = 1; index < arr.size(); index++) {
-                TapConnectorManager.getInstance().start(arr.get(index));
-            }
-        }).start();
-    }
-
-    protected List<List<File>> spilt(File[] f, int eachCount) {
-        int size = f.length / eachCount + (f.length % eachCount > 0 ? 1 : 0);
-        List<List<File>> arr = new ArrayList<>();
-        int index = 0;
-        for (int x = 0; x < size; x++) {
-            List<File> fx = new ArrayList<>();
-            arr.add(fx);
-            for (int y = 0; y < eachCount; y++) {
-                fx.add(f[index]);
-                index++;
-            }
-        }
-        return arr;
     }
 
     public File[] getAllJarFile(File[] paths) {
