@@ -8,6 +8,7 @@ import com.tapdata.tm.sdk.auth.Signer;
 import com.tapdata.tm.sdk.util.Base64Util;
 import com.tapdata.tm.sdk.util.IOUtil;
 import com.tapdata.tm.sdk.util.SignUtil;
+import io.tapdata.pdk.cli.services.request.ProcessGroupInfo;
 import io.tapdata.pdk.cli.utils.HttpRequest;
 import io.tapdata.pdk.cli.utils.OkHttpUtils;
 import io.tapdata.pdk.cli.utils.PrintUtil;
@@ -32,6 +33,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -60,7 +62,10 @@ public class UploadFileService implements Uploader {
   }
 
   public void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
-
+    final AtomicBoolean lock = new AtomicBoolean(false);
+    ProcessGroupInfo groupInfo = new ProcessGroupInfo(lock);
+    groupInfo.setPrintUtil(printUtil);
+    groupInfo.addTotalBytes(file.length());
     boolean cloud = StringUtils.isNotBlank(ak);
 
 
@@ -127,19 +132,20 @@ public class UploadFileService implements Uploader {
       for (Map.Entry<String, InputStream> entry : inputStreamMap.entrySet()) {
         String k = entry.getKey();
         InputStream v = entry.getValue();
+        byte[] in_b = new byte[0];
+        try {
+          in_b = IOUtil.readInputStream(v);
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+        v = new ByteArrayInputStream(in_b);
         if (cloud) {
-          byte[] in_b = new byte[0];
-          try {
-            in_b = IOUtil.readInputStream(v);
-          } catch (IOException e) {
-            throw new RuntimeException(e);
-          }
-          v = new ByteArrayInputStream(in_b);
           digest.update("file".getBytes(UTF_8));
           digest.update(k.getBytes(UTF_8));
           digest.update(in_b);
           inputStreamMap.put(k, v);
         }
+        groupInfo.addTotalBytes(in_b.length);
       }
     }
 
@@ -201,7 +207,7 @@ public class UploadFileService implements Uploader {
       url = hostAndPort + "/api/pdk/upload/source?access_token=" + token;
       request = new HttpRequest(url, method);
     }
-    request.connectTimeout(30000).readTimeout(30000);//连接超时设置
+    request.connectTimeout(300000).readTimeout(300000);//连接超时设置
     if (file != null) {
       request.part("file", file.getName(), "application/java-archive", file);
     }
@@ -226,7 +232,12 @@ public class UploadFileService implements Uploader {
     }    // whether replace the latest version
     request.part("latest", latestString);
 
-    String response = request.body();
+    String response;
+    try {
+      response = request.body();
+    } finally {
+      groupInfo.getLock().compareAndSet(false, true);
+    }
 
     Map map = JSON.parseObject(response, Map.class);
 

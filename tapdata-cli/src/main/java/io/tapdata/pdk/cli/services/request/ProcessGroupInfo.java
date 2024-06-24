@@ -1,15 +1,18 @@
 package io.tapdata.pdk.cli.services.request;
 
+import io.tapdata.pdk.cli.utils.PrintUtil;
+
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ProcessGroupInfo {
-    final AtomicBoolean lock;
-    long totalByte;
-    long uploadedBytes;
-    final StringJoiner allFileName;
-    Long uploadStart;
-    boolean over;
+    public final AtomicBoolean lock;
+    public long totalByte;
+    public long uploadedBytes;
+    public final StringJoiner allFileName;
+    public Long uploadStart;
+    public boolean over;
+    public PrintUtil printUtil;
     public ProcessGroupInfo(AtomicBoolean lock) {
         this.lock = lock;
         allFileName = new StringJoiner(", ");
@@ -46,5 +49,13 @@ public class ProcessGroupInfo {
             this.uploadStart = System.nanoTime();
         }
         return this.uploadStart;
+    }
+
+    public PrintUtil getPrintUtil() {
+        return printUtil;
+    }
+
+    public void setPrintUtil(PrintUtil printUtil) {
+        this.printUtil = printUtil;
     }
 }

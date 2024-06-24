@@ -67,11 +67,15 @@ public class UploadServiceWithProcess implements Uploader {
             }
             URL url = new URI(hostAndPort).toURL();
             String protocol = url.getProtocol();
+            if (StringUtils.isNotBlank(protocol)) {
+                protocol = "http";
+            }
             int port = url.getPort();
             if (port <= 0) {
-                port = url.getDefaultPort();
+                this.hostAndPort = String.format("%s://%s", protocol, url.getHost());
+            } else {
+                this.hostAndPort = String.format("%s://%s:%d", protocol, url.getHost(), port);
             }
-            this.hostAndPort = String.format("%s://%s:%d", StringUtils.isNotBlank(protocol) ? protocol : "http", url.getHost(), port);
         } catch (Exception e) {
             throw new RuntimeException("Service IP and port invalid: " + hostAndPort);
         }
@@ -118,6 +122,7 @@ public class UploadServiceWithProcess implements Uploader {
     }
 
     protected void uploadToCloud(Map<String, BufferedInputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
+        assert file != null;
         Map<String, String> params = new HashMap<>();
         params.put("ts", String.valueOf(System.currentTimeMillis()));
         params.put("nonce", UUID.randomUUID().toString());
@@ -132,14 +137,12 @@ public class UploadServiceWithProcess implements Uploader {
 
         MultipartBody.Builder builder = new MultipartBody.Builder();
         builder.setType(MultipartBody.FORM);
-        if (file != null) {
-            digest.update("file".getBytes(UTF_8));
-            digest.update(file.getName().getBytes(UTF_8));
-            try {
-                digest.update(IOUtil.readFile(file));
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+        digest.update("file".getBytes(UTF_8));
+        digest.update(file.getName().getBytes(UTF_8));
+        try {
+            digest.update(IOUtil.readFile(file));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
 
         if (inputStreamMap != null) {
@@ -149,22 +152,14 @@ public class UploadServiceWithProcess implements Uploader {
                 byte[] in_b = null;
                 try {
                     v.mark(Integer.MAX_VALUE);
-                    ByteArrayOutputStream output = new ByteArrayOutputStream();
-                    byte[] buf = new byte[1024];
-                    int length = v.read(buf);
-                    while (length > 0) {
-                        output.write(buf, 0, length);
-                        length = v.read(buf);
-                    }
+                    in_b = IOUtil.readInputStream(v, false);
                     v.reset();
-                    in_b = output.toByteArray();
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
                 digest.update("file".getBytes(UTF_8));
                 digest.update(k.getBytes(UTF_8));
                 digest.update(in_b);
-                inputStreamMap.put(k, v);
             }
         }
 

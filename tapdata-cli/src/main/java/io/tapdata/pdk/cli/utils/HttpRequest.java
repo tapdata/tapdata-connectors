@@ -21,6 +21,10 @@
  */
 package io.tapdata.pdk.cli.utils;
 
+import io.tapdata.pdk.cli.services.Uploader;
+import io.tapdata.pdk.cli.services.request.ProcessGroupInfo;
+import picocli.CommandLine;
+
 import javax.net.ssl.*;
 import java.io.*;
 import java.net.*;
@@ -2566,20 +2570,124 @@ public class HttpRequest {
 	protected HttpRequest copy(final InputStream input, final OutputStream output)
 			throws IOException {
 		return new CloseOperation<HttpRequest>(input, ignoreCloseExceptions) {
-
 			@Override
 			public HttpRequest run() throws IOException {
-				final byte[] buffer = new byte[bufferSize];
-				int read;
-				while ((read = input.read(buffer)) != -1) {
-					output.write(buffer, 0, read);
-					totalWritten += read;
-					progress.onUpload(totalWritten, totalSize);
-				}
-				return HttpRequest.this;
+				return process(input, output);
+
+//				final byte[] buffer = new byte[bufferSize];
+//				int read;
+//				while ((read = input.read(buffer)) != -1) {
+//					output.write(buffer, 0, read);
+//					totalWritten += read;
+//					progress.onUpload(totalWritten, totalSize);
+//				}
+//				return new StreamProcessWrite().process();
 			}
 		}.call();
 	}
+
+	ProcessGroupInfo groupInfo;
+
+
+	protected HttpRequest process(final InputStream fis, final OutputStream output) {
+		PrintUtil printUtil = groupInfo.getPrintUtil();
+		try {
+			synchronized (groupInfo.lock) {
+				//name = groupInfo.joinFile(name);
+				long totalBytes = groupInfo.getTotalByte();
+				int logTimes = 100; //每上传200k更新一次进度
+				long start = groupInfo.withUploadStart();
+
+				final byte[] buffer = new byte[bufferSize];
+				int bytesRead;
+
+				long uploadedBytes = groupInfo.getUploadedBytes();
+				int step = logTimes;
+				while ((bytesRead = fis.read(buffer)) != -1) {
+
+					output.write(buffer, 0, bytesRead);
+					totalWritten += bytesRead;
+					progress.onUpload(totalWritten, totalSize);
+
+					uploadedBytes = groupInfo.addUploadedBytes(bytesRead);
+					if (step > 0) {
+						step--;
+						continue;
+					}
+					double avg = avg(start, groupInfo.getUploadedBytes());
+					String avgWithUtil = withUint(avg, 0);
+					boolean isLower = avg < 1024 * 1024 * 15;
+					avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (isLower ? "124" : "22" ) + ") " + (isLower ? "⚠️ " : "") + avgWithUtil + "|@");
+
+					onProgress(tops[0], avgWithUtil, calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
+					step = logTimes;
+				}
+				double avg = avg(start, uploadedBytes);
+				onProgress(tops[1], withUint(avg, 0), calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
+			}
+		} catch (Exception e) {
+			printUtil.print(PrintUtil.TYPE.ERROR, "Upload failed, message: " + e.getMessage());
+			throw new RuntimeException(e);
+		} finally {
+			boolean over = false;
+			synchronized (groupInfo.lock) {
+				over = groupInfo.uploadedBytes >= groupInfo.totalByte;
+				if (over && !groupInfo.over) {
+					groupInfo.over = true;
+					Uploader.asyncWait(printUtil, groupInfo.lock, " Waiting for remote service to return request result", true);
+				}
+			}
+		}
+		return HttpRequest.this;
+	}
+
+	public static final String[] tops = new String[]{
+			CommandLine.Help.Ansi.AUTO.string("@|bold,fg(196) ⌾|@"),
+			CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) ✔|@")
+	};
+	public static final String[] UNIT = new String[]{"B/s", "KB/s", "MB/s", "GB/s"};
+	protected double avg(long start, long uploadedBytes) {
+		long now = System.nanoTime() - start;
+		return (uploadedBytes * 1000000000.000000000D) / now;
+	}
+
+	protected String calculate(double avg, long uploadedBytes, long total) {
+		long surplus = total - uploadedBytes;
+		double surplusTime = surplus / avg;
+		return String.format("%.2fs", surplusTime);
+	}
+
+	protected String withUint(double number, int unitIndex) {
+		double newNumber = number / 1024;
+		if (unitIndex < UNIT.length - 1 && newNumber > 1) {
+			return withUint(newNumber, unitIndex + 1);
+		}
+		return String.format("%.2f", number) + UNIT[unitIndex];
+	}
+
+	protected void onProgress(String top, String avg, String surplus, long uploadedBytes, long totalBytes, PrintUtil printUtil) {
+		int progressWidth = 50;
+		double progress = (double) uploadedBytes / totalBytes;
+		int progressInWidth = (int) (progress * progressWidth);
+		StringBuilder builder = new StringBuilder("\r  ⎢");
+		for (int i = 0; i < progressWidth; i++) {
+			if (i < progressInWidth) {
+				builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) █|@"));
+			} else {
+				builder.append(" ");
+			}
+		}
+		builder.append("⎥ ").append(top).append(" ");
+		String ps = CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) " + String.format("%.2f%%", progress * 100) + "|@");
+		builder.append(ps).append(" Avg-speed: ").append(avg);
+		if (null != surplus) {
+			builder.append(" | Remaining-time： ").append(surplus);
+		}
+		//builder.append(" | files: ").append(name);
+		builder.append("\r");
+		printUtil.print0(builder.toString());
+	}
+
 
 	/**
 	 * Copy from reader to writer
@@ -2595,16 +2703,72 @@ public class HttpRequest {
 
 			@Override
 			public HttpRequest run() throws IOException {
-				final char[] buffer = new char[bufferSize];
-				int read;
-				while ((read = input.read(buffer)) != -1) {
-					output.write(buffer, 0, read);
-					totalWritten += read;
-					progress.onUpload(totalWritten, -1);
-				}
-				return HttpRequest.this;
+				return process(input, output);
+//				final char[] buffer = new char[bufferSize];
+//				int read;
+//				while ((read = input.read(buffer)) != -1) {
+//					output.write(buffer, 0, read);
+//					totalWritten += read;
+//					progress.onUpload(totalWritten, -1);
+//				}
+//				return HttpRequest.this;
 			}
 		}.call();
+	}
+
+	HttpRequest process(final Reader fis, final Writer output) {
+		PrintUtil printUtil = groupInfo.getPrintUtil();
+		try {
+			synchronized (groupInfo.lock) {
+				long totalBytes = groupInfo.getTotalByte();
+				int logTimes = 100; //每上传200k更新一次进度
+				long start = groupInfo.withUploadStart();
+
+				final char[] buffer = new char[bufferSize];
+				int bytesRead;
+
+				long uploadedBytes = groupInfo.getUploadedBytes();
+				int step = logTimes;
+				while ((bytesRead = fis.read(buffer)) != -1) {
+					//sink.write(buffer, 0, bytesRead);
+
+					output.write(buffer, 0, bytesRead);
+					totalWritten += bytesRead;
+					progress.onUpload(totalWritten, -1);
+
+					totalWritten += bytesRead;
+					progress.onUpload(totalWritten, totalSize);
+
+					uploadedBytes = groupInfo.addUploadedBytes(bytesRead);
+					if (step > 0) {
+						step--;
+						continue;
+					}
+					double avg = avg(start, groupInfo.getUploadedBytes());
+					String avgWithUtil = withUint(avg, 0);
+					boolean isLower = avg < 1024 * 1024 * 15;
+					avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (isLower ? "124" : "22" ) + ") " + (isLower ? "⚠️ " : "") + avgWithUtil + "|@");
+
+					onProgress(tops[0], avgWithUtil, calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
+					step = logTimes;
+				}
+				double avg = avg(start, uploadedBytes);
+				onProgress(tops[1], withUint(avg, 0), calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
+			}
+		} catch (Exception e) {
+			printUtil.print(PrintUtil.TYPE.ERROR, "Upload failed, message: " + e.getMessage());
+			throw new RuntimeException(e);
+		} finally {
+			boolean over = false;
+			synchronized (groupInfo.lock) {
+				over = groupInfo.uploadedBytes >= groupInfo.totalByte;
+				if (over && !groupInfo.over) {
+					groupInfo.over = true;
+					Uploader.asyncWait(printUtil, groupInfo.lock, " Waiting for remote service to return request result", true);
+				}
+			}
+		}
+		return HttpRequest.this;
 	}
 
 	/**
