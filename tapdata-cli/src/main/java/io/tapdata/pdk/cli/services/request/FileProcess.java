@@ -22,7 +22,7 @@ public class FileProcess extends ProgressRequestBody<File> {
     @Override
     public void writeTo(BufferedSink sink) throws IOException {
         try(InputStream stream = write(sink, new FileInputStream(file), file.getName())) {
-
+            //do nothing
         }
     }
 }

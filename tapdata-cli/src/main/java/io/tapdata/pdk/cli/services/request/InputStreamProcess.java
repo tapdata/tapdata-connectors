@@ -53,11 +53,7 @@ public class InputStreamProcess extends ProgressRequestBody<InputStream> {
     @Override
     public void writeTo(BufferedSink sink) throws IOException {
         try(InputStream stream = write(sink, file, fileName)) {
-            //printUtil.print(PrintUtil.TYPE.TIP, "\n");
-            if (groupInfo.lock.get()) {
-
-            }
-            //printUtil.print(PrintUtil.TYPE.TIP, "\n  this connector file upload succeed, next will upload doc and icon, please wait");
+            //do nothing
         }
     }
 }
