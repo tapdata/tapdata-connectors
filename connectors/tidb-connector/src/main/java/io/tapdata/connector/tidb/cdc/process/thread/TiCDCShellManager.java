@@ -235,7 +235,7 @@ public class TiCDCShellManager implements Activity {
                 log.error("TiCDC must not start normally, TiCDC server depends on {}, make sure this file in you file system", cdcTool.getAbsolutePath());
             }
         } else {
-            log.info("File {} exists, will use {} to execute and start TiCDC server",
+            log.info("File {} exists, will use this to execute and start TiCDC server",
                     file.getAbsolutePath());
         }
         permission(file);
