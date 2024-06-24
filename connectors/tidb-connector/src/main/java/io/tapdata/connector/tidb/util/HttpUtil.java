@@ -86,11 +86,11 @@ public class HttpUtil implements AutoCloseable {
     }
 
 
-    public int queryChangeFeedsList(String cdcUrl) throws IOException {
+    public int queryChangeFeedsList(String cdcUrl) {
         return queryChangeFeeds(cdcUrl).size();
     }
 
-    public boolean queryChangeFeedsList(String cdcUrl, String changeFeedId) throws IOException {
+    public boolean queryChangeFeedsList(String cdcUrl, String changeFeedId) {
         List<Map<String, Object>> items = queryChangeFeeds(cdcUrl);
         if (null == items || items.isEmpty()) return false;
         Optional<Map<String, Object>> first = items.stream().filter(Objects::nonNull)
@@ -105,7 +105,7 @@ public class HttpUtil implements AutoCloseable {
         return false;
     }
 
-    public List<Map<String, Object>> queryChangeFeeds(String cdcUrl) throws IOException {
+    public List<Map<String, Object>> queryChangeFeeds(String cdcUrl) {
         String url = String.format("http://%s/api/v2/changefeeds", cdcUrl);
         HttpGet httpGet = (HttpGet) config(new HttpGet(url));
         try (

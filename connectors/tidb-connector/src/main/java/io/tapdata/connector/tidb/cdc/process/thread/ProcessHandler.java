@@ -72,7 +72,7 @@ public final class ProcessHandler implements Activity {
                 .withGcTtl(processInfo.gcTtl)
                 .withLocalStrongPath(FileUtil.paths(BASE_CDC_CACHE_DATA_DIR, pdServerPath))
                 .withPdIpPorts(processInfo.tidbConfig.getPdServer())
-                .withLogDir(FileUtil.paths(BASE_CDC_LOG_DIR, pdServerPath + "_" + System.currentTimeMillis() + ".log"))
+                .withLogDir(FileUtil.paths(BASE_CDC_LOG_DIR, pdServerPath))
                 .withLogLevel(TiCDCShellManager.LogLevel.INFO)
                 .withClusterId(UUID.randomUUID().toString().replace("-", ""))
                 .withTapConnectionContext(processInfo.nodeContext)
