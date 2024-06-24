@@ -59,6 +59,24 @@ public class HttpUtil implements AutoCloseable {
         return false;
     }
 
+    public boolean changeFeedNotExists(String changeFeedId, String cdcUrl) {
+        String url = String.format("http://%s/api/v2/changefeeds/%s",cdcUrl, changeFeedId);
+        HttpGet httpDelete = (HttpGet) config(new HttpGet(url));
+        try (
+                CloseableHttpResponse response = httpClient.execute(httpDelete)
+        ) {
+            String msg = EntityUtils.toString(response.getEntity());
+            if (response.getStatusLine().getStatusCode() == 400) {
+                return "CDC:ErrChangeFeedNotExists".equalsIgnoreCase(String.valueOf(TapSimplify.fromJson(msg, Map.class).get("error_code")));
+            } else {
+                return false;
+            }
+        } catch (Exception e) {
+            tapLogger.debug("Get change feed failed: {}, will retry again", e.getMessage());
+            return false;
+        }
+    }
+
     public Boolean createChangeFeed(ChangeFeed changefeed, String cdcUrl) throws IOException {
         String url = String.format("http://%s/api/v2/changefeeds", cdcUrl);
         HttpPost httpPost = (HttpPost) config(new HttpPost(url));
@@ -86,11 +104,11 @@ public class HttpUtil implements AutoCloseable {
     }
 
 
-    public int queryChangeFeedsList(String cdcUrl) throws IOException {
+    public int queryChangeFeedsList(String cdcUrl) {
         return queryChangeFeeds(cdcUrl).size();
     }
 
-    public boolean queryChangeFeedsList(String cdcUrl, String changeFeedId) throws IOException {
+    public boolean queryChangeFeedsList(String cdcUrl, String changeFeedId) {
         List<Map<String, Object>> items = queryChangeFeeds(cdcUrl);
         if (null == items || items.isEmpty()) return false;
         Optional<Map<String, Object>> first = items.stream().filter(Objects::nonNull)
@@ -105,7 +123,7 @@ public class HttpUtil implements AutoCloseable {
         return false;
     }
 
-    public List<Map<String, Object>> queryChangeFeeds(String cdcUrl) throws IOException {
+    public List<Map<String, Object>> queryChangeFeeds(String cdcUrl) {
         String url = String.format("http://%s/api/v2/changefeeds", cdcUrl);
         HttpGet httpGet = (HttpGet) config(new HttpGet(url));
         try (
