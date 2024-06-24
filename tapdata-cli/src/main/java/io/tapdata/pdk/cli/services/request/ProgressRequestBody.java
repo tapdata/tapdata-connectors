@@ -64,7 +64,7 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
 
                     }
                     String avgWithUtil = withUint(avg, 0);
-                    avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (avg < 256 ? "124" : "22" ) + ") " + avgWithUtil + "|@");
+                    avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (avg < 1024 ? "124" : "22" ) + ") " + avgWithUtil + "|@");
 
                     onProgress(tops[0], avgWithUtil, calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
                     step = logTimes;
