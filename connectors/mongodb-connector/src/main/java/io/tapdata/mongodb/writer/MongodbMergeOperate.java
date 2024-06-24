@@ -573,30 +573,30 @@ public class MongodbMergeOperate {
 		Map<String, Object> removefields = mergeBundle.getRemovefields();
 		MergeBundle.EventOperation operation = mergeBundle.getOperation();
 		List<String> arrayKeys = currentProperty.getArrayKeys();
+		Map<String, Object> filterMap = buildFilterMap(operation, after, before);
 		if (array) {
 			List<Document> arrayFilter;
 			if (operation == MergeBundle.EventOperation.UPDATE) {
 				arrayFilter = arrayFilter(
-						MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+						filterMap,
 						currentProperty.getJoinKeys(),
 						arrayKeys,
 						currentProperty.getArrayPath()
 				);
 			} else {
 				arrayFilter = arrayFilter(
-						MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+						filterMap,
 						currentProperty.getJoinKeys(),
 						currentProperty.getArrayPath());
 			}
 			mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
 		} else {
-			Map<String, Object> filterMap = buildFilterMap(operation, after, before);
 			Document filter = filter(filterMap, currentProperty.getJoinKeys());
 			mergeResult.getFilter().putAll(filter);
 
 			if (operation == MergeBundle.EventOperation.UPDATE) {
 				List<Document> arrayFilter = arrayFilterForArrayMerge(
-						MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+						filterMap,
 						currentProperty.getArrayKeys(),
 						currentProperty.getTargetPath(),
 						currentProperty.getArrayPath()
