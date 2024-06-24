@@ -65,7 +65,11 @@ public class UploadServiceWithProcess implements Uploader {
             }
             URL url = new URI(hostAndPort).toURL();
             String protocol = url.getProtocol();
-            this.hostAndPort = String.format("%s://%s:%d", StringUtils.isNotBlank(protocol) ? protocol : "http", url.getHost(), url.getPort());
+            int port = url.getPort();
+            if (port <= 0) {
+                port = url.getDefaultPort();
+            }
+            this.hostAndPort = String.format("%s://%s:%d", StringUtils.isNotBlank(protocol) ? protocol : "http", url.getHost(), port);
         } catch (Exception e) {
             throw new RuntimeException("Service IP and port invalid: " + hostAndPort);
         }
