@@ -143,7 +143,7 @@ public class TiCDCShellManager implements Activity {
         cmd = setProperties(cmd, "cluster_id", shellConfig.clusterId);
         cmd = setProperties(cmd, "local_strong_path", new File(shellConfig.localStrongPath).getAbsolutePath());
         cmd = setProperties(cmd, "log_level", shellConfig.logLevel.name);
-        cmd = setProperties(cmd, "log_dir", new File(shellConfig.logDir).getAbsolutePath());
+        cmd = setProperties(cmd, "log_dir", FileUtil.paths(new File(shellConfig.logDir).getAbsolutePath(), System.currentTimeMillis() + ".log"));
         log.info(cmd);
         return cmd;
     }

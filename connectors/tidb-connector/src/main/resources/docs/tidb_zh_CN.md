@@ -5,19 +5,9 @@
 
 ### **2. 支持版本**
 
- - TiDB 5.4.0以上版本 8.0.0以下版本 默认支持CDC 
- 
- - TiDB 8.0.0以上版本如需要支持CDC:
-    
-    1. 请前往 ***https://tiup-mirrors.pingcap.com/cdc-v${ti-db-version}-linux-${system-architecture}.tar.gz*** ，下载对应版本的增量启动工具
-    
-        - ${ti-db-version}: TiDB对应的版本，例如：8.0.0
-    
-        - ${system-architecture}: 对应的操作系统架构，例如：amd64 或者 arm64
-    
-    2. 下载后解压后命名成**cdc**，放置在 **{tapData_dir}/run-resource/ti-db/tool** 环境目录下
+ - TiDB 5.4.0以上版本 默认（arm/amd系统架构环境下）支持CDC 
 
-**{tapData_dir}/run-resource/ti-db/tool/cdc** 需要具备可读可写可执行权限
+**{tapData-dir}/run-resource/ti-db/tool/cdc** 需要具备可读可写可执行权限
 
 ### **3. 先决条件（作为源）**
 3.1配置连接示例
