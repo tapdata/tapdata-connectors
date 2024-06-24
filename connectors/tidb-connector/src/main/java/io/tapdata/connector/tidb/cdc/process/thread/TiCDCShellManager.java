@@ -121,6 +121,7 @@ public class TiCDCShellManager implements Activity {
     public void checkAlive() {
         try (HttpUtil util = HttpUtil.of(log)) {
             if (!util.checkAlive(shellConfig.cdcServerIpPort)) {
+                log.debug("TiDB server not active, will restart TiCDC server, {}", shellConfig.cdcServerIpPort);
                 doActivity();
             }
         } catch (Exception e) {
@@ -141,9 +142,15 @@ public class TiCDCShellManager implements Activity {
         cmd = setProperties(cmd, "pd_ip_ports", shellConfig.pdIpPorts);
         cmd = setProperties(cmd, "cdc_server_ip_port", shellConfig.cdcServerIpPort);
         cmd = setProperties(cmd, "cluster_id", shellConfig.clusterId);
-        cmd = setProperties(cmd, "local_strong_path", new File(shellConfig.localStrongPath).getAbsolutePath());
+        File dataDir = new File(shellConfig.localStrongPath);
+        String dataDirPath = dataDir.getAbsolutePath();
+        cmd = setProperties(cmd, "local_strong_path", dataDirPath);
         cmd = setProperties(cmd, "log_level", shellConfig.logLevel.name);
-        cmd = setProperties(cmd, "log_dir", FileUtil.paths(new File(shellConfig.logDir).getAbsolutePath(), System.currentTimeMillis() + ".log"));
+        File logDir = new File(shellConfig.logDir);
+        String absolutePath = logDir.getAbsolutePath();
+        String logFileName = System.currentTimeMillis() + ".log";
+        String logPath = FileUtil.paths(absolutePath, logFileName);
+        cmd = setProperties(cmd, "log_dir", logPath);
         log.info(cmd);
         return cmd;
     }
