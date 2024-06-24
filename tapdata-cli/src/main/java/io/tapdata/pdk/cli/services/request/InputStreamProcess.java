@@ -7,12 +7,12 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
-public class InputStreamProcess extends ProgressRequestBody<InputStream> {
+public class InputStreamProcess extends ProgressRequestBody<BufferedInputStream> {
     String fileName;
     final long contentLength;
 
-    public InputStreamProcess(InputStream file, String contentType, String fileName, PrintUtil printUtil, ProcessGroupInfo groupInfo) {
-        super(new BufferedInputStream(file, 1024 * 1024 * 10), contentType, printUtil, groupInfo);
+    public InputStreamProcess(BufferedInputStream file, String contentType, String fileName, PrintUtil printUtil, ProcessGroupInfo groupInfo) {
+        super(file, contentType, printUtil, groupInfo);
         this.fileName = fileName;
         contentLength = readLength();
         this.printUtil = printUtil;
@@ -34,7 +34,7 @@ public class InputStreamProcess extends ProgressRequestBody<InputStream> {
         return 0;
     }
 
-    private static long getInputStreamLength(InputStream inputStream) throws IOException {
+    private static long getInputStreamLength(BufferedInputStream inputStream) throws IOException {
         long length = 0;
         byte[] buffer = new byte[1024];
         int bytesRead;

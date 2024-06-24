@@ -20,7 +20,9 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 import org.apache.commons.lang3.StringUtils;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -102,14 +104,20 @@ public class UploadServiceWithProcess implements Uploader {
 
     public void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
         assert file != null;
+        Map<String, BufferedInputStream> map = new HashMap<>();
+        if (null != inputStreamMap && !inputStreamMap.isEmpty()) {
+            inputStreamMap.forEach((name, stream) -> {
+                map.put(name, new BufferedInputStream(stream, 1024 * 1024 * 10));
+            });
+        }
         if (cloud) {
-            uploadToCloud(inputStreamMap, file, jsons, connectionType);
+            uploadToCloud(map, file, jsons, connectionType);
         } else {
-            uploadToOp(inputStreamMap, file, jsons, connectionType);
+            uploadToOp(map, file, jsons, connectionType);
         }
     }
 
-    protected void uploadToCloud(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
+    protected void uploadToCloud(Map<String, BufferedInputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
         Map<String, String> params = new HashMap<>();
         params.put("ts", String.valueOf(System.currentTimeMillis()));
         params.put("nonce", UUID.randomUUID().toString());
@@ -135,16 +143,24 @@ public class UploadServiceWithProcess implements Uploader {
         }
 
         if (inputStreamMap != null) {
-            for (Map.Entry<String, InputStream> entry : inputStreamMap.entrySet()) {
+            for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
                 String k = entry.getKey();
-                InputStream v = entry.getValue();
-                byte[] in_b = new byte[0];
+                BufferedInputStream v = entry.getValue();
+                byte[] in_b = null;
                 try {
-                    in_b = IOUtil.readInputStream(v);
-                } catch (IOException e) {
+                    v.mark(Integer.MAX_VALUE);
+                    ByteArrayOutputStream output = new ByteArrayOutputStream();
+                    byte[] buf = new byte[1024];
+                    int length = v.read(buf);
+                    while (length > 0) {
+                        output.write(buf, 0, length);
+                        length = v.read(buf);
+                    }
+                    v.reset();
+                    in_b = output.toByteArray();
+                } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
-                v = new ByteArrayInputStream(in_b);
                 digest.update("file".getBytes(UTF_8));
                 digest.update(k.getBytes(UTF_8));
                 digest.update(in_b);
@@ -201,12 +217,12 @@ public class UploadServiceWithProcess implements Uploader {
         upload(url, file, inputStreamMap, jsons, connectionType);
     }
 
-    protected void uploadToOp(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
+    protected void uploadToOp(Map<String, BufferedInputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
         String url = hostAndPort + "/api/pdk/upload/source?access_token=" + token;
         upload(url, file, inputStreamMap, jsons, connectionType);
     }
 
-    protected void upload(String url, File file, Map<String, InputStream> inputStreamMap, List<String> jsons, String connectionType) {
+    protected void upload(String url, File file, Map<String, BufferedInputStream> inputStreamMap, List<String> jsons, String connectionType) {
         String fileName = file.getName();
         OkHttpClient client = new OkHttpClient.Builder()
                 .connectTimeout(3000, TimeUnit.SECONDS)
@@ -222,7 +238,7 @@ public class UploadServiceWithProcess implements Uploader {
         builder.addFormDataPart("file", fileName, jarFileBody);
 
         if (inputStreamMap != null) {
-            for (Map.Entry<String, InputStream> entry : inputStreamMap.entrySet()) {
+            for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
                 String entryName = entry.getKey();
                 InputStreamProcess fileBody = new InputStreamProcess(entry.getValue(), "image/*", entryName, printUtil, groupInfo);
                 groupInfo.addTotalBytes(fileBody.contentLength());

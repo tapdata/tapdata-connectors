@@ -58,13 +58,8 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
                         continue;
                     }
                     double avg = avg(start, groupInfo.getUploadedBytes());
-                    if (avg < 256) {
-
-                    } else {
-
-                    }
                     String avgWithUtil = withUint(avg, 0);
-                    avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (avg < 1024 ? "124" : "22" ) + ") " + avgWithUtil + "|@");
+                    avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (avg < 1024 * 1024 * 20 ? "124" : "22" ) + ") " + avgWithUtil + "|@");
 
                     onProgress(tops[0], avgWithUtil, calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
                     step = logTimes;
