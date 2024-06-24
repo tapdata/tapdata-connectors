@@ -206,7 +206,7 @@ public final class ProcessHandler implements Activity {
                 break;
             }
             createChangeFeed(httpUtil, changefeed, minOffset);
-            sleep(3000L);
+            sleep(10000L);
             waitTimes--;
         } while (!httpUtil.queryChangeFeedsList(shellManager.shellConfig.cdcServerIpPort, processInfo.feedId));
     }
@@ -225,10 +225,22 @@ public final class ProcessHandler implements Activity {
             if (!httpUtil.checkAlive(processInfo.cdcServer)) {
                 return;
             }
-            if (Boolean.TRUE.equals(httpUtil.deleteChangeFeed(processInfo.feedId, processInfo.cdcServer))) {
-                log.debug("Stop cdc succeed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
-            } else {
-                throw new CoreException("Stop cdc failed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
+            int waitTimes = 100;
+            while (!httpUtil.changeFeedNotExists(processInfo.feedId, processInfo.cdcServer)) {
+                if (waitTimes < 0) {
+                    log.debug("After five second, Ti change feed not remove, server: {}, feed id: {}",
+                            shellManager.shellConfig.cdcServerIpPort,
+                            processInfo.feedId
+                    );
+                    break;
+                }
+                if (Boolean.TRUE.equals(httpUtil.deleteChangeFeed(processInfo.feedId, processInfo.cdcServer))) {
+                    log.debug("Stop cdc succeed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
+                } else {
+                    throw new CoreException("Stop cdc failed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
+                }
+                sleep(1000L);
+                waitTimes--;
             }
         } catch (Exception e) {
             log.warn("Failed to stop cdc feed process, feed id: {}, message: {}", processInfo.feedId, e.getMessage());
