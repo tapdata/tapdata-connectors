@@ -46,7 +46,6 @@ import java.util.Scanner;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 @CommandLine.Command(
         description = "Push PDK jar file into TM",
@@ -86,14 +85,20 @@ public class RegisterCli extends CommonCli {
     private boolean showAllMessage = false;
 
     @CommandLine.Option(names = {"-p", "--P"}, required = false, description = "Need show upload speed of progress")
-    private boolean showProcess = false;
+    private boolean showProcess = true;
 
     public Integer execute() throws Exception {
         long registerStart = System.currentTimeMillis();
         printUtil = new PrintUtil(showAllMessage);
-        Uploader uploadService = showProcess ?
-                new UploadServiceWithProcess(printUtil, tmUrl, ak, sk, authToken, latest)
-                : new UploadFileService(printUtil, tmUrl, ak, sk, authToken, latest);
+        Uploader uploadService = null;
+        try {
+            uploadService = showProcess ?
+                    new UploadServiceWithProcess(printUtil, tmUrl, ak, sk, authToken, latest)
+                    : new UploadFileService(printUtil, tmUrl, ak, sk, authToken, latest);
+        } catch (Exception e) {
+            printUtil.print(PrintUtil.TYPE.ERROR, "Failed to start upload and register connector, message: " + e.getMessage());
+            System.exit(-1);
+        }
         List<String> filterTypes = generateSkipTypes();
         if (!filterTypes.isEmpty()) {
             printUtil.print(PrintUtil.TYPE.TIP, String.format("* Starting to register data sources, plan to skip data sources that are not within the registration scope.\n* The types of data sources that need to be registered are: %s", filterTypes));
@@ -293,19 +298,7 @@ public class RegisterCli extends CommonCli {
                         }
                         if (file.isFile()) {
                             printUtil.print(PrintUtil.TYPE.INFO, " => uploading ");
-                            uploadService.upload(inputStreamMap, file, jsons);
-                            printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s | (%s) Completed", file.getName(), connectionType));
-                            Collection<String> strings = connector.associatingIds();
-                            new Thread(() -> {
-                                for (String id : strings) {
-                                    try {
-                                        TapConnectorManager.getInstance().releaseAssociateId(id);
-                                    } catch (Exception e) {
-                                        System.out.println(e.getMessage());
-                                        printUtil.print(PrintUtil.TYPE.DEBUG, "Release associate" + id + " failed, message: " + e.getMessage());
-                                    }
-                                }
-                            }).start();
+                            uploadService.upload(inputStreamMap, file, jsons, connectionType);
                         } else {
                             printUtil.print(PrintUtil.TYPE.DEBUG, "File " + file + " doesn't exists");
                             printUtil.print(PrintUtil.TYPE.DEBUG, file.getName() + " registered failed");
@@ -333,39 +326,11 @@ public class RegisterCli extends CommonCli {
 
     protected void load(List<File> f, PrintStream out, PrintStream newOut) {
         final AtomicBoolean over = new AtomicBoolean(false);
-        new Thread(() -> {
-            try {
-                TapConnectorManager.getInstance().start(f);
-            } finally {
-                over.compareAndSet(false, true);
-            }
-        }).start();
-        int a = 0;
-        printUtil.print0("\n");
-        while (!over.get()) {
-            StringBuilder builder = new StringBuilder("\rLoading all submitted connectors from file system, please wait ");
-            if (a > 3) {
-                a = 0;
-            }
-            switch (a) {
-                case 0: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) / |@")); break;
-                case 1: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) - |@")); break;
-                case 2: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) \\ |@")); break;
-                case 3: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) | |@")); break;
-            }
-            a++;
-            builder.append("\r");
-            synchronized (this) {
-                try {
-                    System.setOut(out);
-                    printUtil.print0(builder.toString());
-                } finally {
-                    System.setOut(newOut);
-                }
-            }
-            try {
-                Thread.sleep(500);
-            } catch (Exception e) {}
+        Uploader.asyncWait(printUtil, out, newOut, over, "Scan all submitted connectors from file system, please wait ");
+        try {
+            TapConnectorManager.getInstance().start(f);
+        } finally {
+            over.compareAndSet(false, true);
         }
     }
 
@@ -384,6 +349,7 @@ public class RegisterCli extends CommonCli {
     }
 
     protected void fileTypeDirector(File f, List<File> pathSet) {
+        if (null == f) return;
         int i = fileType(f);
         switch (i) {
             case 1:

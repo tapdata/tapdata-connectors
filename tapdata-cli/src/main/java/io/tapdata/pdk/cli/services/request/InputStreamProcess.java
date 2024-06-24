@@ -11,8 +11,8 @@ public class InputStreamProcess extends ProgressRequestBody<InputStream> {
     String fileName;
     final long contentLength;
 
-    public InputStreamProcess(InputStream file, String contentType, String fileName, PrintUtil printUtil) {
-        super(new BufferedInputStream(file, 1024 * 1024 * 10), contentType, printUtil);
+    public InputStreamProcess(InputStream file, String contentType, String fileName, PrintUtil printUtil, ProcessGroupInfo groupInfo) {
+        super(new BufferedInputStream(file, 1024 * 1024 * 10), contentType, printUtil, groupInfo);
         this.fileName = fileName;
         contentLength = readLength();
         this.printUtil = printUtil;
@@ -52,14 +52,12 @@ public class InputStreamProcess extends ProgressRequestBody<InputStream> {
 
     @Override
     public void writeTo(BufferedSink sink) throws IOException {
-        //long totalBytes = contentLength;
-        byte[] buffer = new byte[2048];
-        //long uploadedBytes = 0;
-        int bytesRead;
-        while ((bytesRead = file.read(buffer)) != -1) {
-            sink.write(buffer, 0, bytesRead);
-            //uploadedBytes += bytesRead;
-            //progressListener.onProgress(fileName, uploadedBytes, totalBytes, printUtil);
+        try(InputStream stream = write(sink, file, fileName)) {
+            //printUtil.print(PrintUtil.TYPE.TIP, "\n");
+            if (groupInfo.lock.get()) {
+
+            }
+            //printUtil.print(PrintUtil.TYPE.TIP, "\n  this connector file upload succeed, next will upload doc and icon, please wait");
         }
     }
 }

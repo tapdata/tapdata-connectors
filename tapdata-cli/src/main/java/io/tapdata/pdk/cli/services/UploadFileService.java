@@ -12,14 +12,20 @@ import io.tapdata.pdk.cli.utils.HttpRequest;
 import io.tapdata.pdk.cli.utils.OkHttpUtils;
 import io.tapdata.pdk.cli.utils.PrintUtil;
 import lombok.extern.slf4j.Slf4j;
-import okhttp3.*;
+import okhttp3.MediaType;
+import okhttp3.MultipartBody;
+import okhttp3.RequestBody;
 import okhttp3.internal.Util;
 import okio.BufferedSink;
 import okio.Okio;
 import okio.Source;
 import org.apache.commons.lang3.StringUtils;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
@@ -53,7 +59,7 @@ public class UploadFileService implements Uploader {
     this.accessCode = accessCode;
   }
 
-  public void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons) {
+  public void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
 
     boolean cloud = StringUtils.isNotBlank(ak);
 
@@ -229,6 +235,9 @@ public class UploadFileService implements Uploader {
     if (!"ok".equals(map.get("code"))) {
         msg = map.get("reqId") != null ? (String) map.get("message") : (String) map.get("msg");
         result = "fail";
+        printUtil.print(PrintUtil.TYPE.ERROR, String.format("* Register Connector: %s | (%s) Failed, message: %s", file.getName(), connectionType, msg));
+    } else {
+      printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s | (%s) Completed", file.getName(), connectionType));
     }
     printUtil.print(PrintUtil.TYPE.DEBUG, "result:" + result + ", name:" + file.getName() + ", msg:" + msg + ", response:" + response);
   }

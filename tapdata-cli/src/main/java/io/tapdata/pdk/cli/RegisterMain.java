@@ -142,7 +142,7 @@ public class RegisterMain {
 		String showProgress = System.getProperty("progress", "true");
 		Collections.addAll(postList, "register", "-a", "3324cfdf-7d3e-4792-bd32-571638d4562f", "-ak", "", "-sk", "", "-f",filter, "-t", server);
 
-		if (Boolean.parseBoolean(showProgress)) {
+		if (!Boolean.parseBoolean(showProgress)) {
 			postList.add("-p");
 		}
 

@@ -9,7 +9,7 @@ import com.tapdata.tm.sdk.util.IOUtil;
 import com.tapdata.tm.sdk.util.SignUtil;
 import io.tapdata.pdk.cli.services.request.FileProcess;
 import io.tapdata.pdk.cli.services.request.InputStreamProcess;
-import io.tapdata.pdk.cli.utils.HttpRequest;
+import io.tapdata.pdk.cli.services.request.ProcessGroupInfo;
 import io.tapdata.pdk.cli.utils.OkHttpUtils;
 import io.tapdata.pdk.cli.utils.PrintUtil;
 import okhttp3.MultipartBody;
@@ -17,6 +17,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.ByteArrayInputStream;
@@ -24,14 +25,18 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.net.URI;
+import java.net.URL;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -46,14 +51,24 @@ public class UploadServiceWithProcess implements Uploader {
     String token;
     boolean cloud;
 
-    public UploadServiceWithProcess(PrintUtil printUtil, String hostAndPort, String ak, String sk, String accessCode, boolean latest) {
+    public UploadServiceWithProcess(PrintUtil printUtil, String hp, String ak, String sk, String accessCode, boolean latest) {
         this.printUtil = printUtil;
         this.latest = latest;
-        this.hostAndPort = hostAndPort;
+        this.hostAndPort = hp;
         this.ak = ak;
         this.sk = sk;
         this.accessCode = accessCode;
         cloud = StringUtils.isNotBlank(ak);
+        try {
+            if (!hostAndPort.startsWith("http")) {
+                hostAndPort = "http://" + hostAndPort;
+            }
+            URL url = new URI(hostAndPort).toURL();
+            String protocol = url.getProtocol();
+            this.hostAndPort = String.format("%s://%s:%d", StringUtils.isNotBlank(protocol) ? protocol : "http", url.getHost(), url.getPort());
+        } catch (Exception e) {
+            throw new RuntimeException("Service IP and port invalid: " + hostAndPort);
+        }
 
         if (!cloud) {
             String tokenUrl = hostAndPort + "/api/users/generatetoken";
@@ -64,35 +79,33 @@ public class UploadServiceWithProcess implements Uploader {
 
             printUtil.print(PrintUtil.TYPE.DEBUG, "generate token " + s);
 
-            if (StringUtils.isBlank(s)) {
-                printUtil.print(PrintUtil.TYPE.ERROR, "TM sever not found or generate token failed");
-                return;
+            if (StringUtils.isNotBlank(s)) {
+                Map<String, Object> map = JSON.parseObject(s, Map.class);
+                Object data = map.get("data");
+                if (null != data) {
+                    JSONObject data1 = (JSONObject) data;
+                    token = (String) data1.get("id");
+                    if (StringUtils.isBlank(token)) {
+                        token = null;
+                    }
+                }
             }
-
-            Map map = JSON.parseObject(s, Map.class);
-            Object data = map.get("data");
-            if (null == data) {
-                printUtil.print(PrintUtil.TYPE.ERROR, "TM sever not found or generate token failed");
-                return;
-            }
-            JSONObject data1 = (JSONObject) data;
-            token = (String) data1.get("id");
-            if (StringUtils.isBlank(token)) {
-                printUtil.print(PrintUtil.TYPE.ERROR, "TM sever not found or generate token failed");
-                return;
+            if (null == token) {
+                throw new RuntimeException("TM sever not found or generate token failed: " + hostAndPort);
             }
         }
     }
 
-    public void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons) {
+    public void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
+        assert file != null;
         if (cloud) {
-            uploadToCloud(inputStreamMap, file, jsons);
+            uploadToCloud(inputStreamMap, file, jsons, connectionType);
         } else {
-            uploadToOp(inputStreamMap, file, jsons);
+            uploadToOp(inputStreamMap, file, jsons, connectionType);
         }
     }
 
-    protected void uploadToCloud(Map<String, InputStream> inputStreamMap, File file, List<String> jsons) {
+    protected void uploadToCloud(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
         Map<String, String> params = new HashMap<>();
         params.put("ts", String.valueOf(System.currentTimeMillis()));
         params.put("nonce", UUID.randomUUID().toString());
@@ -181,34 +194,34 @@ public class UploadServiceWithProcess implements Uploader {
         }).collect(Collectors.joining("&"));
         url = hostAndPort + "/api/pdk/upload/source?" + queryString;
 
-        upload(url, file, inputStreamMap, jsons);
+        upload(url, file, inputStreamMap, jsons, connectionType);
     }
 
-    protected void uploadToOp(Map<String, InputStream> inputStreamMap, File file, List<String> jsons) {
-        if (StringUtils.isBlank(token)) {
-            return;
-        }
+    protected void uploadToOp(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
         String url = hostAndPort + "/api/pdk/upload/source?access_token=" + token;
-        upload(url, file, inputStreamMap, jsons);
+        upload(url, file, inputStreamMap, jsons, connectionType);
     }
 
-    protected void upload(String url, File file, Map<String, InputStream> inputStreamMap, List<String> jsons) {
+    protected void upload(String url, File file, Map<String, InputStream> inputStreamMap, List<String> jsons, String connectionType) {
+        String fileName = file.getName();
         OkHttpClient client = new OkHttpClient.Builder()
                 .connectTimeout(3000, TimeUnit.SECONDS)
                 .readTimeout(3000, TimeUnit.SECONDS)
                 .writeTimeout(3000, TimeUnit.SECONDS)
                 .build();
-
+        final AtomicBoolean lock = new AtomicBoolean(false);
+        ProcessGroupInfo groupInfo = new ProcessGroupInfo(lock);
         MultipartBody.Builder builder = new MultipartBody.Builder();
         builder.setType(MultipartBody.FORM);
-        if (file != null) {
-            RequestBody fileBody = new FileProcess(file, "application/java-archive", printUtil);
-            builder.addFormDataPart("file", file.getName(), fileBody);
-        }
+        RequestBody jarFileBody = new FileProcess(file, "application/java-archive", printUtil, groupInfo);
+        groupInfo.addTotalBytes(file.length());
+        builder.addFormDataPart("file", fileName, jarFileBody);
+
         if (inputStreamMap != null) {
             for (Map.Entry<String, InputStream> entry : inputStreamMap.entrySet()) {
                 String entryName = entry.getKey();
-                InputStreamProcess fileBody = new InputStreamProcess(entry.getValue(), "image/*", entryName, printUtil);
+                InputStreamProcess fileBody = new InputStreamProcess(entry.getValue(), "image/*", entryName, printUtil, groupInfo);
+                groupInfo.addTotalBytes(fileBody.contentLength());
                 builder.addFormDataPart("file", entryName, fileBody);
             }
         }
@@ -235,25 +248,27 @@ public class UploadServiceWithProcess implements Uploader {
                 .build();
 
         try (Response response = client.newCall(request).execute()) {
+            groupInfo.getLock().compareAndSet(false, true);
             if (!response.isSuccessful()) {
-                printUtil.print(PrintUtil.TYPE.ERROR, "Upload failed: " + response);
+                printUtil.print(PrintUtil.TYPE.ERROR, String.format("* Register Connector: %s | (%s) Completed", fileName, connectionType));
                 return;
             }
-            result(response.body().string(), file.getName());
+            ResponseBody body = response.body();
+            String msg = "{}";
+            if (null != body) {
+                msg = body.string();
+            }
+            Map<String, Object> responseMap = JSON.parseObject(msg, Map.class);
+            if (!"ok".equalsIgnoreCase(String.valueOf(responseMap.get("code")))) {
+                Object resultMsg = String.valueOf(Optional.ofNullable(Optional.ofNullable(responseMap.get("message")).orElse(responseMap.get("msg"))).orElse(msg));
+                printUtil.print(PrintUtil.TYPE.ERROR, String.format("* Register Connector: %s | (%s) Failed, message: %s", fileName, connectionType, resultMsg));
+            } else {
+                printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s | (%s) Completed", fileName, connectionType));
+            }
         } catch (IOException e) {
-            printUtil.print(PrintUtil.TYPE.WARN, e.getMessage());
+            groupInfo.getLock().compareAndSet(false, true);
+            printUtil.print(PrintUtil.TYPE.ERROR, String.format("* Register Connector: %s | (%s) Failed, message: %s", fileName, connectionType, e.getMessage()));
             printUtil.print(PrintUtil.TYPE.DEBUG, Arrays.toString(e.getStackTrace()));
         }
-    }
-
-    protected void result(String response, String name) {
-        Map<String, Object> responseMap = JSON.parseObject(response, Map.class);
-        String msg = "success";
-        String result = "success";
-        if (!"ok".equals(responseMap.get("code"))) {
-            msg = responseMap.get("reqId") != null ? (String) responseMap.get("message") : (String) responseMap.get("msg");
-            result = "fail";
-        }
-        printUtil.print(PrintUtil.TYPE.DEBUG, "result:" + result + ", name:" + name + ", msg:" + msg + ", response:" + response);
     }
 }
