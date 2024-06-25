@@ -15,10 +15,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -98,6 +95,7 @@ class MongodbMergeOperateTest {
 	}
 
 	@Nested
+	@DisplayName("Method upsertMerge Test")
 	class upsertMergeTest {
 		@Test
 		@DisplayName("test upsert merge, op: u, before: empty, after: {id: 1, _str: 'test1'}, expect filter: {id: 1}")
@@ -292,6 +290,57 @@ class MongodbMergeOperateTest {
 			assertNotNull(arrayFilter);
 			assertEquals(2, arrayFilter.toBsonDocument().getInt32("element1.id").getValue());
 			assertEquals(22, arrayFilter.toBsonDocument().getInt32("element1.index").getValue());
+		}
+	}
+
+	@Nested
+	@DisplayName("Method updateMerge test")
+	class updateMergeTest {
+		@Test
+		@DisplayName("test update merge, set: {\"id\": 1, \"model\": {}}, remove fields: {\"model\": 1}, set and unset both exists")
+		void test1() {
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE,
+					new Document("id", 1),
+					new Document("id", 1).append("model", new Document()));
+			mergeBundle.setRemovefields(new Document("model", 1));
+			MergeTableProperties mergeTableProperties = new MergeTableProperties();
+			Map<String, String> joinKey = new HashMap<>();
+			joinKey.put("source", "id");
+			joinKey.put("target", "id");
+			List<Map<String, String>> joinKeys = new ArrayList<>();
+			joinKeys.add(joinKey);
+			mergeTableProperties.setJoinKeys(joinKeys);
+			mergeTableProperties.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			mergeTableProperties.setTargetPath("subMap");
+			MergeResult mergeResult = new MergeResult();
+			MongodbMergeOperate.updateMerge(mergeBundle, mergeTableProperties, mergeResult,new HashSet<>(), new MergeFilter(true));
+
+			Document update = mergeResult.getUpdate();
+			assertEquals("{\"$unset\": {\"subMap.model\": 1}, \"$set\": {\"subMap.id\": 1}}", update.toJson());
+		}
+
+		@Test
+		@DisplayName("on the basis of test1, in the update in the mergeResult passed in, add $set")
+		void test2() {
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE,
+					new Document("id", 1),
+					new Document("id", 1).append("model", new Document()));
+			mergeBundle.setRemovefields(new Document("model", 1));
+			MergeTableProperties mergeTableProperties = new MergeTableProperties();
+			Map<String, String> joinKey = new HashMap<>();
+			joinKey.put("source", "id");
+			joinKey.put("target", "id");
+			List<Map<String, String>> joinKeys = new ArrayList<>();
+			joinKeys.add(joinKey);
+			mergeTableProperties.setJoinKeys(joinKeys);
+			mergeTableProperties.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			mergeTableProperties.setTargetPath("subMap");
+			MergeResult mergeResult = new MergeResult();
+			mergeResult.setUpdate(new Document("$set", new Document("td", 1)));
+			MongodbMergeOperate.updateMerge(mergeBundle, mergeTableProperties, mergeResult,new HashSet<>(), new MergeFilter(true));
+
+			Document update = mergeResult.getUpdate();
+			assertEquals("{\"$set\": {\"td\": 1, \"subMap.id\": 1}, \"$unset\": {\"subMap.model\": 1}}", update.toJson());
 		}
 	}
 }
