@@ -1,5 +1,6 @@
 package io.tapdata.mongodb.writer;
 
+import com.mongodb.client.model.UpdateOptions;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.mongodb.entity.MergeBundle;
 import io.tapdata.mongodb.entity.MergeFilter;
@@ -8,6 +9,7 @@ import io.tapdata.mongodb.merge.MergeFilterManager;
 import io.tapdata.pdk.apis.entity.merge.MergeLookupResult;
 import io.tapdata.pdk.apis.entity.merge.MergeTableProperties;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -231,6 +233,65 @@ class MongodbMergeOperateTest {
 					.append("name", "test");
 			Document actual = MongodbMergeOperate.filterSetDocByUnsetDoc(setDoc, null);
 			assertEquals(setDoc, actual);
+		}
+	}
+
+	@Nested
+	@DisplayName("Method updateIntoArrayMerge test")
+	class updateIntoArrayMergeTest {
+		@Test
+		@DisplayName("test update into array, op: u, target path: 'arr', isArray: false, joinKey: {source: 'id', target: 'id'}, arrayKeys: ['id', 'index']")
+		void test1() {
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE, new HashMap<String, Object>() {{
+				put("ID", 1);
+				put("INDEX", 1);
+				put("NAME", "test");
+			}}, new HashMap<String, Object>() {{
+				put("id", 2);
+				put("index", 22);
+				put("name", "test");
+			}});
+			MergeTableProperties mergeTableProperties = new MergeTableProperties();
+			mergeTableProperties.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			mergeTableProperties.setJoinKeys(new ArrayList<Map<String, String>>() {{
+				add(new HashMap<String, String>() {{
+					put("source", "id");
+					put("target", "id");
+				}});
+			}});
+			mergeTableProperties.setTargetPath("arr");
+			mergeTableProperties.setArrayKeys(new ArrayList<String>() {{
+				add("id");
+				add("index");
+			}});
+			mergeTableProperties.setIsArray(false);
+			MergeResult mergeResult = new MergeResult();
+			MergeFilter mergeFilter = new MergeFilter(true);
+
+			MongodbMergeOperate.updateIntoArrayMerge(mergeBundle, mergeTableProperties, mergeResult, mergeFilter);
+
+			Document filter = mergeResult.getFilter();
+			assertNotNull(filter);
+			assertTrue(filter.containsKey("id"));
+			assertEquals(2, filter.getInteger("id"));
+			Document update = mergeResult.getUpdate();
+			assertNotNull(update);
+			assertTrue(update.containsKey("$set"));
+			Document setDoc = update.get("$set", Document.class);
+			assertNotNull(setDoc);
+			assertEquals(3, setDoc.size());
+			assertEquals(2, setDoc.getInteger("arr.$[element1].id"));
+			assertEquals(22, setDoc.getInteger("arr.$[element1].index"));
+			assertEquals("test", setDoc.getString("arr.$[element1].name"));
+			UpdateOptions updateOptions = mergeResult.getUpdateOptions();
+			assertNotNull(updateOptions);
+			List<? extends Bson> arrayFilters = updateOptions.getArrayFilters();
+			assertNotNull(arrayFilters);
+			assertEquals(1, arrayFilters.size());
+			Bson arrayFilter = arrayFilters.get(0);
+			assertNotNull(arrayFilter);
+			assertEquals(2, arrayFilter.toBsonDocument().getInt32("element1.id").getValue());
+			assertEquals(22, arrayFilter.toBsonDocument().getInt32("element1.index").getValue());
 		}
 	}
 }

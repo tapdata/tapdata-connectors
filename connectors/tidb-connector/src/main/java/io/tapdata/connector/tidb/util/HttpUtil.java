@@ -59,6 +59,24 @@ public class HttpUtil implements AutoCloseable {
         return false;
     }
 
+    public boolean changeFeedNotExists(String changeFeedId, String cdcUrl) {
+        String url = String.format("http://%s/api/v2/changefeeds/%s",cdcUrl, changeFeedId);
+        HttpGet httpDelete = (HttpGet) config(new HttpGet(url));
+        try (
+                CloseableHttpResponse response = httpClient.execute(httpDelete)
+        ) {
+            String msg = EntityUtils.toString(response.getEntity());
+            if (response.getStatusLine().getStatusCode() == 400) {
+                return "CDC:ErrChangeFeedNotExists".equalsIgnoreCase(String.valueOf(TapSimplify.fromJson(msg, Map.class).get("error_code")));
+            } else {
+                return false;
+            }
+        } catch (Exception e) {
+            tapLogger.debug("Get change feed failed: {}, will retry again", e.getMessage());
+            return false;
+        }
+    }
+
     public Boolean createChangeFeed(ChangeFeed changefeed, String cdcUrl) throws IOException {
         String url = String.format("http://%s/api/v2/changefeeds", cdcUrl);
         HttpPost httpPost = (HttpPost) config(new HttpPost(url));
