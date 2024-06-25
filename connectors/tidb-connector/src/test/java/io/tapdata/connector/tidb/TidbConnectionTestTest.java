@@ -2,6 +2,8 @@ package io.tapdata.connector.tidb;
 
 
 import io.tapdata.connector.tidb.config.TidbConfig;
+import io.tapdata.connector.tidb.stage.NetworkUtils;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.util.NetUtil;
 import org.junit.jupiter.api.Assertions;
@@ -15,6 +17,7 @@ import java.sql.SQLException;
 import java.util.function.Consumer;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
@@ -44,12 +47,15 @@ class TiDbConnectionTestTest {
         @BeforeEach
         void init() {
             when(tidbConnectionTest.testPbserver()).thenCallRealMethod();
+            tidbConfig.setTiKvPort(8000);
         }
 
         @Test
         void testHttp() {
             tidbConfig.setPdServer("http://127.0.0.1:8000");
-            try(MockedStatic<NetUtil> nu = mockStatic(NetUtil.class)) {
+            try(MockedStatic<NetUtil> nu = mockStatic(NetUtil.class);
+                MockedStatic<NetworkUtils> net = mockStatic(NetworkUtils.class)) {
+                net.when(() -> NetworkUtils.check(anyString(), anyInt(), anyInt())).thenReturn(true);
                 nu.when(() -> NetUtil.validateHostPortWithSocket("127.0.0.1", 8000)).then(a -> null);
                 Assertions.assertTrue(tidbConnectionTest::testPbserver);
             }
@@ -57,7 +63,9 @@ class TiDbConnectionTestTest {
         @Test
         void testHttps() {
             tidbConfig.setPdServer("https://127.0.0.1:8000");
-            try(MockedStatic<NetUtil> nu = mockStatic(NetUtil.class)) {
+            try(MockedStatic<NetUtil> nu = mockStatic(NetUtil.class);
+                MockedStatic<NetworkUtils> net = mockStatic(NetworkUtils.class)) {
+                net.when(() -> NetworkUtils.check(anyString(), anyInt(), anyInt())).thenReturn(true);
                 nu.when(() -> NetUtil.validateHostPortWithSocket("127.0.0.1", 8000)).then(a -> null);
                 Assertions.assertTrue(tidbConnectionTest::testPbserver);
             }
@@ -65,7 +73,9 @@ class TiDbConnectionTestTest {
         @Test
         void testNoProtocol() {
             tidbConfig.setPdServer("127.0.0.1:8000");
-            try(MockedStatic<NetUtil> nu = mockStatic(NetUtil.class)) {
+            try(MockedStatic<NetUtil> nu = mockStatic(NetUtil.class);
+                MockedStatic<NetworkUtils> net = mockStatic(NetworkUtils.class)) {
+                net.when(() -> NetworkUtils.check(anyString(), anyInt(), anyInt())).thenReturn(true);
                 nu.when(() -> NetUtil.validateHostPortWithSocket("127.0.0.1", 8000)).then(a -> null);
                 Assertions.assertTrue(tidbConnectionTest::testPbserver);
             }
@@ -75,6 +85,19 @@ class TiDbConnectionTestTest {
             tidbConfig.setPdServer("dhsjhf:12i.0.0.1:111");
             Assertions.assertFalse(tidbConnectionTest::testPbserver);
         }
+        @Test
+        void testThrow() {
+            tidbConfig.setPdServer("http://127.0.0.1:8000");
+            try(MockedStatic<NetUtil> nu = mockStatic(NetUtil.class);
+                MockedStatic<NetworkUtils> net = mockStatic(NetworkUtils.class)) {
+                net.when(() -> NetworkUtils.check(anyString(), anyInt(), anyInt())).thenAnswer(a -> {
+                    throw new CoreException("");
+                });
+                nu.when(() -> NetUtil.validateHostPortWithSocket("127.0.0.1", 8000)).then(a -> null);
+                Assertions.assertTrue(tidbConnectionTest::testPbserver);
+            }
+        }
+
     }
 
     @Nested

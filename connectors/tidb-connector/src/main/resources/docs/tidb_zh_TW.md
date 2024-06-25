@@ -6,7 +6,7 @@
 
 ### **2. 支持版本**
 
- - TiDB 5.4以上 （arm/amd系統架構環境下）支持CDC
+ - TiDB 6.0.x～8.1.x （arm/amd系統架構環境下）支持CDC
  
 **{tapData_dir}/run-resource/ti-db/tool/cdc** 需要具備可讀可寫可執行許可權
 

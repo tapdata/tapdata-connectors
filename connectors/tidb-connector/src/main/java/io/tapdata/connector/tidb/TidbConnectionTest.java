@@ -6,6 +6,8 @@ import io.tapdata.common.ddl.DDLFactory;
 import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.connector.mysql.constant.MysqlTestItem;
 import io.tapdata.connector.tidb.config.TidbConfig;
+import io.tapdata.connector.tidb.stage.NetworkUtils;
+import io.tapdata.connector.tidb.stage.VersionControl;
 import io.tapdata.constant.ConnectionTypeEnum;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.Capability;
@@ -81,7 +83,12 @@ public class TidbConnectionTest extends CommonDbTest {
                     : "http://" + tidbConfig.getPdServer();
             URI uri = URI.create(pdServer);
             NetUtil.validateHostPortWithSocket(uri.getHost(), uri.getPort());
-            consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_SUCCESSFULLY));
+            try {
+                NetworkUtils.check(uri.getHost(), uri.getPort(), tidbConfig.getTiKvPort());
+                consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_SUCCESSFULLY, "Smooth connection between PDServer and TiKV"));
+            } catch (Exception e) {
+                consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, String.format("Unable to connect to network %s, %s", tidbConfig.getPdServer(), e.getMessage())));
+            }
             return true;
         } catch (Exception e) {
             consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_FAILED, e.getMessage()));
@@ -274,7 +281,12 @@ public class TidbConnectionTest extends CommonDbTest {
                 }
             });
             array = String.valueOf(version).split("-");
-            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, array[1] + "-" + array[2]));
+            try {
+                VersionControl.redirect(array[2]);
+                consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, array[1] + "-" + array[2]));
+            } catch (Exception e) {
+                consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, array[1] + "-" + array[2] + ", " + e.getMessage()));
+            }
         } catch (Throwable e) {
             consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, e.getMessage()));
         }

@@ -6,7 +6,7 @@ Please follow the instructions below to ensure that TiDB database is successfull
 
 ### **2. Supported versions**
 
- - TiDB version above 5.4.0 (under the ARM/AMD system architecture environment) support CDC
+ - TiDB version 6.0.x～8.1.x (under the ARM/AMD system architecture environment) support CDC
  
 **{tapData-dir}/run-resource/ti-db/tool/cdc** Must have read, write, and execute permissions
 
