@@ -5,7 +5,7 @@
 
 ### **2. 支持版本**
 
- - TiDB 5.4.0以上版本 默认（arm/amd系统架构环境下）支持CDC 
+ - TiDB 6.0.x～8.1.x 默认（arm/amd系统架构环境下）支持CDC 
 
 **{tapData-dir}/run-resource/ti-db/tool/cdc** 需要具备可读可写可执行权限
 
