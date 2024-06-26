@@ -45,9 +45,16 @@ public class ProcessSearch {
     }
 
     protected static String getPortFromLine(String line) {
-        String[] split = line.trim().split(" ");
+        String[] split = line.trim().split("\\s+");
         if (split.length >= 2) {
-            return split[1];
+            String pid = split[1];
+            try {
+                Integer.parseInt(pid);
+            } catch (Exception e) {
+                //not a number
+                return null;
+            }
+            return pid;
         }
         return null;
     }
