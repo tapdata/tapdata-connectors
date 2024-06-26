@@ -250,11 +250,10 @@ public class TidbConnectorTest {
             HttpUtil httpUtil;
             String cdcServer;
             DataMap config;
-            List<String> processes;
+            String processes;
             @BeforeEach
             void init() throws IOException {
-                processes = new ArrayList<>();
-                processes.add("100");
+                processes = "100";
                 config = mock(DataMap.class);
                 httpUtil = mock(HttpUtil.class);
                 cdcServer = "http://127.0.0.1:2000";
@@ -272,7 +271,7 @@ public class TidbConnectorTest {
                 try(MockedStatic<ProcessSearch> ps = mockStatic(ProcessSearch.class);
                     MockedStatic<ProcessLauncher> pl = mockStatic(ProcessLauncher.class);
                     MockedStatic<ZipUtils> zu = mockStatic(ZipUtils.class)) {
-                    ps.when(() -> ProcessSearch.getProcesses(any(Log.class), anyString())).thenReturn(processes);
+                    ps.when(() -> ProcessSearch.getProcessesPortsAsLine(anyString(), any(Log.class), anyString())).thenReturn(processes);
                     pl.when(() -> ProcessLauncher.execCmdWaitResult(anyString(), anyString(), any(Log.class))).thenReturn("");
                     zu.when(() -> ZipUtils.deleteFile(anyString(), any(Log.class))).thenAnswer(a -> null);
                     Assertions.assertDoesNotThrow(() -> connector.checkTiServerAndStop(httpUtil, cdcServer, nodeContext));
@@ -290,7 +289,7 @@ public class TidbConnectorTest {
                 try(MockedStatic<ProcessSearch> ps = mockStatic(ProcessSearch.class);
                     MockedStatic<ProcessLauncher> pl = mockStatic(ProcessLauncher.class);
                     MockedStatic<ZipUtils> zu = mockStatic(ZipUtils.class)) {
-                    ps.when(() -> ProcessSearch.getProcesses(any(Log.class), anyString())).thenReturn(processes);
+                    ps.when(() -> ProcessSearch.getProcessesPortsAsLine(anyString(), any(Log.class), anyString())).thenReturn(processes);
                     pl.when(() -> ProcessLauncher.execCmdWaitResult(anyString(), anyString(), any(Log.class))).thenReturn("");
                     zu.when(() -> ZipUtils.deleteFile(anyString(), any(Log.class))).thenAnswer(a -> null);
                     Assertions.assertDoesNotThrow(() -> connector.checkTiServerAndStop(httpUtil, cdcServer, nodeContext));
@@ -304,11 +303,11 @@ public class TidbConnectorTest {
             }
             @Test
             void testNotAnyProcess() throws IOException {
-                processes.clear();
+                processes = null;
                 try(MockedStatic<ProcessSearch> ps = mockStatic(ProcessSearch.class);
                     MockedStatic<ProcessLauncher> pl = mockStatic(ProcessLauncher.class);
                     MockedStatic<ZipUtils> zu = mockStatic(ZipUtils.class)) {
-                    ps.when(() -> ProcessSearch.getProcesses(any(Log.class), anyString())).thenReturn(processes);
+                    ps.when(() -> ProcessSearch.getProcessesPortsAsLine(anyString(), any(Log.class), anyString())).thenReturn(processes);
                     pl.when(() -> ProcessLauncher.execCmdWaitResult(anyString(), anyString(), any(Log.class))).thenReturn("");
                     zu.when(() -> ZipUtils.deleteFile(anyString(), any(Log.class))).thenAnswer(a -> null);
                     Assertions.assertDoesNotThrow(() -> connector.checkTiServerAndStop(httpUtil, cdcServer, nodeContext));
