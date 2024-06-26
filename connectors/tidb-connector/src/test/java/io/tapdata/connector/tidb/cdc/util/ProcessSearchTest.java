@@ -5,9 +5,16 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 
 class ProcessSearchTest {
     Log log;
@@ -146,4 +153,26 @@ class ProcessSearchTest {
         }
     }
 
+
+    @Test
+    void getPortFromLine() {
+        Assertions.assertNull(ProcessSearch.getPortFromLine(""));
+        Assertions.assertNotNull(ProcessSearch.getPortFromLine("0 83800  1046   0 12:56下午 ttys006    0:00.01 ps -ef"));
+        Assertions.assertNull(ProcessSearch.getPortFromLine("0 x  1046   0 12:56下午 ttys006    0:00.01 ps -ef"));
+        Assertions.assertNotNull(ProcessSearch.getPortFromLine("0     83800      1046   0 12:56下午 ttys006    0:00.01 ps -ef"));
+        Assertions.assertNull(ProcessSearch.getPortFromLine("0"));
+    }
+
+    @Test
+    void getProcessesPortsAsLine() {
+        List<String> p = new ArrayList<>();
+        p.add("");
+        p.add("0 83800  1046   0 12:56下午 ttys006    0:00.01 ps -ef");
+        try (MockedStatic<ProcessSearch> ps = mockStatic(ProcessSearch.class) ) {
+            ps.when(() -> ProcessSearch.getProcesses(log, "")).thenReturn(p);
+            ps.when(() -> ProcessSearch.getProcessesPortsAsLine(" ", log, "")).thenCallRealMethod();
+            ps.when(() -> ProcessSearch.getPortFromLine(anyString())).thenCallRealMethod();
+            Assertions.assertNotNull(ProcessSearch.getProcessesPortsAsLine(" ", log, ""));
+        }
+    }
 }
