@@ -212,12 +212,13 @@ public class ElasticsearchConnector extends ConnectorBase {
         TapTable tapTable = tapCreateTableEvent.getTable();
         try{
             if (!elasticsearchHttpContext.existsIndex(tapTable.getId().toLowerCase())) {
-                int chunkSize = 1;
                 CreateIndexRequest indexRequest = new CreateIndexRequest(tapTable.getId().toLowerCase());
+                int chunkSize = elasticsearchConfig.getShardsNumber() <= 0 ? 1 : elasticsearchConfig.getShardsNumber();
+                int replicasSize = elasticsearchConfig.getReplicasNumber() <= 0 ? 1 : elasticsearchConfig.getReplicasNumber();
                 int fieldsLimit = elasticsearchConfig.getFieldsLimit() <= 0 ? 1000 : elasticsearchConfig.getFieldsLimit();
                 indexRequest.settings(Settings.builder()
                         .put("number_of_shards", chunkSize)
-                        .put("number_of_replicas", 1)
+                        .put("number_of_replicas", replicasSize)
                         .put("mapping.total_fields.limit", fieldsLimit));
                 XContentBuilder xContentBuilder = XContentFactory.jsonBuilder();
                 xContentBuilder.startObject();
