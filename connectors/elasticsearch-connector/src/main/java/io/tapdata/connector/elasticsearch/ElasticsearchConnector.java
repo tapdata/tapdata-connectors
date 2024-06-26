@@ -10,7 +10,10 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapRawValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -211,9 +214,11 @@ public class ElasticsearchConnector extends ConnectorBase {
             if (!elasticsearchHttpContext.existsIndex(tapTable.getId().toLowerCase())) {
                 int chunkSize = 1;
                 CreateIndexRequest indexRequest = new CreateIndexRequest(tapTable.getId().toLowerCase());
+                int fieldsLimit = elasticsearchConfig.getFieldsLimit() <= 0 ? 1000 : elasticsearchConfig.getFieldsLimit();
                 indexRequest.settings(Settings.builder()
                         .put("number_of_shards", chunkSize)
-                        .put("number_of_replicas", 1));
+                        .put("number_of_replicas", 1)
+                        .put("mapping.total_fields.limit", fieldsLimit));
                 XContentBuilder xContentBuilder = XContentFactory.jsonBuilder();
                 xContentBuilder.startObject();
                 xContentBuilder.field("dynamic", "true");

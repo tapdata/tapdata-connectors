@@ -16,6 +16,8 @@ public class ElasticsearchConfig {
     private String dateFormat = "yyyy-MM-dd";
     private String datetimeFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
     private String timeFormat = "HH:mm:ss";
+    private Integer fieldsLimit = 1000;
+
     public String getDatetimeFormat() {
         return datetimeFormat;
     }
@@ -74,5 +76,13 @@ public class ElasticsearchConfig {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public Integer getFieldsLimit() {
+        return fieldsLimit;
+    }
+
+    public void setFieldsLimit(Integer fieldsLimit) {
+        this.fieldsLimit = fieldsLimit;
     }
 }
