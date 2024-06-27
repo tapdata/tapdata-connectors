@@ -581,10 +581,18 @@ public class KafkaService extends AbstractMqService {
         KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
         kafkaConsumer.subscribe(tableList);
         List<TapEvent> list = TapSimplify.list();
+        long acceptTime = System.currentTimeMillis();
         while (consuming.get()) {
             ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
             if (consumerRecords.isEmpty()) {
                 continue;
+            }
+            if (System.currentTimeMillis() - acceptTime > 1000 * 60 * 5) {
+                if (EmptyKit.isNotEmpty(list)) {
+                    eventsOffsetConsumer.accept(list, TapSimplify.list());
+                    list = TapSimplify.list();
+                    acceptTime = System.currentTimeMillis();
+                }
             }
             for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
                 makeMessage(consumerRecord, list, consumerRecord.topic());
