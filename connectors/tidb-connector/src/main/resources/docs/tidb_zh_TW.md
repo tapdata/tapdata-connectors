@@ -8,7 +8,7 @@
 
  - TiDB 6.0.x～8.1.x （arm/amd系統架構環境下）支持CDC
  
-**{tapData-dir}/run-resource/ti-db/tool/cdc** 需要具備可讀可寫可執行許可權
+**{tapData_dir}/run-resource/ti-db/tool/cdc** 需要具備可讀可寫可執行許可權
 
 ### **3. 先決條件（作为源）**
 
