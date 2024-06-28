@@ -91,7 +91,7 @@
       "df_table_field_name": "Name",
       "df_table_field_type": "Type",
       "df_table_field_default": "Default value",
-      "df_table_field_primary": "Primary Key",
+      "df_table_field_primary": "PK",
       "df_table_field_operator": "Operation",
       "df_table_field_btn_add": "Add field"
     },

@@ -16,6 +16,10 @@ public class ElasticsearchConfig {
     private String dateFormat = "yyyy-MM-dd";
     private String datetimeFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
     private String timeFormat = "HH:mm:ss";
+    private Integer shardsNumber = 1;
+    private Integer replicasNumber = 1;
+    private Integer fieldsLimit = 1000;
+
     public String getDatetimeFormat() {
         return datetimeFormat;
     }
@@ -74,5 +78,29 @@ public class ElasticsearchConfig {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public Integer getShardsNumber() {
+        return shardsNumber;
+    }
+
+    public void setShardsNumber(Integer shardsNumber) {
+        this.shardsNumber = shardsNumber;
+    }
+
+    public Integer getReplicasNumber() {
+        return replicasNumber;
+    }
+
+    public void setReplicasNumber(Integer replicasNumber) {
+        this.replicasNumber = replicasNumber;
+    }
+
+    public Integer getFieldsLimit() {
+        return fieldsLimit;
+    }
+
+    public void setFieldsLimit(Integer fieldsLimit) {
+        this.fieldsLimit = fieldsLimit;
     }
 }

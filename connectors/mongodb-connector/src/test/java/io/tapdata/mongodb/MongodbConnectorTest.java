@@ -1,5 +1,6 @@
 package io.tapdata.mongodb;
 
+import com.mongodb.MongoCommandException;
 import com.mongodb.client.*;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
@@ -692,6 +693,24 @@ class MongodbConnectorTest {
             doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
             mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent);
             verify(collection,new Times(1)).createIndex(any(Document.class),any(IndexOptions.class));
+        }
+
+        @Test
+        @DisplayName("test create index catch mongodb error code 86(IndexKeySpecsConflict)")
+        void test3() {
+            MongoCommandException mongoCommandException = mock(MongoCommandException.class);
+            when(mongoCommandException.getErrorCode()).thenReturn(86);
+            when(mongoCommandException.getErrorCodeName()).thenReturn("IndexKeySpecsConflict");
+            when(mongoCommandException.getMessage()).thenReturn("Command failed with error 86 (IndexKeySpecsConflict): 'An existing index has the same name as the requested index. When index names are not specified, they are auto generated and can cause conflicts. Please refer to our documentation.");
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(collection.createIndex(any(Bson.class), any(IndexOptions.class))).thenThrow(mongoCommandException);
+            when(mongoDatabase.getCollection("test")).thenReturn(collection);
+            TapIndex tapIndex = new TapIndex().indexField(new TapIndexField().name("xxx").fieldAsc(true));
+            tapCreateIndexEvent = new TapCreateIndexEvent();
+            tapCreateIndexEvent.indexList(Collections.singletonList(tapIndex));
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext, table, tapCreateIndexEvent);
+            assertDoesNotThrow(() -> mongodbConnector.createIndex(connectorContext, table, tapCreateIndexEvent));
+            verify(log).info(anyString(), any());
         }
     }
     @Nested
