@@ -9,11 +9,14 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.simplify.TapSimplify;
 
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -32,6 +35,8 @@ public class TapEventBuilder {
     private static final char[] RANDOM_CHARS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".toCharArray();
     private static final int RANDOM_CHARS_LENGTH = RANDOM_CHARS.length;
     public static final int DEFAULT_RANDOM_STRING_LENGTH = 8;
+    public static final int LONG_RANDOM_STRING_LENGTH = 1000;
+    public static final int DEFAULT_RANDOM_DATE_FRACTION = 0;
 
     private final AtomicLong eventIndex = new AtomicLong(0);
     private AtomicLong serial;
@@ -41,10 +46,14 @@ public class TapEventBuilder {
 
     private final Consumer<Map<String, Object>> heartbeatSetter;
     private Map<String, String> cacheRString = new HashMap<>();
-	private Map<String, Double> cacheRNumber = new HashMap<>();
+    private Map<String, Double> cacheRNumber = new HashMap<>();
+    private Map<String, String> cacheRLongString = new HashMap<>();
+    private Map<String, byte[]> cacheRLongBinary = new HashMap<>();
+    private Map<String, Timestamp> cacheRDate = new HashMap<>();
 
     public TapEventBuilder() {
-        this((data) -> {});
+        this((data) -> {
+        });
     }
 
     public TapEventBuilder(Consumer<Map<String, Object>> heartbeatSetter) {
@@ -151,7 +160,7 @@ public class TapEventBuilder {
                     }
                     cacheRNumber.put(ftype, rNumberValue);
                 }
-				return rNumberValue;
+                return rNumberValue;
             } else if (ftype.startsWith("rstring")) {
                 String rStringValue = cacheRString.get(ftype);
                 if (null == rStringValue) {
@@ -163,6 +172,39 @@ public class TapEventBuilder {
                     cacheRString.put(ftype, rStringValue);
                 }
                 return rStringValue;
+            } else if (ftype.startsWith("rlongstring")) {
+                String rStringValue = cacheRLongString.get(ftype);
+                if (null == rStringValue) {
+                    if (ftype.endsWith(")")) {
+                        rStringValue = randomString(Integer.parseInt(ftype.substring(12, ftype.length() - 1)));
+                    } else {
+                        rStringValue = randomString(LONG_RANDOM_STRING_LENGTH);
+                    }
+                    cacheRLongString.put(ftype, rStringValue);
+                }
+                return rStringValue;
+            } else if (ftype.startsWith("rlongbinary")) {
+                byte[] rBinaryValue = cacheRLongBinary.get(ftype);
+                if (null == rBinaryValue) {
+                    if (ftype.endsWith(")")) {
+                        rBinaryValue = randomString(Integer.parseInt(ftype.substring(12, ftype.length() - 1))).getBytes(StandardCharsets.UTF_8);
+                    } else {
+                        rBinaryValue = randomString(LONG_RANDOM_STRING_LENGTH).getBytes(StandardCharsets.UTF_8);
+                    }
+                    cacheRLongBinary.put(ftype, rBinaryValue);
+                }
+                return rBinaryValue;
+            } else if (ftype.startsWith("rdatetime")) {
+                Timestamp rDatetimeValue = cacheRDate.get(ftype);
+                if (null == rDatetimeValue) {
+                    if (ftype.endsWith(")")) {
+                        rDatetimeValue = randomTimestamp(Integer.parseInt(ftype.substring(10, ftype.length() - 1)));
+                    } else {
+                        rDatetimeValue = randomTimestamp(DEFAULT_RANDOM_DATE_FRACTION);
+                    }
+                    cacheRDate.put(ftype, rDatetimeValue);
+                }
+                return rDatetimeValue;
             } else if (ftype.startsWith("serial")) {
                 if (RecordOperators.Insert == op) {
                     if (null == serial) {
@@ -195,5 +237,13 @@ public class TapEventBuilder {
             buf.append(RANDOM_CHARS[SECURE_RANDOM.nextInt(RANDOM_CHARS_LENGTH)]);
         }
         return buf.toString();
+    }
+
+    private Timestamp randomTimestamp(int fraction) {
+        DateTime dateTime = new DateTime(new Date());
+        long offsetSeconds = (long) ((Math.random() - 0.5) * 60 * 60 * 24 * 365 * 40);
+        dateTime.setSeconds(dateTime.getSeconds() + offsetSeconds);
+        dateTime.setNano((int) (Math.pow(10, 9 - fraction) * (long) (Math.random() * Math.pow(10, fraction))));
+        return dateTime.toTimestamp();
     }
 }

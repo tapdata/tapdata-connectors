@@ -24,11 +24,14 @@ public class RegisterMain {
 	private enum ConnectorEnums {
 		// Empty(BASE_PATH + "connectors/dist/empty-connector-v1.1-SNAPSHOT.jar", "all", "empty"),
 		Dummy(BASE_PATH + "connectors/dist/dummy-connector-v1.0-SNAPSHOT.jar", "all", "dummy", "basic"),
+		Mock_Source(BASE_PATH + "connectors/dist/mock-source-connector-v1.0-SNAPSHOT.jar", "all", "mock-source", "basic"),
+		Mock_Target(BASE_PATH + "connectors/dist/mock-target-connector-v1.0-SNAPSHOT.jar", "all", "mock-target", "basic"),
 		Mysql(BASE_PATH + "connectors/dist/mysql-connector-v1.0-SNAPSHOT.jar", "all", "mysql", "basic", "jdbc"),
 		Postgres(BASE_PATH + "connectors/dist/postgres-connector-v1.0-SNAPSHOT.jar", "all", "postgres", "basic", "jdbc"),
 		Dws(BASE_PATH + "connectors/dist/dws-connector-v1.0-SNAPSHOT.jar", "all", "dws", "basic", "jdbc"),
 		Mongodb(BASE_PATH + "connectors/dist/mongodb-connector-v1.0-SNAPSHOT.jar", "all", "mongodb", "basic", "jdbc"),
 		Mongodb_Atlas(BASE_PATH + "connectors/dist/mongodb-atlas-connector-v1.0-SNAPSHOT.jar", "all", "mongodb-atlas"),
+		Mongodb_Lower(BASE_PATH + "connectors/dist/mongodb-lower-connector-v1.0-SNAPSHOT.jar", "all", "mongodb-lower"),
 		Elasticsearch(BASE_PATH + "connectors/dist/elasticsearch-connector-v1.0-SNAPSHOT.jar", "all", "elasticsearch"),
 		Oceanbase(BASE_PATH + "connectors/dist/oceanbase-mysql-connector-v1.0-SNAPSHOT.jar", "all", "oceanbase"),
 		Doris(BASE_PATH + "connectors/dist/doris-connector-v1.0-SNAPSHOT.jar", "all", "doris"),
@@ -92,7 +95,7 @@ public class RegisterMain {
 		LarkBitable(BASE_PATH + "connectors/dist/lark-bitable-connector-v1.0-SNAPSHOT.jar", "all", "lark-bitable"),
 		AzureCosmosDB(BASE_PATH + "connectors/dist/azure-cosmosdb-connector-v1.0-SNAPSHOT.jar","all","azure-cosmosdb"),
 		HuDi(BASE_PATH + "connectors/dist/hudi-connector-v1.0-SNAPSHOT.jar", "all", "hudi"),
-		HuaWeiOpenGaussDB(BASE_PATH + "connectors/dist/open-gaussdb-connector-v1.0-SNAPSHOT.jar", "all", "huawei-gauss-db")
+		HuaWeiOpenGaussDB(BASE_PATH + "connectors/dist/huawei-cloud-gaussdb-connector-v1.0-SNAPSHOT.jar", "all", "huawei-gauss-db")
 		;
 
 		private final String path;

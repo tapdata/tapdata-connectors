@@ -13,7 +13,6 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.logger.TapLogger;
-import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
 import io.tapdata.mongodb.MongodbConnector;
@@ -56,7 +55,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 
 	private MongoClient mongoClient;
 
-	private Set<String> namespaces = new HashSet<>();
+	protected Set<String> namespaces = new HashSet<>();
 
 	private Map<String, String> nodesURI;
 

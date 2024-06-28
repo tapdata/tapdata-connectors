@@ -10,7 +10,10 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapRawValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -89,7 +92,7 @@ public class ElasticsearchConnector extends ConnectorBase {
             return tapTable;
         }
     }
-    private void initConnection(TapConnectionContext connectorContext) {
+    protected void initConnection(TapConnectionContext connectorContext) {
         elasticsearchConfig = new ElasticsearchConfig().load(connectorContext.getConnectionConfig());
         elasticsearchConfig.load(connectorContext.getNodeConfig());
         exceptionCollector = new ElasticsearchExceptionCollector();
@@ -99,6 +102,7 @@ public class ElasticsearchConnector extends ConnectorBase {
         }catch (Throwable e){
             exceptionCollector.collectTerminateByServer(e);
             exceptionCollector.collectUserPwdInvalid(elasticsearchConfig.getUser(),e);
+            throw e;
         }
     }
 
@@ -204,15 +208,18 @@ public class ElasticsearchConnector extends ConnectorBase {
         new ElasticsearchRecordWriter(elasticsearchHttpContext, tapTable).log(connectorContext.getLog()).write(tapRecordEvents, writeListResultConsumer);
     }
 
-    private void createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
+    protected void createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
         TapTable tapTable = tapCreateTableEvent.getTable();
         try{
             if (!elasticsearchHttpContext.existsIndex(tapTable.getId().toLowerCase())) {
-                int chunkSize = 1;
                 CreateIndexRequest indexRequest = new CreateIndexRequest(tapTable.getId().toLowerCase());
+                int chunkSize = elasticsearchConfig.getShardsNumber() <= 0 ? 1 : elasticsearchConfig.getShardsNumber();
+                int replicasSize = elasticsearchConfig.getReplicasNumber() <= 0 ? 1 : elasticsearchConfig.getReplicasNumber();
+                int fieldsLimit = elasticsearchConfig.getFieldsLimit() <= 0 ? 1000 : elasticsearchConfig.getFieldsLimit();
                 indexRequest.settings(Settings.builder()
                         .put("number_of_shards", chunkSize)
-                        .put("number_of_replicas", 1));
+                        .put("number_of_replicas", replicasSize)
+                        .put("mapping.total_fields.limit", fieldsLimit));
                 XContentBuilder xContentBuilder = XContentFactory.jsonBuilder();
                 xContentBuilder.startObject();
                 xContentBuilder.field("dynamic", "true");
@@ -273,6 +280,7 @@ public class ElasticsearchConnector extends ConnectorBase {
         }catch (Throwable e){
             exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
             exceptionCollector.collectUserPwdInvalid(elasticsearchConfig.getUser(),e);
+            throw new RuntimeException("Create Table " + tapTable.getId() + " Failed | Error: " + e.getMessage(), e);
         }
     }
 

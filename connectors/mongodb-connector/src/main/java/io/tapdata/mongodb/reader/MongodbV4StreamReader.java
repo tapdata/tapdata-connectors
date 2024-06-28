@@ -14,6 +14,7 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
 import io.tapdata.exception.TapPdkRetryableEx;
+import io.tapdata.exception.TapRuntimeException;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
@@ -67,15 +68,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
 	@Override
 	public void read(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
-		if(isPreImage){
-			for(String tableName : tableList){
-				BsonDocument bsonDocument = new BsonDocument();
-				bsonDocument.put("collMod",new BsonString(tableName));
-				bsonDocument.put("changeStreamPreAndPostImages",new BsonDocument("enabled",new BsonBoolean(true)));
-				Document result = mongoDatabase.runCommand(bsonDocument);
-				if(!result.containsKey("ok"))TapLogger.warn(TAG, "{} failed to enable changeStreamPreAndPostImages",tableName);
-			}
-		}
+		openChangeStreamPreAndPostImages(tableList);
 		List<Bson> pipeline = singletonList(Aggregates.match(
 			Filters.in("ns.coll", tableList)
 		));
@@ -304,6 +297,32 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 		running.compareAndSet(true, false);
 		if (mongoClient != null) {
 			mongoClient.close();
+			mongoClient = null;
 		}
 	}
+
+	protected void openChangeStreamPreAndPostImages(List<String> tableList) {
+		if(isPreImage){
+			for(String tableName : tableList){
+				try {
+					openChangeStream(tableName);
+				}catch (MongoException e){
+					if (e.getCode() == 26){
+						mongoDatabase.createCollection(tableName);
+						openChangeStream(tableName);
+						return;
+					}
+					throw new MongoException(tableName + " failed to enable changeStreamPreAndPostImages", e);
+				}
+			}
+		}
+	}
+
+	private void openChangeStream(String tableName) {
+		BsonDocument bsonDocument = new BsonDocument();
+		bsonDocument.put("collMod",new BsonString(tableName));
+		bsonDocument.put("changeStreamPreAndPostImages",new BsonDocument("enabled",new BsonBoolean(true)));
+		mongoDatabase.runCommand(bsonDocument);
+	}
+
 }

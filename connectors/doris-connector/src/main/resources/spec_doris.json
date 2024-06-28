@@ -242,106 +242,30 @@
     "node": {
       "type": "object",
       "properties": {
-        "duplicateKey": {
-          "title": "${duplicateKey}",
-          "type": "array",
-          "x-index": 1,
-          "required": true,
-          "default": null,
-          "x-decorator": "FormItem",
-          "x-component": "FieldSelect",
-          "x-component-props": {
-            "allowCreate": false,
-            "multiple": true,
-            "filterable": true
-          },
-          "x-reactions": [
-            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
-            {
-              "dependencies":["writeStrategy"],
-              "fulfill":{
-                "state":{
-                  "display": "{{$deps[0] === \"appendWrite\" ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ]
-        },
-        "distributedKey": {
-          "title": "${distributedKey}",
-          "type": "array",
-          "x-index": 2,
-          "required": true,
-          "default": null,
-          "x-decorator": "FormItem",
-          "x-component": "FieldSelect",
-          "x-component-props": {
-            "allowCreate": false,
-            "multiple": true,
-            "filterable": true
-          },
-          "x-reactions": [
-            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
-            {
-              "dependencies":["writeStrategy"],
-              "fulfill":{
-                "state":{
-                  "display": "{{$deps[0] === \"appendWrite\" ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ]
-        },
-        "replicationNum": {
-          "required": true,
-          "type": "int",
-          "x-index": 3,
-          "title": "${replicationNum}",
-          "default": 1,
-          "x-decorator": "FormItem",
-          "x-component": "InputNumber"
-        },
-        "writeByteBufferCapacity": {
-          "required": true,
-          "type": "int",
-          "x-index": 4,
-          "title": "${writeByteBufferCapacity}",
-          "default": 10240,
-          "x-decorator": "FormItem",
-          "x-component": "InputNumber",
-          "apiServerKey": "node_writeByteBufferCapacity"
-        },
-        "writeFormat": {
+        "uniqueKeyType": {
           "type": "string",
-          "title": "${writeFormat}",
-          "default": "json",
-          "x-index": 5,
+          "title": "${uniqueKeyType}",
+          "default": "Unique",
           "x-decorator": "FormItem",
           "x-decorator-props": {
-            "feedbackLayout": "none"
+            "tooltip": "${uniqueKeyTypeTip}"
           },
           "x-component": "Select",
+          "x-index": 1,
           "enum": [
             {
-              "label": "Json",
-              "value": "json"
+              "label": "Aggregate",
+              "value": "Aggregate"
             },
             {
-              "label": "CSV",
-              "value": "csv"
+              "label": "Unique",
+              "value": "Unique"
+            },
+            {
+              "label": "Duplicate",
+              "value": "Duplicate"
             }
-          ]
-        },
-        "updateSpecific": {
-          "type": "boolean",
-          "title": "${updateSpecific}",
-          "default": false,
-          "x-index": 6,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "tooltip": "${updateSpecificTooltip}"
-          },
+          ],
           "x-reactions": [
             {
               "dependencies": ["$inputs"],
@@ -353,31 +277,202 @@
             }
           ]
         },
-        "uniqueKeyType": {
-          "type": "string",
-          "title": "${uniqueKeyType}",
-          "default": "Unique",
+        "duplicateKey": {
+          "title": "${duplicateKey}",
+          "type": "array",
+          "x-index": 2,
+          "required": true,
+          "default": null,
           "x-decorator": "FormItem",
-          "x-component": "Select",
-          "x-index": 7,
-          "enum": [
-            {
-              "label": "Aggregate",
-              "value": "Aggregate"
-            },
-            {
-              "label": "Unique",
-              "value": "Unique"
-            }
-          ],
+          "x-decorator-props": {
+            "tooltip": "${duplicateKeyTip}"
+          },
+          "x-component": "FieldSelect",
+          "x-component-props": {
+            "allowCreate": false,
+            "multiple": true,
+            "filterable": true
+          },
           "x-reactions": [
+            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
             {
-              "dependencies": ["$inputs", ".updateSpecific"],
-              "fulfill": {
-                "state": {
-                  "display": "{{$deps[0].length > 0 && $deps[1] ? \"visible\":\"hidden\"}}"
+              "dependencies":["writeStrategy", ".uniqueKeyType"],
+              "fulfill":{
+                "state":{
+                  "display": "{{$deps[0] === \"appendWrite\" && $deps[1] === \"Duplicate\" ? \"visible\":\"hidden\"}}"
                 }
               }
+            }
+          ]
+        },
+        "distributedKey": {
+          "title": "${distributedKey}",
+          "type": "array",
+          "x-index": 3,
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${distributedKeyTip}"
+          },
+          "x-component": "FieldSelect",
+          "x-component-props": {
+            "allowCreate": false,
+            "multiple": true,
+            "filterable": true
+          },
+          "x-reactions": [
+            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
+            {
+              "dependencies":["$inputs"],
+              "fulfill":{
+                "state":{
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "bucket": {
+          "type": "string",
+          "title": "${bucket}",
+          "default": 2,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-index": 4,
+          "x-decorator-props": {
+            "min": 1,
+            "max": 100
+          },
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          }
+        },
+        "tableProperties": {
+          "type": "array",
+          "title": "${tableProperties}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${tablePropertiesTip}"
+          },
+          "default": [
+            {"propKey": "replication_num", "propValue": "1"},
+            {"propKey": "enable_unique_key_merge_on_write", "propValue": "true"},
+            {"propKey": "store_row_column", "propValue": "true"}
+          ],
+          "x-component": "ArrayItems",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            },
+            {
+              "dependencies": [".uniqueKeyType"],
+              "fulfill": {
+                "state": {
+                  "value":
+                  "{{{Aggregate: [{\"propKey\":\"replication_num\",\"propValue\":\"1\"}],Unique: [{\"propKey\":\"replication_num\",\"propValue\":\"1\"},{\"propKey\":\"enable_unique_key_merge_on_write\",\"propValue\":\"true\"},{\"propKey\":\"store_row_column\",\"propValue\":\"true\"}],Duplicate: [{\"propKey\":\"replication_num\",\"propValue\":\"1\"}]}[$deps[0]]}}"
+                }
+              }
+            }
+          ],
+          "x-index": 5,
+          "items": {
+            "type": "object",
+            "properties": {
+              "space": {
+                "type": "void",
+                "x-component": "Space",
+                "properties": {
+                  "propKey": {
+                    "type": "string",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${propKey}"
+                    },
+                    "x-index": 1
+                  },
+                  "propValue": {
+                    "type": "number",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${propValue}"
+                    },
+                    "x-index": 2
+                  },
+                  "remove": {
+                    "type": "void",
+                    "x-decorator": "FormItem",
+                    "x-component": "ArrayItems.Remove"
+                  }
+                }
+              }
+            }
+          },
+          "properties": {
+            "add": {
+              "type": "void",
+              "title": "${prompt}",
+              "x-component": "ArrayItems.Addition",
+              "x-component-props": {
+                "defaultValue": { "propKey": "", "propValue": "" }
+              }
+            }
+          }
+        },
+        "writeByteBufferCapacity": {
+          "required": true,
+          "type": "int",
+          "x-index": 6,
+          "title": "${writeByteBufferCapacity}",
+          "default": 10240,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          },
+          "apiServerKey": "node_writeByteBufferCapacity"
+        },
+        "writeFormat": {
+          "type": "string",
+          "title": "${writeFormat}",
+          "default": "json",
+          "x-index": 7,
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "feedbackLayout": "none"
+          },
+          "x-component": "Select",
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          },
+          "enum": [
+            {
+              "label": "Json",
+              "value": "json"
+            },
+            {
+              "label": "CSV",
+              "value": "csv"
             }
           ]
         }
@@ -408,10 +503,16 @@
       "doc": "docs/readme_en_US.md",
       "duplicateKey": "duplicateKey",
       "distributedKey": "distributedKey",
-      "replicationNum": "replicationNum",
-      "updateSpecific": "updateSpecific",
-      "updateSpecificTooltip": "2.0 new feature (1.x does not take effect), turning on the switch can improve the performance of batch updating fixed fields",
-      "uniqueKeyType": "uniqueKeyType(Aggregate/Unique)"
+      "uniqueKeyType": "Key Type",
+      "uniqueKeyTypeTip": "In the key type, Unique means unique key, Duplicate means duplicate key, Aggregate means aggregate key",
+      "duplicateKeyTip": "Sort field, default to update condition field when selecting Duplicate key type, only enable this configuration when append write mode has no update condition",
+      "distributedKeyTip": "Partition field, used for partitioned tables, the selected field must contain key fields, not filled in by default according to key field partition",
+      "bucket": "Bucket",
+      "prompt": "Add",
+      "tableProperties": "Table Properties",
+      "tablePropertiesTip": "Table properties, for example: {replication_num: 3, storage_format: v2}",
+      "propKey": "Property Name",
+      "propValue": "Property Value"
     },
     "zh_CN": {
       "host": "数据库地址",
@@ -435,10 +536,16 @@
       "doc": "docs/readme_zh_CN.md",
       "duplicateKey": "排序字段",
       "distributedKey": "分区字段",
-      "replicationNum": "副本数",
-      "updateSpecific": "是否更新特定字段",
-      "updateSpecificTooltip": "2.0新特性(1.x不生效)，打开开关可以提升批量更新固定字段性能",
-      "uniqueKeyType": "唯一键类型(Aggregate/Unique)"
+      "uniqueKeyType": "键类型",
+      "uniqueKeyTypeTip": "键类型中Unique表示唯一键，Duplicate表示重复键，Aggregate表示聚合键",
+      "duplicateKeyTip": "排序字段，在选择Duplicate键类型时默认按更新条件字段，追加写入方式无更新条件时才启用该配置",
+      "distributedKeyTip": "分区字段，用于分区表，选取字段必须是键字段包含，不填默认按键字段分区",
+      "bucket": "分桶数",
+      "prompt": "添加",
+      "tableProperties": "表属性",
+      "tablePropertiesTip": "表属性，例如：{replication_num: 3, storage_format: v2}",
+      "propKey": "属性名",
+      "propValue": "属性值"
     },
     "zh_TW": {
       "host": "數據庫地址",
@@ -462,10 +569,16 @@
       "doc": "docs/readme_zh_CN.md",
       "duplicateKey": "排序字段",
       "distributedKey": "分区字段",
-      "replicationNum": "副本數",
-      "updateSpecific": "是否更新特定字段",
-      "updateSpecificTooltip": "2.0新特性(1.x不生效)，打開開關可以提升批量更新固定字段性能",
-      "uniqueKeyType": "唯一鍵類型(Aggregate/Unique)"
+      "uniqueKeyType": "鍵類型",
+      "uniqueKeyTypeTip": "鍵類型中Unique表示唯一鍵，Duplicate表示重複鍵，Aggregate表示聚合鍵",
+      "duplicateKeyTip": "排序字段，在選擇Duplicate鍵類型時默認按更新條件字段，追加寫入方式無更新條件時才啟用該配置",
+      "distributedKeyTip": "分區字段，用於分區表，選取字段必須是鍵字段包含，不填默認按鍵字段分區",
+      "bucket": "分桶數",
+      "prompt": "添加",
+      "tableProperties": "表屬性",
+      "tablePropertiesTip": "表屬性，例如：{replication_num: 3, storage_format: v2}",
+      "propKey": "屬性名",
+      "propValue": "屬性值"
     }
   },
   "dataTypes": {

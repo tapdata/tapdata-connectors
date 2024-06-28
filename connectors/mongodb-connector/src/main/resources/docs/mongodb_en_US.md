@@ -3,7 +3,7 @@
 Please follow the instructions below to ensure that the MongoDB database is successfully added and used in Tapdata.
 > **Note**: MongoDB must be a replica set when it is used as the source connection.
 #### **2.  Supported versions**
-MongoDB 3.2、3.4、3.6、4.0、4.2
+MongoDB 3.6+
 > **Note**:<br>
 >Since Tapdata data synchronization is currently based on MongoDB's Change Stream, which supports multi-table merging, and MongoDB officially supports Change Stream from version 4.0, please try to ensure that the source and target databases are both version 4.0 and above.
 ###  **3.  Prerequisites**

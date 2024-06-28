@@ -28,6 +28,9 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     private static final String SET_CLIENT_SQL_MODE = "set sql_mode = ?";
     private static final List<String> ignoreSqlModes = new ArrayList<String>() {{
         add("NO_ZERO_DATE");
+        add("STRICT_TRANS_TABLES");
+        add("STRICT_ALL_TABLES");
+        add("NO_ZERO_IN_DATE");
     }};
 
     public MysqlJdbcContextV2(CommonDbConfig config) {

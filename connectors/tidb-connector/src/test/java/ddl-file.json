@@ -1,0 +1,242 @@
+{
+  "schema_450116318093639703_0206100104.json": {
+    "Table": "products1",
+    "Schema": "test",
+    "Version": 1,
+    "TableVersion": 450116318093639703,
+    "Query": "CREATE TABLE `products1` (`no_w_id` INT(11) NOT NULL,`no_d_id` INT(11) NOT NULL,`no_o_id` INT(11) NOT NULL,PRIMARY KEY(`no_w_id`))",
+    "Type": 3,
+    "TableColumns": [
+      {
+        "ColumnName": "no_w_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false",
+        "ColumnIsPk": "true"
+      },
+      {
+        "ColumnName": "no_d_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "no_o_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      }
+    ],
+    "TableColumnsTotal": 3
+  },
+  "schema_450117011425198099_0827167968.json": {
+    "Table": "products1",
+    "Schema": "test",
+    "Version": 1,
+    "TableVersion": 450117011425198099,
+    "Query": "ALTER TABLE `test`.`products1` MODIFY COLUMN `new_column_name` VARCHAR(10)",
+    "Type": 12,
+    "TableColumns": [
+      {
+        "ColumnName": "no_w_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false",
+        "ColumnIsPk": "true"
+      },
+      {
+        "ColumnName": "no_d_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "no_o_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "new_column_name",
+        "ColumnType": "VARCHAR",
+        "ColumnPrecision": "10"
+      }
+    ],
+    "TableColumnsTotal": 4
+  },
+  "schema_450117012827668492_2577208209.json": {
+    "Table": "products1",
+    "Schema": "test",
+    "Version": 1,
+    "TableVersion": 450117012827668492,
+    "Query": "ALTER TABLE `test`.`products1` ADD COLUMN `col` INT",
+    "Type": 5,
+    "TableColumns": [
+      {
+        "ColumnName": "no_w_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false",
+        "ColumnIsPk": "true"
+      },
+      {
+        "ColumnName": "no_d_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "no_o_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "col",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11"
+      }
+    ],
+    "TableColumnsTotal": 4
+  },
+  "schema_450117010835374091_3856429158.json": {
+    "Table": "products1",
+    "Schema": "test",
+    "Version": 1,
+    "TableVersion": 450117010835374091,
+    "Query": "ALTER TABLE `test`.`products1` ADD COLUMN `new_column_name` INT",
+    "Type": 5,
+    "TableColumns": [
+      {
+        "ColumnName": "no_w_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false",
+        "ColumnIsPk": "true"
+      },
+      {
+        "ColumnName": "no_d_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "no_o_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "new_column_name",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11"
+      }
+    ],
+    "TableColumnsTotal": 4
+  },
+  "schema_450117012119879693_0206100104.json": {
+    "Table": "products1",
+    "Schema": "test",
+    "Version": 1,
+    "TableVersion": 450117012119879693,
+    "Query": "ALTER TABLE `test`.`products1` DROP COLUMN `new_column_name`",
+    "Type": 6,
+    "TableColumns": [
+      {
+        "ColumnName": "no_w_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false",
+        "ColumnIsPk": "true"
+      },
+      {
+        "ColumnName": "no_d_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "no_o_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      }
+    ],
+    "TableColumnsTotal": 3
+  },
+  "schema_450117013470183442_2744141683.json": {
+    "Table": "products1",
+    "Schema": "test",
+    "Version": 1,
+    "TableVersion": 450117013470183442,
+    "Query": "ALTER TABLE `test`.`products1` CHANGE COLUMN `col` `new_col` INT",
+    "Type": 12,
+    "TableColumns": [
+      {
+        "ColumnName": "no_w_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false",
+        "ColumnIsPk": "true"
+      },
+      {
+        "ColumnName": "no_d_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "no_o_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "new_col",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11"
+      }
+    ],
+    "TableColumnsTotal": 4
+  },
+  "schema_450117461133230092_1949267974.json": {
+    "Table": "products1",
+    "Schema": "test",
+    "Version": 1,
+    "TableVersion": 450117461133230092,
+    "Query": "ALTER TABLE `test`.`products1` ADD COLUMN `char_col` VARCHAR(10)",
+    "Type": 5,
+    "TableColumns": [
+      {
+        "ColumnName": "no_w_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false",
+        "ColumnIsPk": "true"
+      },
+      {
+        "ColumnName": "no_d_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "no_o_id",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11",
+        "ColumnNullable": "false"
+      },
+      {
+        "ColumnName": "new_col",
+        "ColumnType": "INT",
+        "ColumnPrecision": "11"
+      },
+      {
+        "ColumnName": "char_col",
+        "ColumnType": "VARCHAR",
+        "ColumnPrecision": "10"
+      }
+    ],
+    "TableColumnsTotal": 5
+  }
+}

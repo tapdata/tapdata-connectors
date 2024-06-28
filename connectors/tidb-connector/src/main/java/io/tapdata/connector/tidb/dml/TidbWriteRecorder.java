@@ -9,7 +9,6 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -60,8 +59,6 @@ public class TidbWriteRecorder extends NormalWriteRecorder {
     }
 
     protected void insertUpdate(Map<String, Object> after, Map<String, Object> before, WriteListResult<TapRecordEvent> listResult) throws SQLException {
-        Map<String, Object> all = new HashMap<>(before);
-        all.putAll(after);
         String preparedStatementKey = String.join(",", after.keySet());
         if (preparedStatementKey.equals(this.preparedStatementKey)) {
             preparedStatement = preparedStatementMap.get(preparedStatementKey);
@@ -82,7 +79,7 @@ public class TidbWriteRecorder extends NormalWriteRecorder {
         preparedStatement.clearParameters();
         int pos = 1;
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(all.get(key), columnTypeMap.get(key)));
+            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
         }
     }
 

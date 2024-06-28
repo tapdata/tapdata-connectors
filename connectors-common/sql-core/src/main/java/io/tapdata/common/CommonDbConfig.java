@@ -38,6 +38,7 @@ public class CommonDbConfig implements Serializable {
     private char escapeChar = '"';
     private Boolean hashSplit = false;
     private int maxSplit = 20;
+    private Boolean doubleActive = false;
 
     private Boolean useSSL = false;
     private String sslCa;
@@ -233,6 +234,14 @@ public class CommonDbConfig implements Serializable {
 
     public void setMaxSplit(int maxSplit) {
         this.maxSplit = maxSplit;
+    }
+
+    public Boolean getDoubleActive() {
+        return doubleActive;
+    }
+
+    public void setDoubleActive(Boolean doubleActive) {
+        this.doubleActive = doubleActive;
     }
 
     public Boolean getUseSSL() {

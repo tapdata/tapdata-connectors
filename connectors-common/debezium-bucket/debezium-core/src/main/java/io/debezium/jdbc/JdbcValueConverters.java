@@ -29,6 +29,7 @@ import java.util.Base64.Encoder;
 import java.util.BitSet;
 import java.util.concurrent.TimeUnit;
 
+import io.debezium.type.TapIllegalDate;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.slf4j.Logger;
@@ -389,7 +390,9 @@ public class JdbcValueConverters implements ValueConverterProvider {
     protected Object convertTimestampWithZone(Column column, Field fieldDefn, Object data) {
         if (data instanceof Long && Long.MIN_VALUE == (Long) data)
             return data;
-
+        if (data instanceof TapIllegalDate){
+            return data;
+        }
         return convertValue(column, fieldDefn, data, fallbackTimestampWithTimeZone, (r) -> {
             try {
                 r.deliver(ZonedTimestamp.toIsoString(data, defaultOffset, adjuster));
@@ -461,7 +464,9 @@ public class JdbcValueConverters implements ValueConverterProvider {
     protected Object convertTimestampToEpochMillis(Column column, Field fieldDefn, Object data) {
         if (data instanceof Long && Long.MIN_VALUE == (Long) data)
             return data;
-
+        if (data instanceof TapIllegalDate){
+            return data;
+        }
         // epoch is the fallback value
         return convertValue(column, fieldDefn, data, 0L, (r) -> {
             try {
@@ -489,7 +494,9 @@ public class JdbcValueConverters implements ValueConverterProvider {
     protected Object convertTimestampToEpochMicros(Column column, Field fieldDefn, Object data) {
         if (data instanceof Long && Long.MIN_VALUE == (Long) data)
             return data;
-
+        if (data instanceof TapIllegalDate){
+            return data;
+        }
         // epoch is the fallback value
         return convertValue(column, fieldDefn, data, 0L, (r) -> {
             try {
@@ -517,7 +524,9 @@ public class JdbcValueConverters implements ValueConverterProvider {
     protected Object convertTimestampToEpochNanos(Column column, Field fieldDefn, Object data) {
         if (data instanceof Long && Long.MIN_VALUE == (Long) data)
             return data;
-
+        if (data instanceof TapIllegalDate){
+            return data;
+        }
         // epoch is the fallback value
         return convertValue(column, fieldDefn, data, 0L, (r) -> {
             try {
@@ -545,7 +554,9 @@ public class JdbcValueConverters implements ValueConverterProvider {
     protected Object convertTimestampToEpochMillisAsDate(Column column, Field fieldDefn, Object data) {
         if (data instanceof Integer && Integer.MIN_VALUE == (Integer) data)
             return data;
-
+        if (data instanceof TapIllegalDate){
+            return data;
+        }
         // epoch is the fallback value
         return convertValue(column, fieldDefn, data, new java.util.Date(0L), (r) -> {
             try {

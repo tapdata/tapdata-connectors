@@ -683,7 +683,7 @@ public class MySqlStreamingChangeEventSource implements StreamingChangeEventSour
      */
     protected void handleInsert(Event event) throws InterruptedException {
         handleChange(event, "insert", WriteRowsEventData.class, x -> taskContext.getSchema().getTableId(x.getTableId()), WriteRowsEventData::getRows,
-                (tableId, row) -> eventDispatcher.dispatchDataChangeEvent(tableId, new MySqlChangeRecordEmitter(offsetContext, clock, Operation.CREATE, null, row)));
+                (tableId, row) -> eventDispatcher.dispatchDataChangeEvent(tableId, new TapMySqlChangeRecordEmitter(offsetContext, clock, Operation.CREATE, null, row)));
     }
 
     /**
@@ -695,7 +695,7 @@ public class MySqlStreamingChangeEventSource implements StreamingChangeEventSour
     protected void handleUpdate(Event event) throws InterruptedException {
         handleChange(event, "update", UpdateRowsEventData.class, x -> taskContext.getSchema().getTableId(x.getTableId()), UpdateRowsEventData::getRows,
                 (tableId, row) -> eventDispatcher.dispatchDataChangeEvent(tableId,
-                        new MySqlChangeRecordEmitter(offsetContext, clock, Operation.UPDATE, row.getKey(), row.getValue())));
+                        new TapMySqlChangeRecordEmitter(offsetContext, clock, Operation.UPDATE, row.getKey(), row.getValue())));
     }
 
     /**
@@ -706,7 +706,7 @@ public class MySqlStreamingChangeEventSource implements StreamingChangeEventSour
      */
     protected void handleDelete(Event event) throws InterruptedException {
         handleChange(event, "delete", DeleteRowsEventData.class, x -> taskContext.getSchema().getTableId(x.getTableId()), DeleteRowsEventData::getRows,
-                (tableId, row) -> eventDispatcher.dispatchDataChangeEvent(tableId, new MySqlChangeRecordEmitter(offsetContext, clock, Operation.DELETE, row, null)));
+                (tableId, row) -> eventDispatcher.dispatchDataChangeEvent(tableId, new TapMySqlChangeRecordEmitter(offsetContext, clock, Operation.DELETE, row, null)));
     }
 
     private <T extends EventData, U> void handleChange(Event event, String changeType, Class<T> eventDataClass, TableIdProvider<T> tableIdProvider,
