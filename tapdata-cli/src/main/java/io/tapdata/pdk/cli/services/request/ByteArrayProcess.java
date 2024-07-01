@@ -6,41 +6,26 @@ import okio.BufferedSink;
 import picocli.CommandLine;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.charset.CharsetEncoder;
-import java.nio.charset.StandardCharsets;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
-
-public class StringProcess extends ProgressRequestBody<String> {
+public class ByteArrayProcess extends ProgressRequestBody<byte[]>  {
     String name;
-    byte[] bytes;
-    CharsetEncoder encoder;
-    int index;
-
-    public StringProcess(String file, String name, String contentType, PrintUtil printUtil, ProcessGroupInfo groupInfo) {
-        super(file, contentType, printUtil, groupInfo);
+    public ByteArrayProcess(String name, byte[] bytes, String contentType, PrintUtil printUtil, ProcessGroupInfo groupInfo) {
+        super(bytes, contentType, printUtil, groupInfo);
         this.name = name;
-        encoder = StandardCharsets.UTF_8.newEncoder();
-        try {
-            ByteBuffer encode = encoder.encode(CharBuffer.wrap(file));
-            bytes = encode.array();
-            index = encode.limit();
-//            bytes = file.getBytes(UTF_8);
-//            index = bytes.length;
-        } catch (Exception e) {
-            bytes = new byte[]{};
-        }
     }
 
     @Override
     public long length() {
-        return index;
+        return file.length;
     }
 
     @Override
     public String name() {
+        return "file";
+    }
+
+    @Override
+    public String fileName() {
         return name;
     }
 
@@ -52,11 +37,9 @@ public class StringProcess extends ProgressRequestBody<String> {
                 long totalBytes = groupInfo.getTotalByte();
                 long start = groupInfo.withUploadStart();
 
+                sink.write(file, 0, file.length);
 
-                //sink.writeUtf8(file);
-                sink.write(bytes, 0, index);
-
-                long uploadedBytes = groupInfo.addUploadedBytes(index);
+                long uploadedBytes = groupInfo.addUploadedBytes(file.length);
                 double avg = avg(start, groupInfo.getUploadedBytes());
                 String avgWithUtil = withUint(avg, 0);
                 boolean isLower = avg < WARN_AVG;

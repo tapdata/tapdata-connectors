@@ -21,14 +21,44 @@
  */
 package io.tapdata.pdk.cli.utils;
 
-import io.tapdata.pdk.cli.services.Uploader;
-import io.tapdata.pdk.cli.services.request.ProcessGroupInfo;
 import org.jetbrains.annotations.NotNull;
 import picocli.CommandLine;
 
-import javax.net.ssl.*;
-import java.io.*;
-import java.net.*;
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.Flushable;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.PrintStream;
+import java.io.Reader;
+import java.io.UnsupportedEncodingException;
+import java.io.Writer;
+import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.MalformedURLException;
+import java.net.Proxy;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.Charset;
@@ -38,14 +68,26 @@ import java.security.GeneralSecurityException;
 import java.security.PrivilegedAction;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPInputStream;
 
-import static java.net.HttpURLConnection.*;
+import static java.net.HttpURLConnection.HTTP_BAD_REQUEST;
+import static java.net.HttpURLConnection.HTTP_CREATED;
+import static java.net.HttpURLConnection.HTTP_INTERNAL_ERROR;
+import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
+import static java.net.HttpURLConnection.HTTP_NOT_MODIFIED;
+import static java.net.HttpURLConnection.HTTP_NO_CONTENT;
+import static java.net.HttpURLConnection.HTTP_OK;
 import static java.net.Proxy.Type.HTTP;
 
 /**
@@ -1793,22 +1835,6 @@ public class HttpRequest {
 		return body(charset());
 	}
 
-	public String body1() throws IOException {
-		closeOutputQuietly();
-
-		ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-		OutputStream outputStream2 = getConnection().getOutputStream();
-		InputStream outputStream = getConnection().getInputStream();
-		getConnection().connect();
-		// 将第一个OutputStream中的数据写入到ByteArrayOutputStream
-		// 将第一个OutputStream中的数据写入到ByteArrayOutputStream
-
-//		byte[] buffer = output.getBytes();
-//		byteArrayOutputStream.write(buffer);
-//		byteArrayOutputStream.writeTo(outputStream2);
-		return "";
-	}
-
 	/**
 	 * Get the response body as a {@link String} and set it as the value of the
 	 * given reference.
@@ -2643,102 +2669,17 @@ public class HttpRequest {
 		return new CloseOperation<HttpRequest>(input, ignoreCloseExceptions) {
 			@Override
 			public HttpRequest run() throws IOException {
-				return process(input, output);
-
-//				final byte[] buffer = new byte[bufferSize];
-//				int read;
-//				while ((read = input.read(buffer)) != -1) {
-//					output.write(buffer, 0, read);
-//					totalWritten += read;
-//					progress.onUpload(totalWritten, totalSize);
-//				}
-//				return new StreamProcessWrite().process();
-			}
-		}.call();
-	}
-
-	ProcessGroupInfo groupInfo;
-
-	public HttpRequest groupInfo(ProcessGroupInfo g) {
-		this.groupInfo = g;
-		return this;
-	}
-
-
-	protected HttpRequest process(final InputStream fis, final OutputStream output) {
-		PrintUtil printUtil = groupInfo.getPrintUtil();
-		try {
-			synchronized (groupInfo.lock) {
-				//name = groupInfo.joinFile(name);
-				long totalBytes = groupInfo.getTotalByte();
-				int logTimes = 100; //每上传200k更新一次进度
-				long start = groupInfo.withUploadStart();
 
 				final byte[] buffer = new byte[bufferSize];
-				int bytesRead;
-
-				long uploadedBytes = groupInfo.getUploadedBytes();
-				int step = logTimes;
-				while ((bytesRead = fis.read(buffer)) != -1) {
-
-					output.write(buffer, 0, bytesRead);
-					totalWritten += bytesRead;
+				int read;
+				while ((read = input.read(buffer)) != -1) {
+					output.write(buffer, 0, read);
+					totalWritten += read;
 					progress.onUpload(totalWritten, totalSize);
-
-					uploadedBytes = groupInfo.addUploadedBytes(bytesRead);
-					if (step > 0) {
-						step--;
-						continue;
-					}
-					double avg = avg(start, groupInfo.getUploadedBytes());
-					String avgWithUtil = withUint(avg, 0);
-					boolean isLower = avg < 1024 * 1024 * 15;
-					avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (isLower ? "124" : "22" ) + ") " + (isLower ? "⚠️ " : "") + avgWithUtil + "|@");
-
-					onProgress(tops[0], avgWithUtil, calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
-					step = logTimes;
 				}
-				double avg = avg(start, uploadedBytes);
-				onProgress(tops[1], withUint(avg, 0), calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
+				return HttpRequest.this;
 			}
-		} catch (Exception e) {
-			printUtil.print(PrintUtil.TYPE.ERROR, "Upload failed, message: " + e.getMessage());
-			throw new RuntimeException(e);
-		} finally {
-			boolean over = false;
-			synchronized (groupInfo.lock) {
-				over = groupInfo.uploadedBytes >= groupInfo.totalByte;
-				if (over && !groupInfo.over) {
-					groupInfo.over = true;
-					Uploader.asyncWait(printUtil, groupInfo.lock, " Waiting for remote service to return request result", true);
-				}
-			}
-		}
-		return HttpRequest.this;
-	}
-
-	public static final String[] tops = new String[]{
-			CommandLine.Help.Ansi.AUTO.string("@|bold,fg(196) ⌾|@"),
-			CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) ✔|@")
-	};
-	public static final String[] UNIT = new String[]{"B/s", "KB/s", "MB/s", "GB/s"};
-	protected double avg(long start, long uploadedBytes) {
-		long now = System.nanoTime() - start;
-		return (uploadedBytes * 1000000000.000000000D) / now;
-	}
-
-	protected String calculate(double avg, long uploadedBytes, long total) {
-		long surplus = total - uploadedBytes;
-		double surplusTime = surplus / avg;
-		return String.format("%.2fs", surplusTime);
-	}
-
-	protected String withUint(double number, int unitIndex) {
-		double newNumber = number / 1024;
-		if (unitIndex < UNIT.length - 1 && newNumber > 1) {
-			return withUint(newNumber, unitIndex + 1);
-		}
-		return String.format("%.2f", number) + UNIT[unitIndex];
+		}.call();
 	}
 
 	protected void onProgress(String top, String avg, String surplus, long uploadedBytes, long totalBytes, PrintUtil printUtil) {
@@ -2779,72 +2720,16 @@ public class HttpRequest {
 
 			@Override
 			public HttpRequest run() throws IOException {
-				return process(input, output);
-//				final char[] buffer = new char[bufferSize];
-//				int read;
-//				while ((read = input.read(buffer)) != -1) {
-//					output.write(buffer, 0, read);
-//					totalWritten += read;
-//					progress.onUpload(totalWritten, -1);
-//				}
-//				return HttpRequest.this;
+				final char[] buffer = new char[bufferSize];
+				int read;
+				while ((read = input.read(buffer)) != -1) {
+					output.write(buffer, 0, read);
+					totalWritten += read;
+					progress.onUpload(totalWritten, -1);
+				}
+				return HttpRequest.this;
 			}
 		}.call();
-	}
-
-	HttpRequest process(final Reader fis, final Writer output) {
-		PrintUtil printUtil = groupInfo.getPrintUtil();
-		try {
-			synchronized (groupInfo.lock) {
-				long totalBytes = groupInfo.getTotalByte();
-				int logTimes = 100; //每上传200k更新一次进度
-				long start = groupInfo.withUploadStart();
-
-				final char[] buffer = new char[bufferSize];
-				int bytesRead;
-
-				long uploadedBytes = groupInfo.getUploadedBytes();
-				int step = logTimes;
-				while ((bytesRead = fis.read(buffer)) != -1) {
-					//sink.write(buffer, 0, bytesRead);
-
-					output.write(buffer, 0, bytesRead);
-					totalWritten += bytesRead;
-					progress.onUpload(totalWritten, -1);
-
-					totalWritten += bytesRead;
-					progress.onUpload(totalWritten, totalSize);
-
-					uploadedBytes = groupInfo.addUploadedBytes(bytesRead);
-					if (step > 0) {
-						step--;
-						continue;
-					}
-					double avg = avg(start, groupInfo.getUploadedBytes());
-					String avgWithUtil = withUint(avg, 0);
-					boolean isLower = avg < 1024 * 1024 * 15;
-					avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (isLower ? "124" : "22" ) + ") " + (isLower ? "⚠️ " : "") + avgWithUtil + "|@");
-
-					onProgress(tops[0], avgWithUtil, calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
-					step = logTimes;
-				}
-				double avg = avg(start, uploadedBytes);
-				onProgress(tops[1], withUint(avg, 0), calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
-			}
-		} catch (Exception e) {
-			printUtil.print(PrintUtil.TYPE.ERROR, "Upload failed, message: " + e.getMessage());
-			throw new RuntimeException(e);
-		} finally {
-			boolean over = false;
-			synchronized (groupInfo.lock) {
-				over = groupInfo.uploadedBytes >= groupInfo.totalByte;
-				if (over && !groupInfo.over) {
-					groupInfo.over = true;
-					Uploader.asyncWait(printUtil, groupInfo.lock, " Waiting for remote service to return request result", true);
-				}
-			}
-		}
-		return HttpRequest.this;
 	}
 
 	/**

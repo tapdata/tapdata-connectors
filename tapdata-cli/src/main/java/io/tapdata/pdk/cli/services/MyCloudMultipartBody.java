@@ -111,7 +111,7 @@ public final class MyCloudMultipartBody extends RequestBody {
                 }
             }
 
-            MediaType contentType = body.contentType();
+            //MediaType contentType = body.contentType();
             if (contentType != null) {
                 byteCountBuffer.writeUtf8("Content-Type: ")
                         .writeUtf8(contentType.toString())

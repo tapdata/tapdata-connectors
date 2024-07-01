@@ -15,17 +15,24 @@ import java.util.Map;
 public class UploadServiceWithProcess implements Uploader {
     boolean cloud;
     ServiceUpload uploader;
+    UploadFileService service;
 
     public UploadServiceWithProcess(PrintUtil printUtil, String hp, String ak, String sk, String accessCode, boolean latest) {
         cloud = StringUtils.isNotBlank(ak);
         if (!cloud) {
             uploader = new DoOpUpload(printUtil, hp, accessCode, latest);
         } else {
-            uploader = new DoCloudUpload(printUtil, hp, ak, sk, latest);
+            service = new UploadFileService(printUtil, hp, ak, sk, "", latest);
+            //uploader = new DoCloudUpload(printUtil, hp, ak, sk, latest);
         }
     }
 
     public void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
+        if (cloud) {
+            service.upload(inputStreamMap, file, jsons, connectionType);
+            return;
+        }
+
         assert file != null;
         Map<String, BufferedInputStream> map = new HashMap<>();
         if (null != inputStreamMap && !inputStreamMap.isEmpty()) {

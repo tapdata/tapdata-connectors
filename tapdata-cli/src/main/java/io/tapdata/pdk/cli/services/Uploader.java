@@ -45,10 +45,12 @@ public interface Uploader {
         }).start();
     }
 
-    public static void asyncWait(PrintUtil printUtil, AtomicBoolean over, String waitString, boolean inLeft) {
+    public static void asyncWait(PrintUtil printUtil, AtomicBoolean over, String waitString, boolean inLeft, boolean nextLine) {
         new Thread(() -> {
             int a = 0;
-            printUtil.print0("\n");
+            if (nextLine) {
+                printUtil.print0("\n");
+            }
             while (!over.get()) {
                 StringBuilder builder = new StringBuilder("\r ");
                 if (!inLeft) {
@@ -78,5 +80,8 @@ public interface Uploader {
                 } catch (Exception e) {}
             }
         }).start();
+    }
+    public static void asyncWait(PrintUtil printUtil, AtomicBoolean over, String waitString, boolean inLeft) {
+        asyncWait(printUtil, over, waitString, inLeft, true);
     }
 }

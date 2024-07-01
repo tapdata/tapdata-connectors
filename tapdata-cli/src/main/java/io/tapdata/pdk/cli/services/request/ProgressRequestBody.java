@@ -37,8 +37,10 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
 
     @Override
     public long contentLength() {
-        return -1L;
+        return -1;//length();
     }
+
+    public abstract long length();
 
     public abstract String name();
 

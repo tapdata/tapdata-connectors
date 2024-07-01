@@ -45,7 +45,7 @@ public class InputStreamProcess extends ProgressRequestBody<BufferedInputStream>
     }
 
     @Override
-    public long contentLength() {
+    public long length() {
         return contentLength;
     }
 

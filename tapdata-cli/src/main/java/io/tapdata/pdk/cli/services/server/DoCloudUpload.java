@@ -7,6 +7,8 @@ import com.tapdata.tm.sdk.util.IOUtil;
 import com.tapdata.tm.sdk.util.SignUtil;
 import io.tapdata.pdk.cli.services.MyCloudMultipartBody;
 import io.tapdata.pdk.cli.services.ServiceUpload;
+import io.tapdata.pdk.cli.services.UploadFileService;
+import io.tapdata.pdk.cli.services.request.ByteArrayProcess;
 import io.tapdata.pdk.cli.services.request.FileProcess;
 import io.tapdata.pdk.cli.services.request.InputStreamProcess;
 import io.tapdata.pdk.cli.services.request.ProcessGroupInfo;
@@ -22,18 +24,21 @@ import okio.BufferedSink;
 import okio.Okio;
 
 import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -46,21 +51,22 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 public class DoCloudUpload implements ServiceUpload {
     public static final String URL = "%s/api/pdk/upload/source?%s";
 
-    boolean latest;
     String hostAndPort;
     String ak;
     String sk;
     PrintUtil printUtil;
+    String latestString;
+
 
     public DoCloudUpload(PrintUtil printUtil, String hp, String ak, String sk, boolean latest) {
         this.printUtil = printUtil;
-        this.latest = latest;
         this.ak = ak;
         this.sk = sk;
         this.hostAndPort = fixUrl(hp);
+        this.latestString = String.valueOf(latest);
+
     }
 
-    @Override
     public void upload(Map<String, BufferedInputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
         final AtomicBoolean lock = new AtomicBoolean(false);
         ProcessGroupInfo groupInfo = new ProcessGroupInfo(lock);
@@ -78,47 +84,45 @@ public class DoCloudUpload implements ServiceUpload {
             throw new RuntimeException(e);
         }
 
-        digest.update("file".getBytes(UTF_8));
-        digest.update(file.getName().getBytes(UTF_8));
         try {
-            byte[] bytes = IOUtil.readFile(file);
-            digest.update(bytes);
+            if (null == inputStreamMap) {
+                inputStreamMap = new LinkedHashMap<>();
+            }
+            BufferedInputStream inputStream = new BufferedInputStream(new FileInputStream(file));
+            inputStreamMap.put(file.getName(), inputStream);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
 
-        if (inputStreamMap != null) {
-            for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
+        for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
                 String k = entry.getKey();
                 BufferedInputStream v = entry.getValue();
                 byte[] in_b = null;
                 try {
-                    v.mark(Integer.MAX_VALUE);
-                    in_b = IOUtil.readInputStream(v, false);
-                    v.reset();
+                    in_b = IOUtil.readInputStream(v);
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
                 digest.update("file".getBytes(UTF_8));
                 digest.update(k.getBytes(UTF_8));
                 digest.update(in_b);
+                inputStreamMap.put(k, new BufferedInputStream(new ByteArrayInputStream(in_b)));
             }
-        }
 
-        //要上传的文字参数
+
         if (jsons != null && !jsons.isEmpty()) {
+            //要上传的文字参数
+            if (jsons.size() == 1) {
+                // if the jsons size == 1, the data received by TM will be weird, adding an empty string helps TM receive the
+                // proper data; the empty string should be dealt in TM.
+                jsons.add("");
+            }
             for (String json : jsons) {
                 digest.update("source".getBytes(UTF_8));
                 digest.update(json.getBytes(UTF_8));
             }
-            // if the jsons size == 1, the data received by TM will be weird, adding an empty string helps TM receive the
-            // proper data; the empty string should be dealt in TM.
-            if (jsons.size() == 1) {
-                digest.update("source".getBytes(UTF_8));
-                digest.update("".getBytes(UTF_8));
-            }
-        }    // whether replace the latest version
-        String latestString = String.valueOf(latest);
+        }
+
         digest.update("latest".getBytes(UTF_8));
         digest.update(latestString.getBytes(UTF_8));
 
@@ -163,46 +167,30 @@ public class DoCloudUpload implements ServiceUpload {
         url = String.format(URL, hostAndPort, queryString);
 
         uploadV2(url, file.getName(), groupInfo, body, connectionType, sign);
-        //upload(url, file, inputStreamMap, jsons, connectionType, sign);
     }
 
 
     protected List<ProgressRequestBody<?>> body(ProcessGroupInfo groupInfo, File file, Map<String, BufferedInputStream> inputStreamMap, List<String> jsons) {
         List<ProgressRequestBody<?>> body = new ArrayList<>();
-        try {
-            ProgressRequestBody<File> jarFileBody = new FileProcess(file, "application/java-archive", printUtil, groupInfo);
-            body.add(jarFileBody);
-            groupInfo.addTotalBytes(jarFileBody.contentLength());
-        } catch (Exception e) {
-
-        }
-        if (inputStreamMap != null) {
-            for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
-                String entryName = entry.getKey();
-                ProgressRequestBody<BufferedInputStream> fileBody = new InputStreamProcess(entry.getValue(), "image/*", entryName, printUtil, groupInfo);
-                body.add(fileBody);
-                groupInfo.addTotalBytes(fileBody.contentLength());
-            }
+        for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
+            String entryName = entry.getKey();
+            String type = entryName.endsWith(".jar") ? "application/java-archive" : "image/*";
+            ProgressRequestBody<BufferedInputStream> fileBody = new InputStreamProcess(entry.getValue(), type, entryName, printUtil, groupInfo);
+            body.add(fileBody);
+            groupInfo.addTotalBytes(fileBody.length());
         }
 
         if (jsons != null && !jsons.isEmpty()) {
             for (String json : jsons) {
-                ProgressRequestBody<String> fileBody = new StringProcess(json, "source", null, printUtil, groupInfo);
+                ProgressRequestBody<String> fileBody = new StringProcess(json, "source", "text/plain", printUtil, groupInfo);
                 body.add(fileBody);
-                groupInfo.addTotalBytes(fileBody.contentLength());
-            }
-            // if the jsons size == 1, the data received by TM will be weird, adding an empty string helps TM receive the
-            // proper data; the empty string should be dealt in TM.
-            if (jsons.size() == 1) {
-                ProgressRequestBody<String> fileBody = new StringProcess("", "source", null, printUtil, groupInfo);
-                body.add(fileBody);
-                groupInfo.addTotalBytes(fileBody.contentLength());
+                groupInfo.addTotalBytes(fileBody.length());
             }
         }
 
-        ProgressRequestBody<String> fileBody = new StringProcess(String.valueOf(latest), "source", null, printUtil, groupInfo);
+        ProgressRequestBody<String> fileBody = new StringProcess(latestString, "latest", "text/plain", printUtil, groupInfo);
         body.add(fileBody);
-        groupInfo.addTotalBytes(fileBody.contentLength());
+        groupInfo.addTotalBytes(fileBody.length());
 
         return body;
     }
@@ -211,9 +199,9 @@ public class DoCloudUpload implements ServiceUpload {
     protected void uploadV2(String url, String fileName, ProcessGroupInfo groupInfo, List<ProgressRequestBody<?>> body, String connectionType, String signature) {
         OkHttpClient client = new OkHttpClient.Builder()
                 .protocols(Arrays.asList(Protocol.HTTP_1_1))
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
-                .writeTimeout(30, TimeUnit.SECONDS)
+                .connectTimeout(120, TimeUnit.SECONDS)
+                .readTimeout(120, TimeUnit.SECONDS)
+                .writeTimeout(120, TimeUnit.SECONDS)
                 .build();
 
         MyCloudMultipartBody.Builder builder = new MyCloudMultipartBody.Builder("00content0boundary00");
@@ -226,9 +214,9 @@ public class DoCloudUpload implements ServiceUpload {
         MyCloudMultipartBody requestBody = builder.build();
         Request request = new Request.Builder()
                 .url(url)
-//                .addHeader("Signature", signature)
-//                .addHeader("Content-Type", "multipart/form-data; boundary=00content0boundary00")
-//                .addHeader("charset", "utf-8")
+                .addHeader("Signature", signature)
+                .addHeader("Content-Type", "multipart/form-data; boundary=00content0boundary00")
+                .addHeader("charset", "utf-8")
                 .post(requestBody)
                 .build();
 
@@ -255,7 +243,7 @@ public class DoCloudUpload implements ServiceUpload {
             for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
                 String entryName = entry.getKey();
                 InputStreamProcess fileBody = new InputStreamProcess(entry.getValue(), "image/*", entryName, printUtil, groupInfo);
-                groupInfo.addTotalBytes(fileBody.contentLength());
+                groupInfo.addTotalBytes(fileBody.length());
                 builder.addFormDataPart("file", entryName, fileBody);
             }
         }
@@ -264,21 +252,20 @@ public class DoCloudUpload implements ServiceUpload {
         if (jsons != null && !jsons.isEmpty()) {
             for (String json : jsons) {
                 StringProcess fileBody = new StringProcess(json, "source", null, printUtil, groupInfo);
-                groupInfo.addTotalBytes(fileBody.contentLength());
+                groupInfo.addTotalBytes(fileBody.length());
                 builder.addFormDataPart("source", null, fileBody);
             }
             // if the jsons size == 1, the data received by TM will be weird, adding an empty string helps TM receive the
             // proper data; the empty string should be dealt in TM.
             if (jsons.size() == 1) {
                 StringProcess fileBody = new StringProcess("", "source", null, printUtil, groupInfo);
-                groupInfo.addTotalBytes(fileBody.contentLength());
+                groupInfo.addTotalBytes(fileBody.length());
                 builder.addFormDataPart("source", null, fileBody);
             }
         }
         // whether replace the latest version
-        String l = String.valueOf(latest);
-        StringProcess fileBody = new StringProcess(l, "source", null, printUtil, groupInfo);
-        groupInfo.addTotalBytes(fileBody.contentLength());
+        StringProcess fileBody = new StringProcess(latestString, "source", null, printUtil, groupInfo);
+        groupInfo.addTotalBytes(fileBody.length());
         builder.addFormDataPart("latest", null, fileBody);
 
         MyCloudMultipartBody requestBody = builder.build();

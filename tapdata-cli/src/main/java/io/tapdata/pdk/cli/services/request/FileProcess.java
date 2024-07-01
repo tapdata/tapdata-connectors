@@ -22,7 +22,7 @@ public class FileProcess extends ProgressRequestBody<File> {
     }
 
     @Override
-    public long contentLength() {
+    public long length() {
         return length;
     }
 
