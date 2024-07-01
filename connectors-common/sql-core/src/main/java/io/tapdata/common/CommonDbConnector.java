@@ -371,7 +371,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
             try {
                 jdbcContext.query(sql, resultSet -> {
                     if (resultSet.next()) {
-                        filterResult.setResult(DbKit.getRowFromResultSet(resultSet, columnNames));
+                        DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                        processDataMap(dataMap, tapTable);
+                        filterResult.setResult(dataMap);
                     }
                 });
             } catch (Throwable e) {
@@ -634,7 +636,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
             try {
                 while (resultSet.next()) {
                     List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
-                    filterResults.add(DbKit.getRowFromResultSet(resultSet, allColumn));
+                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, allColumn);
+                    processDataMap(dataMap, table);
+                    filterResults.add(dataMap);
                     if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
                         consumer.accept(filterResults);
                         filterResults = new FilterResults();
@@ -661,7 +665,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 while (resultSet.next()) {
                     List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
                     allColumn.remove("ROWNO_");
-                    filterResults.add(DbKit.getRowFromResultSet(resultSet, allColumn));
+                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, allColumn);
+                    processDataMap(dataMap, table);
+                    filterResults.add(dataMap);
                     if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
                         consumer.accept(filterResults);
                         filterResults = new FilterResults();
