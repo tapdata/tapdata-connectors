@@ -293,7 +293,9 @@ public class HudiWrite extends HiveJdbcWrite {
         } catch (SQLException e) {
             throw e;
         } finally {
-            pstmt.close();
+            if (null != pstmt){
+                pstmt.close();
+            }
         }
         insertColumnSql.setLength(0);
         if (executeSuccess){
@@ -344,7 +346,9 @@ public class HudiWrite extends HiveJdbcWrite {
         } catch (SQLException e) {
             throw e;
         } finally {
-            pstmt.close();
+            if (null != pstmt){
+                pstmt.close();
+            }
         }
         return false;
     }
@@ -372,7 +376,9 @@ public class HudiWrite extends HiveJdbcWrite {
         } catch (SQLException e) {
             throw e;
         } finally {
-            pstmt.close();
+            if (null != pstmt){
+                pstmt.close();
+            }
         }
         if (executeSuccess){
             return 1;
@@ -404,7 +410,9 @@ public class HudiWrite extends HiveJdbcWrite {
         } catch (SQLException e) {
             throw e;
         } finally {
-            pstmt.close();
+            if (null != pstmt){
+                pstmt.close();
+            }
         }
         return false;
     }

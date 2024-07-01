@@ -133,15 +133,7 @@ public class CodecsFilterManagerTest extends PDKTestBaseV2 {
         });
     }
 
-    private static Random random;
-
-    static {
-        try {
-            random = SecureRandom.getInstanceStrong();
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e);
-        }
-    }
+    private static Random random = new Random();
 
     public List<Map<String,Object>> testRecord(final Map<String, TapField> fieldMap, final int recordCount){
         List<Map<String,Object>> records = new ArrayList<>();

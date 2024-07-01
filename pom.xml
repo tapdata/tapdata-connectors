@@ -19,14 +19,18 @@
 
     <properties>
         <snoar.coverage.exclusions>
-            connectors-common/debezium-bucket/**
+            connectors-common/debezium-bucket/**,
+            connectors-common/mysql-binlog-connector-java/**
         </snoar.coverage.exclusions>
         <snoar.exclusions>
-            connectors-common/debezium-bucket/**
+            connectors-common/debezium-bucket/**,
+            connectors-common/mysql-binlog-connector-java/**
         </snoar.exclusions>
         <sonar.test.exclusions>
             **/src/test/**,
-            tapdata-cli/**
+            tapdata-cli/**,
+            connectors-common/debezium-bucket/**,
+            connectors-common/mysql-binlog-connector-java/**
         </sonar.test.exclusions>
     </properties>
 

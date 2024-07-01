@@ -129,15 +129,7 @@ public class Record extends HashMap<String, Object> {
         return newRecords;
     }
 
-    private static Random random;
-
-    static {
-        try {
-            random = SecureRandom.getInstanceStrong();
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e);
-        }
-    }
+    private static Random random = new Random();
 
     private static Record builderKey(Record record, LinkedHashMap<String, TapField> nameFieldMap, Checker... checker) {
         //Record item = (Objects.nonNull(checker[0]) && checker[0].check())? ;

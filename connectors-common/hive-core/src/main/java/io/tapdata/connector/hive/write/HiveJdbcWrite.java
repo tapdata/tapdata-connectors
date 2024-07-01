@@ -174,7 +174,9 @@ public class HiveJdbcWrite {
         } catch (SQLException e) {
             writeListResult = batchErrorHandle(tapConnectorContext, tapTable, tapRecordEventList, pstmt, e);
         } finally {
-            pstmt.close();
+            if (null != pstmt) {
+                pstmt.close();
+            }
         }
         return writeListResult;
     }

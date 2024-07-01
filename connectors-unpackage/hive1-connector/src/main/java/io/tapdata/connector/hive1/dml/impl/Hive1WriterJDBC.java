@@ -199,7 +199,9 @@ public class Hive1WriterJDBC implements Hive1Writer {
         } catch (SQLException e) {
             writeListResult = batchErrorHandle(tapConnectorContext, tapTable, tapRecordEventList, pstmt, e);
         } finally {
-            pstmt.close();
+            if (null != pstmt){
+                pstmt.close();
+            }
         }
         return writeListResult;
     }
