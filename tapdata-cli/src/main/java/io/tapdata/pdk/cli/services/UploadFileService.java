@@ -207,7 +207,7 @@ public class UploadFileService implements Uploader {
       url = hostAndPort + "/api/pdk/upload/source?access_token=" + token;
       request = new HttpRequest(url, method);
     }
-    request.connectTimeout(300000).readTimeout(300000);//连接超时设置
+    request.groupInfo(groupInfo).connectTimeout(300000).readTimeout(300000);//连接超时设置
     if (file != null) {
       request.part("file", file.getName(), "application/java-archive", file);
     }
@@ -234,7 +234,9 @@ public class UploadFileService implements Uploader {
 
     String response;
     try {
-      response = request.body();
+      response = request.body1();
+    } catch (IOException e) {
+      response = "{}";
     } finally {
       groupInfo.getLock().compareAndSet(false, true);
     }

@@ -23,6 +23,7 @@ package io.tapdata.pdk.cli.utils;
 
 import io.tapdata.pdk.cli.services.Uploader;
 import io.tapdata.pdk.cli.services.request.ProcessGroupInfo;
+import org.jetbrains.annotations.NotNull;
 import picocli.CommandLine;
 
 import javax.net.ssl.*;
@@ -770,6 +771,10 @@ public class HttpRequest {
 			encoder = Charset.forName(getValidCharset(charset)).newEncoder();
 		}
 
+		public byte[] getBytes() {
+			return buf;
+		}
+
 		/**
 		 * Write string to stream
 		 *
@@ -783,6 +788,56 @@ public class HttpRequest {
 			super.write(bytes.array(), 0, bytes.limit());
 
 			return this;
+		}
+
+		@Override
+		public synchronized void write(int b) throws IOException {
+			super.write(b);
+		}
+
+		@Override
+		public synchronized void write(@NotNull byte[] b, int off, int len) throws IOException {
+			super.write(b, off, len);
+		}
+
+		@Override
+		public synchronized void flush() throws IOException {
+			super.flush();
+		}
+
+		@Override
+		public void write(@NotNull byte[] b) throws IOException {
+			super.write(b);
+		}
+
+		@Override
+		public void close() throws IOException {
+			super.close();
+		}
+
+		@Override
+		public int hashCode() {
+			return super.hashCode();
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			return super.equals(obj);
+		}
+
+		@Override
+		protected Object clone() throws CloneNotSupportedException {
+			return super.clone();
+		}
+
+		@Override
+		public String toString() {
+			return super.toString();
+		}
+
+		@Override
+		protected void finalize() throws Throwable {
+			super.finalize();
 		}
 	}
 
@@ -1738,6 +1793,22 @@ public class HttpRequest {
 		return body(charset());
 	}
 
+	public String body1() throws IOException {
+		closeOutputQuietly();
+
+		ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+		OutputStream outputStream2 = getConnection().getOutputStream();
+		InputStream outputStream = getConnection().getInputStream();
+		getConnection().connect();
+		// 将第一个OutputStream中的数据写入到ByteArrayOutputStream
+		// 将第一个OutputStream中的数据写入到ByteArrayOutputStream
+
+//		byte[] buffer = output.getBytes();
+//		byteArrayOutputStream.write(buffer);
+//		byteArrayOutputStream.writeTo(outputStream2);
+		return "";
+	}
+
 	/**
 	 * Get the response body as a {@link String} and set it as the value of the
 	 * given reference.
@@ -2587,6 +2658,11 @@ public class HttpRequest {
 	}
 
 	ProcessGroupInfo groupInfo;
+
+	public HttpRequest groupInfo(ProcessGroupInfo g) {
+		this.groupInfo = g;
+		return this;
+	}
 
 
 	protected HttpRequest process(final InputStream fis, final OutputStream output) {

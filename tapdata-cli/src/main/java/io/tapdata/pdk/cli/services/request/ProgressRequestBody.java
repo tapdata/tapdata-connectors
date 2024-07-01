@@ -11,9 +11,10 @@ import java.io.IOException;
 import java.io.InputStream;
 
 public abstract class ProgressRequestBody<T> extends RequestBody {
+    public static final long WARN_AVG = 1024 * 1024 * 15;
     public static final String[] tops = new String[]{
             CommandLine.Help.Ansi.AUTO.string("@|bold,fg(196) ⌾|@"),
-            CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) ✔|@")
+            CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) ✔|@")
     };
     public static final String[] UNIT = new String[]{"B/s", "KB/s", "MB/s", "GB/s"};
     protected final T file;
@@ -30,11 +31,20 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
 
     @Override
     public MediaType contentType() {
+        if (null == contentType) return null;
         return MediaType.parse(contentType);
     }
 
     @Override
-    public abstract long contentLength();
+    public long contentLength() {
+        return -1L;
+    }
+
+    public abstract String name();
+
+    public String fileName() {
+        return null;
+    }
 
     @Override
     public abstract void writeTo(BufferedSink sink) throws IOException;
@@ -59,8 +69,8 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
                     }
                     double avg = avg(start, groupInfo.getUploadedBytes());
                     String avgWithUtil = withUint(avg, 0);
-                    boolean isLower = avg < 1024 * 1024 * 15;
-                    avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (isLower ? "124" : "22" ) + ") " + (isLower ? "⚠️ " : "") + avgWithUtil + "|@");
+                    boolean isLower = avg < WARN_AVG;
+                    avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (isLower ? "124" : "28" ) + ") " + (isLower ? "⚠️ " : "") + avgWithUtil + "|@");
 
                     onProgress(tops[0], avgWithUtil, calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
                     step = logTimes;
@@ -111,13 +121,13 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
         StringBuilder builder = new StringBuilder("\r  ⎢");
         for (int i = 0; i < progressWidth; i++) {
             if (i < progressInWidth) {
-                builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) █|@"));
+                builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) █|@"));
             } else {
                 builder.append(" ");
             }
         }
         builder.append("⎥ ").append(top).append(" ");
-        String ps = CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) " + String.format("%.2f%%", progress * 100) + "|@");
+        String ps = CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) " + String.format("%.2f%%", progress * 100) + "|@");
         builder.append(ps).append(" Avg-speed: ").append(avg);
         if (null != surplus) {
             builder.append(" | Remaining-time： ").append(surplus);

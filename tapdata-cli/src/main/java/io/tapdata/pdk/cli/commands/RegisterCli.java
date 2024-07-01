@@ -133,7 +133,7 @@ public class RegisterCli extends CommonCli {
                         List<String> jsons = new ArrayList<>();
                         TapConnector connector = TapConnectorManager.getInstance().getTapConnectorByJarName(file.getName());
                         Collection<TapNodeInfo> tapNodeInfoCollection = connector.getTapNodeClassFactory().getConnectorTapNodeInfos();
-                        Map<String, InputStream> inputStreamMap = new HashMap<>();
+                        Map<String, InputStream> inputStreamMap = new LinkedHashMap<>();
                         boolean needUpload = true;
                         String connectionType = "";
                         for (TapNodeInfo nodeInfo : tapNodeInfoCollection) {

@@ -49,6 +49,16 @@ public class InputStreamProcess extends ProgressRequestBody<BufferedInputStream>
         return contentLength;
     }
 
+    @Override
+    public String fileName() {
+        return fileName;
+    }
+
+    @Override
+    public String name() {
+        return "file";
+    }
+
 
     @Override
     public void writeTo(BufferedSink sink) throws IOException {

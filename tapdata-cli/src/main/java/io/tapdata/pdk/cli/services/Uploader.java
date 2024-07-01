@@ -23,10 +23,10 @@ public interface Uploader {
                     a = 0;
                 }
                 switch (a) {
-                    case 0: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) / |@")); break;
-                    case 1: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) - |@")); break;
-                    case 2: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) \\ |@")); break;
-                    case 3: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) | |@")); break;
+                    case 0: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) / |@")); break;
+                    case 1: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) - |@")); break;
+                    case 2: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) \\ |@")); break;
+                    case 3: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) | |@")); break;
                 }
                 a++;
                 builder.append("\r");
@@ -59,10 +59,10 @@ public interface Uploader {
                 }
                 builder.append("[");
                 switch (a) {
-                    case 0: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) /|@")); break;
-                    case 1: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) -|@")); break;
-                    case 2: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) \\|@")); break;
-                    case 3: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) ||@")); break;
+                    case 0: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) /|@")); break;
+                    case 1: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) -|@")); break;
+                    case 2: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) \\|@")); break;
+                    case 3: builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) ||@")); break;
                 }
                 a++;
                 builder.append("]");
