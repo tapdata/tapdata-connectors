@@ -8,24 +8,32 @@ import com.tapdata.tm.sdk.auth.Signer;
 import com.tapdata.tm.sdk.util.Base64Util;
 import com.tapdata.tm.sdk.util.IOUtil;
 import com.tapdata.tm.sdk.util.SignUtil;
+import io.tapdata.pdk.cli.services.request.ProcessGroupInfo;
 import io.tapdata.pdk.cli.utils.HttpRequest;
 import io.tapdata.pdk.cli.utils.OkHttpUtils;
 import io.tapdata.pdk.cli.utils.PrintUtil;
 import lombok.extern.slf4j.Slf4j;
-import okhttp3.*;
+import okhttp3.MediaType;
+import okhttp3.MultipartBody;
+import okhttp3.RequestBody;
 import okhttp3.internal.Util;
 import okio.BufferedSink;
 import okio.Okio;
 import okio.Source;
 import org.apache.commons.lang3.StringUtils;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -36,10 +44,24 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * @Description:
  */
 @Slf4j
-public class UploadFileService {
+public class UploadFileService implements Uploader {
+  boolean latest;
+  String hostAndPort;
+  String accessCode;
+  String ak;
+  String sk;
+  PrintUtil printUtil;
 
-  public static void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, boolean latest, String hostAndPort, String accessCode, String ak, String sk, PrintUtil printUtil) {
+  public UploadFileService(PrintUtil printUtil, String hostAndPort, String ak, String sk, String accessCode, boolean latest) {
+    this.printUtil = printUtil;
+    this.latest = latest;
+    this.hostAndPort = hostAndPort;
+    this.ak = ak;
+    this.sk = sk;
+    this.accessCode = accessCode;
+  }
 
+  public void upload(Map<String, InputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
     boolean cloud = StringUtils.isNotBlank(ak);
 
 
@@ -106,14 +128,14 @@ public class UploadFileService {
       for (Map.Entry<String, InputStream> entry : inputStreamMap.entrySet()) {
         String k = entry.getKey();
         InputStream v = entry.getValue();
+        byte[] in_b = new byte[0];
+        try {
+          in_b = IOUtil.readInputStream(v);
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+        v = new ByteArrayInputStream(in_b);
         if (cloud) {
-          byte[] in_b = new byte[0];
-          try {
-            in_b = IOUtil.readInputStream(v);
-          } catch (IOException e) {
-            throw new RuntimeException(e);
-          }
-          v = new ByteArrayInputStream(in_b);
           digest.update("file".getBytes(UTF_8));
           digest.update(k.getBytes(UTF_8));
           digest.update(in_b);
@@ -180,7 +202,7 @@ public class UploadFileService {
       url = hostAndPort + "/api/pdk/upload/source?access_token=" + token;
       request = new HttpRequest(url, method);
     }
-    request.connectTimeout(30000).readTimeout(30000);//连接超时设置
+    request.connectTimeout(120000).readTimeout(120000);//连接超时设置
     if (file != null) {
       request.part("file", file.getName(), "application/java-archive", file);
     }
@@ -205,8 +227,14 @@ public class UploadFileService {
     }    // whether replace the latest version
     request.part("latest", latestString);
 
-    String response = request.body();
-
+    AtomicBoolean lock = new AtomicBoolean(false);
+    Uploader.asyncWait(printUtil, lock, " Waiting for remote service to return request result", true, false);
+    String response;
+    try {
+        response = request.body();
+    } finally {
+        lock.compareAndSet(false, true);
+    }
     Map map = JSON.parseObject(response, Map.class);
 
     String msg = "success";
@@ -214,6 +242,9 @@ public class UploadFileService {
     if (!"ok".equals(map.get("code"))) {
         msg = map.get("reqId") != null ? (String) map.get("message") : (String) map.get("msg");
         result = "fail";
+        printUtil.print(PrintUtil.TYPE.ERROR, String.format("* Register Connector: %s | (%s) Failed, message: %s", file.getName(), connectionType, msg));
+    } else {
+      printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s | (%s) Completed", file.getName(), connectionType));
     }
     printUtil.print(PrintUtil.TYPE.DEBUG, "result:" + result + ", name:" + file.getName() + ", msg:" + msg + ", response:" + response);
   }

@@ -25,7 +25,7 @@ public class PrintUtil {
                 print(CommandLine.Help.Ansi.AUTO.string("@|fg(246) " + message + "|@"));
                 break;
             case INFO:
-                print(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) " + message + "|@"));
+                print(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) " + message + "|@"));
                 break;
             case WARN:
                 print(CommandLine.Help.Ansi.AUTO.string("@|bold,yellow,underline " + message + "|@"));
@@ -45,6 +45,13 @@ public class PrintUtil {
     }
     public void print(String message) {
         System.out.println(message);
+    }
+
+    public void print0(String message) {
+        System.out.print(message);
+    }
+    public void print1(String message, Object params) {
+        System.out.printf(message, params);
     }
 
     public enum TYPE {
