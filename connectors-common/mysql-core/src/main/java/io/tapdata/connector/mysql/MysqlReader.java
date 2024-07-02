@@ -95,12 +95,14 @@ public class MysqlReader implements Closeable {
     private KVReadOnlyMap<TapTable> tapTableMap;
     private DDLParserType ddlParserType = DDLParserType.MYSQL_CCJ_SQL_PARSER;
     private static final int MIN_BATCH_SIZE = 1000;
-    private TimeZone DB_TIME_ZONE;
+    private TimeZone timeZone;
+    private TimeZone dbTimeZone;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     private final ExceptionCollector exceptionCollector;
     private String dropTransactionId = null;
     private final MysqlConfig mysqlConfig;
     protected Log tapLogger;
+    private long diff = 0;
 
     public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, Supplier<Boolean> isAlive) {
         this.mysqlJdbcContext = mysqlJdbcContext;
@@ -108,12 +110,19 @@ public class MysqlReader implements Closeable {
         this.isAlive = isAlive;
         this.tapLogger = tapLogger;
         this.exceptionCollector = new MysqlExceptionCollector();
+        LocalDateTime dt = LocalDateTime.now();
+        ZonedDateTime fromZonedDateTime;
         try {
+            this.dbTimeZone = mysqlJdbcContext.queryTimeZone();
             if (mysqlConfig.getOldVersionTimezone()) {
-                this.DB_TIME_ZONE = mysqlJdbcContext.queryTimeZone();
+                this.timeZone = dbTimeZone;
+                fromZonedDateTime = dt.atZone(TimeZone.getDefault().toZoneId());
             } else {
-                this.DB_TIME_ZONE = TimeZone.getTimeZone("GMT" + mysqlConfig.getTimezone());
+                this.timeZone = TimeZone.getTimeZone("GMT" + mysqlConfig.getTimezone());
+                fromZonedDateTime = dt.atZone(mysqlConfig.getZoneId());
             }
+            ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
+            diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
         } catch (Exception ignore) {
 
         }
@@ -739,10 +748,6 @@ public class MysqlReader implements Closeable {
         TapField tapField = tapTable.getNameFieldMap().get(fieldName);
         if (null == tapField) return value;
         TapType tapType = tapField.getTapType();
-        LocalDateTime dt = LocalDateTime.now();
-        ZonedDateTime fromZonedDateTime = dt.atZone(TimeZone.getDefault().toZoneId());
-        ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
-        long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
         if (tapType instanceof TapDateTime) {
             int fraction = ((TapDateTime) tapType).getFraction();
             if (value instanceof Long) {
@@ -752,12 +757,7 @@ public class MysqlReader implements Closeable {
                     value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
                 }
             } else if (value instanceof String) {
-                try {
-                    Instant instant = Instant.parse((CharSequence) value);
-                    long milliOffset = DB_TIME_ZONE.getRawOffset() + diff;
-                    value = instant.getEpochSecond() * (long) Math.pow(10, fraction) + instant.getNano() / (long) Math.pow(10, 9 - fraction) + (long) (milliOffset * Math.pow(10, fraction - 3));
-                } catch (Exception ignored) {
-                }
+                value = Instant.parse((CharSequence) value);
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
             value = (Integer) value * 24 * 60 * 60 * 1000L + diff;

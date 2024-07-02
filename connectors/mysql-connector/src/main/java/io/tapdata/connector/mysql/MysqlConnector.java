@@ -80,7 +80,10 @@ public class MysqlConnector extends CommonDbConnector {
     protected MysqlReader mysqlReader;
     protected MysqlWriter mysqlWriter;
     protected String version;
+    protected TimeZone timeZone;
+    protected TimeZone dbTimeZone;
     protected ZoneId zoneId;
+    protected ZoneId dbZoneId;
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
@@ -122,11 +125,14 @@ public class MysqlConnector extends CommonDbConnector {
             }
             this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext, this::isAlive);
             this.mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
+            this.dbTimeZone = mysqlJdbcContext.queryTimeZone();
             if (mysqlConfig.getOldVersionTimezone()) {
-                this.zoneId = mysqlJdbcContext.queryTimeZone().toZoneId();
+                this.timeZone = dbTimeZone;
             } else {
-                this.zoneId = mysqlConfig.getZoneId();
+                this.timeZone = TimeZone.getTimeZone("GMT" + mysqlConfig.getTimezone());
             }
+            this.dbZoneId = dbTimeZone.toZoneId();
+            this.zoneId = timeZone.toZoneId();
             ddlSqlGenerator = new MysqlDDLSqlGenerator(version, ((TapConnectorContext) tapConnectionContext).getTableMap());
         }
         fieldDDLHandlers = new BiClassHandlers<>();
@@ -143,7 +149,13 @@ public class MysqlConnector extends CommonDbConnector {
         codecRegistry.registerFromTapValue(TapArrayValue.class, "json", tapValue -> toJson(tapValue.getValue()));
 
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
-            if (tapDateTimeValue.getValue() != null && tapDateTimeValue.getValue().getTimeZone() == null) {
+            if (!mysqlConfig.getOldVersionTimezone()) {
+                if (tapDateTimeValue.getOriginType().startsWith("timestamp")) {
+                    tapDateTimeValue.getValue().setTimeZone(dbTimeZone);
+                } else {
+                    tapDateTimeValue.getValue().setTimeZone(timeZone);
+                }
+            } else if (tapDateTimeValue.getValue() != null && tapDateTimeValue.getValue().getTimeZone() == null) {
                 tapDateTimeValue.getValue().setTimeZone(TimeZone.getDefault());
             }
             return tapDateTimeValue.getValue().isContainsIllegal() ? tapDateTimeValue.getValue().getIllegalDate() : formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS");
@@ -151,7 +163,7 @@ public class MysqlConnector extends CommonDbConnector {
         //date类型通过jdbc读取时，会自动转换为当前时区的时间，所以设置为当前时区
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().isContainsIllegal() ? tapDateValue.getValue().getIllegalDate() : tapDateValue.getValue().toFormatString("yyyy-MM-dd"));
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
-        codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
+        codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
 
         codecRegistry.registerFromTapValue(TapBooleanValue.class, "tinyint(1)", TapValue::getValue);
 
@@ -453,8 +465,10 @@ public class MysqlConnector extends CommonDbConnector {
                 Object value;
                 if ("TIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                     value = resultSet.getString(i + 1);
+                } else if ("YEAR".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                    value = resultSet.getInt(i + 1);
                 } else if ("TIMESTAMP".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                    value = resultSet.getObject(i + 1);
+                    value = ((Timestamp) resultSet.getObject(i + 1)).toLocalDateTime().atZone(dbZoneId);
                 } else if ("DATE".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                     if (mysqlConfig.getOldVersionTimezone()) {
                         value = resultSet.getString(i + 1);

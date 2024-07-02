@@ -204,7 +204,7 @@ public class PostgresConnector extends CommonDbConnector {
                 return tapDateValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalDate();
             }
         });
-        codecRegistry.registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
+        codecRegistry.registerFromTapValue(TapYearValue.class, "character(4)", TapValue::getOriginValue);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
@@ -511,7 +511,12 @@ public class PostgresConnector extends CommonDbConnector {
                 } else if (value instanceof Date) {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getZoneId()));
                 } else if (value instanceof Time) {
-                    entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getZoneId()));
+                    if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                        continue;
+                    }
+                    if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
+                        entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getZoneId()));
+                    }
                 }
             }
         }
