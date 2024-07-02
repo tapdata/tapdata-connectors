@@ -18,6 +18,10 @@
     </modules>
 
     <properties>
+        <sonar.issue.ignore.allfile>
+            connectors-common/debezium-bucket/**,
+            connectors-common/mysql-binlog-connector-java/**
+        </sonar.issue.ignore.allfile>
         <snoar.coverage.exclusions>
             connectors-common/debezium-bucket/**,
             connectors-common/mysql-binlog-connector-java/**
