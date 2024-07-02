@@ -16,15 +16,7 @@ public class TidbConfig extends MysqlConfig implements Serializable {
     private String mqTopic;
     private String mqUsername;
     private String mqPassword;
-    private String ticdcUrl;
-
-    public String getTicdcUrl() {
-        return ticdcUrl;
-    }
-
-    public void setTicdcUrl(String ticdcUrl) {
-        this.ticdcUrl = ticdcUrl;
-    }
+    private Integer tiKvPort;
 
     public String getNameSrvAddr() {
         return nameSrvAddr;
@@ -68,6 +60,16 @@ public class TidbConfig extends MysqlConfig implements Serializable {
 
     public String getPdServer() {
         return pdServer;
+    }
+
+    public int getTiKvPort() {
+        if (null == tiKvPort) return 20160;
+        return tiKvPort;
+    }
+
+    public void setTiKvPort(Integer tiKvPort) {
+        if (null == tiKvPort) tiKvPort = 20160;
+        this.tiKvPort = tiKvPort;
     }
 
     public void setPdServer(String pdServer) {

@@ -1,5 +1,6 @@
 package io.tapdata.mongodb;
 
+import com.mongodb.MongoCommandException;
 import com.mongodb.client.*;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
@@ -32,6 +33,7 @@ import org.bson.conversions.Bson;
 import org.junit.jupiter.api.*;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
+import org.mockito.internal.verification.Times;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.*;
@@ -652,6 +654,80 @@ class MongodbConnectorTest {
             when(mongoConfig.getUri()).thenReturn("mongodb://127.0.0.1:27017/test");
             doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
             assertThrows(RuntimeException.class,()->mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent));
+        }
+        @Test
+        @DisplayName("test create index method when indexFields only contains _id")
+        void test1(){
+            List<TapIndex> indexList = new ArrayList<>();
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("index");
+            List<TapIndexField> indexFields = new ArrayList<>();
+            TapIndexField indexField = new TapIndexField();
+            indexField.setName("_id");
+            indexFields.add(indexField);
+            tapIndex.setIndexFields(indexFields);
+            indexList.add(tapIndex);
+            when(tapCreateIndexEvent.getIndexList()).thenReturn(indexList);
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
+            mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent);
+            verify(mongoDatabase,new Times(0)).getCollection("test");
+        }
+        @Test
+        @DisplayName("test create index method when indexFields contains _id and other field")
+        void test2(){
+            List<TapIndex> indexList = new ArrayList<>();
+            TapIndex tapIndex = new TapIndex();
+            tapIndex.setName("index");
+            List<TapIndexField> indexFields = new ArrayList<>();
+            TapIndexField indexField = new TapIndexField();
+            indexField.setName("_id");
+            indexFields.add(indexField);
+            TapIndexField indexField1 = new TapIndexField();
+            indexField1.setName("_id");
+            indexFields.add(indexField1);
+            tapIndex.setIndexFields(indexFields);
+            indexList.add(tapIndex);
+            when(tapCreateIndexEvent.getIndexList()).thenReturn(indexList);
+            MongoCollection collection = mock(MongoCollection.class);
+            when(mongoDatabase.getCollection("test")).thenReturn(collection);
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext,table,tapCreateIndexEvent);
+            mongodbConnector.createIndex(connectorContext,table,tapCreateIndexEvent);
+            verify(collection,new Times(1)).createIndex(any(Document.class),any(IndexOptions.class));
+        }
+
+        @Test
+        @DisplayName("test create index catch mongodb error code 86(IndexKeySpecsConflict)")
+        void test3() {
+            MongoCommandException mongoCommandException = mock(MongoCommandException.class);
+            when(mongoCommandException.getErrorCode()).thenReturn(86);
+            when(mongoCommandException.getErrorCodeName()).thenReturn("IndexKeySpecsConflict");
+            when(mongoCommandException.getMessage()).thenReturn("Command failed with error 86 (IndexKeySpecsConflict): 'An existing index has the same name as the requested index. When index names are not specified, they are auto generated and can cause conflicts. Please refer to our documentation.");
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(collection.createIndex(any(Bson.class), any(IndexOptions.class))).thenThrow(mongoCommandException);
+            when(mongoDatabase.getCollection("test")).thenReturn(collection);
+            TapIndex tapIndex = new TapIndex().indexField(new TapIndexField().name("xxx").fieldAsc(true));
+            tapCreateIndexEvent = new TapCreateIndexEvent();
+            tapCreateIndexEvent.indexList(Collections.singletonList(tapIndex));
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext, table, tapCreateIndexEvent);
+            assertDoesNotThrow(() -> mongodbConnector.createIndex(connectorContext, table, tapCreateIndexEvent));
+            verify(log).info(anyString(), any());
+        }
+        @Test
+        @DisplayName("test create index catch mongodb error code 85(IndexOptionsConflict)")
+        void test4() {
+            MongoCommandException mongoCommandException = mock(MongoCommandException.class);
+            when(mongoCommandException.getErrorCode()).thenReturn(85);
+            when(mongoCommandException.getErrorCodeName()).thenReturn("IndexOptionsConflict");
+            when(mongoCommandException.getMessage()).thenReturn("Command failed with error 85 (IndexOptionsConflict): 'An existing index has the same name as the requested index. When index names are not specified, they are auto generated and can cause conflicts. Please refer to our documentation.");
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(collection.createIndex(any(Bson.class), any(IndexOptions.class))).thenThrow(mongoCommandException);
+            when(mongoDatabase.getCollection("test")).thenReturn(collection);
+            TapIndex tapIndex = new TapIndex().indexField(new TapIndexField().name("xxx").fieldAsc(true));
+            tapCreateIndexEvent = new TapCreateIndexEvent();
+            tapCreateIndexEvent.indexList(Collections.singletonList(tapIndex));
+            doCallRealMethod().when(mongodbConnector).createIndex(connectorContext, table, tapCreateIndexEvent);
+            assertDoesNotThrow(() -> mongodbConnector.createIndex(connectorContext, table, tapCreateIndexEvent));
+            verify(log).warn(anyString(), any());
         }
     }
     @Nested

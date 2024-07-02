@@ -60,7 +60,7 @@
 		<module>dws-connector</module>
 		<module>azure-cosmosdb-connector</module>
         <module>hudi-connector</module>
-		<module>open-gaussdb-connector</module>
+		<module>huawei-cloud-gaussdb-connector</module>
 		<module>aws-clickhouse-connector</module>
 		<module>mongodb-lower-connector</module>
         <module>mock-source-connector</module>
