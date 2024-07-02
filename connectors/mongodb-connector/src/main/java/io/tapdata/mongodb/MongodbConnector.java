@@ -1125,41 +1125,56 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	protected void createIndex(TapConnectorContext tapConnectorContext, TapTable table, TapCreateIndexEvent tapCreateIndexEvent) {
-		try {
 		final List<TapIndex> indexList = tapCreateIndexEvent.getIndexList();
 		if (CollectionUtils.isNotEmpty(indexList)) {
+			Document keys = new Document();
 			for (TapIndex tapIndex : indexList) {
-
-				if (EmptyKit.isNotBlank(tapIndex.getName()) && tapIndex.getName().startsWith("__t__")) {
-					continue;
-				}
-
-				final List<TapIndexField> indexFields = tapIndex.getIndexFields();
-				if (CollectionUtils.isNotEmpty(indexFields)) {
-					if (indexFields.size() == 1 && "_id".equals(indexFields.stream().findFirst().get().getName())) {
+				try {
+					if (EmptyKit.isNotBlank(tapIndex.getName()) && tapIndex.getName().startsWith("__t__")) {
 						continue;
 					}
-					final MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
-					Document keys = new Document();
-					for (TapIndexField indexField : indexFields) {
-						keys.append(indexField.getName(), 1);
+
+					final List<TapIndexField> indexFields = tapIndex.getIndexFields();
+					if (CollectionUtils.isNotEmpty(indexFields)) {
+						if (indexFields.size() == 1 && "_id".equals(indexFields.stream().findFirst().get().getName())) {
+							continue;
+						}
+						final MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
+						keys = new Document();
+						for (TapIndexField indexField : indexFields) {
+							keys.append(indexField.getName(), 1);
+						}
+						final IndexOptions indexOptions = new IndexOptions();
+						indexOptions.background(true);
+						if (indexFields.size() != 1 || !"_id".equals(indexFields.stream().findFirst().get().getName())) {
+							indexOptions.unique(tapIndex.isUnique());
+						}
+						if (EmptyKit.isNotEmpty(tapIndex.getName())) {
+							indexOptions.name(tapIndex.getName());
+						}
+						collection.createIndex(keys, indexOptions);
 					}
-					final IndexOptions indexOptions = new IndexOptions();
-					indexOptions.background(true);
-					if (indexFields.size() != 1 || !"_id".equals(indexFields.stream().findFirst().get().getName())) {
-						indexOptions.unique(tapIndex.isUnique());
+				} catch (Exception e) {
+					if (e instanceof MongoCommandException) {
+						MongoCommandException mongoCommandException = (MongoCommandException) e;
+						if (mongoCommandException.getErrorCode() == 86 && "IndexKeySpecsConflict".equals(mongoCommandException.getErrorCodeName())) {
+							// Index already exists
+							Document finalKeys = keys;
+							Optional.ofNullable(tapConnectorContext.getLog()).ifPresent(log -> log.info("Index [{}] already exists, can ignore creating this index, server error detail message: {}", finalKeys, e.getMessage()));
+							continue;
+						}
+						if (mongoCommandException.getErrorCode() == 85 && "IndexOptionsConflict".equals(mongoCommandException.getErrorCodeName())) {
+							// Index already exists but options is inconsistent
+							Document finalKeys = keys;
+							Optional.ofNullable(tapConnectorContext.getLog()).ifPresent(log -> log.warn("Index [{}] already exists but options is inconsistent, will ignore creating this index, server error detail message: {}", finalKeys, e.getMessage()));
+							continue;
+						}
 					}
-					if (EmptyKit.isNotEmpty(tapIndex.getName())) {
-						indexOptions.name(tapIndex.getName());
-					}
-					collection.createIndex(keys, indexOptions);
+					exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(), e);
+					exceptionCollector.throwWriteExIfNeed(null, e);
+					throw e;
 				}
 			}
-		}
-		}catch (Exception e){
-			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
-			exceptionCollector.throwWriteExIfNeed(null,e);
-			throw e;
 		}
 	}
 
