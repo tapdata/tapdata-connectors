@@ -118,32 +118,32 @@ public class RabbitmqService extends AbstractMqService {
     public void loadTables(int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
         Client client = new Client(String.format(RABBITMQ_URL, mqConfig.getMqHost(), ((RabbitmqConfig) mqConfig).getApiPort()),
                 mqConfig.getMqUsername(), mqConfig.getMqPassword());
-        Channel channel = rabbitmqConnection.createChannel();
-        Set<String> existQueueSet = client.getQueues().stream().map(QueueInfo::getName).collect(Collectors.toSet());
-        Set<String> destinationSet = new HashSet<>();
-        Set<String> existQueueNameSet = new HashSet<>();
-        if (EmptyKit.isEmpty(mqConfig.getMqQueueSet())) {
-            destinationSet.addAll(existQueueSet);
-        } else {
-            //query queue which exists
-            for (String queue : existQueueSet) {
-                if (mqConfig.getMqQueueSet().contains(queue)) {
-                    destinationSet.add(queue);
-                    existQueueNameSet.add(queue);
+        try (Channel channel = rabbitmqConnection.createChannel()) {
+            Set<String> existQueueSet = client.getQueues().stream().map(QueueInfo::getName).collect(Collectors.toSet());
+            Set<String> destinationSet = new HashSet<>();
+            Set<String> existQueueNameSet = new HashSet<>();
+            if (EmptyKit.isEmpty(mqConfig.getMqQueueSet())) {
+                destinationSet.addAll(existQueueSet);
+            } else {
+                //query queue which exists
+                for (String queue : existQueueSet) {
+                    if (mqConfig.getMqQueueSet().contains(queue)) {
+                        destinationSet.add(queue);
+                        existQueueNameSet.add(queue);
+                    }
+                }
+                //create queue which not exists
+                Set<String> needCreateQueueSet = mqConfig.getMqQueueSet().stream()
+                        .filter(i -> !existQueueNameSet.contains(i)).collect(Collectors.toSet());
+                if (EmptyKit.isNotEmpty(needCreateQueueSet)) {
+                    for (String queue : needCreateQueueSet) {
+                        channel.queueDeclare(queue, true, false, false, null);
+                        destinationSet.add(queue);
+                    }
                 }
             }
-            //create queue which not exists
-            Set<String> needCreateQueueSet = mqConfig.getMqQueueSet().stream()
-                    .filter(i -> !existQueueNameSet.contains(i)).collect(Collectors.toSet());
-            if (EmptyKit.isNotEmpty(needCreateQueueSet)) {
-                for (String queue : needCreateQueueSet) {
-                    channel.queueDeclare(queue, true, false, false, null);
-                    destinationSet.add(queue);
-                }
-            }
+            submitTables(tableSize, consumer, channel, destinationSet);
         }
-        submitTables(tableSize, consumer, channel, destinationSet);
-        channel.close();
     }
 
     @Override
@@ -197,6 +197,9 @@ public class RabbitmqService extends AbstractMqService {
             } catch (Exception e) {
                 listResult.addError(event, e);
             }
+            finally {
+                channel.close();
+            }
         }
         writeListResultConsumer.accept(listResult.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get()));
     }
@@ -249,48 +252,49 @@ public class RabbitmqService extends AbstractMqService {
     @Override
     public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         consuming.set(true);
-        Channel channel = rabbitmqConnection.createChannel();
-        tableList.forEach(tableName -> {
-            List<TapEvent> list = TapSimplify.list();
-            DefaultConsumer consumer = new DefaultConsumer(channel) {
-                @Override
-                public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
-                    super.handleDelivery(consumerTag, envelope, properties, body);
-                    MqOp mqOp = MqOp.fromValue(properties.getHeaders().get("mqOp").toString());
-                    Map<String, Object> data = jsonParser.fromJsonBytes(body, Map.class);
-                    switch (mqOp) {
-                        case INSERT:
-                            list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
-                            break;
-                        case UPDATE:
-                            list.add(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
-                            break;
-                        case DELETE:
-                            list.add(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()));
-                            break;
+        try (Channel channel = rabbitmqConnection.createChannel()) {
+            tableList.forEach(tableName -> {
+                List<TapEvent> list = TapSimplify.list();
+                DefaultConsumer consumer = new DefaultConsumer(channel) {
+                    @Override
+                    public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
+                        super.handleDelivery(consumerTag, envelope, properties, body);
+                        MqOp mqOp = MqOp.fromValue(properties.getHeaders().get("mqOp").toString());
+                        Map<String, Object> data = jsonParser.fromJsonBytes(body, Map.class);
+                        switch (mqOp) {
+                            case INSERT:
+                                list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
+                                break;
+                            case UPDATE:
+                                list.add(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
+                                break;
+                            case DELETE:
+                                list.add(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()));
+                                break;
+                        }
+                        channel.basicAck(envelope.getDeliveryTag(), false);
+                        if (list.size() >= eventBatchSize) {
+                            List<TapEvent> subList = TapSimplify.list();
+                            subList.addAll(list);
+                            eventsOffsetConsumer.accept(subList, TapSimplify.list());
+                            list.clear();
+                        }
                     }
-                    channel.basicAck(envelope.getDeliveryTag(), false);
-                    if (list.size() >= eventBatchSize) {
-                        List<TapEvent> subList = TapSimplify.list();
-                        subList.addAll(list);
-                        eventsOffsetConsumer.accept(subList, TapSimplify.list());
-                        list.clear();
+                };
+                try {
+                    channel.queueDeclare(tableName, true, false, false, null);
+                    channel.basicConsume(tableName, consumer);
+                    while (consuming.get()) {
+                        Thread.sleep(1000);
                     }
+                    channel.close();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
                 }
-            };
-            try {
-                channel.queueDeclare(tableName, true, false, false, null);
-                channel.basicConsume(tableName, consumer);
-                while (consuming.get()) {
-                    Thread.sleep(1000);
+                if (EmptyKit.isNotEmpty(list)) {
+                    eventsOffsetConsumer.accept(list, TapSimplify.list());
                 }
-                channel.close();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-            if (EmptyKit.isNotEmpty(list)) {
-                eventsOffsetConsumer.accept(list, TapSimplify.list());
-            }
-        });
+            });
+        }
     }
 }

@@ -80,14 +80,14 @@ public class LocalFileStorage implements TapFileStorage {
         if (isFileExist(path) && !canReplace) {
             return getFile(path);
         }
-        OutputStream os = Files.newOutputStream(Paths.get(path));
-        int bytesRead;
-        byte[] buffer = new byte[8192];
-        while ((bytesRead = is.read(buffer, 0, 8192)) != -1) {
-            os.write(buffer, 0, bytesRead);
+        try (OutputStream os = Files.newOutputStream(Paths.get(path))) {
+            int bytesRead;
+            byte[] buffer = new byte[8192];
+            while ((bytesRead = is.read(buffer, 0, 8192)) != -1) {
+                os.write(buffer, 0, bytesRead);
+            }
+            os.flush();
         }
-        os.flush();
-        os.close();
         return getFile(path);
     }
 
