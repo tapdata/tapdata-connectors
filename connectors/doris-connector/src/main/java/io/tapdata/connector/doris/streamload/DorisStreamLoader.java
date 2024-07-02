@@ -239,7 +239,7 @@ public class DorisStreamLoader {
         }
     }
 
-    private String buildLoadUrl(final String dorisHttp, final String database, final String tableName) {
+    protected String buildLoadUrl(final String dorisHttp, final String database, final String tableName) {
         if (Boolean.TRUE.equals(dorisConfig.getUseHTTPS()))
             return String.format(HTTPS_LOAD_URL_PATTERN, dorisHttp, database, tableName);
         else

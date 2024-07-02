@@ -95,7 +95,7 @@ public class DorisTest extends CommonDbTest {
     protected static final String TEST_DORIS_UPDATE_RECORD = "update %s set col2=1 where col1=0";
     protected static final String TEST_DORIS_DELETE_RECORD = "delete from %s where col1=0";
 
-    protected Boolean testStreamLoadPrivilege() {
+    public Boolean testStreamLoadPrivilege() {
         try {
             boolean testResult = false;
             if (((DorisConfig) commonDbConfig).getUseHTTPS()) {

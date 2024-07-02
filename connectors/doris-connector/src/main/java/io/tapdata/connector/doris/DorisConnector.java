@@ -165,7 +165,7 @@ public class DorisConnector extends CommonDbConnector {
         return retryOptions;
     }
 
-    private DorisStreamLoader getDorisStreamLoader() {
+    public DorisStreamLoader getDorisStreamLoader() {
         String threadName = Thread.currentThread().getName();
         if (!dorisStreamLoaderMap.containsKey(threadName)) {
             DorisJdbcContext context = new DorisJdbcContext(dorisConfig);
