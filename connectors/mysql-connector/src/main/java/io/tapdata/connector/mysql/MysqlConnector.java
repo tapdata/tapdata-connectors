@@ -161,7 +161,7 @@ public class MysqlConnector extends CommonDbConnector {
             return tapDateTimeValue.getValue().isContainsIllegal() ? tapDateTimeValue.getValue().getIllegalDate() : formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS");
         });
         //date类型通过jdbc读取时，会自动转换为当前时区的时间，所以设置为当前时区
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().isContainsIllegal() ? tapDateValue.getValue().getIllegalDate() : tapDateValue.getValue().toFormatString("yyyy-MM-dd"));
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().isContainsIllegal() ? tapDateValue.getValue().getIllegalDate() : tapDateValue.getValue().toInstant());
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
         codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
 
@@ -475,7 +475,7 @@ public class MysqlConnector extends CommonDbConnector {
                     } else {
                         value = resultSet.getObject(i + 1);
                         if (value instanceof java.sql.Date) {
-                            value = ((java.sql.Date) value).toLocalDate().atStartOfDay(zoneId);
+                            value = ((java.sql.Date) value).toLocalDate();
                         }
                     }
                 } else if ("DATETIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {

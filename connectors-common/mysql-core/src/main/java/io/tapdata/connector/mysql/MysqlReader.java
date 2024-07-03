@@ -760,7 +760,7 @@ public class MysqlReader implements Closeable {
                 value = Instant.parse((CharSequence) value);
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
-            value = (Integer) value * 24 * 60 * 60 * 1000L + diff;
+            value = (Integer) value * 24 * 60 * 60 * 1000L;
         }
         return value;
     }

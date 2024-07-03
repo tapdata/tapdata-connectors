@@ -179,7 +179,7 @@ public class PostgresConnector extends CommonDbConnector {
         });
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> {
-            if (postgresConfig.getOldVersionTimezone()) {
+            if (postgresConfig.getOldVersionTimezone() || tapTimeValue.getOriginType().endsWith("with time zone")) {
                 return tapTimeValue.getValue().toTime();
             } else {
                 return tapTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalTime();
@@ -197,13 +197,7 @@ public class PostgresConnector extends CommonDbConnector {
                 }
             }
         });
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
-            if (postgresConfig.getOldVersionTimezone()) {
-                return tapDateValue.getValue().toSqlDate();
-            } else {
-                return tapDateValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalDate();
-            }
-        });
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
         codecRegistry.registerFromTapValue(TapYearValue.class, "character(4)", TapValue::getOriginValue);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
@@ -509,7 +503,7 @@ public class PostgresConnector extends CommonDbConnector {
                         entry.setValue(((Timestamp) value).toLocalDateTime().atZone(postgresConfig.getZoneId()));
                     }
                 } else if (value instanceof Date) {
-                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getZoneId()));
+                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
                 } else if (value instanceof Time) {
                     if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
                         continue;
