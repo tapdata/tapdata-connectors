@@ -1163,6 +1163,12 @@ public class MongodbConnector extends ConnectorBase {
 							Optional.ofNullable(tapConnectorContext.getLog()).ifPresent(log -> log.info("Index [{}] already exists, can ignore creating this index, server error detail message: {}", finalKeys, e.getMessage()));
 							continue;
 						}
+						if (mongoCommandException.getErrorCode() == 85 && "IndexOptionsConflict".equals(mongoCommandException.getErrorCodeName())) {
+							// Index already exists but options is inconsistent
+							Document finalKeys = keys;
+							Optional.ofNullable(tapConnectorContext.getLog()).ifPresent(log -> log.warn("Index [{}] already exists but options is inconsistent, will ignore creating this index, server error detail message: {}", finalKeys, e.getMessage()));
+							continue;
+						}
 					}
 					exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(), e);
 					exceptionCollector.throwWriteExIfNeed(null, e);
