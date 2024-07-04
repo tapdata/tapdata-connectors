@@ -18,6 +18,7 @@
     </modules>
 
     <properties>
+
         <sonar.coverage.exclusions>
             connectors-common/debezium-bucket/**,
             connectors-common/mysql-binlog-connector-java/**,
@@ -37,6 +38,25 @@
             **/src/test/**,
             tapdata-cli/**
         </sonar.test.exclusions>
+
+        <sonar.inclusions>
+            connectors-common/*,
+            connectors-javascript/*,
+            connectors-tdd/*,
+            connectors-unpackage/*,
+            file-storages/*,
+            connectors/mysql-connector/**,
+            connectors/kafka-connector/**,
+            connectors/mongodb-connector/**,
+            connectors/postgres-connector/**,
+            connectors/clickhouse-connector/**,
+            connectors/doris-connector/**,
+            connectors/tidb-connector/**,
+            connectors/opengauss-connector/**,
+            connectors/oceanbase-mysql-connector/**,
+            connectors/elasticsearch-connector/**,
+            connectors/csv-connector/**
+        </sonar.inclusions>
     </properties>
 
     <build>
