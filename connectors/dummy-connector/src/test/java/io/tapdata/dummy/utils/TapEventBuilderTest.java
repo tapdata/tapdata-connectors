@@ -1,16 +1,23 @@
 package io.tapdata.dummy.utils;
 
+import io.tapdata.dummy.constants.RecordOperators;
 import io.tapdata.dummy.constants.SyncStage;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.simplify.TapSimplify;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.sql.Timestamp;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -301,5 +308,37 @@ class TapEventBuilderTest {
 			assertInstanceOf(Timestamp.class, after.get("date1"));
 			assertEquals(((Timestamp) after.get("date1")).getNanos(), (long) ((long) ((Timestamp) after.get("date1")).getNanos() / Math.pow(10, 6)) * Math.pow(10, 6));
 		}
+	}
+
+	@Test
+	void name() {
+		TapEventBuilder tapEventBuilder = new TapEventBuilder();
+		tapEventBuilder.reset(null, SyncStage.Initial);
+		TapTable tapTable = new TapTable("test");
+		for (int i = 0; i < 30; i++) {
+			TapField tapField = new TapField("_number" + i, "rnumber");
+			tapTable.putField(tapField.getName(), tapField);
+		}
+		for (int i = 0; i < 20; i++) {
+			TapField tapField = new TapField("_string" + i, "rstring");
+			tapTable.putField(tapField.getName(), tapField);
+		}
+		long start = System.currentTimeMillis();
+		int time = 50000000;
+		List<FieldTypeCode> fieldCodes = TypeMappingUtils.toFieldCodes(tapTable.getNameFieldMap());
+		IntStream.range(0, time).forEach(i->{
+			TapInsertRecordEvent tapInsertRecordEvent = tapEventBuilder.generateInsertRecordEvent(
+					tapTable,
+					fieldCodes
+			);
+		});
+		long end = System.currentTimeMillis();
+		long costMs = end - start;
+		BigDecimal costSec = BigDecimal.valueOf(costMs).divide(BigDecimal.valueOf(1000), 2, RoundingMode.HALF_UP);
+		BigDecimal qps = BigDecimal.valueOf(time);
+		if (costSec.compareTo(BigDecimal.ZERO) > 0) {
+			qps = BigDecimal.valueOf(time).divide(costSec, 2, RoundingMode.HALF_UP);
+		}
+		System.out.printf("qps: %s, cost ms: %s ms%n", qps.toPlainString(), costMs);
 	}
 }

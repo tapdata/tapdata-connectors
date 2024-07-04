@@ -11,15 +11,14 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.simplify.TapSimplify;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -45,8 +44,8 @@ public class TapEventBuilder {
     private DummyOffset offset;
 
     private final Consumer<Map<String, Object>> heartbeatSetter;
-    private Map<String, String> cacheRString = new HashMap<>();
-    private Map<String, Double> cacheRNumber = new HashMap<>();
+    private Map<String, String> cacheRString = new Object2ObjectOpenHashMap<>();
+    private Map<String, Double> cacheRNumber = new Object2ObjectOpenHashMap<>();
     private Map<String, String> cacheRLongString = new HashMap<>();
     private Map<String, byte[]> cacheRLongBinary = new HashMap<>();
     private Map<String, Timestamp> cacheRDate = new HashMap<>();
@@ -78,9 +77,22 @@ public class TapEventBuilder {
     }
 
     public TapInsertRecordEvent generateInsertRecordEvent(TapTable table) {
-        Map<String, Object> after = new HashMap<>();
+        Map<String, Object> after = new HashMap<>(table.getNameFieldMap().size() * 2);
+//        Map<String, Object> after = new Object2ObjectOpenHashMap<>(table.getNameFieldMap().size() * 2);
         for (TapField tapField : table.childItems()) {
             after.put(tapField.getName(), generateEventValue(tapField, RecordOperators.Insert));
+        }
+        heartbeatSetter.accept(after);
+
+        TapInsertRecordEvent tapEvent = TapSimplify.insertRecordEvent(after, table.getName());
+        updateOffset(table.getName(), RecordOperators.Insert, tapEvent);
+        return tapEvent;
+    }
+
+    public TapInsertRecordEvent generateInsertRecordEvent(TapTable table, List<FieldTypeCode> fieldTypeCodes) {
+        Map<String, Object> after = new Object2ObjectOpenHashMap<>(table.getNameFieldMap().size() * 2);
+        for (FieldTypeCode fieldTypeCode : fieldTypeCodes) {
+            after.put(fieldTypeCode.getTapField().getName(), generateEventValue(fieldTypeCode, RecordOperators.Insert));
         }
         heartbeatSetter.accept(after);
 
@@ -139,17 +151,16 @@ public class TapEventBuilder {
      * @param op    operate type
      * @return TapEvent
      */
-    private Object generateEventValue(TapField field, RecordOperators op) {
+    protected Object generateEventValue(TapField field, RecordOperators op) {
         if (null != field.getDefaultValue()) {
             return field.getDefaultValue();
         }
-
-        if ("uuid".equalsIgnoreCase(field.getDataType())) {
+        String ftype = field.getDataType();
+        if ("uuid".equalsIgnoreCase(ftype)) {
             return UUID.randomUUID().toString();
-        } else if ("now".equalsIgnoreCase(field.getDataType())) {
+        } else if ("now".equalsIgnoreCase(ftype)) {
             return Timestamp.from(Instant.now());
         } else {
-            String ftype = field.getDataType();
             if (ftype.startsWith("rnumber")) {
                 Double rNumberValue = cacheRNumber.get(ftype);
                 if (null == rNumberValue) {
@@ -223,6 +234,62 @@ public class TapEventBuilder {
             }
         }
         return field.getDefaultValue();
+    }
+
+    private String defaultRString;
+    private Double defaultRNumber;
+
+    protected Object generateEventValue(FieldTypeCode fieldTypeCode, RecordOperators op) {
+        TapField tapField = fieldTypeCode.tapField;
+        if (null != tapField.getDefaultValue()) {
+            return tapField.getDefaultValue();
+        }
+        int type = fieldTypeCode.type;
+        Integer length = fieldTypeCode.length;
+        Object value;
+        switch (type) {
+            case 10:
+                if (null == length) {
+                    if (null == defaultRString) {
+                        defaultRString = randomString(DEFAULT_RANDOM_STRING_LENGTH);
+                    }
+                    value = defaultRString;
+                } else {
+                    value = cacheRString.get(type + "_" + length);
+                    if (null == value) {
+                        value = randomString(length);
+                        cacheRString.put(type + "_" + length, (String) value);
+                    }
+                }
+                break;
+            case 20:
+                if (null == length) {
+                    if (null == defaultRNumber) {
+                        defaultRNumber = Math.round(SECURE_RANDOM.nextDouble() * 10000 * 10000) / (double) 10000;
+                    }
+                    value = defaultRNumber;
+                } else {
+                    double powNum = Math.pow(10, length);
+                    value = Math.round(SECURE_RANDOM.nextDouble() * powNum * powNum) / powNum;
+                    cacheRNumber.put(type + "_" + length, (Double) value);
+                }
+                break;
+            case 30:
+                if (RecordOperators.Insert == op) {
+                    if (null == serial) {
+                        serial = null == fieldTypeCode.getSerial() ? new AtomicLong(1) : fieldTypeCode.getSerial();
+                        serialStep = null == fieldTypeCode.getStep() ? 1 : fieldTypeCode.getStep();
+                    }
+                    value = serial.getAndAdd(serialStep);
+                } else {
+                    value =  (int) (SECURE_RANDOM.nextDouble() * serial.get()) - serial.get() % serialStep;
+                }
+                break;
+            default:
+                value = null;
+                break;
+        }
+        return value;
     }
 
     /**

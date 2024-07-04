@@ -4,7 +4,9 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.dummy.constants.RecordOperators;
 import io.tapdata.dummy.constants.SyncStage;
 import io.tapdata.dummy.po.DummyOffset;
+import io.tapdata.dummy.utils.FieldTypeCode;
 import io.tapdata.dummy.utils.TapEventBuilder;
+import io.tapdata.dummy.utils.TypeMappingUtils;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
@@ -157,8 +159,9 @@ public class DummyConnector extends ConnectorBase {
             // generate insert record event
             TapInsertRecordEvent tapInsertRecordEvent;
             Long initialTotals = config.getInitialTotals();
+            List<FieldTypeCode> fieldCodes = TypeMappingUtils.toFieldCodes(table.getNameFieldMap());
             for (int dataIndex = 0; dataIndex < initialTotals && isAlive(); dataIndex++) {
-                tapInsertRecordEvent = builder.generateInsertRecordEvent(table);
+                tapInsertRecordEvent = builder.generateInsertRecordEvent(table, fieldCodes);
                 batchConsumer.accept(tapInsertRecordEvent);
             }
         }
@@ -247,7 +250,7 @@ public class DummyConnector extends ConnectorBase {
             for (TapRecordEvent e : recordEvents) {
                 if (!(isAlive() && writeRate.addReturn())) return;
 
-                delayCalculation.log(e.getTime());
+//                delayCalculation.log(e.getTime());
 
                 if (e instanceof TapInsertRecordEvent) {
                     insert.addAndGet(1);
