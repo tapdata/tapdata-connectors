@@ -27,6 +27,7 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -227,7 +228,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 if (field.schema().name().endsWith("ZonedTimestamp")) {
                     obj = Instant.parse((String) obj).atZone(ZoneOffset.UTC);
                 } else if (field.schema().name().endsWith("ZonedTime")) {
-                    obj = LocalTime.parse(((String) obj).replace("Z", ""));
+                    obj = LocalTime.parse(((String) obj).replace("Z", "")).atDate(LocalDate.ofYearDay(1970, 1)).atZone(ZoneOffset.UTC);
                 }
             }
             dataMap.put(field.name(), obj);
