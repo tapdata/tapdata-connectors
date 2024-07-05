@@ -36,6 +36,14 @@
           },
           "x-index": 20
         },
+        "useHTTPS": {
+          "type": "boolean",
+          "title": "${useHTTPS}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-index": 29
+        },
         "dorisHttp": {
           "type": "string",
           "title": "${dorisHttp}",
@@ -100,6 +108,7 @@
               },
               "x-index": 70
             },
+
             "timezone": {
               "type": "string",
               "title": "${timezone}",
@@ -486,8 +495,8 @@
       "hostTip": "The address of the database, it can be an IP address or a domain name, for example: 192.168.1.200",
       "port": "Port",
       "portTip": "The port number of the database, the default port of Doris is 9030",
-      "dorisHttp": "Http Address",
-      "dorisHttpTip": "The address of the Doris http interface, for example: 192.168.1.200:8030",
+      "dorisHttp": "http/https Address",
+      "dorisHttpTip": "The address of the Doris Http/Https interface, for example: 192.168.1.200:8030",
       "catalog": "Doris Catalog",
       "catalogTip": "The directory of Doris can be left blank for non clustered Doris or those that do not require narrowing down the data range, such as doris_cluster",
       "database": "DB Name",
@@ -512,15 +521,16 @@
       "tableProperties": "Table Properties",
       "tablePropertiesTip": "Table properties, for example: {replication_num: 3, storage_format: v2}",
       "propKey": "Property Name",
-      "propValue": "Property Value"
+      "propValue": "Property Value",
+      "useHTTPS": "Enable HTTPS"
     },
     "zh_CN": {
       "host": "数据库地址",
       "hostTip": "数据库的地址，它可以是IP地址或者域名，例如：192.168.1.200",
       "port": "端口",
       "portTip": "数据库的端口号，Doris默认端口9030",
-      "dorisHttp": "http接口地址",
-      "dorisHttpTip": "Doris的http接口地址，例如：192.168.1.200:8030",
+      "dorisHttp": "http/https接口地址",
+      "dorisHttpTip": "Doris的http/https接口地址，例如：192.168.1.200:8030",
       "catalog": "Doris目录",
       "catalogTip": "Doris的目录，非集群Doris或不需要缩小数据范围的可以不填写，例如：doris_cluster",
       "database": "数据库名称",
@@ -545,15 +555,16 @@
       "tableProperties": "表属性",
       "tablePropertiesTip": "表属性，例如：{replication_num: 3, storage_format: v2}",
       "propKey": "属性名",
-      "propValue": "属性值"
+      "propValue": "属性值",
+      "useHTTPS": "开启HTTPS"
     },
     "zh_TW": {
       "host": "數據庫地址",
       "hostTip": "數據庫的地址，它可以是IP地址或者域名，例如：192.168.1.200",
       "port": "端口",
       "portTip": "數據庫的端口號，Doris默認端口9030",
-      "dorisHttp": "http接口地址",
-      "dorisHttpTip": "Doris的http接口地址，例如：192.168.1.200:8030",
+      "dorisHttp": "http/https接口地址",
+      "dorisHttpTip": "Doris的http/https接口地址，例如：192.168.1.200:8030",
       "catalog": "Doris目錄",
       "catalogTip": "Doris的目錄，非集群Doris或不需要縮小數據範圍的可以不填寫，例如：doris_cluster",
       "database": "数据库名称",
@@ -578,7 +589,8 @@
       "tableProperties": "表屬性",
       "tablePropertiesTip": "表屬性，例如：{replication_num: 3, storage_format: v2}",
       "propKey": "屬性名",
-      "propValue": "屬性值"
+      "propValue": "屬性值",
+      "useHTTPS": "開啓HTTPS"
     }
   },
   "dataTypes": {

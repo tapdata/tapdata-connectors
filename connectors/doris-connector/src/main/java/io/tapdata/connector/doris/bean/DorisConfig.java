@@ -25,6 +25,8 @@ public class DorisConfig extends CommonDbConfig {
     private List<LinkedHashMap<String, String>> tableProperties = new ArrayList<>();
     private Boolean jdbcCompletion = false;
 
+    private Boolean useHTTPS =false;
+
     //customize
     public DorisConfig() {
         setDbType("doris");
@@ -35,7 +37,11 @@ public class DorisConfig extends CommonDbConfig {
     public DorisConfig load(Map<String, Object> map) {
         DorisConfig config = (DorisConfig) super.load(map);
         config.setSchema(config.getDatabase());
-        config.setDorisHttp(getDorisHttp().replace("http://", ""));
+        if(Boolean.TRUE.equals(useHTTPS)){
+            config.setDorisHttp(getDorisHttp().replace("https://", ""));
+        }else{
+            config.setDorisHttp(getDorisHttp().replace("http://", ""));
+        }
         return config;
     }
 
@@ -111,6 +117,14 @@ public class DorisConfig extends CommonDbConfig {
 
     public int getBucket() {
         return bucket;
+    }
+
+    public Boolean getUseHTTPS() {
+        return useHTTPS;
+    }
+
+    public void setUseHTTPS(Boolean useHTTPS) {
+        this.useHTTPS = useHTTPS;
     }
 
     public void setBucket(int bucket) {
