@@ -179,22 +179,17 @@ public class PostgresConnector extends CommonDbConnector {
         });
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> {
-            if (postgresConfig.getOldVersionTimezone() || tapTimeValue.getOriginType().endsWith("with time zone")) {
+            if (postgresConfig.getOldVersionTimezone() || EmptyKit.isNotNull(tapTimeValue.getValue().getTimeZone())) {
                 return tapTimeValue.getValue().toTime();
             } else {
                 return tapTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalTime();
             }
         });
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
-            if (postgresConfig.getOldVersionTimezone()) {
+            if (postgresConfig.getOldVersionTimezone() || EmptyKit.isNotNull(tapDateTimeValue.getValue().getTimeZone())) {
                 return tapDateTimeValue.getValue().toTimestamp();
             } else {
-                if (tapDateTimeValue.getOriginType().endsWith("with time zone")) {
-                    TimeZone timeZone = tapDateTimeValue.getValue().getTimeZone();
-                    return tapDateTimeValue.getValue().toInstant().atZone(EmptyKit.isNull(timeZone) ? ZoneId.of("+00:00") : tapDateTimeValue.getValue().getTimeZone().toZoneId()).toLocalDateTime();
-                } else {
-                    return tapDateTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalDateTime();
-                }
+                return tapDateTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalDateTime();
             }
         });
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
@@ -500,7 +495,9 @@ public class PostgresConnector extends CommonDbConnector {
                         continue;
                     }
                     if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
-                        entry.setValue(((Timestamp) value).toLocalDateTime().atZone(postgresConfig.getZoneId()));
+                        entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
+                    } else {
+                        entry.setValue(((Timestamp) value).toLocalDateTime().atZone(ZoneId.systemDefault()));
                     }
                 } else if (value instanceof Date) {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
@@ -509,7 +506,9 @@ public class PostgresConnector extends CommonDbConnector {
                         continue;
                     }
                     if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
-                        entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getZoneId()));
+                        entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
+                    } else {
+                        entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()));
                     }
                 }
             }

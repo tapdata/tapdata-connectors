@@ -56,10 +56,7 @@ import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.sql.ResultSetMetaData;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZonedDateTime;
+import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -757,7 +754,7 @@ public class MysqlReader implements Closeable {
                     value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
                 }
             } else if (value instanceof String) {
-                value = Instant.parse((CharSequence) value);
+                value = Instant.parse((CharSequence) value).atZone(ZoneOffset.UTC);
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
             value = (Integer) value * 24 * 60 * 60 * 1000L;

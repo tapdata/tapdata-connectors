@@ -84,6 +84,7 @@ public class MysqlConnector extends CommonDbConnector {
     protected TimeZone dbTimeZone;
     protected ZoneId zoneId;
     protected ZoneId dbZoneId;
+    protected int zoneOffsetHour;
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
@@ -133,6 +134,7 @@ public class MysqlConnector extends CommonDbConnector {
             }
             this.dbZoneId = dbTimeZone.toZoneId();
             this.zoneId = timeZone.toZoneId();
+            this.zoneOffsetHour = timeZone.getRawOffset() / 1000 / 60 / 60;
             ddlSqlGenerator = new MysqlDDLSqlGenerator(version, ((TapConnectorContext) tapConnectionContext).getTableMap());
         }
         fieldDDLHandlers = new BiClassHandlers<>();
@@ -150,7 +152,7 @@ public class MysqlConnector extends CommonDbConnector {
 
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
             if (!mysqlConfig.getOldVersionTimezone()) {
-                if (tapDateTimeValue.getOriginType().startsWith("timestamp")) {
+                if (EmptyKit.isNotNull(tapDateTimeValue.getValue().getTimeZone())) {
                     tapDateTimeValue.getValue().setTimeZone(dbTimeZone);
                 } else {
                     tapDateTimeValue.getValue().setTimeZone(timeZone);
@@ -485,7 +487,7 @@ public class MysqlConnector extends CommonDbConnector {
                             if (mysqlConfig.getOldVersionTimezone()) {
                                 value = ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000));
                             } else {
-                                value = ((LocalDateTime) value).atZone(zoneId);
+                                value = ((LocalDateTime) value).minusHours(zoneOffsetHour);
                             }
                         }
                     } catch (Exception ignore) {
