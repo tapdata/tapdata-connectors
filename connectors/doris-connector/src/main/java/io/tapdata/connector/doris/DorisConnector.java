@@ -28,8 +28,24 @@ import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
+import org.apache.http.*;
+import org.apache.http.client.RedirectStrategy;
+import org.apache.http.client.methods.HttpPut;
+import org.apache.http.client.methods.HttpUriRequest;
+import org.apache.http.conn.ssl.NoopHostnameVerifier;
+import org.apache.http.conn.ssl.TrustAllStrategy;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.impl.client.LaxRedirectStrategy;
+import org.apache.http.protocol.HttpContext;
+import org.apache.http.ssl.SSLContexts;
+import org.eclipse.jetty.client.HttpClient;
 
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
 import java.io.IOException;
+import java.net.URI;
+
 import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -149,11 +165,17 @@ public class DorisConnector extends CommonDbConnector {
         return retryOptions;
     }
 
-    private DorisStreamLoader getDorisStreamLoader() {
+    public DorisStreamLoader getDorisStreamLoader() {
         String threadName = Thread.currentThread().getName();
         if (!dorisStreamLoaderMap.containsKey(threadName)) {
             DorisJdbcContext context = new DorisJdbcContext(dorisConfig);
-            DorisStreamLoader dorisStreamLoader = new DorisStreamLoader(context, new HttpUtil().getHttpClient());
+            CloseableHttpClient httpClient;
+            if (Boolean.TRUE.equals(dorisConfig.getUseHTTPS())) {
+                httpClient = HttpUtil.generationHttpClient();
+            } else {
+                httpClient = new HttpUtil().getHttpClient();
+            }
+            DorisStreamLoader dorisStreamLoader = new DorisStreamLoader(context,httpClient);
             dorisStreamLoaderMap.put(threadName, dorisStreamLoader);
         }
         return dorisStreamLoaderMap.get(threadName);
