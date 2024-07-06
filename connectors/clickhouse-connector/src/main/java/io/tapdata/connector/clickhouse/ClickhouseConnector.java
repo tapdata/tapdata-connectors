@@ -37,10 +37,11 @@ import org.apache.commons.codec.binary.Base64;
 
 import java.sql.Date;
 import java.sql.SQLException;
-import java.sql.Time;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -175,6 +176,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         });
 
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss.SS"));
+        codecRegistry.registerFromTapValue(TapYearValue.class, "char(4)", TapValue::getOriginValue);
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "String", tapValue -> {
             if (tapValue != null && tapValue.getValue() != null)
                 return new String(Base64.encodeBase64(tapValue.getValue()));
@@ -194,7 +196,7 @@ public class ClickhouseConnector extends CommonDbConnector {
             if (clickhouseConfig.getOldVersionTimezone()) {
                 return tapDateValue.getValue().toSqlDate();
             } else {
-                return tapDateValue.getValue().toInstant().atZone(clickhouseConfig.getZoneId()).toLocalDate();
+                return tapDateValue.getValue().toTimestamp().toLocalDateTime().toLocalDate();
             }
         });
 
@@ -381,18 +383,18 @@ public class ClickhouseConnector extends CommonDbConnector {
             for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
                 Object value = entry.getValue();
                 if (value instanceof java.sql.Date) {
-                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(clickhouseConfig.getZoneId()));
-                } else if (value instanceof Time) {
-                    entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(clickhouseConfig.getZoneId()));
+                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
+                } else if (value instanceof Timestamp) {
+                    entry.setValue(Instant.ofEpochMilli(((Timestamp) value).getTime()).atZone(ZoneOffset.UTC).toLocalDateTime().minusHours(clickhouseConfig.getZoneOffsetHour()));
                 } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().startsWith("Date32")) {
-                    entry.setValue(LocalDate.parse((String) value).atStartOfDay(clickhouseConfig.getZoneId()));
+                    entry.setValue(LocalDate.parse((String) value).atStartOfDay());
                 } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().startsWith("DateTime64")) {
                     String dataFormat = dataFormatMap.get(tapTable.getId() + "." + entry.getKey());
                     if (EmptyKit.isNull(dataFormat)) {
                         dataFormat = DateUtil.determineDateFormat((String) value);
                         dataFormatMap.put(tapTable.getId() + "." + entry.getKey(), dataFormat);
                     }
-                    entry.setValue(DateUtil.parseInstantWithZone((String) value, dataFormat, clickhouseConfig.getZoneId()));
+                    entry.setValue(DateUtil.parseInstantWithHour((String) value, dataFormat, clickhouseConfig.getZoneOffsetHour()));
                 }
             }
         }
