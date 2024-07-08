@@ -570,17 +570,18 @@ public class KafkaService extends AbstractMqService {
         ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(((KafkaConfig) mqConfig), connectorId, true);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         List<Integer> partitionInfo = getPartitionList(tableName);
-        int threadSize = Math.max(partitionInfo.size(), 1);
+        int threadSize = Math.min(Math.max(partitionInfo.size(), 1), 8);
+        List<List<Integer>> partitionGroup = DbKit.splitToPieces(partitionInfo, (partitionInfo.size() - 1) / threadSize + 1);
         CountDownLatch countDownLatch = new CountDownLatch(threadSize);
         ExecutorService executorService = Executors.newFixedThreadPool(threadSize);
         try {
             for (int i = 0; i < threadSize; i++) {
-                final int partition = partitionInfo.get(i);
+                List<Integer> partitions = partitionGroup.get(i);
                 executorService.submit(() -> {
                     try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
                         List<TapEvent> list = TapSimplify.list();
                         if (threadSize > 1) {
-                            kafkaConsumer.assign(Collections.singleton(new TopicPartition(tapTable.getId(), partition)));
+                            kafkaConsumer.assign(partitions.stream().map(v -> new TopicPartition(tapTable.getId(), v)).collect(Collectors.toList()));
                         } else {
                             kafkaConsumer.subscribe(Collections.singleton(tapTable.getId()));
                         }
