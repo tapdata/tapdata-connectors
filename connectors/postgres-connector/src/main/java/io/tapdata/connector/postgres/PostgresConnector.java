@@ -486,6 +486,6 @@ public class PostgresConnector extends CommonDbConnector {
         }).orElse(null);
         if (null == pks) throw new CoreException("No pk field found for table: " + tapTable.getName());
 
-        return "abs(('x' || MD5(CONCAT_WS(',', \"" + String.join("`, `", pks) + "\")))::bit(64)::bigint)";
+        return "abs(('x' || MD5(CONCAT_WS(',', \"" + String.join("\", \"", pks) + "\")))::bit(64)::bigint)";
     }
 }
