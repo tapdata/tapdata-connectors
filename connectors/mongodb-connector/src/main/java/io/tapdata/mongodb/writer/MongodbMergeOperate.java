@@ -388,11 +388,6 @@ public class MongodbMergeOperate {
 					setOperateDoc.putAll(after);
 				}
 				final Document update = mergeResult.getUpdate();
-				if (update.containsKey("$set")) {
-					update.get("$set", Document.class).putAll(setOperateDoc);
-				} else {
-					update.put("$set", setOperateDoc);
-				}
 				if (removeFields != null) {
 					if (EmptyKit.isNotEmpty(targetPath)) {
 						for (Map.Entry<String, Object> entry : removeFields.entrySet()) {
@@ -418,6 +413,12 @@ public class MongodbMergeOperate {
 							update.put("$unset", unsetOperateDoc);
 						}
 					}
+				}
+				Document setOperateDocFiltered = filterSetDocByUnsetDoc(setOperateDoc, unsetOperateDoc);
+				if (update.containsKey("$set")) {
+					update.get("$set", Document.class).putAll(setOperateDocFiltered);
+				} else {
+					update.put("$set", setOperateDocFiltered);
 				}
 				if (operation == MergeBundle.EventOperation.INSERT) {
 					mergeResult.getUpdateOptions().upsert(true);
@@ -514,11 +515,6 @@ public class MongodbMergeOperate {
 		switch (operation) {
 			case INSERT:
 			case UPDATE:
-				if (mergeResult.getUpdate().containsKey("$set")) {
-					mergeResult.getUpdate().get("$set", Document.class).putAll(updateOpDoc);
-				} else {
-					mergeResult.getUpdate().put("$set", updateOpDoc);
-				}
 				if (MapUtils.isNotEmpty(unsetOpDoc)) {
 					removeShareKeys(sharedJoinKeys, unsetOpDoc, array);
 					if (mergeResult.getUpdate().containsKey("$unset")) {
@@ -530,6 +526,12 @@ public class MongodbMergeOperate {
 							mergeResult.getUpdate().put("$unset", unsetOpDoc);
 						}
 					}
+				}
+				Document updateOpDocFiltered = filterSetDocByUnsetDoc(updateOpDoc, unsetOpDoc);
+				if (mergeResult.getUpdate().containsKey("$set")) {
+					mergeResult.getUpdate().get("$set", Document.class).putAll(updateOpDocFiltered);
+				} else {
+					mergeResult.getUpdate().put("$set", updateOpDocFiltered);
 				}
 				break;
 			case DELETE:
@@ -572,30 +574,30 @@ public class MongodbMergeOperate {
 		Map<String, Object> removefields = mergeBundle.getRemovefields();
 		MergeBundle.EventOperation operation = mergeBundle.getOperation();
 		List<String> arrayKeys = currentProperty.getArrayKeys();
+		Map<String, Object> filterMap = buildFilterMap(operation, after, before);
 		if (array) {
 			List<Document> arrayFilter;
 			if (operation == MergeBundle.EventOperation.UPDATE) {
 				arrayFilter = arrayFilter(
-						MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+						filterMap,
 						currentProperty.getJoinKeys(),
 						arrayKeys,
 						currentProperty.getArrayPath()
 				);
 			} else {
 				arrayFilter = arrayFilter(
-						MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+						filterMap,
 						currentProperty.getJoinKeys(),
 						currentProperty.getArrayPath());
 			}
 			mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
 		} else {
-			Map<String, Object> filterMap = buildFilterMap(operation, after, before);
 			Document filter = filter(filterMap, currentProperty.getJoinKeys());
 			mergeResult.getFilter().putAll(filter);
 
 			if (operation == MergeBundle.EventOperation.UPDATE) {
 				List<Document> arrayFilter = arrayFilterForArrayMerge(
-						MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(),
+						filterMap,
 						currentProperty.getArrayKeys(),
 						currentProperty.getTargetPath(),
 						currentProperty.getArrayPath()
@@ -841,5 +843,30 @@ public class MongodbMergeOperate {
 			}
 			mergeResult.getFilter().put(entry.getKey(), entry.getValue());
 		}
+	}
+
+	protected static Document filterSetDocByUnsetDoc(Document setDoc, Document unsetDoc) {
+		if (MapUtils.isEmpty(setDoc) || MapUtils.isEmpty(unsetDoc)) {
+			return setDoc;
+		}
+		for (String key : unsetDoc.keySet()) {
+			setDoc.remove(key);
+			String[] split = key.split("\\.");
+			if (split.length > 1) {
+				String parentKey = null;
+				for (String s : split) {
+					if (StringUtils.isBlank(parentKey)) {
+						parentKey = s;
+					} else {
+						parentKey = parentKey + "." + s;
+					}
+					Object obj = setDoc.get(parentKey);
+					if (obj instanceof Map && ((Map<?, ?>) obj).isEmpty()) {
+						setDoc.remove(parentKey);
+					}
+				}
+			}
+		}
+		return setDoc;
 	}
 }

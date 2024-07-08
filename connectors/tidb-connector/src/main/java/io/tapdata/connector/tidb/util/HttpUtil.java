@@ -15,13 +15,18 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
 public class HttpUtil implements AutoCloseable {
     public static final int ERROR_START_TS_BEFORE_GC = 100012;
@@ -39,14 +44,8 @@ public class HttpUtil implements AutoCloseable {
     }
 
     public Boolean deleteChangeFeed(String changefeedId, String cdcUrl) throws IOException {
-        String url = "http://" + cdcUrl + "/api/v2/changefeeds/" + changefeedId;
-        HttpDelete httpDelete = new HttpDelete(url);
-        RequestConfig requestConfig = RequestConfig.custom()
-                .setConnectTimeout(10000)
-                .setConnectionRequestTimeout(10000)
-                .setSocketTimeout(10000)
-                .setRedirectsEnabled(true).build();
-        httpDelete.setConfig(requestConfig);
+        String url = String.format("http://%s/api/v2/changefeeds/%s",cdcUrl, changefeedId);
+        HttpDelete httpDelete = (HttpDelete) config(new HttpDelete(url));
         try (
                 CloseableHttpResponse response = httpClient.execute(httpDelete)
         ) {
@@ -60,9 +59,27 @@ public class HttpUtil implements AutoCloseable {
         return false;
     }
 
+    public boolean changeFeedNotExists(String changeFeedId, String cdcUrl) {
+        String url = String.format("http://%s/api/v2/changefeeds/%s",cdcUrl, changeFeedId);
+        HttpGet httpDelete = (HttpGet) config(new HttpGet(url));
+        try (
+                CloseableHttpResponse response = httpClient.execute(httpDelete)
+        ) {
+            String msg = EntityUtils.toString(response.getEntity());
+            if (response.getStatusLine().getStatusCode() == 400) {
+                return "CDC:ErrChangeFeedNotExists".equalsIgnoreCase(String.valueOf(TapSimplify.fromJson(msg, Map.class).get("error_code")));
+            } else {
+                return false;
+            }
+        } catch (Exception e) {
+            tapLogger.debug("Get change feed failed: {}, will retry again", e.getMessage());
+            return false;
+        }
+    }
+
     public Boolean createChangeFeed(ChangeFeed changefeed, String cdcUrl) throws IOException {
-        String url = "http://" + cdcUrl + "/api/v2/changefeeds";
-        HttpPost httpPost = new HttpPost(url);
+        String url = String.format("http://%s/api/v2/changefeeds", cdcUrl);
+        HttpPost httpPost = (HttpPost) config(new HttpPost(url));
         SerializeConfig config = new SerializeConfig();
         config.propertyNamingStrategy = PropertyNamingStrategy.SnakeCase;
         httpPost.setEntity(new StringEntity(JSON.toJSONString(changefeed, config), "UTF-8"));
@@ -72,6 +89,7 @@ public class HttpUtil implements AutoCloseable {
         ) {
             HttpEntity responseEntity = response.getEntity();
             if (responseEntity != null && response.getStatusLine().getStatusCode() == 200) {
+                tapLogger.debug("Create change feed succeed, request body: {}", EntityUtils.toString(responseEntity));
                 tapLogger.info("Create change feed succeed, change feed id: {}", changefeed.getChangefeedId());
                 return true;
             } else {
@@ -86,9 +104,28 @@ public class HttpUtil implements AutoCloseable {
     }
 
 
-    public int queryChangeFeedsList(String cdcUrl) throws IOException {
-        String url = "http://" + cdcUrl + "/api/v2/changefeeds";
-        HttpGet httpGet = new HttpGet(url);
+    public int queryChangeFeedsList(String cdcUrl) {
+        return queryChangeFeeds(cdcUrl).size();
+    }
+
+    public boolean queryChangeFeedsList(String cdcUrl, String changeFeedId) {
+        List<Map<String, Object>> items = queryChangeFeeds(cdcUrl);
+        if (null == items || items.isEmpty()) return false;
+        Optional<Map<String, Object>> first = items.stream().filter(Objects::nonNull)
+                .filter(c -> Objects.nonNull(c.get("id")))
+                .filter(c -> changeFeedId.equals(c.get("id")))
+                .findFirst();
+        if (first.isPresent()) {
+            Map<String, Object> info = first.get();
+            Object state = info.get("state");
+            return Objects.nonNull(state) && "normal".equals(state);
+        }
+        return false;
+    }
+
+    public List<Map<String, Object>> queryChangeFeeds(String cdcUrl) {
+        String url = String.format("http://%s/api/v2/changefeeds", cdcUrl);
+        HttpGet httpGet = (HttpGet) config(new HttpGet(url));
         try (
                 CloseableHttpResponse response = httpClient.execute(httpGet)
         ) {
@@ -96,24 +133,39 @@ public class HttpUtil implements AutoCloseable {
             if (responseEntity != null && response.getStatusLine().getStatusCode() == 200) {
                 String toString = EntityUtils.toString(responseEntity);
                 JSONObject jsonObject = JSON.parseObject(toString);
-                int taskNum = (int) jsonObject.get("total");
-                tapLogger.debug("Query change feeds list succeed, task count: {}", taskNum);
-                return taskNum;
+                List<Map<String, Object>> items = (List<Map<String, Object>>) jsonObject.get("items");
+                if (null == items || items.isEmpty()) return new ArrayList<>();
+                return items;
             } else {
-                throw new IOException("Query change feeds list failed, message: " + (null == responseEntity ? "" : EntityUtils.toString(responseEntity)));
+                tapLogger.warn("Query change feeds list failed, message: {}", (null == responseEntity ? "" : EntityUtils.toString(responseEntity)));
             }
+        } catch (Exception e) {
+            tapLogger.warn("Query change feeds list with an exception, message: {}", e.getMessage());
         }
+        return new ArrayList<>();
     }
 
     public boolean checkAlive(String serverUrl) {
-        String url = "http://" + serverUrl + "/api/v2/health";
-        HttpGet httpGet = new HttpGet(url);
+        String url = String.format("http://%s/api/v2/health", serverUrl);
+        HttpGet httpGet = (HttpGet) config(new HttpGet(url));
         try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
             HttpEntity responseEntity = response.getEntity();
             return responseEntity != null && response.getStatusLine().getStatusCode() == 200;
         } catch (Exception e) {
             return false;
         }
+    }
+
+    protected HttpRequestBase config(HttpRequestBase requestBase) {
+        RequestConfig.Builder custom = RequestConfig.custom();
+        custom.setConnectTimeout(10000);
+        custom.setConnectTimeout(10000);
+        custom.setConnectionRequestTimeout(10000);
+        custom.setSocketTimeout(10000);
+        custom.setRedirectsEnabled(true);
+        RequestConfig build = custom.build();
+        requestBase.setConfig(build);
+        return requestBase;
     }
 
     public void close() {

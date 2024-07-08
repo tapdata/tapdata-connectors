@@ -182,6 +182,7 @@ public class TidbConnector extends CommonDbConnector {
     protected void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
         String feedId = genericFeedId(nodeContext.getStateMap());
         String cdcServer = String.valueOf(Optional.ofNullable(nodeContext.getStateMap().get(ProcessHandler.CDC_SERVER)).orElse("127.0.0.1:8300"));
+        nodeContext.getLog().info("Source timezone: {}", timezone.toZoneId().toString());
         ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
                 .withZone(timezone)
                 .withCdcServer(cdcServer)
@@ -259,25 +260,18 @@ public class TidbConnector extends CommonDbConnector {
 
     protected void checkTiServerAndStop(HttpUtil httpUtil, String cdcServer, TapConnectorContext connectorContext) throws IOException {
         Log log = connectorContext.getLog();
-        if (!httpUtil.checkAlive(cdcServer)) {
-            return;
-        }
         log.debug("Cdc server is alive, will check change feed list");
         synchronized (TiCDCShellManager.PROCESS_LOCK) {
             if (httpUtil.queryChangeFeedsList(cdcServer) <= 0) {
                 log.debug("There is not any change feed with cdc server: {}, will stop cdc server", cdcServer);
-                String killCmd = "kill -9 ${pid}";
                 TiCDCShellManager.ShellConfig config = new TiCDCShellManager.ShellConfig();
                 config.withPdIpPorts(connectorContext.getConnectionConfig().getString("pdServer"));
                 String pdServer = config.getPdIpPorts();
-                List<String> processes = ProcessSearch.getProcesses(log, TiCDCShellManager.getCdcPsGrepFilter(pdServer, cdcServer));
-                if (!processes.isEmpty()) {
-                    StringJoiner joiner = new StringJoiner(" ");
-                    processes.forEach(joiner::add);
-                    ProcessLauncher.execCmdWaitResult(
-                            TiCDCShellManager.setProperties(killCmd, "pid", joiner.toString()),
-                            "stop cdc server failed, message: {}",
-                            log);
+                String processes = ProcessSearch.getProcessesPortsAsLine(" ", log, TiCDCShellManager.getCdcPsGrepFilter(pdServer, cdcServer));
+                if (null != processes) {
+                    String killCmd = TiCDCShellManager.setProperties("kill -9 ${pid}", "pid", processes);
+                    log.debug("After release cdc resource, kill cdc server, kill cmd: {}", killCmd);
+                    ProcessLauncher.execCmdWaitResult(killCmd, "stop cdc server failed, message: {}", log);
                 }
                 ErrorKit.ignoreAnyError(() -> ZipUtils.deleteFile(FileUtil.paths(Activity.BASE_CDC_CACHE_DATA_DIR, ProcessHandler.pdServerPath(pdServer)), log));
                 ErrorKit.ignoreAnyError(() -> ZipUtils.deleteFile(FileUtil.paths(Activity.BASE_CDC_LOG_DIR, ProcessHandler.pdServerPath(pdServer) + ".log"), log));

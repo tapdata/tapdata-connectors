@@ -13,6 +13,8 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -50,8 +52,29 @@ public class TiCDCShellManager implements Activity {
         //do nothing
     }
 
+    protected void checkDir(String path) {
+        File logDir = new File(path);
+        Path toPath = logDir.toPath();
+        try {
+            if (!java.nio.file.Files.exists(toPath)) {
+                java.nio.file.Files.createDirectories(toPath);
+                log.debug("TiCDC file dir not exists, make dir succeed: {}", logDir.getAbsolutePath());
+                return;
+            }
+            if (!java.nio.file.Files.isDirectory(toPath)) {
+                java.nio.file.Files.delete(toPath);
+                java.nio.file.Files.createDirectories(toPath);
+                log.debug("TiCDC file dir is file, after delete this file make dir succeed: {}", logDir.getAbsolutePath());
+            }
+        } catch (IOException e) {
+            log.debug("TiCDC file dir is file, after delete this file make dir failed: {}", logDir.getAbsolutePath());
+        }
+    }
+
     @Override
     public void doActivity() {
+        checkDir(BASE_CDC_LOG_DIR);
+        checkDir(new File(shellConfig.localStrongPath).getAbsolutePath());
         synchronized (PROCESS_LOCK) {
             String runningCdcInfo = getAllRunningCdcInfo();
             try {
@@ -98,6 +121,7 @@ public class TiCDCShellManager implements Activity {
     public void checkAlive() {
         try (HttpUtil util = HttpUtil.of(log)) {
             if (!util.checkAlive(shellConfig.cdcServerIpPort)) {
+                log.debug("TiDB server not active, will restart TiCDC server, {}", shellConfig.cdcServerIpPort);
                 doActivity();
             }
         } catch (Exception e) {
@@ -118,9 +142,15 @@ public class TiCDCShellManager implements Activity {
         cmd = setProperties(cmd, "pd_ip_ports", shellConfig.pdIpPorts);
         cmd = setProperties(cmd, "cdc_server_ip_port", shellConfig.cdcServerIpPort);
         cmd = setProperties(cmd, "cluster_id", shellConfig.clusterId);
-        cmd = setProperties(cmd, "local_strong_path", new File(shellConfig.localStrongPath).getAbsolutePath());
+        File dataDir = new File(shellConfig.localStrongPath);
+        String dataDirPath = dataDir.getAbsolutePath();
+        cmd = setProperties(cmd, "local_strong_path", dataDirPath);
         cmd = setProperties(cmd, "log_level", shellConfig.logLevel.name);
-        cmd = setProperties(cmd, "log_dir", new File(shellConfig.logDir).getAbsolutePath());
+        File logDir = new File(shellConfig.logDir);
+        String absolutePath = logDir.getAbsolutePath();
+        String logFileName = System.currentTimeMillis() + ".log";
+        String logPath = FileUtil.paths(absolutePath, logFileName);
+        cmd = setProperties(cmd, "log_dir", logPath);
         log.info(cmd);
         return cmd;
     }
@@ -211,7 +241,25 @@ public class TiCDCShellManager implements Activity {
             if (!cdcTool.exists() || !cdcTool.isFile()) {
                 log.error("TiCDC must not start normally, TiCDC server depends on {}, make sure this file in you file system", cdcTool.getAbsolutePath());
             }
+        } else {
+            log.info("File {} exists, will use this to execute and start TiCDC server",
+                    file.getAbsolutePath());
         }
+        permission(file);
+    }
+
+    protected void permission(File file) {
+        try {
+            if (!file.canRead()) file.setReadable(true);
+            if (!file.canWrite()) file.setWritable(true);
+            if (!file.canExecute()) file.setExecutable(true);
+        } catch (Exception e) {
+            log.warn("Auto set permission failed,  message: {}", e.getMessage());
+        }
+
+        if (!file.canRead()) log.warn("File {} requires read permission, but lacks this permission", file.getAbsolutePath());
+        if (!file.canWrite()) log.warn("File {} requires write permission, but lacks this permission", file.getAbsolutePath());
+        if (!file.canExecute()) log.warn("File {} requires execute permission, but lacks this permission", file.getAbsolutePath());
     }
 
     protected String cdcFileName() {

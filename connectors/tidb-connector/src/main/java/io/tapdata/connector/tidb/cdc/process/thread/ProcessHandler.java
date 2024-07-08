@@ -15,6 +15,7 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.commons.collections4.CollectionUtils;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,7 +72,7 @@ public final class ProcessHandler implements Activity {
                 .withGcTtl(processInfo.gcTtl)
                 .withLocalStrongPath(FileUtil.paths(BASE_CDC_CACHE_DATA_DIR, pdServerPath))
                 .withPdIpPorts(processInfo.tidbConfig.getPdServer())
-                .withLogDir(FileUtil.paths(BASE_CDC_LOG_DIR, pdServerPath + ".log"))
+                .withLogDir(FileUtil.paths(BASE_CDC_LOG_DIR, pdServerPath, processInfo.feedId))
                 .withLogLevel(TiCDCShellManager.LogLevel.INFO)
                 .withClusterId(UUID.randomUUID().toString().replace("-", ""))
                 .withTapConnectionContext(processInfo.nodeContext)
@@ -180,13 +181,42 @@ public final class ProcessHandler implements Activity {
             if (null != minOffset) {
                 changefeed.setStartTs(minOffset);
             }
-            if (httpUtil.createChangeFeed(changefeed, processInfo.cdcServer)) {
-                log.info("TiCDC start successfully from: {}", minOffset);
-            } else {
-                throw new CoreException("TiCDC server start change feed failed, server: {}, change feed id: {}", processInfo.cdcServer, changefeed);
-            }
+            checkAliveAndWait(httpUtil, changefeed, minOffset);
         } catch (Exception e) {
             throw new CoreException("Failed start cdc feed process, feed id: {}, message: {}", processInfo.feedId, e.getMessage(), e);
+        }
+    }
+
+    protected void createChangeFeed(HttpUtil httpUtil, ChangeFeed changefeed, Long minOffset) throws IOException {
+        if (httpUtil.createChangeFeed(changefeed, processInfo.cdcServer)) {
+            log.info("TiCDC start successfully from: {}", minOffset);
+        } else {
+            throw new CoreException("TiCDC server start change feed failed, server: {}, change feed id: {}", processInfo.cdcServer, changefeed);
+        }
+    }
+
+    protected void checkAliveAndWait(HttpUtil httpUtil, ChangeFeed changefeed, Long minOffset) throws IOException {
+        int waitTimes = 5;
+        do {
+            if (waitTimes < 0) {
+                log.warn("After five second, Ti change feed not alive, server: {}, feed id: {}",
+                        shellManager.shellConfig.cdcServerIpPort,
+                        processInfo.feedId
+                );
+                break;
+            }
+            createChangeFeed(httpUtil, changefeed, minOffset);
+            sleep(10000L);
+            waitTimes--;
+        } while (!httpUtil.queryChangeFeedsList(shellManager.shellConfig.cdcServerIpPort, processInfo.feedId));
+    }
+
+    protected void sleep(long time) {
+        try {
+            //sleep 1s to wait start process complete
+            Thread.sleep(time);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -195,10 +225,22 @@ public final class ProcessHandler implements Activity {
             if (!httpUtil.checkAlive(processInfo.cdcServer)) {
                 return;
             }
-            if (Boolean.TRUE.equals(httpUtil.deleteChangeFeed(processInfo.feedId, processInfo.cdcServer))) {
-                log.debug("Stop cdc succeed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
-            } else {
-                throw new CoreException("Stop cdc failed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
+            int waitTimes = 100;
+            while (!httpUtil.changeFeedNotExists(processInfo.feedId, processInfo.cdcServer)) {
+                if (waitTimes < 0) {
+                    log.debug("After five second, Ti change feed not remove, server: {}, feed id: {}",
+                            shellManager.shellConfig.cdcServerIpPort,
+                            processInfo.feedId
+                    );
+                    break;
+                }
+                if (Boolean.TRUE.equals(httpUtil.deleteChangeFeed(processInfo.feedId, processInfo.cdcServer))) {
+                    log.debug("Stop cdc succeed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
+                } else {
+                    throw new CoreException("Stop cdc failed, feed id: {}, cdc server: {}", processInfo.feedId, processInfo.cdcServer);
+                }
+                sleep(1000L);
+                waitTimes--;
             }
         } catch (Exception e) {
             log.warn("Failed to stop cdc feed process, feed id: {}, message: {}", processInfo.feedId, e.getMessage());
