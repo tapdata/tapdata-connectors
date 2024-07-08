@@ -4,6 +4,8 @@ import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.postgres.PostgresConnector;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.kit.DbKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -16,7 +18,7 @@ import org.postgresql.util.PGobject;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.UUID;
+import java.util.*;
 
 @TapConnectorClass("spec_opengauss.json")
 public class OpenGaussConnector extends PostgresConnector {
