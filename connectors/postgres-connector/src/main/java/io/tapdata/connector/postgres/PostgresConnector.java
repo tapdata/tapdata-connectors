@@ -10,6 +10,7 @@ import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
@@ -18,7 +19,6 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.type.TapNumber;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
@@ -470,4 +470,22 @@ public class PostgresConnector extends CommonDbConnector {
         });
     }
 
+    @Override
+    protected String getHashSplitStringSql(TapTable tapTable) {
+        List<String> pks = Optional.ofNullable(tapTable.getNameFieldMap()
+        ).map(LinkedHashMap::values
+        ).map(fields -> {
+            List<String> fieldNames = new ArrayList<>();
+            for (TapField f : fields) {
+                if (Boolean.TRUE.equals(f.getPrimaryKey())) {
+                    fieldNames.add(f.getName());
+                }
+            }
+            if (fieldNames.isEmpty()) return null;
+            return fieldNames;
+        }).orElse(null);
+        if (null == pks) throw new CoreException("No pk field found for table: " + tapTable.getName());
+
+        return "abs(('x' || MD5(CONCAT_WS(',', \"" + String.join("`, `", pks) + "\")))::bit(64)::bigint)";
+    }
 }
