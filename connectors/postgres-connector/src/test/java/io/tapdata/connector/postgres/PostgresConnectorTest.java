@@ -2,8 +2,6 @@ package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
-import io.tapdata.connector.postgres.PostgresConnector;
-import io.tapdata.connector.postgres.PostgresSqlMaker;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.schema.TapField;
@@ -27,7 +25,6 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
-import static org.mockito.Mockito.when;
 
 public class PostgresConnectorTest {
 
@@ -158,51 +155,29 @@ public class PostgresConnectorTest {
         @BeforeEach
         void setUp() {
             connector = mock(PostgresConnector.class);
-            tapTable = mock(TapTable.class);
+            tapTable = new TapTable();
+            tapTable.setNameFieldMap(new LinkedHashMap<>());
             doCallRealMethod().when(connector).getHashSplitStringSql(tapTable);
-        }
-
-        private LinkedHashMap<String, TapField> generateFieldMap(TapField... fields) {
-            if (null == fields) {
-                return null;
-            }
-            LinkedHashMap<String, TapField> fieldMap = new LinkedHashMap<>();
-            for (TapField field : fields) {
-                fieldMap.put(field.getName(), field);
-            }
-            return fieldMap;
         }
 
         @Test
         void testEmptyField() {
-            // null getNameFieldMap
-            doCallRealMethod().when(connector).getHashSplitStringSql(tapTable);
-            assertThrows(CoreException.class, () -> connector.getHashSplitStringSql(tapTable));
-
-            // empty getNameFieldMap
-            when(tapTable.getNameFieldMap()).thenReturn(new LinkedHashMap<>());
             doCallRealMethod().when(connector).getHashSplitStringSql(tapTable);
             assertThrows(CoreException.class, () -> connector.getHashSplitStringSql(tapTable));
         }
 
         @Test
         void testNotPrimaryKeys() {
-            LinkedHashMap<String, TapField> fieldMap = generateFieldMap(
-                new TapField("ID", "INT"),
-                new TapField("TITLE", "VARCHAR(64)")
-            );
-            when(tapTable.getNameFieldMap()).thenReturn(fieldMap);
+            tapTable.add(new TapField("ID", "INT"));
+            tapTable.add(new TapField("TITLE", "VARCHAR(64)"));
 
             assertThrows(CoreException.class, () -> connector.getHashSplitStringSql(tapTable));
         }
 
         @Test
         void testTrue() {
-            LinkedHashMap<String, TapField> fieldMap = generateFieldMap(
-                new TapField("ID", "INT").primaryKeyPos(1),
-                new TapField("TITLE", "VARCHAR(64)")
-            );
-            when(tapTable.getNameFieldMap()).thenReturn(fieldMap);
+            tapTable.add(new TapField("ID", "INT").primaryKeyPos(1));
+            tapTable.add(new TapField("TITLE", "VARCHAR(64)"));
 
             assertNotNull(connector.getHashSplitStringSql(tapTable));
         }

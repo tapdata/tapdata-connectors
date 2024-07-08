@@ -326,52 +326,29 @@ public class MysqlConnectorTest {
         @BeforeEach
         void setUp() {
             connector = mock(MysqlConnector.class);
-            tapTable = mock(TapTable.class);
+            tapTable = new TapTable();
+            tapTable.setNameFieldMap(new LinkedHashMap<>());
             doCallRealMethod().when(connector).getHashSplitStringSql(tapTable);
-        }
-
-        private LinkedHashMap<String, TapField> generateFieldMap(TapField... fields) {
-            if (null == fields) {
-                return null;
-            }
-            LinkedHashMap<String, TapField> fieldMap = new LinkedHashMap<>();
-            for (TapField field : fields) {
-                fieldMap.put(field.getName(), field);
-            }
-            return fieldMap;
         }
 
         @Test
         void testEmptyField() {
-            // null getNameFieldMap
-            doCallRealMethod().when(connector).getHashSplitStringSql(tapTable);
-            assertThrows(CoreException.class, () -> connector.getHashSplitStringSql(tapTable));
-
-            // empty getNameFieldMap
-            when(tapTable.getNameFieldMap()).thenReturn(new LinkedHashMap<>());
             doCallRealMethod().when(connector).getHashSplitStringSql(tapTable);
             assertThrows(CoreException.class, () -> connector.getHashSplitStringSql(tapTable));
         }
 
         @Test
         void testNotPrimaryKeys() {
-            LinkedHashMap<String, TapField> fieldMap = generateFieldMap(
-                new TapField("ID", "INT"),
-                new TapField("TITLE", "VARCHAR(64)")
-            );
-            when(tapTable.getNameFieldMap()).thenReturn(fieldMap);
+            tapTable.add(new TapField("ID", "INT"));
+            tapTable.add(new TapField("TITLE", "VARCHAR(64)"));
 
             assertThrows(CoreException.class, () -> connector.getHashSplitStringSql(tapTable));
         }
 
         @Test
         void testTrue() {
-            LinkedHashMap<String, TapField> fieldMap = generateFieldMap(
-                new TapField("ID", "INT").primaryKeyPos(1),
-                new TapField("TITLE", "VARCHAR(64)")
-            );
-            when(tapTable.getNameFieldMap()).thenReturn(fieldMap);
-
+            tapTable.add(new TapField("ID", "INT").primaryKeyPos(1));
+            tapTable.add(new TapField("TITLE", "VARCHAR(64)"));
             assertNotNull(connector.getHashSplitStringSql(tapTable));
         }
     }

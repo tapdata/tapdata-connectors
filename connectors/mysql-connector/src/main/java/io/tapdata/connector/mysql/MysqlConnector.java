@@ -522,19 +522,8 @@ public class MysqlConnector extends CommonDbConnector {
 
     @Override
     protected String getHashSplitStringSql(TapTable tapTable) {
-        List<String> pks = Optional.ofNullable(tapTable.getNameFieldMap()
-            ).map(LinkedHashMap::values
-            ).map(fields -> {
-                List<String> fieldNames = new ArrayList<>();
-                for (TapField f : fields) {
-                    if (Boolean.TRUE.equals(f.getPrimaryKey())) {
-                        fieldNames.add(f.getName());
-                    }
-                }
-                if (fieldNames.isEmpty()) return null;
-                return fieldNames;
-            }).orElse(null);
-        if (null == pks) throw new CoreException("No pk field found for table: " + tapTable.getName());
+        Collection<String> pks = tapTable.primaryKeys();
+        if (pks.isEmpty()) throw new CoreException("No primary keys found for table: " + tapTable.getName());
 
         return "MD5(CONCAT_WS(',', `" + String.join("`, `", pks) + "`))";
     }

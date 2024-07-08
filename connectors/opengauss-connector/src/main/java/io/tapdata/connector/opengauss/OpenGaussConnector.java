@@ -4,7 +4,6 @@ import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.postgres.PostgresConnector;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
-import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.kit.DbKit;
@@ -110,19 +109,8 @@ public class OpenGaussConnector extends PostgresConnector {
 
     @Override
     protected String getHashSplitStringSql(TapTable tapTable) {
-        List<String> pks = Optional.ofNullable(tapTable.getNameFieldMap()
-        ).map(LinkedHashMap::values
-        ).map(fields -> {
-            List<String> fieldNames = new ArrayList<>();
-            for (TapField f : fields) {
-                if (Boolean.TRUE.equals(f.getPrimaryKey())) {
-                    fieldNames.add(f.getName());
-                }
-            }
-            if (fieldNames.isEmpty()) return null;
-            return fieldNames;
-        }).orElse(null);
-        if (null == pks) throw new CoreException("No pk field found for table: " + tapTable.getName());
+        Collection<String> pks = tapTable.primaryKeys();
+        if (pks.isEmpty()) throw new CoreException("No primary keys found for table: " + tapTable.getName());
 
         return "abs(('x' || MD5(CONCAT_WS(',', \"" + String.join("\", \"", pks) + "\")))::bit(64)::bigint)";
     }
