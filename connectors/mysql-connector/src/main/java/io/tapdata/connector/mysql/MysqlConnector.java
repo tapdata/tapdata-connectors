@@ -468,9 +468,11 @@ public class MysqlConnector extends CommonDbConnector {
                 if ("TIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                     value = resultSet.getString(i + 1);
                 } else if ("YEAR".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                    value = resultSet.getInt(i + 1);
+                    Object obj = resultSet.getObject(i + 1);
+                    value = EmptyKit.isNull(obj) ? null : resultSet.getInt(i + 1);
                 } else if ("TIMESTAMP".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                    value = ((Timestamp) resultSet.getObject(i + 1)).toLocalDateTime().atZone(dbZoneId);
+                    Object obj = resultSet.getObject(i + 1);
+                    value = EmptyKit.isNull(obj) ? null : ((Timestamp) obj).toLocalDateTime().atZone(dbZoneId);
                 } else if ("DATE".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                     if (mysqlConfig.getOldVersionTimezone()) {
                         value = resultSet.getString(i + 1);

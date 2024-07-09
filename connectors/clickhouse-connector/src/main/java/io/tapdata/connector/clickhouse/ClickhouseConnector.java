@@ -42,6 +42,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -189,7 +190,7 @@ public class ClickhouseConnector extends CommonDbConnector {
             if (clickhouseConfig.getOldVersionTimezone()) {
                 return tapDateTimeValue.getValue().toTimestamp();
             } else {
-                return tapDateTimeValue.getValue().toInstant().atZone(clickhouseConfig.getZoneId()).toLocalDateTime();
+                return Timestamp.from(tapDateTimeValue.getValue().toInstant().atZone(clickhouseConfig.getZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC).toInstant());
             }
         });
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
