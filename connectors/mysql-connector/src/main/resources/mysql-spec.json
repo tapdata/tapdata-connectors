@@ -32,6 +32,9 @@
       },
       {
         "id": "illegal_date_acceptable"
+      },
+      {
+        "id": "batch_read_hash_split"
       }
     ],
     "supportDDL": {
@@ -322,6 +325,55 @@
           }
         }
       }
+    },
+    "node": {
+      "type": "object",
+      "properties": {
+        "hashSplit": {
+          "type": "boolean",
+          "title": "${hashSplit}",
+          "default": false,
+          "x-index": 10,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${hashSplitTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "maxSplit": {
+          "required": true,
+          "type": "string",
+          "title": "${maxSplit}",
+          "default": 20,
+          "x-index": 12,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 2,
+            "max": 10000
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".hashSplit"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        }
+      }
     }
   },
   "messages": {
@@ -349,7 +401,10 @@
       "master-slaveAddressTip" : "The address port group that the master-slave architecture needs to fill in, the address port of the master database needs to be filled in the first line, for example: 192.168.1.200:3306, 192.168.1.201:3307",
       "Address" : "Please enter the server address",
       "serverPort": "Server port",
-      "prompt": "Add"
+      "prompt": "Add",
+      "hashSplit": "Hash split",
+      "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the hash value, suitable for large table full-stage sharded synchronization",
+      "maxSplit": "Maximum number of splits"
     },
     "zh_CN": {
       "host": "地址",
@@ -374,7 +429,10 @@
       "master-slaveAddressTip" : "主从架构需要填写的地址端口组，主库的地址端口需填写在第一行，例如：192.168.1.200:3306, 192.168.1.201:3306",
       "Address" : "服务器地址",
       "serverPort": "服务器端口",
-      "prompt": "添加"
+      "prompt": "添加",
+      "hashSplit": "哈希分片",
+      "hashSplitTooltip": "开关打开时，可以根据哈希值进行分片，适用于大表全量阶段分片同步",
+      "maxSplit": "最大分片数"
     },
     "zh_TW": {
       "host": "地址",
@@ -399,7 +457,10 @@
       "master-slaveAddressTip" : "主從架構需要填寫的地址端口組，主庫的地址端口需填寫在第壹行，例如：192.168.1.200:3306, 192.168.1.201:3306",
       "Address" : "服務器地址",
       "serverPort": "端口",
-      "prompt": "添加"
+      "prompt": "添加",
+      "hashSplit": "哈希分片",
+      "hashSplitTooltip": "開關打開時，可以根據哈希值進行分片，適用於大表全量階段分片同步",
+      "maxSplit": "最大分片數"
     }
   },
   "dataTypes": {
