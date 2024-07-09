@@ -53,6 +53,7 @@ public class MongodbConfig extends CommonDbConfig {
 
 
 	private boolean timeSeriesCollection;
+	private String writeConcern = "w1";
 
 	public boolean isSyncIndex() {
 		return syncIndex;
@@ -275,5 +276,13 @@ public class MongodbConfig extends CommonDbConfig {
 
 	public void setPreImage(boolean preImage) {
 		this.preImage = preImage;
+	}
+
+	public String getWriteConcern() {
+		return writeConcern;
+	}
+
+	public void setWriteConcern(String writeConcern) {
+		this.writeConcern = writeConcern;
 	}
 }
