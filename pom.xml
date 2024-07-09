@@ -22,10 +22,6 @@
             connectors-common/debezium-bucket/**,
             connectors-common/mysql-binlog-connector-java/**
         </snoar.coverage.exclusions>
-        <snoar.exclusions>
-            connectors-common/debezium-bucket/**,
-            connectors-common/mysql-binlog-connector-java/**
-        </snoar.exclusions>
         <sonar.test.exclusions>
             **/src/test/**,
             tapdata-cli/**,
@@ -48,6 +44,19 @@
                 <configuration>
                     <source>${java.version}</source>
                     <target>${java.version}</target>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.sonarsource.scanner.maven</groupId>
+                <artifactId>sonar-maven-plugin</artifactId>
+                <version>3.11.0.3922</version>
+                <configuration>
+                    <properties>
+                        <snoar.exclusions>
+                            connectors-common/debezium-bucket/**,
+                            connectors-common/mysql-binlog-connector-java/**
+                        </snoar.exclusions>
+                    </properties>
                 </configuration>
             </plugin>
         </plugins>
