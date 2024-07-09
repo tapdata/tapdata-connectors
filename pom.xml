@@ -18,16 +18,44 @@
     </modules>
 
     <properties>
-        <snoar.coverage.exclusions>
+        <sonar.coverage.exclusions>
             connectors-common/debezium-bucket/**,
-            connectors-common/mysql-binlog-connector-java/**
-        </snoar.coverage.exclusions>
+            connectors-common/mysql-binlog-connector-java/**,
+            connectors-tdd/**,
+            tapdata-cli/**,
+            **/**Entity*,
+            **/enums/**
+        </sonar.coverage.exclusions>
+        <sonar.exclusions>
+            connectors-common/debezium-bucket/**,
+            connectors-common/mysql-binlog-connector-java/**,
+            connectors-tdd/**,
+            **/**Entity*,
+            **/enums/**
+        </sonar.exclusions>
         <sonar.test.exclusions>
             **/src/test/**,
-            tapdata-cli/**,
-            connectors-common/debezium-bucket/**,
-            connectors-common/mysql-binlog-connector-java/**
+            tapdata-cli/**
         </sonar.test.exclusions>
+
+        <sonar.inclusions>
+            connectors-common/*,
+            connectors-javascript/*,
+            connectors-tdd/*,
+            connectors-unpackage/*,
+            file-storages/*,
+            connectors/mysql-connector/**,
+            connectors/kafka-connector/**,
+            connectors/mongodb-connector/**,
+            connectors/postgres-connector/**,
+            connectors/clickhouse-connector/**,
+            connectors/doris-connector/**,
+            connectors/tidb-connector/**,
+            connectors/opengauss-connector/**,
+            connectors/oceanbase-mysql-connector/**,
+            connectors/elasticsearch-connector/**,
+            connectors/csv-connector/**
+        </sonar.inclusions>
     </properties>
 
     <build>
@@ -52,10 +80,12 @@
                 <version>3.11.0.3922</version>
                 <configuration>
                     <properties>
-                        <snoar.exclusions>
-                            connectors-common/debezium-bucket/**,
-                            connectors-common/mysql-binlog-connector-java/**
-                        </snoar.exclusions>
+                        <sonar.issue.ignore.allfile>
+                            connectors-common/debezium-bucket/.*
+                            |connectors-common/debezium-bucket/.*/.*
+                            ｜connectors-common/mysql-binlog-connector-java/.*
+                            |connectors-common/mysql-binlog-connector-java/.*/.*
+                        </sonar.issue.ignore.allfile>
                     </properties>
                 </configuration>
             </plugin>
