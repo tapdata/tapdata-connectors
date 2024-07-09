@@ -1,14 +1,20 @@
 package io.tapdata.connector.mysql;
 
 import io.debezium.type.TapIllegalDate;
+import io.tapdata.common.CommonDbConfig;
+import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
+import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.mysql.MysqlConnector;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.*;
@@ -16,15 +22,16 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
+import io.tapdata.utils.UnitTestUtils;
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
-import org.mockito.internal.verification.Times;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -262,6 +269,125 @@ public class MysqlConnectorTest {
             Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
             assertInstanceOf(TapIllegalDate.class,actual.get("_timestamp"));
             assertEquals("_timestamp",((TapInsertRecordEvent)recordEvent).getAfterIllegalDateFieldName().get(0));
+        }
+    }
+
+    @Nested
+    class BatchReadSqlTest {
+        TapTable tapTable;
+        MysqlConfig mysqlConfig;
+        MysqlConnector connector;
+
+        @BeforeEach
+        void setUp() {
+            tapTable = mock(TapTable.class);
+            mysqlConfig = mock(MysqlConfig.class);
+            connector = mock(MysqlConnector.class);
+            doCallRealMethod().when(connector).batchReadSql(tapTable);
+            UnitTestUtils.injectField(MysqlConnector.class, connector, "mysqlConfig", mysqlConfig);
+        }
+
+        private LinkedHashMap<String, TapField> generateFieldMap(TapField... fields) {
+            if (null == fields) {
+                return null;
+            }
+            LinkedHashMap<String, TapField> fieldMap = new LinkedHashMap<>();
+            for (TapField field : fields) {
+                fieldMap.put(field.getName(), field);
+            }
+            return fieldMap;
+        }
+
+        @Test
+        void testFieldSizeLargeThen50() {
+            int fieldSize = 51;
+            TapField[] fields = new TapField[fieldSize];
+            for (int i = 0; i < fieldSize; i++) {
+                fields[i] = new TapField("f" + i, "INT");
+            }
+            when(tapTable.getNameFieldMap()).thenReturn(generateFieldMap(fields));
+            assertTrue(connector.batchReadSql(tapTable).toLowerCase().startsWith("select *"));
+        }
+
+        @Test
+        void testFieldSizeLessThen50() {
+            int fieldSize = 1;
+            TapField[] fields = new TapField[fieldSize];
+            for (int i = 0; i < fieldSize; i++) {
+                fields[i] = new TapField("f" + i, "INT");
+            }
+            when(tapTable.getNameFieldMap()).thenReturn(generateFieldMap(fields));
+            assertFalse(connector.batchReadSql(tapTable).toLowerCase().startsWith("select *"));
+        }
+    }
+
+    @Nested
+    class GetHashSplitStringSqlTest {
+        TapTable tapTable;
+        MysqlConnector connector;
+
+        @BeforeEach
+        void setUp() {
+            connector = mock(MysqlConnector.class);
+            tapTable = new TapTable();
+            tapTable.setNameFieldMap(new LinkedHashMap<>());
+            doCallRealMethod().when(connector).getHashSplitStringSql(tapTable);
+        }
+
+        @Test
+        void testEmptyField() {
+            doCallRealMethod().when(connector).getHashSplitStringSql(tapTable);
+            assertThrows(CoreException.class, () -> connector.getHashSplitStringSql(tapTable));
+        }
+
+        @Test
+        void testNotPrimaryKeys() {
+            tapTable.add(new TapField("ID", "INT"));
+            tapTable.add(new TapField("TITLE", "VARCHAR(64)"));
+
+            assertThrows(CoreException.class, () -> connector.getHashSplitStringSql(tapTable));
+        }
+
+        @Test
+        void testTrue() {
+            tapTable.add(new TapField("ID", "INT").primaryKeyPos(1));
+            tapTable.add(new TapField("TITLE", "VARCHAR(64)"));
+            assertNotNull(connector.getHashSplitStringSql(tapTable));
+        }
+    }
+
+    @Nested
+    class BatchReadWithHashSplitTest {
+        CommonDbConfig commonDbConfig;
+        JdbcContext jdbcContext;
+        Log tapLogger;
+        TapConnectorContext tapConnectorContext;
+        TapTable tapTable;
+        Object offsetState;
+        int eventBatchSize;
+        BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer;
+        MysqlConnector connector;
+
+        @BeforeEach
+        void setUp() throws Throwable {
+            commonDbConfig = mock(CommonDbConfig.class);
+            jdbcContext = mock(JdbcContext.class);
+            tapLogger = mock(Log.class);
+            tapTable = mock(TapTable.class);
+            connector = mock(MysqlConnector.class);
+            UnitTestUtils.injectField(CommonDbConnector.class, connector, "jdbcContext", jdbcContext);
+            UnitTestUtils.injectField(CommonDbConnector.class, connector, "commonDbConfig", commonDbConfig);
+            UnitTestUtils.injectField(CommonDbConnector.class, connector, "tapLogger", tapLogger);
+            doCallRealMethod().when(connector).batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
+        }
+
+        @Test
+        void testApplySplit() {
+            int expectedMaxSplit = 5;
+            when(commonDbConfig.getHashSplit()).thenReturn(true);
+            when(commonDbConfig.getMaxSplit()).thenReturn(expectedMaxSplit);
+            assertDoesNotThrow(()-> connector.batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer));
+            verify(connector, times(expectedMaxSplit)).resultSetConsumer(any(), anyInt(), any());
         }
     }
 
