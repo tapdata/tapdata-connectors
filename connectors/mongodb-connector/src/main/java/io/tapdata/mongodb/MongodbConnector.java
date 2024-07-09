@@ -573,7 +573,7 @@ public class MongodbConnector extends ConnectorBase {
 		}
 		CommonDbConfig mongodbConfig = new MongodbConfig().load(connectionConfig);
 		String database = mongodbConfig.getDatabase();
-		if (null == database || "".equals(database.trim())) {
+		if (null == database || database.trim().isEmpty()) {
 			throw new CoreException("The value of database name in connection config can not be empty");
 		}
 		DataMap nodeConfig = tapConnectorContext.getNodeConfig();
@@ -582,11 +582,10 @@ public class MongodbConnector extends ConnectorBase {
 		if (CollectionUtils.isNotEmpty(pks) && (pks.size() > 1 || !"_id".equals(pks.iterator().next()))) {
 			List<TapIndex> tapIndices = new ArrayList<>();
 			TapIndex tapIndex = new TapIndex();
-			Iterator<String> iterator = pks.iterator();
-			while (iterator.hasNext()) {
-				String pk = iterator.next();
+			for (String pk : pks) {
 				tapIndex.indexField(new TapIndexField().name(pk).fieldAsc(true));
 			}
+			tapIndex.setUnique(true);
 			tapIndices.add(tapIndex);
 			TapCreateIndexEvent tapCreateIndexEvent = new TapCreateIndexEvent().indexList(tapIndices);
 			createIndex(tapConnectorContext, table, tapCreateIndexEvent);
@@ -1270,18 +1269,18 @@ public class MongodbConnector extends ConnectorBase {
 				synchronized (this) {
 					if (mongodbWriter == null) {
 						mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
-						ConnectorCapabilities connectorCapabilities = connectorContext.getConnectorCapabilities();
-						if (null != connectorCapabilities) {
-							mongoConfig.setInsertDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY) ?
-									ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS : connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY));
-							mongoConfig.setUpdateDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY) ?
-									ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS : connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY));
-						} else {
-							mongoConfig.setInsertDmlPolicy(ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS);
-							mongoConfig.setUpdateDmlPolicy(ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS);
-						}
 					}
 				}
+			}
+			ConnectorCapabilities connectorCapabilities = connectorContext.getConnectorCapabilities();
+			if (null != connectorCapabilities) {
+				mongoConfig.setInsertDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY) ?
+						ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS : connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY));
+				mongoConfig.setUpdateDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY) ?
+						ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS : connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY));
+			} else {
+				mongoConfig.setInsertDmlPolicy(ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS);
+				mongoConfig.setUpdateDmlPolicy(ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS);
 			}
 			if ("log_on_nonexists".equals(mongoConfig.getUpdateDmlPolicy())) {
 				List<TapRecordEvent> noUpdateRecordEvents = new ArrayList<>();

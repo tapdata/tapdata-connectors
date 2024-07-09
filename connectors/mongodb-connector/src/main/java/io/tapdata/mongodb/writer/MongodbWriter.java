@@ -290,7 +290,7 @@ public class MongodbWriter {
 		if (recordEvent instanceof TapInsertRecordEvent) {
 			TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
 
-			if (CollectionUtils.isNotEmpty(pks)) {
+			if (CollectionUtils.isNotEmpty(pks) && !ConnectionOptions.DML_INSERT_POLICY_JUST_INSERT.equals(mongodbConfig.getInsertDmlPolicy())) {
 				final Document pkFilter = getPkFilter(pks, insertRecordEvent.getAfter());
 				String operation = "$set";
 				if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(mongodbConfig.getInsertDmlPolicy())) {

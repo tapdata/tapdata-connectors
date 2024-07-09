@@ -3,6 +3,7 @@ package io.tapdata.mongodb;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoCredential;
+import com.mongodb.WriteConcern;
 import com.mongodb.client.*;
 import com.mongodb.connection.ConnectionPoolSettings;
 import io.tapdata.entity.logger.TapLogger;
@@ -404,7 +405,9 @@ public class MongodbUtil {
 					new TapdataBigDecimalCodec(),
 					new TapdataBigIntegerCodec()
 			), defaultCodecRegistry);
-			final MongoClientSettings.Builder builder = MongoClientSettings.builder().codecRegistry(codecRegistry);
+			final MongoClientSettings.Builder builder = MongoClientSettings.builder()
+					.codecRegistry(codecRegistry)
+					.writeConcern(WriteConcern.valueOf(mongodbConfig.getWriteConcern()));
 			String mongodbUri = mongodbConfig.getUri();
 			if (null == mongodbUri || "".equals(mongodbUri)) {
 				throw new RuntimeException("Create MongoDB client failed, error: uri is blank");
