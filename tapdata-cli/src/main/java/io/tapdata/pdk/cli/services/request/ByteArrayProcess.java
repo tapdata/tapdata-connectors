@@ -7,8 +7,9 @@ import picocli.CommandLine;
 
 import java.io.IOException;
 
-public class ByteArrayProcess extends ProgressRequestBody<byte[]>  {
+public class ByteArrayProcess extends ProgressRequestBody<byte[]> {
     String name;
+
     public ByteArrayProcess(String name, byte[] bytes, String contentType, PrintUtil printUtil, ProcessGroupInfo groupInfo) {
         super(bytes, contentType, printUtil, groupInfo);
         this.name = name;
@@ -36,29 +37,36 @@ public class ByteArrayProcess extends ProgressRequestBody<byte[]>  {
                 name = groupInfo.joinFile(name);
                 long totalBytes = groupInfo.getTotalByte();
                 long start = groupInfo.withUploadStart();
-
-                sink.write(file, 0, file.length);
-
-                long uploadedBytes = groupInfo.addUploadedBytes(file.length);
-                double avg = avg(start, groupInfo.getUploadedBytes());
-                String avgWithUtil = withUint(avg, 0);
-                boolean isLower = avg < WARN_AVG;
-                avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (isLower ? "124" : "28") + ") " + (isLower ? "⚠️ " : "") + avgWithUtil + "|@");
-
-                onProgress(tops[0], avgWithUtil, calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
+                int from = 0;
+                int logTimes = 100; //每上传200k更新一次进度
+                int maxReadSize = 2048;
+                int readSize;
+                int step = logTimes;
+                long uploadedBytes = groupInfo.getUploadedBytes();
+                while (from < file.length) {
+                    int bytesCount = file.length - from;
+                    readSize = Math.min(bytesCount, maxReadSize);
+                    sink.write(file, from, readSize);
+                    from += readSize;
+                    uploadedBytes = groupInfo.addUploadedBytes(readSize);
+                    if (step > 0) {
+                        step--;
+                        continue;
+                    }
+                    double avg = avg(start, groupInfo.getUploadedBytes());
+                    String avgWithUtil = withUint(avg, 0);
+                    boolean isLower = avg < WARN_AVG;
+                    avgWithUtil = CommandLine.Help.Ansi.AUTO.string("@|fg(" + (isLower ? "124" : "28") + ") " + (isLower ? "⚠️ " : "") + avgWithUtil + "|@");
+                    onProgress(tops[0], avgWithUtil, calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
+                }
+                double avg = avg(start, uploadedBytes);
+                onProgress(tops[1], withUint(avg, 0), calculate(avg, uploadedBytes, totalBytes), uploadedBytes, totalBytes, printUtil);
             }
         } catch (Exception e) {
             printUtil.print(PrintUtil.TYPE.ERROR, "Upload failed [" + name + "], message: " + e.getMessage());
             throw e;
         } finally {
-            boolean over = false;
-            synchronized (groupInfo.lock) {
-                over = groupInfo.uploadedBytes >= groupInfo.totalByte;
-                if (over && !groupInfo.over) {
-                    groupInfo.over = true;
-                    Uploader.asyncWait(printUtil, groupInfo.lock, " Waiting for remote service to return request result", true);
-                }
-            }
+            checkLock();
         }
     }
 }

@@ -11,7 +11,6 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
 import java.util.Arrays;
@@ -53,23 +52,20 @@ public interface ServiceUpload {
     default void analyseResult(OkHttpClient client, Request request, ProcessGroupInfo groupInfo, PrintUtil printUtil, String fileName, String connectionType) {
         try (Response response = client.newCall(request).execute()) {
             groupInfo.getLock().compareAndSet(false, true);
-//            if (!response.isSuccessful()) {
-//                printUtil.print(PrintUtil.TYPE.ERROR, String.format("* Register Connector: %s | (%s) Failed", fileName, connectionType));
-//                return;
-//            }
             ResponseBody body = response.body();
             String msg = "{}";
             if (null != body) {
                 msg = body.string();
             }
-            Map<String, Object> responseMap = JSON.parseObject(msg, Map.class);
-            if (!"ok".equalsIgnoreCase(String.valueOf(responseMap.get("code")))) {
-                Object resultMsg = String.valueOf(Optional.ofNullable(Optional.ofNullable(responseMap.get("message")).orElse(responseMap.get("msg"))).orElse(msg));
+            boolean isJson = "application/json".equalsIgnoreCase(response.header("Content-Type"));
+            Map<String, Object> responseMap = isJson ? JSON.parseObject(msg, Map.class) : null;
+            if (null == responseMap || !"ok".equalsIgnoreCase(String.valueOf(responseMap.get("code")))) {
+                Object resultMsg = (null == responseMap) ? msg : String.valueOf(Optional.ofNullable(Optional.ofNullable(responseMap.get("message")).orElse(responseMap.get("msg"))).orElse(msg));
                 printUtil.print(PrintUtil.TYPE.ERROR, String.format("* Register Connector: %s | (%s) Failed, message: %s", fileName, connectionType, resultMsg));
             } else {
                 printUtil.print(PrintUtil.TYPE.INFO, String.format("* Register Connector: %s | (%s) Completed", fileName, connectionType));
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             groupInfo.getLock().compareAndSet(false, true);
             printUtil.print(PrintUtil.TYPE.ERROR, String.format("* Register Connector: %s | (%s) Failed, message: %s", fileName, connectionType, e.getMessage()));
             printUtil.print(PrintUtil.TYPE.DEBUG, Arrays.toString(e.getStackTrace()));

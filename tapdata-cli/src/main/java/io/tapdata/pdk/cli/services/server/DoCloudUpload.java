@@ -7,38 +7,28 @@ import com.tapdata.tm.sdk.util.IOUtil;
 import com.tapdata.tm.sdk.util.SignUtil;
 import io.tapdata.pdk.cli.services.MyCloudMultipartBody;
 import io.tapdata.pdk.cli.services.ServiceUpload;
-import io.tapdata.pdk.cli.services.UploadFileService;
+import io.tapdata.pdk.cli.services.request.ByteArrayCollector;
 import io.tapdata.pdk.cli.services.request.ByteArrayProcess;
-import io.tapdata.pdk.cli.services.request.FileProcess;
-import io.tapdata.pdk.cli.services.request.InputStreamProcess;
 import io.tapdata.pdk.cli.services.request.ProcessGroupInfo;
 import io.tapdata.pdk.cli.services.request.ProgressRequestBody;
-import io.tapdata.pdk.cli.services.request.StringProcess;
 import io.tapdata.pdk.cli.utils.PrintUtil;
+import okhttp3.Credentials;
 import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
 import okhttp3.Request;
-import okhttp3.RequestBody;
-import okio.BufferedSink;
-import okio.Okio;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
-import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -64,92 +54,80 @@ public class DoCloudUpload implements ServiceUpload {
         this.sk = sk;
         this.hostAndPort = fixUrl(hp);
         this.latestString = String.valueOf(latest);
-
     }
 
     public void upload(Map<String, BufferedInputStream> inputStreamMap, File file, List<String> jsons, String connectionType) {
-        final AtomicBoolean lock = new AtomicBoolean(false);
-        ProcessGroupInfo groupInfo = new ProcessGroupInfo(lock);
-
-        assert file != null;
         Map<String, String> params = new HashMap<>();
         params.put("ts", String.valueOf(System.currentTimeMillis()));
         params.put("nonce", UUID.randomUUID().toString());
         params.put("signVersion", "1.0");
         params.put("accessKey", ak);
-        MessageDigest digest;
+
+        MessageDigest digest = null;
         try {
             digest = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException(e);
         }
 
+        MultipartBody.Builder builder = new MultipartBody.Builder();
+        builder.setType(MultipartBody.FORM);
+        digest.update("file".getBytes(UTF_8));
+        digest.update(file.getName().getBytes(UTF_8));
         try {
-            if (null == inputStreamMap) {
-                inputStreamMap = new LinkedHashMap<>();
-            }
-            BufferedInputStream inputStream = new BufferedInputStream(new FileInputStream(file));
-            inputStreamMap.put(file.getName(), inputStream);
+            digest.update(IOUtil.readFile(file));
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
 
-        for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
+        if (inputStreamMap != null) {
+            for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
                 String k = entry.getKey();
-                BufferedInputStream v = entry.getValue();
-                byte[] in_b = null;
+                InputStream v = entry.getValue();
+                byte[] in_b = new byte[0];
                 try {
-                    in_b = IOUtil.readInputStream(v);
-                } catch (Exception e) {
+                    v.mark(Integer.MAX_VALUE);
+                    in_b = IOUtil.readInputStream(v, false);
+                    v.reset();
+                } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
+                v = new ByteArrayInputStream(in_b);
                 digest.update("file".getBytes(UTF_8));
                 digest.update(k.getBytes(UTF_8));
                 digest.update(in_b);
-                inputStreamMap.put(k, new BufferedInputStream(new ByteArrayInputStream(in_b)));
-            }
-
-
-        if (jsons != null && !jsons.isEmpty()) {
-            //要上传的文字参数
-            if (jsons.size() == 1) {
-                // if the jsons size == 1, the data received by TM will be weird, adding an empty string helps TM receive the
-                // proper data; the empty string should be dealt in TM.
-                jsons.add("");
-            }
-            for (String json : jsons) {
-                digest.update("source".getBytes(UTF_8));
-                digest.update(json.getBytes(UTF_8));
             }
         }
 
+        //要上传的文字参数
+        if (jsons != null && !jsons.isEmpty()) {
+            for (String json : jsons) {
+                digest.update("source".getBytes(UTF_8));
+                digest.update(json.getBytes());
+            }
+            // if the jsons size == 1, the data received by TM will be weird, adding an empty string helps TM receive the
+            // proper data; the empty string should be dealt in TM.
+            if (jsons.size() == 1) {
+                digest.update("source".getBytes(UTF_8));
+                digest.update("".getBytes());
+            }
+        }
+        // whether replace the latest version
         digest.update("latest".getBytes(UTF_8));
         digest.update(latestString.getBytes(UTF_8));
 
-        List<ProgressRequestBody<?>> body = body(groupInfo, file, inputStreamMap, jsons);
-
-
-        // Include content length
-//        digest.update("Content-Length".getBytes(UTF_8));
-//        long contentLength = groupInfo.totalByte;
-//        digest.update(String.valueOf(contentLength).getBytes(UTF_8));
-
-        // Finalize digest with secret key
-        //digest.update(sk.getBytes(UTF_8));
-
-
         String url;
         final String method = "POST";
+        ByteArrayCollector request;
         String bodyHash = Base64Util.encode(digest.digest());
 
-        printUtil.print(PrintUtil.TYPE.DEBUG, String.format("Body Hash: %s", bodyHash));
+        printUtil.print(PrintUtil.TYPE.DEBUG, String.format("bodyHash: %s", bodyHash));
         BasicCredentials basicCredentials = new BasicCredentials(ak, sk);
         Signer signer = Signer.getSigner(basicCredentials);
 
-
         String canonicalQueryString = SignUtil.canonicalQueryString(params);
         String stringToSign = String.format("%s:%s:%s", method, canonicalQueryString, bodyHash);
-        printUtil.print(PrintUtil.TYPE.DEBUG, String.format("Sign String: %s", stringToSign));
+        printUtil.print(PrintUtil.TYPE.DEBUG, String.format("stringToSign: %s", stringToSign));
         String sign = signer.signString(stringToSign, basicCredentials);
 
         params.put("sign", sign);
@@ -159,49 +137,68 @@ public class DoCloudUpload implements ServiceUpload {
             try {
                 return String.format("%s=%s", SignUtil.percentEncode(key), SignUtil.percentEncode(params.get(key)));
             } catch (UnsupportedEncodingException e) {
-                printUtil.print(PrintUtil.TYPE.WARN, e.getMessage());
-                printUtil.print(PrintUtil.TYPE.DEBUG, Arrays.toString(e.getStackTrace()));
+                e.printStackTrace();
             }
             return key + "=" + params.get(key);
         }).collect(Collectors.joining("&"));
-        url = String.format(URL, hostAndPort, queryString);
-
-        uploadV2(url, file.getName(), groupInfo, body, connectionType, sign);
-    }
-
-
-    protected List<ProgressRequestBody<?>> body(ProcessGroupInfo groupInfo, File file, Map<String, BufferedInputStream> inputStreamMap, List<String> jsons) {
-        List<ProgressRequestBody<?>> body = new ArrayList<>();
-        for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
-            String entryName = entry.getKey();
-            String type = entryName.endsWith(".jar") ? "application/java-archive" : "image/*";
-            ProgressRequestBody<BufferedInputStream> fileBody = new InputStreamProcess(entry.getValue(), type, entryName, printUtil, groupInfo);
-            body.add(fileBody);
-            groupInfo.addTotalBytes(fileBody.length());
-        }
-
-        if (jsons != null && !jsons.isEmpty()) {
-            for (String json : jsons) {
-                ProgressRequestBody<String> fileBody = new StringProcess(json, "source", "text/plain", printUtil, groupInfo);
-                body.add(fileBody);
-                groupInfo.addTotalBytes(fileBody.length());
+        url = hostAndPort + "/api/pdk/upload/source?" + queryString;
+        request = new ByteArrayCollector();
+        request.part("file", file.getName(), "application/java-archive", file);
+        if (inputStreamMap != null) {
+            for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
+                String k = entry.getKey();
+                request.part("file", k, "image/*", entry.getValue());
             }
         }
 
-        ProgressRequestBody<String> fileBody = new StringProcess(latestString, "latest", "text/plain", printUtil, groupInfo);
+        //要上传的文字参数
+        if (jsons != null && !jsons.isEmpty()) {
+            for (String json : jsons) {
+                request.part("source", json);
+            }
+            // if the jsons size == 1, the data received by TM will be weird, adding an empty string helps TM receive the
+            // proper data; the empty string should be dealt in TM.
+            if (jsons.size() == 1) {
+                request.part("source", "");
+            }
+        }
+        // whether replace the latest version
+        request.part("latest", latestString);
+
+        AtomicBoolean lock = new AtomicBoolean(false);
+        ByteArrayCollector.RequestOutputStream output = request.getOutput();
+
+        byte[] bytes;
+        try {
+            try {
+                output.write("\r\n--" + ByteArrayCollector.BOUNDARY + "--\r\n");
+            } catch (Exception e) {
+                System.out.println(e.getMessage());
+            }
+            bytes = output.toByteArray();
+        } finally {
+            if (null != output) {
+                try {
+                    output.close();
+                } catch (IOException e) {
+                    System.out.println(e.getMessage());
+                }
+            }
+        }
+        List<ProgressRequestBody<?>> body = new ArrayList<>();
+        ProcessGroupInfo groupInfo = new ProcessGroupInfo(lock);
+        ProgressRequestBody<byte[]> fileBody = new ByteArrayProcess(null, bytes, MultipartBody.FORM.type(), printUtil, groupInfo);
         body.add(fileBody);
         groupInfo.addTotalBytes(fileBody.length());
-
-        return body;
+        upload(url, file.getName(), groupInfo, body, connectionType, sign);
     }
 
-
-    protected void uploadV2(String url, String fileName, ProcessGroupInfo groupInfo, List<ProgressRequestBody<?>> body, String connectionType, String signature) {
+    protected void upload(String url, String fileName, ProcessGroupInfo groupInfo, List<ProgressRequestBody<?>> body, String connectionType, String signature) {
         OkHttpClient client = new OkHttpClient.Builder()
                 .protocols(Arrays.asList(Protocol.HTTP_1_1))
-                .connectTimeout(120, TimeUnit.SECONDS)
-                .readTimeout(120, TimeUnit.SECONDS)
-                .writeTimeout(120, TimeUnit.SECONDS)
+                .connectTimeout(300, TimeUnit.SECONDS)
+                .readTimeout(300, TimeUnit.SECONDS)
+                .writeTimeout(300, TimeUnit.SECONDS)
                 .build();
 
         MyCloudMultipartBody.Builder builder = new MyCloudMultipartBody.Builder("00content0boundary00");
@@ -214,67 +211,9 @@ public class DoCloudUpload implements ServiceUpload {
         MyCloudMultipartBody requestBody = builder.build();
         Request request = new Request.Builder()
                 .url(url)
+                .addHeader("Authorization", "Basic " + signature)
+                .addHeader("Expect", "100-continue")
                 .addHeader("Signature", signature)
-                .addHeader("Content-Type", "multipart/form-data; boundary=00content0boundary00")
-                .addHeader("charset", "utf-8")
-                .post(requestBody)
-                .build();
-
-        analyseResult(client, request, groupInfo, printUtil, fileName, connectionType);
-    }
-
-    protected void upload(String url, File file, Map<String, BufferedInputStream> inputStreamMap, List<String> jsons, String connectionType, String signature) {
-        String fileName = file.getName();
-        OkHttpClient client = new OkHttpClient.Builder()
-                .protocols(Arrays.asList(Protocol.HTTP_1_1))
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
-                .writeTimeout(30, TimeUnit.SECONDS)
-                .build();
-        final AtomicBoolean lock = new AtomicBoolean(false);
-        ProcessGroupInfo groupInfo = new ProcessGroupInfo(lock);
-        MyCloudMultipartBody.Builder builder = new MyCloudMultipartBody.Builder("00content0boundary00");
-        builder.setType(MultipartBody.FORM);
-        RequestBody jarFileBody = new FileProcess(file, "application/java-archive", printUtil, groupInfo);
-        groupInfo.addTotalBytes(file.length());
-        builder.addFormDataPart("file", fileName, jarFileBody);
-
-        if (inputStreamMap != null) {
-            for (Map.Entry<String, BufferedInputStream> entry : inputStreamMap.entrySet()) {
-                String entryName = entry.getKey();
-                InputStreamProcess fileBody = new InputStreamProcess(entry.getValue(), "image/*", entryName, printUtil, groupInfo);
-                groupInfo.addTotalBytes(fileBody.length());
-                builder.addFormDataPart("file", entryName, fileBody);
-            }
-        }
-
-        //要上传的文字参数
-        if (jsons != null && !jsons.isEmpty()) {
-            for (String json : jsons) {
-                StringProcess fileBody = new StringProcess(json, "source", null, printUtil, groupInfo);
-                groupInfo.addTotalBytes(fileBody.length());
-                builder.addFormDataPart("source", null, fileBody);
-            }
-            // if the jsons size == 1, the data received by TM will be weird, adding an empty string helps TM receive the
-            // proper data; the empty string should be dealt in TM.
-            if (jsons.size() == 1) {
-                StringProcess fileBody = new StringProcess("", "source", null, printUtil, groupInfo);
-                groupInfo.addTotalBytes(fileBody.length());
-                builder.addFormDataPart("source", null, fileBody);
-            }
-        }
-        // whether replace the latest version
-        StringProcess fileBody = new StringProcess(latestString, "source", null, printUtil, groupInfo);
-        groupInfo.addTotalBytes(fileBody.length());
-        builder.addFormDataPart("latest", null, fileBody);
-
-        MyCloudMultipartBody requestBody = builder.build();
-        Request request = new Request.Builder()
-                .url(url)
-                .addHeader("Content-Length", String.valueOf(groupInfo.totalByte))
-                .addHeader("Signature", signature)
-                .addHeader("Content-Type", "multipart/form-data; boundary=00content0boundary00")
-                .addHeader("charset", "utf-8")
                 .post(requestBody)
                 .build();
 

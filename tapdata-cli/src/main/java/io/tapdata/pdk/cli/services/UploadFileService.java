@@ -8,7 +8,6 @@ import com.tapdata.tm.sdk.auth.Signer;
 import com.tapdata.tm.sdk.util.Base64Util;
 import com.tapdata.tm.sdk.util.IOUtil;
 import com.tapdata.tm.sdk.util.SignUtil;
-import io.tapdata.pdk.cli.services.request.ProcessGroupInfo;
 import io.tapdata.pdk.cli.utils.HttpRequest;
 import io.tapdata.pdk.cli.utils.OkHttpUtils;
 import io.tapdata.pdk.cli.utils.PrintUtil;
@@ -126,16 +125,16 @@ public class UploadFileService implements Uploader {
 
     if (inputStreamMap != null) {
       for (Map.Entry<String, InputStream> entry : inputStreamMap.entrySet()) {
-        String k = entry.getKey();
-        InputStream v = entry.getValue();
-        byte[] in_b = new byte[0];
-        try {
-          in_b = IOUtil.readInputStream(v);
-        } catch (IOException e) {
-          throw new RuntimeException(e);
-        }
-        v = new ByteArrayInputStream(in_b);
         if (cloud) {
+          String k = entry.getKey();
+          InputStream v = entry.getValue();
+          byte[] in_b = new byte[0];
+          try {
+            in_b = IOUtil.readInputStream(v);
+          } catch (IOException e) {
+            throw new RuntimeException(e);
+          }
+          v = new ByteArrayInputStream(in_b);
           digest.update("file".getBytes(UTF_8));
           digest.update(k.getBytes(UTF_8));
           digest.update(in_b);
@@ -202,7 +201,7 @@ public class UploadFileService implements Uploader {
       url = hostAndPort + "/api/pdk/upload/source?access_token=" + token;
       request = new HttpRequest(url, method);
     }
-    request.connectTimeout(120000).readTimeout(120000);//连接超时设置
+    request.connectTimeout(1200000).readTimeout(1200000);//连接超时设置
     if (file != null) {
       request.part("file", file.getName(), "application/java-archive", file);
     }

@@ -10,12 +10,14 @@ import io.tapdata.pdk.cli.utils.OkHttpUtils;
 import io.tapdata.pdk.cli.utils.PrintUtil;
 import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.BufferedInputStream;
 import java.io.File;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +73,7 @@ public class DoOpUpload implements ServiceUpload {
     protected void uploadOp(String url, File file, Map<String, BufferedInputStream> inputStreamMap, List<String> jsons, String connectionType) {
         String fileName = file.getName();
         OkHttpClient client = new OkHttpClient.Builder()
+                .protocols(Arrays.asList(Protocol.HTTP_1_1))
                 .connectTimeout(3000, TimeUnit.SECONDS)
                 .readTimeout(3000, TimeUnit.SECONDS)
                 .writeTimeout(3000, TimeUnit.SECONDS)

@@ -3,10 +3,8 @@ package io.tapdata.pdk.cli.services;
 import io.tapdata.pdk.cli.services.request.ProgressRequestBody;
 import okhttp3.Headers;
 import okhttp3.MediaType;
-import okhttp3.MultipartBody;
 import okhttp3.RequestBody;
 import okhttp3.internal.Util;
-import okio.Buffer;
 import okio.BufferedSink;
 import okio.ByteString;
 
@@ -90,56 +88,16 @@ public final class MyCloudMultipartBody extends RequestBody {
 
     private long countBytes() throws IOException {
         long byteCount = 0L;
-
-        Buffer byteCountBuffer = new Buffer();
-
         for (int p = 0, partCount = parts.size(); p < partCount; p++) {
             Part part = parts.get(p);
             Headers headers = part.headers;
             RequestBody body = part.body;
-
-            byteCountBuffer.write(DASHDASH);
-            byteCountBuffer.write(boundary);
-            byteCountBuffer.write(CRLF);
-
-            if (headers != null) {
-                for (int h = 0, headerCount = headers.size(); h < headerCount; h++) {
-                    byteCountBuffer.writeUtf8(headers.name(h))
-                            .write(COLONSPACE)
-                            .writeUtf8(headers.value(h))
-                            .write(CRLF);
-                }
-            }
-
-            //MediaType contentType = body.contentType();
-            if (contentType != null) {
-                byteCountBuffer.writeUtf8("Content-Type: ")
-                        .writeUtf8(contentType.toString())
-                        .write(CRLF);
-            }
-
             long contentLength = body.contentLength();
             if (contentLength != -1) {
-                byteCountBuffer.writeUtf8("Content-Length: ")
-                        .writeDecimalLong(contentLength)
-                        .write(CRLF);
-            } else {
-                // We can't measure the body's size without the sizes of its components.
-                byteCountBuffer.clear();
                 return -1L;
             }
-
-            byteCountBuffer.write(CRLF);
             byteCount += contentLength;
-            byteCountBuffer.write(CRLF);
         }
-
-        byteCountBuffer.write(DASHDASH);
-        byteCountBuffer.write(boundary);
-        byteCountBuffer.write(DASHDASH);
-        byteCountBuffer.write(CRLF);
-        byteCount += byteCountBuffer.size();
-        byteCountBuffer.clear();
         return byteCount;
     }
 
@@ -147,55 +105,11 @@ public final class MyCloudMultipartBody extends RequestBody {
     private void writeOrCountBytes(@Nullable BufferedSink sink) throws IOException {
         for (int p = 0, partCount = parts.size(); p < partCount; p++) {
             Part part = parts.get(p);
-            Headers headers = part.headers;
             ProgressRequestBody<?> body = (ProgressRequestBody<?>) part.body;
-
-            sink.write(DASHDASH);
-            sink.write(boundary);
-            sink.write(CRLF);
-            if (headers != null) {
-                for (int h = 0, headerCount = headers.size(); h < headerCount; h++) {
-                    sink.writeUtf8(headers.name(h))
-                            .write(COLONSPACE)
-                            .writeUtf8(headers.value(h))
-                            .write(CRLF);
-                }
-            }
-
-            MediaType contentType = body.contentType();
-            if (contentType != null) {
-                sink.writeUtf8("Content-Type: ")
-                        .writeUtf8(contentType.toString())
-                        .write(CRLF);
-            }
-
-            long contentLength = body.contentLength();
-            if (contentLength != -1L) {
-                sink.writeUtf8("Content-Length: ")
-                        .writeDecimalLong(contentLength)
-                        .write(CRLF);
-            }
-
-            sink.write(CRLF);
             body.writeTo(sink);
-            sink.write(CRLF);
         }
-        sink.write(DASHDASH);
-        sink.write(boundary);
-        sink.write(DASHDASH);
-        sink.write(CRLF);
     }
 
-    /**
-     * Appends a quoted-string to a StringBuilder.
-     *
-     * <p>RFC 2388 is rather vague about how one should escape special characters in form-data
-     * parameters, and as it turns out Firefox and Chrome actually do rather different things, and
-     * both say in their comments that they're not really sure what the right approach is. We go with
-     * Chrome's behavior (which also experimentally seems to match what IE does), but if you actually
-     * want to have a good chance of things working, please avoid double-quotes, newlines, percent
-     * signs, and the like in your field names.
-     */
     static StringBuilder appendQuotedString(StringBuilder target, String key) {
         target.append('"');
         for (int i = 0, len = key.length(); i < len; i++) {

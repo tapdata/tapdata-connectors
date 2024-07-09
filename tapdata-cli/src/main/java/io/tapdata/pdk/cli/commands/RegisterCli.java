@@ -310,7 +310,7 @@ public class RegisterCli extends CommonCli {
                     }
                 }
             } finally {
-                printUtil.print(PrintUtil.TYPE.INFO, "Register all connector cost time: " + String.format("%.2fs", ((System.currentTimeMillis() - registerStart) / 1000.00)));
+                printUtil.print(PrintUtil.TYPE.TIP, "Register all connector cost time: " + String.format("%.2fs", ((System.currentTimeMillis() - registerStart) / 1000.00)));
             }
             System.exit(0);
         } catch (Throwable throwable) {

@@ -137,15 +137,10 @@ public class RegisterMain {
 
 		List<String> postList = new ArrayList<>();
 		//String server = System.getProperty("server", "https://v3.test.cloud.tapdata.net/tm");
-//		String server = System.getProperty("server", "http://58.251.34.123:3030/");
+		String server = System.getProperty("server", "http://127.0.0.1:3000");
 		String filter = System.getProperty("filter", "");
 		String showProgress = System.getProperty("progress", "true");
-//		Collections.addAll(postList, "register", "-a", "3324cfdf-7d3e-4792-bd32-571638d4562f", "-ak", "", "-sk", "", "-f",filter, "-t", server);
-
-
-		String server = System.getProperty("server", "https://cloud.tapdata.net/console/v3/tm");
-        Collections.addAll(postList, "register", "-a", "da949282212f4fd7b11796cf2599f9a822a7826ee3e04ca9ac7e75e897fa0b9c", "-ak", "tCnHIpwY1KdPHFhFgiIMtkdXzU95dCdY", "-sk", "nfM7BI8y30n42IkNrZWrO4IU4tHBxRAi", "-t", server);
-
+		Collections.addAll(postList, "register", "-a", "3324cfdf-7d3e-4792-bd32-571638d4562f", "-ak", "", "-sk", "", "-f",filter, "-t", server);
 		if (!Boolean.parseBoolean(showProgress)) {
 			postList.add("-p");
 		}

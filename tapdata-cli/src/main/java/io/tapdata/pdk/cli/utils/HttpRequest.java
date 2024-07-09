@@ -22,7 +22,6 @@
 package io.tapdata.pdk.cli.utils;
 
 import org.jetbrains.annotations.NotNull;
-import picocli.CommandLine;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
@@ -2680,29 +2679,6 @@ public class HttpRequest {
 				return HttpRequest.this;
 			}
 		}.call();
-	}
-
-	protected void onProgress(String top, String avg, String surplus, long uploadedBytes, long totalBytes, PrintUtil printUtil) {
-		int progressWidth = 50;
-		double progress = (double) uploadedBytes / totalBytes;
-		int progressInWidth = (int) (progress * progressWidth);
-		StringBuilder builder = new StringBuilder("\r  ⎢");
-		for (int i = 0; i < progressWidth; i++) {
-			if (i < progressInWidth) {
-				builder.append(CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) █|@"));
-			} else {
-				builder.append(" ");
-			}
-		}
-		builder.append("⎥ ").append(top).append(" ");
-		String ps = CommandLine.Help.Ansi.AUTO.string("@|bold,fg(22) " + String.format("%.2f%%", progress * 100) + "|@");
-		builder.append(ps).append(" Avg-speed: ").append(avg);
-		if (null != surplus) {
-			builder.append(" | Remaining-time： ").append(surplus);
-		}
-		//builder.append(" | files: ").append(name);
-		builder.append("\r");
-		printUtil.print0(builder.toString());
 	}
 
 

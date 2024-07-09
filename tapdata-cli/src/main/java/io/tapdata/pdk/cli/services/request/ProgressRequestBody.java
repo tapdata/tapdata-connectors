@@ -11,7 +11,7 @@ import java.io.IOException;
 import java.io.InputStream;
 
 public abstract class ProgressRequestBody<T> extends RequestBody {
-    public static final long WARN_AVG = 1024 * 1024 * 15;
+    public static final long WARN_AVG = 1024 * 1024 * 2;
     public static final String[] tops = new String[]{
             CommandLine.Help.Ansi.AUTO.string("@|bold,fg(196) ⌾|@"),
             CommandLine.Help.Ansi.AUTO.string("@|bold,fg(28) ✔|@")
@@ -37,7 +37,7 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
 
     @Override
     public long contentLength() {
-        return -1;//length();
+        return -1;
     }
 
     public abstract long length();
@@ -85,13 +85,17 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
             printUtil.print(PrintUtil.TYPE.ERROR, "Upload failed ["+ name +"], message: " + e.getMessage());
             throw e;
         } finally {
-            boolean over = false;
-            synchronized (groupInfo.lock) {
-                over = groupInfo.uploadedBytes >= groupInfo.totalByte;
-                if (over && !groupInfo.over) {
-                    groupInfo.over = true;
-                    Uploader.asyncWait(printUtil, groupInfo.lock, " Waiting for remote service to return request result", true);
-                }
+            checkLock();
+        }
+    }
+
+    protected void checkLock() {
+        boolean over = false;
+        synchronized (groupInfo.lock) {
+            over = groupInfo.uploadedBytes >= groupInfo.totalByte;
+            if (over && !groupInfo.over) {
+                groupInfo.over = true;
+                Uploader.asyncWait(printUtil, groupInfo.lock, " Waiting for remote service to return response result", true);
             }
         }
     }
@@ -104,7 +108,7 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
 
     protected String calculate(double avg, long uploadedBytes, long total) {
         long surplus = total - uploadedBytes;
-        double surplusTime = surplus / avg;
+        double surplusTime = (surplus > 0 ? surplus : 0) / avg;
         return String.format("%.2fs", surplusTime);
     }
 
@@ -134,7 +138,6 @@ public abstract class ProgressRequestBody<T> extends RequestBody {
         if (null != surplus) {
             builder.append(" | Remaining-time： ").append(surplus);
         }
-        //builder.append(" | files: ").append(name);
         builder.append("\r");
         printUtil.print0(builder.toString());
     }
