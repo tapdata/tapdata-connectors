@@ -267,11 +267,9 @@ public class TidbConnector extends CommonDbConnector {
                 TiCDCShellManager.ShellConfig config = new TiCDCShellManager.ShellConfig();
                 config.withPdIpPorts(connectorContext.getConnectionConfig().getString("pdServer"));
                 String pdServer = config.getPdIpPorts();
-                List<String> processes = ProcessSearch.getProcesses(log, TiCDCShellManager.getCdcPsGrepFilter(pdServer, cdcServer));
-                if (!processes.isEmpty()) {
-                    StringJoiner joiner = new StringJoiner(" ");
-                    processes.forEach(joiner::add);
-                    String killCmd = TiCDCShellManager.setProperties("kill -9 ${pid}", "pid", joiner.toString());
+                String processes = ProcessSearch.getProcessesPortsAsLine(" ", log, TiCDCShellManager.getCdcPsGrepFilter(pdServer, cdcServer));
+                if (null != processes) {
+                    String killCmd = TiCDCShellManager.setProperties("kill -9 ${pid}", "pid", processes);
                     log.debug("After release cdc resource, kill cdc server, kill cmd: {}", killCmd);
                     ProcessLauncher.execCmdWaitResult(killCmd, "stop cdc server failed, message: {}", log);
                 }

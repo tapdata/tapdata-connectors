@@ -44,6 +44,31 @@ public class ProcessSearch {
         return " | awk " + joiner.toString() + "";
     }
 
+    protected static String getPortFromLine(String line) {
+        String[] split = line.trim().split("\\s+");
+        if (split.length >= 2) {
+            String pid = split[1];
+            try {
+                Integer.parseInt(pid);
+            } catch (Exception e) {
+                //not a number
+                return null;
+            }
+            return pid;
+        }
+        return null;
+    }
+
+    public static String getProcessesPortsAsLine(String splitChar, Log log, String... keywords) {
+        List<String> lines = getProcesses(log, keywords);
+        StringJoiner joiner = new StringJoiner(splitChar);
+        lines.forEach(l -> {
+            String port = getPortFromLine(l);
+            if (null != port) joiner.add(port);
+        });
+        return joiner.toString();
+    }
+
     public static List<String> getProcesses(Log log, String... keywords) {
         List<String> processes = new ArrayList<>();
         BufferedReader reader = null;

@@ -1,10 +1,8 @@
 package io.tapdata.connector.doris.streamload;
 
+import io.tapdata.connector.doris.bean.DorisConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Collections;
@@ -70,6 +68,34 @@ public class DorisStreamLoaderTest {
             ReflectionTestUtils.setField(dorisStreamLoader, "dataColumns", new AtomicReference<>(Collections.singleton("id")));
             when(recordStream.canWrite(anyInt())).thenReturn(true);
             Assertions.assertFalse(dorisStreamLoader.needFlush(new TapInsertRecordEvent().init().after(Collections.emptyMap()), 1, true));
+        }
+    }
+    @Nested
+    class TestBuildLoadUrl{
+        DorisStreamLoader dorisStreamLoader;
+        @BeforeEach
+        void setup() {
+            dorisStreamLoader = mock(DorisStreamLoader.class);
+        }
+        @DisplayName("test Stream load build url when useHTTPS is true")
+        @Test
+        void test1(){
+            DorisConfig dorisConfig = mock(DorisConfig.class);
+            when(dorisConfig.getUseHTTPS()).thenReturn(Boolean.TRUE);
+            ReflectionTestUtils.setField(dorisStreamLoader, "dorisConfig", dorisConfig);
+            doCallRealMethod().when(dorisStreamLoader).buildLoadUrl(anyString(),anyString(),anyString());
+            String url = dorisStreamLoader.buildLoadUrl("localhost:8080","testDataBase","testTable");
+            Assertions.assertEquals("https://localhost:8080/api/testDataBase/testTable/_stream_load", url);
+        }
+        @DisplayName("test Stream load build url when useHTTPS is false")
+        @Test
+        void test2(){
+            DorisConfig dorisConfig = mock(DorisConfig.class);
+            when(dorisConfig.getUseHTTPS()).thenReturn(Boolean.FALSE);
+            ReflectionTestUtils.setField(dorisStreamLoader, "dorisConfig", dorisConfig);
+            doCallRealMethod().when(dorisStreamLoader).buildLoadUrl(anyString(),anyString(),anyString());
+            String url = dorisStreamLoader.buildLoadUrl("localhost:8080","testDataBase","testTable");
+            Assertions.assertEquals("http://localhost:8080/api/testDataBase/testTable/_stream_load", url);
         }
     }
 }
