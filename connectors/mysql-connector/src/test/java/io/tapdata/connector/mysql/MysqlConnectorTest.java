@@ -3,7 +3,9 @@ package io.tapdata.connector.mysql;
 import io.debezium.type.TapIllegalDate;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
+import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.mysql.MysqlConnector;
+import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -263,6 +265,41 @@ public class MysqlConnectorTest {
         }
     }
 
+    @Nested
+    class TimestampToStreamOffsetTest{
 
+        @Test
+        void testBinlogClose() throws Throwable {
+            MysqlConnector mysqlConnector = new MysqlConnector();
+            MysqlJdbcContextV2 mysqlJdbcContext = mock(MysqlJdbcContextV2.class);
+            ReflectionTestUtils.setField(mysqlConnector,"mysqlJdbcContext",mysqlJdbcContext);
+            ExceptionCollector exceptionCollector = new MysqlExceptionCollector();
+            ReflectionTestUtils.setField(mysqlConnector,"exceptionCollector",exceptionCollector);
+
+            when(mysqlJdbcContext.readBinlogPosition()).thenReturn(null);
+            TapConnectorContext tapConnectorContext = mock(TapConnectorContext.class);
+            try {
+                ReflectionTestUtils.invokeMethod(mysqlConnector, "timestampToStreamOffset",
+                        tapConnectorContext, null);
+            }catch (Throwable e){
+                Assertions.assertTrue(e.getMessage().contains("please open mysql binlog config"));
+            }
+        }
+
+        @Test
+        void testBinlogOpen() throws Throwable {
+            MysqlConnector mysqlConnector = new MysqlConnector();
+            MysqlJdbcContextV2 mysqlJdbcContext = mock(MysqlJdbcContextV2.class);
+            ReflectionTestUtils.setField(mysqlConnector, "mysqlJdbcContext", mysqlJdbcContext);
+            MysqlBinlogPosition mysqlBinlogPosition = new MysqlBinlogPosition();
+            long position = 123455L;
+            mysqlBinlogPosition.setPosition(position);
+            when(mysqlJdbcContext.readBinlogPosition()).thenReturn(mysqlBinlogPosition);
+            TapConnectorContext tapConnectorContext = mock(TapConnectorContext.class);
+            MysqlBinlogPosition actualData = ReflectionTestUtils.invokeMethod(mysqlConnector, "timestampToStreamOffset",
+                    tapConnectorContext, null);
+            Assertions.assertTrue(actualData.getPosition() == position);
+        }
+    }
 
 }

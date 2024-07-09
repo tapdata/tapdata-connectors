@@ -10,6 +10,7 @@ import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
 import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
+import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
@@ -29,8 +30,10 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
+import io.tapdata.exception.TapDbCdcConfigInvalidEx;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.ErrorKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -620,6 +623,12 @@ public class MysqlConnector extends CommonDbConnector {
 
     private Object timestampToStreamOffset(TapConnectorContext tapConnectorContext, Long startTime) throws Throwable {
         if (null == startTime) {
+            MysqlBinlogPosition mysqlBinlogPosition = this.mysqlJdbcContext.readBinlogPosition();
+            if (mysqlBinlogPosition == null) {
+                String solutionSuggestions = "please open mysql binlog config";
+                Throwable cause = new Exception(" Binlog config is close");
+                ((MysqlExceptionCollector) exceptionCollector).collectCdcConfigInvalid(solutionSuggestions, cause);
+            }
             return this.mysqlJdbcContext.readBinlogPosition();
         }
         return startTime;
