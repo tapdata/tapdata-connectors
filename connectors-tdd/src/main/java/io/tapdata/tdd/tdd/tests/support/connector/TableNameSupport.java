@@ -1,5 +1,7 @@
 package io.tapdata.tdd.tdd.tests.support.connector;
 
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.Random;
 
 /**
@@ -7,9 +9,9 @@ import java.util.Random;
  */
 public interface TableNameSupport {
     public final static int TABLE_NAME_LENGTH = 15;
+    public Random random = new Random();
 
     public default String tableName() {
-        Random random = new Random();
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < TABLE_NAME_LENGTH; i++) {
             builder.append((char) (97 + random.nextInt(26)));

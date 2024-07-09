@@ -8,6 +8,8 @@ import io.tapdata.entity.schema.type.TapTime;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -127,9 +129,10 @@ public class Record extends HashMap<String, Object> {
         return newRecords;
     }
 
+    private static Random random = new Random();
+
     private static Record builderKey(Record record, LinkedHashMap<String, TapField> nameFieldMap, Checker... checker) {
         //Record item = (Objects.nonNull(checker[0]) && checker[0].check())? ;
-        Random random = new Random();
         nameFieldMap.forEach((key, field) -> {
             if (Objects.nonNull(checker[0]) && checker[0].check(field)) {
                 String type = field.getDataType();
