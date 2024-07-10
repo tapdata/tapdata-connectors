@@ -28,29 +28,13 @@ import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
-import org.apache.http.*;
-import org.apache.http.client.RedirectStrategy;
-import org.apache.http.client.methods.HttpPut;
-import org.apache.http.client.methods.HttpUriRequest;
-import org.apache.http.conn.ssl.NoopHostnameVerifier;
-import org.apache.http.conn.ssl.TrustAllStrategy;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.http.impl.client.LaxRedirectStrategy;
-import org.apache.http.protocol.HttpContext;
-import org.apache.http.ssl.SSLContexts;
-import org.eclipse.jetty.client.HttpClient;
 
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.sql.Date;
-import java.net.URI;
-
 import java.sql.SQLException;
-import java.sql.Time;
-import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Collection;
 import java.util.Collections;
@@ -154,21 +138,15 @@ public class DorisConnector extends CommonDbConnector {
             }
             return "null";
         });
-        codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
+        codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
             if (dorisConfig.getOldVersionTimezone()) {
                 return tapDateTimeValue.getValue().toTimestamp();
             } else {
-                return tapDateTimeValue.getValue().toInstant().atZone(dorisConfig.getZoneId());
+                return tapDateTimeValue.getValue().toInstant().atZone(dorisConfig.getZoneId()).toLocalDateTime();
             }
         });
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
-            if (dorisConfig.getOldVersionTimezone()) {
-                return tapDateValue.getValue().toSqlDate();
-            } else {
-                return tapDateValue.getValue().toInstant().atZone(dorisConfig.getZoneId()).toLocalDate();
-            }
-        });
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
 
@@ -194,7 +172,7 @@ public class DorisConnector extends CommonDbConnector {
             } else {
                 httpClient = new HttpUtil().getHttpClient();
             }
-            DorisStreamLoader dorisStreamLoader = new DorisStreamLoader(context,httpClient);
+            DorisStreamLoader dorisStreamLoader = new DorisStreamLoader(context, httpClient);
             dorisStreamLoaderMap.put(threadName, dorisStreamLoader);
         }
         return dorisStreamLoaderMap.get(threadName);
@@ -372,17 +350,13 @@ public class DorisConnector extends CommonDbConnector {
         if (!dorisConfig.getOldVersionTimezone()) {
             for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
                 Object value = entry.getValue();
-                if (value instanceof Timestamp) {
+                if (value instanceof LocalDateTime) {
                     if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
                         continue;
                     }
-                    if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().startsWith("timestamp")) {
-                        entry.setValue(((Timestamp) value).toLocalDateTime().atZone(dorisConfig.getZoneId()));
-                    }
+                    entry.setValue(((LocalDateTime) value).minusHours(dorisConfig.getZoneOffsetHour()));
                 } else if (value instanceof java.sql.Date) {
-                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(dorisConfig.getZoneId()));
-                } else if (value instanceof Time) {
-                    entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(dorisConfig.getZoneId()));
+                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
                 }
             }
         }

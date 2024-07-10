@@ -673,7 +673,8 @@
       "defaultPrecision": 10,
       "defaultScale": 0,
       "unsigned": "unsigned",
-      "fixed": true
+      "fixed": true,
+      "queryOnly": true
     },
     "date": {
       "byte": 3,
@@ -682,6 +683,15 @@
         "9999-12-31"
       ],
       "to": "TapDate"
+    },
+    "datev2": {
+      "byte": 3,
+      "range": [
+        "1000-01-01",
+        "9999-12-31"
+      ],
+      "to": "TapDate",
+      "queryOnly": true
     },
     "datetime": {
       "byte": 8,
@@ -702,7 +712,8 @@
         0,
         6
       ],
-      "defaultFraction": 0
+      "defaultFraction": 0,
+      "queryOnly": true
     },
     "char[($byte)]": {
       "byte": 255,
