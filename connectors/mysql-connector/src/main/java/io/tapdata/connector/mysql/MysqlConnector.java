@@ -4,6 +4,7 @@ import com.mysql.cj.exceptions.StatementIsClosedException;
 import io.debezium.type.TapIllegalDate;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
+import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
@@ -16,6 +17,7 @@ import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.codec.ToTapValueCodec;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -191,7 +193,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportBatchCount(this::batchCount);
-        connectorFunctions.supportBatchRead(this::batchReadV2);
+        connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
         connectorFunctions.supportStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
@@ -548,15 +550,16 @@ public class MysqlConnector extends CommonDbConnector {
         void buildIllegalDateFieldName(TapRecordEvent event, List<String> illegalDateFieldName);
     }
 
-    private void batchReadV2(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        String sql;
-        if (tapTable.getNameFieldMap().size() > 50) {
-            sql = "SELECT * FROM `" + mysqlConfig.getDatabase() + "`.`" + tapTable.getId() + "`";
-        } else {
-            String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> "`" + c + "`").collect(Collectors.joining(","));
-            sql = String.format("SELECT %s FROM `" + mysqlConfig.getDatabase() + "`.`" + tapTable.getId() + "`", columns);
-        }
-        mysqlJdbcContext.queryWithStream(sql, resultSet -> {
+    @Override
+    protected String getHashSplitStringSql(TapTable tapTable) {
+        Collection<String> pks = tapTable.primaryKeys();
+        if (pks.isEmpty()) throw new CoreException("No primary keys found for table: " + tapTable.getName());
+
+        return "MD5(CONCAT_WS(',', `" + String.join("`, `", pks) + "`))";
+    }
+
+    protected ResultSetConsumer resultSetConsumer(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+        return resultSet -> {
             List<TapEvent> tapEvents = list();
             //get all column names
             Set<String> dateTypeSet = dateFields(tapTable);
@@ -585,8 +588,32 @@ public class MysqlConnector extends CommonDbConnector {
             if (EmptyKit.isNotEmpty(tapEvents)) {
                 eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
             }
-        });
+        };
+    }
 
+    protected String batchReadSql(TapTable tapTable) {
+        if (tapTable.getNameFieldMap().size() > 50) {
+            return String.format("SELECT * FROM `%s`.`%s`", mysqlConfig.getDatabase(), tapTable.getId());
+        } else {
+            String columns = String.join("`, `", tapTable.getNameFieldMap().keySet());
+            return String.format("SELECT `%s` FROM `%s`.`%s`", columns, mysqlConfig.getDatabase(), tapTable.getId());
+        }
+    }
+
+    @Override
+    protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = batchReadSql(tapTable);
+        for (int i = 0; i < commonDbConfig.getMaxSplit(); i++) {
+            String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), i);
+            tapLogger.info("batchRead, splitSql[{}]: {}", i + 1, splitSql);
+            jdbcContext.query(splitSql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
+        }
+    }
+
+    @Override
+    protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = batchReadSql(tapTable);
+        mysqlJdbcContext.queryWithStream(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
     }
 
     @Override

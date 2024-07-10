@@ -552,7 +552,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void batchReadWithoutOffset(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        if (commonDbConfig.getHashSplit()) {
+        if (Boolean.TRUE.equals(commonDbConfig.getHashSplit())) {
             batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
         } else {
             batchReadWithoutHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
@@ -594,11 +594,15 @@ public abstract class CommonDbConnector extends ConnectorBase {
         throw new UnsupportedOperationException("getHashSplitStringSql is not supported");
     }
 
+    protected String getHashSplitModConditions(TapTable tapTable, int maxSplit, int currentSplit) {
+        return "mod(" + getHashSplitStringSql(tapTable) + "," + maxSplit + ")=" + currentSplit;
+    }
+
     protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + c + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
         String sql = String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
         for (int i = 0; i < commonDbConfig.getMaxSplit(); i++) {
-            String splitSql = sql + " WHERE mod(" + getHashSplitStringSql(tapTable) + "," + commonDbConfig.getMaxSplit() + ")=" + i;
+            String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), i);
             tapLogger.info("batchRead, splitSql[{}]: {}", i + 1, splitSql);
             jdbcContext.query(splitSql, resultSet -> {
                 List<TapEvent> tapEvents = list();
