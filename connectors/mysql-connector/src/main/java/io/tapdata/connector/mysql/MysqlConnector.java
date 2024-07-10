@@ -67,7 +67,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 /**
  * @author samuel
@@ -155,7 +154,7 @@ public class MysqlConnector extends CommonDbConnector {
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
             if (!mysqlConfig.getOldVersionTimezone()) {
                 if (EmptyKit.isNotNull(tapDateTimeValue.getValue().getTimeZone())) {
-                    tapDateTimeValue.getValue().setTimeZone(dbTimeZone);
+                    tapDateTimeValue.getValue().setTimeZone(TimeZone.getTimeZone("UTC"));
                 } else {
                     tapDateTimeValue.getValue().setTimeZone(timeZone);
                 }
@@ -465,58 +464,50 @@ public class MysqlConnector extends CommonDbConnector {
         List<String> illegalDateFieldName = new ArrayList<>();
         for (int i = 0; i < metaData.getColumnCount(); i++) {
             String columnName = metaData.getColumnName(i + 1);
-            try {
+            if (!dateTypeSet.contains(columnName)) {
+                data.put(columnName, resultSet.getObject(i + 1));
+            } else {
                 Object value;
-                if ("TIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                    value = resultSet.getString(i + 1);
-                } else if ("YEAR".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                    Object obj = resultSet.getObject(i + 1);
-                    value = EmptyKit.isNull(obj) ? null : resultSet.getInt(i + 1);
-                } else if ("TIMESTAMP".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                    Object obj = resultSet.getObject(i + 1);
-                    value = EmptyKit.isNull(obj) ? null : ((Timestamp) obj).toLocalDateTime().atZone(dbZoneId);
-                } else if ("DATE".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                    if (mysqlConfig.getOldVersionTimezone()) {
-                        value = resultSet.getString(i + 1);
+                try {
+                    value = resultSet.getObject(i + 1);
+                } catch (Exception e) {
+                    value = null;
+                }
+                String string = resultSet.getString(i + 1);
+                //非法时间
+                if (EmptyKit.isNull(value) && EmptyKit.isNotNull(string)) {
+                    if (null == illegalDateConsumer || null == recordEvent) {
+                        data.put(columnName, null);
                     } else {
-                        value = resultSet.getObject(i + 1);
-                        if (value instanceof java.sql.Date) {
-                            value = ((java.sql.Date) value).toLocalDate();
-                        }
-                    }
-                } else if ("DATETIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                    try {
-                        value = resultSet.getObject(i + 1);
-                        if (value instanceof LocalDateTime) {
-                            if (mysqlConfig.getOldVersionTimezone()) {
-                                value = ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000));
-                            } else {
-                                value = ((LocalDateTime) value).minusHours(zoneOffsetHour);
-                            }
-                        }
-                    } catch (Exception ignore) {
-                        value = resultSet.getString(i + 1);
-                    }
-                    if (null == value && dateTypeSet.contains(columnName)) {
-                        value = resultSet.getString(i + 1);
+                        data.put(columnName, buildIllegalDate(recordEvent, illegalDateConsumer, string, illegalDateFieldName, columnName));
                     }
                 } else {
-                    value = resultSet.getObject(i + 1);
-                }
-                if (value != null && dateTypeSet.contains(columnName)) {
-                    String valueS = value.toString();
-                    // 如果是0000开头的时间，或者包含 -00, 就认为是null
-                    if (valueS.startsWith("0000") || valueS.contains("-00")) {
-                        if (null == illegalDateConsumer || null == recordEvent) {
-                            value = null;
+                    if ("TIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                        data.put(columnName, string);
+                    } else if ("YEAR".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                        data.put(columnName, EmptyKit.isNull(value) ? null : resultSet.getInt(i + 1));
+                    } else if ("TIMESTAMP".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                        data.put(columnName, EmptyKit.isNull(value) ? null : ((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
+                    } else if ("DATE".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                        if (mysqlConfig.getOldVersionTimezone()) {
+                            data.put(columnName, resultSet.getString(i + 1));
+                        } else if (value instanceof java.sql.Date) {
+                            data.put(columnName, ((java.sql.Date) value).toLocalDate());
                         } else {
-                            value = buildIllegalDate(recordEvent, illegalDateConsumer, valueS, illegalDateFieldName, columnName);
+                            data.put(columnName, value);
                         }
+                    } else if ("DATETIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                        if (value instanceof LocalDateTime) {
+                            if (mysqlConfig.getOldVersionTimezone()) {
+                                data.put(columnName, ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000)));
+                            } else {
+                                data.put(columnName, ((LocalDateTime) value).minusHours(zoneOffsetHour));
+                            }
+                        }
+                    } else {
+                        data.put(columnName, value);
                     }
                 }
-                data.put(columnName, value);
-            } catch (Exception e) {
-                throw new RuntimeException("Read column value failed, column name: " + columnName + ", data: " + data + "; Error: " + e.getMessage(), e);
             }
         }
         if (null != illegalDateConsumer && null != recordEvent && !EmptyKit.isEmpty(illegalDateFieldName)) {
@@ -645,6 +636,8 @@ public class MysqlConnector extends CommonDbConnector {
             switch (v.getTapType().getType()) {
                 case TapType.TYPE_DATE:
                 case TapType.TYPE_DATETIME:
+                case TapType.TYPE_TIME:
+                case TapType.TYPE_YEAR:
                     dateTypeSet.add(n);
                     break;
                 default:
