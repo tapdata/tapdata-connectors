@@ -148,6 +148,12 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
         }
     }
 
+
+    public void collectCdcConfigInvalid(String solutionSuggestions,Throwable cause){
+        throw new TapDbCdcConfigInvalidEx(pdkId, solutionSuggestions, ErrorKit.getLastCause(cause));
+
+    }
+
     @Override
     public void collectCdcConfigInvalid(Throwable cause) {
         super.collectCdcConfigInvalid(cause);
