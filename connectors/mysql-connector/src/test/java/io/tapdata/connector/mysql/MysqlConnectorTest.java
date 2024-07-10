@@ -5,9 +5,8 @@ import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
-import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.common.exception.ExceptionCollector;
-import io.tapdata.connector.mysql.MysqlConnector;
+import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
@@ -33,6 +32,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -161,6 +163,7 @@ public class MysqlConnectorTest {
         Set<String> dateTypeSet;
         TapRecordEvent recordEvent;
         MysqlConnector.IllegalDateConsumer illegalDateConsumer;
+        MysqlConfig mysqlConfig;
 
         @BeforeEach
         void beforeEach() {
@@ -168,6 +171,7 @@ public class MysqlConnectorTest {
             metaData = mock(ResultSetMetaData.class);
             dateTypeSet = new HashSet<>();
             recordEvent = new TapInsertRecordEvent();
+            mysqlConfig = mock(MysqlConfig.class);
 //            illegalDateConsumer = mock(MysqlConnector.IllegalDateConsumer.class);
             illegalDateConsumer = new MysqlConnector.IllegalDateConsumer() {
                 @Override
@@ -189,6 +193,7 @@ public class MysqlConnectorTest {
             when(metaData.getColumnName(1)).thenReturn("_time");
             when(metaData.getColumnTypeName(1)).thenReturn("TIME");
             when(resultSet.getString(1)).thenReturn("00:00:00");
+            when(resultSet.getObject(1)).thenReturn("00:00:00");
             Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
             Map<String, Object> except = new HashMap<>();
             except.put("_time", "00:00:00");
@@ -196,44 +201,49 @@ public class MysqlConnectorTest {
             assertFalse(recordEvent.getContainsIllegalDate());
         }
 
-        //        @Test
-//        @DisplayName("test filterTimeForMysql method for TIMESTAMP")
-//        void test2() throws SQLException {
-//            when(metaData.getColumnCount()).thenReturn(1);
-//            when(metaData.getColumnName(1)).thenReturn("_timestamp");
-//            when(metaData.getColumnTypeName(1)).thenReturn("TIMESTAMP");
-//            when(resultSet.getString(1)).thenReturn("2024-05-17 00:00:00");
-//            when(resultSet.getObject(1)).thenReturn(Timestamp.valueOf("2024-05-17 00:00:00"));
-//            Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
-//            Map<String, Object> except = new HashMap<>();
-//            except.put("_timestamp","2024-05-17 00:00:00");
-//            assertEquals(except, actual);
-//            assertFalse(recordEvent.getContainsIllegalDate());
-//        }
-//        @Test
-//        @DisplayName("test filterTimeForMysql method for DATE")
-//        void test3() throws SQLException {
-//            when(metaData.getColumnCount()).thenReturn(1);
-//            when(metaData.getColumnName(1)).thenReturn("_date");
-//            when(metaData.getColumnTypeName(1)).thenReturn("DATE");
-//            when(resultSet.getString(1)).thenReturn("2024-05-17");
-//            Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
-//            Map<String, Object> except = new HashMap<>();
-//            except.put("_date","2024-05-17");
-//            assertEquals(except, actual);
-//            assertFalse(recordEvent.getContainsIllegalDate());
-//        }
+        @Test
+        @DisplayName("test filterTimeForMysql method for TIMESTAMP")
+        void test2() throws SQLException {
+            when(metaData.getColumnCount()).thenReturn(1);
+            when(metaData.getColumnName(1)).thenReturn("_timestamp");
+            when(metaData.getColumnTypeName(1)).thenReturn("TIMESTAMP");
+            when(resultSet.getString(1)).thenReturn("2024-05-17 00:00:00");
+            when(resultSet.getObject(1)).thenReturn(Timestamp.valueOf("2024-05-17 00:00:00"));
+            Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
+            Map<String, Object> except = new HashMap<>();
+            except.put("_timestamp", Timestamp.valueOf("2024-05-17 00:00:00"));
+            assertEquals(except, actual);
+            assertFalse(recordEvent.getContainsIllegalDate());
+        }
+
+        @Test
+        @DisplayName("test filterTimeForMysql method for DATE")
+        void test3() throws SQLException {
+            when(metaData.getColumnCount()).thenReturn(1);
+            when(metaData.getColumnName(1)).thenReturn("_date");
+            when(metaData.getColumnTypeName(1)).thenReturn("DATE");
+            when(resultSet.getString(1)).thenReturn("2024-05-17");
+            when(resultSet.getObject(1)).thenReturn(java.sql.Date.valueOf("2024-05-17"));
+            Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
+            Map<String, Object> except = new HashMap<>();
+            except.put("_date", java.sql.Date.valueOf("2024-05-17"));
+            assertEquals(except, actual);
+            assertFalse(recordEvent.getContainsIllegalDate());
+        }
+
         @Test
         @DisplayName("test filterTimeForMysql method for DATETIME")
         void test4() throws SQLException {
+            ReflectionTestUtils.setField(mysqlConnector, "mysqlConfig", mysqlConfig);
             dateTypeSet.add("_datetime");
+            when(mysqlConfig.getOldVersionTimezone()).thenReturn(false);
             when(metaData.getColumnCount()).thenReturn(1);
             when(metaData.getColumnName(1)).thenReturn("_datetime");
             when(metaData.getColumnTypeName(1)).thenReturn("DATETIME");
-            when(resultSet.getObject(1)).thenReturn("2024-05-17 00:00:00");
+            when(resultSet.getObject(1)).thenReturn(LocalDateTime.parse("2024-05-17T00:00:00"));
             Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
             Map<String, Object> except = new HashMap<>();
-            except.put("_datetime", "2024-05-17 00:00:00");
+            except.put("_datetime", LocalDateTime.parse("2024-05-17T00:00:00"));
             assertEquals(except, actual);
             assertFalse(recordEvent.getContainsIllegalDate());
         }
@@ -259,7 +269,8 @@ public class MysqlConnectorTest {
             when(metaData.getColumnCount()).thenReturn(1);
             when(metaData.getColumnName(1)).thenReturn("_datetime");
             when(metaData.getColumnTypeName(1)).thenReturn("DATETIME");
-            when(resultSet.getObject(1)).thenReturn("2024-00-00 00:00:00");
+            when(resultSet.getString(1)).thenReturn("2024-00-00 00:00:00");
+            when(resultSet.getObject(1)).thenReturn(null);
             Map<String, Object> actual = mysqlConnector.filterTimeForMysql(resultSet, metaData, dateTypeSet, recordEvent, illegalDateConsumer);
             assertInstanceOf(TapIllegalDate.class, actual.get("_datetime"));
             assertTrue(recordEvent.getContainsIllegalDate());
@@ -403,22 +414,22 @@ public class MysqlConnectorTest {
     }
 
     @Nested
-    class TimestampToStreamOffsetTest{
+    class TimestampToStreamOffsetTest {
 
         @Test
         void testBinlogClose() throws Throwable {
             MysqlConnector mysqlConnector = new MysqlConnector();
             MysqlJdbcContextV2 mysqlJdbcContext = mock(MysqlJdbcContextV2.class);
-            ReflectionTestUtils.setField(mysqlConnector,"mysqlJdbcContext",mysqlJdbcContext);
+            ReflectionTestUtils.setField(mysqlConnector, "mysqlJdbcContext", mysqlJdbcContext);
             ExceptionCollector exceptionCollector = new MysqlExceptionCollector();
-            ReflectionTestUtils.setField(mysqlConnector,"exceptionCollector",exceptionCollector);
+            ReflectionTestUtils.setField(mysqlConnector, "exceptionCollector", exceptionCollector);
 
             when(mysqlJdbcContext.readBinlogPosition()).thenReturn(null);
             TapConnectorContext tapConnectorContext = mock(TapConnectorContext.class);
             try {
                 ReflectionTestUtils.invokeMethod(mysqlConnector, "timestampToStreamOffset",
                         tapConnectorContext, null);
-            }catch (Throwable e){
+            } catch (Throwable e) {
                 Assertions.assertTrue(e.getMessage().contains("please open mysql binlog config"));
             }
         }
