@@ -69,6 +69,7 @@ public class KafkaConfig extends MqConfig {
     private String authCredentialsSource;
     private String authUserName;
     private String authPassword;
+    private String securityProtocol;
 
     public Boolean getBasicAuth() {
         return basicAuth;
@@ -78,6 +79,13 @@ public class KafkaConfig extends MqConfig {
         this.basicAuth = basicAuth;
     }
 
+    public String getSecurityProtocol() {
+        return securityProtocol;
+    }
+
+    public void setSecurityProtocol(String securityProtocol) {
+        this.securityProtocol = securityProtocol;
+    }
 
     /**
      * kafka source (Consumer)
