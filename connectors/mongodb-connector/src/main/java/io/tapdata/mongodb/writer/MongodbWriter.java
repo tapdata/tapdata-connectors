@@ -21,6 +21,7 @@ import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.mongodb.writer.error.BulkWriteErrorCodeHandlerEnum;
+import io.tapdata.mongodb.writer.error.TapMongoBulkWriteException;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
@@ -108,7 +109,7 @@ public class MongodbWriter {
 		}
 
 		BulkWriteOptions bulkWriteOptions;
-		AtomicReference<MongoBulkWriteException> mongoBulkWriteException = new AtomicReference<>();
+		AtomicReference<RuntimeException> mongoBulkWriteException = new AtomicReference<>();
 		while (!bulkWriteModel.isEmpty()) {
 			bulkWriteOptions = buildBulkWriteOptions(bulkWriteModel);
 			try {
@@ -116,7 +117,7 @@ public class MongodbWriter {
 				collection.bulkWrite(writeModels, bulkWriteOptions);
 				bulkWriteModel.clearAll();
 			} catch (MongoBulkWriteException e) {
-				Consumer<MongoBulkWriteException> errorConsumer = mongoBulkWriteException::set;
+				Consumer<RuntimeException> errorConsumer = mongoBulkWriteException::set;
 				if (!handleBulkWriteError(e, bulkWriteModel, bulkWriteOptions, collection, errorConsumer)) {
 					if (null != mongoBulkWriteException.get()) {
 						throw mongoBulkWriteException.get();
@@ -184,7 +185,7 @@ public class MongodbWriter {
 		BulkWriteModel bulkWriteModel,
 		BulkWriteOptions bulkWriteOptions,
 		MongoCollection<Document> collection,
-		Consumer<MongoBulkWriteException> errorConsumer
+		Consumer<RuntimeException> errorConsumer
 	) {
 		List<BulkWriteError> writeErrors = originMongoBulkWriteException.getWriteErrors();
 		List<BulkWriteError> cantHandleErrors = new ArrayList<>();
@@ -220,7 +221,10 @@ public class MongodbWriter {
 				originMongoBulkWriteException.getServerAddress(),
 				originMongoBulkWriteException.getErrorLabels()
 			);
-			errorConsumer.accept(mongoBulkWriteException);
+			List<WriteModel<Document>> errorWriteModels = new ArrayList<>();
+			cantHandleErrors.forEach(writeError -> errorWriteModels.add(bulkWriteModel.getWriteModels().get(writeError.getIndex())));
+			TapMongoBulkWriteException tapMongoBulkWriteException = new TapMongoBulkWriteException(mongoBulkWriteException, errorWriteModels);
+			errorConsumer.accept(tapMongoBulkWriteException);
 			return false;
 		} else {
 			if (bulkWriteOptions.isOrdered()) {
