@@ -10,8 +10,10 @@ import org.apache.commons.io.FileUtils;
 
 import java.io.File;
 import java.io.Serializable;
+import java.time.ZoneId;
 import java.util.Map;
 import java.util.Properties;
+import java.util.TimeZone;
 
 /**
  * common relation database config
@@ -39,6 +41,11 @@ public class CommonDbConfig implements Serializable {
     private Boolean hashSplit = false;
     private int maxSplit = 20;
     private Boolean doubleActive = false;
+    private Boolean oldVersionTimezone = false;
+    protected String timezone = "+00:00";
+    protected ZoneId zoneId;
+    protected Integer zoneOffsetHour;
+    protected ZoneId sysZoneId;
 
     private Boolean useSSL = false;
     private String sslCa;
@@ -77,6 +84,12 @@ public class CommonDbConfig implements Serializable {
             assert beanUtils != null;
             assert jsonParser != null;
             beanUtils.copyProperties(jsonParser.fromJson(json, this.getClass()), this);
+            if (EmptyKit.isBlank(timezone)) {
+                timezone = "+00:00";
+            }
+            TimeZone timeZone = TimeZone.getTimeZone("GMT" + timezone);
+            zoneId = timeZone.toZoneId();
+            zoneOffsetHour = timeZone.getRawOffset() / 1000 / 60 / 60;
             return this;
         } catch (Exception e) {
             throw new IllegalArgumentException("json string is not valid for db config");
@@ -93,6 +106,12 @@ public class CommonDbConfig implements Serializable {
         properties = new Properties();
         assert beanUtils != null;
         beanUtils.mapToBean(map, this);
+        if (EmptyKit.isBlank(timezone)) {
+            timezone = "+00:00";
+        }
+        TimeZone timeZone = TimeZone.getTimeZone("GMT" + timezone);
+        zoneId = timeZone.toZoneId();
+        zoneOffsetHour = timeZone.getRawOffset() / 1000 / 60 / 60;
         if (useSSL && EmptyKit.isNotEmpty(map) && map.containsKey("useSSL")) {
             try {
                 generateSSlFile();
@@ -242,6 +261,46 @@ public class CommonDbConfig implements Serializable {
 
     public void setDoubleActive(Boolean doubleActive) {
         this.doubleActive = doubleActive;
+    }
+
+    public Boolean getOldVersionTimezone() {
+        return oldVersionTimezone;
+    }
+
+    public void setOldVersionTimezone(Boolean oldVersionTimezone) {
+        this.oldVersionTimezone = oldVersionTimezone;
+    }
+
+    public String getTimezone() {
+        return timezone;
+    }
+
+    public void setTimezone(String timezone) {
+        this.timezone = timezone;
+    }
+
+    public ZoneId getZoneId() {
+        return zoneId;
+    }
+
+    public void setZoneId(ZoneId zoneId) {
+        this.zoneId = zoneId;
+    }
+
+    public Integer getZoneOffsetHour() {
+        return zoneOffsetHour;
+    }
+
+    public void setZoneOffsetHour(Integer zoneOffsetHour) {
+        this.zoneOffsetHour = zoneOffsetHour;
+    }
+
+    public ZoneId getSysZoneId() {
+        return sysZoneId;
+    }
+
+    public void setSysZoneId(ZoneId sysZoneId) {
+        this.sysZoneId = sysZoneId;
     }
 
     public Boolean getUseSSL() {

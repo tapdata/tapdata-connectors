@@ -22,7 +22,7 @@ public class MysqlJdbcContextTest {
             try (
                     MysqlJdbcContextV2 mysqlJdbcContextV2 = new MysqlJdbcContextV2(config)
             ) {
-                Assertions.assertEquals(config.getTimezone(), "GMT+08:00");
+                Assertions.assertEquals(config.getTimezone(), "+08:00");
             }
         }
 

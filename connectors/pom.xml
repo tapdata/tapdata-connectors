@@ -65,6 +65,7 @@
 		<module>mongodb-lower-connector</module>
         <module>mock-source-connector</module>
 		<module>mock-target-connector</module>
+		<module>vastbase-connector</module>
 	</modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>

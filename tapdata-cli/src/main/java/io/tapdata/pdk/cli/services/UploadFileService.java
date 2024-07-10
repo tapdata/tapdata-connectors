@@ -180,7 +180,7 @@ public class UploadFileService {
       url = hostAndPort + "/api/pdk/upload/source?access_token=" + token;
       request = new HttpRequest(url, method);
     }
-    request.connectTimeout(30000).readTimeout(30000);//连接超时设置
+    request.connectTimeout(180000).readTimeout(180000);//连接超时设置
     if (file != null) {
       request.part("file", file.getName(), "application/java-archive", file);
     }

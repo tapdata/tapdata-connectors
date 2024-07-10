@@ -19,7 +19,6 @@ public class DorisConfig extends CommonDbConfig {
     private List<String> distributedKey;
     private Integer writeByteBufferCapacity = 10240;
     private String writeFormat = "json";
-    private String timezone;
     private String uniqueKeyType = "Unique";
     private int bucket = 2;
     private List<LinkedHashMap<String, String>> tableProperties = new ArrayList<>();
@@ -97,14 +96,6 @@ public class DorisConfig extends CommonDbConfig {
 
     public void setWriteFormat(String writeFormat) {
         this.writeFormat = writeFormat;
-    }
-
-    public String getTimezone() {
-        return timezone;
-    }
-
-    public void setTimezone(String timezone) {
-        this.timezone = timezone;
     }
 
     public String getUniqueKeyType() {

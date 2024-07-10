@@ -50,7 +50,7 @@ public class AliyunADBMySQLConnector extends MysqlConnector {
         if (tapConnectionContext instanceof TapConnectorContext) {
             this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext, this::isAlive);
             this.mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
-            this.timezone = mysqlJdbcContext.queryTimeZone();
+            this.zoneId = mysqlJdbcContext.queryTimeZone().toZoneId();
             ddlSqlGenerator = new MysqlDDLSqlGenerator(version, ((TapConnectorContext) tapConnectionContext).getTableMap());
         }
         fieldDDLHandlers = new BiClassHandlers<>();
