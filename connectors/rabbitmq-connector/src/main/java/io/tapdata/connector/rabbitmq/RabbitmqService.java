@@ -24,8 +24,10 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -38,6 +40,9 @@ public class RabbitmqService extends AbstractMqService {
     private final ConnectionFactory connectionFactory;
     private Connection rabbitmqConnection;
     private static final String RABBITMQ_URL = "http://%s:%s/api";
+    protected static final String RABBIT_CONTENT_TYPE_JSON = "application/json";
+    protected static final String RABBIT_CONTENT_ENCODE = "utf-8";
+    AtomicReference<Throwable> atomicReference = new AtomicReference<>();
 
     public RabbitmqService(RabbitmqConfig mqConfig) {
         this.mqConfig = mqConfig;
@@ -100,7 +105,7 @@ public class RabbitmqService extends AbstractMqService {
         if (message == null) {
             return new HashMap<>();
         }
-        return jsonParser.fromJsonBytes(message.getBody(), Map.class);
+        return parse(message.getProps(), message.getBody());
     }
 
     @Override
@@ -180,7 +185,11 @@ public class RabbitmqService extends AbstractMqService {
                 mqOp = MqOp.DELETE;
             }
             headers.put("mqOp", mqOp.getOp());
-            AMQP.BasicProperties props = new AMQP.BasicProperties().builder().headers(headers).build();
+            AMQP.BasicProperties props = new AMQP.BasicProperties().builder()
+                    .contentType(RABBIT_CONTENT_TYPE_JSON)
+                    .contentEncoding(RABBIT_CONTENT_ENCODE)
+                    .headers(headers)
+                    .build();
             try {
                 channel.basicPublish("", tapTable.getId(), props, body);
                 switch (mqOp) {
@@ -203,6 +212,7 @@ public class RabbitmqService extends AbstractMqService {
 
     @Override
     public void consumeOne(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        atomicReference.set(null);
         consuming.set(true);
         Channel channel = rabbitmqConnection.createChannel();
         String tableName = tapTable.getId();
@@ -211,53 +221,10 @@ public class RabbitmqService extends AbstractMqService {
         DefaultConsumer consumer = new DefaultConsumer(channel) {
             @Override
             public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
-                super.handleDelivery(consumerTag, envelope, properties, body);
-                MqOp mqOp = MqOp.fromValue(properties.getHeaders().get("mqOp").toString());
-                Map<String, Object> data = jsonParser.fromJsonBytes(body, Map.class);
-                switch (mqOp) {
-                    case INSERT:
-                        list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
-                        break;
-                    case UPDATE:
-                        list.add(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
-                        break;
-                    case DELETE:
-                        list.add(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()));
-                        break;
-                }
-                channel.basicAck(envelope.getDeliveryTag(), false);
-                if (list.size() >= eventBatchSize) {
-                    List<TapEvent> subList = TapSimplify.list();
-                    subList.addAll(list);
-                    eventsOffsetConsumer.accept(subList, TapSimplify.list());
-                    time.set(System.currentTimeMillis());
-                    list.clear();
-                }
-            }
-        };
-        channel.queueDeclare(tableName, true, false, false, null);
-        channel.basicConsume(tableName, consumer);
-        while (consuming.get() && System.currentTimeMillis() - time.get() < 10000) {
-            TapSimplify.sleep(1000);
-        }
-        channel.close();
-        if (EmptyKit.isNotEmpty(list)) {
-            eventsOffsetConsumer.accept(list, TapSimplify.list());
-        }
-    }
-
-    @Override
-    public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        consuming.set(true);
-        Channel channel = rabbitmqConnection.createChannel();
-        tableList.forEach(tableName -> {
-            List<TapEvent> list = TapSimplify.list();
-            DefaultConsumer consumer = new DefaultConsumer(channel) {
-                @Override
-                public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
+                try {
                     super.handleDelivery(consumerTag, envelope, properties, body);
                     MqOp mqOp = MqOp.fromValue(properties.getHeaders().get("mqOp").toString());
-                    Map<String, Object> data = jsonParser.fromJsonBytes(body, Map.class);
+                    Map<String, Object> data = parse(properties,body);//jsonParser.fromJsonBytes(body, Map.class);
                     switch (mqOp) {
                         case INSERT:
                             list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
@@ -274,7 +241,78 @@ public class RabbitmqService extends AbstractMqService {
                         List<TapEvent> subList = TapSimplify.list();
                         subList.addAll(list);
                         eventsOffsetConsumer.accept(subList, TapSimplify.list());
+                        time.set(System.currentTimeMillis());
                         list.clear();
+                    }
+                } catch (Exception e) {
+                    atomicReference.set(e);
+                    throw e;
+                }
+            }
+        };
+        channel.queueDeclare(tableName, true, false, false, null);
+        channel.basicConsume(tableName, consumer);
+        while (consuming.get() && System.currentTimeMillis() - time.get() < 10000) {
+            exception();
+            try {
+                Thread.sleep(1000);
+            } catch (Exception e) {
+                tapLogger.debug(e.getMessage());
+            }
+        }
+        try {
+            channel.close();
+        } catch (Exception e) {
+            tapLogger.warn(e.getMessage());
+        }
+        if (EmptyKit.isNotEmpty(list)) {
+            eventsOffsetConsumer.accept(list, TapSimplify.list());
+        }
+    }
+
+    protected void exception() {
+        Throwable throwable = atomicReference.get();
+        if (null != throwable) {
+            tapLogger.warn(throwable.getMessage(), throwable);
+            throw new RuntimeException(throwable);
+        }
+    }
+
+    @Override
+    public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        consuming.set(true);
+        atomicReference.set(null);
+        Channel channel = rabbitmqConnection.createChannel();
+        tableList.forEach(tableName -> {
+            List<TapEvent> list = TapSimplify.list();
+            DefaultConsumer consumer = new DefaultConsumer(channel) {
+                @Override
+                public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
+                    try {
+                        super.handleDelivery(consumerTag, envelope, properties, body);
+                        MqOp mqOp = MqOp.fromValue(properties.getHeaders().get("mqOp").toString());
+                        Map<String, Object> data = parse(properties,body);//jsonParser.fromJsonBytes(body, Map.class);
+                        switch (mqOp) {
+                            case INSERT:
+                                list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
+                                break;
+                            case UPDATE:
+                                list.add(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
+                                break;
+                            case DELETE:
+                                list.add(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()));
+                                break;
+                        }
+                        channel.basicAck(envelope.getDeliveryTag(), false);
+                        if (list.size() >= eventBatchSize) {
+                            List<TapEvent> subList = TapSimplify.list();
+                            subList.addAll(list);
+                            eventsOffsetConsumer.accept(subList, TapSimplify.list());
+                            list.clear();
+                        }
+                    } catch (Exception e) {
+                        atomicReference.set(e);
+                        throw e;
                     }
                 }
             };
@@ -282,7 +320,12 @@ public class RabbitmqService extends AbstractMqService {
                 channel.queueDeclare(tableName, true, false, false, null);
                 channel.basicConsume(tableName, consumer);
                 while (consuming.get()) {
-                    Thread.sleep(1000);
+                    exception();
+                    try {
+                        Thread.sleep(1000);
+                    } catch (Exception e) {
+                        tapLogger.debug(e.getMessage());
+                    }
                 }
                 channel.close();
             } catch (Exception e) {
@@ -292,5 +335,31 @@ public class RabbitmqService extends AbstractMqService {
                 eventsOffsetConsumer.accept(list, TapSimplify.list());
             }
         });
+    }
+
+    public void blockConsume() {
+        consuming.compareAndSet(true, false);
+    }
+
+    public Map<String, Object> parse(AMQP.BasicProperties props, byte[] body) throws UnsupportedEncodingException {
+        String contentType = String.valueOf(props.getContentType()).toLowerCase();
+        if (RABBIT_CONTENT_TYPE_JSON.equals(contentType)) {
+            String contentEncoding = Optional.ofNullable(props.getContentEncoding()).orElse(RABBIT_CONTENT_ENCODE);
+            String bodyString = new String(body, contentEncoding);
+            if (bodyString.startsWith("\"")) {
+                bodyString = bodyString.substring(1);
+            }
+            if (bodyString.endsWith("\"")) {
+                bodyString = bodyString.substring(0, bodyString.length() - 1);
+            }
+            return TapSimplify.fromJson(bodyString, Map.class);
+        } else {
+            try {
+                return jsonParser.fromJsonBytes(body, Map.class);
+            } catch (Exception e) {
+                tapLogger.warn("Can not parse bytes from RabbitMQ, data format mismatch: {}, props: {}", new String(body), TapSimplify.toJson(props));
+                throw e;
+            }
+        }
     }
 }
