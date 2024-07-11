@@ -133,7 +133,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
             if (majorVersion >= 8 && minorVersion >= 4) {
                 binLogStatusSql = "SHOW BINARY LOG STATUS";
             } else {
-                binLogStatusSql = "SHOW MASTER LOGS";
+                binLogStatusSql = "SHOW MASTER STATUS";
             }
         } else {
             binLogStatusSql = "SHOW MASTER STATUS";
