@@ -606,40 +606,42 @@ public abstract class CommonDbConnector extends ConnectorBase {
         String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + c + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
         String sql = String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
-        CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getMaxSplit());
-        ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getMaxSplit());
+        CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
+        ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
         try {
-            for (int i = 0; i < commonDbConfig.getMaxSplit(); i++) {
-                final int index = i;
+            for (int i = 0; i < commonDbConfig.getBatchReadThreadSize(); i++) {
+                final int threadIndex = i;
                 executorService.submit(() -> {
                     try {
-                        String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), index);
-                        tapLogger.info("batchRead, splitSql[{}]: {}", index + 1, splitSql);
-                        jdbcContext.query(splitSql, resultSet -> {
-                            List<TapEvent> tapEvents = list();
-                            //get all column names
-                            List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
-                            try {
-                                while (isAlive() && resultSet.next()) {
-                                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
-                                    processDataMap(dataMap, tapTable);
-                                    tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
-                                    if (tapEvents.size() == eventBatchSize) {
-                                        syncEventSubmit(tapEvents, eventsOffsetConsumer);
-                                        tapEvents = list();
+                        for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
+                            String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
+                            tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
+                            jdbcContext.query(splitSql, resultSet -> {
+                                List<TapEvent> tapEvents = list();
+                                //get all column names
+                                List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+                                try {
+                                    while (isAlive() && resultSet.next()) {
+                                        DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                                        processDataMap(dataMap, tapTable);
+                                        tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
+                                        if (tapEvents.size() == eventBatchSize) {
+                                            syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                            tapEvents = list();
+                                        }
                                     }
+                                } catch (SQLException e) {
+                                    exceptionCollector.collectTerminateByServer(e);
+                                    exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+                                    exceptionCollector.revealException(e);
+                                    throw e;
                                 }
-                            } catch (SQLException e) {
-                                exceptionCollector.collectTerminateByServer(e);
-                                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
-                                exceptionCollector.revealException(e);
-                                throw e;
-                            }
-                            //last events those less than eventBatchSize
-                            if (EmptyKit.isNotEmpty(tapEvents)) {
-                                syncEventSubmit(tapEvents, eventsOffsetConsumer);
-                            }
-                        });
+                                //last events those less than eventBatchSize
+                                if (EmptyKit.isNotEmpty(tapEvents)) {
+                                    syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                }
+                            });
+                        }
                     } catch (Exception e) {
                         throwable.set(e);
                     } finally {
