@@ -248,7 +248,7 @@ public class MySqlConnection extends JdbcConnection {
             if (versionNums.length >= 2) {
                 int majorVersion = Integer.parseInt(versionNums[0]);
                 int minorVersion = Integer.parseInt(versionNums[1]);
-                if (majorVersion >= 8 && minorVersion >= 4) {
+                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
                     binLogStatusSql = "SHOW BINARY LOG STATUS";
                 } else {
                     binLogStatusSql = "SHOW MASTER STATUS";
