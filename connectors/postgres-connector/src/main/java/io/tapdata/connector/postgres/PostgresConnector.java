@@ -407,10 +407,24 @@ public class PostgresConnector extends CommonDbConnector {
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
         if (canCdc) {
+            createPublicationIfNotExist();
             testReplicateIdentity(connectorContext.getTableMap());
             buildSlot(connectorContext, false);
         }
         return new PostgresOffset();
+    }
+
+    private void createPublicationIfNotExist() throws SQLException {
+        String publicationName = postgresConfig.getPartitionRoot() ? "dbz_publication_root" : "dbz_publication";
+        AtomicBoolean needCreate = new AtomicBoolean(false);
+        postgresJdbcContext.queryWithNext(String.format("SELECT COUNT(1) FROM pg_publication WHERE pubname = '%s'", publicationName), resultSet -> {
+            if (resultSet.getInt(1) <= 0) {
+                needCreate.set(true);
+            }
+        });
+        if (needCreate.get()) {
+            postgresJdbcContext.execute(String.format("CREATE PUBLICATION %s FOR ALL TABLES %s", publicationName, postgresConfig.getPartitionRoot() ? "WITH (publish_via_partition_root = true)" : ""));
+        }
     }
 
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
