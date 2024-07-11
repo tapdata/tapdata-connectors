@@ -3,6 +3,8 @@ package io.tapdata.connector.opengauss;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.postgres.PostgresConnector;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.kit.DbKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -15,7 +17,7 @@ import org.postgresql.util.PGobject;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.UUID;
+import java.util.*;
 
 @TapConnectorClass("spec_opengauss.json")
 public class OpenGaussConnector extends PostgresConnector {
@@ -105,4 +107,11 @@ public class OpenGaussConnector extends PostgresConnector {
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
     }
 
+    @Override
+    protected String getHashSplitStringSql(TapTable tapTable) {
+        Collection<String> pks = tapTable.primaryKeys();
+        if (pks.isEmpty()) throw new CoreException("No primary keys found for table: " + tapTable.getName());
+
+        return "abs(('x' || MD5(CONCAT_WS(',', \"" + String.join("\", \"", pks) + "\")))::bit(64)::bigint)";
+    }
 }

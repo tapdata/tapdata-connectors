@@ -201,9 +201,10 @@ public class TapEventBuilder {
                 Double rNumberValue = cacheRNumber.get(ftype);
                 if (null == rNumberValue) {
                     if (ftype.endsWith(")")) {
-                        rNumberValue = SECURE_RANDOM.nextDouble() * Long.parseLong(ftype.substring(8, ftype.length() - 1));
+                        double powNum = Math.pow(10, Long.parseLong(ftype.substring(8, ftype.length() - 1)));
+                        rNumberValue = Math.round(SECURE_RANDOM.nextDouble() * powNum * powNum) / powNum;
                     } else {
-                        rNumberValue = SECURE_RANDOM.nextDouble() * 4;
+                        rNumberValue = Math.round(SECURE_RANDOM.nextDouble() * 10000 * 10000) / (double) 10000;
                     }
                     cacheRNumber.put(ftype, rNumberValue);
                 }

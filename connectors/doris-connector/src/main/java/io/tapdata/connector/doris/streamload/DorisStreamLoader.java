@@ -16,12 +16,14 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -37,7 +39,8 @@ public class DorisStreamLoader {
     private static final String TAG = DorisStreamLoader.class.getSimpleName();
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    private static final String LOAD_URL_PATTERN = "http://%s/api/%s/%s/_stream_load";
+    private static final String HTTPS_LOAD_URL_PATTERN = "https://%s/api/%s/%s/_stream_load";
+    private static final String HTTP_LOAD_URL_PATTERN = "http://%s/api/%s/%s/_stream_load";
     private static final String LABEL_PREFIX_PATTERN = "tapdata_%s_%s";
 
     private final DorisConfig dorisConfig;
@@ -236,8 +239,11 @@ public class DorisStreamLoader {
         }
     }
 
-    private String buildLoadUrl(final String dorisHttp, final String database, final String tableName) {
-        return String.format(LOAD_URL_PATTERN, dorisHttp, database, tableName);
+    protected String buildLoadUrl(final String dorisHttp, final String database, final String tableName) {
+        if (Boolean.TRUE.equals(dorisConfig.getUseHTTPS()))
+            return String.format(HTTPS_LOAD_URL_PATTERN, dorisHttp, database, tableName);
+        else
+            return String.format(HTTP_LOAD_URL_PATTERN, dorisHttp, database, tableName);
     }
 
     private String buildPrefix(final String tableName) {

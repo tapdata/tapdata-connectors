@@ -26,9 +26,12 @@ import org.codehaus.plexus.util.StringUtils;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -52,7 +55,11 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 
     public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext) throws SQLException {
         this.postgresConfig = (PostgresConfig) postgresJdbcContext.getConfig();
-        this.timeZone = postgresJdbcContext.queryTimeZone();
+        if (postgresConfig.getOldVersionTimezone()) {
+            this.timeZone = postgresJdbcContext.queryTimeZone();
+        } else {
+            this.timeZone = TimeZone.getTimeZone("GMT" + postgresConfig.getTimezone());
+        }
     }
 
     public PostgresCdcRunner useSlot(String slotName) {
@@ -147,7 +154,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 continue;
             }
             if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
-                eventList.add(new HeartbeatEvent().init().referenceTime(((Struct)sr.value()).getInt64("ts_ms")));
+                eventList.add(new HeartbeatEvent().init().referenceTime(((Struct) sr.value()).getInt64("ts_ms")));
                 continue;
             } else if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
                 continue;
@@ -217,6 +224,12 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 obj = struct.getBytes(field.name());
             } else if (obj instanceof Struct) {
                 obj = BigDecimal.valueOf(NumberKit.bytes2long(((Struct) obj).getBytes("value")), (int) ((Struct) obj).get("scale"));
+            } else if (obj instanceof String && EmptyKit.isNotNull(field.schema().name())) {
+                if (field.schema().name().endsWith("ZonedTimestamp")) {
+                    obj = Instant.parse((String) obj).atZone(ZoneOffset.UTC);
+                } else if (field.schema().name().endsWith("ZonedTime")) {
+                    obj = LocalTime.parse(((String) obj).replace("Z", "")).atDate(LocalDate.ofYearDay(1970, 1)).atZone(ZoneOffset.UTC);
+                }
             }
             dataMap.put(field.name(), obj);
         });

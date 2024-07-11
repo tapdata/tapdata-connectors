@@ -375,6 +375,30 @@ public class DateUtil {
         }
     }
 
+    public static Object parseInstantWithZone(String dateString, String dateFormat, ZoneId zoneId) {
+        if (EmptyKit.isNull(dateFormat)) {
+            return dateString;
+        }
+        DateTimeFormatter DT_FORMATTER = DateTimeFormatter.ofPattern(dateFormat);
+        if (dateFormat.contains("H")) {
+            return LocalDateTime.parse(dateString, DT_FORMATTER).atZone(zoneId);
+        } else {
+            return LocalDate.parse(dateString, DT_FORMATTER).atStartOfDay(zoneId);
+        }
+    }
+
+    public static Object parseInstantWithHour(String dateString, String dateFormat, int hour) {
+        if (EmptyKit.isNull(dateFormat)) {
+            return dateString;
+        }
+        DateTimeFormatter DT_FORMATTER = DateTimeFormatter.ofPattern(dateFormat);
+        if (dateFormat.contains("H")) {
+            return LocalDateTime.parse(dateString, DT_FORMATTER).minusHours(hour);
+        } else {
+            return LocalDate.parse(dateString, DT_FORMATTER);
+        }
+    }
+
     /**
      * Parse the given date string to date object and return a date instance based on the given
      * date string. This makes use of the {@link DateUtil#determineDateFormat(String)} to determine

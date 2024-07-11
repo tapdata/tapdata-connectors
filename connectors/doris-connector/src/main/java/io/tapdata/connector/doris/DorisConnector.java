@@ -28,10 +28,18 @@ import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
+import org.apache.http.impl.client.CloseableHttpClient;
 
 import java.io.IOException;
+import java.sql.Date;
 import java.sql.SQLException;
-import java.util.*;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -47,7 +55,6 @@ public class DorisConnector extends CommonDbConnector {
     private DorisJdbcContext dorisJdbcContext;
     private DorisConfig dorisConfig;
     private final Map<String, DorisStreamLoader> dorisStreamLoaderMap = new ConcurrentHashMap<>();
-
 
 
     @Override
@@ -131,8 +138,14 @@ public class DorisConnector extends CommonDbConnector {
             }
             return "null";
         });
-        codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
+        codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
+            if (dorisConfig.getOldVersionTimezone()) {
+                return tapDateTimeValue.getValue().toTimestamp();
+            } else {
+                return tapDateTimeValue.getValue().toInstant().atZone(dorisConfig.getZoneId()).toLocalDateTime();
+            }
+        });
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
@@ -149,11 +162,17 @@ public class DorisConnector extends CommonDbConnector {
         return retryOptions;
     }
 
-    private DorisStreamLoader getDorisStreamLoader() {
+    public DorisStreamLoader getDorisStreamLoader() {
         String threadName = Thread.currentThread().getName();
         if (!dorisStreamLoaderMap.containsKey(threadName)) {
             DorisJdbcContext context = new DorisJdbcContext(dorisConfig);
-            DorisStreamLoader dorisStreamLoader = new DorisStreamLoader(context, new HttpUtil().getHttpClient());
+            CloseableHttpClient httpClient;
+            if (Boolean.TRUE.equals(dorisConfig.getUseHTTPS())) {
+                httpClient = HttpUtil.generationHttpClient();
+            } else {
+                httpClient = new HttpUtil().getHttpClient();
+            }
+            DorisStreamLoader dorisStreamLoader = new DorisStreamLoader(context, httpClient);
             dorisStreamLoaderMap.put(threadName, dorisStreamLoader);
         }
         return dorisStreamLoaderMap.get(threadName);
@@ -324,5 +343,22 @@ public class DorisConnector extends CommonDbConnector {
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("TABLE_ROWS")));
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("DATA_LENGTH")));
         return tableInfo;
+    }
+
+    @Override
+    protected void processDataMap(DataMap dataMap, TapTable tapTable) {
+        if (!dorisConfig.getOldVersionTimezone()) {
+            for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
+                Object value = entry.getValue();
+                if (value instanceof LocalDateTime) {
+                    if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                        continue;
+                    }
+                    entry.setValue(((LocalDateTime) value).minusHours(dorisConfig.getZoneOffsetHour()));
+                } else if (value instanceof java.sql.Date) {
+                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
+                }
+            }
+        }
     }
 }
