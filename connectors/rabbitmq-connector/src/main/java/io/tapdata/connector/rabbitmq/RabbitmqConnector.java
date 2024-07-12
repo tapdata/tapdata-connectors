@@ -34,6 +34,7 @@ public class RabbitmqConnector extends ConnectorBase {
     private void initConnection(TapConnectionContext connectorContext) throws Throwable {
         rabbitmqConfig = (RabbitmqConfig) new RabbitmqConfig().load(connectorContext.getConnectionConfig());
         rabbitmqService = new RabbitmqService(rabbitmqConfig);
+        rabbitmqService.setTapLogger(connectorContext.getLog());
         rabbitmqService.init();
     }
 
@@ -104,7 +105,11 @@ public class RabbitmqConnector extends ConnectorBase {
     }
 
     private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        rabbitmqService.consumeOne(tapTable, eventBatchSize, eventsOffsetConsumer);
+        try {
+            rabbitmqService.consumeOne(tapTable, eventBatchSize, eventsOffsetConsumer);
+        } finally {
+            rabbitmqService.blockConsume();
+        }
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
