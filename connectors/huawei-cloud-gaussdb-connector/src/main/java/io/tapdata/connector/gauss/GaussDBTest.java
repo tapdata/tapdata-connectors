@@ -37,7 +37,6 @@ public class GaussDBTest extends CommonDbTest {
     }
 
     protected GaussDBTest init() {
-        testFunctionMap().remove("testStreamRead");
         testFunctionMap().put("testConnectorVersion", this::testConnectorVersion);
         return this;
     }
@@ -131,6 +130,12 @@ public class GaussDBTest extends CommonDbTest {
         } catch (Exception e) {
             getConsumer().accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, e.getMessage()));
         }
+        return true;
+    }
+
+    @Override
+    public Boolean testStreamRead() {
+        consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY));
         return true;
     }
 }
