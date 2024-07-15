@@ -8,6 +8,7 @@ import io.tapdata.common.JdbcContext;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
+import io.tapdata.entity.codec.FromTapValueCodec;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
@@ -20,6 +21,8 @@ import io.tapdata.entity.schema.type.TapBinary;
 import io.tapdata.entity.schema.type.TapBoolean;
 import io.tapdata.entity.schema.type.TapDateTime;
 import io.tapdata.entity.schema.type.TapNumber;
+import io.tapdata.entity.schema.value.DateTime;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
@@ -154,6 +157,7 @@ public class MysqlConnectorTest {
         ReflectionTestUtils.invokeMethod(mysqlConnector, "registerCapabilities", connectorFunctions, codecRegistry);
         Assertions.assertNotNull(connectorFunctions.getCountByPartitionFilterFunction());
     }
+
 
     @Nested
     class FilterTimeForMysqlTest {
@@ -447,6 +451,61 @@ public class MysqlConnectorTest {
             MysqlBinlogPosition actualData = ReflectionTestUtils.invokeMethod(mysqlConnector, "timestampToStreamOffset",
                     tapConnectorContext, null);
             Assertions.assertTrue(actualData.getPosition() == position);
+        }
+    }
+    @Nested
+    class testFromDateTimeValue{
+        FromTapValueCodec<TapDateTimeValue> customFromTapValueCodec;
+        MysqlConnector mysqlConnector = new MysqlConnector();
+
+        @BeforeEach
+        void init() {
+
+            ConnectorFunctions connectorFunctions = new ConnectorFunctions();
+            TapCodecsRegistry codecRegistry = new TapCodecsRegistry();
+            ReflectionTestUtils.invokeMethod(mysqlConnector, "registerCapabilities", connectorFunctions, codecRegistry);
+            customFromTapValueCodec = codecRegistry.getCustomFromTapValueCodec(TapDateTimeValue.class);
+        }
+        @DisplayName("test fromTapValue oldVersionTimezone is false,and tapvalue Timezone is null")
+        @Test
+        void test1(){
+            MysqlConfig mysqlConfig = new MysqlConfig();
+            mysqlConfig.setOldVersionTimezone(false);
+            ReflectionTestUtils.setField(mysqlConnector,"mysqlConfig",mysqlConfig);
+            ReflectionTestUtils.setField(mysqlConnector,"timeZone",TimeZone.getTimeZone("Asia/Shanghai"));
+            DateTime dateTime=new DateTime();
+            dateTime.setSeconds(1424476800L);
+            dateTime.setNano(0);
+            TapDateTimeValue tapDateTime=new TapDateTimeValue();
+            tapDateTime.setValue(dateTime);
+            assertEquals("2015-02-21 08:00:00.000000",customFromTapValueCodec.fromTapValue(tapDateTime));
+        }
+        @DisplayName("test fromTapValue oldVersionTimezone is false,and tapValue Timezone is null")
+        @Test
+        void test2(){
+            MysqlConfig mysqlConfig = new MysqlConfig();
+            mysqlConfig.setOldVersionTimezone(false);
+            ReflectionTestUtils.setField(mysqlConnector,"mysqlConfig",mysqlConfig);
+            DateTime dateTime=new DateTime();
+            dateTime.setSeconds(1424476800L);
+            dateTime.setTimeZone(TimeZone.getTimeZone("UTC"));
+            dateTime.setNano(0);
+            TapDateTimeValue tapDateTime=new TapDateTimeValue();
+            tapDateTime.setValue(dateTime);
+            assertEquals("2015-02-21 00:00:00.000000",customFromTapValueCodec.fromTapValue(tapDateTime));
+        }
+        @DisplayName("test fromTapValue oldVersionTimezone is true")
+        @Test
+        void test3(){
+            MysqlConfig mysqlConfig = new MysqlConfig();
+            mysqlConfig.setOldVersionTimezone(true);
+            ReflectionTestUtils.setField(mysqlConnector,"mysqlConfig",mysqlConfig);
+            DateTime dateTime=new DateTime();
+            dateTime.setSeconds(1424476800L);
+            dateTime.setNano(0);
+            TapDateTimeValue tapDateTime=new TapDateTimeValue();
+            tapDateTime.setValue(dateTime);
+            assertEquals("2015-02-21 08:00:00.000000",customFromTapValueCodec.fromTapValue(tapDateTime));
         }
     }
 

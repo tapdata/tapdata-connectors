@@ -35,10 +35,8 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
-import io.tapdata.exception.TapDbCdcConfigInvalidEx;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -131,7 +129,7 @@ public class MysqlConnector extends CommonDbConnector {
             this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext, this::isAlive);
             this.mysqlReader = new MysqlReader(mysqlJdbcContext, tapLogger, this::isAlive);
             this.dbTimeZone = mysqlJdbcContext.queryTimeZone();
-            if (mysqlConfig.getOldVersionTimezone()) {
+            if (!mysqlConfig.getOldVersionTimezone()) {
                 this.timeZone = dbTimeZone;
             } else {
                 this.timeZone = TimeZone.getTimeZone("GMT" + mysqlConfig.getTimezone());
