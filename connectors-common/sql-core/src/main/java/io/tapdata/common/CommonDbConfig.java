@@ -40,6 +40,7 @@ public class CommonDbConfig implements Serializable {
     private char escapeChar = '"';
     private Boolean hashSplit = false;
     private int maxSplit = 20;
+    private int batchReadThreadSize = 4;
     private Boolean doubleActive = false;
     private Boolean oldVersionTimezone = false;
     protected String timezone = "+00:00";
@@ -253,6 +254,14 @@ public class CommonDbConfig implements Serializable {
 
     public void setMaxSplit(int maxSplit) {
         this.maxSplit = maxSplit;
+    }
+
+    public int getBatchReadThreadSize() {
+        return batchReadThreadSize;
+    }
+
+    public void setBatchReadThreadSize(int batchReadThreadSize) {
+        this.batchReadThreadSize = batchReadThreadSize;
     }
 
     public Boolean getDoubleActive() {
