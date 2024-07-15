@@ -120,7 +120,7 @@
               "x-component": "Select",
               "enum": [
                 {
-                  "label": "Database Timezone",
+                  "label": "",
                   "value": ""
                 },
                 {

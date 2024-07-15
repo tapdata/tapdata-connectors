@@ -620,21 +620,14 @@ public abstract class CommonDbConnector extends ConnectorBase {
                                 List<TapEvent> tapEvents = list();
                                 //get all column names
                                 List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
-                                try {
-                                    while (isAlive() && resultSet.next()) {
-                                        DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
-                                        processDataMap(dataMap, tapTable);
-                                        tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
-                                        if (tapEvents.size() == eventBatchSize) {
-                                            syncEventSubmit(tapEvents, eventsOffsetConsumer);
-                                            tapEvents = list();
-                                        }
+                                while (isAlive() && resultSet.next()) {
+                                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                                    processDataMap(dataMap, tapTable);
+                                    tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
+                                    if (tapEvents.size() == eventBatchSize) {
+                                        syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                        tapEvents = list();
                                     }
-                                } catch (SQLException e) {
-                                    exceptionCollector.collectTerminateByServer(e);
-                                    exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
-                                    exceptionCollector.revealException(e);
-                                    throw e;
                                 }
                                 //last events those less than eventBatchSize
                                 if (EmptyKit.isNotEmpty(tapEvents)) {
@@ -655,7 +648,10 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 throw new RuntimeException(e);
             }
             if (EmptyKit.isNotNull(throwable.get())) {
-                throw new RuntimeException(throwable.get());
+                exceptionCollector.collectTerminateByServer(throwable.get());
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), throwable.get());
+                exceptionCollector.revealException(throwable.get());
+                throw throwable.get();
             }
         } finally {
             executorService.shutdown();
