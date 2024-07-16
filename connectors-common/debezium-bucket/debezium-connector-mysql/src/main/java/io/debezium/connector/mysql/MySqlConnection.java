@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -236,7 +237,26 @@ public class MySqlConnection extends JdbcConnection {
      */
     public String knownGtidSet() {
         try {
-            return queryAndMap("SHOW MASTER STATUS", rs -> {
+            AtomicReference<String> version = new AtomicReference<>();
+            query("select version()", rs -> {
+                if (rs.next()) {
+                    version.set(rs.getString(1));
+                }
+            });
+            String binLogStatusSql;
+            String[] versionNums = version.get().split("\\.");
+            if (versionNums.length >= 2) {
+                int majorVersion = Integer.parseInt(versionNums[0]);
+                int minorVersion = Integer.parseInt(versionNums[1]);
+                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
+                    binLogStatusSql = "SHOW BINARY LOG STATUS";
+                } else {
+                    binLogStatusSql = "SHOW MASTER STATUS";
+                }
+            } else {
+                binLogStatusSql = "SHOW MASTER STATUS";
+            }
+            return queryAndMap(binLogStatusSql, rs -> {
                 if (rs.next() && rs.getMetaData().getColumnCount() > 4) {
                     return rs.getString(5); // GTID set, may be null, blank, or contain a GTID set
                 }
