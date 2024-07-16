@@ -664,7 +664,7 @@ public class MysqlConnector extends CommonDbConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(mysqlConfig.getConnectionString());
         try (
-                MysqlConnectionTest mysqlConnectionTest = new MysqlConnectionTest(mysqlConfig, consumer)
+                MysqlConnectionTest mysqlConnectionTest = new MysqlConnectionTest(mysqlConfig, consumer,connectionOptions)
         ) {
             mysqlConnectionTest.testOneByOne();
         }
