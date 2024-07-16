@@ -54,8 +54,8 @@ public class ClickhouseJdbcContext extends JdbcContext {
     public DataMap getTableInfo(String tableName) {
         DataMap dataMap = DataMap.create();
         List<String> list = new ArrayList<>();
-        list.add("NUM_ROWS");
-        list.add("AVG_ROW_LEN");
+        list.add("total_rows");
+        list.add("total_bytes");
         try {
             query(String.format(CK_TABLE_INFO, tableName, getConfig().getDatabase()), resultSet -> {
                 while (resultSet.next()) {
@@ -101,5 +101,5 @@ public class ClickhouseJdbcContext extends JdbcContext {
                     "from system.columns \n" +
                     "where database='%s' %s\n" +
                     "order by table,position";
-    private final static String CK_TABLE_INFO = "select * from system.tables where name ='%s' and database='%s' ";
+    private final static String CK_TABLE_INFO = "select total_rows,total_bytes from system.tables where name ='%s' and database='%s' ";
 }

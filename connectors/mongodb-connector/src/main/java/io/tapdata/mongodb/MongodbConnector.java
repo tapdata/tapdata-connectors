@@ -1706,14 +1706,14 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
-		TableInfo tableInfo = new TableInfo();
+		TableInfo tableInfo;
 		try {
 			String database = mongoConfig.getDatabase();
 			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
 			Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
 			tableInfo = TableInfo.create();
-			tableInfo.setNumOfRows(Long.valueOf(collStats.getInteger("count")));
-			tableInfo.setStorageSize(Long.valueOf(collStats.getInteger("size")));
+			tableInfo.setNumOfRows(Long.valueOf(String.valueOf(collStats.get("count"))));
+			tableInfo.setStorageSize(Long.valueOf(String.valueOf(collStats.get("size"))));
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
