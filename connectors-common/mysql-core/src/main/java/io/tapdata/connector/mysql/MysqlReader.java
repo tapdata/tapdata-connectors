@@ -730,13 +730,17 @@ public class MysqlReader implements Closeable {
             if (value instanceof ByteBuffer) {
                 value = ((ByteBuffer) value).array();
             }
-            value = handleDatetime(table, fieldName, value);
+            if (mysqlConfig.getOldVersionTimezone()) {
+                value = handleDatetimeWithOldVersion(table, fieldName, value);
+            } else {
+                value = handleDatetime(table, fieldName, value);
+            }
             result.put(fieldName, value);
         }
         return result;
     }
 
-    private Object handleDatetime(String table, String fieldName, Object value) {
+    protected Object handleDatetime(String table, String fieldName, Object value) {
         TapTable tapTable = tapTableMap.get(table);
         if (null == tapTable) return value;
         if (null == tapTable.getNameFieldMap()) {
@@ -754,10 +758,45 @@ public class MysqlReader implements Closeable {
                     value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
                 }
             } else if (value instanceof String) {
-                value = Instant.parse((CharSequence) value).atZone(dbTimeZone.toZoneId());
+                value = Instant.parse((CharSequence) value).atZone(dbTimeZone.toZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC);
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
             value = (Integer) value * 24 * 60 * 60 * 1000L;
+        }
+        return value;
+    }
+
+    private Object handleDatetimeWithOldVersion(String table, String fieldName, Object value) {
+        TapTable tapTable = tapTableMap.get(table);
+        if (null == tapTable) return value;
+        if (null == tapTable.getNameFieldMap()) {
+            return value;
+        }
+        TapField tapField = tapTable.getNameFieldMap().get(fieldName);
+        if (null == tapField) return value;
+        TapType tapType = tapField.getTapType();
+        LocalDateTime dt = LocalDateTime.now();
+        ZonedDateTime fromZonedDateTime = dt.atZone(TimeZone.getDefault().toZoneId());
+        ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
+        long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
+        if (tapType instanceof TapDateTime) {
+            int fraction = ((TapDateTime) tapType).getFraction();
+            if (value instanceof Long) {
+                if (fraction > 3) {
+                    value = ((Long) value + diff * 1000) / (long) Math.pow(10, 6 - fraction);
+                } else {
+                    value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
+                }
+            } else if (value instanceof String) {
+                try {
+                    Instant instant = Instant.parse((CharSequence) value);
+                    long milliOffset = timeZone.getRawOffset() + diff;
+                    value = instant.getEpochSecond() * (long) Math.pow(10, fraction) + instant.getNano() / (long) Math.pow(10, 9 - fraction) + (long) (milliOffset * Math.pow(10, fraction - 3));
+                } catch (Exception ignored) {
+                }
+            }
+        } else if (tapType instanceof TapDate && (value instanceof Integer)) {
+            value = (Integer) value * 24 * 60 * 60 * 1000L + diff;
         }
         return value;
     }

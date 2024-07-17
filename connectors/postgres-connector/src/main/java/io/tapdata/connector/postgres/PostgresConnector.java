@@ -52,6 +52,7 @@ import java.sql.Date;
 import java.sql.*;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -180,8 +181,10 @@ public class PostgresConnector extends CommonDbConnector {
         });
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> {
-            if (postgresConfig.getOldVersionTimezone() || EmptyKit.isNotNull(tapTimeValue.getValue().getTimeZone())) {
+            if (postgresConfig.getOldVersionTimezone()) {
                 return tapTimeValue.getValue().toTime();
+            } else if (EmptyKit.isNotNull(tapTimeValue.getValue().getTimeZone())) {
+                return tapTimeValue.getValue().toInstant().atZone(ZoneId.systemDefault()).toLocalTime();
             } else {
                 return tapTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalTime();
             }
@@ -512,7 +515,7 @@ public class PostgresConnector extends CommonDbConnector {
                     if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
                         entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
                     } else {
-                        entry.setValue(((Timestamp) value).toLocalDateTime().atZone(ZoneId.systemDefault()));
+                        entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
                     }
                 } else if (value instanceof Date) {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
@@ -523,7 +526,7 @@ public class PostgresConnector extends CommonDbConnector {
                     if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
                         entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
                     } else {
-                        entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()));
+                        entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneOffset.UTC));
                     }
                 }
             }

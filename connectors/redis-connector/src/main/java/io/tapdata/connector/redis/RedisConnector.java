@@ -131,6 +131,9 @@ public class RedisConnector extends ConnectorBase {
         }
         TestItem testConnect = redisTest.testConnect();
         consumer.accept(testConnect);
+        if (testConnect.getResult() == TestItem.RESULT_SUCCESSFULLY) {
+            consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY));
+        }
         redisTest.close();
         return null;
     }
