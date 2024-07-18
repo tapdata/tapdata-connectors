@@ -31,6 +31,7 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.common.TopicPartitionInfo;
 
@@ -87,7 +88,8 @@ public class KafkaConnector extends ConnectorBase {
             properties.put("basic.auth.user.info", kafkaConfig.getAuthUserName() + ":" + kafkaConfig.getAuthPassword());
         }
         if (EmptyKit.isNotEmpty(this.kafkaConfig.getMqUsername()) && EmptyKit.isNotEmpty(this.kafkaConfig.getMqPassword())) {
-            properties.put("security.protocol", "SASL_PLAINTEXT");
+            String securityProtocol = "SASL_SSL".equals(kafkaConfig.getSecurityProtocol()) ? "SASL_SSL" : "SASL_PLAINTEXT";
+            properties.put("security.protocol", securityProtocol);
             String saslMechanism;
             String model;
             switch (kafkaConfig.getKafkaSaslMechanism().toUpperCase()) {

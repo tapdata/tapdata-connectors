@@ -2,9 +2,9 @@ package io.tapdata.connector.mysql;
 
 import io.debezium.config.Configuration;
 import io.debezium.connector.mysql.MySqlConnectorConfig;
-import io.debezium.type.TapIllegalDate;
 import io.debezium.embedded.EmbeddedEngine;
 import io.debezium.engine.DebeziumEngine;
+import io.debezium.type.TapIllegalDate;
 import io.tapdata.common.ddl.DDLFactory;
 import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
 import io.tapdata.common.ddl.type.DDLParserType;
@@ -56,10 +56,7 @@ import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.sql.ResultSetMetaData;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZonedDateTime;
+import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -95,12 +92,14 @@ public class MysqlReader implements Closeable {
     private KVReadOnlyMap<TapTable> tapTableMap;
     private DDLParserType ddlParserType = DDLParserType.MYSQL_CCJ_SQL_PARSER;
     private static final int MIN_BATCH_SIZE = 1000;
-    private TimeZone DB_TIME_ZONE;
+    private TimeZone timeZone;
+    private TimeZone dbTimeZone;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     private final ExceptionCollector exceptionCollector;
     private String dropTransactionId = null;
     private final MysqlConfig mysqlConfig;
     protected Log tapLogger;
+    private long diff = 0;
 
     public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, Supplier<Boolean> isAlive) {
         this.mysqlJdbcContext = mysqlJdbcContext;
@@ -108,8 +107,19 @@ public class MysqlReader implements Closeable {
         this.isAlive = isAlive;
         this.tapLogger = tapLogger;
         this.exceptionCollector = new MysqlExceptionCollector();
+        LocalDateTime dt = LocalDateTime.now();
+        ZonedDateTime fromZonedDateTime;
         try {
-            this.DB_TIME_ZONE = mysqlJdbcContext.queryTimeZone();
+            this.dbTimeZone = mysqlJdbcContext.queryTimeZone();
+            if (mysqlConfig.getOldVersionTimezone()) {
+                this.timeZone = dbTimeZone;
+                fromZonedDateTime = dt.atZone(TimeZone.getDefault().toZoneId());
+            } else {
+                this.timeZone = TimeZone.getTimeZone("GMT" + mysqlConfig.getTimezone());
+                fromZonedDateTime = dt.atZone(mysqlConfig.getZoneId());
+            }
+            ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
+            diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
         } catch (Exception ignore) {
 
         }
@@ -543,36 +553,36 @@ public class MysqlReader implements Closeable {
             return null;
         }
         Map<String, TapIllegalDate> beforeInvalidMap = new HashMap<>();
-        if (null != value.schema().field("beforeInvalid")){
+        if (null != value.schema().field("beforeInvalid")) {
             Struct invalid = value.getStruct("beforeInvalid");
             for (Field field : invalid.schema().fields()) {
                 byte[] bytes = invalid.getBytes(field.name());
                 try {
                     Object o = TapIllegalDate.byteToIllegalDate(bytes);
-                    if (o instanceof TapIllegalDate){
-                        beforeInvalidMap.put(field.name(),(TapIllegalDate) o);
+                    if (o instanceof TapIllegalDate) {
+                        beforeInvalidMap.put(field.name(), (TapIllegalDate) o);
                     }
                 } catch (IOException e) {
-                    throw new RuntimeException("byte to tap illegal date error",e);
+                    throw new RuntimeException("byte to tap illegal date error", e);
                 } catch (ClassNotFoundException e) {
-                    throw new RuntimeException("byte to tap illegal date error",e);
+                    throw new RuntimeException("byte to tap illegal date error", e);
                 }
             }
         }
         Map<String, TapIllegalDate> afterInvalidMap = new HashMap<>();
-        if (null != value.schema().field("afterInvalid")){
+        if (null != value.schema().field("afterInvalid")) {
             Struct invalid = value.getStruct("afterInvalid");
             for (Field field : invalid.schema().fields()) {
                 byte[] bytes = invalid.getBytes(field.name());
                 try {
                     Object o = TapIllegalDate.byteToIllegalDate(bytes);
-                    if (o instanceof TapIllegalDate){
-                        afterInvalidMap.put(field.name(),(TapIllegalDate) o);
+                    if (o instanceof TapIllegalDate) {
+                        afterInvalidMap.put(field.name(), (TapIllegalDate) o);
                     }
                 } catch (IOException e) {
-                    throw new RuntimeException("byte to tap illegal date error",e);
+                    throw new RuntimeException("byte to tap illegal date error", e);
                 } catch (ClassNotFoundException e) {
-                    throw new RuntimeException("byte to tap illegal date error",e);
+                    throw new RuntimeException("byte to tap illegal date error", e);
                 }
             }
         }
@@ -584,10 +594,10 @@ public class MysqlReader implements Closeable {
                 if (null == valueSchema.field("after"))
                     throw new RuntimeException("Found insert record does not have after: " + record);
                 after = struct2Map(value.getStruct("after"), table);
-                if (!EmptyKit.isEmpty(afterInvalidMap)){
+                if (!EmptyKit.isEmpty(afterInvalidMap)) {
                     after.putAll(afterInvalidMap);
                     tapRecordEvent.setContainsIllegalDate(true);
-                    ((TapInsertRecordEvent)tapRecordEvent).setAfterIllegalDateFieldName(afterInvalidMap.keySet().stream().collect(Collectors.toList()));
+                    ((TapInsertRecordEvent) tapRecordEvent).setAfterIllegalDateFieldName(afterInvalidMap.keySet().stream().collect(Collectors.toList()));
                 }
                 ((TapInsertRecordEvent) tapRecordEvent).setAfter(after);
                 break;
@@ -595,7 +605,7 @@ public class MysqlReader implements Closeable {
                 tapRecordEvent = new TapUpdateRecordEvent().init();
                 if (null != valueSchema.field("before")) {
                     before = struct2Map(value.getStruct("before"), table);
-                    if (!EmptyKit.isEmpty(beforeInvalidMap)){
+                    if (!EmptyKit.isEmpty(beforeInvalidMap)) {
                         before.putAll(beforeInvalidMap);
                         tapRecordEvent.setContainsIllegalDate(true);
                         ((TapUpdateRecordEvent) tapRecordEvent).setBeforeIllegalDateFieldName(beforeInvalidMap.keySet().stream().collect(Collectors.toList()));
@@ -605,7 +615,7 @@ public class MysqlReader implements Closeable {
                 if (null == valueSchema.field("after"))
                     throw new RuntimeException("Found update record does not have after: " + record);
                 after = struct2Map(value.getStruct("after"), table);
-                if (!EmptyKit.isEmpty(beforeInvalidMap) || !EmptyKit.isEmpty(afterInvalidMap)){
+                if (!EmptyKit.isEmpty(beforeInvalidMap) || !EmptyKit.isEmpty(afterInvalidMap)) {
                     before.putAll(beforeInvalidMap);
                     after.putAll(afterInvalidMap);
                     tapRecordEvent.setContainsIllegalDate(true);
@@ -620,10 +630,10 @@ public class MysqlReader implements Closeable {
                     throw new RuntimeException("Found delete record does not have before: " + record);
                 before = struct2Map(value.getStruct("before"), table);
                 ((TapDeleteRecordEvent) tapRecordEvent).setBefore(before);
-                if (!EmptyKit.isEmpty(beforeInvalidMap)){
+                if (!EmptyKit.isEmpty(beforeInvalidMap)) {
                     before.putAll(beforeInvalidMap);
                     tapRecordEvent.setContainsIllegalDate(true);
-                    ((TapDeleteRecordEvent)tapRecordEvent).setBeforeIllegalDateFieldName(beforeInvalidMap.keySet().stream().collect(Collectors.toList()));
+                    ((TapDeleteRecordEvent) tapRecordEvent).setBeforeIllegalDateFieldName(beforeInvalidMap.keySet().stream().collect(Collectors.toList()));
                 }
                 break;
             default:
@@ -720,13 +730,43 @@ public class MysqlReader implements Closeable {
             if (value instanceof ByteBuffer) {
                 value = ((ByteBuffer) value).array();
             }
-            value = handleDatetime(table, fieldName, value);
+            if (mysqlConfig.getOldVersionTimezone()) {
+                value = handleDatetimeWithOldVersion(table, fieldName, value);
+            } else {
+                value = handleDatetime(table, fieldName, value);
+            }
             result.put(fieldName, value);
         }
         return result;
     }
 
-    private Object handleDatetime(String table, String fieldName, Object value) {
+    protected Object handleDatetime(String table, String fieldName, Object value) {
+        TapTable tapTable = tapTableMap.get(table);
+        if (null == tapTable) return value;
+        if (null == tapTable.getNameFieldMap()) {
+            return value;
+        }
+        TapField tapField = tapTable.getNameFieldMap().get(fieldName);
+        if (null == tapField) return value;
+        TapType tapType = tapField.getTapType();
+        if (tapType instanceof TapDateTime) {
+            int fraction = ((TapDateTime) tapType).getFraction();
+            if (value instanceof Long) {
+                if (fraction > 3) {
+                    value = ((Long) value + diff * 1000) / (long) Math.pow(10, 6 - fraction);
+                } else {
+                    value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
+                }
+            } else if (value instanceof String) {
+                value = Instant.parse((CharSequence) value).atZone(dbTimeZone.toZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC);
+            }
+        } else if (tapType instanceof TapDate && (value instanceof Integer)) {
+            value = (Integer) value * 24 * 60 * 60 * 1000L;
+        }
+        return value;
+    }
+
+    private Object handleDatetimeWithOldVersion(String table, String fieldName, Object value) {
         TapTable tapTable = tapTableMap.get(table);
         if (null == tapTable) return value;
         if (null == tapTable.getNameFieldMap()) {
@@ -750,7 +790,7 @@ public class MysqlReader implements Closeable {
             } else if (value instanceof String) {
                 try {
                     Instant instant = Instant.parse((CharSequence) value);
-                    long milliOffset = DB_TIME_ZONE.getRawOffset() + diff;
+                    long milliOffset = timeZone.getRawOffset() + diff;
                     value = instant.getEpochSecond() * (long) Math.pow(10, fraction) + instant.getNano() / (long) Math.pow(10, 9 - fraction) + (long) (milliOffset * Math.pow(10, fraction - 3));
                 } catch (Exception ignored) {
                 }

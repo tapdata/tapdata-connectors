@@ -117,7 +117,7 @@ public class RabbitmqService extends AbstractMqService {
         if (message == null) {
             return new HashMap<>();
         }
-        return jsonParser.fromJsonBytes(message.getBody(), Map.class);
+        return parse(message.getProps(), message.getBody());
     }
 
     @Override
@@ -232,6 +232,7 @@ public class RabbitmqService extends AbstractMqService {
 
     @Override
     public void consumeOne(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        atomicReference.set(null);
         consuming.set(true);
         try (Channel channel = rabbitmqConnection.createChannel()) {
             String tableName = tapTable.getId();

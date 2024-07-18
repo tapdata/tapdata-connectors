@@ -42,7 +42,7 @@ public class MysqlConfig extends CommonDbConfig {
             deploymentMode = DeployModeEnum.STANDALONE.getMode();
             config.setDeploymentMode(deploymentMode);
         }
-        if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
+        if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
             ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress = config.getMasterSlaveAddress();
             if (EmptyKit.isEmpty(masterSlaveAddress)) {
                 throw new RuntimeException("host cannot be empty");
@@ -91,10 +91,12 @@ public class MysqlConfig extends CommonDbConfig {
             properties.put(defaultKey, DEFAULT_PROPERTIES.get(defaultKey));
         }
 
-        if (StringUtils.isNotBlank(timezone) && !timezone.startsWith("GMT")) {
-            timezone = "GMT" + timezone;
-            String serverTimezone = timezone.replace("+", "%2B").replace(":00", "");
-            properties.put("serverTimezone", serverTimezone);
+        if (getOldVersionTimezone()) {
+            if (StringUtils.isNotBlank(timezone) && !timezone.startsWith("GMT")) {
+                timezone = "GMT" + timezone;
+                String serverTimezone = timezone.replace("+", "%2B").replace(":00", "");
+                properties.put("serverTimezone", serverTimezone);
+            }
         }
         StringBuilder propertiesString = new StringBuilder();
         properties.forEach((k, v) -> propertiesString.append("&").append(k).append("=").append(v));
@@ -153,19 +155,10 @@ public class MysqlConfig extends CommonDbConfig {
         }
     }
 
-    protected String timezone;
     private String deploymentMode;
     private ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress;
     private ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress;
     private LinkedHashMap<String, Integer> masterNode;
-
-    public String getTimezone() {
-        return timezone;
-    }
-
-    public void setTimezone(String timezone) {
-        this.timezone = timezone;
-    }
 
     public String getDeploymentMode() {
         return deploymentMode;

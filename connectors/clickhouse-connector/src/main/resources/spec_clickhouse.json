@@ -110,7 +110,7 @@
               "x-index": 7,
               "enum": [
                 {
-                  "label": "Database Timezone",
+                  "label": "",
                   "value": ""
                 },
                 {
@@ -508,8 +508,7 @@
         0,
         6
       ],
-      "defaultFraction": 0,
-      "withTimeZone": true
+      "defaultFraction": 0
     },
     "Enum8($enums)": {
       "name": "enum",

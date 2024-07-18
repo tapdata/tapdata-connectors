@@ -293,6 +293,12 @@ public class TidbConnectionTest extends CommonDbTest {
         return true;
     }
 
+    @Override
+    public Boolean testStreamRead() {
+        consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY));
+        return true;
+    }
+
     public Boolean testCDCPrivileges() {
         AtomicReference<TestItem> testItem = new AtomicReference<>();
         try {

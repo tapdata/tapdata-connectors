@@ -19,6 +19,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     private String logPluginName = "pgoutput"; //default log plugin for postgres, pay attention to lower version
     private Boolean closeNotNull = false;
+    private Boolean partitionRoot = false;
 
     //customize
     public PostgresConfig() {
@@ -74,5 +75,13 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setCloseNotNull(Boolean closeNotNull) {
         this.closeNotNull = closeNotNull;
+    }
+
+    public Boolean getPartitionRoot() {
+        return partitionRoot;
+    }
+
+    public void setPartitionRoot(Boolean partitionRoot) {
+        this.partitionRoot = partitionRoot;
     }
 }

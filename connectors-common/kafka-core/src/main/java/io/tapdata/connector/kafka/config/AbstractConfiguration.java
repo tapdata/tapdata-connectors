@@ -31,7 +31,8 @@ public abstract class AbstractConfiguration implements KafkaConfiguration {
             String krb5Path = Krb5Util.saveByCatalog("connections-" + connectorId, kafkaConfig.getKrb5Keytab(), kafkaConfig.getKrb5Conf(), true);
             Krb5Util.updateKafkaConf(kafkaConfig.getKrb5ServiceName(), kafkaConfig.getKrb5Principal(), krb5Path, kafkaConfig.getKrb5Conf(), configMap);
         } else if (EmptyKit.isNotEmpty(this.kafkaConfig.getMqUsername()) && EmptyKit.isNotEmpty(this.kafkaConfig.getMqPassword())) {
-            configMap.put("security.protocol", "SASL_PLAINTEXT");
+            String securityProtocol = "SASL_SSL".equals(kafkaConfig.getSecurityProtocol()) ? "SASL_SSL" : "SASL_PLAINTEXT";
+            configMap.put("security.protocol", securityProtocol);
             String saslMechanism;
             String model;
             switch (kafkaConfig.getKafkaSaslMechanism().toUpperCase()) {
