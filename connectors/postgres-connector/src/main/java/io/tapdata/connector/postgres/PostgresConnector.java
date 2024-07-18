@@ -410,7 +410,9 @@ public class PostgresConnector extends CommonDbConnector {
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
         if (canCdc) {
-            createPublicationIfNotExist();
+            if ("pgoutput".equals(postgresConfig.getLogPluginName()) && postgresVersion.compareTo("100000") > 0) {
+                createPublicationIfNotExist();
+            }
             testReplicateIdentity(connectorContext.getTableMap());
             buildSlot(connectorContext, false);
         }
