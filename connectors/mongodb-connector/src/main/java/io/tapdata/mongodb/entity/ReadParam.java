@@ -6,6 +6,7 @@ import io.tapdata.mongodb.MongoBatchOffset;
 import io.tapdata.mongodb.MongodbExceptionCollector;
 import io.tapdata.mongodb.batch.CollectionCollector;
 import io.tapdata.mongodb.batch.ErrorHandler;
+import io.tapdata.mongodb.batch.RawCollectionCollector;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 
 import java.util.List;
@@ -44,6 +45,11 @@ public class ReadParam {
     CollectionCollector collection;
     public ReadParam withMongoCollection(CollectionCollector collection) {
         this.collection = collection;
+        return this;
+    }
+    RawCollectionCollector rawCollection;
+    public ReadParam withMongoRawCollection(RawCollectionCollector rawCollection) {
+        this.rawCollection = rawCollection;
         return this;
     }
     MongodbConfig mongoConfig;
@@ -94,6 +100,10 @@ public class ReadParam {
 
     public CollectionCollector getCollection() {
         return collection;
+    }
+
+    public RawCollectionCollector getRawCollection() {
+        return rawCollection;
     }
 
     public MongodbConfig getMongoConfig() {
