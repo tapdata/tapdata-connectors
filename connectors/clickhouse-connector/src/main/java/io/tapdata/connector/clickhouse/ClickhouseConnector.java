@@ -363,7 +363,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         clickhouseConfig = new ClickhouseConfig().load(connectionContext.getConnectionConfig());
         try (
-                ClickhouseTest clickhouseTest = new ClickhouseTest(clickhouseConfig, consumer)
+                ClickhouseTest clickhouseTest = new ClickhouseTest(clickhouseConfig, consumer,connectionOptions)
         ) {
             clickhouseTest.testOneByOne();
             return connectionOptions;
