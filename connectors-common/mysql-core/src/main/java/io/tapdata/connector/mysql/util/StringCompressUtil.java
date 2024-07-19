@@ -21,6 +21,7 @@ public class StringCompressUtil {
         try (ByteArrayOutputStream out = new ByteArrayOutputStream();
              GZIPOutputStream gzip = new GZIPOutputStream(out)) {
             gzip.write(str.getBytes(DEFAULT_CODE));
+            gzip.close();
             return new String(out.toByteArray(), DEFAULT_CODE);
         }
     }
