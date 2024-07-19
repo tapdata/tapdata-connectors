@@ -409,7 +409,7 @@ public class MysqlReader implements Closeable {
                     try {
                         mysqlSchemaHistory = StringCompressUtil.uncompress((String) mysqlSchemaHistory);
                     } catch (IOException e) {
-                        throw new CoreException("Uncompress Mysql schema history failed, string: {}, message: {}", (((String) mysqlSchemaHistory).length() > 655350 ? "...(mysql Schema History too long, more than 655350)" : mysqlSchemaHistory), e.getMessage(), e);
+                        throw new CoreException("Uncompress Mysql schema history failed, message: {}, string: {}", e.getMessage(), (((String) mysqlSchemaHistory).length() > 655350 ? "...(mysql Schema History too long, more than 655350)" : mysqlSchemaHistory), e);
                     }
                     mysqlSchemaHistory = InstanceFactory.instance(JsonParser.class).fromJson((String) mysqlSchemaHistory,
                             new TypeHolder<Map<String, LinkedHashSet<String>>>() {

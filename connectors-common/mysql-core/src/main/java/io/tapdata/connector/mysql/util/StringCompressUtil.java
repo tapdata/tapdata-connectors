@@ -3,6 +3,7 @@ package io.tapdata.connector.mysql.util;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Base64;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -20,9 +21,8 @@ public class StringCompressUtil {
         }
         try (ByteArrayOutputStream out = new ByteArrayOutputStream();
              GZIPOutputStream gzip = new GZIPOutputStream(out)) {
-            gzip.write(str.getBytes());
-            String string = out.toString(DEFAULT_CODE);
-            return string;
+            gzip.write(str.getBytes(DEFAULT_CODE));
+            return new String(out.toByteArray(), DEFAULT_CODE);
         }
     }
 
@@ -38,8 +38,7 @@ public class StringCompressUtil {
             while ((n = gunzip.read(buffer)) >= 0) {
                 out.write(buffer, 0, n);
             }
-            String string = out.toString(DEFAULT_CODE);
-            return string;
+            return new String(out.toByteArray(), DEFAULT_CODE);
         }
     }
 }
