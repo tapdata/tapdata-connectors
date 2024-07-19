@@ -83,23 +83,24 @@ public class MongoBatchReader {
     }
 
     protected FindIterable<RawBsonDocument> findIterable(ReadParam param) {
-        Log log = connectorContext.getLog();
+//        Log log = connectorContext.getLog();
         MongoCollection<RawBsonDocument> collection = param.getRawCollection().collectRawCollection(table.getId());
         FindIterable<RawBsonDocument> findIterable;
         final int batchSize = eventBatchSize > 0 ? eventBatchSize : DEFAULT_BATCH_SIZE;
-        if (offset == null) {
-            findIterable = collection.find().sort(sort).batchSize(batchSize);
-        } else {
-            MongoBatchOffset mongoOffset = (MongoBatchOffset) offset;
-            Object offsetValue = mongoOffset.value();
-            if (offsetValue != null) {
-                findIterable = collection.find(queryCondition(offsetKey, offsetValue)).sort(sort)
-                        .batchSize(batchSize);
-            } else {
-                findIterable = collection.find().sort(sort).batchSize(batchSize);
-                log.warn("Offset format is illegal {}, no offset value has been found. Final offset will be null to do the batchRead", offset);
-            }
-        }
+        findIterable = collection.find().batchSize(batchSize);
+//        if (offset == null) {
+//            findIterable = collection.find().sort(sort).batchSize(batchSize);
+//        } else {
+//            MongoBatchOffset mongoOffset = (MongoBatchOffset) offset;
+//            Object offsetValue = mongoOffset.value();
+//            if (offsetValue != null) {
+//                findIterable = collection.find(queryCondition(offsetKey, offsetValue)).sort(sort)
+//                        .batchSize(batchSize);
+//            } else {
+//                findIterable = collection.find().sort(sort).batchSize(batchSize);
+//                log.warn("Offset format is illegal {}, no offset value has been found. Final offset will be null to do the batchRead", offset);
+//            }
+//        }
         if (mongoConfig.isNoCursorTimeout()) {
             findIterable.noCursorTimeout(true);
         }
