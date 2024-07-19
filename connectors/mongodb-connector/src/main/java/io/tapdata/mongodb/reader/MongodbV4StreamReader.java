@@ -126,6 +126,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     ChangeStreamDocument<RawBsonDocument> event = streamCursor.tryNext();
                     if (event == null) {
                         while (count++ < numThreads) {
+                            tapEventArray[count - 1] = null;
                             countDownLatch.get().countDown();
                         }
                     } else {
@@ -206,13 +207,18 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         }
         OperationType operationType = event.getOperationType();
         ByteBuffer byteBuffer = event.getFullDocument().getByteBuffer().asNIO();
-        ByteBuffer byteBufferBefore = event.getFullDocumentBeforeChange().getByteBuffer().asNIO();
+
         try (
-                BsonBinaryReader reader = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBuffer)));
-                BsonBinaryReader readerBefore = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBufferBefore)))
+                BsonBinaryReader reader = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBuffer)))
         ) {
             Document fullDocument = codec.decode(reader, decoderContext);
-            Document fullDocumentBeforeChange = codec.decode(readerBefore, decoderContext);
+            Document fullDocumentBeforeChange = null;
+            if (EmptyKit.isNotNull(event.getFullDocumentBeforeChange())) {
+                ByteBuffer byteBufferBefore = event.getFullDocumentBeforeChange().getByteBuffer().asNIO();
+                try (BsonBinaryReader readerBefore = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBufferBefore)))) {
+                    fullDocumentBeforeChange = codec.decode(readerBefore, decoderContext);
+                }
+            }
             if (operationType == OperationType.INSERT) {
                 DataMap after = new DataMap();
                 after.putAll(fullDocument);
