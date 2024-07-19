@@ -57,9 +57,28 @@ import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.sql.ResultSetMetaData;
-import java.time.*;
-import java.util.*;
-import java.util.concurrent.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -397,7 +416,7 @@ public class MysqlReader implements Closeable {
         return mysqlStreamOffset;
     }
 
-    private void initMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
+    protected void initMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
         // block init cdc schema by a lock, because mysqlSchemaHistory(string) may too long,
         //   memory size may over 1G and cause engine OOM when start tasks sync
         tapLogger.debug("Mysql init/save cdc schema lock, {}", System.currentTimeMillis());
@@ -409,7 +428,7 @@ public class MysqlReader implements Closeable {
                     try {
                         mysqlSchemaHistory = StringCompressUtil.uncompress((String) mysqlSchemaHistory);
                     } catch (IOException e) {
-                        throw new CoreException("Uncompress Mysql schema history failed, message: {}, string: {}", e.getMessage(), (((String) mysqlSchemaHistory).length() > 655350 ? "...(mysql Schema History too long, more than 655350)" : mysqlSchemaHistory), e);
+                        throw new CoreException("Uncompress Mysql schema history failed, message: {}, string: {}", e.getMessage(), (((String) mysqlSchemaHistory).length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : mysqlSchemaHistory), e);
                     }
                     mysqlSchemaHistory = InstanceFactory.instance(JsonParser.class).fromJson((String) mysqlSchemaHistory,
                             new TypeHolder<Map<String, LinkedHashSet<String>>>() {
@@ -422,7 +441,7 @@ public class MysqlReader implements Closeable {
         }
     }
 
-    private void saveMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
+    protected void saveMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
         tapLogger.debug("Mysql save/init cdc schema lock, {}", System.currentTimeMillis());
         try {
             tapConnectorContext.configContext();
@@ -433,7 +452,7 @@ public class MysqlReader implements Closeable {
                     try {
                         json = StringCompressUtil.compress(json);
                     } catch (IOException e) {
-                        tapLogger.warn("Compress Mysql schema history failed, string: " +(json.length() > 655350 ? "...(mysql Schema History too long, more than 655350)" : json) + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
+                        tapLogger.warn("Compress Mysql schema history failed, string: " +(json.length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : json) + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
                         return;
                     }
                     tapConnectorContext.getStateMap().put(MYSQL_SCHEMA_HISTORY, json);
