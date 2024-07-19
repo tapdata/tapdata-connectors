@@ -13,6 +13,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
@@ -32,15 +33,14 @@ import org.bson.io.ByteBufferBsonInput;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 import static io.tapdata.base.ConnectorBase.*;
 import static java.util.Collections.singletonList;
@@ -62,6 +62,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     private DocumentCodec codec;
     private DecoderContext decoderContext;
     private ConnectionString connectionString;
+    private LinkedBlockingQueue<OffsetEvent>[] logQueueArray;
 
     public MongodbV4StreamReader setPreImage(boolean isPreImage) {
         this.isPreImage = isPreImage;
@@ -96,7 +97,6 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 //        List<Bson> pipeline1 = asList(Aggregates.match(Filters.or(collList)));
         FullDocument fullDocumentOption = FullDocument.UPDATE_LOOKUP;
         FullDocumentBeforeChange fullDocumentBeforeChangeOption = FullDocumentBeforeChange.WHEN_AVAILABLE;
-        List<TapEvent> tapEvents = list();
         while (running.get()) {
             ChangeStreamIterable<RawBsonDocument> changeStream;
             if (offset != null) {
@@ -115,50 +115,45 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             }
             consumer.streamReadStarted();
             int numThreads = 8;
-
-            ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
+            logQueueArray = new LinkedBlockingQueue[numThreads];
+            for (int i = 0; i < numThreads; i++) {
+                logQueueArray[i] = new LinkedBlockingQueue<>(32);
+            }
+            ExecutorService executorService = Executors.newWorkStealingPool(numThreads);
             AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
             try (final MongoChangeStreamCursor<ChangeStreamDocument<RawBsonDocument>> streamCursor = changeStream.cursor()) {
-                AtomicReference<CountDownLatch> countDownLatch = new AtomicReference<>(new CountDownLatch(numThreads));
-                TapEvent[] tapEventArray = new TapEvent[numThreads];
-                int count = 0;
+                new Thread(() -> {
+                    List<TapEvent> events = list();
+                    while (running.get()) {
+                        try {
+                            for (int i = 0; i < numThreads; i++) {
+                                OffsetEvent event = logQueueArray[i].take();
+                                events.add(event.getEvent());
+                                if (events.size() >= eventBatchSize) {
+                                    consumer.accept(events, event.getOffset());
+                                    events = list();
+                                }
+                            }
+                        } catch (InterruptedException ignored) {
+                        }
+                    }
+                }).start();
+                if (EmptyKit.isNotNull(throwableAtomicReference.get())) {
+                    throw throwableAtomicReference.get();
+                }
+                AtomicLong count = new AtomicLong(0);
                 while (running.get()) {
                     ChangeStreamDocument<RawBsonDocument> event = streamCursor.tryNext();
                     if (event == null) {
-                        while (count++ < numThreads) {
-                            tapEventArray[count - 1] = null;
-                            countDownLatch.get().countDown();
-                        }
+                        TapSimplify.sleep(1000);
                     } else {
-                        final int index = count;
                         executorService.submit(() -> {
                             try {
-                                emit(event, tapEventArray, index);
+                                emit(event, count, numThreads);
                             } catch (Exception e) {
                                 throwableAtomicReference.set(e);
-                            } finally {
-                                countDownLatch.get().countDown();
                             }
                         });
-                        count++;
-                        offset = event.getResumeToken();
-                    }
-                    if (count >= numThreads) {
-                        try {
-                            countDownLatch.get().await();
-                        } catch (InterruptedException e) {
-                            throw new RuntimeException(e);
-                        }
-                        if (EmptyKit.isNotNull(throwableAtomicReference.get())) {
-                            throw new RuntimeException(throwableAtomicReference.get());
-                        }
-                        tapEvents.addAll(Arrays.stream(tapEventArray).filter(EmptyKit::isNotNull).collect(Collectors.toList()));
-                        if (tapEvents.size() >= eventBatchSize) {
-                            consumer.accept(tapEvents, offset);
-                            tapEvents = list();
-                        }
-                        count = 0;
-                        countDownLatch.set(new CountDownLatch(numThreads));
                     }
                 }
             } catch (Throwable throwable) {
@@ -167,8 +162,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     if (throwable instanceof IllegalStateException && EmptyKit.isNotEmpty(message) && (message.contains("state should be: open") || message.contains("Cursor has been closed"))) {
                         return;
                     }
-
-                    if (throwable instanceof MongoInterruptedException || throwable instanceof InterruptedException) {
+                    if (throwable instanceof MongoInterruptedException) {
                         return;
                     }
                 }
@@ -187,14 +181,38 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 //TapLogger.warn(TAG,"Read change stream from {}, failed {} " ,MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage());
                 //TapLogger.debug(TAG, "Read change stream from {}, failed {}, error {}", MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage(), getStackString(throwable));
                 //}
-                throw throwable;
             } finally {
                 executorService.shutdown();
             }
         }
     }
 
-    private void emit(ChangeStreamDocument<RawBsonDocument> event, TapEvent[] tapEventArray, int index) {
+    static class OffsetEvent {
+        private final Object offset;
+        private final TapEvent event;
+
+        public OffsetEvent(TapEvent event, Object offset) {
+            this.offset = offset;
+            this.event = event;
+        }
+
+        public Object getOffset() {
+            return offset;
+        }
+
+        public TapEvent getEvent() {
+            return event;
+        }
+    }
+
+    protected void enqueueTapEvent(TapEvent tapEvent, Object offset, int index) {
+        try {
+            logQueueArray[index].put(new OffsetEvent(tapEvent, offset));
+        } catch (InterruptedException ignore) {
+        }
+    }
+
+    private void emit(ChangeStreamDocument<RawBsonDocument> event, AtomicLong index, int numThreads) {
         MongoNamespace mongoNamespace = event.getNamespace();
 
         String collectionName = null;
@@ -202,7 +220,6 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             collectionName = mongoNamespace.getCollectionName();
         }
         if (collectionName == null) {
-            tapEventArray[index] = null;
             return;
         }
         OperationType operationType = event.getOperationType();
@@ -224,7 +241,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 after.putAll(fullDocument);
                 TapInsertRecordEvent recordEvent = insertRecordEvent(after, collectionName);
                 recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
-                tapEventArray[index] = recordEvent;
+                enqueueTapEvent(recordEvent, event.getResumeToken(), (int) (index.getAndIncrement() % numThreads));
             } else if (operationType == OperationType.DELETE) {
                 DataMap before = new DataMap();
                 if (event.getDocumentKey() != null) {
@@ -246,7 +263,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     }
 
                     recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
-                    tapEventArray[index] = recordEvent;
+                    enqueueTapEvent(recordEvent, event.getResumeToken(), (int) (index.getAndIncrement() % numThreads));
                 } else {
                     TapLogger.warn(TAG, "Document key is null, failed to delete. {}", event);
                 }
@@ -296,7 +313,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 //							recordEvent.setInfo(info);
                     recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
                     recordEvent.setIsReplaceEvent(operationType.equals(OperationType.REPLACE));
-                    tapEventArray[index] = recordEvent;
+                    enqueueTapEvent(recordEvent, event.getResumeToken(), (int) (index.getAndIncrement() % numThreads));
                 } else {
                     throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));
                 }
