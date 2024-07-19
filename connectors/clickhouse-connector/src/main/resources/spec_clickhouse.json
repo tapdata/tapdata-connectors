@@ -482,7 +482,8 @@
         "1925-01-01",
         "9999-12-31"
       ],
-      "pattern": "yyyy-MM-dd"
+      "pattern": "yyyy-MM-dd",
+      "queryOnly": true
     },
     "DateTime[($fraction)]": {
       "to": "TapDateTime",

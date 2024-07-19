@@ -31,6 +31,7 @@ import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.http.impl.client.CloseableHttpClient;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -357,6 +358,8 @@ public class DorisConnector extends CommonDbConnector {
                     entry.setValue(((LocalDateTime) value).minusHours(dorisConfig.getZoneOffsetHour()));
                 } else if (value instanceof java.sql.Date) {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
+                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().equals("largeint")) {
+                    entry.setValue(new BigDecimal((String) value));
                 }
             }
         }
