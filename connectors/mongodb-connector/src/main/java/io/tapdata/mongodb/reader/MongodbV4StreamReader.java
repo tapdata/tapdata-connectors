@@ -122,7 +122,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             ExecutorService executorService = Executors.newWorkStealingPool(numThreads);
             AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
             try (final MongoChangeStreamCursor<ChangeStreamDocument<RawBsonDocument>> streamCursor = changeStream.cursor()) {
-                new Thread(() -> {
+                Thread t = new Thread(() -> {
                     List<TapEvent> events = list();
                     while (running.get()) {
                         try {
@@ -134,10 +134,13 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                                     events = list();
                                 }
                             }
-                        } catch (InterruptedException ignored) {
+                        } catch (Exception e) {
+                            throwableAtomicReference.set(e);
                         }
                     }
-                }).start();
+                });
+                t.setName("MongodbV4StreamReader-Consumer");
+                t.start();
                 if (EmptyKit.isNotNull(throwableAtomicReference.get())) {
                     throw throwableAtomicReference.get();
                 }
@@ -177,6 +180,8 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         throw new TapPdkRetryableEx(connectorContext.getSpecification().getId(), throwable);
                     }
                 }
+
+                throw new RuntimeException(throwable);
                 //else {
                 //TapLogger.warn(TAG,"Read change stream from {}, failed {} " ,MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage());
                 //TapLogger.debug(TAG, "Read change stream from {}, failed {}, error {}", MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage(), getStackString(throwable));
