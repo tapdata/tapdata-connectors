@@ -6,20 +6,6 @@
 
 package io.debezium.connector.mysql;
 
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.OptionalLong;
-import java.util.concurrent.atomic.AtomicReference;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import io.debezium.DebeziumException;
 import io.debezium.config.CommonConnectorConfig;
 import io.debezium.config.CommonConnectorConfig.EventProcessingFailureHandlingMode;
@@ -32,6 +18,14 @@ import io.debezium.jdbc.JdbcConnection;
 import io.debezium.relational.TableId;
 import io.debezium.relational.history.DatabaseHistory;
 import io.debezium.util.Strings;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.SQLException;
+import java.time.Duration;
+import java.util.*;
 
 /**
  * {@link JdbcConnection} extension to be used with MySQL Server
@@ -237,24 +231,20 @@ public class MySqlConnection extends JdbcConnection {
      */
     public String knownGtidSet() {
         try {
-            AtomicReference<String> version = new AtomicReference<>();
-            query("select version()", rs -> {
-                if (rs.next()) {
-                    version.set(rs.getString(1));
+            String binLogStatusSql = "SHOW MASTER STATUS";
+            try (
+                    Connection connection = connection()
+            ) {
+                DatabaseMetaData databaseMetaData = connection.getMetaData();
+                String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
+                String[] versionNums = version.split("\\.");
+                if (versionNums.length >= 2) {
+                    int majorVersion = Integer.parseInt(versionNums[0]);
+                    int minorVersion = Integer.parseInt(versionNums[1]);
+                    if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
+                        binLogStatusSql = "SHOW BINARY LOG STATUS";
+                    }
                 }
-            });
-            String binLogStatusSql;
-            String[] versionNums = version.get().split("\\.");
-            if (versionNums.length >= 2) {
-                int majorVersion = Integer.parseInt(versionNums[0]);
-                int minorVersion = Integer.parseInt(versionNums[1]);
-                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
-                    binLogStatusSql = "SHOW BINARY LOG STATUS";
-                } else {
-                    binLogStatusSql = "SHOW MASTER STATUS";
-                }
-            } else {
-                binLogStatusSql = "SHOW MASTER STATUS";
             }
             return queryAndMap(binLogStatusSql, rs -> {
                 if (rs.next() && rs.getMetaData().getColumnCount() > 4) {
