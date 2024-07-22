@@ -125,18 +125,20 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     public MysqlBinlogPosition readBinlogPosition() throws Throwable {
         AtomicReference<MysqlBinlogPosition> mysqlBinlogPositionAtomicReference = new AtomicReference<>();
-        String binLogStatusSql;
-        String[] versionNums = queryVersion().split("\\.");
-        if (versionNums.length >= 2) {
-            int majorVersion = Integer.parseInt(versionNums[0]);
-            int minorVersion = Integer.parseInt(versionNums[1]);
-            if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
-                binLogStatusSql = "SHOW BINARY LOG STATUS";
-            } else {
-                binLogStatusSql = "SHOW MASTER STATUS";
+        String binLogStatusSql = "SHOW MASTER STATUS";
+        try (
+                Connection connection = getConnection()
+        ) {
+            DatabaseMetaData databaseMetaData = connection.getMetaData();
+            String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
+            String[] versionNums = version.split("\\.");
+            if (versionNums.length >= 2) {
+                int majorVersion = Integer.parseInt(versionNums[0]);
+                int minorVersion = Integer.parseInt(versionNums[1]);
+                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
+                    binLogStatusSql = "SHOW BINARY LOG STATUS";
+                }
             }
-        } else {
-            binLogStatusSql = "SHOW MASTER STATUS";
         }
         normalQuery(binLogStatusSql, rs -> {
             if (rs.next()) {
