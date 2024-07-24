@@ -19,7 +19,7 @@ public class MariadbConnector extends MysqlConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(mysqlConfig.getConnectionString());
         try (
-                MariadbTest mariadbTest = new MariadbTest(mysqlConfig, consumer)
+                MariadbTest mariadbTest = new MariadbTest(mysqlConfig, consumer,connectionOptions)
         ) {
             mariadbTest.testOneByOne();
         }

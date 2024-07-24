@@ -75,7 +75,7 @@ public class AliyunADBMySQLConnector extends MysqlConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(mysqlConfig.getConnectionString());
         try (
-                AliyunADBMySQLTest aliyunADBMySQLTest = new AliyunADBMySQLTest(mysqlConfig, consumer)
+                AliyunADBMySQLTest aliyunADBMySQLTest = new AliyunADBMySQLTest(mysqlConfig, consumer, connectionOptions)
         ) {
             aliyunADBMySQLTest.testOneByOne();
         }

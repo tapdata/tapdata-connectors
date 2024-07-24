@@ -8,6 +8,7 @@ import io.tapdata.connector.mysql.constant.MysqlTestItem;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.constant.ConnectionTypeEnum;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -36,9 +37,12 @@ public class MysqlConnectionTest extends CommonDbTest {
 
     protected boolean cdcCapability = true;
 
-    public MysqlConnectionTest(MysqlConfig mysqlConfig, Consumer<TestItem> consumer) {
+    protected ConnectionOptions connectionOptions;
+
+    public MysqlConnectionTest(MysqlConfig mysqlConfig, Consumer<TestItem> consumer,ConnectionOptions connectionOptions) {
         super(mysqlConfig, consumer);
         jdbcContext = new MysqlJdbcContextV2(mysqlConfig);
+        this.connectionOptions = connectionOptions;
         String deploymentMode = mysqlConfig.getDeploymentMode();
         if (!ConnectionTypeEnum.SOURCE.getType().equals(commonDbConfig.get__connectionType())) {
 //            testFunctionMap.put("testCreateTablePrivilege", this::testCreateTablePrivilege);
@@ -293,6 +297,17 @@ public class MysqlConnectionTest extends CommonDbTest {
         }
         consumer.accept(testItem.get());
         return cdcCapability;
+    }
+    @Override
+    public Boolean testTimeDifference(){
+        try {
+            long nowTime = jdbcContext.queryTimestamp();
+            connectionOptions.setTimeDifference(getTimeDifference(nowTime));
+        } catch (SQLException e) {
+            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
+                    "Failed to obtain current database time: " + e.getMessage() + "\n" + getStackString(e)));
+        }
+        return true;
     }
 
     public Boolean testCreateTablePrivilege() {

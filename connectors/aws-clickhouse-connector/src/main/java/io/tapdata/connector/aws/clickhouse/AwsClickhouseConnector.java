@@ -35,7 +35,7 @@ public class AwsClickhouseConnector extends ClickhouseConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         clickhouseConfig = new AwsClickhouseConfig().load(connectionContext.getConnectionConfig());
         try (
-                AwsClickhouseTest clickhouseTest = new AwsClickhouseTest(clickhouseConfig, consumer)
+                AwsClickhouseTest clickhouseTest = new AwsClickhouseTest(clickhouseConfig, consumer,connectionOptions)
         ) {
             clickhouseTest.testOneByOne();
             return connectionOptions;

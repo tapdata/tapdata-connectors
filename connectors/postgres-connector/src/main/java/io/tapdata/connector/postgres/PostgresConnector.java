@@ -89,7 +89,7 @@ public class PostgresConnector extends CommonDbConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer).initContext()
+                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer, connectionOptions).initContext()
         ) {
             postgresTest.testOneByOne();
             return connectionOptions;
@@ -313,7 +313,7 @@ public class PostgresConnector extends CommonDbConnector {
     private void initConnection(TapConnectionContext connectionContext) {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         postgresTest = new PostgresTest(postgresConfig, testItem -> {
-        }).initContext();
+        },null).initContext();
         postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;

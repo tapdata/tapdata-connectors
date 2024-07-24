@@ -2,6 +2,7 @@ package io.tapdata.mongodb;
 
 import com.alibaba.fastjson.JSONObject;
 import com.mongodb.ConnectionString;
+import com.mongodb.MongoException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
@@ -19,6 +20,7 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
+import static io.tapdata.base.ConnectorBase.getStackString;
 import static io.tapdata.base.ConnectorBase.testItem;
 
 public class MongodbTest extends CommonDbTest {
@@ -356,6 +358,17 @@ public class MongodbTest extends CommonDbTest {
             return false;
         }
         consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY));
+        return true;
+    }
+
+    public Boolean testTimeDifference(){
+        try {
+            Long nowTime = MongodbUtil.getServerTime(mongoClient, mongodbConfig.getDatabase());
+            connectionOptions.setTimeDifference(getTimeDifference(nowTime));
+        }catch (MongoException e){
+            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
+                    "Failed to obtain current database time: " + e.getMessage() + "\n" + getStackString(e)));
+        }
         return true;
     }
 

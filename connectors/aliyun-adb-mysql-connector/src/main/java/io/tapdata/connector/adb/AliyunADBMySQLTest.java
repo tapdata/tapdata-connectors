@@ -2,6 +2,7 @@ package io.tapdata.connector.adb;
 
 import io.tapdata.connector.mysql.MysqlConnectionTest;
 import io.tapdata.connector.mysql.config.MysqlConfig;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 
 import java.util.List;
@@ -9,8 +10,8 @@ import java.util.function.Consumer;
 
 public class AliyunADBMySQLTest extends MysqlConnectionTest {
 
-    public AliyunADBMySQLTest(MysqlConfig mysqlConfig, Consumer<TestItem> consumer) {
-        super(mysqlConfig, consumer);
+    public AliyunADBMySQLTest(MysqlConfig mysqlConfig, Consumer<TestItem> consumer, ConnectionOptions connectionOptions) {
+        super(mysqlConfig, consumer,connectionOptions);
         testFunctionMap.remove("testBinlogMode");
         testFunctionMap.remove("testBinlogRowImage");
         testFunctionMap.remove("testCDCPrivileges");
