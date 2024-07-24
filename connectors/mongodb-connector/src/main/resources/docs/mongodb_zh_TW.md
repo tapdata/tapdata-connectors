@@ -1,124 +1,102 @@
-## **連接配寘幫助**
-### **1. MONGODB安裝說明**
-請遵循以下說明以確保在Tapdata中成功添加和使用MongoDB資料庫。
-> **注意**:MongoDB作為源端連接時，必須是副本集。
-#### **2. 支持版本**
+## **連接配置幫助**
+MongoDB 是壹個流行的、開源 NoSQL 數據庫，以靈活/可擴展的方式存儲和檢索數據。完成 Agent 部署後，您可以跟隨本文教程在 TapData 中添加 MongoDB 數據源，後續可將其作爲源或目標庫來構建數據管道。
+> **注意**：MongoDB 作爲源端連接時，必須是副本集。
+## 支持版本
 MongoDB 3.6+
->**注意**:<br>
->由於Tapdata資料同步現時是基於MongoDB的Change Stream支持對多錶合併的操作，而MongoDB官方是從4.0版本開始支持Change Stream的，囙此，請儘量保證源端資料庫和目標端資料庫都是4.0及以上版本。
-### **3. 先決條件**
-#### **3.1作為源資料庫**
-##### **3.1.1基本配置**
--源端MongoDB支持副本集和分片集羣。
--如果源端MongoDB只有一個節點，您可以將其配寘為單成員的複製集，以開啟oplog功能。
--您應該配寘足够的oplog空間。 我們建議至少足以容納24小時的oplog。
-##### **3.1.2帳戶許可權**
-如果源端MongoDB啟用了安全身份驗證，則Tapdata用於連接源端MongoDB的使用者帳戶必須具有以下內寘角色：
-```
-clusterMonitor（讀取oplog）
-readAnyDatabase
-```
-要創建具有上述許可權的用戶，您可以參考以下示例：
-```
-use admin
-db.createUser（{
-“user”：“johndoe”，
-“pwd”：“my_password”，
-“roles”：[
-{
-“role”：“clusterMonitor”，
-“db”：“admin”
-}，
-{
-“role”：“readAnyDatabase”，
-“db”：“admin”
-}
-]
-}
-```
-如果您不希望授予` readAnyDatabase `角色，則還可以向特定的資料庫以及local和config資料庫賦予讀取許可權。 例如：
-```
-use admin
-db.createUser（{
-“user”：“johndoe”，
-“pwd”：“my_password”，
-“roles”：[
-{
-“role”：“clusterMonitor”，
-“db”：“admin”
-}，
-{
-“role”：“read”，
-“db”：“my_db”
-}，
-{
-“role”：“read”，
-“db”：“local”
-}，
-{
-“role”：“read”，
-“db”：“config”
-}
-]
-}
-```
-請注意，只有MongoDB版本3.2需要local資料庫的讀取許可權。
+>**注意**：<br>
+>由于 Tapdata 數據同步目前是基于 MongoDB 的 Change Stream 支持對多表合並的操作，而 MongoDB 官方是從 4.0 版本開始支持 Change Stream 的，因此，請盡量保證源端數據庫和目標端數據庫都是 4.0 及以上版本。
+## 功能限制
+* 源端 MongoDB 支持副本集和分片集群。
+* 支持MongoDB分片集群從節點全量和增量同步
+##  准備工作
+### 作爲源庫
+1. 保障源庫的架構爲副本集或分片集群，如果爲單節點架構，您可以將其配置爲單成員的副本集以開啓 Oplog。
+   具體操作，見[如何將單節點轉爲副本集](https://docs.mongodb.com/manual/tutorial/convert-standalone-to-replica-set/)。
+2. 配置充足的 Oplog 存儲空間，至少需要容納 24 小時的 Oplog。
+   具體操作，見[修改 Oplog 大小](https://docs.mongodb.com/manual/tutorial/change-oplog-size/)。
+3. 根據權限管控需求選擇下述步驟，創建用于數據同步/開發任務的賬號並授予權限。
+> **注意**：由于分片服務器不會向 config 數據庫獲取用戶權限，因此，當源庫爲分片集群架構時，您需要在每個分片的主節點上創建相應的用戶並授予權限。
+* 授予指定庫（以 **demodata** 庫爲例）的讀權限
+  ```bash
+  use admin
+  db.createUser(
+    {
+      user: "tapdata",
+      pwd: "my_password",
+      roles: [
+         { role: "read", db: "demodata" },
+         { role: "read", db: "local" },
+         { role: "read", db: "config" },
+         { role: "clusterMonitor", db: "admin" },
+      ]
+    }
+  )
+  ```
+
+* 授予所有庫的讀權限。
+
+     ```bash
+     use admin
+     db.createUser(
+       {
+         user: "tapdata",
+         pwd: "my_password",
+         roles: [
+            { role: "readAnyDatabase", db: "admin" },
+            { role: "clusterMonitor", db: "admin" },
+         ]
+       }
+      )
+     ```
+> **注意**：只有 MongoDB 版本 3.2 需要 local 數據庫的讀取權限。
+4. 在設置 MongoDB URI 時，推薦將寫關注級別設置爲大多數，即 `w=majority`，否則可能因 Primary 節點異常宕機導致的數據丟失文檔。
+
+5. 源庫爲集群架構時，爲提升數據同步性能，TapData 將會爲每個分片創建壹個線程並讀取數據，在配置數據同步/開發任務前，您還需要執行下述操作。
+
+  * 關閉源庫的均衡器（Balancer），避免塊遷移對數據壹致性的影響。具體操作，見[如何停止平衡器](https://docs.mongodb.com/manual/reference/method/sh.stopBalancer/)。
+  * 清除源庫中，因塊遷移失敗而産生的孤立文檔，避免 _id 沖突。具體操作，見[如何清理孤立文檔](https://docs.mongodb.com/manual/reference/command/cleanupOrphaned/)。
+
 > **重要事項**<br>
->對於集羣分片，您必須在每個分片主節點上創建適當的用戶許可權。 這是由於MongoDB的安全架構設計。
->當登入到每個單獨的分片時，分片服務器不會向config資料庫獲取用戶許可權。 相反，它將使用其本地用戶資料庫進行身份驗證和授權。
-###### 3.1.3參攷
-[​MongoDB Documentation:如何更改oplog的大小​]（ https://docs.mongodb.com/manual/tutorial/change-oplog-size/ ）<br>
-[​MongoDB Documentation:如何將單節點轉為複製集​]（ https://docs.mongodb.com/manual/tutorial/convert-standalone-to-replica-set/ ）<br>
-> **注意**<br>
->如果MongoDB URI未設定w=majority，Tapdata會使用默認的配寘w=1，表示數據寫到primary節點後就返回了。
->如果在數據從primary節點同步到secondary節點前，primary節點發生异常宕機，此時就會發生資料丟失。 囙此建議使用w=majority配寘。
-> w=majority表示只有當數據寫到大多數節點後才會返回用戶端正確寫入。
-#### **3.2. 作為目標資料庫**
-##### **3.2.1基本配置**
--目標端MongoDB支持副本集和分片集羣。
--如果您的目標端MongoDB只有一個節點，您可以將其配寘為單成員的複製集，以開啟oplog功能。
--確保為目標MongoDB配寘了足够的資源來處理源資料庫的工作負載。
-##### **3.2.2帳戶許可權**
-如果目標MongoDB啟用了安全身份驗證，則Tapdata使用的使用者帳戶必須具有以下角色/許可權：
-- `clusterMonitor`（數據驗證功能需要使用）
-- `readWrite`（作為目標資料庫需要擁有的角色）
-  要創建具有以上許可權的用戶，您可以參考以下示例：
+> 1.對于集群分片，您必須在每個分片主節點上創建適當的用戶權限。 這是由于MongoDB的安全架構設計。
+> 當登錄到每個單獨的分片時，分片服務器不會向config數據庫獲取用戶權限。 相反，它將使用其本地用戶數據庫進行身份驗證和授權。<br>
+> 2.對于MongoDB 3.x 以下版本請確保Tapdata服務與MongoDB各節點通信正常。
+### 作爲目標庫
+
+授予指定庫（以 **demodata** 庫爲例）的寫權限，並授予 **clusterMonitor** 角色以供數據驗證使用，示例如下：
+
+```bash
+use admin
+db.createUser(
+  {
+    user: "tapdata",
+    pwd: "my_password",
+    roles: [
+       { role: "readWrite", db: "demodata" },
+       { role: "clusterMonitor", db: "admin" },
+       { role: "read",db: "local"}
+    ]
+  }
+)
 ```
-> use admin
-> db.createUser（{
-“user”：“johndoe”，
-“pwd”：“my_password”，
-“roles”：[
-{
-“role”：“clusterMonitor”，
-“db”：“admin”
-}，
-{
-“role”：“readWrite”，
-“db”：“my_db”
-}，
-{
-“role”：“read”，
-“db”：“local”
-}
-]
-}
-```
-> **注意**：只有MongoDB版本3.2需要local資料庫的讀取許可權。
-### **4. 同步MongoDB集羣**
-當使用MongoDB集羣作為源庫時，Tapdata會為每個分片創建一個線程，以直接從分片主節點（或次節點）讀取數據。< br>
-為提高負載效能，我們認為有必要使用這種多執行緒並行的設計方案。 但是需要注意的是，這種方法的副作用是可能會在源集羣庫中產生孤立檔案。 孤立檔案是當MongoDB發生自動數據遷移所導致的。< br>
-要解决此問題，建議在使用MongoDB集羣作為源庫同步前，完成以下任務：<br>
-- **停止平衡器**<br>
-  有關停止平衡器的詳細說明，請參閱：<br>
-  [​MongoDB Documentation:如何停止平衡器​]（ https://docs.mongodb.com/manual/reference/method/sh.stopBalancer/ ）
-- **使用cleanOrphan命令，請參閱**<br>
-  [​MongoDB Documentation:如何清理孤兒檔案​]（ https://docs.mongodb.com/manual/reference/command/cleanupOrphaned/ ）
-### **5. MongoDB TLS/SSL配寘**
-- **啟用TLS/SSL**<br>
-  請在左側配寘頁的“使用TLS/SSL連接”中選擇“是”項進行配寘<br>
-- **設定MongoDB PemKeyFile**<br>
-  點擊“選擇檔案”，選擇證書檔案，若證書檔案有密碼保護，則在“私密金鑰密碼”中填入密碼<br>
-- **設定CAFile**<br>
-  請在左側配寘頁的“驗證服務器證書”中選擇“是”<br>
-  然後在下方的“認證授權”中點擊“選擇檔案”<br>
+> **注意**：只有 MongoDB 版本 3.2 需要 local 數據庫的讀取權限。
+### MongoDB TLS/SSL配置
+- **啓用TLS/SSL**<br>
+  請在左側配置頁的 “使用TLS/SSL連接”中選擇“是”項進行配置<br>
+- **設置MongoDB PemKeyFile**<br>
+  點擊“選擇文件”，選擇證書文件，若證書文件有密碼保護，則在“私鑰密碼”中填入密碼<br>
+- **設置CAFile**<br>
+  請在左側配置頁的 “驗證服務器證書”中選擇“是”<br>
+  然後在下方的“認證授權”中點擊“選擇文件”<br>
+### MongoDB 性能測試
+配置:ecs.u1-c1m2.2xlarge 機型, 8C 16G, 100GB ESSD 磁盤
+
+|  寫入方式   | RPS      |
+| -------- |------------|
+| 全量寫入  |    95K     |
+| 混合寫入  |    2.5k    |
+
+
+| 讀取方式 | RPS      |
+|------|------------|
+| 全量讀取 |    50k     |
+| 增量讀取 |    14k    |

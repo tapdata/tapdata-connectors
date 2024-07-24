@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
+import java.sql.SQLException;
 import java.util.Properties;
 
 import static org.mockito.Mockito.*;
@@ -156,5 +157,15 @@ public class JdbcContextTest {
                 }
             }
         }
+    }
+    @Nested
+    class QueryTimestampTest{
+        @Test
+        void test() throws SQLException {
+            JdbcContext jdbcContext = mock(JdbcContext.class);
+            doCallRealMethod().when(jdbcContext).queryTimestamp();
+            Assertions.assertThrows(UnsupportedOperationException.class, jdbcContext::queryTimestamp);
+        }
+
     }
 }

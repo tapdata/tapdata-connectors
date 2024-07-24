@@ -8,6 +8,7 @@ import com.mongodb.client.model.Sorts;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongoBatchOffset;
 import io.tapdata.mongodb.MongodbConnector;
 import io.tapdata.mongodb.MongodbExceptionCollector;
@@ -124,6 +125,9 @@ public class MongoBatchReader {
                     }
                 });
                 if (!checkAlive.getAsBoolean()) return;
+            }
+            if (EmptyKit.isNotEmpty(tapEvents.get())) {
+                tapReadOffsetConsumer.accept(tapEvents.get(), new HashMap<>());
             }
         } catch (Exception e) {
             doException(e);

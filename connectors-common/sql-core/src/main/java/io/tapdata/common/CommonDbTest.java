@@ -45,6 +45,7 @@ public class CommonDbTest implements AutoCloseable {
         if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
             testFunctionMap.put("testReadPrivilege", this::testReadPrivilege);
             testFunctionMap.put("testStreamRead", this::testStreamRead);
+            testFunctionMap.put(TestItem.ITEM_TIME_DETECTION, this::testTimeDifference);
         }
     }
 
@@ -156,6 +157,20 @@ public class CommonDbTest implements AutoCloseable {
 
     public Boolean testStreamRead() {
         return true;
+    }
+
+    public Boolean testTimeDifference(){
+        return true;
+    }
+
+    public Long getTimeDifference(Long time) {
+        long timeDifference = Math.abs(time - System.currentTimeMillis());
+        if (timeDifference > 1000) {
+            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
+                    "Time difference between engine and data source is "+ timeDifference + "ms"));
+            return timeDifference;
+        }
+        return 0L;
     }
 
     //healthCheck-ping

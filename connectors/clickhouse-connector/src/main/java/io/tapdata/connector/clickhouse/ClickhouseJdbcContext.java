@@ -8,13 +8,11 @@ import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.*;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class ClickhouseJdbcContext extends JdbcContext {
 
@@ -84,6 +82,13 @@ public class ClickhouseJdbcContext extends JdbcContext {
         return null;
     }
 
+    @Override
+    public Long queryTimestamp() throws SQLException {
+        AtomicReference<Timestamp> currentTime = new AtomicReference<>();
+        queryWithNext(CK_CURRENT_TIME, resultSet -> currentTime.set(resultSet.getTimestamp(1)));
+        return currentTime.get().getTime();
+    }
+
     public static final String DATABASE_TIMEZONE_SQL = "SELECT timeZone()";
     private final static String CK_ALL_TABLE = "select name `tableName`, comment `tableComment` from system.tables where database='%s' %s";
     private final static String CK_ALL_TABLE_20 = "select name `tableName` from system.tables where database='%s' %s";
@@ -102,4 +107,6 @@ public class ClickhouseJdbcContext extends JdbcContext {
                     "where database='%s' %s\n" +
                     "order by table,position";
     private final static String CK_TABLE_INFO = "select * from system.tables where name ='%s' and database='%s' ";
+
+    private final static String CK_CURRENT_TIME = "SELECT NOW64()";
 }

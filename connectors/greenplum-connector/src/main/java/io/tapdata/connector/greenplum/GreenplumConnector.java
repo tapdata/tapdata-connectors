@@ -161,7 +161,7 @@ public class GreenplumConnector extends PostgresConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                GreenplumTest greenplumTest = new GreenplumTest(postgresConfig, consumer)
+                GreenplumTest greenplumTest = new GreenplumTest(postgresConfig, consumer,connectionOptions)
         ) {
             greenplumTest.testOneByOne();
             return connectionOptions;
