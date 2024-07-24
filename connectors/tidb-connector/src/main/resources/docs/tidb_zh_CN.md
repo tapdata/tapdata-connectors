@@ -130,7 +130,7 @@
 
   <div style="text-align: center;"><img src="https://download.pingcap.com/images/docs/ticdc/cdc-architecture.png" alt="TiCDC的架构" /></div>
 
-  <div style="width:100%;opacity:0.95;font-size: 14px;text-align:center;">图1.2-1 TiCDC的架构</div> 
+  <div style="width:100%;opacity:0.95;font-size: 14px;text-align:center;">图3.3-1 TiCDC的架构</div> 
 
 ### ***4 同步性能***   
 
