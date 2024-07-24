@@ -14,7 +14,7 @@
  - **Full quantity + incremental (Source)**: Full data synchronization, database/table level data migration, incremental data synchronization, DMZ/DDL synchronization
  - **Data writing (Target)**: Create tables, delete tables, write data (insert/modify/delete), synchronize DDL
 
-#### 1.1 **As Target**
+#### 1.1 **As Source**
 
   - **Data source connection attribute configuration**
 
@@ -35,16 +35,18 @@
       &nbsp;&nbsp;In order to ensure the security and operational integrity of your database system, the TiDB connector as a source mainly relies on the following database permissions. You need to ensure that the database user account you provide has at least the following complete permissions for the corresponding tables in the corresponding database:
       
       - ***SELECT***：Allow user permissions to read data from the table.
-      - ***SHOW DATABASES*** ：Allow system permissions for users to view database lists.
       
     - Permission authorization:  If your user does not have the above permissions, you can refer to the following operations for user authorization under DBA user
     
       ```sql
           GRANT 
-              SELECT, SHOW DATABASES
+              SELECT
           ON <DATABASE_NAME>.<TABLE_NAME> 
           TO 'user' IDENTIFIED BY 'password';
       ```
+  - **Incremental impact content**
+     - To avoid the impact of TiCDC's garbage collection on transaction or incremental data information extraction, it is recommended to execute command ```SET GLOBAL tidb_gc_life_time= '24h'``` to set it to 24 hours or a time length that meets your business needs. Setting a longer time will allow you to read incremental data from a longer period of time. The default attribute value for this attribute in the TiDB database is: ```10m0s``` 
+
 
 #### 1.2 **As Target**
 
