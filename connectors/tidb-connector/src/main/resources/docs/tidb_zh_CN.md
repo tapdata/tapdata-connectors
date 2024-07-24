@@ -36,13 +36,12 @@
       
       - ***SELECT***：允许用户从表中读取数据的用户权限。
       - ***SHOW DATABASES*** ：允许用户查看数据库列表的系统权限。
-      - ***RELOAD***：允许用户重新加载权限、日志等系统配置的系统权限。
       
     - 权限授权： 如果您的用户不具备以上权限，您可以在DBA用户下参考下列操作进行用户授权
     
       ```sql
           GRANT 
-              SELECT, SHOW DATABASES, RELOAD 
+              SELECT, SHOW DATABASES 
           ON <DATABASE_NAME>.<TABLE_NAME> 
           TO 'user' IDENTIFIED BY 'password';
       ```

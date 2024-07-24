@@ -36,13 +36,12 @@
       
       - ***SELECT***：允許用戶從錶中讀取數據的用戶許可權。
       - ***SHOW DATABASES*** ：允許用戶查看資料庫清單的系統許可權。
-      - ***RELOAD***：允許用戶重新加載許可權、日誌等系統配寘的系統許可權。
       
     - 許可權授權：如果您的用戶不具備以上許可權，您可以在DBA用戶下參攷下列操作進行用戶授權
     
       ```sql
           GRANT 
-              SELECT, SHOW DATABASES, RELOAD 
+              SELECT, SHOW DATABASES
           ON <DATABASE_NAME>.<TABLE_NAME> 
           TO 'user' IDENTIFIED BY 'password';
       ```

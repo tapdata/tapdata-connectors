@@ -36,13 +36,12 @@
       
       - ***SELECT***：Allow user permissions to read data from the table.
       - ***SHOW DATABASES*** ：Allow system permissions for users to view database lists.
-      - ***RELOAD***：Allow users to reload system permissions, logs, and other system configurations.
       
     - Permission authorization:  If your user does not have the above permissions, you can refer to the following operations for user authorization under DBA user
     
       ```sql
           GRANT 
-              SELECT, SHOW DATABASES, RELOAD 
+              SELECT, SHOW DATABASES
           ON <DATABASE_NAME>.<TABLE_NAME> 
           TO 'user' IDENTIFIED BY 'password';
       ```
