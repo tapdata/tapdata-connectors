@@ -8,6 +8,8 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.changestream.*;
+import io.tapdata.common.concurrent.ConcurrentProcessor;
+import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -38,6 +40,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -63,7 +66,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     private DecoderContext decoderContext;
     private ConnectionString connectionString;
     private LinkedBlockingQueue<OffsetEvent>[] logQueueArray;
-
+    private ConcurrentProcessor<ChangeStreamDocument<RawBsonDocument>, OffsetEvent> concurrentProcessor;
     public MongodbV4StreamReader setPreImage(boolean isPreImage) {
         this.isPreImage = isPreImage;
         return this;
@@ -79,6 +82,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         running.compareAndSet(false, true);
         codec = new DocumentCodec();
         decoderContext = DecoderContext.builder().build();
+        concurrentProcessor = TapExecutors.createSimple(8, 32, "MongodbV4StreamReader-Processor");
         connectionString = new ConnectionString(mongodbConfig.getUri());
     }
 
@@ -114,24 +118,25 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 changeStream.fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
             }
             consumer.streamReadStarted();
-            int numThreads = 8;
-            logQueueArray = new LinkedBlockingQueue[numThreads];
-            for (int i = 0; i < numThreads; i++) {
-                logQueueArray[i] = new LinkedBlockingQueue<>(32);
-            }
-            ExecutorService executorService = Executors.newWorkStealingPool(numThreads);
             AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
             try (final MongoChangeStreamCursor<ChangeStreamDocument<RawBsonDocument>> streamCursor = changeStream.cursor()) {
                 Thread t = new Thread(() -> {
                     List<TapEvent> events = list();
+                    OffsetEvent lastOffsetEvent = null;
                     while (running.get()) {
                         try {
-                            for (int i = 0; i < numThreads; i++) {
-                                OffsetEvent event = logQueueArray[i].take();
+                            OffsetEvent event = concurrentProcessor.get(2, TimeUnit.SECONDS);
+                            if (EmptyKit.isNotNull(event)) {
+                                lastOffsetEvent = event;
                                 events.add(event.getEvent());
                                 if (events.size() >= eventBatchSize) {
                                     consumer.accept(events, event.getOffset());
-                                    events = list();
+                                    events = new ArrayList<>();
+                                }
+                            } else {
+                                if (events.size() > 0) {
+                                    consumer.accept(events, lastOffsetEvent.getOffset());
+                                    events = new ArrayList<>();
                                 }
                             }
                         } catch (Exception e) {
@@ -141,23 +146,22 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 });
                 t.setName("MongodbV4StreamReader-Consumer");
                 t.start();
-                if (EmptyKit.isNotNull(throwableAtomicReference.get())) {
-                    throw throwableAtomicReference.get();
-                }
-                AtomicLong count = new AtomicLong(0);
                 while (running.get()) {
+                    if (EmptyKit.isNotNull(throwableAtomicReference.get())) {
+                        throw throwableAtomicReference.get();
+                    }
                     ChangeStreamDocument<RawBsonDocument> event = streamCursor.tryNext();
                     if (event == null) {
-                        TapSimplify.sleep(1000);
-                    } else {
-                        executorService.submit(() -> {
-                            try {
-                                emit(event, count, numThreads);
-                            } catch (Exception e) {
-                                throwableAtomicReference.set(e);
-                            }
-                        });
+                        continue;
                     }
+                    concurrentProcessor.runAsync(event, e -> {
+                        try {
+                            return emit(e);
+                        } catch (Exception er) {
+                            throwableAtomicReference.set(er);
+                            return null;
+                        }
+                    });
                 }
             } catch (Throwable throwable) {
                 if (!running.get()) {
@@ -187,7 +191,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 //TapLogger.debug(TAG, "Read change stream from {}, failed {}, error {}", MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage(), getStackString(throwable));
                 //}
             } finally {
-                executorService.shutdown();
+                concurrentProcessor.close();
             }
         }
     }
@@ -210,23 +214,16 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         }
     }
 
-    protected void enqueueTapEvent(TapEvent tapEvent, Object offset, int index) {
-        try {
-            logQueueArray[index].put(new OffsetEvent(tapEvent, offset));
-        } catch (InterruptedException ignore) {
-        }
-    }
-
-    private void emit(ChangeStreamDocument<RawBsonDocument> event, AtomicLong index, int numThreads) {
+    private OffsetEvent emit(ChangeStreamDocument<RawBsonDocument> event) {
         MongoNamespace mongoNamespace = event.getNamespace();
-
         String collectionName = null;
         if (mongoNamespace != null) {
             collectionName = mongoNamespace.getCollectionName();
         }
         if (collectionName == null) {
-            return;
+            return null;
         }
+        OffsetEvent offsetEvent = null;
         OperationType operationType = event.getOperationType();
         ByteBuffer byteBuffer = event.getFullDocument().getByteBuffer().asNIO();
 
@@ -246,7 +243,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 after.putAll(fullDocument);
                 TapInsertRecordEvent recordEvent = insertRecordEvent(after, collectionName);
                 recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
-                enqueueTapEvent(recordEvent, event.getResumeToken(), (int) (index.getAndIncrement() % numThreads));
+                offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
             } else if (operationType == OperationType.DELETE) {
                 DataMap before = new DataMap();
                 if (event.getDocumentKey() != null) {
@@ -268,7 +265,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     }
 
                     recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
-                    enqueueTapEvent(recordEvent, event.getResumeToken(), (int) (index.getAndIncrement() % numThreads));
+                    offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
                 } else {
                     TapLogger.warn(TAG, "Document key is null, failed to delete. {}", event);
                 }
@@ -318,13 +315,13 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 //							recordEvent.setInfo(info);
                     recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
                     recordEvent.setIsReplaceEvent(operationType.equals(OperationType.REPLACE));
-                    enqueueTapEvent(recordEvent, event.getResumeToken(), (int) (index.getAndIncrement() % numThreads));
+                    offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
                 } else {
                     throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));
                 }
             }
         }
-
+        return offsetEvent;
     }
 
     @Override
