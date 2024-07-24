@@ -378,8 +378,8 @@ public class ClickhouseConnector extends CommonDbConnector {
     private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
         DataMap dataMap = clickhouseJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
-        tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("NUM_ROWS")));
-        tableInfo.setStorageSize(Long.valueOf(dataMap.getString("AVG_ROW_LEN")));
+        tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("total_rows")));
+        tableInfo.setStorageSize(Long.valueOf(dataMap.getString("total_bytes")));
         return tableInfo;
     }
 
