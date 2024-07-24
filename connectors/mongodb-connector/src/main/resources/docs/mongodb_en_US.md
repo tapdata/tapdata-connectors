@@ -1,124 +1,100 @@
 ## **Connection configuration help**
-###  **1.  MONGODB installation instructions**
-Please follow the instructions below to ensure that the MongoDB database is successfully added and used in Tapdata.
-> **Note**: MongoDB must be a replica set when it is used as the source connection.
-#### **2.  Supported versions**
+MongoDB is a popular, open source NoSQL database that stores and retrieves data in a flexible/scalable way. After completing the Agent deployment, you can follow the tutorial in this article to add the MongoDB data source in TapData, which can later be used as a source or target library to build a data pipeline.
+> **TIP**: When MongoDB is connected as the source, it must be a replica set.
+## Supported version
 MongoDB 3.6+
-> **Note**:<br>
+>**TIP**:<br>
 >Since Tapdata data synchronization is currently based on MongoDB's Change Stream, which supports multi-table merging, and MongoDB officially supports Change Stream from version 4.0, please try to ensure that the source and target databases are both version 4.0 and above.
-###  **3.  Prerequisites**
-#### **3.1 as the source database**
-##### **3.1.1 Basic configuration**
-- The source MongoDB supports replica sets and sharding clusters.
-- If the source MongoDB has only one node, you can configure it as a single-member replication set to enable the oplog function.
-- You should configure enough oplog space. We suggest that it is at least enough to accommodate 24 hours of oplog.
-##### **3.1.2 Account permissions**
-If security authentication is enabled for the source MongoDB, the user account that Tapdata uses to connect to the source MongoDB must have the following built-in roles:
+## Functional limitations
+* The source MongoDB supports replica sets and sharded clusters.
+* Supports full and incremental synchronization of slave nodes in MongoDB sharded clusters
+##  Preparation
+### As a Source Database
+1. Make sure that the schema of the source database is a replica set or a sharding cluster. If it is standalone, you can configure it as a single-member replica set to open Oplog. For more information, see [Convert a Standalone to a Replica Set](https://docs.mongodb.com/manual/tutorial/convert-standalone-to-replica-set/).
+2. To ensure sufficient storage space for the Oplog, it is important to configure it to accommodate at least 24 hours' worth of data. For detailed instructions, see [Change the Size of the Oplog](https://docs.mongodb.com/manual/tutorial/change-oplog-size/).
+3. To create an account and grant permissions according to permission management requirements, follow the necessary steps.
+> **TIP**：In shard cluster architectures, the shard server is unable to retrieve user permissions from the config database. Therefore, it is necessary to create corresponding users and grant permissions on the master nodes of each shard.
+ * Grant read role to specified database (e.g. demodata)
+      ```bash
+      use admin
+      db.createUser(
+        {
+          user: "tapdata",
+          pwd: "my_password",
+          roles: [
+             { role: "read", db: "demodata" },
+             { role: "read", db: "local" },
+             { role: "read", db: "config" },
+             { role: "clusterMonitor", db: "admin" },
+          ]
+        }
+      )
+      ```
+
+    * Grant read role to all databases.
+
+     ```bash
+     use admin
+     db.createUser(
+       {
+         user: "tapdata",
+         pwd: "my_password",
+         roles: [
+            { role: "readAnyDatabase", db: "admin" },
+            { role: "clusterMonitor", db: "admin" },
+         ]
+       }
+      )
+     ```
+> **TIP**: Only when using MongoDB version 3.2, it is necessary to grant the read role to the local database.
+4. When configuring the MongoDB URI, it is advisable to set the write concern to majority (w=majority) to mitigate the risk of data loss in the event of a primary node downtime.
+
+5. create a thread for each shard and read the data. Before configuring data synchronization/development tasks, you also need to perform the following operations.
+
+    * Turn off the Balancer to avoid the impact of chunk migration on data consistency. For more information, see [Stop the Balancer](https://docs.mongodb.com/manual/reference/method/sh.stopBalancer/).
+    * Clears the orphaned documents due to failed chunk migration to avoid _id conflicts. For more information, see [Clean Up Orphaned Documents](https://docs.mongodb.com/manual/reference/command/cleanupOrphaned/).
+
+> **IMPORTANT**<br>
+> 1. For cluster sharding, you must create appropriate user permissions on each shard master node. This is due to MongoDB's security architecture design.
+  When logging into each individual shard, the shard server does not obtain user permissions from the config database. Instead, it will use its local user database for authentication and authorization. <br>
+> 2. For versions below MongoDB 3.x, please ensure that the Tapdata service communicates normally with each MongoDB node.
+### As a Target Database
+
+Grant write role to specified database (e.g. demodata) and clusterMonitor role for data validation, e.g.:
+
+```bash
+useadmin
+db.createUser(
+  {
+    user: "tapdata",
+    pwd: "my_password",
+    roles: [
+       { role: "readWrite", db: "demodata" },
+       { role: "clusterMonitor", db: "admin" },
+       { role: "read",db: "local"}
+    ]
+  }
+)
 ```
-ClusterMonitor (read oplog)
-readAnyDatabase
-```
-To create a user with the above permissions, you can refer to the following example:
-```
-use admin
-db.createUser({
-"user" : "johndoe",
-"pwd"  : "my_password",
-"roles" : [
-{
-"role" : "clusterMonitor",
-"db" : "admin"
-},
-{
-"role" : "readAnyDatabase",
-"db" : "admin"
-}
-]
-}
-```
-If you do not want to grant the 'readAnyDatabase' role, you can also grant read permissions to specific databases and local and config databases. For example:
-```
-use admin
-db.createUser({
-"user" : "johndoe",
-"pwd"  : "my_password",
-"roles" : [
-{
-"role" : "clusterMonitor",
-"db" : "admin"
-},
-{
-"role" : "read",
-"db" : "my_db"
-}，
-{
-"role" : "read",
-"db" : "local"
-},
-{
-"role" : "read",
-"db" : "config"
-}
-]
-}
-```
-Please note that only MongoDB version 3.2 requires read access to the local database.
-> **Important matters**<br>
->For cluster sharding, you must create appropriate user permissions on each sharding master node. This is due to the security architecture design of MongoDB.
->When logging into each separate partition, the partition server will not obtain user permissions from the config database. Instead, it will use its local user database for authentication and authorization.
-###### 3.1.3 Reference
-     [MongoDB Documentation: How to change the size of oplog]（ https://docs.mongodb.com/manual/tutorial/change-oplog-size/ )<br>
-     [MongoDB Documentation: How to convert a single node into a replica set]（ https://docs.mongodb.com/manual/tutorial/convert-standalone-to-replica-set/ )<br>
-> **Note**<br>
->If MongoDB URI is not set to w=major, Tapdata will use the default configuration of w=1, which means that the data is returned after being written to the primary node.
->If the primary node goes down abnormally before the data is synchronized from the primary node to the secondary node, data loss will occur. Therefore, it is recommended to use w=major configuration.
->W=majority means that the client can only write the data correctly after it is written to most nodes.
-#### **3.2.  As target database**
-##### **3.2.1 Basic configuration**
-- MongoDB on the target side supports replica sets and sharding clusters.
-- If your target MongoDB has only one node, you can configure it as a single-member replication set to enable the oplog function.
-- Ensure that sufficient resources are configured for the target MongoDB to handle the workload of the source database.
-##### **3.2.2 Account permissions**
-If the target MongoDB has security authentication enabled, the user account used by Tapdata must have the following roles/permissions:
-- 'clusterMonitor' (data validation function needs to be used)
-- 'readWrite '(as the role of the target database)
-To create a user with the above permissions, you can refer to the following example:
-```
-> use admin
-> db.createUser({
-"user" : "johndoe",
-"pwd"  : "my_password",
-"roles" : [
-{
-"role" : "clusterMonitor",
-"db" : "admin"
-},
-{
-"role" : "readWrite",
-"db" : "my_db"
-},
-{
-"role" : "read",
-"db" : "local"
-}
-]
-}
-```
-> **Note**: Only MongoDB version 3.2 requires read access to the local database.
-### **4.  Synchronize MongoDB cluster**
-When using the MongoDB cluster as the source library, Tapdata will create a thread for each shard to read data directly from the primary node (or secondary node) of the shard< br>
-In order to improve the load performance, we think it is necessary to use this multi-thread parallel design scheme. However, it should be noted that the side effect of this method is that isolated documents may be generated in the source cluster library. Orphaned documents are caused by MongoDB's automatic data migration< br>
-To solve this problem, it is recommended to complete the following tasks before using MongoDB cluster as source database synchronization:<br>
-- **Stop balancer**<br>
-For detailed instructions on stopping the balancer, see:<br>
-[MongoDB Documentation: How to stop the balancer]（ https://docs.mongodb.com/manual/reference/method/sh.stopBalancer/ )
-- **Use the cleanOrphan command, see**<br>
-[MongoDB Documentation: How to clean up orphan documents]（ https://docs.mongodb.com/manual/reference/command/cleanupOrphaned/ )
-### **5.  MongoDB TLS/SSL configuration**
+> **TIP**: Only when using MongoDB version 3.2, it is necessary to grant the read role to the local database.
+### MongoDB TLS/SSL configuration**
 - **Enable TLS/SSL**<br>
-Please select "Yes" in "Connect using TLS/SSL" on the left configuration page to configure<br>
+  Please select "Yes" in "Connect using TLS/SSL" on the left configuration page to configure<br>
 - **Set MongoDB PemKeyFile**<br>
-Click "Select File" and select the certificate file. If the certificate file is password protected, fill in the password in "Private Key Password"<br>
+  Click "Select File" and select the certificate file. If the certificate file is password protected, fill in the password in "Private Key Password"<br>
 - **Set CAFile**<br>
-Please select "Yes" in "Validate server certificate" on the left configuration page<br>
-Then click "Select File" in "Authentication and Authorization" below<br>
+  Please select "Yes" in "Validate server certificate" on the left configuration page<br>
+  Then click "Select File" in "Authentication and Authorization" below<br>
+### MongoDB performance test
+Configuration: ecs.u1-c1m2.2xlarge model, 8C 16G, 100GB ESSD disk
+
+| Writing method | RPS |
+|-------- |------------|
+| Full write | 95K |
+| Mixed writing | 2.5k |
+
+
+| Reading method | RPS |
+|------|------------|
+| Full read | 50k |
+| Incremental read | 14k |
