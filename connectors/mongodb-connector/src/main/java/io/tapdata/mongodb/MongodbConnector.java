@@ -125,6 +125,20 @@ public class MongodbConnector extends ConnectorBase {
 		return collection;
 	}
 
+	protected MongoCollection<RawBsonDocument> getMongoRawCollection(String table) {
+		MongoCollection<RawBsonDocument> collection = null;
+		try {
+			collection = mongoDatabase.getCollection(table, RawBsonDocument.class);
+		}catch (Exception e){
+			exceptionCollector.collectTerminateByServer(e);
+			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
+			exceptionCollector.collectReadPrivileges(e);
+			exceptionCollector.collectWritePrivileges(e);
+			throw e;
+		}
+		return collection;
+	}
+
 	/**
 	 * The method invocation life circle is below,
 	 * initiated -> discoverSchema -> destroy -> ended
@@ -1507,7 +1521,7 @@ public class MongodbConnector extends ConnectorBase {
 				.withMongodbConfig(mongoConfig)
 				.withBatchOffset(batchOffset)
 				.withMongodbExceptionCollector(exceptionCollector)
-				.withMongoCollection(this::getMongoCollection)
+				.withMongoRawCollection(this::getMongoRawCollection)
 				.withErrorHandler(e -> errorHandle(e, connectorContext));
 		MongoBatchReader.of(param).batchReadCollection(param);
 	}

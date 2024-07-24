@@ -42,7 +42,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -176,7 +175,13 @@ public class ClickhouseConnector extends CommonDbConnector {
             else return 0;
         });
 
-        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss.SS"));
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> {
+            if (clickhouseConfig.getOldVersionTimezone()) {
+                return formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss.SS");
+            } else {
+                return formatTapDateTimeV2(tapTimeValue.getValue(), "HH:mm:ss.SS");
+            }
+        });
         codecRegistry.registerFromTapValue(TapYearValue.class, "char(4)", TapValue::getOriginValue);
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "String", tapValue -> {
             if (tapValue != null && tapValue.getValue() != null)
@@ -363,7 +368,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         clickhouseConfig = new ClickhouseConfig().load(connectionContext.getConnectionConfig());
         try (
-                ClickhouseTest clickhouseTest = new ClickhouseTest(clickhouseConfig, consumer)
+                ClickhouseTest clickhouseTest = new ClickhouseTest(clickhouseConfig, consumer,connectionOptions)
         ) {
             clickhouseTest.testOneByOne();
             return connectionOptions;

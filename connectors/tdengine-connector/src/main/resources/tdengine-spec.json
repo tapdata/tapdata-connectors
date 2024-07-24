@@ -132,7 +132,7 @@
           "x-index": 11,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {

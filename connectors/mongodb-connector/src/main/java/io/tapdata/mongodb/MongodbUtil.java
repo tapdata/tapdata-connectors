@@ -51,6 +51,7 @@ public class MongodbUtil {
 	private final static String BUILDINFO = "buildinfo";
 	private final static String VERSION = "version";
 	private final static String COLL_STATS = "collStats";
+	private final static String SERVER_STATUS = "serverStatus";
 
 	public static int getVersion(MongoClient mongoClient, String database) {
 		int versionNum = 0;
@@ -67,6 +68,13 @@ public class MongodbUtil {
 		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
 		Document buildinfo = mongoDatabase.runCommand(new BsonDocument(BUILDINFO, new BsonString("")));
 		return buildinfo.get(VERSION).toString();
+	}
+
+	public static Long getServerTime(MongoClient mongoClient, String database) {
+		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
+		Document document = mongoDatabase.runCommand(new BsonDocument(SERVER_STATUS, new BsonInt32(1)));
+		Date date = (Date) document.get("localTime");
+		return date.getTime();
 	}
 
 	public static Map<String, Object> getCollectionStatus(MongoClient mongoClient, String database, String collectionName) {

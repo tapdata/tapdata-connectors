@@ -7,8 +7,11 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.*;
+import io.tapdata.entity.utils.DataMap;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import org.junit.jupiter.api.Assertions;
@@ -180,6 +183,19 @@ public class PostgresConnectorTest {
             tapTable.add(new TapField("TITLE", "VARCHAR(64)"));
 
             assertNotNull(connector.getHashSplitStringSql(tapTable));
+        }
+    }
+    @Nested
+    class ConnectionTest{
+        @Test
+        void test_main(){
+            PostgresConnector postgresConnector = new PostgresConnector();
+            TapConnectionContext connectionContext = mock(TapConnectionContext.class);
+            Consumer<TestItem> consumer = testItem -> {
+            };
+            when(connectionContext.getConnectionConfig()).thenReturn(new DataMap());
+            Assertions.assertThrows(IllegalArgumentException.class,()->postgresConnector.connectionTest(connectionContext,consumer));
+
         }
     }
 }

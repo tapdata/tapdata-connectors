@@ -52,6 +52,7 @@ import java.sql.Date;
 import java.sql.*;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -88,7 +89,7 @@ public class PostgresConnector extends CommonDbConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer).initContext()
+                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer, connectionOptions).initContext()
         ) {
             postgresTest.testOneByOne();
             return connectionOptions;
@@ -180,8 +181,10 @@ public class PostgresConnector extends CommonDbConnector {
         });
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> {
-            if (postgresConfig.getOldVersionTimezone() || EmptyKit.isNotNull(tapTimeValue.getValue().getTimeZone())) {
+            if (postgresConfig.getOldVersionTimezone()) {
                 return tapTimeValue.getValue().toTime();
+            } else if (EmptyKit.isNotNull(tapTimeValue.getValue().getTimeZone())) {
+                return tapTimeValue.getValue().toInstant().atZone(ZoneId.systemDefault()).toLocalTime();
             } else {
                 return tapTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalTime();
             }
@@ -310,7 +313,7 @@ public class PostgresConnector extends CommonDbConnector {
     private void initConnection(TapConnectionContext connectionContext) {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         postgresTest = new PostgresTest(postgresConfig, testItem -> {
-        }).initContext();
+        },null).initContext();
         postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;
@@ -407,10 +410,26 @@ public class PostgresConnector extends CommonDbConnector {
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
         if (canCdc) {
+            if ("pgoutput".equals(postgresConfig.getLogPluginName()) && postgresVersion.compareTo("100000") > 0) {
+                createPublicationIfNotExist();
+            }
             testReplicateIdentity(connectorContext.getTableMap());
             buildSlot(connectorContext, false);
         }
         return new PostgresOffset();
+    }
+
+    private void createPublicationIfNotExist() throws SQLException {
+        String publicationName = postgresConfig.getPartitionRoot() ? "dbz_publication_root" : "dbz_publication";
+        AtomicBoolean needCreate = new AtomicBoolean(false);
+        postgresJdbcContext.queryWithNext(String.format("SELECT COUNT(1) FROM pg_publication WHERE pubname = '%s'", publicationName), resultSet -> {
+            if (resultSet.getInt(1) <= 0) {
+                needCreate.set(true);
+            }
+        });
+        if (needCreate.get()) {
+            postgresJdbcContext.execute(String.format("CREATE PUBLICATION %s FOR ALL TABLES %s", publicationName, postgresConfig.getPartitionRoot() ? "WITH (publish_via_partition_root = true)" : ""));
+        }
     }
 
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
@@ -498,7 +517,7 @@ public class PostgresConnector extends CommonDbConnector {
                     if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
                         entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
                     } else {
-                        entry.setValue(((Timestamp) value).toLocalDateTime().atZone(ZoneId.systemDefault()));
+                        entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
                     }
                 } else if (value instanceof Date) {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
@@ -509,7 +528,7 @@ public class PostgresConnector extends CommonDbConnector {
                     if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
                         entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
                     } else {
-                        entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()));
+                        entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneOffset.UTC));
                     }
                 }
             }

@@ -160,7 +160,7 @@
               "x-index": 90,
               "enum": [
                 {
-                  "label": "Database Timezone",
+                  "label": "",
                   "value": ""
                 },
                 {
@@ -340,6 +340,27 @@
               }
             }
           ]
+        },
+        "partitionRoot": {
+          "type": "boolean",
+          "title": "${partitionRoot}",
+          "default": false,
+          "x-index": 15,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${partitionRootTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -368,7 +389,9 @@
       "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded",
       "hashSplit": "Hash split",
       "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the hash value, suitable for large table full-stage sharded synchronization",
-      "maxSplit": "Maximum number of splits"
+      "maxSplit": "Maximum number of splits",
+      "partitionRoot": "Partition table CDC root table",
+      "partitionRootTooltip": "Only postgres-v13 and above and log plugin pgoutput are supported. When the switch is turned on, the partition table CDC event only perceives the root table, and when the switch is turned off, only perceives each sub-table"
     },
     "zh_CN": {
       "doc": "docs/postgres_zh_CN.md",
@@ -392,7 +415,9 @@
       "closeNotNullTooltip": "开关打开时会将非空限制丢弃",
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "开关打开时，可以根据哈希值进行分片，适用于大表全量阶段分片同步",
-      "maxSplit": "最大分片数"
+      "maxSplit": "最大分片数",
+      "partitionRoot": "分区表CDC根表",
+      "partitionRootTooltip": "仅postgres-v13以上且日志插件pgoutput时才支持，开关打开时，分区表CDC事件仅感知根表，关闭时，仅感知各子表"
     },
     "zh_TW": {
       "doc": "docs/postgres_zh_TW.md",
@@ -416,7 +441,9 @@
       "closeNotNullTooltip": "開關打開時會將非空限制丟棄",
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "開關打開時，可以根據哈希值進行分片，適用於大表全量階段分片同步",
-      "maxSplit": "最大分片數"
+      "maxSplit": "最大分片數",
+      "partitionRoot": "分區表CDC根表",
+      "partitionRootTooltip": "僅postgres-v13以上且日誌插件pgoutput時才支持，開關打開時，分區表CDC事件僅感知根表，關閉時，僅感知各子表"
     }
   },
   "dataTypes": {

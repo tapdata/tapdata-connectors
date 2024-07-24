@@ -109,6 +109,14 @@ public class PostgresDebeziumConfig {
         if (Boolean.TRUE.equals(postgresConfig.getDoubleActive())) {
             builder.with("provide.transaction.metadata", true);
         }
+        if ("pgoutput".equals(postgresConfig.getLogPluginName())) {
+            builder.with("publication.autocreate.mode", "disabled");
+            if (postgresConfig.getPartitionRoot()) {
+                builder.with("publication.name", "dbz_publication_root");
+            } else {
+                builder.with("publication.name", "dbz_publication");
+            }
+        }
         if (EmptyKit.isNotEmpty(observedTableList)) {
             //construct tableWhiteList with schema.table(,) as <public.Student,postgres.test>
             String tableWhiteList = observedTableList.stream().map(v -> postgresConfig.getSchema() + "." + v).collect(Collectors.joining(", "));

@@ -19,6 +19,7 @@ import io.tapdata.connector.mysql.entity.MysqlStreamOffset;
 import io.tapdata.connector.mysql.util.MysqlBinlogPositionUtil;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.mysql.util.StringCompressUtil;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.ddl.TapDDLUnknownEvent;
@@ -56,9 +57,28 @@ import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.sql.ResultSetMetaData;
-import java.time.*;
-import java.util.*;
-import java.util.concurrent.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -396,37 +416,51 @@ public class MysqlReader implements Closeable {
         return mysqlStreamOffset;
     }
 
-    private void initMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
-        KVMap<Object> stateMap = tapConnectorContext.getStateMap();
-        Object mysqlSchemaHistory = stateMap.get(MYSQL_SCHEMA_HISTORY);
-        if (mysqlSchemaHistory instanceof String) {
-            try {
-                mysqlSchemaHistory = StringCompressUtil.uncompress((String) mysqlSchemaHistory);
-            } catch (IOException e) {
-                throw new RuntimeException("Uncompress Mysql schema history failed, string: " + mysqlSchemaHistory, e);
+    protected void initMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
+        // block init cdc schema by a lock, because mysqlSchemaHistory(string) may too long,
+        //   memory size may over 1G and cause engine OOM when start tasks sync
+        tapLogger.debug("Mysql init/save cdc schema lock, {}", System.currentTimeMillis());
+        try {
+            synchronized (MysqlReader.class) {
+                KVMap<Object> stateMap = tapConnectorContext.getStateMap();
+                Object mysqlSchemaHistory = stateMap.get(MYSQL_SCHEMA_HISTORY);
+                if (mysqlSchemaHistory instanceof String) {
+                    try {
+                        mysqlSchemaHistory = StringCompressUtil.uncompress((String) mysqlSchemaHistory);
+                    } catch (IOException e) {
+                        throw new CoreException("Uncompress Mysql schema history failed, message: {}, string: {}", e.getMessage(), (((String) mysqlSchemaHistory).length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : mysqlSchemaHistory), e);
+                    }
+                    mysqlSchemaHistory = InstanceFactory.instance(JsonParser.class).fromJson((String) mysqlSchemaHistory,
+                            new TypeHolder<Map<String, LinkedHashSet<String>>>() {
+                            });
+                    MysqlSchemaHistoryTransfer.historyMap.putAll((Map) mysqlSchemaHistory);
+                }
             }
-            mysqlSchemaHistory = InstanceFactory.instance(JsonParser.class).fromJson((String) mysqlSchemaHistory,
-                    new TypeHolder<Map<String, LinkedHashSet<String>>>() {
-                    });
-            MysqlSchemaHistoryTransfer.historyMap.putAll((Map) mysqlSchemaHistory);
+        } finally {
+            tapLogger.debug("Mysql init/save cdc schema unlock, {}", System.currentTimeMillis());
         }
     }
 
-    private void saveMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
-        tapConnectorContext.configContext();
-        Thread.currentThread().setName("Save-Mysql-Schema-History-" + serverName);
-        if (!MysqlSchemaHistoryTransfer.isSave()) {
-            MysqlSchemaHistoryTransfer.executeWithLock(n -> !isAlive.get(), () -> {
-                String json = InstanceFactory.instance(JsonParser.class).toJson(MysqlSchemaHistoryTransfer.historyMap);
-                try {
-                    json = StringCompressUtil.compress(json);
-                } catch (IOException e) {
-                    tapLogger.warn("Compress Mysql schema history failed, string: " + json + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
-                    return;
-                }
-                tapConnectorContext.getStateMap().put(MYSQL_SCHEMA_HISTORY, json);
-                MysqlSchemaHistoryTransfer.save();
-            });
+    protected void saveMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
+        tapLogger.debug("Mysql save/init cdc schema lock, {}", System.currentTimeMillis());
+        try {
+            tapConnectorContext.configContext();
+            Thread.currentThread().setName("Save-Mysql-Schema-History-" + serverName);
+            if (!MysqlSchemaHistoryTransfer.isSave()) {
+                MysqlSchemaHistoryTransfer.executeWithLock(n -> !isAlive.get(), () -> {
+                    String json = InstanceFactory.instance(JsonParser.class).toJson(MysqlSchemaHistoryTransfer.historyMap);
+                    try {
+                        json = StringCompressUtil.compress(json);
+                    } catch (IOException e) {
+                        tapLogger.warn("Compress Mysql schema history failed, string: " +(json.length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : json) + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
+                        return;
+                    }
+                    tapConnectorContext.getStateMap().put(MYSQL_SCHEMA_HISTORY, json);
+                    MysqlSchemaHistoryTransfer.save();
+                });
+            }
+        } finally {
+            tapLogger.debug("Mysql save/init cdc schema unlock, {}", System.currentTimeMillis());
         }
     }
 
@@ -730,13 +764,17 @@ public class MysqlReader implements Closeable {
             if (value instanceof ByteBuffer) {
                 value = ((ByteBuffer) value).array();
             }
-            value = handleDatetime(table, fieldName, value);
+            if (mysqlConfig.getOldVersionTimezone()) {
+                value = handleDatetimeWithOldVersion(table, fieldName, value);
+            } else {
+                value = handleDatetime(table, fieldName, value);
+            }
             result.put(fieldName, value);
         }
         return result;
     }
 
-    private Object handleDatetime(String table, String fieldName, Object value) {
+    protected Object handleDatetime(String table, String fieldName, Object value) {
         TapTable tapTable = tapTableMap.get(table);
         if (null == tapTable) return value;
         if (null == tapTable.getNameFieldMap()) {
@@ -754,10 +792,45 @@ public class MysqlReader implements Closeable {
                     value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
                 }
             } else if (value instanceof String) {
-                value = Instant.parse((CharSequence) value).atZone(dbTimeZone.toZoneId());
+                value = Instant.parse((CharSequence) value).atZone(dbTimeZone.toZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC);
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
             value = (Integer) value * 24 * 60 * 60 * 1000L;
+        }
+        return value;
+    }
+
+    private Object handleDatetimeWithOldVersion(String table, String fieldName, Object value) {
+        TapTable tapTable = tapTableMap.get(table);
+        if (null == tapTable) return value;
+        if (null == tapTable.getNameFieldMap()) {
+            return value;
+        }
+        TapField tapField = tapTable.getNameFieldMap().get(fieldName);
+        if (null == tapField) return value;
+        TapType tapType = tapField.getTapType();
+        LocalDateTime dt = LocalDateTime.now();
+        ZonedDateTime fromZonedDateTime = dt.atZone(TimeZone.getDefault().toZoneId());
+        ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
+        long diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
+        if (tapType instanceof TapDateTime) {
+            int fraction = ((TapDateTime) tapType).getFraction();
+            if (value instanceof Long) {
+                if (fraction > 3) {
+                    value = ((Long) value + diff * 1000) / (long) Math.pow(10, 6 - fraction);
+                } else {
+                    value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
+                }
+            } else if (value instanceof String) {
+                try {
+                    Instant instant = Instant.parse((CharSequence) value);
+                    long milliOffset = timeZone.getRawOffset() + diff;
+                    value = instant.getEpochSecond() * (long) Math.pow(10, fraction) + instant.getNano() / (long) Math.pow(10, 9 - fraction) + (long) (milliOffset * Math.pow(10, fraction - 3));
+                } catch (Exception ignored) {
+                }
+            }
+        } else if (tapType instanceof TapDate && (value instanceof Integer)) {
+            value = (Integer) value * 24 * 60 * 60 * 1000L + diff;
         }
         return value;
     }

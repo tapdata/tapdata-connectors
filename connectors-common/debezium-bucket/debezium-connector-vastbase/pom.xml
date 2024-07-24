@@ -8,7 +8,7 @@
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>debezium-connector-vastbase</artifactId>
-    <name>Debezium Connector for PostgreSQL</name>
+    <name>Debezium Connector for vastbase</name>
     <packaging>jar</packaging>
     <properties>
         <!-- 

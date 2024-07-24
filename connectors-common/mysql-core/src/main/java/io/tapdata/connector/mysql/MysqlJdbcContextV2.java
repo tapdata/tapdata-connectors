@@ -125,7 +125,22 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     public MysqlBinlogPosition readBinlogPosition() throws Throwable {
         AtomicReference<MysqlBinlogPosition> mysqlBinlogPositionAtomicReference = new AtomicReference<>();
-        normalQuery("SHOW MASTER STATUS", rs -> {
+        String binLogStatusSql = "SHOW MASTER STATUS";
+        try (
+                Connection connection = getConnection()
+        ) {
+            DatabaseMetaData databaseMetaData = connection.getMetaData();
+            String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
+            String[] versionNums = version.split("\\.");
+            if (versionNums.length >= 2) {
+                int majorVersion = Integer.parseInt(versionNums[0]);
+                int minorVersion = Integer.parseInt(versionNums[1]);
+                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
+                    binLogStatusSql = "SHOW BINARY LOG STATUS";
+                }
+            }
+        }
+        normalQuery(binLogStatusSql, rs -> {
             if (rs.next()) {
                 String binlogFilename = rs.getString(1);
                 long binlogPosition = rs.getLong(2);
@@ -156,6 +171,12 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     public Timestamp queryCurrentTime() throws SQLException {
         AtomicReference<Timestamp> currentTime = new AtomicReference<>();
         queryWithNext(MYSQL_CURRENT_TIME, resultSet -> currentTime.set(resultSet.getTimestamp(1)));
+        return currentTime.get();
+    }
+    @Override
+    public Long queryTimestamp() throws SQLException {
+        AtomicReference<Long> currentTime = new AtomicReference<>();
+        queryWithNext(MYSQL_TIMESTAMP, resultSet -> currentTime.set(resultSet.getLong(1)));
         return currentTime.get();
     }
 
@@ -240,6 +261,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     private final static String MYSQL_VERSION = "SELECT VERSION()";
     private final static String MYSQL_CURRENT_TIME = "SELECT NOW();";
+    private final static String MYSQL_TIMESTAMP = "SELECT REPLACE(unix_timestamp(NOW(3)),'.','') AS currentTimeMillis";
 
     public final static String MYSQL_TIMEZONE = "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()) as timeoffset";
 

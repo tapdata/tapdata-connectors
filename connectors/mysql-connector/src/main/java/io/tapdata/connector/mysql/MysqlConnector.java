@@ -495,7 +495,7 @@ public class MysqlConnector extends CommonDbConnector {
                         if (mysqlConfig.getOldVersionTimezone()) {
                             data.put(columnName, resultSet.getString(i + 1));
                         } else if (value instanceof java.sql.Date) {
-                            data.put(columnName, ((java.sql.Date) value).toLocalDate());
+                            data.put(columnName, ((java.sql.Date) value).toLocalDate().atStartOfDay());
                         } else {
                             data.put(columnName, value);
                         }
@@ -664,7 +664,7 @@ public class MysqlConnector extends CommonDbConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(mysqlConfig.getConnectionString());
         try (
-                MysqlConnectionTest mysqlConnectionTest = new MysqlConnectionTest(mysqlConfig, consumer)
+                MysqlConnectionTest mysqlConnectionTest = new MysqlConnectionTest(mysqlConfig, consumer,connectionOptions)
         ) {
             mysqlConnectionTest.testOneByOne();
         }
