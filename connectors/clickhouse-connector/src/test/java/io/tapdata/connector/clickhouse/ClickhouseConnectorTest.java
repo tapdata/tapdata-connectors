@@ -1,6 +1,7 @@
 package io.tapdata.connector.clickhouse;
 
 import com.zaxxer.hikari.pool.HikariPool;
+import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.connector.clickhouse.config.ClickhouseConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.utils.DataMap;
