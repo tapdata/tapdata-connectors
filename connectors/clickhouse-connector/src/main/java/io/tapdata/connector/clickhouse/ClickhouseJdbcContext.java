@@ -52,8 +52,8 @@ public class ClickhouseJdbcContext extends JdbcContext {
     public DataMap getTableInfo(String tableName) {
         DataMap dataMap = DataMap.create();
         List<String> list = new ArrayList<>();
-        list.add("NUM_ROWS");
-        list.add("AVG_ROW_LEN");
+        list.add("total_rows");
+        list.add("total_bytes");
         try {
             query(String.format(CK_TABLE_INFO, tableName, getConfig().getDatabase()), resultSet -> {
                 while (resultSet.next()) {
