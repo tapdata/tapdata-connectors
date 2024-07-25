@@ -6,7 +6,6 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.Sorts;
 import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongoBatchOffset;
@@ -31,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
@@ -126,13 +126,20 @@ public class MongoBatchReader {
                 });
                 if (!checkAlive.getAsBoolean()) return;
             }
+            executorService.shutdown();
+            //等待所有线程执行完毕
+            while (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
+                if (!checkAlive.getAsBoolean()) return;
+            }
             if (EmptyKit.isNotEmpty(tapEvents.get())) {
                 tapReadOffsetConsumer.accept(tapEvents.get(), new HashMap<>());
             }
         } catch (Exception e) {
             doException(e);
         } finally {
-            executorService.shutdown();
+            if (!executorService.isShutdown()) {
+                executorService.shutdown();
+            }
         }
     }
 
