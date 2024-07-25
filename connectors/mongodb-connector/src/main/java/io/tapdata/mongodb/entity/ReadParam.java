@@ -1,5 +1,6 @@
 package io.tapdata.mongodb.entity;
 
+import com.mongodb.client.MongoClient;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.mongodb.MongoBatchOffset;
@@ -77,6 +78,11 @@ public class ReadParam {
         this.checkAlive = checkAlive;
         return this;
     }
+    MongoClient mongoClient;
+    public ReadParam withMongoClient(MongoClient mongoClient) {
+        this.mongoClient = mongoClient;
+        return this;
+    }
 
     public TapConnectorContext getConnectorContext() {
         return connectorContext;
@@ -124,5 +130,9 @@ public class ReadParam {
 
     public BooleanSupplier getCheckAlive() {
         return checkAlive;
+    }
+
+    public MongoClient getMongoClient() {
+        return mongoClient;
     }
 }
