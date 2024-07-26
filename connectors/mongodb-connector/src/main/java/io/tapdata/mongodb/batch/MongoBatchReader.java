@@ -4,7 +4,6 @@ import com.mongodb.MongoInterruptedException;
 import com.mongodb.client.*;
 import com.mongodb.client.model.Sorts;
 import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongoBatchOffset;
@@ -26,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -85,6 +85,7 @@ public class MongoBatchReader {
         MongoCollection<RawBsonDocument> collection = param.getRawCollection().collectRawCollection(table.getId());
         FindIterable<RawBsonDocument> findIterable;
         final int batchSize = eventBatchSize > 0 ? eventBatchSize : DEFAULT_BATCH_SIZE;
+        findIterable = collection.find().batchSize(batchSize);
 //        if (offset == null) {
 //            findIterable = collection.find().sort(sort).batchSize(batchSize);
 //        } else {
@@ -137,6 +138,7 @@ public class MongoBatchReader {
         AtomicReference<List<TapEvent>> tapEvents = new AtomicReference<>(list());
         DocumentCodec codec = new DocumentCodec();
         DecoderContext decoderContext = DecoderContext.builder().build();
+        FindIterable<RawBsonDocument> findIterable = findIterable(param);
         int numThreads = 8;
         ExecutorService executorService = Executors.newWorkStealingPool(numThreads);
         try (MongoCursor<RawBsonDocument> mongoCursor = findIterable.iterator()) {
@@ -150,13 +152,20 @@ public class MongoBatchReader {
                 });
                 if (!checkAlive.getAsBoolean()) return;
             }
+            executorService.shutdown();
+            //等待所有线程执行完毕
+            while (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
+                if (!checkAlive.getAsBoolean()) return;
+            }
             if (EmptyKit.isNotEmpty(tapEvents.get())) {
                 tapReadOffsetConsumer.accept(tapEvents.get(), new HashMap<>());
             }
         } catch (Exception e) {
             doException(e);
         } finally {
-            executorService.shutdown();
+            if (!executorService.isShutdown()) {
+                executorService.shutdown();
+            }
         }
     }
 

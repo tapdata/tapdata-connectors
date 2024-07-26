@@ -15,7 +15,6 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
@@ -37,12 +36,8 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static io.tapdata.base.ConnectorBase.*;
@@ -65,8 +60,8 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     private DocumentCodec codec;
     private DecoderContext decoderContext;
     private ConnectionString connectionString;
-    private LinkedBlockingQueue<OffsetEvent>[] logQueueArray;
     private ConcurrentProcessor<ChangeStreamDocument<RawBsonDocument>, OffsetEvent> concurrentProcessor;
+
     public MongodbV4StreamReader setPreImage(boolean isPreImage) {
         this.isPreImage = isPreImage;
         return this;
