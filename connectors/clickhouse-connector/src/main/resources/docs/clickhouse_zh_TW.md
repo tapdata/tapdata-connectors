@@ -2,7 +2,7 @@
 ### ClickHouse安裝說明
 請遵循以下說明以確保在 Tapdata 中成功添加和使用ClickHouse數據庫。
 ### 支持版本
-Clickhouse 20.x, 21.x，22.x,23.x
+Clickhouse 20.x, 21.x 22.x, 23.x ,24.x
 ### 功能限制
 - 目前clickhouse 作爲源時，僅支持輪訓字段增量同步方式
 ### 先決條件
@@ -61,16 +61,14 @@ grant select on default.* to user
   ```
   - 其中adminUser 和 user 分別爲新創建的授權賬號名與用於數據複製/轉換的用戶名
   - password 爲用戶密碼
-#### 注意事項
-- ClickHouse不支持binary相關的字段類型，如果您的源表中有相關類型的字段，目標會將binary相關字段轉成Base64字符串寫入
+### 支持數據類型
+- FixedString、String、UUID、Int8、UInt8、Int16、UInt16、Int32、UInt32、Int64、UInt64、Int128、UInt128、Int256、UInt256、Float32、Float64、Decimal、Date、Date32、DateTime、DateTime64、Enum8、Enum16、Array、Tuple
 ### 使用幫助
 - 當ClickHouse作爲目標時，節點配置中--&gt;高級配置--&gt;數據源專屬配置--&gt;合併分區間隔(分鐘)配置選項可以配置ClickHouse的Optimize Table的間隔，您可以根據業務需求自定義Optimize Table間隔。
 ### 性能測試
 - 環境說明
-  - 本次測試中，Tapdata的部署環境爲12C96G，ClickHouse使用docker 部署，分配的資源爲8C48G
-  - 測試任務的源使用Tapdata 的模擬數據源模擬1000w數據對ClickHouse進行寫入。目標開啓4線程併發寫入，每批次寫入條數爲20000
-    ##### 測試結果
-    | 同步写入条数   | 同步耗时 |   平均QPS |
-        | :------------- | :----------: | ------------: |
-    | 1000w |   9s   | 11w/s |
-    | 5000w        |    6min24s     |         13w/s |
+  - TapData 版本: v3.7.0, 其中 16GB 分配給引擎, 8GB 分配給管理端; 元數據庫通過 --wiredTigerCacheSizeGB 限定內存, 4GB 分配給元數據庫
+  - ClickHouse 數據庫: ecs.u1-c1m2.2xlarge 機型, 8C 16G, 100GB ESSD 磁盤,版本爲24.5.3.5
+  ##### 測試結果
+  1. ClickHouse 全量寫入 : 將 10,000,000 1KB 數據從 Dummy 數據庫 同步到 ClickHouse,平均RPS 爲250K
+  2. ClickHouse 全量讀取 RPS: 將 10,000,000 1KB 數據從 ClickHouse 同步到 Dummy 數據庫，平均RPS 爲130K

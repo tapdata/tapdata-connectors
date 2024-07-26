@@ -2,9 +2,9 @@
 ### ClickHouse Installation Instructions
 Follow these instructions to ensure that the ClickHouse database is added and used successfully in Tapdata.
 ### Supported versions
-Clickhouse 20.x, 21.x，22.x,23.x
+Clickhouse 20.x, 21.x 22.x, 23.x ,24.x
 ### Functional limitations
-- Currently clickhouse only supports incremental field synchronization
+- Currently, clickhouse only supports incremental field synchronization
 ### Prerequisites
 #### as source
 Log in to the clickhouse database and run the following command format to create an account for your sync/dev tasks.
@@ -55,16 +55,14 @@ CREATE USER user IDENTIFIED WITH plaintext_password BY 'password';
     ```
   - Where adminUser and user are the name of the newly created authorized account and the username used for data replication/conversion, respectively
   -password is the user's password
-#### Notes
-- ClickHouse does not support a binary-dependent field type. If you have a field of that type in your source table, the target will convert the binary-dependent field to a Base64 string
+### Supported data types
+- FixedString、String、UUID、Int8、UInt8、Int16、UInt16、Int32、UInt32、Int64、UInt64、Int128、UInt128、Int256、UInt256、Float32、Float64、Decimal、Date、Date32、DateTime、DateTime64、Enum8、Enum16、Array、Tuple
 #### Help
 - When ClickHouse is the target, the node configuration is --&gt; Advanced configuration --&gt; Data source specific configuration -&gt; The Merge Partition Interval (minutes) configuration option allows you to configure ClickHouse's Optimize Table interval, which you can customize according to your business needs.
 #### Performance testing
 - Environment description
-  -In this test, the deployment environment of Tapdata is 12C96G, and ClickHouse is deployed using docker with 8C48G allocated resources
-  -The source of the test task uses Tapdata's mock data source to simulate 1000w data writes to ClickHouse. The target starts 4-threaded concurrent writes with batches of 20,000
+  - TapData version: v3.7.0, where 16GB is allocated to the engine and 8GB is allocated to the management side; The metadata database is memory limited by --wiredTigerCacheSizeGB, and 4GB is allocated to the metadata database
+  - ClickHouse database: ecs.u1-c1m2.2xlarge model, 8C 16G, 100GB ESSD disk, version 24.5.3.5
   ##### Test results
-  | 同步写入条数   | 同步耗时 |   平均QPS |
-      | :------------- | :----------: | ------------: |
-  | 1000w |   9s   | 11w/s |
-  | 5000w        |    6min24s     |         13w/s |
+  1. ClickHouse Full write: Synchronizing 10,000,000 1KB of data from Dummy database to ClickHouse with an average RPS of 250K
+  2. ClickHouse Full load RPS: Synchronizing 10,000,000 1KB of data from ClickHouse to the Dummy database with an average RPS of 130K

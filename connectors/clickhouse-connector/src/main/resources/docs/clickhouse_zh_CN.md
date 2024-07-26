@@ -2,7 +2,7 @@
 ### ClickHouse安装说明
 请遵循以下说明以确保在 Tapdata 中成功添加和使用ClickHouse数据库。
 ### 支持版本
-Clickhouse 20.x, 21.x，22.x,23.x
+Clickhouse 20.x, 21.x 22.x, 23.x ,24.x
 ### 功能限制
 - 目前clickhouse 作为源时，仅支持轮训字段增量同步方式
 ### 先决条件
@@ -62,16 +62,14 @@ Clickhouse 20.x, 21.x，22.x,23.x
     ```
     - 其中adminUser 和 user 分别为新创建的授权账号名与用于数据复制/转换的用户名
     - password 为用户密码
-#### 注意事项
-- ClickHouse不支持binary相关的字段类型，如果您的源表中有相关类型的字段，目标会将binary相关字段转成Base64字符串写入
-#### 使用帮助
+### 支持数据类型
+- FixedString、String、UUID、Int8、UInt8、Int16、UInt16、Int32、UInt32、Int64、UInt64、Int128、UInt128、Int256、UInt256、Float32、Float64、Decimal、Date、Date32、DateTime、DateTime64、Enum8、Enum16、Array、Tuple
+### 使用帮助
 - 当ClickHouse作为目标时，节点配置中-->高级配置-->数据源专属配置-->合并分区间隔(分钟)配置选项可以配置ClickHouse的Optimize Table的间隔，您可以根据业务需求自定义Optimize Table间隔。
-#### 性能测试
+### 性能测试
 - 环境说明
-  - 本次测试中，Tapdata的部署环境为12C96G，ClickHouse使用docker 部署，分配的资源为8C48G
-  - 测试任务的源使用Tapdata 的模拟数据源模拟1000w数据对ClickHouse进行写入。目标开启4线程并发写入，每批次写入条数为20000
+  - TapData 版本: v3.7.0, 其中 16GB 分配给引擎, 8GB 分配给管理端; 元数据库通过 --wiredTigerCacheSizeGB 限定内存, 4GB 分配给元数据库
+  - ClickHouse 数据库: ecs.u1-c1m2.2xlarge 机型, 8C 16G, 100GB ESSD 磁盘,版本为24.5.3.5
   ##### 测试结果
-    | 同步写入条数   | 同步耗时 |   平均QPS |
-    | :------------- | :----------: | ------------: |
-    | 1000w |   9s   | 11w/s |
-    | 5000w        |    6min24s     |         13w/s |
+  1. ClickHouse 全量写入 : 将 10,000,000 1KB 数据从 Dummy 数据库 同步到 ClickHouse,平均RPS 为250K
+  2. ClickHouse 全量读取 RPS: 将 10,000,000 1KB 数据从 ClickHouse 同步到 Dummy 数据库，平均RPS 为130K
