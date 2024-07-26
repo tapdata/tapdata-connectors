@@ -4,6 +4,7 @@ import com.mongodb.MongoInterruptedException;
 import com.mongodb.client.*;
 import com.mongodb.client.model.Sorts;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongoBatchOffset;
@@ -138,7 +139,6 @@ public class MongoBatchReader {
         AtomicReference<List<TapEvent>> tapEvents = new AtomicReference<>(list());
         DocumentCodec codec = new DocumentCodec();
         DecoderContext decoderContext = DecoderContext.builder().build();
-        FindIterable<RawBsonDocument> findIterable = findIterable(param);
         int numThreads = 8;
         ExecutorService executorService = Executors.newWorkStealingPool(numThreads);
         try (MongoCursor<RawBsonDocument> mongoCursor = findIterable.iterator()) {
