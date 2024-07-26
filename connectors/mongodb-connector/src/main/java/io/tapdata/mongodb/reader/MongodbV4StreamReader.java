@@ -220,26 +220,15 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         }
         OffsetEvent offsetEvent = null;
         OperationType operationType = event.getOperationType();
-        ByteBuffer byteBuffer = event.getFullDocument().getByteBuffer().asNIO();
-
-        try (
-                BsonBinaryReader reader = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBuffer)))
-        ) {
-            Document fullDocument = codec.decode(reader, decoderContext);
-            Document fullDocumentBeforeChange = null;
-            if (EmptyKit.isNotNull(event.getFullDocumentBeforeChange())) {
-                ByteBuffer byteBufferBefore = event.getFullDocumentBeforeChange().getByteBuffer().asNIO();
-                try (BsonBinaryReader readerBefore = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBufferBefore)))) {
-                    fullDocumentBeforeChange = codec.decode(readerBefore, decoderContext);
-                }
+        Document fullDocumentBeforeChange = null;
+        if (EmptyKit.isNotNull(event.getFullDocumentBeforeChange())) {
+            ByteBuffer byteBufferBefore = event.getFullDocumentBeforeChange().getByteBuffer().asNIO();
+            try (BsonBinaryReader readerBefore = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBufferBefore)))) {
+                fullDocumentBeforeChange = codec.decode(readerBefore, decoderContext);
             }
-            if (operationType == OperationType.INSERT) {
-                DataMap after = new DataMap();
-                after.putAll(fullDocument);
-                TapInsertRecordEvent recordEvent = insertRecordEvent(after, collectionName);
-                recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
-                offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
-            } else if (operationType == OperationType.DELETE) {
+        }
+        if(null == event.getFullDocument()){
+            if (operationType == OperationType.DELETE) {
                 DataMap before = new DataMap();
                 if (event.getDocumentKey() != null) {
                     final Document documentKey = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
@@ -264,57 +253,73 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 } else {
                     TapLogger.warn(TAG, "Document key is null, failed to delete. {}", event);
                 }
-            } else if (operationType == OperationType.UPDATE || operationType == OperationType.REPLACE) {
-                DataMap before = new DataMap();
-                DataMap after = new DataMap();
-                if (event.getDocumentKey() != null) {
-                    UpdateDescription updateDescription = event.getUpdateDescription();
-                    if (isPreImage && MapUtils.isNotEmpty(fullDocumentBeforeChange)) {
-                        before.putAll(fullDocumentBeforeChange);
-                    }
-                    if (MapUtils.isNotEmpty(fullDocument)) {
-                        after.putAll(fullDocument);
-                    } else if (null != updateDescription) {
-                        Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
-                        after.putAll(decodeDocument);
-                        if (null != updateDescription.getUpdatedFields()) {
-                            decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
-                            for (String key : decodeDocument.keySet()) {
-                                after.put(key, decodeDocument.get(key));
+            }
+        }else{
+            ByteBuffer byteBuffer = event.getFullDocument().getByteBuffer().asNIO();
+
+            try (
+                    BsonBinaryReader reader = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBuffer)))
+            ) {
+                Document fullDocument = codec.decode(reader, decoderContext);
+                if (operationType == OperationType.INSERT) {
+                    DataMap after = new DataMap();
+                    after.putAll(fullDocument);
+                    TapInsertRecordEvent recordEvent = insertRecordEvent(after, collectionName);
+                    recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
+                    offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
+                } else if (operationType == OperationType.UPDATE || operationType == OperationType.REPLACE) {
+                    DataMap before = new DataMap();
+                    DataMap after = new DataMap();
+                    if (event.getDocumentKey() != null) {
+                        UpdateDescription updateDescription = event.getUpdateDescription();
+                        if (isPreImage && MapUtils.isNotEmpty(fullDocumentBeforeChange)) {
+                            before.putAll(fullDocumentBeforeChange);
+                        }
+                        if (MapUtils.isNotEmpty(fullDocument)) {
+                            after.putAll(fullDocument);
+                        } else if (null != updateDescription) {
+                            Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
+                            after.putAll(decodeDocument);
+                            if (null != updateDescription.getUpdatedFields()) {
+                                decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
+                                for (String key : decodeDocument.keySet()) {
+                                    after.put(key, decodeDocument.get(key));
+                                }
                             }
                         }
-                    }
 
-                    TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
+                        TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
 //							Map<String, Object> info = new DataMap();
 //							Map<String, Object> unset = new DataMap();
-                    List<String> removedFields = new ArrayList<>();
-                    if (updateDescription != null) {
-                        for (String f : updateDescription.getRemovedFields()) {
+                        List<String> removedFields = new ArrayList<>();
+                        if (updateDescription != null) {
+                            for (String f : updateDescription.getRemovedFields()) {
 
-                            if (after.keySet().stream().noneMatch(v -> v.equals(f))) {
+                                if (after.keySet().stream().noneMatch(v -> v.equals(f))) {
 //										unset.put(f, true);
-                                removedFields.add(f);
-                            }
+                                    removedFields.add(f);
+                                }
 //									if (!after.containsKey(f)) {
 //										unset.put(f, true);
 //									}
-                        }
+                            }
 //								if (unset.size() > 0) {
 //									info.put("$unset", unset);
 //								}
-                        if (removedFields.size() > 0) {
-                            recordEvent.removedFields(removedFields);
+                            if (removedFields.size() > 0) {
+                                recordEvent.removedFields(removedFields);
+                            }
                         }
-                    }
 //							recordEvent.setInfo(info);
-                    recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
-                    recordEvent.setIsReplaceEvent(operationType.equals(OperationType.REPLACE));
-                    offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
-                } else {
-                    throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));
+                        recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
+                        recordEvent.setIsReplaceEvent(operationType.equals(OperationType.REPLACE));
+                        offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
+                    } else {
+                        throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));
+                    }
                 }
-            }
+        }
+
         }
         return offsetEvent;
     }
