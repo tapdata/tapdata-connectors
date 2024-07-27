@@ -1,11 +1,10 @@
 package io.tapdata.mongodb.batch;
 
 import com.mongodb.MongoInterruptedException;
-import com.mongodb.client.FindIterable;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoCursor;
+import com.mongodb.client.*;
 import com.mongodb.client.model.Sorts;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongoBatchOffset;
@@ -15,10 +14,7 @@ import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.entity.ReadParam;
 import io.tapdata.mongodb.reader.StreamWithOpLogCollection;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import org.bson.BsonBinaryReader;
-import org.bson.ByteBufNIO;
-import org.bson.Document;
-import org.bson.RawBsonDocument;
+import org.bson.*;
 import org.bson.codecs.DecoderContext;
 import org.bson.codecs.DocumentCodec;
 import org.bson.conversions.Bson;
@@ -30,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -83,7 +81,7 @@ public class MongoBatchReader {
         return document;
     }
 
-    protected FindIterable<RawBsonDocument> findIterable(ReadParam param) {
+    protected FindIterable<RawBsonDocument> findIterable(ReadParam param, ClientSession clientSession) {
 //        Log log = connectorContext.getLog();
         MongoCollection<RawBsonDocument> collection = param.getRawCollection().collectRawCollection(table.getId());
         FindIterable<RawBsonDocument> findIterable;
@@ -102,17 +100,45 @@ public class MongoBatchReader {
 //                log.warn("Offset format is illegal {}, no offset value has been found. Final offset will be null to do the batchRead", offset);
 //            }
 //        }
-        if (mongoConfig.isNoCursorTimeout()) {
-            findIterable.noCursorTimeout(true);
+        if (mongoConfig.isNoCursorTimeout() && null != clientSession) {
+            findIterable = collection.find(clientSession).batchSize(batchSize).noCursorTimeout(true);
+        }else{
+            findIterable = collection.find().batchSize(batchSize);
         }
         return findIterable;
     }
 
     public void batchReadCollection(ReadParam param) {
+        if(mongoConfig.isNoCursorTimeout()){
+            batchReadCursorNoCursorTimeout(param);
+        }else{
+            batchReadCursor(findIterable(param,null));
+        }
+    }
+
+    public void batchReadCursorNoCursorTimeout(ReadParam param) {
+        Log log = connectorContext.getLog();
+        MongoClient mongoClient = param.getMongoClient();
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        try(ClientSession clientSession = mongoClient.startSession()){
+            BsonDocument bsonDocument = clientSession.getServerSession().getIdentifier();
+            BsonArray bsonArray = new BsonArray();
+            bsonArray.add(bsonDocument);
+            scheduler.scheduleAtFixedRate(()->{
+                mongoClient.getDatabase(mongoConfig.getDatabase()).runCommand(new BsonDocument("refreshSessions",bsonArray));
+                log.info("refresh session");
+            },1,1, TimeUnit.MINUTES);
+            FindIterable<RawBsonDocument> findIterable = findIterable(param,clientSession);
+            batchReadCursor(findIterable);
+        } finally {
+            scheduler.shutdownNow();
+        }
+    }
+
+    public void batchReadCursor(FindIterable<RawBsonDocument> findIterable){
         AtomicReference<List<TapEvent>> tapEvents = new AtomicReference<>(list());
         DocumentCodec codec = new DocumentCodec();
         DecoderContext decoderContext = DecoderContext.builder().build();
-        FindIterable<RawBsonDocument> findIterable = findIterable(param);
         int numThreads = 8;
         ExecutorService executorService = Executors.newWorkStealingPool(numThreads);
         try (MongoCursor<RawBsonDocument> mongoCursor = findIterable.iterator()) {

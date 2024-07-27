@@ -167,7 +167,7 @@ public class CommonDbTest implements AutoCloseable {
         long timeDifference = Math.abs(time - System.currentTimeMillis());
         if (timeDifference > 1000) {
             consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Time difference between engine and data source is "+ timeDifference + "ms"));
+                    "Time difference between engine and data source is "+ timeDifference + "ms," + "Please manually calibrate the time of the engine and data source."));
             return timeDifference;
         }
         return 0L;

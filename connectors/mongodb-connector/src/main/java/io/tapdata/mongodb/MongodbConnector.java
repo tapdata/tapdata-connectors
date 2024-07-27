@@ -1522,7 +1522,8 @@ public class MongodbConnector extends ConnectorBase {
 				.withBatchOffset(batchOffset)
 				.withMongodbExceptionCollector(exceptionCollector)
 				.withMongoRawCollection(this::getMongoRawCollection)
-				.withErrorHandler(e -> errorHandle(e, connectorContext));
+				.withErrorHandler(e -> errorHandle(e, connectorContext))
+				.withMongoClient(mongoClient);
 		MongoBatchReader.of(param).batchReadCollection(param);
 	}
 
