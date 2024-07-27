@@ -4,6 +4,11 @@ import io.tapdata.entity.error.CoreException;
 
 import java.text.ParsePosition;
 import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.temporal.ChronoField;
+import java.time.temporal.TemporalQueries;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TimeZone;
@@ -24,12 +29,29 @@ public interface Convert {
         }
     }
 
-    default Object covertToDateTime(Object fromValue, int precision, String format, TimeZone timezone) {
+    default Object covertToDate(Object fromValue, int precision, String format, TimeZone timezone) {
         if (fromValue instanceof String) {
             try {
                 SimpleDateFormat f = new SimpleDateFormat(String.format(format, Convert.timePrecision(precision)));
                 f.setTimeZone(timezone);
-                return f.parse((String) fromValue, new ParsePosition(precision));
+                return f.parse((String) fromValue);
+            } catch (Exception e) {
+                throw new CoreException(101, e, e.getMessage());
+            }
+        }
+        return fromValue;
+    }
+
+    default Object covertToDateTime(Object fromValue, int precision, String format, TimeZone timezone) {
+        if (fromValue instanceof String) {
+            try {
+                DateTimeFormatter formatter = new DateTimeFormatterBuilder()
+                        .appendPattern(format)
+                        .optionalStart()
+                        .appendFraction(ChronoField.NANO_OF_SECOND, 0, precision, true)
+                        .optionalEnd()
+                        .toFormatter();
+                return LocalDateTime.parse((String) fromValue, formatter).minusHours(timezone.getRawOffset() / 1000 / 60 / 60);
             } catch (Exception e) {
                 throw new CoreException(101, e, e.getMessage());
             }
@@ -41,7 +63,7 @@ public interface Convert {
         if (precision <= 0) return "";
         StringBuilder builder = new StringBuilder(".");
         for (int index = 0; index < precision; index++) {
-            builder.append("S");
+            builder.append("s");
         }
         return builder.toString();
     }
