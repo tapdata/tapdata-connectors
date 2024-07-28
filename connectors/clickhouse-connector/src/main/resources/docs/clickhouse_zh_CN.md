@@ -63,9 +63,10 @@ Clickhouse 20.x, 21.x 22.x, 23.x ,24.x
     - 其中adminUser 和 user 分别为新创建的授权账号名与用于数据复制/转换的用户名
     - password 为用户密码
 ### 支持数据类型
-- FixedString、String、UUID、Int8、UInt8、Int16、UInt16、Int32、UInt32、Int64、UInt64、Int128、UInt128、Int256、UInt256、Float32、Float64、Decimal、Date、Date32、DateTime、DateTime64、Enum8、Enum16、Array、Tuple
-### 使用帮助
+- FixedString、String、UUID、Int8、UInt8、Int16、UInt16、Int32、UInt32、Int64、UInt64、Int128、UInt128、Int256、UInt256、Float32、Float64、Decimal、Date、Date32、DateTime、DateTime64、Enum8、Enum16、Tuple
+### 其他说明
 - 当ClickHouse作为目标时，节点配置中-->高级配置-->数据源专属配置-->合并分区间隔(分钟)配置选项可以配置ClickHouse的Optimize Table的间隔，您可以根据业务需求自定义Optimize Table间隔。
+- 当ClickHouse作为目标时，并且使用TapData自动创建表时，当源表有主键时，会使用ReplacingMergeTree引擎进行建表并且以主键进行排序。当源表无主键时，会使用ReplacingMergeTree 进行建表并且不会指定排序键。
 ### 性能测试
 - 环境说明
   - TapData 版本: v3.7.0, 其中 16GB 分配给引擎, 8GB 分配给管理端; 元数据库通过 --wiredTigerCacheSizeGB 限定内存, 4GB 分配给元数据库
