@@ -30,6 +30,7 @@ public interface Convert {
     }
 
     default Object covertToDate(Object fromValue, int precision, String format, TimeZone timezone) {
+        if (precision < 0) precision = 0;
         if (fromValue instanceof String) {
             try {
                 SimpleDateFormat f = new SimpleDateFormat(String.format(format, Convert.timePrecision(precision)));
@@ -43,6 +44,7 @@ public interface Convert {
     }
 
     default Object covertToDateTime(Object fromValue, int precision, String format, TimeZone timezone) {
+        if  (precision < 1) return covertToDate(fromValue, precision, format, timezone);
         if (fromValue instanceof String) {
             try {
                 DateTimeFormatter formatter = new DateTimeFormatterBuilder()

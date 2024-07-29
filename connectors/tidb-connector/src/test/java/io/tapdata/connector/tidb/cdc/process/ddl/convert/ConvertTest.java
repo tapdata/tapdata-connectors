@@ -6,6 +6,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.temporal.ChronoField;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -32,7 +35,6 @@ class ConvertTest {
 
     @Test
     void testCovertToDateTime() {
-
         Object c = convert.covertToDateTime("2024-06-11 16:33:00.0", 1, "yyyy-MM-dd HH:mm:ss", TimeZone.getDefault());
         Assertions.assertNotNull(c);
         Assertions.assertEquals(LocalDateTime.class.getName(), c.getClass().getName());
@@ -41,10 +43,17 @@ class ConvertTest {
         Assertions.assertNotNull(c);
         Assertions.assertEquals(Long.class.getName(), c.getClass().getName());
 
+        c = convert.covertToDateTime(System.currentTimeMillis(), -1, "yyyy-MM-dd", TimeZone.getDefault());
+        Assertions.assertNotNull(c);
+        Assertions.assertEquals(Long.class.getName(), c.getClass().getName());
+
+        c = convert.covertToDateTime(System.currentTimeMillis(), 1, "yyyy-MM-dd", TimeZone.getDefault());
+        Assertions.assertNotNull(c);
+        Assertions.assertEquals(Long.class.getName(), c.getClass().getName());
+
         Assertions.assertThrows(CoreException.class, () -> {
             convert.covertToDateTime("2024-06-11 16:33:00.0", 0, "hthfsyyyy-MM-dd", TimeZone.getDefault());
         });
-
     }
 
     @Test
