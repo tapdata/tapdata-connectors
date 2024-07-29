@@ -12,6 +12,6 @@ public class TimeConvert implements Convert {
 
     @Override
     public Object convert(Object fromValue) {
-        return covertToDate(fromValue, precision, "hh:mm:ss", timezone);
+        return covertToTime(fromValue, precision, "hh:mm:ss", timezone);
     }
 }
