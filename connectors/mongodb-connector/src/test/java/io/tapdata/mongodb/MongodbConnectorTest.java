@@ -788,7 +788,7 @@ class MongodbConnectorTest {
             when(mongoClient.getDatabase("test")).thenReturn(mongoDatabase);
             Document collStats = new Document();
             Integer count = 26888601;
-            Long size = 36690786769L;
+            Double size = 366907867698976.0;
             collStats.put("count",count);
             collStats.put("size",size);
             when(mongoDatabase.runCommand(new Document("collStats", tableName))).thenReturn(collStats);
