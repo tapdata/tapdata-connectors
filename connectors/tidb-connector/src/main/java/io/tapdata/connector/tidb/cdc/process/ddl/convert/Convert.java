@@ -3,6 +3,7 @@ package io.tapdata.connector.tidb.cdc.process.ddl.convert;
 import io.tapdata.entity.error.CoreException;
 
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
@@ -31,9 +32,7 @@ public interface Convert {
         if (precision < 0) precision = 0;
         if (fromValue instanceof String) {
             try {
-                SimpleDateFormat f = new SimpleDateFormat(String.format(format, Convert.timePrecision(precision)));
-                f.setTimeZone(timezone);
-                return f.parse((String) fromValue);
+                return LocalDateTime.parse((String) fromValue, DateTimeFormatter.ofPattern(String.format(format, Convert.timePrecision(precision)))).atZone(timezone.toZoneId()).toInstant();
             } catch (Exception e) {
                 throw new CoreException(101, e, e.getMessage());
             }
