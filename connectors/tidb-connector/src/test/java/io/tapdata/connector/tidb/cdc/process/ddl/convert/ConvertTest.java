@@ -5,15 +5,15 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TimeZone;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 class ConvertTest {
     Convert convert;
+
     @BeforeEach
     void setUp() {
         convert = new Convert() {
@@ -32,13 +32,10 @@ class ConvertTest {
 
     @Test
     void testCovertToDateTime() {
-        Object c = convert.covertToDateTime("2024-06-11", 0, "yyyy-MM-dd", TimeZone.getDefault());
-        Assertions.assertNotNull(c);
-        Assertions.assertEquals(Date.class.getName(), c.getClass().getName());
 
-        c = convert.covertToDateTime("2024-06-11 16:33:00.0", 1, "yyyy-MM-dd hh:mm:ss", TimeZone.getDefault());
+        Object c = convert.covertToDateTime("2024-06-11 16:33:00.0", 1, "yyyy-MM-dd HH:mm:ss", TimeZone.getDefault());
         Assertions.assertNotNull(c);
-        Assertions.assertEquals(Date.class.getName(), c.getClass().getName());
+        Assertions.assertEquals(LocalDateTime.class.getName(), c.getClass().getName());
 
         c = convert.covertToDateTime(System.currentTimeMillis(), 0, "yyyy-MM-dd", TimeZone.getDefault());
         Assertions.assertNotNull(c);
@@ -48,6 +45,23 @@ class ConvertTest {
             convert.covertToDateTime("2024-06-11 16:33:00.0", 0, "hthfsyyyy-MM-dd", TimeZone.getDefault());
         });
 
+    }
+
+    @Test
+    void testCovertToDate() {
+        Object c = convert.covertToDate("2024-06-11", 0, "yyyy-MM-dd", TimeZone.getDefault());
+        Assertions.assertNotNull(c);
+        Assertions.assertEquals(Date.class.getName(), c.getClass().getName());
+
+        c = convert.covertToDate("2024-06-11 16:33:00.0", 1, "yyyy-MM-dd hh:mm:ss", TimeZone.getDefault());
+        Assertions.assertNotNull(c);
+        Assertions.assertEquals(Date.class.getName(), c.getClass().getName());
+
+        c = convert.covertToDate(System.currentTimeMillis(), 0, "yyyy-MM-dd", TimeZone.getDefault());
+        Assertions.assertNotNull(c);
+        Assertions.assertEquals(Long.class.getName(), c.getClass().getName());
+
+        Assertions.assertNotNull(convert.covertToDate("2024-06-11 16:33:00", 0, "yyyy-MM-dd", TimeZone.getDefault()));
     }
 
     @Test
