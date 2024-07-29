@@ -346,6 +346,7 @@ public class TidbConnector extends CommonDbConnector {
         filterResults.setFilter(tapAdvanceFilter);
         try {
             tidbReader.readWithFilter(tapConnectorContext, tapTable, tapAdvanceFilter, n -> !isAlive(), data -> {
+                processDataMap(data, tapTable);
                 filterResults.add(data);
                 if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
                     consumer.accept(filterResults);
@@ -396,7 +397,7 @@ public class TidbConnector extends CommonDbConnector {
                 entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(zoneId).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
             } else if (value instanceof Timestamp) {
                 if (isTimestamp) {
-                    entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
+                    entry.setValue(((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
                 } else {
                     entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
                 }

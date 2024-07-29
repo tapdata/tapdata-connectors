@@ -3,7 +3,9 @@ package io.tapdata.connector.tidb.cdc.process.ddl.convert;
 import io.tapdata.entity.error.CoreException;
 
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoField;
@@ -31,9 +33,30 @@ public interface Convert {
         if (precision < 0) precision = 0;
         if (fromValue instanceof String) {
             try {
-                SimpleDateFormat f = new SimpleDateFormat(String.format(format, Convert.timePrecision(precision)));
-                f.setTimeZone(timezone);
-                return f.parse((String) fromValue);
+                return LocalDate.parse((String) fromValue, DateTimeFormatter.ofPattern(String.format(format, Convert.timePrecision(precision))));
+            } catch (Exception e) {
+                throw new CoreException(101, e, e.getMessage());
+            }
+        }
+        return fromValue;
+    }
+    default Object covertToTime(Object fromValue, int precision, String format, TimeZone timezone) {
+        if (precision < 0) precision = 0;
+        if (fromValue instanceof String) {
+            try {
+                return LocalTime.parse((String) fromValue, DateTimeFormatter.ofPattern(String.format(format, Convert.timePrecision(precision))));
+            } catch (Exception e) {
+                throw new CoreException(101, e, e.getMessage());
+            }
+        }
+        return fromValue;
+    }
+
+    default Object covertDateTime(Object fromValue, int precision, String format, TimeZone timezone) {
+        if (precision < 0) precision = 0;
+        if (fromValue instanceof String) {
+            try {
+                return LocalDateTime.parse((String) fromValue, DateTimeFormatter.ofPattern(String.format(format, Convert.timePrecision(precision)))).atZone(timezone.toZoneId()).toInstant();
             } catch (Exception e) {
                 throw new CoreException(101, e, e.getMessage());
             }
@@ -42,7 +65,7 @@ public interface Convert {
     }
 
     default Object covertToDateTime(Object fromValue, int precision, String format, TimeZone timezone) {
-        if  (precision < 1) return covertToDate(fromValue, precision, format, timezone);
+        if  (precision < 1) return covertDateTime(fromValue, precision, format, timezone);
         if (fromValue instanceof String) {
             try {
                 DateTimeFormatter formatter = new DateTimeFormatterBuilder()
