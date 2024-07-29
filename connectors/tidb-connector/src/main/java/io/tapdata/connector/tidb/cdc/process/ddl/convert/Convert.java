@@ -51,7 +51,7 @@ public interface Convert {
                         .appendFraction(ChronoField.NANO_OF_SECOND, 0, precision, true)
                         .optionalEnd()
                         .toFormatter();
-                return LocalDateTime.parse((String) fromValue, formatter).minusHours(timezone.getRawOffset() / 1000 / 60 / 60);
+                return LocalDateTime.parse((String) fromValue, formatter);
             } catch (Exception e) {
                 throw new CoreException(101, e, e.getMessage());
             }

@@ -11,6 +11,7 @@ class DateTimeConvertTest {
 
     @Test
     void convert() {
+        Assertions.assertNotNull(new DateTimeConvert("0", TimeZone.getDefault()).convert("2024-06-11 16:51:00"));
         Assertions.assertNotNull(new DateTimeConvert("3", TimeZone.getDefault()).convert("2024-06-11 16:51:00.123"));
     }
 }
