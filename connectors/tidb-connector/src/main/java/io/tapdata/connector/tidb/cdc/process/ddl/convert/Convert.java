@@ -2,13 +2,11 @@ package io.tapdata.connector.tidb.cdc.process.ddl.convert;
 
 import io.tapdata.entity.error.CoreException;
 
-import java.text.ParsePosition;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoField;
-import java.time.temporal.TemporalQueries;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TimeZone;
