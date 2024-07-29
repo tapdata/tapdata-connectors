@@ -58,11 +58,13 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.sql.Date;
+import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -377,16 +379,29 @@ public class TidbConnector extends CommonDbConnector {
     protected void processDataMap(DataMap dataMap, TapTable tapTable) throws RuntimeException {
         for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
             Object value = entry.getValue();
+            TapField field = tapTable.getNameFieldMap().get(entry.getKey());
+            String dataType = field.getDataType();
+            boolean isTimestamp = dataType.startsWith("timestamp") || dataType.startsWith("TIMESTAMP");
             if (value instanceof LocalDateTime) {
                 if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
                     continue;
                 }
-                entry.setValue(((LocalDateTime) value).minusHours(tidbConfig.getZoneOffsetHour()));
+                if (isTimestamp) {
+                    entry.setValue(((LocalDateTime) value).atZone(ZoneOffset.UTC));
+                } else {
+                    entry.setValue(((LocalDateTime) value).minusHours(tidbConfig.getZoneOffsetHour()));
+                }
             }  else if (value instanceof java.sql.Date) {
                 ZoneId zoneId = null == timezone ? ZoneId.systemDefault() : timezone.toZoneId();
-                entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(zoneId).toLocalDateTime());
+                entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(zoneId).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
             } else if (value instanceof Timestamp) {
-                entry.setValue(Instant.ofEpochMilli(((Timestamp) value).getTime()).atZone(ZoneOffset.UTC).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
+                if (isTimestamp) {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
+                } else {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
+                }
+            } else if (value instanceof Time) {
+                entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
             }
         }
     }
