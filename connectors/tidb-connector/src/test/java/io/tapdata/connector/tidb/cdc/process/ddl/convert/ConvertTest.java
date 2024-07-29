@@ -6,9 +6,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeFormatterBuilder;
-import java.time.temporal.ChronoField;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -53,6 +50,9 @@ class ConvertTest {
 
         Assertions.assertThrows(CoreException.class, () -> {
             convert.covertToDateTime("2024-06-11 16:33:00.0", 0, "hthfsyyyy-MM-dd", TimeZone.getDefault());
+        });
+        Assertions.assertThrows(CoreException.class, () -> {
+            convert.covertToDateTime("2024-06-11 16:33:00.0", 1, "hthfsyyyy-MM-dd", TimeZone.getDefault());
         });
     }
 
