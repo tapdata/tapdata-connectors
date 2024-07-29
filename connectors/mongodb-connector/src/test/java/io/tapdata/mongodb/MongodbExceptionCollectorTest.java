@@ -6,6 +6,7 @@ import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.bulk.BulkWriteResult;
 import com.mongodb.bulk.WriteConcernError;
 import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
+import io.tapdata.mongodb.writer.error.TapMongoBulkWriteException;
 import org.bson.BsonDocument;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Nested;
@@ -45,6 +46,29 @@ public class MongodbExceptionCollectorTest {
             // match TapPdkTraverseElementEx exception
             writeErrors.add(new BulkWriteError(-3, "cannot use the part (subDoc of subDoc.a) to traverse the element ({subDoc: \"xxx\"})", Mockito.mock(BsonDocument.class), 0));
             Assertions.assertThrows(TapPdkSkippableDataEx.class, () -> mongodbExceptionCollector.throwWriteExIfNeed(dataList, mongoBulkWriteException));
+        }
+
+        @Test
+        void testCannotUseThePart_TapMongoBulkWriteException() {
+            // mock exception
+            List<Object> dataList = new ArrayList<>();
+            BulkWriteResult writeResult = Mockito.mock(BulkWriteResult.class);
+            List<BulkWriteError> writeErrors = new ArrayList<>();
+            WriteConcernError writeConcernError = Mockito.mock(WriteConcernError.class);
+            ServerAddress serverAddress = Mockito.mock(ServerAddress.class);
+            Set<String> errorLabels = new HashSet<>();
+
+            MongodbExceptionCollector mongodbExceptionCollector = new MongodbExceptionCollector();
+            MongoBulkWriteException mongoBulkWriteException = new MongoBulkWriteException(writeResult, writeErrors, writeConcernError, serverAddress, errorLabels);
+            TapMongoBulkWriteException tapMongoBulkWriteException = new TapMongoBulkWriteException(mongoBulkWriteException,new ArrayList<>());
+
+            // no match exception
+            writeErrors.add(new BulkWriteError(-3, "test", Mockito.mock(BsonDocument.class), 0));
+            Assertions.assertDoesNotThrow(() -> mongodbExceptionCollector.throwWriteExIfNeed(dataList, tapMongoBulkWriteException));
+
+            // match TapPdkTraverseElementEx exception
+            writeErrors.add(new BulkWriteError(-3, "cannot use the part (subDoc of subDoc.a) to traverse the element ({subDoc: \"xxx\"})", Mockito.mock(BsonDocument.class), 0));
+            Assertions.assertThrows(TapPdkSkippableDataEx.class, () -> mongodbExceptionCollector.throwWriteExIfNeed(dataList, tapMongoBulkWriteException));
         }
     }
 }
