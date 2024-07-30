@@ -1,13 +1,12 @@
 package io.tapdata.mongodb.batch;
 
 import com.mongodb.MongoInterruptedException;
-import com.mongodb.client.FindIterable;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoCursor;
+import com.mongodb.client.*;
 import com.mongodb.client.model.Sorts;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongoBatchOffset;
 import io.tapdata.mongodb.MongodbConnector;
 import io.tapdata.mongodb.MongodbExceptionCollector;
@@ -15,11 +14,22 @@ import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.entity.ReadParam;
 import io.tapdata.mongodb.reader.StreamWithOpLogCollection;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import org.bson.Document;
+import org.bson.*;
+import org.bson.codecs.DecoderContext;
+import org.bson.codecs.DocumentCodec;
 import org.bson.conversions.Bson;
+import org.bson.io.ByteBufferBsonInput;
 
+import java.nio.ByteBuffer;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 
@@ -71,55 +81,100 @@ public class MongoBatchReader {
         return document;
     }
 
-    protected FindIterable<Document> findIterable(ReadParam param) {
-        Log log = connectorContext.getLog();
-        MongoCollection<Document> collection = param.getCollection().collectCollection(table.getId());
-        FindIterable<Document> findIterable;
+    protected FindIterable<RawBsonDocument> findIterable(ReadParam param, ClientSession clientSession) {
+//        Log log = connectorContext.getLog();
+        MongoCollection<RawBsonDocument> collection = param.getRawCollection().collectRawCollection(table.getId());
+        FindIterable<RawBsonDocument> findIterable;
         final int batchSize = eventBatchSize > 0 ? eventBatchSize : DEFAULT_BATCH_SIZE;
-        if (offset == null) {
-            findIterable = collection.find().sort(sort).batchSize(batchSize);
-        } else {
-            MongoBatchOffset mongoOffset = (MongoBatchOffset) offset;
-            Object offsetValue = mongoOffset.value();
-            if (offsetValue != null) {
-                findIterable = collection.find(queryCondition(offsetKey, offsetValue)).sort(sort)
-                        .batchSize(batchSize);
-            } else {
-                findIterable = collection.find().sort(sort).batchSize(batchSize);
-                log.warn("Offset format is illegal {}, no offset value has been found. Final offset will be null to do the batchRead", offset);
-            }
-        }
-        if (mongoConfig.isNoCursorTimeout()) {
-            findIterable.noCursorTimeout(true);
+        findIterable = collection.find().batchSize(batchSize);
+//        if (offset == null) {
+//            findIterable = collection.find().sort(sort).batchSize(batchSize);
+//        } else {
+//            MongoBatchOffset mongoOffset = (MongoBatchOffset) offset;
+//            Object offsetValue = mongoOffset.value();
+//            if (offsetValue != null) {
+//                findIterable = collection.find(queryCondition(offsetKey, offsetValue)).sort(sort)
+//                        .batchSize(batchSize);
+//            } else {
+//                findIterable = collection.find().sort(sort).batchSize(batchSize);
+//                log.warn("Offset format is illegal {}, no offset value has been found. Final offset will be null to do the batchRead", offset);
+//            }
+//        }
+        if (mongoConfig.isNoCursorTimeout() && null != clientSession) {
+            findIterable = collection.find(clientSession).batchSize(batchSize).noCursorTimeout(true);
+        }else{
+            findIterable = collection.find().batchSize(batchSize);
         }
         return findIterable;
     }
 
     public void batchReadCollection(ReadParam param) {
-		List<TapEvent> tapEvents = list();
-		FindIterable<Document> findIterable = findIterable(param);
-		Document lastDocument = null;
-		try (MongoCursor<Document> mongoCursor = findIterable.iterator()) {
-			while (mongoCursor.hasNext()) {
-                lastDocument = mongoCursor.next();
-                tapEvents = emit(lastDocument, tapEvents);
-                if (!checkAlive.getAsBoolean()) return;
-			}
-        } catch (Exception e) {
-			doException(e);
-        } finally {
-            afterEmit(tapEvents, lastDocument);
+        if(mongoConfig.isNoCursorTimeout()){
+            batchReadCursorNoCursorTimeout(param);
+        }else{
+            batchReadCursor(findIterable(param,null));
         }
     }
 
-    protected List<TapEvent> emit(Document lastDocument, List<TapEvent> tapEvents) {
-        tapEvents.add(insertRecordEvent(convert(lastDocument), table.getId()));
-        if (tapEvents.size() != eventBatchSize) {
-            return tapEvents;
+    public void batchReadCursorNoCursorTimeout(ReadParam param) {
+        Log log = connectorContext.getLog();
+        MongoClient mongoClient = param.getMongoClient();
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        try(ClientSession clientSession = mongoClient.startSession()){
+            BsonDocument bsonDocument = clientSession.getServerSession().getIdentifier();
+            BsonArray bsonArray = new BsonArray();
+            bsonArray.add(bsonDocument);
+            scheduler.scheduleAtFixedRate(()->{
+                mongoClient.getDatabase(mongoConfig.getDatabase()).runCommand(new BsonDocument("refreshSessions",bsonArray));
+                log.info("refresh session");
+            },1,1, TimeUnit.MINUTES);
+            FindIterable<RawBsonDocument> findIterable = findIterable(param,clientSession);
+            batchReadCursor(findIterable);
+        } finally {
+            scheduler.shutdownNow();
         }
-        batchOffset = findMongoBatchOffset(lastDocument);
-        tapReadOffsetConsumer.accept(tapEvents, batchOffset);
-        return list();
+    }
+
+    public void batchReadCursor(FindIterable<RawBsonDocument> findIterable){
+        AtomicReference<List<TapEvent>> tapEvents = new AtomicReference<>(list());
+        DocumentCodec codec = new DocumentCodec();
+        DecoderContext decoderContext = DecoderContext.builder().build();
+        int numThreads = 8;
+        ExecutorService executorService = Executors.newWorkStealingPool(numThreads);
+        try (MongoCursor<RawBsonDocument> mongoCursor = findIterable.iterator()) {
+            while (mongoCursor.hasNext()) {
+                RawBsonDocument lastDocument = mongoCursor.next();
+                executorService.submit(() -> {
+                    ByteBuffer byteBuffer = lastDocument.getByteBuffer().asNIO();
+                    try (BsonBinaryReader reader = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBuffer)))) {
+                        emit(codec.decode(reader, decoderContext), tapEvents);
+                    }
+                });
+                if (!checkAlive.getAsBoolean()) return;
+            }
+            executorService.shutdown();
+            //等待所有线程执行完毕
+            while (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
+                if (!checkAlive.getAsBoolean()) return;
+            }
+            if (EmptyKit.isNotEmpty(tapEvents.get())) {
+                tapReadOffsetConsumer.accept(tapEvents.get(), new HashMap<>());
+            }
+        } catch (Exception e) {
+            doException(e);
+        } finally {
+            if (!executorService.isShutdown()) {
+                executorService.shutdown();
+            }
+        }
+    }
+
+    protected synchronized void emit(Document lastDocument, AtomicReference<List<TapEvent>> tapEvents) {
+        tapEvents.get().add(insertRecordEvent(convert(lastDocument), table.getId()));
+        if (tapEvents.get().size() >= eventBatchSize) {
+            tapReadOffsetConsumer.accept(tapEvents.get(), new HashMap<>());
+            tapEvents.set(list());
+        }
     }
 
     protected MongoBatchOffset findMongoBatchOffset(Document lastDocument) {

@@ -3,6 +3,7 @@ package io.tapdata.connector.adb;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.PostgresTest;
 import io.tapdata.connector.postgres.config.PostgresConfig;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 
 import java.util.ArrayList;
@@ -14,8 +15,8 @@ import static io.tapdata.base.ConnectorBase.testItem;
 
 public class TencentDBPostgresTest extends PostgresTest {
 
-    public TencentDBPostgresTest(PostgresConfig postgresConfig, Consumer<TestItem> consumer) {
-        super(postgresConfig, consumer);
+    public TencentDBPostgresTest(PostgresConfig postgresConfig, Consumer<TestItem> consumer, ConnectionOptions connectionOptions) {
+        super(postgresConfig, consumer, connectionOptions);
     }
 
     public TencentDBPostgresTest initContext() {

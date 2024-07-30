@@ -57,12 +57,17 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.sql.Date;
+import java.sql.Time;
 import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.StringJoiner;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -341,6 +346,7 @@ public class TidbConnector extends CommonDbConnector {
         filterResults.setFilter(tapAdvanceFilter);
         try {
             tidbReader.readWithFilter(tapConnectorContext, tapTable, tapAdvanceFilter, n -> !isAlive(), data -> {
+                processDataMap(data, tapTable);
                 filterResults.add(data);
                 if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
                     consumer.accept(filterResults);
@@ -374,8 +380,29 @@ public class TidbConnector extends CommonDbConnector {
     protected void processDataMap(DataMap dataMap, TapTable tapTable) throws RuntimeException {
         for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
             Object value = entry.getValue();
-            if (value instanceof Timestamp && null != timezone) {
-                entry.setValue(((Timestamp) value).toLocalDateTime().atZone(timezone.toZoneId()));
+            TapField field = tapTable.getNameFieldMap().get(entry.getKey());
+            String dataType = field.getDataType();
+            boolean isTimestamp = dataType.startsWith("timestamp") || dataType.startsWith("TIMESTAMP");
+            if (value instanceof LocalDateTime) {
+                if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                    continue;
+                }
+                if (isTimestamp) {
+                    entry.setValue(((LocalDateTime) value).atZone(ZoneOffset.UTC));
+                } else {
+                    entry.setValue(((LocalDateTime) value).minusHours(tidbConfig.getZoneOffsetHour()));
+                }
+            }  else if (value instanceof java.sql.Date) {
+                ZoneId zoneId = null == timezone ? ZoneId.systemDefault() : timezone.toZoneId();
+                entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(zoneId).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
+            } else if (value instanceof Timestamp) {
+                if (isTimestamp) {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
+                } else {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
+                }
+            } else if (value instanceof Time) {
+                entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
             }
         }
     }

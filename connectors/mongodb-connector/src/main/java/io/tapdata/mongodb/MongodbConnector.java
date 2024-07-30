@@ -125,6 +125,20 @@ public class MongodbConnector extends ConnectorBase {
 		return collection;
 	}
 
+	protected MongoCollection<RawBsonDocument> getMongoRawCollection(String table) {
+		MongoCollection<RawBsonDocument> collection = null;
+		try {
+			collection = mongoDatabase.getCollection(table, RawBsonDocument.class);
+		}catch (Exception e){
+			exceptionCollector.collectTerminateByServer(e);
+			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
+			exceptionCollector.collectReadPrivileges(e);
+			exceptionCollector.collectWritePrivileges(e);
+			throw e;
+		}
+		return collection;
+	}
+
 	/**
 	 * The method invocation life circle is below,
 	 * initiated -> discoverSchema -> destroy -> ended
@@ -1507,8 +1521,9 @@ public class MongodbConnector extends ConnectorBase {
 				.withMongodbConfig(mongoConfig)
 				.withBatchOffset(batchOffset)
 				.withMongodbExceptionCollector(exceptionCollector)
-				.withMongoCollection(this::getMongoCollection)
-				.withErrorHandler(e -> errorHandle(e, connectorContext));
+				.withMongoRawCollection(this::getMongoRawCollection)
+				.withErrorHandler(e -> errorHandle(e, connectorContext))
+				.withMongoClient(mongoClient);
 		MongoBatchReader.of(param).batchReadCollection(param);
 	}
 
@@ -1706,14 +1721,16 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
-		TableInfo tableInfo = new TableInfo();
+		TableInfo tableInfo;
 		try {
 			String database = mongoConfig.getDatabase();
 			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
 			Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
 			tableInfo = TableInfo.create();
-			tableInfo.setNumOfRows(Long.valueOf(collStats.getInteger("count")));
-			tableInfo.setStorageSize(Long.valueOf(collStats.getInteger("size")));
+			BigDecimal numOfRows = new BigDecimal(String.valueOf(collStats.get("count")));
+			tableInfo.setNumOfRows(numOfRows.longValue());
+			BigDecimal storageSize = new BigDecimal(String.valueOf(collStats.get("size")));
+			tableInfo.setStorageSize(storageSize.longValue());
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);

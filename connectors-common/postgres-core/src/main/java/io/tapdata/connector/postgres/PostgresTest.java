@@ -6,24 +6,30 @@ import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import org.postgresql.Driver;
 
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
+import static io.tapdata.base.ConnectorBase.getStackString;
 import static io.tapdata.base.ConnectorBase.testItem;
 
 public class PostgresTest extends CommonDbTest {
+
+    protected ConnectionOptions connectionOptions;
 
     public PostgresTest() {
         super();
     }
 
-    public PostgresTest(PostgresConfig postgresConfig, Consumer<TestItem> consumer) {
+    public PostgresTest(PostgresConfig postgresConfig, Consumer<TestItem> consumer, ConnectionOptions connectionOptions) {
         super(postgresConfig, consumer);
+        this.connectionOptions = connectionOptions;
     }
 
     public PostgresTest initContext() {
@@ -114,6 +120,17 @@ public class PostgresTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, e.getMessage()));
+        }
+        return true;
+    }
+    @Override
+    public Boolean testTimeDifference(){
+        try {
+            long nowTime = jdbcContext.queryTimestamp();
+            connectionOptions.setTimeDifference(getTimeDifference(nowTime));
+        } catch (SQLException e) {
+            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
+                    "Failed to obtain current database time: " + e.getMessage() + "\n" + getStackString(e)));
         }
         return true;
     }

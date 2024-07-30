@@ -10,6 +10,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.exception.*;
 import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
 import io.tapdata.kit.ErrorKit;
+import io.tapdata.mongodb.writer.error.TapMongoBulkWriteException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -104,16 +105,25 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
     public void collectWriteType(Object data, Throwable cause) {
         if (cause instanceof MongoBulkWriteException) {
-            for (BulkWriteError err : ((MongoBulkWriteException) cause).getWriteErrors()) {
-                if (Pattern.matches(".*cannot use the part \\([^)]+\\) to traverse the element \\([^)]+\\).*", err.getMessage())) {
-                    Optional.ofNullable(data)
-                            .map(obj -> (obj instanceof List) ? (List<?>) obj : null)
-                            .map(list -> (list.size() > err.getIndex()) ? list.get(err.getIndex()) : null)
-                            .ifPresent(event -> {
-                                throw new TapPdkSkippableDataEx(err.getMessage() + ": " + JSON.toJSONString(event), getPdkId(), ErrorKit.getLastCause(cause));
-                            });
-                    throw new TapPdkSkippableDataEx(err.getMessage(), getPdkId(), ErrorKit.getLastCause(cause));
-                }
+            checkMongoBulkWriteError(data, (MongoBulkWriteException) cause);
+        }else if(cause instanceof TapMongoBulkWriteException){
+            Throwable throwable = cause.getCause();
+            if(throwable instanceof MongoBulkWriteException){
+                checkMongoBulkWriteError(data, (MongoBulkWriteException) throwable);
+            }
+        }
+    }
+
+    protected void checkMongoBulkWriteError(Object data,MongoBulkWriteException cause){
+        for (BulkWriteError err : cause.getWriteErrors()) {
+            if (Pattern.matches(".*cannot use the part \\([^)]+\\) to traverse the element \\([^)]+\\).*", err.getMessage())) {
+                Optional.ofNullable(data)
+                        .map(obj -> (obj instanceof List) ? (List<?>) obj : null)
+                        .map(list -> (list.size() > err.getIndex()) ? list.get(err.getIndex()) : null)
+                        .ifPresent(event -> {
+                            throw new TapPdkSkippableDataEx(err.getMessage() + ": " + JSON.toJSONString(event), getPdkId(), ErrorKit.getLastCause(cause));
+                        });
+                throw new TapPdkSkippableDataEx(err.getMessage(), getPdkId(), ErrorKit.getLastCause(cause));
             }
         }
     }

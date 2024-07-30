@@ -241,6 +241,10 @@ public abstract class JdbcContext implements AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
+    public Long queryTimestamp() throws SQLException {
+        throw new UnsupportedOperationException();
+    }
+
     @Override
     public void close() {
         if (EmptyKit.isNotNull(hikariDataSource)) {

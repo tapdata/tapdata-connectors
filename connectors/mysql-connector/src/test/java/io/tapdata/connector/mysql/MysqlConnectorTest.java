@@ -20,8 +20,11 @@ import io.tapdata.entity.schema.type.TapBinary;
 import io.tapdata.entity.schema.type.TapBoolean;
 import io.tapdata.entity.schema.type.TapDateTime;
 import io.tapdata.entity.schema.type.TapNumber;
+import io.tapdata.entity.utils.DataMap;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import io.tapdata.utils.UnitTestUtils;
@@ -447,6 +450,29 @@ public class MysqlConnectorTest {
             MysqlBinlogPosition actualData = ReflectionTestUtils.invokeMethod(mysqlConnector, "timestampToStreamOffset",
                     tapConnectorContext, null);
             Assertions.assertTrue(actualData.getPosition() == position);
+        }
+    }
+
+    @Nested
+    class ConnectionTest{
+        MysqlConfig mysqlConfig;
+        MysqlConnector connector;
+        @BeforeEach
+        void init(){
+            mysqlConfig = mock(MysqlConfig.class);
+            connector = mock(MysqlConnector.class);
+        }
+
+        @Test
+        void test_main(){
+            TapConnectionContext connectionContext = mock(TapConnectionContext.class);
+            when(connectionContext.getConnectionConfig()).thenReturn(new DataMap());
+            Consumer<TestItem> consumer = testItem -> {
+            };
+            doCallRealMethod().when(connector).connectionTest(any(),any());
+            Assertions.assertThrows(IllegalArgumentException.class,()->{
+                connector.connectionTest(connectionContext,consumer);
+            });
         }
     }
 

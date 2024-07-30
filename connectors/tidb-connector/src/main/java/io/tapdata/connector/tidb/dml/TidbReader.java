@@ -5,6 +5,7 @@ import io.tapdata.connector.mysql.SqlMaker;
 import io.tapdata.connector.tidb.TidbJdbcContext;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapType;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 
@@ -27,7 +28,7 @@ public class TidbReader implements Serializable {
     }
 
     public void readWithFilter(TapConnectorContext tapConnectorContext, TapTable tapTable, TapAdvanceFilter tapAdvanceFilter,
-                               Predicate<?> stop, Consumer<Map<String, Object>> consumer) throws Throwable {
+                               Predicate<?> stop, Consumer<DataMap> consumer) throws Throwable {
         SqlMaker sqlMaker = new MysqlMaker();
         String sql = sqlMaker.selectSql(tapConnectorContext, tapTable, tapAdvanceFilter);
         AtomicLong row = new AtomicLong(0L);
@@ -40,7 +41,7 @@ public class TidbReader implements Serializable {
                         break;
                     }
                     row.incrementAndGet();
-                    Map<String, Object> data = new HashMap<>();
+                    DataMap data = new DataMap();
                     for (int i = 0; i < metaData.getColumnCount(); i++) {
                         String columnName = metaData.getColumnName(i + 1);
                         try {
