@@ -1,7 +1,9 @@
 package io.tapdata.connector.postgres.cdc;
 
 import io.debezium.embedded.EmbeddedEngine;
+import io.debezium.embedded.StopConnectorException;
 import io.debezium.engine.DebeziumEngine;
+import io.debezium.engine.StopEngineException;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.cdc.config.PostgresDebeziumConfig;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
@@ -141,75 +143,84 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     }
 
     @Override
-    public void consumeRecords(List<SourceRecord> sourceRecords, DebeziumEngine.RecordCommitter<SourceRecord> committer) {
+    public void consumeRecords(List<SourceRecord> sourceRecords, DebeziumEngine.RecordCommitter<SourceRecord> committer) throws InterruptedException {
         super.consumeRecords(sourceRecords, committer);
         List<TapEvent> eventList = TapSimplify.list();
         Map<String, ?> offset = null;
         for (SourceRecord sr : sourceRecords) {
-            offset = sr.sourceOffset();
-            // PG use micros to indicate the time but in pdk api we use millis
-            Long referenceTime = (Long) offset.get("ts_usec") / 1000;
-            Struct struct = ((Struct) sr.value());
-            if (struct == null) {
-                continue;
-            }
-            if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
-                eventList.add(new HeartbeatEvent().init().referenceTime(((Struct) sr.value()).getInt64("ts_ms")));
-                continue;
-            } else if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
-                continue;
-            }
-            String op = struct.getString("op");
-            String lsn = String.valueOf(offset.get("lsn"));
-            String table = struct.getStruct("source").getString("table");
-            //双活情形下，需要过滤_tap_double_active记录的同事务数据
-            if (Boolean.TRUE.equals(postgresConfig.getDoubleActive())) {
-                if ("_tap_double_active".equals(table)) {
-                    dropTransactionId = String.valueOf(sr.sourceOffset().get("transaction_id"));
+            try{
+                offset = sr.sourceOffset();
+                // PG use micros to indicate the time but in pdk api we use millis
+                Long referenceTime = (Long) offset.get("ts_usec") / 1000;
+                Struct struct = ((Struct) sr.value());
+                if (struct == null) {
                     continue;
-                } else {
-                    if (null != dropTransactionId) {
-                        if (dropTransactionId.equals(String.valueOf(sr.sourceOffset().get("transaction_id")))) {
-                            continue;
-                        } else {
-                            dropTransactionId = null;
+                }
+                if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
+                    eventList.add(new HeartbeatEvent().init().referenceTime(((Struct) sr.value()).getInt64("ts_ms")));
+                    committer.markProcessed(sr);
+                    continue;
+                } else if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
+                    continue;
+                }
+                String op = struct.getString("op");
+                String lsn = String.valueOf(offset.get("lsn"));
+                String table = struct.getStruct("source").getString("table");
+                //双活情形下，需要过滤_tap_double_active记录的同事务数据
+                if (Boolean.TRUE.equals(postgresConfig.getDoubleActive())) {
+                    if ("_tap_double_active".equals(table)) {
+                        dropTransactionId = String.valueOf(sr.sourceOffset().get("transaction_id"));
+                        continue;
+                    } else {
+                        if (null != dropTransactionId) {
+                            if (dropTransactionId.equals(String.valueOf(sr.sourceOffset().get("transaction_id")))) {
+                                continue;
+                            } else {
+                                dropTransactionId = null;
+                            }
                         }
                     }
                 }
-            }
-            Struct after = struct.getStruct("after");
-            Struct before = struct.getStruct("before");
-            TapRecordEvent event = null;
-            switch (op) { //snapshot.mode = 'never'
-                case "c": //after running --insert
-                case "r": //after slot but before running --read
-                    event = new TapInsertRecordEvent().init().table(table).after(getMapFromStruct(after));
-                    break;
-                case "d": //after running --delete
-                    event = new TapDeleteRecordEvent().init().table(table).before(getMapFromStruct(before));
-                    break;
-                case "u": //after running --update
-                    event = new TapUpdateRecordEvent().init().table(table).after(getMapFromStruct(after)).before(getMapFromStruct(before));
-                    break;
-                default:
-                    break;
-            }
-            if (EmptyKit.isNotNull(event)) {
-                event.setReferenceTime(referenceTime);
-                event.setExactlyOnceId(lsn);
-            }
-            eventList.add(event);
-            if (eventList.size() >= recordSize) {
-                postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
-                consumer.accept(eventList, postgresOffset);
-                PostgresOffsetStorage.postgresOffsetMap.put(runnerName, postgresOffset);
-                eventList = TapSimplify.list();
+                Struct after = struct.getStruct("after");
+                Struct before = struct.getStruct("before");
+                TapRecordEvent event = null;
+                switch (op) { //snapshot.mode = 'never'
+                    case "c": //after running --insert
+                    case "r": //after slot but before running --read
+                        event = new TapInsertRecordEvent().init().table(table).after(getMapFromStruct(after));
+                        break;
+                    case "d": //after running --delete
+                        event = new TapDeleteRecordEvent().init().table(table).before(getMapFromStruct(before));
+                        break;
+                    case "u": //after running --update
+                        event = new TapUpdateRecordEvent().init().table(table).after(getMapFromStruct(after)).before(getMapFromStruct(before));
+                        break;
+                    default:
+                        break;
+                }
+                if (EmptyKit.isNotNull(event)) {
+                    event.setReferenceTime(referenceTime);
+                    event.setExactlyOnceId(lsn);
+                }
+                eventList.add(event);
+                committer.markProcessed(sr);
+                if (eventList.size() >= recordSize) {
+                    postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
+                    consumer.accept(eventList, postgresOffset);
+                    PostgresOffsetStorage.postgresOffsetMap.put(runnerName, postgresOffset);
+                    committer.markBatchFinished();
+                    eventList = TapSimplify.list();
+                }
+            }catch (StopConnectorException | StopEngineException ex){
+                committer.markProcessed(sr);
+                throw ex;
             }
         }
         if (EmptyKit.isNotEmpty(eventList)) {
             postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
             consumer.accept(eventList, postgresOffset);
             PostgresOffsetStorage.postgresOffsetMap.put(runnerName, postgresOffset);
+            committer.markBatchFinished();
         }
     }
 
