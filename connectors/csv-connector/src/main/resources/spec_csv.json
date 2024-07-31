@@ -613,10 +613,10 @@
           "default": "0x",
           "x-reactions": [
             {
-              "dependencies": ["$inputs", ".separatorType"],
+              "dependencies": [".separatorType"],
               "fulfill": {
                 "state": {
-                  "display": "{{$deps[0].length > 0 && $deps[1] === 'ascii' ? \"visible\":\"hidden\"}}"
+                  "display": "{{$deps[0] === 'ascii' ? \"visible\":\"hidden\"}}"
                 }
               }
             }
