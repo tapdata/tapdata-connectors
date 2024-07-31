@@ -4,7 +4,6 @@
     "icon": "icons/mysql.png",
     "id": "mysql",
     "doc": "${doc}",
-    "authentication": "Alpha",
     "tags": ["Database", "ssl", "doubleActive"]
   },
   "configOptions": {

@@ -4,7 +4,6 @@
     "icon": "icons/rabbitmq.png",
     "doc": "${doc}",
     "id": "rabbitmq",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {

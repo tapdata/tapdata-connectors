@@ -4,7 +4,6 @@
     "icon": "icons/json.png",
     "doc": "${doc}",
     "id": "json",
-    "authentication": "Beta",
     "tags": ["File"]
   },
   "configOptions": {

@@ -4,7 +4,6 @@
     "icon": "icons/bigquery.png",
     "doc" : "${doc}",
     "id": "bigquery",
-    "authentication": "Beta",
     "tags": [""]
   },
   "configOptions": {

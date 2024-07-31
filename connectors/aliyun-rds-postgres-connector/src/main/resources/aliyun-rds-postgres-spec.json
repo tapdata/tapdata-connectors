@@ -4,7 +4,6 @@
     "icon": "icons/aliyun_rds_postgres.png",
     "doc" : "${doc}",
     "id": "aliyun-rds-postgres",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
