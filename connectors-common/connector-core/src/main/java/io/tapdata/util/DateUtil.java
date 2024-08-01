@@ -399,8 +399,11 @@ public class DateUtil {
         }
     }
 
-    public static Object parseInstantWithHour(String dateString, Map<String,String> dateFormatMap, int hour) {
+    public static Object parseInstantWithHour(String dateString, Map<String, String> dateFormatMap, int hour) {
         String dateFormat = determineDateFormat(dateString, dateFormatMap);
+        if (dateFormat == null) {
+            return dateString;
+        }
         DateTimeFormatter DT_FORMATTER = DateTimeFormatter.ofPattern(dateFormat);
         if (dateFormat.contains("H")) {
             return LocalDateTime.parse(dateString, DT_FORMATTER).minusHours(hour);
