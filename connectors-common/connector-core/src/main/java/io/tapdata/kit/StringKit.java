@@ -50,7 +50,7 @@ public class StringKit {
         if (EmptyKit.isEmpty(list)) {
             return "";
         }
-        return list.stream().map(s -> around + s + around).collect(Collectors.joining(splitter));
+        return list.stream().map(s -> around + s.replace(around, around + around) + around).collect(Collectors.joining(splitter));
     }
 
     public static int compareVersion(String version1, String version2) {
