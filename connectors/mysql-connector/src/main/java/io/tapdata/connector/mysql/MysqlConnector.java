@@ -35,10 +35,8 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
-import io.tapdata.exception.TapDbCdcConfigInvalidEx;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -66,6 +64,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -585,7 +586,8 @@ public class MysqlConnector extends CommonDbConnector {
         };
     }
 
-    protected String batchReadSql(TapTable tapTable) {
+    @Override
+    protected String getBatchReadSelectSql(TapTable tapTable) {
         if (tapTable.getNameFieldMap().size() > 50) {
             return String.format("SELECT * FROM `%s`.`%s`", mysqlConfig.getDatabase(), tapTable.getId());
         } else {
@@ -596,18 +598,41 @@ public class MysqlConnector extends CommonDbConnector {
 
     @Override
     protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        String sql = batchReadSql(tapTable);
-        for (int i = 0; i < commonDbConfig.getMaxSplit(); i++) {
-            String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), i);
-            tapLogger.info("batchRead, splitSql[{}]: {}", i + 1, splitSql);
-            jdbcContext.query(splitSql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
+        String sql = getBatchReadSelectSql(tapTable);
+        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
+        ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
+        try {
+            for (int i = 0; i < commonDbConfig.getBatchReadThreadSize(); i++) {
+                final int threadIndex = i;
+                executorService.submit(() -> {
+                    try {
+                        for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
+                            String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
+                            tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
+                            jdbcContext.query(splitSql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
+                        }
+                    } catch (Exception e) {
+                        throwable.set(e);
+                    } finally {
+                        countDownLatch.countDown();
+                    }
+                });
+            }
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            if (EmptyKit.isNotNull(throwable.get())) {
+                exceptionCollector.collectTerminateByServer(throwable.get());
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), throwable.get());
+                exceptionCollector.revealException(throwable.get());
+                throw throwable.get();
+            }
+        } finally {
+            executorService.shutdown();
         }
-    }
-
-    @Override
-    protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        String sql = batchReadSql(tapTable);
-        mysqlJdbcContext.queryWithStream(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
     }
 
     @Override
@@ -664,7 +689,7 @@ public class MysqlConnector extends CommonDbConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(mysqlConfig.getConnectionString());
         try (
-                MysqlConnectionTest mysqlConnectionTest = new MysqlConnectionTest(mysqlConfig, consumer,connectionOptions)
+                MysqlConnectionTest mysqlConnectionTest = new MysqlConnectionTest(mysqlConfig, consumer, connectionOptions)
         ) {
             mysqlConnectionTest.testOneByOne();
         }

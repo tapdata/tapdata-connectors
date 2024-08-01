@@ -308,7 +308,7 @@ public class MysqlConnectorTest {
             tapTable = mock(TapTable.class);
             mysqlConfig = mock(MysqlConfig.class);
             connector = mock(MysqlConnector.class);
-            doCallRealMethod().when(connector).batchReadSql(tapTable);
+            doCallRealMethod().when(connector).getBatchReadSelectSql(tapTable);
             UnitTestUtils.injectField(MysqlConnector.class, connector, "mysqlConfig", mysqlConfig);
         }
 
@@ -331,7 +331,7 @@ public class MysqlConnectorTest {
                 fields[i] = new TapField("f" + i, "INT");
             }
             when(tapTable.getNameFieldMap()).thenReturn(generateFieldMap(fields));
-            assertTrue(connector.batchReadSql(tapTable).toLowerCase().startsWith("select *"));
+            assertTrue(connector.getBatchReadSelectSql(tapTable).toLowerCase().startsWith("select *"));
         }
 
         @Test
@@ -342,7 +342,7 @@ public class MysqlConnectorTest {
                 fields[i] = new TapField("f" + i, "INT");
             }
             when(tapTable.getNameFieldMap()).thenReturn(generateFieldMap(fields));
-            assertFalse(connector.batchReadSql(tapTable).toLowerCase().startsWith("select *"));
+            assertFalse(connector.getBatchReadSelectSql(tapTable).toLowerCase().startsWith("select *"));
         }
     }
 
@@ -411,6 +411,7 @@ public class MysqlConnectorTest {
             int expectedMaxSplit = 5;
             when(commonDbConfig.getHashSplit()).thenReturn(true);
             when(commonDbConfig.getMaxSplit()).thenReturn(expectedMaxSplit);
+            when(commonDbConfig.getBatchReadThreadSize()).thenReturn(3);
             assertDoesNotThrow(() -> connector.batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer));
             verify(connector, times(expectedMaxSplit)).resultSetConsumer(any(), anyInt(), any());
         }

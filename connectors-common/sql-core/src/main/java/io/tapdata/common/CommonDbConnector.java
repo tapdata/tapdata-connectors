@@ -602,9 +602,13 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return "mod(" + getHashSplitStringSql(tapTable) + "," + maxSplit + ")=" + currentSplit;
     }
 
-    protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+    protected String getBatchReadSelectSql(TapTable tapTable) {
         String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + c + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
-        String sql = String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
+        return String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
+    }
+
+    protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
         ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
