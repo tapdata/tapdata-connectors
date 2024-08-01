@@ -549,8 +549,10 @@ public class MysqlConnector extends CommonDbConnector {
     protected String getHashSplitStringSql(TapTable tapTable) {
         Collection<String> pks = tapTable.primaryKeys();
         if (pks.isEmpty()) throw new CoreException("No primary keys found for table: " + tapTable.getName());
-
-        return "MD5(CONCAT_WS(',', `" + String.join("`, `", pks) + "`))";
+        if (pks.size() == 1) {
+            return "CRC32(" + pks.iterator().next() + ")";
+        }
+        return "CRC32(CONCAT_WS(',', `" + String.join("`, `", pks) + "`))";
     }
 
     protected ResultSetConsumer resultSetConsumer(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
