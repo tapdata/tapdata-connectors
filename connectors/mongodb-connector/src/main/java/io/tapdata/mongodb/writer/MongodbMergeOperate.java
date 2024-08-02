@@ -748,7 +748,7 @@ public class MongodbMergeOperate {
 		return updateOpDoc;
 	}
 
-	private static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent) {
+	protected static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent) {
 		Map<String, Object> before = null;
 		Map<String, Object> after = null;
 		MergeBundle.EventOperation eventOperation;

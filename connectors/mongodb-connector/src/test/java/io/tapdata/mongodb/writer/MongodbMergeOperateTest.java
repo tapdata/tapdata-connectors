@@ -1,6 +1,9 @@
 package io.tapdata.mongodb.writer;
 
 import com.mongodb.client.model.UpdateOptions;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.mongodb.entity.MergeBundle;
 import io.tapdata.mongodb.entity.MergeFilter;
@@ -15,6 +18,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
+import java.time.Instant;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -341,6 +345,59 @@ class MongodbMergeOperateTest {
 
 			Document update = mergeResult.getUpdate();
 			assertEquals("{\"$set\": {\"td\": 1, \"subMap.id\": 1}, \"$unset\": {\"subMap.model\": 1}}", update.toJson());
+		}
+	}
+
+	@Nested
+	@DisplayName("Method mergeBundle test")
+	class mergeBundleTest {
+		@Test
+		@DisplayName("test insert event")
+		void test1() {
+			Document after = new Document("id", 1).append("title", "xxxxxxxx").append("lastModDate", Instant.now());
+			List<String> removeFields = new ArrayList<>();
+			removeFields.add("test");
+			TapInsertRecordEvent insertRecordEvent = TapInsertRecordEvent.create().init().after(after).removedFields(removeFields);
+			MergeBundle mergeBundle = MongodbMergeOperate.mergeBundle(insertRecordEvent);
+			assertNotNull(mergeBundle);
+			assertEquals(MergeBundle.EventOperation.INSERT, mergeBundle.getOperation());
+			assertEquals(after, mergeBundle.getAfter());
+			assertEquals(new HashMap<String, Object>() {
+				{
+					put("test", true);
+				}
+			}, mergeBundle.getRemovefields());
+		}
+
+		@Test
+		@DisplayName("test update event")
+		void test2() {
+			Document before = new Document("id", 1).append("title", "xxxxxxxx").append("lastModDate", Instant.now()).append("test", 1);
+			Document after = new Document("id", 1).append("title", "yyyyyyyy").append("lastModDate", Instant.now());
+			List<String> removeFields = new ArrayList<>();
+			removeFields.add("test");
+			TapUpdateRecordEvent updateRecordEvent = TapUpdateRecordEvent.create().init().before(before).after(after).removedFields(removeFields);
+			MergeBundle mergeBundle = MongodbMergeOperate.mergeBundle(updateRecordEvent);
+			assertNotNull(mergeBundle);
+			assertEquals(MergeBundle.EventOperation.UPDATE, mergeBundle.getOperation());
+			assertEquals(before, mergeBundle.getBefore());
+			assertEquals(after, mergeBundle.getAfter());
+			assertEquals(new HashMap<String, Object>() {
+				{
+					put("test", true);
+				}
+			}, mergeBundle.getRemovefields());
+		}
+
+		@Test
+		@DisplayName("test delete event")
+		void test3() {
+			Document before = new Document("id", 1).append("title", "xxxxxxxx").append("lastModDate", Instant.now());
+			TapDeleteRecordEvent deleteRecordEvent = TapDeleteRecordEvent.create().init().before(before);
+			MergeBundle mergeBundle = MongodbMergeOperate.mergeBundle(deleteRecordEvent);
+			assertNotNull(mergeBundle);
+			assertEquals(MergeBundle.EventOperation.DELETE, mergeBundle.getOperation());
+			assertEquals(before, mergeBundle.getBefore());
 		}
 	}
 }
