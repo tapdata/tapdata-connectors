@@ -137,7 +137,7 @@ public class MongodbMergeOperate {
 				}
 				break;
 			case updateWrite:
-				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys);
+				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys, mergeFilter);
 				if (unsetResultNull) {
 					addUnsetMerge(mergeResults, unsetResult);
 				}
@@ -145,7 +145,7 @@ public class MongodbMergeOperate {
 				mergeResult = updateMergeIfNeed(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
 				break;
 			case updateIntoArray:
-				unsetResult = updateIntoArrayUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, parentProperties);
+				unsetResult = updateIntoArrayUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, parentProperties, mergeFilter);
 				if (unsetResultNull && addUnsetMerge(mergeResults, unsetResult)) {
 					mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
 				}
@@ -228,7 +228,10 @@ public class MongodbMergeOperate {
 		return mergeResult;
 	}
 
-	private static MergeResult updateWriteUnsetMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult, Set<String> sharedJoinKeys) {
+	private static MergeResult updateWriteUnsetMerge(
+			MergeBundle mergeBundle, MergeTableProperties currentProperty,
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
+			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter) {
 		if (null == currentProperty) {
 			return mergeResult;
 		}
@@ -253,7 +256,7 @@ public class MongodbMergeOperate {
 			List<Map<String, String>> joinKeys = currentProperty.getJoinKeys();
 			Document filter;
 			mergeResult = new MergeResult();
-			filter = filter(updateJoinKeyBefore, joinKeys);
+			filter = unsetFilter(updateJoinKeyBefore, joinKeys);
 			if (null != updateJoinKey.getParentBefore()) {
 				filter.putAll(updateJoinKey.getParentBefore());
 			}
@@ -270,6 +273,7 @@ public class MongodbMergeOperate {
 			}
 			mergeResult.getFilter().putAll(filter);
 		}
+		appendAllParentMergeFilters(mergeResult, mergeFilter);
 
 		if (null == mergeResult.getOperation()) {
 			mergeResult.setOperation(MergeResult.Operation.UPDATE);
@@ -285,7 +289,10 @@ public class MongodbMergeOperate {
 		return mergeResult;
 	}
 
-	private static MergeResult updateIntoArrayUnsetMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult, MergeTableProperties parentProperties) {
+	private static MergeResult updateIntoArrayUnsetMerge(
+			MergeBundle mergeBundle, MergeTableProperties currentProperty,
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult,
+			MergeTableProperties parentProperties, MergeFilter mergeFilter) {
 		String id = currentProperty.getId();
 		if (null == mergeResult && (MapUtils.isEmpty(updateJoinKeys) || !updateJoinKeys.containsKey(id))) {
 			return mergeResult;
@@ -338,6 +345,7 @@ public class MongodbMergeOperate {
 			}
 			mergeResult.getFilter().putAll(filter);
 		}
+		appendAllParentMergeFilters(mergeResult, mergeFilter);
 
 		if (mergeResult.getOperation() == null) {
 			mergeResult.setOperation(MergeResult.Operation.UPDATE);
@@ -420,9 +428,7 @@ public class MongodbMergeOperate {
 				} else {
 					update.put("$set", setOperateDocFiltered);
 				}
-				if (operation == MergeBundle.EventOperation.INSERT) {
-					mergeResult.getUpdateOptions().upsert(true);
-				}
+				mergeResult.getUpdateOptions().upsert(true);
 				if (mergeResult.getOperation() == null) {
 					mergeResult.setOperation(MergeResult.Operation.UPDATE);
 				}
@@ -712,6 +718,9 @@ public class MongodbMergeOperate {
 		if (isArray) {
 			if (firstMergeResult && StringUtils.isNotBlank(targetPath)) {
 				data.keySet().forEach(key -> {
+					if (haveDot(key)) {
+						return;
+					}
 					if (sharedJoinKeys.contains(String.join(".", targetPath, key))) {
 						return;
 					}
@@ -720,15 +729,26 @@ public class MongodbMergeOperate {
 			}
 		} else {
 			data.keySet().forEach(key -> {
-				if (EmptyKit.isNotEmpty(targetPath)) {
-					unsetDoc.append(String.join(".", targetPath, key), true);
-				} else {
-					unsetDoc.append(key, true);
+				if (haveDot(key)) {
+					return;
 				}
+				String unsetKey = key;
+				if (EmptyKit.isNotEmpty(targetPath)) {
+					unsetKey = String.join(".", targetPath, key);
+					unsetDoc.append(String.join(".", targetPath, key), true);
+				}
+				unsetDoc.append(unsetKey, true);
 			});
 			unsetDoc.keySet().removeIf(key -> isShareJoinKey(sharedJoinKeys, key));
 		}
 		return unsetDoc;
+	}
+
+	private static boolean haveDot(String str) {
+		if (StringUtils.isBlank(str)) {
+			return false;
+		}
+		return str.contains(".");
 	}
 
 	private static Document buildPullDocument(Map<String, Object> data, List<String> arrayKeys, boolean array, String targetPath) {
@@ -787,6 +807,14 @@ public class MongodbMergeOperate {
 		Document document = new Document();
 		for (Map<String, String> joinKey : joinKeys) {
 			document.put(joinKey.get("target"), MapUtil.getValueByKey(data, joinKey.get("source")));
+		}
+		return document;
+	}
+
+	private static Document unsetFilter(Map<String, Object> data, List<Map<String, String>> joinKeys) {
+		Document document = new Document();
+		for (Map<String, String> joinKey : joinKeys) {
+			document.put(joinKey.get("target"), MapUtil.getValueByKey(data, joinKey.get("target")));
 		}
 		return document;
 	}
