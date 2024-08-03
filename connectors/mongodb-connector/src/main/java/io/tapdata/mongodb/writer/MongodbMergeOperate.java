@@ -33,11 +33,11 @@ public class MongodbMergeOperate {
 
 	protected static final String UNSET_KEY = "$unset";
 
-	public static List<WriteModel<Document>> merge(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, TapRecordEvent tapRecordEvent, Collection<String> allColumn, Collection<String> pks) {
+	public static List<WriteModel<Document>> merge(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, TapRecordEvent tapRecordEvent) {
 		List<WriteModel<Document>> writeModels;
 		try {
 			writeModels = new ArrayList<>();
-			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent, allColumn, pks);
+			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent);
 			final Map<String, Object> info = tapRecordEvent.getInfo();
 			if (tapRecordEvent instanceof TapInsertRecordEvent) {
 				inserted.incrementAndGet();
@@ -748,11 +748,11 @@ public class MongodbMergeOperate {
 		return updateOpDoc;
 	}
 
-	private static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent, Collection<String> allColumn, Collection<String> pks) {
+	protected static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent) {
 		Map<String, Object> before = null;
 		Map<String, Object> after = null;
-		MergeBundle.EventOperation eventOperation = null;
-		Map<String, Object> removefields = null;
+		MergeBundle.EventOperation eventOperation;
+		Map<String, Object> removeFieldsMap = removeFieldsWrapper(tapRecordEvent);
 		if (tapRecordEvent instanceof TapInsertRecordEvent) {
 			after = ((TapInsertRecordEvent) tapRecordEvent).getAfter();
 			eventOperation = MergeBundle.EventOperation.INSERT;
@@ -760,19 +760,27 @@ public class MongodbMergeOperate {
 			before = ((TapUpdateRecordEvent) tapRecordEvent).getBefore();
 			after = ((TapUpdateRecordEvent) tapRecordEvent).getAfter();
 			eventOperation = MergeBundle.EventOperation.UPDATE;
-			List<String> removedFields = ((TapUpdateRecordEvent) tapRecordEvent).getRemovedFields();
-			if (removedFields != null && removedFields.size() > 0) {
-				removefields = new HashMap<>();
-				for (String removeField : removedFields) {
-					removefields.put(removeField, true);
-				}
-			}
 		} else {
 			before = ((TapDeleteRecordEvent) tapRecordEvent).getBefore();
 			eventOperation = MergeBundle.EventOperation.DELETE;
 		}
 
-		return new MergeBundle(eventOperation, before, after, removefields);
+		return new MergeBundle(eventOperation, before, after, removeFieldsMap);
+	}
+
+	private static Map<String, Object> removeFieldsWrapper(TapRecordEvent tapRecordEvent) {
+		List<String> removedFields = null;
+		Map<String, Object> removefieldsMap = new HashMap<>();
+		if (tapRecordEvent instanceof TapInsertRecordEvent) {
+			removedFields = ((TapInsertRecordEvent) tapRecordEvent).getRemovedFields();
+		} else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
+			removedFields = ((TapUpdateRecordEvent) tapRecordEvent).getRemovedFields();
+		}
+		if (null == removedFields) {
+			return new HashMap<>();
+		}
+		removedFields.forEach(removeField -> removefieldsMap.put(removeField, true));
+		return removefieldsMap;
 	}
 
 	private static Document filter(Map<String, Object> data, List<Map<String, String>> joinKeys) {
