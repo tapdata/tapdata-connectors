@@ -13,6 +13,7 @@ import io.tapdata.pdk.apis.entity.merge.MergeLookupResult;
 import io.tapdata.pdk.apis.entity.merge.MergeTableProperties;
 import org.bson.Document;
 import org.bson.conversions.Bson;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -317,7 +318,7 @@ class MongodbMergeOperateTest {
 			mergeTableProperties.setMergeType(MergeTableProperties.MergeType.updateWrite);
 			mergeTableProperties.setTargetPath("subMap");
 			MergeResult mergeResult = new MergeResult();
-			MongodbMergeOperate.updateMerge(mergeBundle, mergeTableProperties, mergeResult,new HashSet<>(), new MergeFilter(true));
+			MongodbMergeOperate.updateMerge(mergeBundle, mergeTableProperties, mergeResult, new HashSet<>(), new MergeFilter(true));
 
 			Document update = mergeResult.getUpdate();
 			assertEquals("{\"$unset\": {\"subMap.model\": 1}, \"$set\": {\"subMap.id\": 1}}", update.toJson());
@@ -341,7 +342,7 @@ class MongodbMergeOperateTest {
 			mergeTableProperties.setTargetPath("subMap");
 			MergeResult mergeResult = new MergeResult();
 			mergeResult.setUpdate(new Document("$set", new Document("td", 1)));
-			MongodbMergeOperate.updateMerge(mergeBundle, mergeTableProperties, mergeResult,new HashSet<>(), new MergeFilter(true));
+			MongodbMergeOperate.updateMerge(mergeBundle, mergeTableProperties, mergeResult, new HashSet<>(), new MergeFilter(true));
 
 			Document update = mergeResult.getUpdate();
 			assertEquals("{\"$set\": {\"td\": 1, \"subMap.id\": 1}, \"$unset\": {\"subMap.model\": 1}}", update.toJson());
@@ -398,6 +399,116 @@ class MongodbMergeOperateTest {
 			assertNotNull(mergeBundle);
 			assertEquals(MergeBundle.EventOperation.DELETE, mergeBundle.getOperation());
 			assertEquals(before, mergeBundle.getBefore());
+		}
+	}
+
+	@Nested
+	@DisplayName("Method buildUnsetDocument test")
+	class buildUnsetDocumentTest {
+		@Test
+		@DisplayName("test not array, have target path")
+		void test1() {
+			Document data = new Document("f1", true)
+					.append("subDoc", true)
+					.append("subDoc.f1", true)
+					.append("f2", true);
+			Set<String> shareJoinKey = new HashSet<>();
+			shareJoinKey.add("target.f2");
+			Document unsetDoc = MongodbMergeOperate.buildUnsetDocument(shareJoinKey, data, "target", false, false);
+			assertNotNull(unsetDoc);
+			Document expect = new Document("target.f1", true)
+					.append("target.subDoc", true);
+			assertEquals(expect, unsetDoc);
+		}
+
+		@Test
+		@DisplayName("test not array, not have target path")
+		void test2() {
+			Document data = new Document("f1", true)
+					.append("subDoc", true)
+					.append("subDoc.f1", true)
+					.append("f2", true);
+			Set<String> shareJoinKey = new HashSet<>();
+			shareJoinKey.add("f2");
+			Document unsetDoc = MongodbMergeOperate.buildUnsetDocument(shareJoinKey, data, "", false, false);
+			assertNotNull(unsetDoc);
+			Document expect = new Document("f1", true)
+					.append("subDoc", true);
+			assertEquals(expect, unsetDoc);
+		}
+
+		@Test
+		@DisplayName("test array, have target path")
+		void test3() {
+			Document data = new Document("f1", true)
+					.append("subArray", true)
+					.append("subArray.f1", true)
+					.append("f2", true);
+			Set<String> shareJoinKey = new HashSet<>();
+			shareJoinKey.add("target.f2");
+			Document unsetDoc = MongodbMergeOperate.buildUnsetDocument(shareJoinKey, data, "target", true, true);
+			assertNotNull(unsetDoc);
+			Document expect = new Document("target.$[element1].f1", true)
+					.append("target.$[element1].subArray", true);
+			assertEquals(expect, unsetDoc);
+		}
+
+		@Test
+		@DisplayName("test array, not have target path")
+		void test4() {
+			Document data = new Document("f1", true)
+					.append("subArray", true)
+					.append("subArray.f1", true)
+					.append("f2", true);
+			Set<String> shareJoinKey = new HashSet<>();
+			shareJoinKey.add("target.f2");
+			Document unsetDoc = MongodbMergeOperate.buildUnsetDocument(shareJoinKey, data, "", true, true);
+			assertTrue(unsetDoc.isEmpty());
+		}
+
+		@Test
+		@DisplayName("test array, firstMergeResult is false")
+		void test5() {
+			Document data = new Document("f1", true)
+					.append("subArray", true)
+					.append("subArray.f1", true)
+					.append("f2", true);
+			Set<String> shareJoinKey = new HashSet<>();
+			shareJoinKey.add("target.f2");
+			Document unsetDoc = MongodbMergeOperate.buildUnsetDocument(shareJoinKey, data, "target", true, false);
+			assertTrue(unsetDoc.isEmpty());
+		}
+	}
+
+	@Nested
+	@DisplayName("Method unsetFilter test")
+	class unsetFilterTest {
+
+		private Document data;
+		private List<Map<String, String>> joinKeys;
+
+		@BeforeEach
+		void setUp() {
+			data = new Document("id1", 1)
+					.append("type1", "xxx")
+					.append("f1", "zzzz")
+					.append("f2", 625.85);
+			joinKeys = new ArrayList<>();
+			joinKeys.add(new HashMap<String, String>() {{
+				put("source", "id");
+				put("target", "id1");
+			}});
+			joinKeys.add(new HashMap<String, String>() {{
+				put("source", "type");
+				put("target", "type1");
+			}});
+		}
+
+		@Test
+		@DisplayName("test main process")
+		void test1() {
+			Document filter = MongodbMergeOperate.unsetFilter(data, joinKeys);
+			assertEquals(new Document("id1", 1).append("type1", "xxx"), filter);
 		}
 	}
 }

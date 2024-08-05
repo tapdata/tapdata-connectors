@@ -713,7 +713,7 @@ public class MongodbMergeOperate {
 		return filterMap;
 	}
 
-	private static Document buildUnsetDocument(Set<String> sharedJoinKeys, Map<String, Object> data, String targetPath, boolean isArray, boolean firstMergeResult) {
+	protected static Document buildUnsetDocument(Set<String> sharedJoinKeys, Map<String, Object> data, String targetPath, boolean isArray, boolean firstMergeResult) {
 		Document unsetDoc = new Document();
 		if (isArray) {
 			if (firstMergeResult && StringUtils.isNotBlank(targetPath)) {
@@ -735,7 +735,6 @@ public class MongodbMergeOperate {
 				String unsetKey = key;
 				if (EmptyKit.isNotEmpty(targetPath)) {
 					unsetKey = String.join(".", targetPath, key);
-					unsetDoc.append(String.join(".", targetPath, key), true);
 				}
 				unsetDoc.append(unsetKey, true);
 			});
@@ -811,7 +810,7 @@ public class MongodbMergeOperate {
 		return document;
 	}
 
-	private static Document unsetFilter(Map<String, Object> data, List<Map<String, String>> joinKeys) {
+	protected static Document unsetFilter(Map<String, Object> data, List<Map<String, String>> joinKeys) {
 		Document document = new Document();
 		for (Map<String, String> joinKey : joinKeys) {
 			document.put(joinKey.get("target"), MapUtil.getValueByKey(data, joinKey.get("target")));
