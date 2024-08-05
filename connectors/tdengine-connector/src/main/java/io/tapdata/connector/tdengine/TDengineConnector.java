@@ -256,9 +256,9 @@ public class TDengineConnector extends CommonDbConnector {
         for (String tableName : tables) {
             String topic = "tap_topic_" + tableName;
             if (canReplace) {
-                createSqls.add(String.format("drop topic if exists %s", topic));
+                createSqls.add(String.format("drop topic if exists `%s`", topic));
             }
-            createSqls.add(String.format("create topic if not exists %s as select * from %s", topic, tableName));
+            createSqls.add(String.format("create topic if not exists `%s` as select * from `%s`", topic, tableName));
         }
         tdengineJdbcContext.batchExecute(createSqls);
     }
@@ -270,7 +270,7 @@ public class TDengineConnector extends CommonDbConnector {
         }
         for (String tableName : tables) {
             String topic = "tap_topic_" + tableName;
-            dropSqls.add(String.format("drop topic if exists %s", topic));
+            dropSqls.add(String.format("drop topic if exists `%s`", topic));
         }
         tdengineJdbcContext.batchExecute(dropSqls);
     }
