@@ -78,6 +78,14 @@ public abstract class CommonDbConnector extends ConnectorBase {
         multiThreadDiscoverSchema(tableList, tableSize, consumer);
     }
 
+    /**
+     * when your connector need to support partition table and main-curl table
+     *  you should impl this function to discover those tablies relations
+     * */
+    public List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
+        return tapTableList;
+    }
+
     @Override
     protected void singleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
         List<TapTable> tapTableList = TapSimplify.list();
@@ -111,7 +119,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             tapTable.setIndexList(tapIndexList);
             tapTableList.add(tapTable);
         });
-        syncSchemaSubmit(tapTableList, consumer);
+        syncSchemaSubmit(discoverPartitionInfo(tapTableList), consumer);
     }
 
     //some datasource makePrimaryKeyAndIndex in not the same way, such as db2
