@@ -50,9 +50,9 @@ public class PageLimit implements PageStage {
             throw new CoreException("FROM_TO is selected as the paging mode for table ["+tapPage.tableName()+"], but the table level paging start value field of \"TAP_PAGE_OFFSET\" is not used in the paging parameters or the paging end field is not marked with \"TAP_PAGE_LIMIT\" ");
         }
         String pageResultPath = requestApi.pageResultPath();
-        if (Objects.isNull(pageResultPath)){
-            throw new CoreException("The table data source field is not specified in the interface return result.");
-        }
+//        if (Objects.isNull(pageResultPath)){
+//            throw new CoreException("The table data source field is not specified in the interface return result.");
+//        }
         //获取首次请求结果
         //获取首次请求结果
         if(Objects.isNull(param)){

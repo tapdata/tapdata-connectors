@@ -2,6 +2,7 @@ package io.tapdata.common.support;
 
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.common.support.entitys.APIEntity;
 import io.tapdata.common.support.entitys.APIResponse;
@@ -60,6 +61,14 @@ public interface APIInvoker {
 							   int batchCount,
 							   AtomicBoolean task,
 							   BiConsumer<List<TapEvent>, Object> consumer);
+
+	public void mockData(TapConnectionContext connectorContext,
+						 TapTable table,
+						 Object offset,
+						 int batchCount,
+						 AtomicBoolean task,
+						 int mockTimes,
+						 BiConsumer<List<TapEvent>, Object> consumer);
 
 	public void iterateAllData(String urlOrName, String method, Object offset, APIIterateInterceptor interceptor);
 }

@@ -4,8 +4,14 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.APIFactoryImpl;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.type.TapNumber;
+import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -56,10 +62,14 @@ public class QuickApiConnector extends ConnectorBase {
 			}
 			String expireStatus = connectionConfig.getString("expireStatus");
 			String tokenParams = connectionConfig.getString("tokenParams");
+			Boolean autoSchema = Boolean.TRUE.equals(connectionConfig.get("autoSchema"));
+			String sampleData = String.valueOf(connectionConfig.get("sampleData"));
 			config.apiConfig(apiType)
 					.jsonTxt(jsonTxt)
 					.expireStatus(expireStatus)
-					.tokenParams(tokenParams);
+					.tokenParams(tokenParams)
+					.autoSchema(autoSchema)
+					.sampleData(sampleData);
 			apiFactory = new APIFactoryImpl();
 			invoker = apiFactory.loadAPI(jsonTxt, apiParam);
 			invoker.setAPIResponseInterceptor(QuickAPIResponseInterceptor.create(config,invoker));
@@ -111,8 +121,81 @@ public class QuickApiConnector extends ConnectorBase {
 	public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
 		List<String> schema = invoker.tables();
 		List<TapTable> tableList = new ArrayList<>();
-		schema.stream().filter(Objects::nonNull).forEach(name->tableList.add(table(name,name)));
-		consumer.accept( tableList );
+		boolean autoSchema = Boolean.TRUE.equals(config.getAutoSchema());
+		String sampleData = config.getSampleData();
+		if (!autoSchema) {
+			Map<String, Object> map = new HashMap<>();
+			try {
+				map = fromJson(sampleData, Map.class);
+			} catch (Exception e) {
+				connectionContext.getLog().error("Falied to load schema sample data, message: {}, data: ", e.getMessage(), sampleData, e);
+			}
+			Map<String, Object> finalMap = map;
+			schema.stream().filter(Objects::nonNull).forEach(name -> {
+				Object data = finalMap.get(name);
+				TapTable table = table(name, name);
+				LinkedHashMap<String, TapField> fields = new LinkedHashMap<>();
+				table.setNameFieldMap(fields);
+				if (data instanceof Map) {
+					analyseSample((Map<String, Object>) data, table);
+				}
+				tableList.add(table);
+			});
+		} else {
+			schema.stream().filter(Objects::nonNull).forEach(name -> {
+				TapTable table = table(name, name)
+						.defaultPrimaryKeys(new ArrayList<>());
+				LinkedHashMap<String, TapField> fields = new LinkedHashMap<>();
+				table.setNameFieldMap(fields);
+				invoker.mockData(connectionContext, table, new Object(), 100, task, 1, (events, t) -> {
+					if (null != events && !events.isEmpty()) {
+						events.stream().filter(Objects::nonNull).forEach(e -> {
+							Map<String, Object> data = null;
+							if (e instanceof TapInsertRecordEvent) {
+								data = ((TapInsertRecordEvent) e).getAfter();
+							} else if (e instanceof TapUpdateRecordEvent) {
+								data = ((TapUpdateRecordEvent) e).getAfter();
+							} else if (e instanceof TapDeleteRecordEvent) {
+								data = ((TapDeleteRecordEvent) e).getBefore();
+							}
+							analyseSample(data, table);
+						});
+					}
+				});
+				tableList.add(table);
+			});
+		}
+		consumer.accept(tableList);
+	}
+
+	protected void analyseSample(Map<String, Object> data, TapTable table) {
+		if (null != data && !data.isEmpty()) {
+			Map<String, Object> finalData = data;
+			data.keySet().stream().filter(k -> !table.getNameFieldMap().containsKey(k)).forEach(k -> {
+				TapField field = null;
+				Object value = finalData.get(k);
+				if (null == value) {
+					field = new TapField().name(k).tapType(tapRaw()).dataType("Object");
+				} else if (value instanceof Number) {
+					field = new TapField().name(k).tapType(tapNumber()).dataType("Number");
+				} else if (value instanceof Date) {
+					field = new TapField().name(k).tapType(tapDate()).dataType("Date");
+				} else if (value instanceof DateTime) {
+					field = new TapField().name(k).tapType(tapDateTime()).dataType("DateTime");
+				} else if (value instanceof String) {
+					field = new TapField().name(k).tapType(tapString()).dataType("String");
+				} else if (value instanceof Map) {
+					field = new TapField().name(k).tapType(tapMap()).dataType("Object");
+				} else if (value instanceof Collection || value.getClass().isArray()) {
+					field = new TapField().name(k).tapType(tapArray()).dataType("Array");
+				} else if (value instanceof Boolean) {
+					field = new TapField().name(k).tapType(tapBoolean()).dataType("Boolean");
+				} else {
+					field = new TapField().name(k).tapType(tapRaw()).dataType("Object");
+				}
+				table.add(field);
+			});
+		}
 	}
 
 	@Override

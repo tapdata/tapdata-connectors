@@ -31,9 +31,8 @@ public class PageNone implements PageStage {
         int size = tapPage.batchCount();
 
         String pageResultPath = requestApi.pageResultPath();
-        String pageResultPathTemp = this.pageResultPath(pageResultPath);
         Map<String, Object> apiResult = apiResponse.result();
-        Object pageResult = ApiMapUtil.getKeyFromMap(apiResult, pageResultPathTemp);
+        Object pageResult = getResultByPath(pageResultPath, apiResult);
         if (Objects.isNull(pageResult)){
             throw new CoreException(String.format("The value of the [%s] parameter was not found in the request result, the interface call failed, or check whether the parameter key is correct.", pageResultPath));
         }

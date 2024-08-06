@@ -10,7 +10,6 @@ import io.tapdata.common.postman.enums.PostParam;
 import io.tapdata.common.postman.pageStage.PageStage;
 import io.tapdata.common.postman.pageStage.TapPage;
 import io.tapdata.common.postman.util.ApiMapUtil;
-import io.tapdata.common.support.APIFactory;
 import io.tapdata.common.support.APIInvoker;
 import io.tapdata.common.support.APIIterateInterceptor;
 import io.tapdata.common.support.APIResponseInterceptor;
@@ -19,11 +18,10 @@ import io.tapdata.common.support.comom.APIIterateError;
 import io.tapdata.common.support.core.emun.TapApiTag;
 import io.tapdata.common.support.entitys.APIEntity;
 import io.tapdata.common.support.entitys.APIResponse;
-import io.tapdata.common.util.ScriptUtil;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 
 import java.util.*;
@@ -197,6 +195,10 @@ public class PostManAPIInvoker
                           int batchCount,
                           AtomicBoolean task,
                           BiConsumer<List<TapEvent>, Object> consumer) {
+        getData(connectorContext, table, offset, batchCount, task, null, consumer);
+    }
+
+    public void getData(TapConnectionContext connectorContext, TapTable table, Object offset, int batchCount, AtomicBoolean task, Integer mockTimes, BiConsumer<List<TapEvent>, Object> consumer) {
         List<ApiMap.ApiEntity> tables = ApiMapUtil.tableApis(this.analysis.apiContext().apis());
         if (tables.isEmpty()) {
             throw new CoreException("Please use TAP_TABLE on the API document format label specifies at least one table data add in for the data source.");
@@ -228,8 +230,14 @@ public class PostManAPIInvoker
                 .invoker(this)
                 .tableName(currentTable)
                 .task(task)
+                .times(mockTimes)
                 .consumer(consumer);
         stage.page(tapPage);
+    }
+
+    @Override
+    public void mockData(TapConnectionContext connectorContext, TapTable table, Object offset, int batchCount, AtomicBoolean task, int mockTimes, BiConsumer<List<TapEvent>, Object> consumer) {
+        getData(connectorContext, table, offset, batchCount, task, mockTimes, consumer);
     }
 
     @Override

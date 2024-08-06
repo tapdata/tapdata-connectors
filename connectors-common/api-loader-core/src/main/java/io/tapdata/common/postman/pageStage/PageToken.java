@@ -62,9 +62,9 @@ public class PageToken implements PageStage {
             throw new CoreException("TAP_PAGE_TOKEN is selected as the paging mode for table ["+tapPage.tableName()+"], but the table level paging start value field of \"TAP_PAGE_TOKEN\" is not used in the paging parameters ");
         }
         String pageResultPath = requestApi.pageResultPath();
-        if (Objects.isNull(pageResultPath)){
-            throw new CoreException("The table data source field is not specified in the interface return result.");
-        }
+//        if (Objects.isNull(pageResultPath)){
+//            throw new CoreException("The table data source field is not specified in the interface return result.");
+//        }
         //获取首次请求结果
         if(Objects.isNull(param)){
             param = new HashMap<>();

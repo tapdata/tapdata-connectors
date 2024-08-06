@@ -79,6 +79,38 @@
             }
           ],
           "required": false
+        },
+        "autoSchema": {
+          "type": "boolean",
+          "default": true,
+          "title": "${autoSchema}",
+          "x-decorator-props": {
+            "colon": false,
+            "tooltip": "${autoSchema}"
+          },
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-index": 50
+        },
+        "sampleData": {
+          "type": "String",
+          "title": "${sampleData}",
+          "default": "{\"table_name_1\":{},\"table_name_2\":{}}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-component-props": {
+            "type": "textarea"
+          },
+          "x-index": 60,
+          "required": true,
+          "x-reactions": {
+            "dependencies": ["autoSchema"],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0] ? \"hidden\" : \"visible\"}}"
+              }
+            }
+          }
         }
       }
     },
@@ -96,7 +128,9 @@
       "jsonTxt": "Postman Collection in JSON",
       "expireStatus": "Expiration Status Desc",
       "tokenParams": "Token parameter specification",
-      "hookButton": "Generate Service URL"
+      "hookButton": "Generate Service URL",
+      "autoSchema": "Automatically retrieve table structure",
+      "sampleData": "Sample Data（JSON）"
     },
     "zh_CN": {
       "doc": "docs/quickapi_zh_CN.md",
@@ -104,7 +138,9 @@
       "jsonTxt": "PostMan导出的API JSON",
       "expireStatus": "过期状态描述",
       "tokenParams": "Token 参数指定",
-      "hookButton": "生成服务URL"
+      "hookButton": "生成服务URL",
+      "autoSchema": "自动获取表结构",
+      "sampleData": "样本数据（JSON）"
     },
     "zh_TW": {
       "doc": "docs/quickapi_zh_TW.md",
@@ -112,10 +148,88 @@
       "jsonTxt": "PostMan匯出的API JSON",
       "expireStatus": "過期狀態描述",
       "tokenParams": "Token 參數指定",
-      "hookButton": "生成服務URL"
+      "hookButton": "生成服務URL",
+      "autoSchema": "自動獲取錶結構",
+      "sampleData": "樣本數據（JSON）"
     }
   },
   "dataTypes": {
-
+    "Object": {
+      "to": "TapMap"
+    },
+    "Number": {
+      "precision": [
+        1,
+        1000
+      ],
+      "scale": [
+        0,
+        1000
+      ],
+      "fixed": true,
+      "preferPrecision": 20,
+      "preferScale": 8,
+      "priority": 1,
+      "to": "TapNumber"
+    },
+    "Date": {
+      "range": [
+        "1000-01-01",
+        "9999-12-31"
+      ],
+      "pattern": "yyyy-MM-dd",
+      "fraction": 0,
+      "defaultFraction": 0,
+      "withTimeZone": false,
+      "priority": 2,
+      "to": "TapDate"
+    },
+    "DateTime": {
+      "range": [
+        "1000-01-01 00:00:00.000",
+        "9999-12-31 23:59:59.999"
+      ],
+      "pattern": "yyyy-MM-dd hh:mm:ss.sss",
+      "fraction": [
+        0,
+        9
+      ],
+      "defaultFraction": 3,
+      "withTimeZone": false,
+      "priority": 2,
+      "to": "TapDateTime"
+    },
+    "Long": {
+      "bit": 64,
+      "priority": 10,
+      "value": [
+        -9223372036854775808,
+        9223372036854775807
+      ],
+      "scale": 0,
+      "to": "TapNumber"
+    },
+    "Boolean": {
+      "to": "TapBoolean"
+    },
+    "String": {
+      "byte": 1024,
+      "priority": 1,
+      "defaultByte": 512,
+      "preferByte": 1024,
+      "to": "TapString"
+    },
+    "Array": {
+      "to": "TapArray"
+    },
+    "Float": {
+      "to": "TapNumber",
+      "bit": 64,
+      "scale": [
+        0,
+        6
+      ],
+      "fixed": false
+    }
   }
 }

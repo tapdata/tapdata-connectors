@@ -7,6 +7,7 @@ import io.tapdata.common.support.entitys.APIEntity;
 import io.tapdata.common.support.entitys.APIResponse;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 
 import java.util.List;
@@ -74,6 +75,11 @@ public class APIInvokerDecoratorStruct implements APIInvoker {
     @Override
     public void pageStage(TapConnectorContext connectorContext, TapTable table, Object offset, int batchCount, AtomicBoolean task, BiConsumer<List<TapEvent>, Object> consumer) {
         apiInvoker.pageStage(connectorContext, table, offset, batchCount, task, consumer);
+    }
+
+    @Override
+    public void mockData(TapConnectionContext connectorContext, TapTable table, Object offset, int batchCount, AtomicBoolean task, int mockTimes, BiConsumer<List<TapEvent>, Object> consumer) {
+        apiInvoker.mockData(connectorContext, table, offset, batchCount, task, mockTimes, consumer);
     }
 
     @Override

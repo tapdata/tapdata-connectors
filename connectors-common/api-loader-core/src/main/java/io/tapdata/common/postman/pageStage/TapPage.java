@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 
 public class TapPage {
+    private Integer times;
     private AtomicBoolean task;
     public Boolean isAlive(){
         return task.get();
@@ -31,6 +32,10 @@ public class TapPage {
     }
     public TapPage offset(Object offset){
         this.offset = offset;
+        return this;
+    }
+    public TapPage times(Integer times) {
+        this.times = times;
         return this;
     }
     public TapPage apiParam(Map<String,Object> apiParam){
@@ -77,5 +82,8 @@ public class TapPage {
     }
     public String tableName(){
         return this.tableName;
+    }
+    public Integer times() {
+        return this.times;
     }
 }

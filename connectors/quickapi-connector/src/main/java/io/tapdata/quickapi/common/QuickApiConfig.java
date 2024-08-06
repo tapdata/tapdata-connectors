@@ -50,6 +50,33 @@ public class QuickApiConfig {
         return this;
     }
 
+    Boolean autoSchema;
+    String sampleData;
+    public QuickApiConfig autoSchema(Boolean autoSchema) {
+        this.autoSchema = autoSchema;
+        return this;
+    }
+    public QuickApiConfig sampleData(String sampleData) {
+        this.sampleData = sampleData;
+        return this;
+    }
+
+    public Boolean getAutoSchema() {
+        return autoSchema;
+    }
+
+    public void setAutoSchema(Boolean autoSchema) {
+        this.autoSchema = autoSchema;
+    }
+
+    public String getSampleData() {
+        return sampleData;
+    }
+
+    public void setSampleData(String sampleData) {
+        this.sampleData = sampleData;
+    }
+
     public static void main(String[] args) {
         String url = "http://127.0.0.1/api/post?key1=&key2=12,3,5,6&key3=";
         int indexOf = url.indexOf("key99=");
