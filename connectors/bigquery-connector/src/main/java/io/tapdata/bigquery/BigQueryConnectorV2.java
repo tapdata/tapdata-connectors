@@ -211,18 +211,18 @@ public class BigQueryConnectorV2 extends ConnectorBase {
                             try {
                                 writeConsumer.accept(this.stream.writeRecord(writeList, targetTable));
                             } catch (Exception e) {
-                                if (e instanceof WriteBigQueryException){
-                                    throw new CoreException(e.getMessage());
-                                }else {
-                                    context.getLog().error("uploadEvents size {} to table {} failed, {}", writeList.size(), targetTable.getId(), e.getMessage());
-                                    throw new RuntimeException(e);
+                                if (e instanceof WriteBigQueryException) {
+                                    throw new CoreException(e, e.getMessage());
+                                } else {
+                                    assert targetTable != null;
+                                    context.getLog().error("Upload events size {} to table {} failed, message: {}", writeList.size(), targetTable.getId(), e.getMessage(), e);
                                 }
                             }
                         },
                         (writeList, targetTable) -> {
                             LinkedHashMap<String, TapField> nameFieldMap = targetTable.getNameFieldMap();
                             if (Objects.isNull(nameFieldMap) || nameFieldMap.isEmpty()) {
-                                throw new CoreException("TapTable not any fields.");
+                                throw new CoreException("TapTable not any fields");
                             }
                             for (TapRecordEvent event : writeList) {
                                 if (Objects.isNull(event)) continue;
