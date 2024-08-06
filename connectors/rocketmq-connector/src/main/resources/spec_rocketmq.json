@@ -4,7 +4,6 @@
     "icon": "icons/rocketmq.png",
     "doc": "${doc}",
     "id": "rocketmq",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {

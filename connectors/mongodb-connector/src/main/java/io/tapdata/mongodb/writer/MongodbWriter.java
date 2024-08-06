@@ -102,7 +102,7 @@ public class MongodbWriter {
 		if (!is_cloud && mongodbConfig.isEnableSaveDeleteData()) {
 			MongodbLookupUtil.lookUpAndSaveDeleteMessage(tapRecordEvents, this.globalStateMap, this.connectionString, pks, collection);
 		}
-		BulkWriteModel bulkWriteModel = buildBulkWriteModel(tapRecordEvents, table, inserted, updated, deleted, collection, pks);
+		BulkWriteModel bulkWriteModel = buildBulkWriteModel(tapRecordEvents, table, inserted, updated, deleted, pks);
 
 		if (bulkWriteModel.isEmpty()) {
 			throw new RuntimeException("Bulk write data failed, write model list is empty, received record size: " + tapRecordEvents.size());
@@ -250,8 +250,7 @@ public class MongodbWriter {
 		}
 	}
 
-	private BulkWriteModel buildBulkWriteModel(List<TapRecordEvent> tapRecordEvents, TapTable table, AtomicLong inserted, AtomicLong updated, AtomicLong deleted, MongoCollection<Document> collection, Collection<String> pks) {
-		Collection<String> allColumn = table.getNameFieldMap().keySet();
+	private BulkWriteModel buildBulkWriteModel(List<TapRecordEvent> tapRecordEvents, TapTable table, AtomicLong inserted, AtomicLong updated, AtomicLong deleted, Collection<String> pks) {
 		BulkWriteModel bulkWriteModel = new BulkWriteModel(pks.contains("_id"));
 		for (TapRecordEvent recordEvent : tapRecordEvents) {
 			if (!(recordEvent instanceof TapInsertRecordEvent)) {
@@ -265,7 +264,7 @@ public class MongodbWriter {
 			final Map<String, Object> info = recordEvent.getInfo();
 			if (MapUtils.isNotEmpty(info) && info.containsKey(MergeInfo.EVENT_INFO_KEY)) {
 				bulkWriteModel.setAllInsert(false);
-				final List<WriteModel<Document>> mergeWriteModels = MongodbMergeOperate.merge(inserted, updated, deleted, recordEvent, allColumn, pks);
+				final List<WriteModel<Document>> mergeWriteModels = MongodbMergeOperate.merge(inserted, updated, deleted, recordEvent);
 				if (CollectionUtils.isNotEmpty(mergeWriteModels)) {
 					mergeWriteModels.forEach(bulkWriteModel::addAnyOpModel);
 				}

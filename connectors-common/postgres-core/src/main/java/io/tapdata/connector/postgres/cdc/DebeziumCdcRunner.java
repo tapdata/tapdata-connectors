@@ -31,7 +31,7 @@ public abstract class DebeziumCdcRunner implements CdcRunner {
     /**
      * records caught by cdc can only be consumed in this method
      */
-    public void consumeRecords(List<SourceRecord> sourceRecords, DebeziumEngine.RecordCommitter<SourceRecord> committer) {
+    public void consumeRecords(List<SourceRecord> sourceRecords, DebeziumEngine.RecordCommitter<SourceRecord> committer) throws InterruptedException {
 
     }
 

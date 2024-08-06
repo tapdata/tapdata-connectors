@@ -72,7 +72,7 @@ public class TDengineSubscribe {
             properties.setProperty(TMQConstants.VALUE_DESERIALIZER,
                     "io.tapdata.connector.tdengine.subscribe.TDengineResultDeserializer");
 
-            List<String> topicList = tableList.stream().map(v -> "tap_topic_" + v).collect(Collectors.toList());
+            List<String> topicList = tableList.stream().map(v -> String.format("`tap_topic_%s`",v)).collect(Collectors.toList());
             // poll data
             try (TaosConsumer<Map<String, Object>> taosConsumer = new TaosConsumer<>(properties)) {
                 taosConsumer.subscribe(topicList);
@@ -113,6 +113,7 @@ public class TDengineSubscribe {
         if (EmptyKit.isEmpty(topic)) {
             return null;
         }
+        topic = topic.substring(1, topic.length() - 1);
         if (topic.startsWith("tap_topic_")) {
             return topic.substring(10);
         }

@@ -2,6 +2,7 @@ package io.tapdata.connector.csv;
 
 import com.opencsv.CSVReader;
 import com.opencsv.CSVReaderBuilder;
+import com.opencsv.CustomCsvParser;
 import io.tapdata.common.FileConnector;
 import io.tapdata.common.FileOffset;
 import io.tapdata.common.FileSchema;
@@ -128,7 +129,7 @@ public class CsvConnector extends FileConnector {
         storage.readFile(fileOffset.getPath(), is -> {
             try (
                     Reader reader = new InputStreamReader(is, fileConfig.getFileEncoding());
-                    CSVReader csvReader = new CSVReaderBuilder(reader).build()
+                    CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(new CustomCsvParser(((CsvConfig) fileConfig).getSeparator().charAt(0))).build()
             ) {
                 String[] headers;
                 if (EmptyKit.isNotBlank(fileConfig.getHeader())) {

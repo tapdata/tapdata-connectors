@@ -49,13 +49,24 @@ public class TDengineSuperRecordWriter {
                     return;
                 }
                 if (tapRecordEvent instanceof TapInsertRecordEvent) {
-                    largeSql.append("`").append(getSubTableName(tags, (TapInsertRecordEvent) tapRecordEvent)).append("`")
-                            .append(" USING ").append(String.format("`%s`.`%s` (", tDengineConfig.getDatabase(), tapTable.getId()))
-                            .append("`").append(String.join("`,`", tags)).append("`) TAGS (")
-                            .append(tags.stream().map(tag -> object2String(((TapInsertRecordEvent) tapRecordEvent).getAfter().get(tag))).collect(Collectors.joining(",")))
-                            .append(") (`").append(String.join("`,`", otherColumns)).append("`) VALUES (")
-                            .append(otherColumns.stream().map(other -> object2String(((TapInsertRecordEvent) tapRecordEvent).getAfter().get(other))).collect(Collectors.joining(",")))
-                            .append(") ");
+                    if(inserted == 0){
+                        largeSql.append("`").append(getSubTableName(tags, (TapInsertRecordEvent) tapRecordEvent)).append("`")
+                                .append(" USING ").append(String.format("`%s`.`%s` (", tDengineConfig.getDatabase(), tapTable.getId()))
+                                .append("`").append(String.join("`,`", tags)).append("`) TAGS (")
+                                .append(tags.stream().map(tag -> object2String(((TapInsertRecordEvent) tapRecordEvent).getAfter().get(tag))).collect(Collectors.joining(",")))
+                                .append(") (`").append(String.join("`,`", otherColumns)).append("`) VALUES (")
+                                .append(otherColumns.stream().map(other -> object2String(((TapInsertRecordEvent) tapRecordEvent).getAfter().get(other))).collect(Collectors.joining(",")))
+                                .append(") ");
+                    }else{
+                        largeSql.append("`").append(getSubTableName(tags, (TapInsertRecordEvent) tapRecordEvent)).append("`")
+                                .append(" USING ").append(String.format("`%s`.`%s` (", tDengineConfig.getDatabase(), tapTable.getId()))
+                                .append("`").append(String.join("`,`", tags)).append("`) TAGS (")
+                                .append(tags.stream().map(tag -> object2String(((TapInsertRecordEvent) tapRecordEvent).getAfter().get(tag))).collect(Collectors.joining(",")))
+                                .append(") VALUES (")
+                                .append(otherColumns.stream().map(other -> object2String(((TapInsertRecordEvent) tapRecordEvent).getAfter().get(other))).collect(Collectors.joining(",")))
+                                .append(") ");
+                    }
+
                     inserted++;
                 }
             }

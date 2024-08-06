@@ -4,7 +4,6 @@
     "icon": "icon/github.png",
     "doc" : "${doc}",
     "id": "GitHub",
-    "authentication": "Alpha",
     "tags": ["SaaS"]
   },
   "configOptions": {

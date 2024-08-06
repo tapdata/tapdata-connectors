@@ -4,7 +4,6 @@
     "icon": "icons/activemq.png",
     "doc": "${doc}",
     "id": "activemq",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {

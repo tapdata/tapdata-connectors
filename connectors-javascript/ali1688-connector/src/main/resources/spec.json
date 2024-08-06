@@ -4,7 +4,6 @@
     "icon": "icon/alibaba.png",
     "doc" : "${doc}",
     "id": "ali1688",
-    "authentication": "Alpha",
     "tags": ["SaaS"]
   },
   "configOptions": {

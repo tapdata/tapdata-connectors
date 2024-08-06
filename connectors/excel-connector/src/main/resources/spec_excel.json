@@ -4,7 +4,6 @@
     "icon": "icons/excel.png",
     "doc": "${doc}",
     "id": "excel",
-    "authentication": "Beta",
     "tags": ["File"]
   },
   "configOptions": {

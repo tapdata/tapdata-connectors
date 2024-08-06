@@ -4,8 +4,7 @@
 		"icon": "icons/mongodb.png",
 		"doc" : "${doc}",
 		"tags" : ["schema-free","Database"],
-		"id": "mongodb",
-		"authentication": "Alpha"
+		"id": "mongodb"
 	},
 	"configOptions": {
 		"capabilities": [

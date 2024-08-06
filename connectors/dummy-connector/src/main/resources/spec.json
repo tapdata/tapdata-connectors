@@ -4,7 +4,6 @@
     "icon": "icons/dummy.png",
     "doc" : "${doc}",
     "id": "dummy",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {

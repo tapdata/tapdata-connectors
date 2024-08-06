@@ -4,7 +4,6 @@
     "icon": "icons/clickhouse.png",
     "id": "aws-clickhouse",
     "doc": "${doc}",
-    "authentication": "Alpha",
     "tags": [
       "Database"
     ]

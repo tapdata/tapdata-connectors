@@ -4,7 +4,6 @@
     "icon": "icon/temu.png",
     "doc" : "${doc}",
     "id": "temu",
-    "authentication": "Alpha",
     "tags": ["SaaS"]
   },
   "configOptions": {

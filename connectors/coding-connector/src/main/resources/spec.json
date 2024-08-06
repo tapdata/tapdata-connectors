@@ -4,7 +4,6 @@
     "icon": "icons/coding.png",
     "doc" : "${doc}",
     "id": "coding",
-    "authentication": "Beta",
     "tags": ["SaaS"]
   },
   "configOptions": {

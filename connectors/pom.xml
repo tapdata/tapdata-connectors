@@ -84,6 +84,7 @@
 		<pdk-error-code.version>1.0-SNAPSHOT</pdk-error-code.version>
 		<mockito.version>4.11.0</mockito.version>
 		<byte-buddy.version>1.12.23</byte-buddy.version>
+		<pay.mode>Free</pay.mode>
 	</properties>
 
 	<dependencies>

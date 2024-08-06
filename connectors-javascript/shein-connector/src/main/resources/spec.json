@@ -4,7 +4,6 @@
     "icon": "icon/shein.png",
     "doc" : "${doc}",
     "id": "shein",
-    "authentication": "Alpha",
     "tags": ["SaaS"]
   },
   "configOptions": {

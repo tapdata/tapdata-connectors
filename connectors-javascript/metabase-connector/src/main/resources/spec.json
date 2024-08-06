@@ -4,7 +4,6 @@
     "icon": "icon/metabase.png",
     "doc" : "${doc}",
     "id": "metabase",
-    "authentication": "Alpha",
     "tags": ["SaaS"]
   },
   "configOptions": {

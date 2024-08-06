@@ -4,7 +4,6 @@
     "icon": "icons/vastbase.png",
     "doc" : "${doc}",
     "id": "vastbase",
-    "authentication": "Alpha",
     "tags": ["Database", "ssl", "doubleActive"]
   },
   "configOptions": {

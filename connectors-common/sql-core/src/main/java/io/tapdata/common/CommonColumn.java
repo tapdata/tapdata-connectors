@@ -17,6 +17,10 @@ public class CommonColumn {
     protected String remarks;
     protected String columnDefaultValue;
     protected String autoInc;
+    protected String pureDataType;
+    protected Integer dataLength;
+    protected Integer dataPrecision;
+    protected Integer dataScale;
 
     public CommonColumn() {
     }
@@ -24,6 +28,10 @@ public class CommonColumn {
     public CommonColumn(DataMap dataMap) {
         this.columnName = dataMap.getString("columnName");
         this.dataType = dataMap.getString("dataType");
+        this.pureDataType = dataMap.getString("dataType");
+        this.dataLength = dataMap.getInteger("dataLength");
+        this.dataPrecision = dataMap.getInteger("dataPrecision");
+        this.dataScale = dataMap.getInteger("dataScale");
         this.nullable = dataMap.getString("nullable");
         this.remarks = dataMap.getString("columnComment");
         this.columnDefaultValue = null;
