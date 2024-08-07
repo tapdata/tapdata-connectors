@@ -564,9 +564,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + c + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
-        String sql = String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
-
+        String sql = getBatchReadSelectSql(tapTable);
         jdbcContext.query(sql, resultSet -> {
             List<TapEvent> tapEvents = list();
             //get all column names
