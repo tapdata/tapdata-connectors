@@ -8,6 +8,10 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestCurrentTimeConsistentEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestReadPrivilegeEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestStreamReadEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 import org.postgresql.Driver;
 
 import java.sql.Connection;
@@ -56,7 +60,7 @@ public class PostgresTest extends CommonDbTest {
             }
             return true;
         } catch (Throwable e) {
-            consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_FAILED, new TapTestReadPrivilegeEx(e)));
             return false;
         }
     }
@@ -80,7 +84,7 @@ public class PostgresTest extends CommonDbTest {
             return true;
         } catch (Throwable e) {
             consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    String.format("Test log plugin failed: {%s}, Maybe cdc events cannot work", ErrorKit.getLastCause(e).getMessage())));
+                    new TapTestStreamReadEx(e)));
             return null;
         }
     }
@@ -119,7 +123,7 @@ public class PostgresTest extends CommonDbTest {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, e.getMessage()));
+            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestWritePrivilegeEx(e)));
         }
         return true;
     }
@@ -129,8 +133,7 @@ public class PostgresTest extends CommonDbTest {
             long nowTime = jdbcContext.queryTimestamp();
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));
         } catch (SQLException e) {
-            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Failed to obtain current database time: " + e.getMessage() + "\n" + getStackString(e)));
+            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestCurrentTimeConsistentEx(e)));
         }
         return true;
     }

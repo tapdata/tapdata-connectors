@@ -19,7 +19,7 @@
         <sql.core.version>1.0-SNAPSHOT</sql.core.version>
         <mysql.core.version>1.0-SNAPSHOT</mysql.core.version>
         <commons-lang3.version>3.12.0</commons-lang3.version>
-        <tapdata.pdk.api.version>1.3.5-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.3.8-SNAPSHOT</tapdata.pdk.api.version>
         <!-- dependencies versions -->
         <flink.version>1.17.0</flink.version>
         <slf4j.version>1.7.15</slf4j.version>

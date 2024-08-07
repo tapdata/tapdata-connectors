@@ -12,6 +12,9 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestConnectionEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestCurrentTimeConsistentEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
 import io.tapdata.util.NetUtil;
 import org.apache.commons.collections4.CollectionUtils;
 import org.bson.Document;
@@ -20,7 +23,6 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
-import static io.tapdata.base.ConnectorBase.getStackString;
 import static io.tapdata.base.ConnectorBase.testItem;
 
 public class MongodbTest extends CommonDbTest {
@@ -114,7 +116,7 @@ public class MongodbTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY, TEST_CONNECTION_LOGIN));
             return true;
         } catch (Throwable e) {
-            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, new TapTestConnectionEx(e)));
             return false;
         }
     }
@@ -135,7 +137,7 @@ public class MongodbTest extends CommonDbTest {
                 consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, versionMsg));
             }
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, new TapTestVersionEx(e)));
         }
         return true;
     }
@@ -366,8 +368,7 @@ public class MongodbTest extends CommonDbTest {
             Long nowTime = MongodbUtil.getServerTime(mongoClient, mongodbConfig.getDatabase());
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));
         }catch (MongoException e){
-            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Failed to obtain current database time: " + e.getMessage() + "\n" + getStackString(e)));
+            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestCurrentTimeConsistentEx(e)));
         }
         return true;
     }

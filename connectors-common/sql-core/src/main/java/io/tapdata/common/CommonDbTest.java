@@ -4,6 +4,10 @@ import io.tapdata.constant.ConnectionTypeEnum;
 import io.tapdata.constant.DbTestItem;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestConnectionEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestHostPortEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
 import io.tapdata.util.NetUtil;
 
@@ -67,7 +71,7 @@ public class CommonDbTest implements AutoCloseable {
                     String.format(TEST_HOST_PORT_MESSAGE, commonDbConfig.getHost(), commonDbConfig.getPort())));
             return true;
         } catch (IOException e) {
-            consumer.accept(testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_FAILED, new TapTestHostPortEx(e, commonDbConfig.getHost(), String.valueOf(commonDbConfig.getPort()))));
             return false;
         }
     }
@@ -80,7 +84,7 @@ public class CommonDbTest implements AutoCloseable {
             consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY, TEST_CONNECTION_LOGIN));
             return true;
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, new TapTestConnectionEx(e)));
             return false;
         }
     }
@@ -102,7 +106,7 @@ public class CommonDbTest implements AutoCloseable {
                 consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, versionMsg));
             }
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, new TapTestVersionEx(e)));
         }
         return true;
     }
@@ -138,7 +142,7 @@ public class CommonDbTest implements AutoCloseable {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, new TapTestWritePrivilegeEx(e)));
         }
         return true;
     }
