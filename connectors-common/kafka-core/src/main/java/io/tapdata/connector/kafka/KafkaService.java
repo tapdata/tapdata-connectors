@@ -6,11 +6,12 @@ import io.tapdata.common.constant.MqOp;
 import io.tapdata.connector.kafka.admin.Admin;
 import io.tapdata.connector.kafka.admin.DefaultAdmin;
 import io.tapdata.connector.kafka.config.*;
-import io.tapdata.connector.kafka.util.Krb5Util;
-import io.tapdata.connector.kafka.util.ObjectUtils;
+import io.tapdata.connector.kafka.data.KafkaOffset;
+import io.tapdata.connector.kafka.util.*;
 import io.tapdata.constant.MqTestItem;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -40,6 +41,7 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
+import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
 import javax.script.Invocable;
@@ -626,37 +628,40 @@ public class KafkaService extends AbstractMqService {
     }
 
     @Override
-    public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+	public void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         consuming.set(true);
-        ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(((KafkaConfig) mqConfig), connectorId, true);
-        KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
-        kafkaConsumer.subscribe(tableList);
-        List<TapEvent> list = TapSimplify.list();
-        long acceptTime = System.currentTimeMillis();
-        while (consuming.get()) {
-            ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
-            if (consumerRecords.isEmpty()) {
-                continue;
-            }
-            if (System.currentTimeMillis() - acceptTime > 1000 * 60 * 5) {
-                if (EmptyKit.isNotEmpty(list)) {
-                    eventsOffsetConsumer.accept(list, TapSimplify.list());
-                    list = TapSimplify.list();
-                    acceptTime = System.currentTimeMillis();
+        int maxDelay = 500;
+        KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
+        ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration((kafkaConfig), connectorId, true);
+        try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
+            KafkaOffset streamOffset = KafkaOffsetUtils.setConsumerByOffset(kafkaConsumer, tableList, offset, consuming);
+            try (BatchPusher<TapEvent> batchPusher = new BatchPusher<TapEvent>(
+                tapEvents -> eventsOffsetConsumer.accept(tapEvents, streamOffset.clone())
+            ).batchSize(eventBatchSize).maxDelay(maxDelay)) {
+                // 将初始化的 offset 推送到目标，让指定时间的增量任务下次启动时拿到 offset
+                Optional.of(new HeartbeatEvent()).ifPresent(event -> {
+                    event.setTime(System.currentTimeMillis());
+                    batchPusher.add(event);
+                });
+
+                // 消费数据
+                while (consuming.get()) {
+                    ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
+                    if (consumerRecords.isEmpty()) {
+                        batchPusher.checkAndSummit();
+                    } else {
+                        for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+                            streamOffset.addTopicOffset(consumerRecord); // 推进 offset
+                            makeMessage(consumerRecord, consumerRecord.topic(), batchPusher::add);
+                        }
+                    }
                 }
             }
-            for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-                makeMessage(consumerRecord, consumerRecord.topic(), list::add);
-                if (list.size() >= eventBatchSize) {
-                    eventsOffsetConsumer.accept(list, TapSimplify.list());
-                    list = TapSimplify.list();
-                }
-            }
+        } catch (InterruptedException | InterruptException ex) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ex) {
+            tapLogger.error("Stream consume occur: {}", ex.getMessage(), ex);
         }
-        if (EmptyKit.isNotEmpty(list)) {
-            eventsOffsetConsumer.accept(list, TapSimplify.list());
-        }
-        kafkaConsumer.close();
     }
 
     private void makeMessage(ConsumerRecord<byte[], byte[]> consumerRecord, String tableName, Consumer<TapEvent> consumer) {
@@ -675,15 +680,16 @@ public class KafkaService extends AbstractMqService {
             });
         } else {
             Map<String, Object> data = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
+            long referenceTime = consumerRecord.timestamp();
             switch (MqOp.fromValue(mqOpReference.get())) {
                 case INSERT:
-                    consumer.accept(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
+                    consumer.accept(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(referenceTime));
                     break;
                 case UPDATE:
-                    consumer.accept(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
+                    consumer.accept(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(referenceTime));
                     break;
                 case DELETE:
-                    consumer.accept(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()));
+                    consumer.accept(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(referenceTime));
                     break;
             }
         }
