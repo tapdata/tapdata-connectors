@@ -2,6 +2,8 @@ package io.tapdata.connector.elasticsearch;
 
 import io.tapdata.constant.DbTestItem;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestConnectionEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestHostPortEx;
 import io.tapdata.util.NetUtil;
 import org.elasticsearch.client.RequestOptions;
 
@@ -24,7 +26,7 @@ public class ElasticsearchTest {
             NetUtil.validateHostPortWithSocket(elasticsearchConfig.getHost(), elasticsearchConfig.getPort());
             return testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_SUCCESSFULLY);
         } catch (IOException e) {
-            return testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_FAILED, e.getMessage());
+            return testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_FAILED, new TapTestHostPortEx(e, elasticsearchConfig.getHost(), String.valueOf(elasticsearchConfig.getPort())));
         }
     }
 
@@ -34,7 +36,7 @@ public class ElasticsearchTest {
                 return testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY);
             }
         } catch (Exception e) {
-            return testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, e.getMessage());
+            return testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, new TapTestConnectionEx(e));
         }
         return testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Elasticsearch client ping failed!");
     }

@@ -18,6 +18,7 @@ import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
+import io.tapdata.pdk.apis.exception.TapTestItemException;
 import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.utils.TypeConverter;
@@ -180,11 +181,14 @@ public abstract class ConnectorBase implements TapConnector {
     }
 
     public static TestItem testItem(String item, int resultCode) {
-        return testItem(item, resultCode, null);
+        return new TestItem(item, resultCode);
     }
 
     public static TestItem testItem(String item, int resultCode, String information) {
         return new TestItem(item, resultCode, information);
+    }
+    public static TestItem testItem(String item, int resultCode, TapTestItemException tapTestItemException) {
+        return new TestItem(item, resultCode, tapTestItemException);
     }
 
     public static Entry entry(String key, Object value) {

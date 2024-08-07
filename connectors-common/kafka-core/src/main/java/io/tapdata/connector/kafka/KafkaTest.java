@@ -8,6 +8,7 @@ import io.tapdata.connector.kafka.config.AdminConfiguration;
 import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.DescribeAclsResult;
 import org.apache.kafka.common.acl.AccessControlEntryFilter;
@@ -120,7 +121,7 @@ public class KafkaTest extends CommonDbTest {
 				}
 			} catch (Exception e) {
 				e.printStackTrace();
-				consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, e.getMessage()));
+				consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, new TapTestWritePrivilegeEx(e)));
 				return false;
 			}
 
