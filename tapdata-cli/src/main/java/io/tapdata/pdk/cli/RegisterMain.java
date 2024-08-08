@@ -147,6 +147,11 @@ public class RegisterMain {
 	}
 
 	private static String basePath() {
+        String connectorsHome = System.getProperty("connectors_home");
+        if (null != connectorsHome) {
+            return connectorsHome;
+        }
+
 		URL resource = RegisterMain.class.getClassLoader().getResource("");
 		if (null == resource) {
 			return "/";
