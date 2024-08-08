@@ -61,7 +61,7 @@ public class RocketmqService extends AbstractMqService {
     public TestItem testConnect() {
         try {
             defaultMQProducer.start();
-            return new TestItem(MqTestItem.ROCKET_MQ_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null);
+            return new TestItem(MqTestItem.ROCKET_MQ_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY);
         } catch (Throwable t) {
             return new TestItem(MqTestItem.ROCKET_MQ_CONNECTION.getContent(), TestItem.RESULT_FAILED, t.getMessage());
         }

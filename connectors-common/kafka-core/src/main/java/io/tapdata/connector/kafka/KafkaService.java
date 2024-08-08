@@ -99,7 +99,7 @@ public class KafkaService extends AbstractMqService {
         if (((KafkaConfig) mqConfig).getKrb5()) {
             try {
                 Krb5Util.checkKDCDomainsBase64(((KafkaConfig) mqConfig).getKrb5Conf());
-                return new TestItem(MqTestItem.KAFKA_BASE64_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null);
+                return new TestItem(MqTestItem.KAFKA_BASE64_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY);
             } catch (Exception e) {
                 return new TestItem(MqTestItem.KAFKA_BASE64_CONNECTION.getContent(), TestItem.RESULT_FAILED, e.getMessage());
             }
@@ -107,7 +107,7 @@ public class KafkaService extends AbstractMqService {
         AdminConfiguration configuration = new AdminConfiguration(((KafkaConfig) mqConfig), connectorId);
         try (Admin admin = new DefaultAdmin(configuration)) {
             if (admin.isClusterConnectable()) {
-                return new TestItem(MqTestItem.KAFKA_MQ_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null);
+                return new TestItem(MqTestItem.KAFKA_MQ_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY);
             } else {
                 return new TestItem(MqTestItem.KAFKA_MQ_CONNECTION.getContent(), TestItem.RESULT_FAILED, "cluster is not connectable");
             }
