@@ -91,7 +91,7 @@ public class KafkaSRService extends KafkaService {
         if ((kafkaConfig).getKrb5()) {
             try {
                 Krb5Util.checkKDCDomainsBase64((kafkaConfig).getKrb5Conf());
-                return new TestItem(MqTestItem.KAFKA_BASE64_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY);
+                return new TestItem(MqTestItem.KAFKA_BASE64_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null);
             } catch (Exception e) {
                 return new TestItem(MqTestItem.KAFKA_BASE64_CONNECTION.getContent(), TestItem.RESULT_FAILED, e.getMessage());
             }
@@ -107,7 +107,7 @@ public class KafkaSRService extends KafkaService {
                         return new TestItem(MqTestItem.KAFKA_SCHEMA_REGISTER_CONNECTION.getContent(), TestItem.RESULT_FAILED, reschemaRegisterResponse.toString());
                     }
                 }
-                return new TestItem(MqTestItem.KAFKA_SCHEMA_REGISTER_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY);
+                return new TestItem(MqTestItem.KAFKA_SCHEMA_REGISTER_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null);
             } else {
                 for (String schemaRegisterUrl : schemaRegisterUrls) {
                     Response reschemaRegisterResponse = SchemaRegisterUtil.sendBasicAuthRequest("http://" + schemaRegisterUrl + "/subjects",
@@ -117,7 +117,7 @@ public class KafkaSRService extends KafkaService {
                         return new TestItem(MqTestItem.KAFKA_SCHEMA_REGISTER_CONNECTION.getContent(), TestItem.RESULT_FAILED, reschemaRegisterResponse.toString());
                     }
                 }
-                return new TestItem(MqTestItem.KAFKA_SCHEMA_REGISTER_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY);
+                return new TestItem(MqTestItem.KAFKA_SCHEMA_REGISTER_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null);
             }
         } catch (Exception e) {
             e.printStackTrace();
