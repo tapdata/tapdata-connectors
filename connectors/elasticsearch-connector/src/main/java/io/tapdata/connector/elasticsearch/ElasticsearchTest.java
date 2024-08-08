@@ -26,7 +26,7 @@ public class ElasticsearchTest {
             NetUtil.validateHostPortWithSocket(elasticsearchConfig.getHost(), elasticsearchConfig.getPort());
             return testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_SUCCESSFULLY);
         } catch (IOException e) {
-            return testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_FAILED, new TapTestHostPortEx(e, elasticsearchConfig.getHost(), String.valueOf(elasticsearchConfig.getPort())));
+            return new TestItem(DbTestItem.HOST_PORT.getContent(), new TapTestHostPortEx(e, elasticsearchConfig.getHost(), String.valueOf(elasticsearchConfig.getPort())), TestItem.RESULT_FAILED);
         }
     }
 
@@ -36,7 +36,7 @@ public class ElasticsearchTest {
                 return testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY);
             }
         } catch (Exception e) {
-            return testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, new TapTestConnectionEx(e));
+            return new TestItem(TestItem.ITEM_CONNECTION, new TapTestConnectionEx(e), TestItem.RESULT_FAILED);
         }
         return testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Elasticsearch client ping failed!");
     }

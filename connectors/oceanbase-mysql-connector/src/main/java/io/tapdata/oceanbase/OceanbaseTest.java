@@ -27,7 +27,7 @@ public class OceanbaseTest extends MysqlConnectionTest implements AutoCloseable 
         try {
             jdbcContext.queryWithNext("select version()", rs -> consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, rs.getString(1))));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, new TapTestVersionEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }

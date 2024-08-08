@@ -116,7 +116,7 @@ public class MongodbTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY, TEST_CONNECTION_LOGIN));
             return true;
         } catch (Throwable e) {
-            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, new TapTestConnectionEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestConnectionEx(e), TestItem.RESULT_FAILED));
             return false;
         }
     }
@@ -137,7 +137,7 @@ public class MongodbTest extends CommonDbTest {
                 consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, versionMsg));
             }
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, new TapTestVersionEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -368,7 +368,7 @@ public class MongodbTest extends CommonDbTest {
             Long nowTime = MongodbUtil.getServerTime(mongoClient, mongodbConfig.getDatabase());
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));
         }catch (MongoException e){
-            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestCurrentTimeConsistentEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_TIME_DETECTION, new TapTestCurrentTimeConsistentEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;
     }

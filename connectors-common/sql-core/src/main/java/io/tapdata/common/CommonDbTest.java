@@ -71,7 +71,7 @@ public class CommonDbTest implements AutoCloseable {
                     String.format(TEST_HOST_PORT_MESSAGE, commonDbConfig.getHost(), commonDbConfig.getPort())));
             return true;
         } catch (IOException e) {
-            consumer.accept(testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_FAILED, new TapTestHostPortEx(e, commonDbConfig.getHost(), String.valueOf(commonDbConfig.getPort()))));
+            consumer.accept(new TestItem(DbTestItem.HOST_PORT.getContent(), new TapTestHostPortEx(e, commonDbConfig.getHost(), String.valueOf(commonDbConfig.getPort())), TestItem.RESULT_FAILED));
             return false;
         }
     }
@@ -84,7 +84,7 @@ public class CommonDbTest implements AutoCloseable {
             consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY, TEST_CONNECTION_LOGIN));
             return true;
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, new TapTestConnectionEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestConnectionEx(e), TestItem.RESULT_FAILED));
             return false;
         }
     }
@@ -106,7 +106,7 @@ public class CommonDbTest implements AutoCloseable {
                 consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, versionMsg));
             }
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, new TapTestVersionEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -142,7 +142,7 @@ public class CommonDbTest implements AutoCloseable {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, new TapTestWritePrivilegeEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }
