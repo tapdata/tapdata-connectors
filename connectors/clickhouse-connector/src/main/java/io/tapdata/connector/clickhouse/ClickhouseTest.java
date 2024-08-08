@@ -43,7 +43,7 @@ public class ClickhouseTest extends CommonDbTest {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, new TapTestWritePrivilegeEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -54,7 +54,7 @@ public class ClickhouseTest extends CommonDbTest {
             long nowTime = jdbcContext.queryTimestamp();
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));
         } catch (SQLException e) {
-            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestCurrentTimeConsistentEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_TIME_DETECTION, new TapTestCurrentTimeConsistentEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;
     }

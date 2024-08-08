@@ -106,7 +106,7 @@ public class MysqlConnectionTest extends CommonDbTest {
 
             });
         } catch (Throwable e) {
-            consumer.accept(testItem(itemMark, TestItem.RESULT_FAILED, new TapTestReadPrivilegeEx(e)));
+            consumer.accept(new TestItem(itemMark, new TapTestReadPrivilegeEx(e), TestItem.RESULT_FAILED));
             return false;
         }
         if (globalWrite.get() != null) {
@@ -229,12 +229,12 @@ public class MysqlConnectionTest extends CommonDbTest {
                 testItem.set(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY));
             } else {
                 cdcCapability = false;
-                testItem.set(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestCDCPrivilegeEx(e)));
+                testItem.set(new TestItem(TestItem.ITEM_READ_LOG, new TapTestCDCPrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             }
 
         } catch (Throwable e) {
             cdcCapability = false;
-            testItem.set(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestCDCPrivilegeEx(e)));
+            testItem.set(new TestItem(TestItem.ITEM_READ_LOG, new TapTestCDCPrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         consumer.accept(testItem.get());
         return cdcCapability;
@@ -264,7 +264,7 @@ public class MysqlConnectionTest extends CommonDbTest {
             });
         } catch (Exception e) {
             cdcCapability = false;
-            testItem.set(testItem(MysqlTestItem.CHECK_BINLOG_MODE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestUnknownEx("Check binlog mode failed.", e)));
+            testItem.set(new TestItem(MysqlTestItem.CHECK_BINLOG_MODE.getContent(), new TapTestUnknownEx("Check binlog mode failed.", e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         consumer.accept(testItem.get());
         return cdcCapability;
@@ -288,7 +288,7 @@ public class MysqlConnectionTest extends CommonDbTest {
             }
         } catch (Throwable e) {
             cdcCapability = false;
-            testItem.set(testItem(MysqlTestItem.CHECK_BINLOG_ROW_IMAGE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestUnknownEx("Check binlog row image failed.",e)));
+            testItem.set(new TestItem(MysqlTestItem.CHECK_BINLOG_ROW_IMAGE.getContent(), new TapTestUnknownEx("Check binlog row image failed.",e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         consumer.accept(testItem.get());
         return cdcCapability;
@@ -299,7 +299,7 @@ public class MysqlConnectionTest extends CommonDbTest {
             long nowTime = jdbcContext.queryTimestamp();
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));
         } catch (SQLException e) {
-            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestCurrentTimeConsistentEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_TIME_DETECTION, new TapTestCurrentTimeConsistentEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;
     }
@@ -323,10 +323,10 @@ public class MysqlConnectionTest extends CommonDbTest {
             if (errorCode == 1290 && "HY000".equals(sqlState) && StringUtils.isNotBlank(message) && message.contains("--skip-grant-tables")) {
                 consumer.accept(testItem(MysqlTestItem.CHECK_CREATE_TABLE_PRIVILEGE.getContent(), TestItem.RESULT_SUCCESSFULLY));
             } else {
-                consumer.accept(testItem(MysqlTestItem.CHECK_CREATE_TABLE_PRIVILEGE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestCreateTablePrivilegeEx(e)));
+                consumer.accept(new TestItem(MysqlTestItem.CHECK_CREATE_TABLE_PRIVILEGE.getContent(), new TapTestCreateTablePrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             }
         } catch (Throwable e) {
-            consumer.accept(testItem(MysqlTestItem.CHECK_CREATE_TABLE_PRIVILEGE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestCreateTablePrivilegeEx(e)));
+            consumer.accept(new TestItem(MysqlTestItem.CHECK_CREATE_TABLE_PRIVILEGE.getContent(), new TapTestCreateTablePrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return true;
         }
         return true;

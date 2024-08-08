@@ -181,10 +181,10 @@ public abstract class ConnectorBase implements TapConnector {
     }
 
     public static TestItem testItem(String item, int resultCode) {
-        return new TestItem(item, resultCode, null);
+        return new TestItem(item, resultCode);
     }
 
-    public static TestItem testItem(String item, int resultCode, Object information) {
+    public static TestItem testItem(String item, int resultCode, String information) {
         return new TestItem(item, resultCode, information);
     }
 

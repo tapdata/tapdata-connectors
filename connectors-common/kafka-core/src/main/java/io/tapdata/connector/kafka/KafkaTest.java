@@ -121,7 +121,7 @@ public class KafkaTest extends CommonDbTest {
 				}
 			} catch (Exception e) {
 				e.printStackTrace();
-				consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, new TapTestWritePrivilegeEx(e)));
+				consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
 				return false;
 			}
 
