@@ -454,13 +454,12 @@ public class CustomConnector extends ConnectorBase {
         return 0;
     }
 
-    private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws ScriptException {
+    protected void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws ScriptException {
         ScriptCore scriptCore = new ScriptCore(tapTable.getId());
         assert scriptFactory != null;
         ScriptEngine scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(customConfig.getJsEngineName()).log(tapConnectorContext.getLog()));
         scriptEngine.eval(ScriptUtil.appendSourceFunctionScript(customConfig.getHistoryScript(), true));
         scriptEngine.put("core", scriptCore);
-//        scriptEngine.put("log", new CustomLog());
         AtomicReference<Throwable> scriptException = new AtomicReference<>();
         Runnable runnable = () -> {
             Invocable invocable = (Invocable) scriptEngine;
