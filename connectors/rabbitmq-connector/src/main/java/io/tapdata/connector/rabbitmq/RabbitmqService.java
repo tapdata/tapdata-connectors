@@ -70,7 +70,7 @@ public class RabbitmqService extends AbstractMqService {
     public TestItem testConnect() {
         try {
             rabbitmqConnection = connectionFactory.newConnection();
-            return new TestItem(MqTestItem.RABBIT_MQ_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null);
+            return new TestItem(MqTestItem.RABBIT_MQ_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY);
         } catch (Exception t) {
             return new TestItem(MqTestItem.RABBIT_MQ_CONNECTION.getContent(), TestItem.RESULT_FAILED, t.getMessage());
         }

@@ -59,7 +59,7 @@ public class ActivemqService extends AbstractMqService {
         try {
             activemqConnection = (ActiveMQConnection) activeMQConnectionFactory.createConnection();
             activemqConnection.start();
-            return new TestItem(MqTestItem.ACTIVE_MQ_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null);
+            return new TestItem(MqTestItem.ACTIVE_MQ_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY);
         } catch (Throwable t) {
             return new TestItem(MqTestItem.ACTIVE_MQ_CONNECTION.getContent(), TestItem.RESULT_FAILED, t.getMessage());
         }
