@@ -26,6 +26,8 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -181,12 +183,32 @@ public abstract class ConnectorBase implements TapConnector {
     }
 
     public static TestItem testItem(String item, int resultCode) {
-        return new TestItem(item, resultCode, null);
+        return testItem(item, resultCode, null);
     }
 
     public static TestItem testItem(String item, int resultCode, Object information) {
-        return new TestItem(item, resultCode, information);
-    }
+        Constructor<TestItem> constructor;
+        if (information instanceof String) {
+            try {
+                constructor = TestItem.class.getConstructor(String.class, int.class, String.class);
+                return constructor.newInstance(item, resultCode, information);
+            } catch (NoSuchMethodException e) {
+                return new TestItem(item, resultCode, information);
+            } catch (InvocationTargetException | IllegalAccessException | InstantiationException e) {
+				throw new RuntimeException(e);
+			}
+        } else if (information instanceof TapTestItemException) {
+            return new TestItem(item, resultCode, information);
+        }
+        try {
+            constructor = TestItem.class.getConstructor(String.class, int.class, String.class);
+            return constructor.newInstance(item, resultCode, null);
+        } catch (NoSuchMethodException e) {
+            return new TestItem(item, resultCode);
+        } catch (InvocationTargetException | InstantiationException | IllegalAccessException e) {
+			throw new RuntimeException(e);
+		}
+	}
 
     public static Entry entry(String key, Object value) {
         return TapSimplify.entry(key, value);
