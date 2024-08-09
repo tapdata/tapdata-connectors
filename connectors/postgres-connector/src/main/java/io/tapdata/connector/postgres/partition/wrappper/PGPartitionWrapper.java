@@ -1,11 +1,12 @@
 package io.tapdata.connector.postgres.partition.wrappper;
 
-import io.tapdata.connector.postgres.PostgresConnector;
+import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.partition.TapPartitionField;
+import io.tapdata.entity.schema.partition.type.TapPartitionStage;
 import io.tapdata.entity.schema.partition.type.TapPartitionType;
 
 import java.util.ArrayList;
@@ -24,13 +25,13 @@ public abstract class PGPartitionWrapper {
 
     }
 
-    public abstract TapPartitionType.Type type();
+    public abstract TapPartitionStage type();
 
     public List<TapPartitionField> partitionFields(TapTable table, String checkOrPartitionRule, Log log) {
         List<TapField> tapFields = matchFieldNames(table, checkOrPartitionRule);
         List<TapPartitionField> fieldList = new ArrayList<>();
         for (TapField field : tapFields) {
-            if (null == field) continue;;
+            if (null == field) continue;
             TapPartitionField tapPartitionField = new TapPartitionField();
             tapPartitionField.setName(field.getName());
             tapPartitionField.setDataType(field.getDataType());
@@ -45,9 +46,9 @@ public abstract class PGPartitionWrapper {
         return fieldList;
     }
 
-    public abstract List<? extends TapPartitionType> parse(TapTable table, String partitionSQL, String checkOrPartitionRule, Log log);
+    public abstract List<TapPartitionType> parse(TapTable table, String partitionSQL, String checkOrPartitionRule, Log log);
 
-    public static TapPartitionType.Type type(String partitionType, String tableName, Log log) {
+    public static TapPartitionStage type(String partitionType, String tableName, Log log) {
         PGPartitionWrapper instance = instance(partitionType);
         if (Objects.nonNull(instance)) {
             return instance.type();
@@ -67,7 +68,7 @@ public abstract class PGPartitionWrapper {
         }
     }
 
-    public static List<? extends TapPartitionType> warp(TapTable table, String partitionType, String checkOrPartitionRule, String partitionSQL, Log log) {
+    public static List<TapPartitionType> warp(TapTable table, String partitionType, String checkOrPartitionRule, String partitionSQL, Log log) {
         PGPartitionWrapper instance = instance(partitionType);
         if (Objects.nonNull(instance)) {
             return instance.parse(table, partitionSQL, checkOrPartitionRule, log);
@@ -79,13 +80,13 @@ public abstract class PGPartitionWrapper {
 
     protected static PGPartitionWrapper instance(String partitionType) {
         switch (partitionType) {
-            case PostgresConnector.TableType.RANGE:
+            case TableType.RANGE:
                 return new RangeWrapper();
-            case PostgresConnector.TableType.LIST:
+            case TableType.LIST:
                 return new ListWrapper();
-            case PostgresConnector.TableType.HASH:
+            case TableType.HASH:
                 return new HashWrapper();
-            case PostgresConnector.TableType.INHERIT:
+            case TableType.INHERIT:
                 return new InheritWrapper();
             default:
                 return null;
@@ -110,6 +111,7 @@ public abstract class PGPartitionWrapper {
             throw new CoreException("Unable to get partition fields from {} (partition field setting sql is invalid or not be support)", check);
         }
     }
+
     public List<TapField> matchFieldNames(TapTable table, String check) {
         String[] fieldArr = matchFieldNames(check);
         List<TapField> fieldList = new ArrayList<>();
