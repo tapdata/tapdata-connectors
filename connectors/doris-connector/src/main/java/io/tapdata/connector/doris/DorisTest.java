@@ -45,7 +45,7 @@ public class DorisTest extends CommonDbTest {
             if (e instanceof SQLException && ((SQLException) e).getErrorCode() == 1045) {
                 consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Incorrect username or password"));
             } else {
-                consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, new TapTestConnectionEx(e)));
+                consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestConnectionEx(e), TestItem.RESULT_FAILED));
             }
             return false;
         }
@@ -57,7 +57,7 @@ public class DorisTest extends CommonDbTest {
             String dorisVersion = jdbcContext.queryVersion();
             consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, dorisVersion));
         } catch (Throwable throwable) {
-            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, new TapTestVersionEx(throwable)));
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(throwable), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -89,7 +89,7 @@ public class DorisTest extends CommonDbTest {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, new TapTestWritePrivilegeEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -117,7 +117,7 @@ public class DorisTest extends CommonDbTest {
                 consumer.accept(testItem(STREAM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "port of StreamLoad Service is not right"));
             }
         } catch (Exception e) {
-            consumer.accept(testItem(STREAM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestUnknownEx(e)));
+            consumer.accept(new TestItem(STREAM_WRITE, new TapTestUnknownEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;
     }

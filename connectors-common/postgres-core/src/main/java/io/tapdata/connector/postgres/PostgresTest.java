@@ -60,7 +60,7 @@ public class PostgresTest extends CommonDbTest {
             }
             return true;
         } catch (Throwable e) {
-            consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_FAILED, new TapTestReadPrivilegeEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_READ, new TapTestReadPrivilegeEx(e), TestItem.RESULT_FAILED));
             return false;
         }
     }
@@ -83,8 +83,7 @@ public class PostgresTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY, "Cdc can work normally"));
             return true;
         } catch (Throwable e) {
-            consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    new TapTestStreamReadEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestStreamReadEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return null;
         }
     }
@@ -123,7 +122,7 @@ public class PostgresTest extends CommonDbTest {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestWritePrivilegeEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;
     }
@@ -133,7 +132,7 @@ public class PostgresTest extends CommonDbTest {
             long nowTime = jdbcContext.queryTimestamp();
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));
         } catch (SQLException e) {
-            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, new TapTestCurrentTimeConsistentEx(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_TIME_DETECTION, new TapTestCurrentTimeConsistentEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;
     }

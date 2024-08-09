@@ -18,7 +18,6 @@ import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
-import io.tapdata.pdk.apis.exception.TapTestItemException;
 import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.utils.TypeConverter;
@@ -26,8 +25,6 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -183,32 +180,12 @@ public abstract class ConnectorBase implements TapConnector {
     }
 
     public static TestItem testItem(String item, int resultCode) {
-        return testItem(item, resultCode, null);
+        return new TestItem(item, resultCode);
     }
 
-    public static TestItem testItem(String item, int resultCode, Object information) {
-        Constructor<TestItem> constructor;
-        if (information instanceof String) {
-            try {
-                constructor = TestItem.class.getConstructor(String.class, int.class, String.class);
-                return constructor.newInstance(item, resultCode, information);
-            } catch (NoSuchMethodException e) {
-                return new TestItem(item, resultCode, information);
-            } catch (InvocationTargetException | IllegalAccessException | InstantiationException e) {
-				throw new RuntimeException(e);
-			}
-        } else if (information instanceof TapTestItemException) {
-            return new TestItem(item, resultCode, information);
-        }
-        try {
-            constructor = TestItem.class.getConstructor(String.class, int.class, String.class);
-            return constructor.newInstance(item, resultCode, null);
-        } catch (NoSuchMethodException e) {
-            return new TestItem(item, resultCode);
-        } catch (InvocationTargetException | InstantiationException | IllegalAccessException e) {
-			throw new RuntimeException(e);
-		}
-	}
+    public static TestItem testItem(String item, int resultCode, String information) {
+        return new TestItem(item, resultCode, information);
+    }
 
     public static Entry entry(String key, Object value) {
         return TapSimplify.entry(key, value);
