@@ -426,8 +426,8 @@
     "String": {
       "byte": 200,
       "priority": 1,
-      "defaultByte": 200,
-      "preferByte": 200,
+      "defaultByte": 500,
+      "preferByte": 500,
       "to": "TapString"
     },
     "Text": {

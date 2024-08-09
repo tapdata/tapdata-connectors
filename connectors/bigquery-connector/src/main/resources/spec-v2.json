@@ -120,14 +120,14 @@
     "BYTES[($bit)]": {
       "name": "BYTES",
       "to": "TapBinary",
-      "byte": 9223372036854775807,
-      "defaultByte": 9223372036854775807
+      "byte": 2147483648,
+      "defaultByte": 2147483648
     },
     "STRING[($byte)]": {
       "name": "STRING",
       "to": "TapString",
-      "byte": 9223372036854775807,
-      "defaultByte": 9223372036854775807
+      "byte": 2147483648,
+      "defaultByte": 2147483647
     },
     "INT64": {
       "to": "TapNumber",
