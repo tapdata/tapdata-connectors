@@ -454,13 +454,12 @@ public class CustomConnector extends ConnectorBase {
         return 0;
     }
 
-    private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws ScriptException {
+    protected void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws ScriptException {
         ScriptCore scriptCore = new ScriptCore(tapTable.getId());
         assert scriptFactory != null;
         ScriptEngine scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(customConfig.getJsEngineName()).log(tapConnectorContext.getLog()));
         scriptEngine.eval(ScriptUtil.appendSourceFunctionScript(customConfig.getHistoryScript(), true));
         scriptEngine.put("core", scriptCore);
-//        scriptEngine.put("log", new CustomLog());
         AtomicReference<Throwable> scriptException = new AtomicReference<>();
         Runnable runnable = () -> {
             Invocable invocable = (Invocable) scriptEngine;
@@ -474,25 +473,25 @@ public class CustomConnector extends ConnectorBase {
         t.start();
         List<TapEvent> eventList = new ArrayList<>();
         while (isAlive() && t.isAlive()) {
-            try {
-                CustomEventMessage message = null;
-                try {
-                    message = scriptCore.getEventQueue().poll(1, TimeUnit.SECONDS);
-                } catch (InterruptedException ignored) {
-                }
-                if (EmptyKit.isNotNull(message)) {
-                    eventList.add(message.getTapEvent());
-                    if (eventList.size() == eventBatchSize) {
-                        eventsOffsetConsumer.accept(eventList, new HashMap<>());
-                        eventList = new ArrayList<>();
-                    }
-                }
-            } catch (Exception e) {
-                break;
-            }
-        }
-        if (EmptyKit.isNotNull(scriptException.get())) {
-            throw new RuntimeException(scriptException.get());
+			CustomEventMessage message = null;
+			try {
+				message = scriptCore.getEventQueue().poll(1, TimeUnit.SECONDS);
+			} catch (InterruptedException ignored) {
+			}
+			if (EmptyKit.isNotNull(message)) {
+				eventList.add(message.getTapEvent());
+				if (eventList.size() == eventBatchSize) {
+					eventsOffsetConsumer.accept(eventList, new HashMap<>());
+					eventList = new ArrayList<>();
+				}
+			}
+			if (EmptyKit.isNotNull(scriptException.get())) {
+				throw new RuntimeException(scriptException.get());
+			}
+		}
+        while(isAlive() && !scriptCore.getEventQueue().isEmpty()) {
+            CustomEventMessage message = scriptCore.getEventQueue().poll();
+            eventList.add(message.getTapEvent());
         }
         if (isAlive() && EmptyKit.isNotEmpty(eventList)) {
             eventsOffsetConsumer.accept(eventList, new HashMap<>());

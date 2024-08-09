@@ -4,6 +4,8 @@ import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.clickhouse.config.ClickhouseConfig;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestCurrentTimeConsistentEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -11,9 +13,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
 
-import static io.tapdata.base.ConnectorBase.getStackString;
-import static io.tapdata.base.ConnectorBase.testItem;
-
+import static io.tapdata.base.ConnectorBase.*;
 
 public class ClickhouseTest extends CommonDbTest {
     protected ConnectionOptions connectionOptions;
@@ -43,7 +43,7 @@ public class ClickhouseTest extends CommonDbTest {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -54,8 +54,7 @@ public class ClickhouseTest extends CommonDbTest {
             long nowTime = jdbcContext.queryTimestamp();
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));
         } catch (SQLException e) {
-            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Failed to obtain current database time: " + e.getMessage() + "\n" + getStackString(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_TIME_DETECTION, new TapTestCurrentTimeConsistentEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;
     }

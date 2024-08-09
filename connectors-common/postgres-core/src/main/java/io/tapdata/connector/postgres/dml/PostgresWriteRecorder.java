@@ -94,6 +94,17 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         }
     }
 
+    protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
+        if (!containsNull) {
+            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
+                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+        } else {
+            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
+                            .collect(Collectors.joining(" AND "));
+        }
+    }
+
     @Override
     protected Object filterValue(Object value, String dataType) {
         if (EmptyKit.isNull(value)) {

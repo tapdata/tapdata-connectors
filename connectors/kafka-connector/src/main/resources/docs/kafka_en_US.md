@@ -1,70 +1,68 @@
-## **connection configuration description**
-### **1. Kafka installation instructions**
-Please follow the instructions below to ensure that the Kafka database is successfully added and used in tapdata.
-### **2. use restrictions**
->- only the message format of JSON object string is supported (such as ` {"Id": 1, "name": "Zhang San"} `)
->- create a theme in advance
->- Kafka version 2.3.x
->- if you choose to ignore consumption or push exceptions, the 'offset' of these messages will still be recorded, that is, these messages will not be pushed later, and there is a risk of data loss
->- message push is implemented as' at least once ', and the corresponding consumer should do idempotent operations
-   #### **2.1 synchronization mode**
-   ##### **full volume only**
-   >In this mode, source will start to subscribe and consume from each partition of the topic 'early offset'. If there is a message consumption record before, it will be restored to the previous' offset 'to start consumption
-   ##### **incremental only**
-   >In this mode, source will start to subscribe and consume from each partition 'latest offset' of the topic. If there is a message consumption record before, it will be restored to the previous' offset 'to start consumption
-   ##### **full volume + increment**
-   >In this mode, source will skip the full synchronization phase and start from the incremental phase.
-   >
->1. If full synchronization has not been carried out, subscription consumption will start from each partition of the topic 'early offset'
->2. Otherwise, subscribe and consume from each partition of the topic 'latest offset'.
->3. If there is a message consumption record before, it will be restored to the previous' offset 'to start consumption
- #### **2.2 node connection**
-|Whether source | target | can be linked|
-| ------------- | ------------- | ---------- |
-|Kafka | elasticsearch | yes|
-|Kafka | redis | yes|
-|Kafka | table | yes|
-|Kafka | collection | yes|
-|Kafka | memory | yes|
-|Elasticsearch | Kafka | yes|
-|Table | Kafka | yes|
-|Redis | Kafka | yes|
-|Collection | Kafka | yes|
-|Memory | Kafka | yes|
-##### **2.3 data migration**
-|Whether source | target | can be linked|
-| ---------- | ---------- | ---------- |
-|Kafka | MySQL | yes|
-|Kafka | Oracle | yes|
-|Kafka | mongodb | yes|
-|Kafka | DB2 | yes|
-|Kafka | Postgres | yes|
-|Kafka | MSSQL | yes|
-|Kafka | base 8s | yes|
-|Kafka | Sybase ASE | yes|
-|MySQL | Kafka | yes|
-|Oracle | Kafka | yes|
-|Mongodb | Kafka | yes|
-|DB2 | Kafka | yes|
-|Postgres | Kafka | yes|
-|Sybase ASE | Kafka | yes|
-|Base 8s | Kafka | yes|
-|MSSQL | Kafka | yes|
-### **3. configuration**
-##### **3.1 public configuration**
-|Field name (UI form parameter name) | type | whether it is required | remarks | default value | verification | UI form field name | UI form field component|
-| ---------------------- | ------ | -------- | ------------------- | ------ | ---------------------------------------------------------------------------------------- | ---------------- | ------------------------- |
-|Kafkabootstrapservers | string | is | broker address list | - | host1:port, host2:port, host3:port (such as 192.168.1.1:9092192.168.1.2:9092192.168.1.3:9092) | host list | ` < input type= "text" / > `|
-|Databasetype | string | is | database type | - | fixed value: Kafka | none ` <input type= "hidden" / > `|
-| connection_ Type | string | is | link type | - | enumeration value: source \ | target \ | source_ and_ Target | link type ` < select / > `|
-|Kafkapatterntopics | string | is | topic name regular expression, | - | text length is greater than 0, less than 256 | topic regular expression | ` <input type= "text" / > `|
-##### **3.2 Source (Kafka Consumer)**
-|Field name (UI form parameter name) | type | whether it is required | remarks | default value | verification | UI form field name | UI form field component|
-| ------------------------ | ------- | -------- | ----------------------------------------------------------------------------------- | ------ | --------------------- | -------------------- | ---------------- |
-|Kafkaignoreinvalidrecord | Boolean | no | whether to ignore non JSON object format messages. If yes, the message will be ignored when encountering parsing exceptions. Otherwise, stop pulling messages | false | enumeration value: true \ | false | ignore non JSON format messages | ` < select / > `|
-##### **3.3 Target (Kafka Producer)**
-|Field name (UI form parameter name) | type | whether it is required | remarks | default value | verification | UI form field name | UI form field component|
-| ---------------------- | ------- | -------- | -------------------------------------------------------------------------------------------------------- | ------ | --------------------------------------------- | ---------------- | ---------------- |
-|Kafkaacks | string | no | ack confirmation mechanism, "0": unconfirmed, "1": only write to master partitions, "-1": write to most ISR partitions, "all": write to all ISR partitions | -1 | enumeration value: "0" 124; "1" | "-1" | | "all" | message push ACK | `<select / > `|
-|Kafkacompressiontype | string | no | message compression type: gzip, snappy, lz4, zstd High traffic message compression can improve transmission efficiency. | -| Enumeration value: "gzip" 124; "snappy" | "lz4" | "zstd" | message push compression method | ` < select / > `|
-|Kafkaignorepusherror | Boolean | no | whether to ignore the push message exception. If yes, ignore the push message (there is message loss), otherwise stop pushing the message | false | enumeration value: true \ | false | message push ignore exception | ` < select / > `|
+# **1. Supported versions**
+
+- Scala: `2.12`
+- kafka: `2.0` ~ `2.5`
+
+# **2. Supported data types**
+
+- Object: Corresponds to `TapMap`
+- Array: Corresponds to `TapArray`
+- Number: Corresponds to `TapNumber`
+- Boolean: Corresponds to `TapBoolean`
+- Character: Corresponds to `TapString`
+
+# **3. Functional limitations/Notes/Capability boundaries**
+
+- Only supports `JSON Object` string message format (such as `{"id":1, "name": "张三"}`)
+- If you select "Ignore non-JSON object format messages" or "Ignore push message exceptions", the `offset` of these
+  messages will still be recorded, that is, these messages will not be pushed later, and there is a risk of data loss
+- Message push is implemented as `At least once`, and the corresponding consumer end must do idempotent operations
+- Message compression type: default `gzip`, large-volume message compression can improve transmission efficiency
+- `Kafka` itself does not Distinguish between `DML` and `DDL`:
+- Scenario `Oracle` >> `Kafka` >> `MySQL`, supports `DDL` and `DML` synchronization of `Oracle`
+- The `DDL` synchronization scenario synchronized from other products to `Kafka` is not supported
+
+# **4. ACK confirmation mechanism**
+
+- No confirmation (`0`): Exit after the message is pushed, and will not check whether kafka has been written correctly
+- Write only to the Master partition (`1`): After the message is pushed, it will ensure that the master partition
+  receives and writes
+- Write to most ISR partitions (`-1`, default option): After the message is pushed, it will ensure that the data is
+  received and written by more than half of the partitions
+- Write to all ISR partitions (`all`): After the message is pushed, it will ensure that the data is received and written
+  by all partitions
+
+# **5. Authentication method**
+
+## **5.1 User And Password**
+
+- If not filled in, it is no authentication mode, and `org.apache.kafka.common.security.plain.PlainLoginModule` is used
+  for configuration
+- When filling in, `org.apache.kafka.common.security.scram.ScramLoginModule` configuration will be used
+
+## **5.2 Kerberos**
+
+1. Get Kerberos Ticket
+    - Can be obtained
+      through `kinit -kt <keytab-file> <principal>`, `kadmin.local -q "ktadd -norandkey -k <keytab-file> <principal>"`
+        - `keytab-file`: file name
+        - `principal`: principal configuration name
+        - `-norandkey`: does not change the password
+    - Can view the configuration through `klist`, `kadmin.local -q "list_principals"`
+2. Configure according to Ticket information
+    - Key representation file, such as: `kdc.keytab`
+    - Configuration file, such as: `kdc.conf`
+    - Principal configuration, such as: `kafka/kkz.com@EXAMPLE.COM`
+    - Service name, such as: `kafka`
+
+### **5.2.1 Frequently Asked Questions**
+
+1. The prompt domain is not configured, such as: `kkz.com`
+    - Log in to the machine where `FE` is located
+    - Modify the `/etc/hosts` configuration:
+
+```shell
+cat >> /etc/hosts << EOF
+192.168.1.2 kkz.com
+EOF
+```

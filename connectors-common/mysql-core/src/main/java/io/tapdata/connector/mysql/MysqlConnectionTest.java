@@ -10,6 +10,7 @@ import io.tapdata.constant.ConnectionTypeEnum;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.*;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
@@ -19,9 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static io.tapdata.base.ConnectorBase.getStackString;
-import static io.tapdata.base.ConnectorBase.testItem;
-
+import static io.tapdata.base.ConnectorBase.*;
 /**
  * @author samuel
  * @Description
@@ -107,7 +106,7 @@ public class MysqlConnectionTest extends CommonDbTest {
 
             });
         } catch (Throwable e) {
-            consumer.accept(testItem(itemMark, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(itemMark, new TapTestReadPrivilegeEx(e), TestItem.RESULT_FAILED));
             return false;
         }
         if (globalWrite.get() != null) {
@@ -230,14 +229,12 @@ public class MysqlConnectionTest extends CommonDbTest {
                 testItem.set(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY));
             } else {
                 cdcCapability = false;
-                testItem.set(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                        "Check cdc privileges failed; " + e.getErrorCode() + " " + e.getSQLState() + " " + e.getMessage() + "\n" + getStackString(e)));
+                testItem.set(new TestItem(TestItem.ITEM_READ_LOG, new TapTestCDCPrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             }
 
         } catch (Throwable e) {
-            testItem.set(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Check cdc privileges failed; " + e.getMessage() + "\n" + getStackString(e)));
             cdcCapability = false;
+            testItem.set(new TestItem(TestItem.ITEM_READ_LOG, new TapTestCDCPrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         consumer.accept(testItem.get());
         return cdcCapability;
@@ -267,8 +264,7 @@ public class MysqlConnectionTest extends CommonDbTest {
             });
         } catch (Exception e) {
             cdcCapability = false;
-            testItem.set(testItem(MysqlTestItem.CHECK_BINLOG_MODE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Check binlog mode failed; " + e.getMessage() + "\n" + getStackString(e)));
+            testItem.set(new TestItem(MysqlTestItem.CHECK_BINLOG_MODE.getContent(), new TapTestUnknownEx("Check binlog mode failed.", e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         consumer.accept(testItem.get());
         return cdcCapability;
@@ -292,8 +288,7 @@ public class MysqlConnectionTest extends CommonDbTest {
             }
         } catch (Throwable e) {
             cdcCapability = false;
-            testItem.set(testItem(MysqlTestItem.CHECK_BINLOG_ROW_IMAGE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Check binlog row image failed; " + e.getMessage() + "\n" + getStackString(e)));
+            testItem.set(new TestItem(MysqlTestItem.CHECK_BINLOG_ROW_IMAGE.getContent(), new TapTestUnknownEx("Check binlog row image failed.",e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         consumer.accept(testItem.get());
         return cdcCapability;
@@ -304,8 +299,7 @@ public class MysqlConnectionTest extends CommonDbTest {
             long nowTime = jdbcContext.queryTimestamp();
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));
         } catch (SQLException e) {
-            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Failed to obtain current database time: " + e.getMessage() + "\n" + getStackString(e)));
+            consumer.accept(new TestItem(TestItem.ITEM_TIME_DETECTION, new TapTestCurrentTimeConsistentEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;
     }
@@ -329,12 +323,10 @@ public class MysqlConnectionTest extends CommonDbTest {
             if (errorCode == 1290 && "HY000".equals(sqlState) && StringUtils.isNotBlank(message) && message.contains("--skip-grant-tables")) {
                 consumer.accept(testItem(MysqlTestItem.CHECK_CREATE_TABLE_PRIVILEGE.getContent(), TestItem.RESULT_SUCCESSFULLY));
             } else {
-                consumer.accept(testItem(MysqlTestItem.CHECK_CREATE_TABLE_PRIVILEGE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                        "Check create table privileges failed; " + e.getErrorCode() + " " + e.getSQLState() + " " + e.getMessage() + "\n" + getStackString(e)));
+                consumer.accept(new TestItem(MysqlTestItem.CHECK_CREATE_TABLE_PRIVILEGE.getContent(), new TapTestCreateTablePrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             }
         } catch (Throwable e) {
-            consumer.accept(testItem(MysqlTestItem.CHECK_CREATE_TABLE_PRIVILEGE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Check create table privileges failed; " + e.getMessage() + "\n" + getStackString(e)));
+            consumer.accept(new TestItem(MysqlTestItem.CHECK_CREATE_TABLE_PRIVILEGE.getContent(), new TapTestCreateTablePrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return true;
         }
         return true;

@@ -17,7 +17,6 @@ import io.tapdata.entity.schema.value.TapDateTimeValue;
 import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -31,7 +30,6 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.avro.generic.GenericRecord;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.common.TopicPartitionInfo;
 
@@ -309,7 +307,7 @@ public class KafkaConnector extends ConnectorBase {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
         try {
-            kafkaService.streamConsume(tableList, recordSize, consumer);
+            kafkaService.streamConsume(tableList, offsetState, recordSize, consumer);
         } catch (Throwable e) {
             kafkaExceptionCollector.collectTerminateByServer(e);
             kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);
@@ -319,7 +317,10 @@ public class KafkaConnector extends ConnectorBase {
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
-        return TapSimplify.list();
+	    if (null == offsetStartTime) {
+		    return System.currentTimeMillis();
+	    }
+	    return offsetStartTime;
     }
 
     private void checkConnection(TapConnectionContext connectionContext, List<String> items, Consumer<ConnectionCheckItem> consumer) {
