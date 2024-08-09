@@ -4,6 +4,7 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.partition.type.TapPartitionList;
+import io.tapdata.entity.schema.partition.type.TapPartitionStage;
 import io.tapdata.entity.schema.partition.type.TapPartitionType;
 
 import java.util.ArrayList;
@@ -22,8 +23,8 @@ public class ListWrapper extends PGPartitionWrapper {
     //DEFAULT
 
     @Override
-    public TapPartitionType.Type type() {
-        return TapPartitionType.Type.LIST;
+    public TapPartitionStage type() {
+        return TapPartitionStage.LIST;
     }
 
     protected List<String[]> values(String check) {
@@ -39,10 +40,10 @@ public class ListWrapper extends PGPartitionWrapper {
     }
 
     @Override
-    public List<? extends TapPartitionType> parse(TapTable table, String partitionSQL, String checkOrPartitionRule, Log log) {
-        ArrayList<TapPartitionList<String>> lists = new ArrayList<>();
+    public List<TapPartitionType> parse(TapTable table, String partitionSQL, String checkOrPartitionRule, Log log) {
+        ArrayList<TapPartitionType> lists = new ArrayList<>();
         if ("DEFAULT".equalsIgnoreCase(partitionSQL)) {
-            TapPartitionList<String> stringTapPartitionList = new TapPartitionList<>(TapPartitionType.FieldType.STRING);
+            TapPartitionList<String> stringTapPartitionList = new TapPartitionList<>();
             stringTapPartitionList.setToDefault();
             lists.add(stringTapPartitionList);
             return lists;
@@ -52,7 +53,7 @@ public class ListWrapper extends PGPartitionWrapper {
             throw new CoreException("Unable find any value in LIST partition table: {}, partition SQL: {}", table.getId(), partitionSQL);
         }
         for (String[] value : values) {
-            TapPartitionList<String> stringTapPartitionList = new TapPartitionList<>(TapPartitionType.FieldType.STRING);
+            TapPartitionList<String> stringTapPartitionList = new TapPartitionList<>();
             stringTapPartitionList.dataIn(new ArrayList<>(Arrays.asList(value)));
             lists.add(stringTapPartitionList);
         }

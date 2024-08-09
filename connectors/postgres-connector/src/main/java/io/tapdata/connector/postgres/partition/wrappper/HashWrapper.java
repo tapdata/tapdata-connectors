@@ -4,6 +4,7 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.partition.type.TapPartitionHash;
+import io.tapdata.entity.schema.partition.type.TapPartitionStage;
 import io.tapdata.entity.schema.partition.type.TapPartitionType;
 
 import java.util.ArrayList;
@@ -16,12 +17,12 @@ public class HashWrapper extends PGPartitionWrapper {
     public static final String REGEX = "modulus\\s+(\\d+)\\s*,\\s*remainder\\s+(\\d+)";
 
     @Override
-    public TapPartitionType.Type type() {
-        return TapPartitionType.Type.HASH;
+    public TapPartitionStage type() {
+        return TapPartitionStage.HASH;
     }
 
     @Override
-    public List<? extends TapPartitionType> parse(TapTable table, String partitionSQL, String checkOrPartitionRule, Log log) {
+    public List<TapPartitionType> parse(TapTable table, String partitionSQL, String checkOrPartitionRule, Log log) {
         //for values with (modulus 4, remainder 1);
         Pattern pattern = Pattern.compile(REGEX);
         Matcher matcher = pattern.matcher(String.valueOf(partitionSQL).toLowerCase());
@@ -29,14 +30,14 @@ public class HashWrapper extends PGPartitionWrapper {
             int modulus = Integer.parseInt(matcher.group(1));
             int remainder = Integer.parseInt(matcher.group(2));
 
-            TapPartitionHash tapPartitionHash = new TapPartitionHash(TapPartitionType.FieldType.INTEGER)
+            TapPartitionHash tapPartitionHash = new TapPartitionHash()
                     .modulus(modulus)
                     .remainder(remainder);
-            List<TapPartitionHash> hashes = new ArrayList<>();
+            List<TapPartitionType> hashes = new ArrayList<>();
             hashes.add(tapPartitionHash);
             return hashes;
         } else {
-           throw new CoreException("Unable get modulus and remainder value from HASH partition table: {}, partition SQL: {}", table.getId(), partitionSQL);
+            throw new CoreException("Unable get modulus and remainder value from HASH partition table: {}, partition SQL: {}", table.getId(), partitionSQL);
         }
     }
 }
