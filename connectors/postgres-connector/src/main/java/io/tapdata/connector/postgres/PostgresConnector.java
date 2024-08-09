@@ -9,6 +9,7 @@ import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
+import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
@@ -20,7 +21,15 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapType;
-import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.schema.value.TapArrayValue;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapMapValue;
+import io.tapdata.entity.schema.value.TapRawValue;
+import io.tapdata.entity.schema.value.TapStringValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
+import io.tapdata.entity.schema.value.TapValue;
+import io.tapdata.entity.schema.value.TapYearValue;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
@@ -41,19 +50,37 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
-import org.postgresql.geometric.*;
+import io.tapdata.pdk.apis.functions.connector.common.vo.TapPartitionResult;
+import org.postgresql.geometric.PGbox;
+import org.postgresql.geometric.PGcircle;
+import org.postgresql.geometric.PGline;
+import org.postgresql.geometric.PGlseg;
+import org.postgresql.geometric.PGpath;
+import org.postgresql.geometric.PGpoint;
+import org.postgresql.geometric.PGpolygon;
 import org.postgresql.jdbc.PgArray;
 import org.postgresql.jdbc.PgSQLXML;
 import org.postgresql.util.PGInterval;
 import org.postgresql.util.PGobject;
 
 import java.math.BigDecimal;
+import java.sql.Connection;
 import java.sql.Date;
-import java.sql.*;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TimeZone;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -73,6 +100,7 @@ public class PostgresConnector extends CommonDbConnector {
     private Object slotName; //must be stored in stateMap
     protected String postgresVersion;
     protected Map<String, Boolean> writtenTableMap = new ConcurrentHashMap<>();
+    protected PostgresPartitionContext postgresPartitionContext;
 
     @Override
     public void onStart(TapConnectionContext connectorContext) {
@@ -203,7 +231,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
         connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
-
+        connectorFunctions.supportQueryPartitionTablesByParentName(this::discoverPartitionInfoByParentName);
 
     }
 
@@ -253,7 +281,7 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
-    private static final String PG_REPLICATE_IDENTITY = "select relname, relreplident from pg_class\n" +
+    private static final String PG_REPLICATE_IDENTITY = "select relname, relreplident from pg_class " +
             "where relnamespace=(select oid from pg_namespace where nspname='%s') and relname in (%s)";
 
     private void testReplicateIdentity(KVReadOnlyMap<TapTable> tableMap) {
@@ -331,6 +359,10 @@ public class PostgresConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
         exceptionCollector = new PostgresExceptionCollector();
+        postgresPartitionContext = new PostgresPartitionContext(tapLogger)
+                .withJdbcContext(jdbcContext)
+                .withPostgresVersion(postgresVersion)
+                .withPostgresConfig(postgresConfig);
     }
 
     private void openIdentity(TapTable tapTable) throws SQLException {
@@ -541,5 +573,14 @@ public class PostgresConnector extends CommonDbConnector {
         if (pks.isEmpty()) throw new CoreException("No primary keys found for table: " + tapTable.getName());
 
         return "abs(('x' || MD5(CONCAT_WS(',', \"" + String.join("\", \"", pks) + "\")))::bit(64)::bigint)";
+    }
+
+    public void discoverPartitionInfoByParentName(TapConnectorContext connectorContext, List<TapTable> table, Consumer<Collection<TapPartitionResult>> consumer) throws SQLException {
+        postgresPartitionContext.discoverPartitionInfoByParentName(connectorContext, table, consumer);
+    }
+
+    @Override
+    public List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
+        return postgresPartitionContext.discoverPartitionInfo(tapTableList);
     }
 }
