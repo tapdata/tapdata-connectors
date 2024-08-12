@@ -385,6 +385,7 @@ public class MysqlConnectorTest {
     class BatchReadWithHashSplitTest {
         CommonDbConfig commonDbConfig;
         JdbcContext jdbcContext;
+        MysqlJdbcContextV2 mysqlJdbcContextV2;
         Log tapLogger;
         TapConnectorContext tapConnectorContext;
         TapTable tapTable;
@@ -396,11 +397,13 @@ public class MysqlConnectorTest {
         @BeforeEach
         void setUp() throws Throwable {
             commonDbConfig = mock(CommonDbConfig.class);
-            jdbcContext = mock(JdbcContext.class);
+            mysqlJdbcContextV2 = mock(MysqlJdbcContextV2.class);
+            jdbcContext = mysqlJdbcContextV2;
             tapLogger = mock(Log.class);
             tapTable = mock(TapTable.class);
             connector = mock(MysqlConnector.class);
             UnitTestUtils.injectField(CommonDbConnector.class, connector, "jdbcContext", jdbcContext);
+            UnitTestUtils.injectField(MysqlConnector.class, connector, "mysqlJdbcContext", jdbcContext);
             UnitTestUtils.injectField(CommonDbConnector.class, connector, "commonDbConfig", commonDbConfig);
             UnitTestUtils.injectField(CommonDbConnector.class, connector, "tapLogger", tapLogger);
             doCallRealMethod().when(connector).batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);

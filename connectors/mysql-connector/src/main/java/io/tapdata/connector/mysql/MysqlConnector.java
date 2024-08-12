@@ -612,9 +612,9 @@ public class MysqlConnector extends CommonDbConnector {
                         for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
                             String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
                             tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
-                            jdbcContext.query(splitSql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
+                            mysqlJdbcContext.queryWithStream(splitSql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
                         }
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
                         throwable.set(e);
                     } finally {
                         countDownLatch.countDown();
@@ -635,6 +635,11 @@ public class MysqlConnector extends CommonDbConnector {
         } finally {
             executorService.shutdown();
         }
+    }
+
+    protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        mysqlJdbcContext.queryWithStream(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
     }
 
     @Override
