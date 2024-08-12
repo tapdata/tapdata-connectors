@@ -636,6 +636,17 @@ public class MysqlConnector extends CommonDbConnector {
             executorService.shutdown();
         }
     }
+    protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        try {
+            mysqlJdbcContext.query(sql,resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
+        } catch (SQLException e) {
+            exceptionCollector.collectTerminateByServer(e);
+            exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+            exceptionCollector.revealException(e);
+            throw e;
+        }
+    }
 
     @Override
     protected void queryByAdvanceFilterWithOffset(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {

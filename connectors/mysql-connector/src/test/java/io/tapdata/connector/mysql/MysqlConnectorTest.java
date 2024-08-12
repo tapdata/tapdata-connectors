@@ -5,6 +5,7 @@ import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
+import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
@@ -21,6 +22,7 @@ import io.tapdata.entity.schema.type.TapBoolean;
 import io.tapdata.entity.schema.type.TapDateTime;
 import io.tapdata.entity.schema.type.TapNumber;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
@@ -30,6 +32,7 @@ import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import io.tapdata.utils.UnitTestUtils;
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
+import org.mockito.internal.verification.Times;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.ResultSet;
@@ -477,4 +480,38 @@ public class MysqlConnectorTest {
         }
     }
 
+    @Nested
+    class batchReadWithoutHashSplit{
+        TapConnectorContext tapConnectorContext;
+        TapTable tapTable;
+        Object offsetState;
+        int eventBatchSize;
+        BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer;
+        @Test
+        void testBatchReadWithoutHashSplitNormal() throws Throwable {
+            MysqlConnector mysqlConnector = mock(MysqlConnector.class);
+            MysqlJdbcContextV2 mysqlJdbcContext = mock(MysqlJdbcContextV2.class);
+            ReflectionTestUtils.setField(mysqlConnector, "mysqlJdbcContext", mysqlJdbcContext);
+            ExceptionCollector exceptionCollector = new MysqlExceptionCollector();
+            ReflectionTestUtils.setField(mysqlConnector, "exceptionCollector", exceptionCollector);
+            doCallRealMethod().when(mysqlConnector).batchReadWithoutHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
+            mysqlConnector.batchReadWithoutHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
+            verify(mysqlConnector, new Times(1)).resultSetConsumer(tapTable,eventBatchSize,eventsOffsetConsumer);
+        }
+        @Test
+        void testBatchReadWithoutHashSplitEx() throws Throwable {
+            MysqlConnector mysqlConnector = mock(MysqlConnector.class);
+            MysqlJdbcContextV2 mysqlJdbcContext = mock(MysqlJdbcContextV2.class);
+            ReflectionTestUtils.setField(mysqlConnector, "mysqlJdbcContext", mysqlJdbcContext);
+            ExceptionCollector exceptionCollector = new MysqlExceptionCollector();
+            MysqlConfig mysqlConfig = mock(MysqlConfig.class);
+            ReflectionTestUtils.setField(exceptionCollector, "mysqlConfig", mysqlConfig);
+            ReflectionTestUtils.setField(mysqlConnector, "exceptionCollector", exceptionCollector);
+            when(mysqlConnector.getBatchReadSelectSql(tapTable)).thenReturn("select * from test.aa");
+            when(mysqlConnector.resultSetConsumer(tapTable,eventBatchSize,eventsOffsetConsumer)).thenReturn(mock(ResultSetConsumer.class));
+            doThrow(new SQLException("test sql exception", "test sql", 10001)).when(mysqlJdbcContext).query(anyString(), any(ResultSetConsumer.class));
+            doCallRealMethod().when(mysqlConnector).batchReadWithoutHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
+            assertThrows(TapPdkRetryableEx.class, ()->mysqlConnector.batchReadWithoutHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer));
+        }
+    }
 }
