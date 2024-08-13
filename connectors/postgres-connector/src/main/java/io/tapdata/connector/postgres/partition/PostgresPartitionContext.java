@@ -91,7 +91,7 @@ public class PostgresPartitionContext {
 
     protected Set<String> discoverPartitionInfo(Map<String, TapTable> tapTableList) throws SQLException {
         if (null == tapTableList || tapTableList.isEmpty()) return null;
-        if (postgresVersion.compareTo("100000") < 0) {
+        if (Integer.parseInt(postgresVersion) < 100000) {
             // 6.3以下版本不支持分区 | 10.0版本 只支持继承方式创建表 ---> 不属于分区表，暂不支持
             tapLogger.info("Not support partition table when {} version pg", postgresVersion);
             return null;

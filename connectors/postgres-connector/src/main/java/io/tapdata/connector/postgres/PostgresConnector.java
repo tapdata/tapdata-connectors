@@ -10,6 +10,7 @@ import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
+import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
@@ -82,8 +83,10 @@ import java.util.Map;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * PDK for Postgresql
@@ -112,12 +115,14 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     @Override
-    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
+    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws SQLException {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer, connectionOptions).initContext()
+                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer, connectionOptions)
+                        .initContext()
+                        .withPostgresVersion();
         ) {
             postgresTest.testOneByOne();
             return connectionOptions;
@@ -351,6 +356,8 @@ public class PostgresConnector extends CommonDbConnector {
         });
         commonSqlMaker = new PostgresSqlMaker().closeNotNull(postgresConfig.getCloseNotNull());
         postgresVersion = postgresJdbcContext.queryVersion();
+        postgresJdbcContext.withPostgresVersion(postgresVersion);
+        postgresTest.withPostgresVersion(postgresVersion);
         ddlSqlGenerator = new PostgresDDLSqlGenerator();
         tapLogger = connectionContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();
@@ -582,5 +589,33 @@ public class PostgresConnector extends CommonDbConnector {
     @Override
     public List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
         return postgresPartitionContext.discoverPartitionInfo(tapTableList);
+    }
+
+    protected CopyOnWriteArraySet<List<DataMap>> splitTableForMultiDiscoverSchema(List<DataMap> tables, int tableSize) {
+        if (Integer.parseInt(postgresVersion) < 100000) {
+            return super.splitTableForMultiDiscoverSchema(tables, tableSize);
+        }
+        return new CopyOnWriteArraySet<>(splitToPieces(tables, tableSize));
+    }
+
+    List<List<DataMap>> splitToPieces(List<DataMap> data, int eachPieceSize) {
+        if (EmptyKit.isEmpty(data)) {
+            return new ArrayList<>();
+        }
+        if (eachPieceSize <= 0) {
+            throw new IllegalArgumentException("Param Error");
+        }
+        List<List<DataMap>> result = new ArrayList<>();
+        List<DataMap> subList = new ArrayList<>();
+        result.add(subList);
+        for (DataMap datum : data) {
+            String tableType = String.valueOf(datum.get("tableType"));
+            if (subList.size() >= eachPieceSize && !TableType.CHILD_TABLE.equals(tableType)) {
+                subList = new ArrayList<>();
+                result.add(subList);
+            }
+            subList.add(datum);
+        }
+        return result;
     }
 }

@@ -41,6 +41,15 @@ public class PostgresTest extends CommonDbTest {
         return this;
     }
 
+    public PostgresTest withPostgresVersion(String version) {
+        ((PostgresJdbcContext)jdbcContext).withPostgresVersion(version);
+        return this;
+    }
+    public PostgresTest withPostgresVersion() throws SQLException {
+        ((PostgresJdbcContext)jdbcContext).withPostgresVersion(jdbcContext.queryVersion());
+        return this;
+    }
+
     @Override
     protected List<String> supportVersions() {
         return Lists.newArrayList("9.4", "9.5", "9.6", "1*");
