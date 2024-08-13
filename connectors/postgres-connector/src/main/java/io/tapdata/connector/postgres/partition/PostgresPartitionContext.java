@@ -136,6 +136,7 @@ public class PostgresPartitionContext {
                         break;
                     case TableType.CHILD_TABLE:
                         TapTable subTable = tapTableList.get(tableName);
+                        if (null == subTable) continue;
                         TapTable tapTable = subTable.partitionMasterTableId(parent);
                         subTable.setPartitionInfo(tapPartition); //子表要包含分区信息
                         TapSubPartitionTableInfo partitionSchema = TapSubPartitionTableInfo.create()
