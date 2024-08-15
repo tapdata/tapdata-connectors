@@ -215,22 +215,6 @@ public class MongodbConfig extends CommonDbConfig {
 		this.sslCA = sslCA;
 	}
 
-	public String getInsertDmlPolicy() {
-		return insertDmlPolicy;
-	}
-
-	public void setInsertDmlPolicy(String insertDmlPolicy) {
-		this.insertDmlPolicy = insertDmlPolicy;
-	}
-
-	public String getUpdateDmlPolicy() {
-		return updateDmlPolicy;
-	}
-
-	public void setUpdateDmlPolicy(String updateDmlPolicy) {
-		this.updateDmlPolicy = updateDmlPolicy;
-	}
-
 	public boolean isEnableSaveDeleteData() {
 		return enableSaveDeleteData;
 	}

@@ -96,8 +96,8 @@ public class MongodbConnector extends ConnectorBase {
 	private MongodbStreamReader mongodbStreamReader;
 	private MongodbStreamReader opLogStreamReader;
 	private ConcurrentHashMap<String,Set<String>> shardKeyMap = new ConcurrentHashMap<>();
+	private final Map<String, MongodbWriter> writerMap = new ConcurrentHashMap<>();
 
-	private volatile MongodbWriter mongodbWriter;
 	protected Map<String, Integer> stringTypeValueMap;
 
 	private final MongodbExecuteCommandFunction mongodbExecuteCommandFunction = new MongodbExecuteCommandFunction();
@@ -1278,25 +1278,23 @@ public class MongodbConnector extends ConnectorBase {
 	 */
 	private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
 		putShardKey(table.getId());
+		String threadName = Thread.currentThread().getName();
+		MongodbWriter mongodbWriter = writerMap.get(threadName);
+		if (EmptyKit.isNull(mongodbWriter)) {
+			mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
+			writerMap.put(threadName, mongodbWriter);
+		}
 		try {
-			if (mongodbWriter == null) {
-				synchronized (this) {
-					if (mongodbWriter == null) {
-						mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
-					}
-				}
+			String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
+			if (insertDmlPolicy == null) {
+				insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
 			}
-			ConnectorCapabilities connectorCapabilities = connectorContext.getConnectorCapabilities();
-			if (null != connectorCapabilities) {
-				mongoConfig.setInsertDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY) ?
-						ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS : connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY));
-				mongoConfig.setUpdateDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY) ?
-						ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS : connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY));
-			} else {
-				mongoConfig.setInsertDmlPolicy(ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS);
-				mongoConfig.setUpdateDmlPolicy(ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS);
+			String updateDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
+			if (updateDmlPolicy == null) {
+				updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
 			}
-			if ("log_on_nonexists".equals(mongoConfig.getUpdateDmlPolicy())) {
+			mongodbWriter.dmlPolicy(insertDmlPolicy, updateDmlPolicy);
+			if ("log_on_nonexists".equals(updateDmlPolicy)) {
 				List<TapRecordEvent> noUpdateRecordEvents = new ArrayList<>();
 				for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
 					if (tapRecordEvent instanceof TapUpdateRecordEvent) {
@@ -1687,10 +1685,6 @@ public class MongodbConnector extends ConnectorBase {
 			mongoClient = null;
 		}
 
-		if (mongodbWriter != null) {
-			mongodbWriter.onDestroy();
-			mongodbWriter = null;
-		}
 		closeOpLogThreadSource();
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
