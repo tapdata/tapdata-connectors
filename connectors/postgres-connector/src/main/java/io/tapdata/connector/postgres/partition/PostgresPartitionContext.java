@@ -124,30 +124,35 @@ public class PostgresPartitionContext {
                 String partitionBound = String.valueOf(r.getString(TableType.KEY_PARTITION_BOUND));
                 TapPartition tapPartition = partitionMap.computeIfAbsent(parent, k -> TapPartition.create());
                 TapTable tapParent = tapTableList.get(parent);
-                switch (tableType) {
-                    case TableType.PARTITIONED_TABLE:
-                        tapPartition.originPartitionStageSQL(checkOrPartitionRule);
-                        tapParent.setPartitionMasterTableId(parent);
-                        Optional.ofNullable(PGPartitionWrapper.partitionFields(tapParent, partitionType, checkOrPartitionRule, tableName, tapLogger))
-                                .ifPresent(tapPartition::addAllPartitionFields);
-                    case TableType.PARENT_TABLE:
-                        Optional.ofNullable(PGPartitionWrapper.type(partitionType, tableName, tapLogger))
-                                .ifPresent(tapPartition::type);
-                        break;
-                    case TableType.CHILD_TABLE:
-                        TapTable subTable = tapTableList.get(tableName);
-                        TapSubPartitionTableInfo partitionSchema = TapSubPartitionTableInfo.create()
-                                .originPartitionBoundSQL(partitionBound)
-                                .tableName(tableName);
-                        Optional.ofNullable(PGPartitionWrapper.warp(tapParent, partitionType, checkOrPartitionRule, partitionBound, tapLogger))
-                                .ifPresent(partitionSchema::setTapPartitionTypes);
-                        tapPartition.appendPartitionSchemas(partitionSchema);
+                try {
+                    switch (tableType) {
+                        case TableType.PARTITIONED_TABLE:
+                            tapPartition.originPartitionStageSQL(checkOrPartitionRule);
+                            tapParent.setPartitionMasterTableId(parent);
+                            Optional.ofNullable(PGPartitionWrapper.partitionFields(tapParent, partitionType, checkOrPartitionRule, tableName, tapLogger))
+                                    .ifPresent(tapPartition::addAllPartitionFields);
+                        case TableType.PARENT_TABLE:
+                            Optional.ofNullable(PGPartitionWrapper.type(partitionType, tableName, tapLogger))
+                                    .ifPresent(tapPartition::type);
+                            break;
+                        case TableType.CHILD_TABLE:
+                            TapTable subTable = tapTableList.get(tableName);
+                            TapSubPartitionTableInfo partitionSchema = TapSubPartitionTableInfo.create()
+                                    .originPartitionBoundSQL(partitionBound)
+                                    .tableName(tableName);
+                            Optional.ofNullable(PGPartitionWrapper.warp(tapParent, partitionType, checkOrPartitionRule, partitionBound, tapLogger))
+                                    .ifPresent(partitionSchema::setTapPartitionTypes);
+                            tapPartition.appendPartitionSchemas(partitionSchema);
 
-                        if (null == subTable) continue;
-                        subTable.partitionMasterTableId(parent);
-                        subTable.setPartitionInfo(tapPartition); //子表要包含分区信息
-                        break;
-                    default:
+                            if (null == subTable) continue;
+                            subTable.partitionMasterTableId(parent);
+                            subTable.setPartitionInfo(tapPartition); //子表要包含分区信息
+                            break;
+                        default:
+                    }
+                } catch (Exception e) {
+                    tapPartition.setInvalidType(true);
+                    tapPartition.setInvalidMsg(e.getMessage());
                 }
             }
         });

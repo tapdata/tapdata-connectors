@@ -20,6 +20,8 @@ import java.util.regex.Pattern;
 public abstract class PGPartitionWrapper {
     public static final String REGEX = "\\(([^)]+)\\)";
     public static final String SPLIT_REGEX = "\\s*,\\s*";
+    private static final Pattern VALID_COLUMN_NAME_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]*$");
+
 
     protected PGPartitionWrapper() {
 
@@ -29,6 +31,9 @@ public abstract class PGPartitionWrapper {
 
     public List<TapPartitionField> partitionFields(TapTable table, String checkOrPartitionRule, Log log) {
         List<TapField> tapFields = matchFieldNames(table, checkOrPartitionRule);
+        if (null != checkOrPartitionRule && !"".equals(checkOrPartitionRule.trim()) && tapFields.isEmpty()) {
+            throw new CoreException("Can not support invalid partition filed stage: {}, table: {}", checkOrPartitionRule, table.getId());
+        }
         List<TapPartitionField> fieldList = new ArrayList<>();
         for (TapField field : tapFields) {
             if (null == field) continue;
@@ -108,7 +113,7 @@ public abstract class PGPartitionWrapper {
         if (null != matchValues) {
             return matchValues;
         } else {
-            throw new CoreException("Unable to get partition fields from {} (partition field setting sql is invalid or not be support)", check);
+            throw new CoreException("Unable to get partition fields from {} (partition field setting sql is invalid or not be support), only support simple partition stage,such as: (field_name) or  (field1,field2,...)", check);
         }
     }
 
@@ -117,8 +122,18 @@ public abstract class PGPartitionWrapper {
         List<TapField> fieldList = new ArrayList<>();
         LinkedHashMap<String, TapField> nameFieldMap = table.getNameFieldMap();
         for (String field : fieldArr) {
+            if (!isValidColumnName(field)) {
+                throw new CoreException("Unable to get partition fields from {} (partition field setting sql is invalid or not be support), only support simple partition stage,such as: (field_name) or  (field1,field2,...)", check);
+            }
             Optional.ofNullable(nameFieldMap.get(field)).ifPresent(fieldList::add);
         }
         return fieldList;
+    }
+
+    boolean isValidColumnName(String columnName) {
+        if (columnName == null || columnName.length() == 0 || columnName.length() > 63) {
+            return false;
+        }
+        return VALID_COLUMN_NAME_PATTERN.matcher(columnName).matches();
     }
 }
