@@ -123,10 +123,10 @@ public class PostgresPartitionContext {
                 }
                 String partitionBound = String.valueOf(r.getString(TableType.KEY_PARTITION_BOUND));
                 TapPartition tapPartition = partitionMap.computeIfAbsent(parent, k -> TapPartition.create());
+                TapTable tapParent = tapTableList.get(parent);
                 switch (tableType) {
                     case TableType.PARTITIONED_TABLE:
                         tapPartition.originPartitionStageSQL(checkOrPartitionRule);
-                        TapTable tapParent = tapTableList.get(parent);
                         tapParent.setPartitionMasterTableId(parent);
                         Optional.ofNullable(PGPartitionWrapper.partitionFields(tapParent, partitionType, checkOrPartitionRule, tableName, tapLogger))
                                 .ifPresent(tapPartition::addAllPartitionFields);
@@ -136,15 +136,16 @@ public class PostgresPartitionContext {
                         break;
                     case TableType.CHILD_TABLE:
                         TapTable subTable = tapTableList.get(tableName);
-                        if (null == subTable) continue;
-                        TapTable tapTable = subTable.partitionMasterTableId(parent);
-                        subTable.setPartitionInfo(tapPartition); //子表要包含分区信息
                         TapSubPartitionTableInfo partitionSchema = TapSubPartitionTableInfo.create()
                                 .originPartitionBoundSQL(partitionBound)
                                 .tableName(tableName);
-                        Optional.ofNullable(PGPartitionWrapper.warp(tapTable, partitionType, checkOrPartitionRule, partitionBound, tapLogger))
+                        Optional.ofNullable(PGPartitionWrapper.warp(tapParent, partitionType, checkOrPartitionRule, partitionBound, tapLogger))
                                 .ifPresent(partitionSchema::setTapPartitionTypes);
                         tapPartition.appendPartitionSchemas(partitionSchema);
+
+                        if (null == subTable) continue;
+                        subTable.partitionMasterTableId(parent);
+                        subTable.setPartitionInfo(tapPartition); //子表要包含分区信息
                         break;
                     default:
                 }
