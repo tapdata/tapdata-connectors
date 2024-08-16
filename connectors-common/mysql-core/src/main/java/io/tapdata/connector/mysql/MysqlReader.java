@@ -300,7 +300,7 @@ public class MysqlReader implements Closeable {
                     .with("database.history.store.only.captured.tables.ddl", true)
                     .with(MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE, MySqlConnectorConfig.SnapshotLockingMode.NONE)
                     .with("max.queue.size", mysqlConfig.getMaximumQueueSize())
-                    .with("max.batch.size", Math.max(batchSize, 100))
+                    .with("max.batch.size", mysqlConfig.getMaximumQueueSize()/8)
                     .with(MySqlConnectorConfig.SERVER_ID, randomServerId())
                     .with("time.precision.mode", "adaptive_time_microseconds")
 //					.with("converters", "time")
