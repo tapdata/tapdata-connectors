@@ -130,6 +130,10 @@
             {
               "label": "PGOUTPUT",
               "value": "pgoutput"
+            },
+            {
+              "label": "WALMINER",
+              "value": "walminer"
             }
           ]
         },

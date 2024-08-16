@@ -4,6 +4,7 @@ import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
+import io.tapdata.connector.postgres.cdc.WalLogMiner;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
@@ -56,6 +57,7 @@ import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -313,7 +315,7 @@ public class PostgresConnector extends CommonDbConnector {
     private void initConnection(TapConnectionContext connectionContext) {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         postgresTest = new PostgresTest(postgresConfig, testItem -> {
-        },null).initContext();
+        }, null).initContext();
         postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;
@@ -387,25 +389,38 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
-        testReplicateIdentity(nodeContext.getTableMap());
-        buildSlot(nodeContext, true);
-        cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
-        cdcRunner.startCdcRunner();
-        if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
-            Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
-            if (throwable instanceof SQLException) {
-                exceptionCollector.collectTerminateByServer(throwable);
-                exceptionCollector.collectCdcConfigInvalid(throwable);
-                exceptionCollector.revealException(throwable);
+        if ("walminer".equals(postgresConfig.getLogPluginName())) {
+            new WalLogMiner(postgresJdbcContext, tapLogger)
+                    .watch(tableList, nodeContext.getTableMap())
+                    .offset(offsetState)
+                    .registerConsumer(consumer, recordSize)
+                    .startMiner(this::isAlive);
+        } else {
+            cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+            testReplicateIdentity(nodeContext.getTableMap());
+            buildSlot(nodeContext, true);
+            cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
+            cdcRunner.startCdcRunner();
+            if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
+                Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
+                if (throwable instanceof SQLException) {
+                    exceptionCollector.collectTerminateByServer(throwable);
+                    exceptionCollector.collectCdcConfigInvalid(throwable);
+                    exceptionCollector.revealException(throwable);
+                }
+                throw throwable;
             }
-            throw throwable;
         }
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
+        if ("walminer".equals(postgresConfig.getLogPluginName())) {
+            String walLsn = timestampToWalLsn(offsetStartTime);
+            tapLogger.info("timestampToStreamOffset start at {}", walLsn);
+            return walLsn;
+        }
         if (EmptyKit.isNotNull(offsetStartTime)) {
-            tapLogger.warn("Postgres specified time start increment is not supported, use the current time as the start increment");
+            tapLogger.warn("Postgres specified time start increment is not supported except walminer, use the current time as the start increment");
         }
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
@@ -417,6 +432,55 @@ public class PostgresConnector extends CommonDbConnector {
             buildSlot(connectorContext, false);
         }
         return new PostgresOffset();
+    }
+
+    private String timestampToWalLsn(Long offsetStartTime) throws SQLException {
+        String walDirectory = getWalDirectory();
+        AtomicReference<String> fileAndLsn = new AtomicReference<>();
+        if (EmptyKit.isNull(offsetStartTime)) {
+            postgresJdbcContext.queryWithNext("SELECT pg_current_wal_lsn()", resultSet -> fileAndLsn.set(resultSet.getString(1)));
+            postgresJdbcContext.queryWithNext(String.format("select pg_walfile_name('%s')", fileAndLsn.get()), resultSet -> {
+                fileAndLsn.set(resultSet.getString(1) + "," + fileAndLsn.get());
+            });
+        } else {
+            postgresJdbcContext.prepareQuery("SELECT * FROM pg_ls_waldir() where modification>? order by modification", Collections.singletonList(new Timestamp(offsetStartTime)), resultSet -> {
+                if (resultSet.next()) {
+                    fileAndLsn.set(resultSet.getString(1));
+                }
+            });
+            try (
+                    Connection connection = jdbcContext.getConnection();
+                    Statement statement = connection.createStatement();
+                    PreparedStatement preparedStatement = connection.prepareStatement("select * from walminer_contents where timestamp >= ? order by start_lsn limit 1")
+            ) {
+                statement.execute(String.format("select walminer_wal_add('%s')", walDirectory + fileAndLsn.get()));
+                statement.execute("select walminer_all()");
+                preparedStatement.setObject(1, new Timestamp(offsetStartTime));
+                try (ResultSet resultSet = preparedStatement.executeQuery()) {
+                    if (resultSet.next()) {
+                        fileAndLsn.set(fileAndLsn.get() + "," + resultSet.getString("start_lsn"));
+                    }
+                }
+                statement.execute("select walminer_stop()");
+            }
+        }
+        return walDirectory + fileAndLsn.get();
+    }
+
+    protected String getWalDirectory() throws SQLException {
+        AtomicReference<String> walDirectory = new AtomicReference<>();
+        postgresJdbcContext.query("SELECT name, setting FROM pg_settings WHERE name = 'wal_dir' or name = 'data_directory'", resultSet -> {
+            while (resultSet.next()) {
+                if ("wal_dir".equals(resultSet.getString(1)) && EmptyKit.isNotEmpty(resultSet.getString(2))) {
+                    walDirectory.set(resultSet.getString(2) + "/");
+                    break;
+                }
+                if ("data_directory".equals(resultSet.getString(1)) && EmptyKit.isNotEmpty(resultSet.getString(2))) {
+                    walDirectory.set(resultSet.getString(2) + (postgresVersion.compareTo("100000") >= 0 ? "/pg_wal/" : "/pg_xlog/"));
+                }
+            }
+        });
+        return walDirectory.get();
     }
 
     private void createPublicationIfNotExist() throws SQLException {
