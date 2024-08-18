@@ -42,6 +42,7 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
+import io.tapdata.pdk.apis.functions.connector.source.ConnectionConfigWithTables;
 import org.postgresql.geometric.*;
 import org.postgresql.jdbc.PgArray;
 import org.postgresql.jdbc.PgSQLXML;
@@ -94,6 +95,14 @@ public class PostgresConnector extends CommonDbConnector {
                 PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer, connectionOptions).initContext()
         ) {
             postgresTest.testOneByOne();
+            connectionOptions.setInstanceUniqueId(StringKit.md5(String.join("|"
+                    , postgresConfig.getUser()
+                    , postgresConfig.getHost()
+                    , String.valueOf(postgresConfig.getPort())
+                    , postgresConfig.getDatabase()
+                    , postgresConfig.getLogPluginName()
+            )));
+            connectionOptions.setNamespaces(Collections.singletonList(postgresConfig.getSchema()));
             return connectionOptions;
         }
     }
@@ -205,7 +214,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
         connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
-
+        connectorFunctions.supportStreamReadMultiConnectionFunction(this::streamReadMultiConnection);
 
     }
 
@@ -410,6 +419,45 @@ public class PostgresConnector extends CommonDbConnector {
                 }
                 throw throwable;
             }
+        }
+    }
+
+    private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
+        cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+        testReplicateIdentity(nodeContext.getTableMap());
+        buildSlot(nodeContext, true);
+        Map<String, List<String>> schemaTableMap = new HashMap<>();
+        for (ConnectionConfigWithTables withTables : connectionConfigWithTables) {
+            if (null == withTables.getConnectionConfig())
+                throw new RuntimeException("Not found connection config");
+            if (null == withTables.getConnectionConfig().get("schema"))
+                throw new RuntimeException("Not found connection schema");
+            if (null == withTables.getTables())
+                throw new RuntimeException("Not found connection tables");
+
+            schemaTableMap.compute(String.valueOf(withTables.getConnectionConfig().get("schema")), (schema, tableList) -> {
+                if (null == tableList) {
+                    tableList = new ArrayList<>();
+                }
+
+                for (String tableName : withTables.getTables()) {
+                    if (!tableList.contains(tableName)) {
+                        tableList.add(tableName);
+                    }
+                }
+                return tableList;
+            });
+        }
+        cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerConsumer(consumer, batchSize);
+        cdcRunner.startCdcRunner();
+        if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
+            Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
+            if (throwable instanceof SQLException) {
+                exceptionCollector.collectTerminateByServer(throwable);
+                exceptionCollector.collectCdcConfigInvalid(throwable);
+                exceptionCollector.revealException(throwable);
+            }
+            throw throwable;
         }
     }
 

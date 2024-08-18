@@ -1,5 +1,6 @@
 package io.tapdata.connector.postgres.cdc;
 
+import com.google.common.collect.Lists;
 import io.debezium.embedded.EmbeddedEngine;
 import io.debezium.embedded.StopConnectorException;
 import io.debezium.engine.DebeziumEngine;
@@ -54,6 +55,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     protected TimeZone timeZone;
     private String dropTransactionId = null;
+    private boolean withSchema = false;
 
     public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext) throws SQLException {
         this.postgresConfig = (PostgresConfig) postgresJdbcContext.getConfig();
@@ -70,6 +72,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     }
 
     public PostgresCdcRunner watch(List<String> observedTableList) {
+        withSchema = false;
         if (postgresConfig.getDoubleActive()) {
             observedTableList.add("_tap_double_active");
         }
@@ -78,6 +81,22 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 .use(timeZone)
                 .useSlot(runnerName)
                 .watch(observedTableList);
+        return this;
+    }
+
+    public PostgresCdcRunner watch(Map<String, List<String>> schemaTableMap) {
+        withSchema = true;
+        if (postgresConfig.getDoubleActive()) {
+            schemaTableMap.computeIfPresent(postgresConfig.getSchema(), (k, v) -> {
+                v.add("_tap_double_active");
+                return v;
+            });
+        }
+        postgresDebeziumConfig = new PostgresDebeziumConfig()
+                .use(postgresConfig)
+                .use(timeZone)
+                .useSlot(runnerName)
+                .watch(schemaTableMap);
         return this;
     }
 
@@ -148,7 +167,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         List<TapEvent> eventList = TapSimplify.list();
         Map<String, ?> offset = null;
         for (SourceRecord sr : sourceRecords) {
-            try{
+            try {
                 offset = sr.sourceOffset();
                 // PG use micros to indicate the time but in pdk api we use millis
                 Long referenceTime = (Long) offset.get("ts_usec") / 1000;
@@ -166,6 +185,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 String op = struct.getString("op");
                 String lsn = String.valueOf(offset.get("lsn"));
                 String table = struct.getStruct("source").getString("table");
+                String schema = struct.getStruct("source").getString("schema");
                 //双活情形下，需要过滤_tap_double_active记录的同事务数据
                 if (Boolean.TRUE.equals(postgresConfig.getDoubleActive())) {
                     if ("_tap_double_active".equals(table)) {
@@ -201,6 +221,9 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 if (EmptyKit.isNotNull(event)) {
                     event.setReferenceTime(referenceTime);
                     event.setExactlyOnceId(lsn);
+                    if (withSchema) {
+                        event.setNamespaces(Lists.newArrayList(schema, table));
+                    }
                 }
                 eventList.add(event);
                 committer.markProcessed(sr);
@@ -211,7 +234,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                     committer.markBatchFinished();
                     eventList = TapSimplify.list();
                 }
-            }catch (StopConnectorException | StopEngineException ex){
+            } catch (StopConnectorException | StopEngineException ex) {
                 committer.markProcessed(sr);
                 throw ex;
             }
