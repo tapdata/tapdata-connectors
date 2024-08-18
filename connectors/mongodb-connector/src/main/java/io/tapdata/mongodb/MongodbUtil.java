@@ -14,6 +14,7 @@ import io.tapdata.kit.StringKit;
 import io.tapdata.mongodb.codecs.TapdataBigDecimalCodec;
 import io.tapdata.mongodb.codecs.TapdataBigIntegerCodec;
 import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.mongodb.reader.StreamWithOpLogCollection;
 import io.tapdata.mongodb.util.SSLUtil;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import org.apache.commons.collections4.CollectionUtils;
@@ -181,7 +182,7 @@ public class MongodbUtil {
 		});
 
 		// 如果表里没有 _id, 则生成一个
-		if (idExist.get() == false) {
+		if (idExist.get() == false && !StreamWithOpLogCollection.OP_LOG_FULL_NAME.equals(collection.getNamespace().getFullName())) {
 			ObjectId objectId = new ObjectId();
 			BsonObjectId bsonObjectId = new BsonObjectId(objectId);
 			BsonDocument bsonDocument = new BsonDocument("_id", bsonObjectId);
