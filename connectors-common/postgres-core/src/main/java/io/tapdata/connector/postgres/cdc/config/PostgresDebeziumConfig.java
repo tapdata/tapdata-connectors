@@ -6,6 +6,7 @@ import io.tapdata.kit.EmptyKit;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.TimeZone;
 import java.util.stream.Collectors;
 
@@ -19,6 +20,7 @@ public class PostgresDebeziumConfig {
 
     private PostgresConfig postgresConfig;
     private List<String> observedTableList;
+    private Map<String, List<String>> schemaTableMap;
     private String slotName; //unique for each slot, so create it by postgres config and observed tables
     private String namespace;
     private TimeZone timeZone;
@@ -39,6 +41,13 @@ public class PostgresDebeziumConfig {
 
     public PostgresDebeziumConfig watch(List<String> observedTableList) {
         this.observedTableList = observedTableList;
+        //unique and can find it
+        this.namespace = slotName + "-postgres-connector";
+        return this;
+    }
+
+    public PostgresDebeziumConfig watch(Map<String, List<String>> schemaTableMap) {
+        this.schemaTableMap = schemaTableMap;
         //unique and can find it
         this.namespace = slotName + "-postgres-connector";
         return this;
@@ -120,6 +129,11 @@ public class PostgresDebeziumConfig {
         if (EmptyKit.isNotEmpty(observedTableList)) {
             //construct tableWhiteList with schema.table(,) as <public.Student,postgres.test>
             String tableWhiteList = observedTableList.stream().map(v -> postgresConfig.getSchema() + "." + v).collect(Collectors.joining(", "));
+            builder.with("table.whitelist", tableWhiteList);
+        }
+        if (EmptyKit.isNotEmpty(schemaTableMap)) {
+            //construct tableWhiteList with schema.table(,) as <public.Student,postgres.test>
+            String tableWhiteList = schemaTableMap.entrySet().stream().map(v -> v.getValue().stream().map(l -> v.getKey() + "." + l).collect(Collectors.joining(", "))).collect(Collectors.joining(", "));
             builder.with("table.whitelist", tableWhiteList);
         }
         return builder.build();

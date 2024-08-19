@@ -394,6 +394,27 @@
               }
             }
           ]
+        },
+        "maximumQueueSize": {
+          "type": "string",
+          "title": "${maximumQueueSize}",
+          "default": 800,
+          "x-index": 14,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${maximumQueueSizeTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -427,7 +448,9 @@
       "hashSplit": "Hash split",
       "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the hash value, suitable for large table full-stage sharded synchronization",
       "maxSplit": "Maximum number of splits",
-      "batchReadThreadSize": "Batch read thread size"
+      "batchReadThreadSize": "Batch read thread size",
+      "maximumQueueSize": "Maximum queue size",
+      "maximumQueueSizeTip": "The queue size for reading incremental data in MySQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting."
     },
     "zh_CN": {
       "host": "地址",
@@ -456,7 +479,9 @@
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "开关打开时，可以根据哈希值进行分片，适用于大表全量阶段分片同步",
       "maxSplit": "最大分片数",
-      "batchReadThreadSize": "批量读取线程数"
+      "batchReadThreadSize": "批量读取线程数",
+      "maximumQueueSize": "最大队列大小",
+      "maximumQueueSizeTip": "MySql读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置。"
     },
     "zh_TW": {
       "host": "地址",
@@ -485,7 +510,9 @@
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "開關打開時，可以根據哈希值進行分片，適用於大表全量階段分片同步",
       "maxSplit": "最大分片數",
-      "batchReadThreadSize": "批量讀取線程數"
+      "batchReadThreadSize": "批量讀取線程數",
+      "maximumQueueSize": "最大隊列大小",
+      "maximumQueueSizeTip": "MySql 讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置。"
     }
   },
   "dataTypes": {

@@ -53,6 +53,8 @@ public class MongodbWriter {
 
 	private boolean is_cloud;
 	private final Map<String,Set<String>> shardKeyMap;
+	private String insertPolicy;
+	private String updatePolicy;
 
 	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger, Map<String,Set<String>> shardKeyMap) {
 		this.globalStateMap = globalStateMap;
@@ -293,10 +295,10 @@ public class MongodbWriter {
 		if (recordEvent instanceof TapInsertRecordEvent) {
 			TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
 
-			if (CollectionUtils.isNotEmpty(pks) && !ConnectionOptions.DML_INSERT_POLICY_JUST_INSERT.equals(mongodbConfig.getInsertDmlPolicy())) {
+			if (CollectionUtils.isNotEmpty(pks) && !ConnectionOptions.DML_INSERT_POLICY_JUST_INSERT.equals(insertPolicy)) {
 				final Document pkFilter = getPkFilter(pks, insertRecordEvent.getAfter());
 				String operation = "$set";
-				if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(mongodbConfig.getInsertDmlPolicy())) {
+				if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(insertPolicy)) {
 					operation = "$setOnInsert";
 				}
                 if(shardKeyMap.containsKey(tapTable.getId())){
@@ -344,7 +346,7 @@ public class MongodbWriter {
 					u.putAll(after);
 					writeModel = new ReplaceOneModel<>(pkFilter, u, new ReplaceOptions().upsert(false));
 				}else{
-					if (ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS.equals(mongodbConfig.getUpdateDmlPolicy())) {
+					if (ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS.equals(updatePolicy)) {
 						options.upsert(false);
 					}
 					MongodbUtil.removeIdIfNeed(pks, after);
@@ -409,6 +411,12 @@ public class MongodbWriter {
 		}
 
 		return filter;
+	}
+
+	public MongodbWriter dmlPolicy(String insertPolicy, String updatePolicy) {
+		this.insertPolicy = insertPolicy;
+		this.updatePolicy = updatePolicy;
+		return this;
 	}
 
 }

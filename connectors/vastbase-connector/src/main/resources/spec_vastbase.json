@@ -441,7 +441,7 @@
       "fixed": true,
       "to": "TapString"
     },
-    "character varying[($byte)]": {
+    "varchar[($byte)]": {
       "byte": 10485760,
       "priority": 1,
       "defaultByte": 10485760,
