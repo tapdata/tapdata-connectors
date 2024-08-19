@@ -4,6 +4,9 @@ import io.tapdata.common.JdbcContext;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.partition.wrappper.PGPartitionWrapper;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.schema.TapIndex;
+import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.partition.TapPartition;
 import io.tapdata.entity.schema.partition.TapSubPartitionTableInfo;
@@ -11,9 +14,11 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapPartitionResult;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -145,6 +150,7 @@ public class PostgresPartitionContext {
                             tapPartition.appendPartitionSchemas(partitionSchema);
 
                             if (null == subTable) continue;
+                            updatePk(tapParent, subTable);
                             subTable.partitionMasterTableId(parent);
                             subTable.setPartitionInfo(tapPartition); //子表要包含分区信息
                             break;
@@ -157,7 +163,52 @@ public class PostgresPartitionContext {
             }
         });
         partitionMap.forEach((key, partition) -> Optional.ofNullable(tapTableList.get(key)).ifPresent(tab -> tab.setPartitionInfo(partition)));
+        setPK(tapTableList);
         return removeTableIds;
+    }
+
+    protected void updatePk(TapTable masterTable, TapTable subTable) {
+        Collection<String> keys = subTable.primaryKeys();
+        if (null == keys || keys.isEmpty()) return;
+        LinkedHashMap<String, TapField> nameFieldMap = masterTable.getNameFieldMap();
+        nameFieldMap.forEach((field, tapField) -> {
+            if (keys.contains(field)) {
+                Collection<String> existsPK = Optional.ofNullable(masterTable.primaryKeys()).orElse(new ArrayList<>());
+                if (!existsPK.contains(field)) {
+                    tapField.setPrimaryKey(true);
+                    tapField.setPartitionKeyPos(existsPK.size()+1);
+                }
+            }
+        });
+    }
+
+    protected void setPK(Map<String, TapTable> tapTableList) {
+        tapTableList.forEach((tableName, table) -> {
+            List<TapIndex> indexList = Optional.ofNullable(table.getIndexList()).orElse(new ArrayList<>());
+            if (indexList.isEmpty() && Objects.nonNull(table.getPartitionInfo())
+                    && Objects.nonNull(table.getPartitionMasterTableId())
+                    && table.getPartitionMasterTableId().equals(tableName)) {
+                LinkedHashMap<String, TapField> nameFieldMap = table.getNameFieldMap();
+                TapIndex index = new TapIndex();
+                index.setName(tableName + "_pkey");
+                index.setPrimary(true);
+                index.setUnique(true);
+                index.setIndexFields(new ArrayList<>());
+                nameFieldMap.forEach((name, field) -> {
+                    if (Boolean.TRUE.equals(field.getPartitionKey())) {
+                        TapIndexField indexField = new TapIndexField();
+                        indexField.setType(field.getDataType());
+                        indexField.setName(name);
+                        indexField.setFieldAsc(true);
+                        index.getIndexFields().add(indexField);
+                    }
+                });
+                if (!index.getIndexFields().isEmpty()) {
+                    indexList.add(index);
+                    table.setIndexList(indexList);
+                }
+            }
+        });
     }
 
     public static final String SQL_MORE_10_VERSION_SELECT_SUB_TABLE = "SELECT " +
