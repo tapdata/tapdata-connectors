@@ -50,6 +50,7 @@ public abstract class NormalWriteRecorder {
 
     protected final AtomicLong atomicLong = new AtomicLong(0); //record counter
     protected final List<TapRecordEvent> batchCache = TapSimplify.list(); //event cache
+    protected int batchCacheSize = 0;
     protected Log tapLogger;
 
     public NormalWriteRecorder(Connection connection, TapTable tapTable, String schema) {
@@ -114,8 +115,8 @@ public abstract class NormalWriteRecorder {
                 batchCache.clear();
             }
         } catch (SQLException e) {
-            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
-            listResult.addErrors(map);
+//            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
+//            listResult.addErrors(map);
             throw e;
         }
         atomicLong.addAndGet(succeed);
