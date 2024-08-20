@@ -12,6 +12,7 @@ import io.tapdata.connector.tidb.util.HttpUtil;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
@@ -32,7 +33,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.io.IOException;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -525,41 +528,186 @@ public class TidbConnectorTest {
         class processDataMap {
             DataMap dataMap;
             TapTable tapTable;
+            TidbConfig tidbConfig;
+            LinkedHashMap<String, TapField> map;
             @BeforeEach
             void init() {
+                tidbConfig = mock(TidbConfig.class);
+                when(tidbConfig.getZoneOffsetHour()).thenReturn(8);
                 dataMap = new DataMap();
                 tapTable = mock(TapTable.class);
+                map = mock(LinkedHashMap.class);
+                when(tapTable.getNameFieldMap()).thenReturn(map);
+                ReflectionTestUtils.setField(connector, "tidbConfig", tidbConfig);
 
                 doCallRealMethod().when(connector).processDataMap(dataMap, tapTable);
             }
+            @Nested
+            class IsTimestamp {
+                @BeforeEach
+                void init() {
+                    TapField field = mock(TapField.class);
+                    when(map.get("t")).thenReturn(field);
+                    when(map.get("t2")).thenReturn(field);
+                    when(field.getDataType()).thenReturn("timestamp");
+                }
+                @Test
+                void testNormal() {
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
 
-            @Test
-            void testNormal() {
-                Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                @Test
+                void test1() {
+                    dataMap.put("t", new Timestamp(System.currentTimeMillis()));
+                    dataMap.put("t2", 2);
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test2() {
+                    ReflectionTestUtils.setField(connector, "timezone", null);
+                    dataMap.put("t", new Timestamp(System.currentTimeMillis()));
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test3() {
+                    when(map.containsKey("t")).thenReturn(true);
+                    dataMap.put("t", LocalDateTime.now());
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test31() {
+                    when(map.containsKey("t")).thenReturn(false);
+                    dataMap.put("t", LocalDateTime.now());
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test4() {
+                    ReflectionTestUtils.setField(connector, "timezone", null);
+                    dataMap.put("t", new java.sql.Date(System.currentTimeMillis()));
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test41() {
+                    dataMap.put("t", new java.sql.Date(System.currentTimeMillis()));
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test5() {
+                    dataMap.put("t", new java.sql.Time(System.currentTimeMillis()));
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
             }
-            @Test
-            void test1() {
-                dataMap.put("t", new Timestamp(System.currentTimeMillis()));
-                dataMap.put("t2", 2);
-                Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+            @Nested
+            class NotTimestamp {
+                @BeforeEach
+                void init() {
+                    TapField field = mock(TapField.class);
+                    when(map.get("t")).thenReturn(field);
+                    when(map.get("t2")).thenReturn(field);
+                    when(field.getDataType()).thenReturn("time");
+                }
+                @Test
+                void testNormal() {
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+
+                @Test
+                void test1() {
+                    dataMap.put("t", new Timestamp(System.currentTimeMillis()));
+                    dataMap.put("t2", 2);
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test2() {
+                    ReflectionTestUtils.setField(connector, "timezone", null);
+                    dataMap.put("t", new Timestamp(System.currentTimeMillis()));
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test3() {
+                    when(map.containsKey("t")).thenReturn(true);
+                    dataMap.put("t", LocalDateTime.now());
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test31() {
+                    when(map.containsKey("t")).thenReturn(false);
+                    dataMap.put("t", LocalDateTime.now());
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test4() {
+                    ReflectionTestUtils.setField(connector, "timezone", null);
+                    dataMap.put("t", new java.sql.Date(System.currentTimeMillis()));
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test41() {
+                    dataMap.put("t", new java.sql.Date(System.currentTimeMillis()));
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
             }
-            @Test
-            void test2() {
-                ReflectionTestUtils.setField(connector, "timezone", null);
-                dataMap.put("t", new Timestamp(System.currentTimeMillis()));
-                Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+            @Nested
+            class NotTIMESTAMP1 {
+                @BeforeEach
+                void init() {
+                    TapField field = mock(TapField.class);
+                    when(map.get("t")).thenReturn(field);
+                    when(map.get("t2")).thenReturn(field);
+                    when(field.getDataType()).thenReturn("TIMESTAMP");
+                }
+                @Test
+                void testNormal() {
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+
+                @Test
+                void test1() {
+                    dataMap.put("t", new Timestamp(System.currentTimeMillis()));
+                    dataMap.put("t2", 2);
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test2() {
+                    ReflectionTestUtils.setField(connector, "timezone", null);
+                    dataMap.put("t", new Timestamp(System.currentTimeMillis()));
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test3() {
+                    when(map.containsKey("t")).thenReturn(true);
+                    dataMap.put("t", LocalDateTime.now());
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test31() {
+                    when(map.containsKey("t")).thenReturn(false);
+                    dataMap.put("t", LocalDateTime.now());
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test4() {
+                    ReflectionTestUtils.setField(connector, "timezone", null);
+                    dataMap.put("t", new java.sql.Date(System.currentTimeMillis()));
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
+                @Test
+                void test41() {
+                    dataMap.put("t", new java.sql.Date(System.currentTimeMillis()));
+                    Assertions.assertDoesNotThrow(() -> connector.processDataMap(dataMap, tapTable));
+                }
             }
         }
 
         @Nested
         class initTimeZone {
             @Test
-            void testNormal() throws SQLException {
+            void testNormal() {
                 doCallRealMethod().when(connector).initTimeZone();
                 Assertions.assertDoesNotThrow(connector::initTimeZone);
             }
             @Test
-            void test1() throws SQLException {
+            void test1() {
                 tidbConfig.setTimezone("+08:00");
                 doCallRealMethod().when(connector).initTimeZone();
                 Assertions.assertDoesNotThrow(connector::initTimeZone);

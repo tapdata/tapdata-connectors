@@ -4,12 +4,14 @@ import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
+import io.tapdata.connector.postgres.cdc.WalLogMiner;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
@@ -18,7 +20,6 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.type.TapNumber;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
@@ -34,10 +35,14 @@ import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import io.tapdata.pdk.apis.entity.*;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
+import io.tapdata.pdk.apis.functions.connector.source.ConnectionConfigWithTables;
 import org.postgresql.geometric.*;
 import org.postgresql.jdbc.PgArray;
 import org.postgresql.jdbc.PgSQLXML;
@@ -45,12 +50,15 @@ import org.postgresql.util.PGInterval;
 import org.postgresql.util.PGobject;
 
 import java.math.BigDecimal;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.Date;
+import java.sql.*;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -84,9 +92,17 @@ public class PostgresConnector extends CommonDbConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer).initContext()
+                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer, connectionOptions).initContext()
         ) {
             postgresTest.testOneByOne();
+            connectionOptions.setInstanceUniqueId(StringKit.md5(String.join("|"
+                    , postgresConfig.getUser()
+                    , postgresConfig.getHost()
+                    , String.valueOf(postgresConfig.getPort())
+                    , postgresConfig.getDatabase()
+                    , postgresConfig.getLogPluginName()
+            )));
+            connectionOptions.setNamespaces(Collections.singletonList(postgresConfig.getSchema()));
             return connectionOptions;
         }
     }
@@ -175,16 +191,30 @@ public class PostgresConnector extends CommonDbConnector {
             return new TapStringValue(interval);
         });
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
-        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime());
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> {
+            if (postgresConfig.getOldVersionTimezone()) {
+                return tapTimeValue.getValue().toTime();
+            } else if (EmptyKit.isNotNull(tapTimeValue.getValue().getTimeZone())) {
+                return tapTimeValue.getValue().toInstant().atZone(ZoneId.systemDefault()).toLocalTime();
+            } else {
+                return tapTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalTime();
+            }
+        });
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
+            if (postgresConfig.getOldVersionTimezone() || EmptyKit.isNotNull(tapDateTimeValue.getValue().getTimeZone())) {
+                return tapDateTimeValue.getValue().toTimestamp();
+            } else {
+                return tapDateTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalDateTime();
+            }
+        });
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
-        codecRegistry.registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
+        codecRegistry.registerFromTapValue(TapYearValue.class, "character(4)", TapValue::getOriginValue);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
         connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
-
+        connectorFunctions.supportStreamReadMultiConnectionFunction(this::streamReadMultiConnection);
 
     }
 
@@ -294,7 +324,7 @@ public class PostgresConnector extends CommonDbConnector {
     private void initConnection(TapConnectionContext connectionContext) {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         postgresTest = new PostgresTest(postgresConfig, testItem -> {
-        }).initContext();
+        }, null).initContext();
         postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;
@@ -368,10 +398,57 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+        if ("walminer".equals(postgresConfig.getLogPluginName())) {
+            new WalLogMiner(postgresJdbcContext, tapLogger)
+                    .watch(tableList, nodeContext.getTableMap())
+                    .offset(offsetState)
+                    .registerConsumer(consumer, recordSize)
+                    .startMiner(this::isAlive);
+        } else {
+            cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+            testReplicateIdentity(nodeContext.getTableMap());
+            buildSlot(nodeContext, true);
+            cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
+            cdcRunner.startCdcRunner();
+            if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
+                Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
+                if (throwable instanceof SQLException) {
+                    exceptionCollector.collectTerminateByServer(throwable);
+                    exceptionCollector.collectCdcConfigInvalid(throwable);
+                    exceptionCollector.revealException(throwable);
+                }
+                throw throwable;
+            }
+        }
+    }
+
+    private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
         cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
         testReplicateIdentity(nodeContext.getTableMap());
         buildSlot(nodeContext, true);
-        cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
+        Map<String, List<String>> schemaTableMap = new HashMap<>();
+        for (ConnectionConfigWithTables withTables : connectionConfigWithTables) {
+            if (null == withTables.getConnectionConfig())
+                throw new RuntimeException("Not found connection config");
+            if (null == withTables.getConnectionConfig().get("schema"))
+                throw new RuntimeException("Not found connection schema");
+            if (null == withTables.getTables())
+                throw new RuntimeException("Not found connection tables");
+
+            schemaTableMap.compute(String.valueOf(withTables.getConnectionConfig().get("schema")), (schema, tableList) -> {
+                if (null == tableList) {
+                    tableList = new ArrayList<>();
+                }
+
+                for (String tableName : withTables.getTables()) {
+                    if (!tableList.contains(tableName)) {
+                        tableList.add(tableName);
+                    }
+                }
+                return tableList;
+            });
+        }
+        cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerConsumer(consumer, batchSize);
         cdcRunner.startCdcRunner();
         if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
             Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
@@ -385,16 +462,86 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
+        if ("walminer".equals(postgresConfig.getLogPluginName())) {
+            String walLsn = timestampToWalLsn(offsetStartTime);
+            tapLogger.info("timestampToStreamOffset start at {}", walLsn);
+            return walLsn;
+        }
         if (EmptyKit.isNotNull(offsetStartTime)) {
-            tapLogger.warn("Postgres specified time start increment is not supported, use the current time as the start increment");
+            tapLogger.warn("Postgres specified time start increment is not supported except walminer, use the current time as the start increment");
         }
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
         if (canCdc) {
+            if ("pgoutput".equals(postgresConfig.getLogPluginName()) && postgresVersion.compareTo("100000") > 0) {
+                createPublicationIfNotExist();
+            }
             testReplicateIdentity(connectorContext.getTableMap());
             buildSlot(connectorContext, false);
         }
         return new PostgresOffset();
+    }
+
+    private String timestampToWalLsn(Long offsetStartTime) throws SQLException {
+        String walDirectory = getWalDirectory();
+        AtomicReference<String> fileAndLsn = new AtomicReference<>();
+        if (EmptyKit.isNull(offsetStartTime)) {
+            postgresJdbcContext.queryWithNext("SELECT pg_current_wal_lsn()", resultSet -> fileAndLsn.set(resultSet.getString(1)));
+            postgresJdbcContext.queryWithNext(String.format("select pg_walfile_name('%s')", fileAndLsn.get()), resultSet -> {
+                fileAndLsn.set(resultSet.getString(1) + "," + fileAndLsn.get());
+            });
+        } else {
+            postgresJdbcContext.prepareQuery("SELECT * FROM pg_ls_waldir() where modification>? order by modification", Collections.singletonList(new Timestamp(offsetStartTime)), resultSet -> {
+                if (resultSet.next()) {
+                    fileAndLsn.set(resultSet.getString(1));
+                }
+            });
+            try (
+                    Connection connection = jdbcContext.getConnection();
+                    Statement statement = connection.createStatement();
+                    PreparedStatement preparedStatement = connection.prepareStatement("select * from walminer_contents where timestamp >= ? order by start_lsn limit 1")
+            ) {
+                statement.execute(String.format("select walminer_wal_add('%s')", walDirectory + fileAndLsn.get()));
+                statement.execute("select walminer_all()");
+                preparedStatement.setObject(1, new Timestamp(offsetStartTime));
+                try (ResultSet resultSet = preparedStatement.executeQuery()) {
+                    if (resultSet.next()) {
+                        fileAndLsn.set(fileAndLsn.get() + "," + resultSet.getString("start_lsn"));
+                    }
+                }
+                statement.execute("select walminer_stop()");
+            }
+        }
+        return walDirectory + fileAndLsn.get();
+    }
+
+    protected String getWalDirectory() throws SQLException {
+        AtomicReference<String> walDirectory = new AtomicReference<>();
+        postgresJdbcContext.query("SELECT name, setting FROM pg_settings WHERE name = 'wal_dir' or name = 'data_directory'", resultSet -> {
+            while (resultSet.next()) {
+                if ("wal_dir".equals(resultSet.getString(1)) && EmptyKit.isNotEmpty(resultSet.getString(2))) {
+                    walDirectory.set(resultSet.getString(2) + "/");
+                    break;
+                }
+                if ("data_directory".equals(resultSet.getString(1)) && EmptyKit.isNotEmpty(resultSet.getString(2))) {
+                    walDirectory.set(resultSet.getString(2) + (postgresVersion.compareTo("100000") >= 0 ? "/pg_wal/" : "/pg_xlog/"));
+                }
+            }
+        });
+        return walDirectory.get();
+    }
+
+    private void createPublicationIfNotExist() throws SQLException {
+        String publicationName = postgresConfig.getPartitionRoot() ? "dbz_publication_root" : "dbz_publication";
+        AtomicBoolean needCreate = new AtomicBoolean(false);
+        postgresJdbcContext.queryWithNext(String.format("SELECT COUNT(1) FROM pg_publication WHERE pubname = '%s'", publicationName), resultSet -> {
+            if (resultSet.getInt(1) <= 0) {
+                needCreate.set(true);
+            }
+        });
+        if (needCreate.get()) {
+            postgresJdbcContext.execute(String.format("CREATE PUBLICATION %s FOR ALL TABLES %s", publicationName, postgresConfig.getPartitionRoot() ? "WITH (publish_via_partition_root = true)" : ""));
+        }
     }
 
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
@@ -428,16 +575,16 @@ public class PostgresConnector extends CommonDbConnector {
             }
 
             if (type == TapType.TYPE_STRING && field.getDataType().toLowerCase().contains("character(")) {
-                 sql.append(String.format("TRIM( \"%s\" )", fieldName)).append(",");
-                 continue;
+                sql.append(String.format("TRIM( \"%s\" )", fieldName)).append(",");
+                continue;
             }
 
-            if(type == TapType.TYPE_BOOLEAN && field.getDataType().toLowerCase().contains("boolean")){
+            if (type == TapType.TYPE_BOOLEAN && field.getDataType().toLowerCase().contains("boolean")) {
                 sql.append(String.format("CAST( \"%s\" as int )", fieldName)).append(",");
                 continue;
             }
 
-            if(type == TapType.TYPE_TIME && field.getDataType().toLowerCase().contains("with time zone")){
+            if (type == TapType.TYPE_TIME && field.getDataType().toLowerCase().contains("with time zone")) {
                 sql.append(String.format("SUBSTRING(cast(\"%s\" as varchar) FROM 1 FOR 8)", fieldName)).append(",");
                 continue;
             }
@@ -456,7 +603,7 @@ public class PostgresConnector extends CommonDbConnector {
         sql = new StringBuilder(sql.substring(0, sql.length() - 1));
         sql.append(" )) FROM 1 FOR 16)) AS bit(64)) as BIGINT)) AS num " +
                 "  FROM ").append("\"" + table.getName() + "\"  ");
-        sql.append(commonSqlMaker.buildCommandWhereSql(filter,""));
+        sql.append(commonSqlMaker.buildCommandWhereSql(filter, ""));
         sql.append(") t) n),64))");
         return sql.toString();
     }
@@ -470,4 +617,41 @@ public class PostgresConnector extends CommonDbConnector {
         });
     }
 
+    @Override
+    protected void processDataMap(DataMap dataMap, TapTable tapTable) {
+        if (!postgresConfig.getOldVersionTimezone()) {
+            for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
+                Object value = entry.getValue();
+                if (value instanceof Timestamp) {
+                    if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                        continue;
+                    }
+                    if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
+                        entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
+                    } else {
+                        entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
+                    }
+                } else if (value instanceof Date) {
+                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
+                } else if (value instanceof Time) {
+                    if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                        continue;
+                    }
+                    if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
+                        entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
+                    } else {
+                        entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneOffset.UTC));
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    protected String getHashSplitStringSql(TapTable tapTable) {
+        Collection<String> pks = tapTable.primaryKeys();
+        if (pks.isEmpty()) throw new CoreException("No primary keys found for table: " + tapTable.getName());
+
+        return "abs(('x' || MD5(CONCAT_WS(',', \"" + String.join("\", \"", pks) + "\")))::bit(64)::bigint)";
+    }
 }

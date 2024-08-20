@@ -4,7 +4,6 @@
     "icon": "icons/clickhouse.png",
     "id": "aws-clickhouse",
     "doc": "${doc}",
-    "authentication": "Alpha",
     "tags": [
       "Database"
     ]
@@ -109,7 +108,7 @@
               "x-index": 7,
               "enum": [
                 {
-                  "label": "Database Timezone",
+                  "label": "",
                   "value": ""
                 },
                 {

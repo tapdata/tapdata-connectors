@@ -4,7 +4,6 @@
     "icon": "icons/clickhouse.png",
     "id": "clickhouse",
     "doc": "${doc}",
-    "authentication": "Alpha",
     "tags": [
       "Database"
     ]
@@ -110,7 +109,7 @@
               "x-index": 7,
               "enum": [
                 {
-                  "label": "Database Timezone",
+                  "label": "",
                   "value": ""
                 },
                 {
@@ -482,7 +481,8 @@
         "1925-01-01",
         "9999-12-31"
       ],
-      "pattern": "yyyy-MM-dd"
+      "pattern": "yyyy-MM-dd",
+      "queryOnly": true
     },
     "DateTime[($fraction)]": {
       "to": "TapDateTime",
@@ -508,8 +508,7 @@
         0,
         6
       ],
-      "defaultFraction": 0,
-      "withTimeZone": true
+      "defaultFraction": 0
     },
     "Enum8($enums)": {
       "name": "enum",

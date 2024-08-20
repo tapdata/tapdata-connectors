@@ -57,9 +57,12 @@ public class TDengineJdbcContext extends JdbcContext {
         TapLogger.debug(TAG, "Query some tables, schema: " + getConfig().getDatabase());
         List<DataMap> tableList = TapSimplify.list();
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
+        String stableSql = EmptyKit.isNotEmpty(tableNames) ? "AND stable_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
         String typeSql = EmptyKit.isNotEmpty(((TDengineConfig) getConfig()).getLoadTableOptions()) ? "AND type IN (" + StringKit.joinString(((TDengineConfig) getConfig()).getLoadTableOptions(), "'", ",") + ")" : "";
         try {
-            query(String.format("select * from (select db_name, table_name, table_comment, type from information_schema.ins_tables union all select db_name, stable_name, table_comment, \"SUPER_TABLE\" from information_schema.ins_stables) where db_name = '%s' %s %s;", getConfig().getDatabase(), tableSql, typeSql),
+            query(String.format("select db_name, table_name, table_comment, type from information_schema.ins_tables " +
+                            "where db_name = '%s' %s %s"+
+                            "union all select db_name, stable_name, table_comment, \"SUPER_TABLE\" from information_schema.ins_stables where db_name = '%s' %s;", getConfig().getDatabase(), tableSql, typeSql, getConfig().getDatabase(),stableSql),
                     resultSet -> tableList.addAll(TDengineDbKit.getDataFromResultSet(resultSet)));
         } catch (Throwable e) {
             TapLogger.error(TAG, "Execute queryAllTables failed, error: " + e.getMessage(), e);

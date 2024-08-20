@@ -4,7 +4,6 @@
     "icon": "icon/hubspot.png",
     "doc" : "${doc}",
     "id": "hubspot",
-    "authentication": "Alpha",
     "tags": ["SaaS"]
   },
   "configOptions": {

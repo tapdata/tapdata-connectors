@@ -96,8 +96,8 @@ public class MongodbConnector extends ConnectorBase {
 	private MongodbStreamReader mongodbStreamReader;
 	private MongodbStreamReader opLogStreamReader;
 	private ConcurrentHashMap<String,Set<String>> shardKeyMap = new ConcurrentHashMap<>();
+	private final Map<String, MongodbWriter> writerMap = new ConcurrentHashMap<>();
 
-	private volatile MongodbWriter mongodbWriter;
 	protected Map<String, Integer> stringTypeValueMap;
 
 	private final MongodbExecuteCommandFunction mongodbExecuteCommandFunction = new MongodbExecuteCommandFunction();
@@ -115,6 +115,20 @@ public class MongodbConnector extends ConnectorBase {
 		MongoCollection<Document> collection = null;
 		try {
 			collection = mongoDatabase.getCollection(table);
+		}catch (Exception e){
+			exceptionCollector.collectTerminateByServer(e);
+			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
+			exceptionCollector.collectReadPrivileges(e);
+			exceptionCollector.collectWritePrivileges(e);
+			throw e;
+		}
+		return collection;
+	}
+
+	protected MongoCollection<RawBsonDocument> getMongoRawCollection(String table) {
+		MongoCollection<RawBsonDocument> collection = null;
+		try {
+			collection = mongoDatabase.getCollection(table, RawBsonDocument.class);
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
@@ -473,7 +487,7 @@ public class MongodbConnector extends ConnectorBase {
 		codecRegistry.registerFromTapValue(TapTimeValue.class, "DATE_TIME", tapTimeValue -> tapTimeValue.getValue().toDate());
 		codecRegistry.registerFromTapValue(TapDateTimeValue.class, "DATE_TIME", tapDateTimeValue -> tapDateTimeValue.getValue().toDate());
 		codecRegistry.registerFromTapValue(TapDateValue.class, "DATE_TIME", tapDateValue -> tapDateValue.getValue().toDate());
-		codecRegistry.registerFromTapValue(TapYearValue.class, "STRING(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
+		codecRegistry.registerFromTapValue(TapYearValue.class, "STRING(4)", TapValue::getOriginValue);
 
 		//Handle ObjectId when the source is also mongodb, we convert ObjectId to String before enter incremental engine.
 		//We need check the TapStringValue, when will write to mongodb, if the originValue is ObjectId, then use originValue instead of the converted String value.
@@ -573,7 +587,7 @@ public class MongodbConnector extends ConnectorBase {
 		}
 		CommonDbConfig mongodbConfig = new MongodbConfig().load(connectionConfig);
 		String database = mongodbConfig.getDatabase();
-		if (null == database || "".equals(database.trim())) {
+		if (null == database || database.trim().isEmpty()) {
 			throw new CoreException("The value of database name in connection config can not be empty");
 		}
 		DataMap nodeConfig = tapConnectorContext.getNodeConfig();
@@ -582,11 +596,10 @@ public class MongodbConnector extends ConnectorBase {
 		if (CollectionUtils.isNotEmpty(pks) && (pks.size() > 1 || !"_id".equals(pks.iterator().next()))) {
 			List<TapIndex> tapIndices = new ArrayList<>();
 			TapIndex tapIndex = new TapIndex();
-			Iterator<String> iterator = pks.iterator();
-			while (iterator.hasNext()) {
-				String pk = iterator.next();
+			for (String pk : pks) {
 				tapIndex.indexField(new TapIndexField().name(pk).fieldAsc(true));
 			}
+			tapIndex.setUnique(true);
 			tapIndices.add(tapIndex);
 			TapCreateIndexEvent tapCreateIndexEvent = new TapCreateIndexEvent().indexList(tapIndices);
 			createIndex(tapConnectorContext, table, tapCreateIndexEvent);
@@ -1265,25 +1278,23 @@ public class MongodbConnector extends ConnectorBase {
 	 */
 	private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
 		putShardKey(table.getId());
+		String threadName = Thread.currentThread().getName();
+		MongodbWriter mongodbWriter = writerMap.get(threadName);
+		if (EmptyKit.isNull(mongodbWriter)) {
+			mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
+			writerMap.put(threadName, mongodbWriter);
+		}
 		try {
-			if (mongodbWriter == null) {
-				synchronized (this) {
-					if (mongodbWriter == null) {
-						mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
-						ConnectorCapabilities connectorCapabilities = connectorContext.getConnectorCapabilities();
-						if (null != connectorCapabilities) {
-							mongoConfig.setInsertDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY) ?
-									ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS : connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY));
-							mongoConfig.setUpdateDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY) ?
-									ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS : connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY));
-						} else {
-							mongoConfig.setInsertDmlPolicy(ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS);
-							mongoConfig.setUpdateDmlPolicy(ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS);
-						}
-					}
-				}
+			String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
+			if (insertDmlPolicy == null) {
+				insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
 			}
-			if ("log_on_nonexists".equals(mongoConfig.getUpdateDmlPolicy())) {
+			String updateDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
+			if (updateDmlPolicy == null) {
+				updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
+			}
+			mongodbWriter.dmlPolicy(insertDmlPolicy, updateDmlPolicy);
+			if ("log_on_nonexists".equals(updateDmlPolicy)) {
 				List<TapRecordEvent> noUpdateRecordEvents = new ArrayList<>();
 				for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
 					if (tapRecordEvent instanceof TapUpdateRecordEvent) {
@@ -1508,8 +1519,9 @@ public class MongodbConnector extends ConnectorBase {
 				.withMongodbConfig(mongoConfig)
 				.withBatchOffset(batchOffset)
 				.withMongodbExceptionCollector(exceptionCollector)
-				.withMongoCollection(this::getMongoCollection)
-				.withErrorHandler(e -> errorHandle(e, connectorContext));
+				.withMongoRawCollection(this::getMongoRawCollection)
+				.withErrorHandler(e -> errorHandle(e, connectorContext))
+				.withMongoClient(mongoClient);
 		MongoBatchReader.of(param).batchReadCollection(param);
 	}
 
@@ -1673,10 +1685,6 @@ public class MongodbConnector extends ConnectorBase {
 			mongoClient = null;
 		}
 
-		if (mongodbWriter != null) {
-			mongodbWriter.onDestroy();
-			mongodbWriter = null;
-		}
 		closeOpLogThreadSource();
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
@@ -1707,14 +1715,16 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
-		TableInfo tableInfo = new TableInfo();
+		TableInfo tableInfo;
 		try {
 			String database = mongoConfig.getDatabase();
 			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
 			Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
 			tableInfo = TableInfo.create();
-			tableInfo.setNumOfRows(Long.valueOf(collStats.getInteger("count")));
-			tableInfo.setStorageSize(Long.valueOf(collStats.getInteger("size")));
+			BigDecimal numOfRows = new BigDecimal(String.valueOf(collStats.get("count")));
+			tableInfo.setNumOfRows(numOfRows.longValue());
+			BigDecimal storageSize = new BigDecimal(String.valueOf(collStats.get("size")));
+			tableInfo.setStorageSize(storageSize.longValue());
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);

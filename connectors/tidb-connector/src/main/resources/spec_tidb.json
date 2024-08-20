@@ -4,7 +4,6 @@
     "icon": "icons/tidb.svg",
     "id": "tidb",
     "doc": "${doc}",
-    "authentication": "Beta",
     "tags": [
       "Database", "ssl"
     ]
@@ -131,17 +130,13 @@
             "timezone": {
               "type": "string",
               "title": "${timezone}",
-              "default": "",
+              "default": "+00:00",
               "x-decorator": "FormItem",
               "x-decorator-props": {
                 "tooltip": "${timezoneTip}"
               },
               "x-component": "Select",
               "enum": [
-                {
-                  "label": "Database Timezone",
-                  "value": ""
-                },
                 {
                   "label": "UTC -11",
                   "value": "-11:00"

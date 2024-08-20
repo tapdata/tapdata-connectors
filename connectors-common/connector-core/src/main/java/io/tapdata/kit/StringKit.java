@@ -50,7 +50,7 @@ public class StringKit {
         if (EmptyKit.isEmpty(list)) {
             return "";
         }
-        return list.stream().map(s -> around + s + around).collect(Collectors.joining(splitter));
+        return list.stream().map(s -> around + s.replace(around, around + around) + around).collect(Collectors.joining(splitter));
     }
 
     public static int compareVersion(String version1, String version2) {
@@ -318,5 +318,10 @@ public class StringKit {
             converted[i * 2 + 1] = HEX_CHARS[b & 0x0F];
         }
         return String.valueOf(converted);
+    }
+
+    //正则表达式去除括号及括号内的内容
+    public static String removeParentheses(String str) {
+        return str.replaceAll("\\(.*?\\)", "");
     }
 }

@@ -19,11 +19,12 @@ public class DorisConfig extends CommonDbConfig {
     private List<String> distributedKey;
     private Integer writeByteBufferCapacity = 10240;
     private String writeFormat = "json";
-    private String timezone;
     private String uniqueKeyType = "Unique";
     private int bucket = 2;
     private List<LinkedHashMap<String, String>> tableProperties = new ArrayList<>();
     private Boolean jdbcCompletion = false;
+
+    private Boolean useHTTPS =false;
 
     //customize
     public DorisConfig() {
@@ -35,7 +36,11 @@ public class DorisConfig extends CommonDbConfig {
     public DorisConfig load(Map<String, Object> map) {
         DorisConfig config = (DorisConfig) super.load(map);
         config.setSchema(config.getDatabase());
-        config.setDorisHttp(getDorisHttp().replace("http://", ""));
+        if(Boolean.TRUE.equals(useHTTPS)){
+            config.setDorisHttp(getDorisHttp().replace("https://", ""));
+        }else{
+            config.setDorisHttp(getDorisHttp().replace("http://", ""));
+        }
         return config;
     }
 
@@ -93,14 +98,6 @@ public class DorisConfig extends CommonDbConfig {
         this.writeFormat = writeFormat;
     }
 
-    public String getTimezone() {
-        return timezone;
-    }
-
-    public void setTimezone(String timezone) {
-        this.timezone = timezone;
-    }
-
     public String getUniqueKeyType() {
         return uniqueKeyType;
     }
@@ -111,6 +108,14 @@ public class DorisConfig extends CommonDbConfig {
 
     public int getBucket() {
         return bucket;
+    }
+
+    public Boolean getUseHTTPS() {
+        return useHTTPS;
+    }
+
+    public void setUseHTTPS(Boolean useHTTPS) {
+        this.useHTTPS = useHTTPS;
     }
 
     public void setBucket(int bucket) {

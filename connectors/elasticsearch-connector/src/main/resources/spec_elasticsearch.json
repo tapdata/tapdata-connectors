@@ -4,7 +4,6 @@
     "icon": "icons/elasticsearch.png",
     "doc" : "${doc}",
     "id": "elasticsearch",
-    "authentication": "Beta",
     "tags": ["Database", "schema-free"]
   },
   "configOptions": {

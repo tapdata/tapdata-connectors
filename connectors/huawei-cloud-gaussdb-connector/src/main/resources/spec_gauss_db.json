@@ -4,7 +4,6 @@
     "icon": "icons/gauss.png",
     "doc": "${doc}",
     "id": "huawei-gauss-db",
-    "authentication": "Beta",
     "tags": ["Database", "ssl"]
   },
   "configOptions": {
@@ -127,7 +126,7 @@
           "x-index": 100,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {

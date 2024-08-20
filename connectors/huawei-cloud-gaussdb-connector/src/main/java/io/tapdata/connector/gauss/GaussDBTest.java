@@ -8,6 +8,8 @@ import io.tapdata.connector.gauss.entity.TestAccept;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestReadPrivilegeEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -37,7 +39,6 @@ public class GaussDBTest extends CommonDbTest {
     }
 
     protected GaussDBTest init() {
-        testFunctionMap().remove("testStreamRead");
         testFunctionMap().put("testConnectorVersion", this::testConnectorVersion);
         return this;
     }
@@ -94,7 +95,7 @@ public class GaussDBTest extends CommonDbTest {
             }
             return true;
         } catch (SQLException e) {
-            getConsumer().accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_FAILED, e.getMessage()));
+            getConsumer().accept(new TestItem(TestItem.ITEM_READ, new TapTestReadPrivilegeEx(e), TestItem.RESULT_FAILED));
             return false;
         }
     }
@@ -129,8 +130,14 @@ public class GaussDBTest extends CommonDbTest {
             jdbcContext.batchExecute(sqlArray);
             getConsumer().accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            getConsumer().accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, e.getMessage()));
+            getConsumer().accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
+        return true;
+    }
+
+    @Override
+    public Boolean testStreamRead() {
+        consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY));
         return true;
     }
 }

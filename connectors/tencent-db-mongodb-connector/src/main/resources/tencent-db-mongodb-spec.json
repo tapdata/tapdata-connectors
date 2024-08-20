@@ -3,10 +3,8 @@
     "name": "TencentDB MongoDB",
     "icon": "icons/tencent-db-mongodb.png",
     "doc" : "${doc}",
-    "tags" : ["schema-free"],
     "id": "tencent-db-mongodb",
-    "authentication": "Beta",
-    "tags": ["Database"]
+    "tags": ["Database", "schema-free"]
   },
   "configOptions": {
     "capabilities": [

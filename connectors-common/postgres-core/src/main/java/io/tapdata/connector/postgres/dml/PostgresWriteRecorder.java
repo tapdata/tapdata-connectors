@@ -9,8 +9,11 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -78,6 +81,30 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         }
     }
 
+    protected String getUpdateSql(Map<String, Object> after, Map<String, Object> before, boolean containsNull) {
+        if (!containsNull) {
+            return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
+                    after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
+                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+        } else {
+            return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
+                    after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
+                            .collect(Collectors.joining(" AND "));
+        }
+    }
+
+    protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
+        if (!containsNull) {
+            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
+                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+        } else {
+            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
+                            .collect(Collectors.joining(" AND "));
+        }
+    }
+
     @Override
     protected Object filterValue(Object value, String dataType) {
         if (EmptyKit.isNull(value)) {
@@ -86,10 +113,15 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         if ("uuid".equalsIgnoreCase(dataType)) {
             return value instanceof UUID ? value : UUID.fromString(String.valueOf(value));
         }
+        if (dataType.endsWith("with time zone") && value instanceof LocalDateTime) {
+            Timestamp timestamp = Timestamp.valueOf(((LocalDateTime) value));
+            timestamp.setTime(timestamp.getTime() + TimeZone.getDefault().getRawOffset());
+            return timestamp;
+        }
         if (value instanceof String) {
             return ((String) value).replace("\u0000", "");
         }
-        if(value instanceof Boolean && dataType.contains("int")){
+        if (value instanceof Boolean && dataType.contains("int")) {
             return Boolean.TRUE.equals(value) ? 1 : 0;
         }
         return value;

@@ -5,7 +5,6 @@ import com.zaxxer.hikari.pool.HikariProxyStatement;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.JdbcContext;
 import io.tapdata.common.ResultSetConsumer;
-import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
@@ -46,9 +45,6 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     }
 
     public TimeZone queryTimeZone() throws SQLException {
-        if (EmptyKit.isNotBlank(((MysqlConfig) getConfig()).getTimezone())) {
-            return TimeZone.getTimeZone(ZoneId.of(((MysqlConfig) getConfig()).getTimezone()));
-        }
         AtomicReference<Long> timeOffset = new AtomicReference<>();
         queryWithNext(MYSQL_TIMEZONE, resultSet -> timeOffset.set(resultSet.getLong(1)));
         DecimalFormat decimalFormat = new DecimalFormat("00");
@@ -129,7 +125,22 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     public MysqlBinlogPosition readBinlogPosition() throws Throwable {
         AtomicReference<MysqlBinlogPosition> mysqlBinlogPositionAtomicReference = new AtomicReference<>();
-        normalQuery("SHOW MASTER STATUS", rs -> {
+        String binLogStatusSql = "SHOW MASTER STATUS";
+        try (
+                Connection connection = getConnection()
+        ) {
+            DatabaseMetaData databaseMetaData = connection.getMetaData();
+            String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
+            String[] versionNums = version.split("\\.");
+            if (versionNums.length >= 2) {
+                int majorVersion = Integer.parseInt(versionNums[0]);
+                int minorVersion = Integer.parseInt(versionNums[1]);
+                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
+                    binLogStatusSql = "SHOW BINARY LOG STATUS";
+                }
+            }
+        }
+        normalQuery(binLogStatusSql, rs -> {
             if (rs.next()) {
                 String binlogFilename = rs.getString(1);
                 long binlogPosition = rs.getLong(2);
@@ -143,23 +154,32 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         });
         return mysqlBinlogPositionAtomicReference.get();
     }
+
     public Map<String, Object> querySlaveStatus() throws Throwable {
         Map<String, Object> hostPortAndStatus = new HashMap<>();
         normalQuery("SHOW SLAVE STATUS", rs -> {
             if (rs.next()) {
-                hostPortAndStatus.put("host",rs.getString("Master_Host"));
-                hostPortAndStatus.put("port",rs.getInt("Master_Port"));
-                hostPortAndStatus.put("slaveIoRunning",rs.getString("Slave_IO_Running"));
-                hostPortAndStatus.put("slaveSqlRunning",rs.getString("Slave_SQL_Running"));
+                hostPortAndStatus.put("host", rs.getString("Master_Host"));
+                hostPortAndStatus.put("port", rs.getInt("Master_Port"));
+                hostPortAndStatus.put("slaveIoRunning", rs.getString("Slave_IO_Running"));
+                hostPortAndStatus.put("slaveSqlRunning", rs.getString("Slave_SQL_Running"));
             }
         });
         return hostPortAndStatus;
     }
+
     public Timestamp queryCurrentTime() throws SQLException {
         AtomicReference<Timestamp> currentTime = new AtomicReference<>();
         queryWithNext(MYSQL_CURRENT_TIME, resultSet -> currentTime.set(resultSet.getTimestamp(1)));
         return currentTime.get();
     }
+    @Override
+    public Long queryTimestamp() throws SQLException {
+        AtomicReference<Long> currentTime = new AtomicReference<>();
+        queryWithNext(MYSQL_TIMESTAMP, resultSet -> currentTime.set(resultSet.getLong(1)));
+        return currentTime.get();
+    }
+
     public String getServerId() throws Throwable {
         AtomicReference<String> serverId = new AtomicReference<>();
         normalQuery("SHOW VARIABLES LIKE 'SERVER_ID'", rs -> {
@@ -241,6 +261,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     private final static String MYSQL_VERSION = "SELECT VERSION()";
     private final static String MYSQL_CURRENT_TIME = "SELECT NOW();";
+    private final static String MYSQL_TIMESTAMP = "SELECT REPLACE(unix_timestamp(NOW(3)),'.','') AS currentTimeMillis";
 
     public final static String MYSQL_TIMEZONE = "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()) as timeoffset";
 

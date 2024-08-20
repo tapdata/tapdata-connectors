@@ -3,10 +3,19 @@ package io.tapdata.connector.doris;
 import cn.hutool.http.HttpUtil;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.doris.bean.DorisConfig;
+import io.tapdata.connector.doris.streamload.DorisStreamLoader;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestConnectionEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestUnknownEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.util.EntityUtils;
 
+import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -36,7 +45,7 @@ public class DorisTest extends CommonDbTest {
             if (e instanceof SQLException && ((SQLException) e).getErrorCode() == 1045) {
                 consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Incorrect username or password"));
             } else {
-                consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, e.getMessage()));
+                consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestConnectionEx(e), TestItem.RESULT_FAILED));
             }
             return false;
         }
@@ -48,7 +57,7 @@ public class DorisTest extends CommonDbTest {
             String dorisVersion = jdbcContext.queryVersion();
             consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, dorisVersion));
         } catch (Throwable throwable) {
-            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, throwable.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(throwable), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -80,7 +89,7 @@ public class DorisTest extends CommonDbTest {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -90,15 +99,25 @@ public class DorisTest extends CommonDbTest {
     protected static final String TEST_DORIS_UPDATE_RECORD = "update %s set col2=1 where col1=0";
     protected static final String TEST_DORIS_DELETE_RECORD = "delete from %s where col1=0";
 
-    protected Boolean testStreamLoadPrivilege() {
+    public Boolean testStreamLoadPrivilege() {
         try {
-            if (HttpUtil.get("http://" + ((DorisConfig) commonDbConfig).getDorisHttp()).contains("Doris</title>")) {
+            boolean testResult = false;
+            if (((DorisConfig) commonDbConfig).getUseHTTPS()) {
+                CloseableHttpClient client = io.tapdata.connector.doris.streamload.HttpUtil.generationHttpClient();
+                HttpGet httpGet = new HttpGet();
+                httpGet.setURI(new URI("https://" + ((DorisConfig) commonDbConfig).getDorisHttp()));
+                testResult=EntityUtils.toString(client.execute(httpGet).getEntity()).contains("Doris</title>");
+            } else {
+                testResult = HttpUtil.get("http://" + ((DorisConfig) commonDbConfig).getDorisHttp()).contains("Doris</title>");
+            }
+
+            if (testResult) {
                 consumer.accept(testItem(STREAM_WRITE, TestItem.RESULT_SUCCESSFULLY, "StreamLoad Service is available"));
             } else {
                 consumer.accept(testItem(STREAM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "port of StreamLoad Service is not right"));
             }
         } catch (Exception e) {
-            consumer.accept(testItem(STREAM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, ErrorKit.getLastCause(e).getMessage()));
+            consumer.accept(new TestItem(STREAM_WRITE, new TapTestUnknownEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;
     }

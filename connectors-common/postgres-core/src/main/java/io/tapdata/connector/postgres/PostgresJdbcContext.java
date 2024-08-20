@@ -10,6 +10,7 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.text.DecimalFormat;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -51,6 +52,12 @@ public class PostgresJdbcContext extends JdbcContext {
         } else {
             return TimeZone.getTimeZone(ZoneId.of(decimalFormat.format(timeOffset.get()) + ":00"));
         }
+    }
+    @Override
+    public Long queryTimestamp() throws SQLException {
+        AtomicReference<Timestamp> currentTime = new AtomicReference<>();
+        queryWithNext(POSTGRES_CURRENT_TIME, resultSet -> currentTime.set(resultSet.getTimestamp(1)));
+        return currentTime.get().getTime();
     }
 
     @Override
@@ -153,5 +160,7 @@ public class PostgresJdbcContext extends JdbcContext {
             " FROM information_schema.tables t1 where t1.table_name ='%s' and t1.table_catalog='%s' and t1.table_schema='%s' ";
 
     private final static String POSTGRES_TIMEZONE = "select date_part('hour', now() - now() at time zone 'UTC')";
+
+    private final static String POSTGRES_CURRENT_TIME = "SELECT NOW()";
 
 }

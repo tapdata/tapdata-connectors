@@ -1,5 +1,8 @@
 package io.tapdata.connector.tidb.cdc.process.ddl.convert;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.TimeZone;
 
 public class TimestampConvert implements Convert {
@@ -12,6 +15,10 @@ public class TimestampConvert implements Convert {
 
     @Override
     public Object convert(Object fromValue) {
-        return covertToDateTime(fromValue, precision, "yyyy-MM-dd hh:mm:ss%s", timezone);
+        Object timestamp = covertToDateTime(fromValue, precision, "yyyy-MM-dd HH:mm:ss", timezone);
+        if (timestamp instanceof LocalDateTime) {
+            return ZonedDateTime.of((LocalDateTime) timestamp, timezone.toZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC);
+        }
+        return timestamp;
     }
 }

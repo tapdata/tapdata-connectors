@@ -59,6 +59,7 @@
                             <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
                             <Version>${version}</Version>
                             <Authentication>GA</Authentication>
+                            <PayMode>${pay.mode}</PayMode>
                             <Git-Build-Time>${git.build.time}</Git-Build-Time>
                             <Git-Branch>${git.branch}</Git-Branch>
                             <Git-Commit-Id>${git.commit.id}</Git-Commit-Id>

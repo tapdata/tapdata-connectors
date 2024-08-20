@@ -4,7 +4,6 @@
     "icon": "icons/postgres.png",
     "doc" : "${doc}",
     "id": "postgres",
-    "authentication": "Alpha",
     "tags": ["Database", "ssl", "doubleActive"]
   },
   "configOptions": {
@@ -22,6 +21,9 @@
       },
       {
         "id": "source_support_exactly_once"
+      },
+      {
+        "id": "batch_read_hash_split"
       }
     ],
     "connection": {
@@ -128,6 +130,10 @@
             {
               "label": "PGOUTPUT",
               "value": "pgoutput"
+            },
+            {
+              "label": "WALMINER",
+              "value": "walminer"
             }
           ]
         },
@@ -157,7 +163,7 @@
               "x-index": 90,
               "enum": [
                 {
-                  "label": "Database Timezone",
+                  "label": "",
                   "value": ""
                 },
                 {
@@ -293,6 +299,71 @@
               }
             }
           ]
+        },
+        "hashSplit": {
+          "type": "boolean",
+          "title": "${hashSplit}",
+          "default": false,
+          "x-index": 10,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${hashSplitTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "maxSplit": {
+          "required": true,
+          "type": "string",
+          "title": "${maxSplit}",
+          "default": 20,
+          "x-index": 12,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 2,
+            "max": 10000
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".hashSplit"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "partitionRoot": {
+          "type": "boolean",
+          "title": "${partitionRoot}",
+          "default": false,
+          "x-index": 15,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${partitionRootTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -318,7 +389,12 @@
       "timezone": "timezone",
       "timezoneTip": "Specify the time zone, otherwise the database time zone will be used by default",
       "closeNotNull": "Ignore NotNull",
-      "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded"
+      "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded",
+      "hashSplit": "Hash split",
+      "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the hash value, suitable for large table full-stage sharded synchronization",
+      "maxSplit": "Maximum number of splits",
+      "partitionRoot": "Partition table CDC root table",
+      "partitionRootTooltip": "Only postgres-v13 and above and log plugin pgoutput are supported. When the switch is turned on, the partition table CDC event only perceives the root table, and when the switch is turned off, only perceives each sub-table"
     },
     "zh_CN": {
       "doc": "docs/postgres_zh_CN.md",
@@ -339,7 +415,12 @@
       "timezone": "时区",
       "timezoneTip": "指定时区，否则默认使用数据库时区",
       "closeNotNull": "忽略NotNull",
-      "closeNotNullTooltip": "开关打开时会将非空限制丢弃"
+      "closeNotNullTooltip": "开关打开时会将非空限制丢弃",
+      "hashSplit": "哈希分片",
+      "hashSplitTooltip": "开关打开时，可以根据哈希值进行分片，适用于大表全量阶段分片同步",
+      "maxSplit": "最大分片数",
+      "partitionRoot": "分区表CDC根表",
+      "partitionRootTooltip": "仅postgres-v13以上且日志插件pgoutput时才支持，开关打开时，分区表CDC事件仅感知根表，关闭时，仅感知各子表"
     },
     "zh_TW": {
       "doc": "docs/postgres_zh_TW.md",
@@ -360,7 +441,12 @@
       "timezone": "時區",
       "timezoneTip": "指定時區，否則默認使用數據庫時區",
       "closeNotNull": "忽略NotNull",
-      "closeNotNullTooltip": "開關打開時會將非空限制丟棄"
+      "closeNotNullTooltip": "開關打開時會將非空限制丟棄",
+      "hashSplit": "哈希分片",
+      "hashSplitTooltip": "開關打開時，可以根據哈希值進行分片，適用於大表全量階段分片同步",
+      "maxSplit": "最大分片數",
+      "partitionRoot": "分區表CDC根表",
+      "partitionRootTooltip": "僅postgres-v13以上且日誌插件pgoutput時才支持，開關打開時，分區表CDC事件僅感知根表，關閉時，僅感知各子表"
     }
   },
   "dataTypes": {

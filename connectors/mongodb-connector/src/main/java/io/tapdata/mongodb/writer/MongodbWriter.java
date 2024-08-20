@@ -21,6 +21,7 @@ import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.mongodb.writer.error.BulkWriteErrorCodeHandlerEnum;
+import io.tapdata.mongodb.writer.error.TapMongoBulkWriteException;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
@@ -52,6 +53,8 @@ public class MongodbWriter {
 
 	private boolean is_cloud;
 	private final Map<String,Set<String>> shardKeyMap;
+	private String insertPolicy;
+	private String updatePolicy;
 
 	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger, Map<String,Set<String>> shardKeyMap) {
 		this.globalStateMap = globalStateMap;
@@ -101,14 +104,14 @@ public class MongodbWriter {
 		if (!is_cloud && mongodbConfig.isEnableSaveDeleteData()) {
 			MongodbLookupUtil.lookUpAndSaveDeleteMessage(tapRecordEvents, this.globalStateMap, this.connectionString, pks, collection);
 		}
-		BulkWriteModel bulkWriteModel = buildBulkWriteModel(tapRecordEvents, table, inserted, updated, deleted, collection, pks);
+		BulkWriteModel bulkWriteModel = buildBulkWriteModel(tapRecordEvents, table, inserted, updated, deleted, pks);
 
 		if (bulkWriteModel.isEmpty()) {
 			throw new RuntimeException("Bulk write data failed, write model list is empty, received record size: " + tapRecordEvents.size());
 		}
 
 		BulkWriteOptions bulkWriteOptions;
-		AtomicReference<MongoBulkWriteException> mongoBulkWriteException = new AtomicReference<>();
+		AtomicReference<RuntimeException> mongoBulkWriteException = new AtomicReference<>();
 		while (!bulkWriteModel.isEmpty()) {
 			bulkWriteOptions = buildBulkWriteOptions(bulkWriteModel);
 			try {
@@ -116,7 +119,7 @@ public class MongodbWriter {
 				collection.bulkWrite(writeModels, bulkWriteOptions);
 				bulkWriteModel.clearAll();
 			} catch (MongoBulkWriteException e) {
-				Consumer<MongoBulkWriteException> errorConsumer = mongoBulkWriteException::set;
+				Consumer<RuntimeException> errorConsumer = mongoBulkWriteException::set;
 				if (!handleBulkWriteError(e, bulkWriteModel, bulkWriteOptions, collection, errorConsumer)) {
 					if (null != mongoBulkWriteException.get()) {
 						throw mongoBulkWriteException.get();
@@ -184,7 +187,7 @@ public class MongodbWriter {
 		BulkWriteModel bulkWriteModel,
 		BulkWriteOptions bulkWriteOptions,
 		MongoCollection<Document> collection,
-		Consumer<MongoBulkWriteException> errorConsumer
+		Consumer<RuntimeException> errorConsumer
 	) {
 		List<BulkWriteError> writeErrors = originMongoBulkWriteException.getWriteErrors();
 		List<BulkWriteError> cantHandleErrors = new ArrayList<>();
@@ -220,7 +223,10 @@ public class MongodbWriter {
 				originMongoBulkWriteException.getServerAddress(),
 				originMongoBulkWriteException.getErrorLabels()
 			);
-			errorConsumer.accept(mongoBulkWriteException);
+			List<WriteModel<Document>> errorWriteModels = new ArrayList<>();
+			cantHandleErrors.forEach(writeError -> errorWriteModels.add(bulkWriteModel.getWriteModels().get(writeError.getIndex())));
+			TapMongoBulkWriteException tapMongoBulkWriteException = new TapMongoBulkWriteException(mongoBulkWriteException, errorWriteModels);
+			errorConsumer.accept(tapMongoBulkWriteException);
 			return false;
 		} else {
 			if (bulkWriteOptions.isOrdered()) {
@@ -246,8 +252,7 @@ public class MongodbWriter {
 		}
 	}
 
-	private BulkWriteModel buildBulkWriteModel(List<TapRecordEvent> tapRecordEvents, TapTable table, AtomicLong inserted, AtomicLong updated, AtomicLong deleted, MongoCollection<Document> collection, Collection<String> pks) {
-		Collection<String> allColumn = table.getNameFieldMap().keySet();
+	private BulkWriteModel buildBulkWriteModel(List<TapRecordEvent> tapRecordEvents, TapTable table, AtomicLong inserted, AtomicLong updated, AtomicLong deleted, Collection<String> pks) {
 		BulkWriteModel bulkWriteModel = new BulkWriteModel(pks.contains("_id"));
 		for (TapRecordEvent recordEvent : tapRecordEvents) {
 			if (!(recordEvent instanceof TapInsertRecordEvent)) {
@@ -261,7 +266,7 @@ public class MongodbWriter {
 			final Map<String, Object> info = recordEvent.getInfo();
 			if (MapUtils.isNotEmpty(info) && info.containsKey(MergeInfo.EVENT_INFO_KEY)) {
 				bulkWriteModel.setAllInsert(false);
-				final List<WriteModel<Document>> mergeWriteModels = MongodbMergeOperate.merge(inserted, updated, deleted, recordEvent, allColumn, pks);
+				final List<WriteModel<Document>> mergeWriteModels = MongodbMergeOperate.merge(inserted, updated, deleted, recordEvent);
 				if (CollectionUtils.isNotEmpty(mergeWriteModels)) {
 					mergeWriteModels.forEach(bulkWriteModel::addAnyOpModel);
 				}
@@ -290,10 +295,10 @@ public class MongodbWriter {
 		if (recordEvent instanceof TapInsertRecordEvent) {
 			TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
 
-			if (CollectionUtils.isNotEmpty(pks)) {
+			if (CollectionUtils.isNotEmpty(pks) && !ConnectionOptions.DML_INSERT_POLICY_JUST_INSERT.equals(insertPolicy)) {
 				final Document pkFilter = getPkFilter(pks, insertRecordEvent.getAfter());
 				String operation = "$set";
-				if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(mongodbConfig.getInsertDmlPolicy())) {
+				if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(insertPolicy)) {
 					operation = "$setOnInsert";
 				}
                 if(shardKeyMap.containsKey(tapTable.getId())){
@@ -341,7 +346,7 @@ public class MongodbWriter {
 					u.putAll(after);
 					writeModel = new ReplaceOneModel<>(pkFilter, u, new ReplaceOptions().upsert(false));
 				}else{
-					if (ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS.equals(mongodbConfig.getUpdateDmlPolicy())) {
+					if (ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS.equals(updatePolicy)) {
 						options.upsert(false);
 					}
 					MongodbUtil.removeIdIfNeed(pks, after);
@@ -406,6 +411,12 @@ public class MongodbWriter {
 		}
 
 		return filter;
+	}
+
+	public MongodbWriter dmlPolicy(String insertPolicy, String updatePolicy) {
+		this.insertPolicy = insertPolicy;
+		this.updatePolicy = updatePolicy;
+		return this;
 	}
 
 }

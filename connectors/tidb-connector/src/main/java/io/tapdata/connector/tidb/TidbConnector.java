@@ -16,6 +16,7 @@ import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.connector.tidb.ddl.TidbDDLSqlGenerator;
 import io.tapdata.connector.tidb.dml.TidbReader;
 import io.tapdata.connector.tidb.dml.TidbRecordWriter;
+import io.tapdata.connector.tidb.exception.TidbExceptionCollector;
 import io.tapdata.connector.tidb.util.HttpUtil;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
@@ -57,13 +58,17 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
-import java.sql.SQLException;
+import java.sql.Date;
+import java.sql.Time;
 import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.StringJoiner;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -81,16 +86,15 @@ public class TidbConnector extends CommonDbConnector {
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
 
-    protected void initTimeZone() throws SQLException {
+    protected void initTimeZone() {
         if (EmptyKit.isBlank(tidbConfig.getTimezone())) {
-            timezone = tidbJdbcContext.queryTimeZone();
-        } else {
-            timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
+            tidbConfig.setTimezone("+00:00");
         }
+        timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
     }
 
     @Override
-    public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
+    public void onStart(TapConnectionContext tapConnectionContext) {
         this.tidbConfig = new TidbConfig().load(tapConnectionContext.getConnectionConfig());
         tidbJdbcContext = new TidbJdbcContext(tidbConfig);
         commonDbConfig = tidbConfig;
@@ -98,7 +102,7 @@ public class TidbConnector extends CommonDbConnector {
         initTimeZone();
         tapLogger = tapConnectionContext.getLog();
         started.set(true);
-
+        exceptionCollector = new TidbExceptionCollector();
         commonSqlMaker = new CommonSqlMaker('`');
         tidbReader = new TidbReader(tidbJdbcContext);
         ddlSqlGenerator = new TidbDDLSqlGenerator();
@@ -343,6 +347,7 @@ public class TidbConnector extends CommonDbConnector {
         filterResults.setFilter(tapAdvanceFilter);
         try {
             tidbReader.readWithFilter(tapConnectorContext, tapTable, tapAdvanceFilter, n -> !isAlive(), data -> {
+                processDataMap(data, tapTable);
                 filterResults.add(data);
                 if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
                     consumer.accept(filterResults);
@@ -376,8 +381,29 @@ public class TidbConnector extends CommonDbConnector {
     protected void processDataMap(DataMap dataMap, TapTable tapTable) throws RuntimeException {
         for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
             Object value = entry.getValue();
-            if (value instanceof Timestamp && null != timezone) {
-                entry.setValue(((Timestamp) value).toLocalDateTime().atZone(timezone.toZoneId()));
+            TapField field = tapTable.getNameFieldMap().get(entry.getKey());
+            String dataType = field.getDataType();
+            boolean isTimestamp = dataType.startsWith("timestamp") || dataType.startsWith("TIMESTAMP");
+            if (value instanceof LocalDateTime) {
+                if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                    continue;
+                }
+                if (isTimestamp) {
+                    entry.setValue(((LocalDateTime) value).atZone(ZoneOffset.UTC));
+                } else {
+                    entry.setValue(((LocalDateTime) value).minusHours(tidbConfig.getZoneOffsetHour()));
+                }
+            }  else if (value instanceof java.sql.Date) {
+                ZoneId zoneId = null == timezone ? ZoneId.systemDefault() : timezone.toZoneId();
+                entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(zoneId).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
+            } else if (value instanceof Timestamp) {
+                if (isTimestamp) {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
+                } else {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
+                }
+            } else if (value instanceof Time) {
+                entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
             }
         }
     }

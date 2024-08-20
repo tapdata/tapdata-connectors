@@ -2,9 +2,15 @@ package io.tapdata.connector.tidb.cdc.process.ddl.convert;
 
 import io.tapdata.entity.error.CoreException;
 
-import java.text.ParsePosition;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.temporal.ChronoField;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TimeZone;
 
 public interface Convert {
@@ -23,12 +29,52 @@ public interface Convert {
         }
     }
 
-    default Object covertToDateTime(Object fromValue, int precision, String format, TimeZone timezone) {
+    default Object covertToDate(Object fromValue, int precision, String format, TimeZone timezone) {
+        if (precision < 0) precision = 0;
         if (fromValue instanceof String) {
             try {
-                SimpleDateFormat f = new SimpleDateFormat(String.format(format, Convert.timePrecision(precision)));
-                f.setTimeZone(timezone);
-                return f.parse((String) fromValue, new ParsePosition(precision));
+                return LocalDate.parse((String) fromValue, DateTimeFormatter.ofPattern(String.format(format, Convert.timePrecision(precision))));
+            } catch (Exception e) {
+                throw new CoreException(101, e, e.getMessage());
+            }
+        }
+        return fromValue;
+    }
+    default Object covertToTime(Object fromValue, int precision, String format, TimeZone timezone) {
+        if (precision < 0) precision = 0;
+        if (fromValue instanceof String) {
+            try {
+                return LocalTime.parse((String) fromValue, DateTimeFormatter.ofPattern(String.format(format, Convert.timePrecision(precision))));
+            } catch (Exception e) {
+                throw new CoreException(101, e, e.getMessage());
+            }
+        }
+        return fromValue;
+    }
+
+    default Object covertDateTime(Object fromValue, int precision, String format, TimeZone timezone) {
+        if (precision < 0) precision = 0;
+        if (fromValue instanceof String) {
+            try {
+                return LocalDateTime.parse((String) fromValue, DateTimeFormatter.ofPattern(String.format(format, Convert.timePrecision(precision)))).atZone(timezone.toZoneId()).toInstant();
+            } catch (Exception e) {
+                throw new CoreException(101, e, e.getMessage());
+            }
+        }
+        return fromValue;
+    }
+
+    default Object covertToDateTime(Object fromValue, int precision, String format, TimeZone timezone) {
+        if  (precision < 1) return covertDateTime(fromValue, precision, format, timezone);
+        if (fromValue instanceof String) {
+            try {
+                DateTimeFormatter formatter = new DateTimeFormatterBuilder()
+                        .appendPattern(format)
+                        .optionalStart()
+                        .appendFraction(ChronoField.NANO_OF_SECOND, 0, precision, true)
+                        .optionalEnd()
+                        .toFormatter();
+                return LocalDateTime.parse((String) fromValue, formatter);
             } catch (Exception e) {
                 throw new CoreException(101, e, e.getMessage());
             }
@@ -40,18 +86,18 @@ public interface Convert {
         if (precision <= 0) return "";
         StringBuilder builder = new StringBuilder(".");
         for (int index = 0; index < precision; index++) {
-            builder.append("S");
+            builder.append("s");
         }
         return builder.toString();
     }
 
     static Convert instance(Map<String, Object> convertInfo, TimeZone timezone) {
         String columnType = String.valueOf(convertInfo.get(COLUMN_TYPE)).toUpperCase();
-        String columnPrecision = String.valueOf(convertInfo.get(COLUMN_PRECISION));
-        String columnScale = String.valueOf(convertInfo.get(COLUMN_SCALE));
+        Object columnPrecision = convertInfo.get(COLUMN_PRECISION);
+        Object columnScale = convertInfo.get(COLUMN_SCALE);
         switch (columnType) {
             case "CHAR":
-                return new CharConvert(columnPrecision);
+                return new CharConvert(String.valueOf(Optional.ofNullable(columnPrecision).orElse(columnScale)));
             case "VARCHAR":
             case "TINYTEXT":
             case "TEXT":
@@ -88,21 +134,21 @@ public interface Convert {
             case "BIGINT":
                 return new LongConvert(false);
             case "DECIMAL":
-                return new DecimalConvert(columnPrecision, columnScale);
+                return new DecimalConvert(String.valueOf(columnPrecision), String.valueOf(columnScale));
             case "FLOAT":
-                return new FloatConvert(false, columnPrecision, columnScale);
+                return new FloatConvert(false, String.valueOf(columnPrecision), String.valueOf(columnScale));
             case "FLOAT UNSIGNED":
-                return new FloatConvert(true, columnPrecision, columnScale);
+                return new FloatConvert(true, String.valueOf(columnPrecision), String.valueOf(columnScale));
             case "DOUBLE":
-                return new DoubleConvert(false, columnPrecision, columnScale);
+                return new DoubleConvert(false, String.valueOf(columnPrecision), String.valueOf(columnScale));
             case "DOUBLE UNSIGNED":
-                return new DoubleConvert(true, columnPrecision, columnScale);
+                return new DoubleConvert(true, String.valueOf(columnPrecision), String.valueOf(columnScale));
             case "TIMESTAMP":
-                return new TimestampConvert(columnPrecision, timezone);
+                return new TimestampConvert(String.valueOf(Optional.ofNullable(columnPrecision).orElse(columnScale)), timezone);
             case "DATETIME":
-                return new DateTimeConvert(columnPrecision, timezone);
+                return new DateTimeConvert(String.valueOf(Optional.ofNullable(columnPrecision).orElse(columnScale)), timezone);
             case "TIME":
-                return new TimeConvert(columnPrecision, timezone);
+                return new TimeConvert(String.valueOf(Optional.ofNullable(columnPrecision).orElse(columnScale)), timezone);
             case "DATE":
                 return new DateConvert(timezone);
             case "YEAR UNSIGNED":

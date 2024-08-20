@@ -4,7 +4,6 @@
     "icon": "icons/mock-source.png",
     "doc" : "${doc}",
     "id": "mock-source",
-    "authentication": "Alpha",
     "tags": ["schema-free","Database"]
   },
   "configOptions": {

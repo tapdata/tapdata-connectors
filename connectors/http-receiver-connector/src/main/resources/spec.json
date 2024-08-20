@@ -4,7 +4,6 @@
     "icon": "icons/http.png",
     "doc": "${doc}",
     "id": "http-receiver",
-    "authentication": "Beta",
     "tags": [
       "SaaS"
     ]

@@ -4,7 +4,6 @@
     "icon": "icons/dws.png",
     "doc" : "${doc}",
     "id": "dws",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
@@ -96,7 +95,7 @@
           "x-index": 9,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {

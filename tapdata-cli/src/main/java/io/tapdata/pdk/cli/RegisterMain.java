@@ -95,7 +95,8 @@ public class RegisterMain {
 		LarkBitable(BASE_PATH + "connectors/dist/lark-bitable-connector-v1.0-SNAPSHOT.jar", "all", "lark-bitable"),
 		AzureCosmosDB(BASE_PATH + "connectors/dist/azure-cosmosdb-connector-v1.0-SNAPSHOT.jar","all","azure-cosmosdb"),
 		HuDi(BASE_PATH + "connectors/dist/hudi-connector-v1.0-SNAPSHOT.jar", "all", "hudi"),
-		HuaWeiOpenGaussDB(BASE_PATH + "connectors/dist/huawei-cloud-gaussdb-connector-v1.0-SNAPSHOT.jar", "all", "huawei-gauss-db")
+		HuaWeiOpenGaussDB(BASE_PATH + "connectors/dist/huawei-cloud-gaussdb-connector-v1.0-SNAPSHOT.jar", "all", "huawei-gauss-db"),
+		Vastbase(BASE_PATH + "connectors/dist/vastbase-connector-v1.0-SNAPSHOT.jar", "all", "vastbase", "basic", "jdbc"),
 		;
 
 		private final String path;
@@ -146,6 +147,11 @@ public class RegisterMain {
 	}
 
 	private static String basePath() {
+        String connectorsHome = System.getProperty("connectors_home");
+        if (null != connectorsHome) {
+            return connectorsHome;
+        }
+
 		URL resource = RegisterMain.class.getClassLoader().getResource("");
 		if (null == resource) {
 			return "/";

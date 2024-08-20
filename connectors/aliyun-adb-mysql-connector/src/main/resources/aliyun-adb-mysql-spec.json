@@ -4,7 +4,6 @@
     "icon": "icons/aliyun_adb_mysql.png",
     "id": "aliyun-adb-mysql",
     "doc": "${doc}",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
@@ -96,7 +95,7 @@
           "x-index": 7,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {

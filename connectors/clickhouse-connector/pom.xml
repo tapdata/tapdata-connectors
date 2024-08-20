@@ -19,7 +19,7 @@
         <postgres.core.version>1.0-SNAPSHOT</postgres.core.version>
         <commons-lang3.version>3.12.0</commons-lang3.version>
         <guava.version>31.0.1-jre</guava.version>
-        <tapdata.pdk.api.version>1.3.5-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.3.8-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
 
     <dependencies>
@@ -112,6 +112,7 @@
                             <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
                             <Version>${version}</Version>
                             <Authentication>GA</Authentication>
+                            <PayMode>${pay.mode}</PayMode>
                             <Git-Build-Time>${git.build.time}</Git-Build-Time>
                             <Git-Branch>${git.branch}</Git-Branch>
                             <Git-Commit-Id>${git.commit.id}</Git-Commit-Id>
@@ -192,6 +193,27 @@
                     <source>8</source>
                     <target>8</target>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <!--first execution : for preparing JaCoCo runtime agent-->
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <!--second execution : for creating code coverage reports-->
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

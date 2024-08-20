@@ -28,6 +28,7 @@ import java.io.StringWriter;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -179,7 +180,7 @@ public abstract class ConnectorBase implements TapConnector {
     }
 
     public static TestItem testItem(String item, int resultCode) {
-        return testItem(item, resultCode, null);
+        return new TestItem(item, resultCode, null);
     }
 
     public static TestItem testItem(String item, int resultCode, String information) {
@@ -227,7 +228,7 @@ public abstract class ConnectorBase implements TapConnector {
     }
 
     public static String formatTapDateTime(DateTime dateTime, String pattern) {
-        if(null == dateTime) throw new IllegalArgumentException("Date time value cannot be null");
+        if (null == dateTime) throw new IllegalArgumentException("Date time value cannot be null");
         if (StringUtils.isBlank(pattern)) {
             throw new IllegalArgumentException("Format pattern cannot be blank");
         }
@@ -235,6 +236,21 @@ public abstract class ConnectorBase implements TapConnector {
             DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(pattern);
             final ZoneId zoneId = dateTime.getTimeZone() != null ? dateTime.getTimeZone().toZoneId() : ZoneId.of("GMT");
             LocalDateTime localDateTime = LocalDateTime.ofInstant(dateTime.toInstant(), zoneId);
+            return dateTimeFormatter.format(localDateTime);
+        } catch (Exception e) {
+            throw new DatetimeFormatException(dateTime, pattern, e);
+        }
+    }
+
+    //timezone will not affect the real date time value
+    public static String formatTapDateTimeV2(DateTime dateTime, String pattern) {
+        if (null == dateTime) throw new IllegalArgumentException("Date time value cannot be null");
+        if (StringUtils.isBlank(pattern)) {
+            throw new IllegalArgumentException("Format pattern cannot be blank");
+        }
+        try {
+            DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(pattern);
+            LocalDateTime localDateTime = LocalDateTime.ofInstant(dateTime.toInstant(), ZoneOffset.UTC);
             return dateTimeFormatter.format(localDateTime);
         } catch (Exception e) {
             throw new DatetimeFormatException(dateTime, pattern, e);

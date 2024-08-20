@@ -1,11 +1,13 @@
 package io.tapdata.mongodb.entity;
 
+import com.mongodb.client.MongoClient;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.mongodb.MongoBatchOffset;
 import io.tapdata.mongodb.MongodbExceptionCollector;
 import io.tapdata.mongodb.batch.CollectionCollector;
 import io.tapdata.mongodb.batch.ErrorHandler;
+import io.tapdata.mongodb.batch.RawCollectionCollector;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 
 import java.util.List;
@@ -46,6 +48,11 @@ public class ReadParam {
         this.collection = collection;
         return this;
     }
+    RawCollectionCollector rawCollection;
+    public ReadParam withMongoRawCollection(RawCollectionCollector rawCollection) {
+        this.rawCollection = rawCollection;
+        return this;
+    }
     MongodbConfig mongoConfig;
     public ReadParam withMongodbConfig(MongodbConfig mongoConfig) {
         this.mongoConfig = mongoConfig;
@@ -69,6 +76,11 @@ public class ReadParam {
     BooleanSupplier checkAlive;
     public ReadParam withCheckAlive(BooleanSupplier checkAlive) {
         this.checkAlive = checkAlive;
+        return this;
+    }
+    MongoClient mongoClient;
+    public ReadParam withMongoClient(MongoClient mongoClient) {
+        this.mongoClient = mongoClient;
         return this;
     }
 
@@ -96,6 +108,10 @@ public class ReadParam {
         return collection;
     }
 
+    public RawCollectionCollector getRawCollection() {
+        return rawCollection;
+    }
+
     public MongodbConfig getMongoConfig() {
         return mongoConfig;
     }
@@ -114,5 +130,9 @@ public class ReadParam {
 
     public BooleanSupplier getCheckAlive() {
         return checkAlive;
+    }
+
+    public MongoClient getMongoClient() {
+        return mongoClient;
     }
 }

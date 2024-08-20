@@ -4,7 +4,6 @@
     "icon": "icon/lark.png",
     "doc": "${doc}",
     "id": "lark-im",
-    "authentication": "Beta",
     "tags": ["SaaS"]
   },
   "configOptions": {

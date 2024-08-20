@@ -4,7 +4,6 @@
     "icon": "icons/oceanbase.png",
     "id": "oceanbase",
     "doc": "${doc}",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
@@ -122,7 +121,7 @@
           "x-index": 10,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {

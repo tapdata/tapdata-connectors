@@ -4,7 +4,6 @@
     "icon": "icons/tdengine.png",
     "id": "tdengine",
     "doc": "${doc}",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
@@ -132,7 +131,7 @@
           "x-index": 11,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {

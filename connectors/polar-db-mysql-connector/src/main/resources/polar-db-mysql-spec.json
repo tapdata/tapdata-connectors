@@ -4,7 +4,6 @@
     "icon": "icons/polar-db-mysql.png",
     "id": "polar-db-mysql",
     "doc": "${doc}",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
@@ -100,7 +99,7 @@
           "x-index": 7,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {

@@ -2,6 +2,7 @@ package io.tapdata.connector.csv;
 
 import com.opencsv.CSVReader;
 import com.opencsv.CSVReaderBuilder;
+import com.opencsv.CustomCsvParser;
 import io.tapdata.common.FileSchema;
 import io.tapdata.connector.csv.config.CsvConfig;
 import io.tapdata.entity.logger.TapLogger;
@@ -35,7 +36,7 @@ public class CsvSchema extends FileSchema {
                 storage.readFile(path, is -> {
                     try (
                             Reader reader = new InputStreamReader(is, fileConfig.getFileEncoding());
-                            CSVReader csvReader = new CSVReaderBuilder(reader).build()
+                            CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(new CustomCsvParser(((CsvConfig) fileConfig).getSeparator().charAt(0))).build()
                     ) {
                         csvReader.skip(fileConfig.getDataStartLine() - 1);
                         String[] data = csvReader.readNext();
@@ -60,7 +61,7 @@ public class CsvSchema extends FileSchema {
         storage.readFile(tapFile.getPath(), is -> {
             try (
                     Reader reader = new InputStreamReader(is, fileConfig.getFileEncoding());
-                    CSVReader csvReader = new CSVReaderBuilder(reader).build()
+                    CSVReader csvReader = new CSVReaderBuilder(reader).withCSVParser(new CustomCsvParser(((CsvConfig) fileConfig).getSeparator().charAt(0))).build()
             ) {
                 if (fileConfig.getHeaderLine() > 0) {
                     csvReader.skip(fileConfig.getHeaderLine() - 1);

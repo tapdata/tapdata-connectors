@@ -13,6 +13,7 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.Capability;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.*;
 import io.tapdata.util.NetUtil;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -27,9 +28,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static io.tapdata.base.ConnectorBase.getStackString;
-import static io.tapdata.base.ConnectorBase.testItem;
-
+import static io.tapdata.base.ConnectorBase.*;
 
 /**
  * @author lemon
@@ -91,7 +90,7 @@ public class TidbConnectionTest extends CommonDbTest {
             }
             return true;
         } catch (Exception e) {
-            consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(PB_SERVER_SUCCESS, new TapTestUnknownEx(e), TestItem.RESULT_FAILED));
             return false;
         }
     }
@@ -113,12 +112,12 @@ public class TidbConnectionTest extends CommonDbTest {
                     } else {
                         errMsg = "password is empty,please enter password";
                     }
-                    consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, errMsg));
+                    consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestAuthEx(e), TestItem.RESULT_FAILED));
 
 
                 }
             }
-            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestConnectionEx(e), TestItem.RESULT_FAILED));
             return false;
         }
     }
@@ -145,7 +144,7 @@ public class TidbConnectionTest extends CommonDbTest {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -173,7 +172,7 @@ public class TidbConnectionTest extends CommonDbTest {
 
             });
         } catch (Throwable e) {
-            consumer.accept(testItem(itemMark, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(itemMark, new TapTestReadPrivilegeEx(e), TestItem.RESULT_FAILED));
             return false;
         }
         if (globalWrite.get() != null) {
@@ -236,7 +235,7 @@ public class TidbConnectionTest extends CommonDbTest {
             }
             return true;
         } catch (Exception e) {
-            consumer.accept(testItem(TI_DB_GC_LIFE_TIME, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TI_DB_GC_LIFE_TIME, new TapTestUnknownEx(e), TestItem.RESULT_FAILED));
             return false;
         }
     }
@@ -285,11 +284,17 @@ public class TidbConnectionTest extends CommonDbTest {
                 VersionControl.redirect(array[2]);
                 consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, array[1] + "-" + array[2]));
             } catch (Exception e) {
-                consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, array[1] + "-" + array[2] + ", " + e.getMessage()));
+                consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             }
         } catch (Throwable e) {
-            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(e), TestItem.RESULT_FAILED));
         }
+        return true;
+    }
+
+    @Override
+    public Boolean testStreamRead() {
+        consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY));
         return true;
     }
 
@@ -355,13 +360,11 @@ public class TidbConnectionTest extends CommonDbTest {
                 consumer.accept(testItem(MysqlTestItem.CHECK_CDC_PRIVILEGES.getContent(), TestItem.RESULT_SUCCESSFULLY));
             } else {
                 cdcCapability = false;
-                consumer.accept(testItem(MysqlTestItem.CHECK_CDC_PRIVILEGES.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                        "Check cdc privileges failed; " + e.getErrorCode() + " " + e.getSQLState() + " " + e.getMessage() + "\n" + getStackString(e)));
+                consumer.accept(new TestItem(MysqlTestItem.CHECK_CDC_PRIVILEGES.getContent(), new TapTestCDCPrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             }
 
         } catch (Throwable e) {
-            consumer.accept(testItem(MysqlTestItem.CHECK_CDC_PRIVILEGES.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Check cdc privileges failed; " + e.getMessage() + "\n" + getStackString(e)));
+            consumer.accept(new TestItem(MysqlTestItem.CHECK_CDC_PRIVILEGES.getContent(),new TapTestCDCPrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             cdcCapability = false;
             return true;
         }
@@ -393,13 +396,11 @@ public class TidbConnectionTest extends CommonDbTest {
             });
         } catch (SQLException e) {
             cdcCapability = false;
-            consumer.accept(testItem(MysqlTestItem.CHECK_BINLOG_MODE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Check binlog mode failed; " + e.getErrorCode() + " " + e.getSQLState() + " " + e.getMessage() + "\n" + getStackString(e)));
+            consumer.accept(new TestItem(MysqlTestItem.CHECK_BINLOG_MODE.getContent(), new TapTestUnknownEx("Check binlog mode failed.",e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
 
         } catch (Throwable e) {
             cdcCapability = false;
-            consumer.accept(testItem(MysqlTestItem.CHECK_BINLOG_MODE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Check binlog mode failed; " + e.getMessage() + "\n" + getStackString(e)));
+            consumer.accept(new TestItem(MysqlTestItem.CHECK_BINLOG_MODE.getContent(), new TapTestUnknownEx("Check binlog mode failed.",e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         consumer.accept(testItem.get());
         return true;
@@ -422,8 +423,7 @@ public class TidbConnectionTest extends CommonDbTest {
                 testItem.set(testItem(MysqlTestItem.CHECK_BINLOG_ROW_IMAGE.getContent(), TestItem.RESULT_SUCCESSFULLY));
             }
         } catch (Throwable e) {
-            consumer.accept(testItem(MysqlTestItem.CHECK_BINLOG_ROW_IMAGE.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Check binlog row image failed; " + e.getMessage() + "\n" + getStackString(e)));
+            consumer.accept(new TestItem(MysqlTestItem.CHECK_BINLOG_ROW_IMAGE.getContent(), new TapTestUnknownEx("Check binlog row image failed.",e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             cdcCapability = false;
         }
         consumer.accept(testItem.get());

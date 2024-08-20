@@ -4,7 +4,6 @@
     "icon": "icons/quickapi.png",
     "doc" : "${doc}",
     "id": "quickapi",
-    "authentication": "Beta",
     "tags": ["SaaS"]
   },
   "configOptions": {

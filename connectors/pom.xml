@@ -65,6 +65,7 @@
 		<module>mongodb-lower-connector</module>
         <module>mock-source-connector</module>
 		<module>mock-target-connector</module>
+		<module>vastbase-connector</module>
 	</modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
@@ -83,19 +84,23 @@
 		<pdk-error-code.version>1.0-SNAPSHOT</pdk-error-code.version>
 		<mockito.version>4.11.0</mockito.version>
 		<byte-buddy.version>1.12.23</byte-buddy.version>
+		<pay.mode>Free</pay.mode>
 	</properties>
 
 	<dependencies>
 		<dependency>
 			<groupId>org.junit.jupiter</groupId>
 			<artifactId>junit-jupiter</artifactId>
-			<version>${junit.jupiter.version}</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-engine</artifactId>
 			<scope>test</scope>
 		</dependency>
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
 
@@ -109,7 +114,6 @@
 		<dependency>
 			<groupId>org.mockito</groupId>
 			<artifactId>mockito-inline</artifactId>
-			<version>4.11.0</version>
 			<scope>test</scope>
 		</dependency>
 
