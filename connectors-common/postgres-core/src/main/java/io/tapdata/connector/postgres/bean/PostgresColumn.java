@@ -19,6 +19,7 @@ public class PostgresColumn extends CommonColumn {
         this.columnName = dataMap.getString("columnName");
         this.dataType = dataMap.getString("dataType").replaceAll("\\[]", " array"); //'dataType' with precision and scale (postgres has its function)
 //        this.dataType = dataMap.getString("data_type"); //'data_type' without precision or scale
+        this.pureDataType = dataMap.getString("pureDataType");
         this.nullable = dataMap.getString("nullable");
         this.remarks = dataMap.getString("columnComment");
         //create table in target has no need to set default value
@@ -28,7 +29,7 @@ public class PostgresColumn extends CommonColumn {
 
     @Override
     public TapField getTapField() {
-        return new TapField(this.columnName, this.dataType).nullable(this.isNullable()).
+        return new TapField(this.columnName, this.dataType).pureDataType(this.pureDataType).nullable(this.isNullable()).
                 defaultValue(columnDefaultValue).comment(this.remarks);
     }
 

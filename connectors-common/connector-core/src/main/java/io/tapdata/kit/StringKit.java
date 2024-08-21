@@ -324,4 +324,17 @@ public class StringKit {
     public static String removeParentheses(String str) {
         return str.replaceAll("\\(.*?\\)", "");
     }
+
+    public static byte[] toByteArray(String hex) {
+        String hexString = hex.replace(" ", "");
+        final byte[] byteArray = new byte[hexString.length() / 2];
+        int k = 0;
+        for (int i = 0; i < byteArray.length; i++) {
+            byte high = (byte) (Character.digit(hexString.charAt(k), 16) & 0xff);
+            byte low = (byte) (Character.digit(hexString.charAt(k + 1), 16) & 0xff);
+            byteArray[i] = (byte) (high << 4 | low);
+            k += 2;
+        }
+        return byteArray;
+    }
 }

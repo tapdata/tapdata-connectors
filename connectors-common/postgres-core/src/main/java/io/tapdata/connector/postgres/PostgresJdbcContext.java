@@ -106,6 +106,7 @@ public class PostgresJdbcContext extends JdbcContext {
             "SELECT\n" +
                     "    col.table_name \"tableName\",\n" +
                     "    col.column_name \"columnName\",\n" +
+                    "    col.data_type \"pureDataType\",\n" +
                     "    col.column_default \"columnDefault\",\n" +
                     "    col.is_nullable \"nullable\",\n" +
                     "       (SELECT max(d.description)\n" +
