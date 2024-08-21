@@ -4,6 +4,7 @@ import io.tapdata.common.concurrent.ConcurrentProcessor;
 import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.common.sqlparser.ResultDO;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
+import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -20,9 +21,11 @@ import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -45,10 +48,11 @@ public class WalLogMiner {
     private String walLsn;
     private AtomicReference<Throwable> threadException = new AtomicReference<>();
     private PostgresCDCSQLParser sqlParser = new PostgresCDCSQLParser();
-
+    private PostgresConfig postgresConfig;
 
     public WalLogMiner(PostgresJdbcContext postgresJdbcContext, Log tapLogger) {
         this.postgresJdbcContext = postgresJdbcContext;
+        this.postgresConfig = (PostgresConfig) postgresJdbcContext.getConfig();
         this.tapLogger = tapLogger;
     }
 
@@ -301,6 +305,22 @@ public class WalLogMiner {
                     }
                 }
                 stringObjectEntry.setValue(stringBuilder.toString());
+                break;
+            case "timestamp":
+                stringObjectEntry.setValue(Timestamp.valueOf((String) value).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
+                break;
+            case "timestamp with time zone":
+                String timestamp = ((String) value).substring(0, ((String) value).length() - 3);
+                String timezone = ((String) value).substring(((String) value).length() - 3);
+                stringObjectEntry.setValue(Timestamp.valueOf(timestamp).toLocalDateTime().atZone(TimeZone.getTimeZone("GMT" + timezone + ":00").toZoneId()));
+                break;
+            case "time":
+                stringObjectEntry.setValue(LocalTime.parse((String) value).atDate(LocalDate.ofYearDay(1970, 1)).minusHours(postgresConfig.getZoneOffsetHour()));
+                break;
+            case "time with time zone":
+                String time = ((String) value).substring(0, ((String) value).length() - 3);
+                String zone = ((String) value).substring(((String) value).length() - 3);
+                stringObjectEntry.setValue(LocalTime.parse(time).atDate(LocalDate.ofYearDay(1970, 1)).atZone(TimeZone.getTimeZone("GMT" + zone + ":00").toZoneId()));
                 break;
         }
     }
