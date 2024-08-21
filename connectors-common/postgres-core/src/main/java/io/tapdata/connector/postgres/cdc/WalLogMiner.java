@@ -267,7 +267,10 @@ public class WalLogMiner {
                 stringObjectEntry.setValue(new BigDecimal((String) value));
                 break;
             case "bit":
-                stringObjectEntry.setValue("1".equals(value));
+                if (value instanceof String && ((String) value).length() == 1) {
+                    stringObjectEntry.setValue("1".equals(value));
+                }
+                break;
             case "bytea":
                 stringObjectEntry.setValue(StringKit.toByteArray(((String) value).substring(2)));
                 break;
@@ -306,7 +309,7 @@ public class WalLogMiner {
                 }
                 stringObjectEntry.setValue(stringBuilder.toString());
                 break;
-            case "timestamp":
+            case "timestamp without time zone":
                 stringObjectEntry.setValue(Timestamp.valueOf((String) value).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
                 break;
             case "timestamp with time zone":
@@ -314,7 +317,7 @@ public class WalLogMiner {
                 String timezone = ((String) value).substring(((String) value).length() - 3);
                 stringObjectEntry.setValue(Timestamp.valueOf(timestamp).toLocalDateTime().atZone(TimeZone.getTimeZone("GMT" + timezone + ":00").toZoneId()));
                 break;
-            case "time":
+            case "time without time zone":
                 stringObjectEntry.setValue(LocalTime.parse((String) value).atDate(LocalDate.ofYearDay(1970, 1)).minusHours(postgresConfig.getZoneOffsetHour()));
                 break;
             case "time with time zone":
