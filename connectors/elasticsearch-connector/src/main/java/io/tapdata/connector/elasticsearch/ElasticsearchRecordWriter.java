@@ -7,7 +7,9 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
+import org.apache.commons.lang3.StringUtils;
 import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
@@ -29,8 +31,8 @@ import static io.tapdata.base.ConnectorBase.toJson;
 public class ElasticsearchRecordWriter {
 
     private Log log;
-    private String insertPolicy = "update-on-exists";
-    private String updatePolicy = "ignore-on-non-exists";
+    private String insertPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
+    private String updatePolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
     private String version;
     private RestHighLevelClient client;
     private final TapTable tapTable;
@@ -42,11 +44,17 @@ public class ElasticsearchRecordWriter {
 
     private ElasticsearchExceptionCollector exceptionCollector;
 
-    public ElasticsearchRecordWriter(ElasticsearchHttpContext httpContext, TapTable tapTable) throws Throwable {
+    public ElasticsearchRecordWriter(ElasticsearchHttpContext httpContext, TapTable tapTable, String insertPolicy, String updatePolicy) throws Throwable {
         this.client = httpContext.getElasticsearchClient();
         this.tapTable = tapTable;
         this.exceptionCollector = new ElasticsearchExceptionCollector();
         analyzeTable();
+        if (StringUtils.isNotBlank(insertPolicy)) {
+            this.insertPolicy = insertPolicy;
+        }
+        if (StringUtils.isNotBlank(updatePolicy)) {
+            this.updatePolicy = updatePolicy;
+        }
     }
 
     private void analyzeTable() {
@@ -69,9 +77,19 @@ public class ElasticsearchRecordWriter {
 //        bulkRequest.setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
             for (TapRecordEvent recordEvent : tapRecordEvents) {
                 if (recordEvent instanceof TapInsertRecordEvent) {
-                    bulkRequest.add(insertDocument(recordEvent));
+                    if (ConnectionOptions.DML_INSERT_POLICY_JUST_INSERT.equals(insertPolicy)) {
+                        bulkRequest.add(insertDocument(recordEvent));
+                    } else if (ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS.equals(insertPolicy)) {
+                        bulkRequest.add(upsertDocument(recordEvent));
+                    } else if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(insertPolicy)) {
+                         throw new RuntimeException("Unsupported insert policy: " + insertPolicy);
+                    }
                 } else if (recordEvent instanceof TapUpdateRecordEvent) {
-                    bulkRequest.add(updateDocument(recordEvent));
+                    if (ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS.equals(updatePolicy)) {
+                        bulkRequest.add(updateDocument(recordEvent));
+                    } else if (ConnectionOptions.DML_UPDATE_POLICY_INSERT_ON_NON_EXISTS.equals(updatePolicy)) {
+                        bulkRequest.add(upsertDocument(recordEvent));
+                    }
                 } else if (recordEvent instanceof TapDeleteRecordEvent) {
                     bulkRequest.add(deleteDocument(recordEvent));
                 }
@@ -150,6 +168,14 @@ public class ElasticsearchRecordWriter {
         String id = getId(value).toString();
         eventMap.put(id, updateRecordEvent);
         return new UpdateRequest(tapTable.getId().toLowerCase(), id).retryOnConflict(3).doc(value);
+    }
+
+    private UpdateRequest upsertDocument(TapRecordEvent recordEvent) {
+        TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
+        Map<String, Object> value = updateRecordEvent.getAfter();
+        String id = getId(value).toString();
+        eventMap.put(id, updateRecordEvent);
+        return new UpdateRequest(tapTable.getId().toLowerCase(), id).retryOnConflict(3).doc(value).docAsUpsert(true);
     }
 
     private DeleteRequest deleteDocument(TapRecordEvent recordEvent) {
