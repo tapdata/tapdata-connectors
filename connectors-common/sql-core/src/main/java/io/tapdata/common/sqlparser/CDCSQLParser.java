@@ -14,7 +14,7 @@ import java.util.List;
  */
 public class CDCSQLParser implements ISQLParser<String, ResultDO> {
 
-    private static final String CANNOT_FIND_COLUMN_NAME = "Can't found column name";
+    protected static final String CANNOT_FIND_COLUMN_NAME = "Can't found column name";
     protected char nameQuote = '"';
     protected char valueQuote = '\'';
     protected char escape = '\\';
