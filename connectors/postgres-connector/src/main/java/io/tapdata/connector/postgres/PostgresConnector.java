@@ -423,9 +423,6 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
-        cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
-        testReplicateIdentity(nodeContext.getTableMap());
-        buildSlot(nodeContext, true);
         Map<String, List<String>> schemaTableMap = new HashMap<>();
         for (ConnectionConfigWithTables withTables : connectionConfigWithTables) {
             if (null == withTables.getConnectionConfig())
@@ -448,16 +445,27 @@ public class PostgresConnector extends CommonDbConnector {
                 return tableList;
             });
         }
-        cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerConsumer(consumer, batchSize);
-        cdcRunner.startCdcRunner();
-        if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
-            Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
-            if (throwable instanceof SQLException) {
-                exceptionCollector.collectTerminateByServer(throwable);
-                exceptionCollector.collectCdcConfigInvalid(throwable);
-                exceptionCollector.revealException(throwable);
+        if ("walminer".equals(postgresConfig.getLogPluginName())) {
+            new WalLogMiner(postgresJdbcContext, tapLogger)
+                    .watch(schemaTableMap, nodeContext.getTableMap())
+                    .offset(offsetState)
+                    .registerConsumer(consumer, batchSize)
+                    .startMiner(this::isAlive);
+        } else {
+            cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+            testReplicateIdentity(nodeContext.getTableMap());
+            buildSlot(nodeContext, true);
+            cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerConsumer(consumer, batchSize);
+            cdcRunner.startCdcRunner();
+            if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
+                Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
+                if (throwable instanceof SQLException) {
+                    exceptionCollector.collectTerminateByServer(throwable);
+                    exceptionCollector.collectCdcConfigInvalid(throwable);
+                    exceptionCollector.revealException(throwable);
+                }
+                throw throwable;
             }
-            throw throwable;
         }
     }
 
