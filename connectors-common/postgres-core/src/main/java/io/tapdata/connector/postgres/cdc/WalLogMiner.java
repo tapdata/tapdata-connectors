@@ -63,7 +63,7 @@ public class WalLogMiner {
     public WalLogMiner watch(List<String> tableList, KVReadOnlyMap<TapTable> tableMap) {
         withSchema = false;
         this.tableList = tableList;
-        filterSchema = tableList.size() > 1;
+        filterSchema = tableList.size() > 50;
         this.dataTypeMap = new ConcurrentHashMap<>();
         tableList.forEach(tableName -> {
             TapTable table = tableMap.get(tableName);
@@ -77,7 +77,7 @@ public class WalLogMiner {
     public WalLogMiner watch(Map<String, List<String>> schemaTableMap, KVReadOnlyMap<TapTable> tableMap) {
         withSchema = true;
         this.schemaTableMap = schemaTableMap;
-        filterSchema = schemaTableMap.entrySet().stream().reduce(0, (a, b) -> a + b.getValue().size(), Integer::sum) > 1;
+        filterSchema = schemaTableMap.entrySet().stream().reduce(0, (a, b) -> a + b.getValue().size(), Integer::sum) > 50;
         this.dataTypeMap = new ConcurrentHashMap<>();
         schemaTableMap.forEach((schema, tables) -> tables.forEach(tableName -> {
             TapTable table = tableMap.get(schema + "." + tableName);
