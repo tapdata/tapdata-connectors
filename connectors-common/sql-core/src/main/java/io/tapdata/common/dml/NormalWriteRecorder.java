@@ -50,6 +50,7 @@ public abstract class NormalWriteRecorder {
 
     protected final AtomicLong atomicLong = new AtomicLong(0); //record counter
     protected final List<TapRecordEvent> batchCache = TapSimplify.list(); //event cache
+    protected int batchCacheSize = 0;
     protected Log tapLogger;
 
     public NormalWriteRecorder(Connection connection, TapTable tapTable, String schema) {
@@ -114,8 +115,8 @@ public abstract class NormalWriteRecorder {
                 batchCache.clear();
             }
         } catch (SQLException e) {
-            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
-            listResult.addErrors(map);
+//            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
+//            listResult.addErrors(map);
             throw e;
         }
         atomicLong.addAndGet(succeed);
@@ -201,6 +202,27 @@ public abstract class NormalWriteRecorder {
         preparedStatement.addBatch();
     }
 
+    protected void generatePrepareStatement(String sql, boolean containsNull, WriteListResult<TapRecordEvent> listResult) throws SQLException {
+        String preparedStatementKey = "|" + containsNull;
+        if (preparedStatementKey.equals(this.preparedStatementKey)) {
+            preparedStatement = preparedStatementMap.get(preparedStatementKey);
+        } else {
+            if (EmptyKit.isNull(this.preparedStatementKey)) {
+                preparedStatement = connection.prepareStatement(sql);
+                preparedStatementMap.put(preparedStatementKey, preparedStatement);
+            } else {
+                executeBatch(listResult);
+                preparedStatement = preparedStatementMap.get(preparedStatementKey);
+                if (EmptyKit.isNull(preparedStatement)) {
+                    preparedStatement = connection.prepareStatement(sql);
+                    preparedStatementMap.put(preparedStatementKey, preparedStatement);
+                }
+            }
+            this.preparedStatementKey = preparedStatementKey;
+        }
+        preparedStatement.clearParameters();
+    }
+
     //插入唯一键冲突时转更新
     protected void upsert(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         throw new UnsupportedOperationException("upsert is not supported");
@@ -226,7 +248,7 @@ public abstract class NormalWriteRecorder {
         preparedStatement.clearParameters();
         int pos = 1;
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, after, key);
         }
     }
 
@@ -276,7 +298,7 @@ public abstract class NormalWriteRecorder {
         preparedStatement.clearParameters();
         int pos = 1;
         for (String key : after.keySet()) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, after, key);
         }
         setBeforeValue(containsNull, before, pos);
     }
@@ -351,15 +373,19 @@ public abstract class NormalWriteRecorder {
         }
     }
 
+    protected void setPrepareStatement(int pos, Map<String, Object> data, String key) throws SQLException {
+        preparedStatement.setObject(pos, filterValue(data.get(key), columnTypeMap.get(key)));
+    }
+
     protected void setBeforeValue(boolean containsNull, Map<String, Object> before, int pos) throws SQLException {
         if (!containsNull) {
             for (String key : before.keySet()) {
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, before, key);
             }
         } else {
             for (String key : before.keySet()) {
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, before, key);
+                setPrepareStatement(pos++, before, key);
             }
         }
     }

@@ -21,41 +21,24 @@ public class MergeWriteRecorder extends NormalWriteRecorder {
     @Override
     protected void upsert(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         boolean containsNull = !hasPk && uniqueCondition.stream().anyMatch(v -> EmptyKit.isNull(after.get(v)));
-        String preparedStatementKey = "|" + containsNull;
-        if (preparedStatementKey.equals(this.preparedStatementKey)) {
-            preparedStatement = preparedStatementMap.get(preparedStatementKey);
-        } else {
-            if (EmptyKit.isNull(this.preparedStatementKey)) {
-                preparedStatement = connection.prepareStatement(getUpsertSql(containsNull));
-                preparedStatementMap.put(preparedStatementKey, preparedStatement);
-            } else {
-                executeBatch(listResult);
-                preparedStatement = preparedStatementMap.get(preparedStatementKey);
-                if (EmptyKit.isNull(preparedStatement)) {
-                    preparedStatement = connection.prepareStatement(getUpsertSql(containsNull));
-                    preparedStatementMap.put(preparedStatementKey, preparedStatement);
-                }
-            }
-            this.preparedStatementKey = preparedStatementKey;
-        }
-        preparedStatement.clearParameters();
+        generatePrepareStatement(getUpsertSql(containsNull), containsNull, listResult);
         //make params
         int pos = 1;
         if (!containsNull) {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, after, key);
             }
         } else {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, after, key);
+                setPrepareStatement(pos++, after, key);
             }
         }
         for (String key : allColumn.stream().filter(col -> !uniqueCondition.contains(col)).collect(Collectors.toList())) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, after, key);
         }
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, after, key);
         }
     }
 
@@ -100,16 +83,16 @@ public class MergeWriteRecorder extends NormalWriteRecorder {
         int pos = 1;
         if (!containsNull) {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, after, key);
             }
         } else {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
-                preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, after, key);
+                setPrepareStatement(pos++, after, key);
             }
         }
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, after, key);
         }
     }
 
@@ -132,41 +115,24 @@ public class MergeWriteRecorder extends NormalWriteRecorder {
         boolean containsNull = !hasPk && uniqueCondition.stream().anyMatch(v -> EmptyKit.isNull(before.get(v)));
         Map<String, Object> all = new HashMap<>(before);
         all.putAll(after);
-        String preparedStatementKey = "|" + containsNull;
-        if (preparedStatementKey.equals(this.preparedStatementKey)) {
-            preparedStatement = preparedStatementMap.get(preparedStatementKey);
-        } else {
-            if (EmptyKit.isNull(this.preparedStatementKey)) {
-                preparedStatement = connection.prepareStatement(getUpsertSql(containsNull));
-                preparedStatementMap.put(preparedStatementKey, preparedStatement);
-            } else {
-                executeBatch(listResult);
-                preparedStatement = preparedStatementMap.get(preparedStatementKey);
-                if (EmptyKit.isNull(preparedStatement)) {
-                    preparedStatement = connection.prepareStatement(getUpsertSql(containsNull));
-                    preparedStatementMap.put(preparedStatementKey, preparedStatement);
-                }
-            }
-            this.preparedStatementKey = preparedStatementKey;
-        }
-        preparedStatement.clearParameters();
+        generatePrepareStatement(getUpsertSql(containsNull), containsNull, listResult);
         //make params
         int pos = 1;
         if (!containsNull) {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, before, key);
             }
         } else {
             for (String key : uniqueCondition) {
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, before, key);
+                setPrepareStatement(pos++, before, key);
             }
         }
         for (String key : allColumn.stream().filter(col -> !uniqueCondition.contains(col)).collect(Collectors.toList())) {
-            preparedStatement.setObject(pos++, filterValue(all.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, all, key);
         }
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(all.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, all, key);
         }
     }
 

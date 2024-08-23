@@ -6,6 +6,9 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
+import org.postgresql.core.BaseConnection;
+import org.postgresql.jdbc.PgSQLXML;
+import org.postgresql.util.PGobject;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -81,19 +84,6 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         }
     }
 
-    @Override
-    protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
-        if (!containsNull) {
-            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
-                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
-        } else {
-            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
-                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
-                            .collect(Collectors.joining(" AND "));
-        }
-    }
-
-    @Override
     protected String getUpdateSql(Map<String, Object> after, Map<String, Object> before, boolean containsNull) {
         if (!containsNull) {
             return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
@@ -107,13 +97,55 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         }
     }
 
+    protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
+        if (!containsNull) {
+            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
+                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+        } else {
+            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
+                            .collect(Collectors.joining(" AND "));
+        }
+    }
+
     @Override
-    protected Object filterValue(Object value, String dataType) {
+    protected Object filterValue(Object value, String dataType) throws SQLException {
         if (EmptyKit.isNull(value)) {
             return null;
         }
         if ("uuid".equalsIgnoreCase(dataType)) {
             return value instanceof UUID ? value : UUID.fromString(String.valueOf(value));
+        }
+        if (dataType.startsWith("bit")) {
+            PGobject pGobject = new PGobject();
+            pGobject.setType("bit");
+            if (value instanceof Boolean) {
+                pGobject.setValue((Boolean) value ? "1" : "0");
+            } else {
+                pGobject.setValue(String.valueOf(value));
+            }
+            return pGobject;
+        }
+        switch (dataType) {
+            case "interval":
+            case "point":
+            case "line":
+            case "lseg":
+            case "box":
+            case "path":
+            case "polygon":
+            case "circle":
+            case "money":
+            case "cidr":
+            case "inet":
+            case "macaddr":
+            case "json":
+                PGobject pGobject = new PGobject();
+                pGobject.setType(dataType);
+                pGobject.setValue(String.valueOf(value));
+                return pGobject;
+            case "xml":
+                return new PgSQLXML(connection.unwrap(BaseConnection.class), String.valueOf(value));
         }
         if (dataType.endsWith("with time zone") && value instanceof LocalDateTime) {
             Timestamp timestamp = Timestamp.valueOf(((LocalDateTime) value));

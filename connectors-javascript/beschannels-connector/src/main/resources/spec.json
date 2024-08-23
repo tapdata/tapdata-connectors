@@ -4,7 +4,6 @@
     "icon": "icon/bes-channels.png",
     "doc" : "${doc}",
     "id": "bes-channels",
-    "authentication": "Beta",
     "group": "io.tapdata",
     "tags": ["SaaS"]
   },

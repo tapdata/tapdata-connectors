@@ -4,7 +4,6 @@
     "icon": "icons/mrshive3.png",
     "id": "mrs-hive3",
     "doc": "${doc}",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {

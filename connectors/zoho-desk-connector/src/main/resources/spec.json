@@ -4,7 +4,6 @@
     "icon": "icons/zoho.png",
     "doc" : "${doc}",
     "id": "zoho-desk",
-    "authentication": "Beta",
     "tags": ["SaaS"]
   },
   "configOptions": {

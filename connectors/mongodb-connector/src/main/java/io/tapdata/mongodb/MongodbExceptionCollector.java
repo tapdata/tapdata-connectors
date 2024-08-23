@@ -3,7 +3,6 @@ package io.tapdata.mongodb;
 import com.alibaba.fastjson.JSON;
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoException;
-import com.mongodb.MongoSecurityException;
 import com.mongodb.bulk.BulkWriteError;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -25,9 +24,8 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     }
 
 
-
     //write
-    public void throwWriteExIfNeed(Object data, Throwable cause){
+    public void throwWriteExIfNeed(Object data, Throwable cause) {
         this.collectTerminateByServer(cause);
         this.collectWritePrivileges(cause);
         this.collectWriteType(data, cause);
@@ -37,7 +35,7 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
     @Override
     public void revealException(Throwable cause) {
-        if(cause instanceof TapPdkBaseException) return;
+        if (cause instanceof TapPdkBaseException) return;
         if (cause instanceof MongoException) {
             throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause))
 //                    .withServerErrorCode(String.valueOf(((MongoException) cause).getCode()))
@@ -48,8 +46,8 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     @Override
     public void collectTerminateByServer(Throwable cause) {
 
-        if (cause instanceof MongoException && (((MongoException) cause).getCode())==-3) {
-            if (cause.getMessage().contains("Timed out after 30000 ms while waiting to connect")){
+        if (cause instanceof MongoException && (((MongoException) cause).getCode()) == -3) {
+            if (cause.getMessage().contains("Timed out after 30000 ms while waiting to connect")) {
                 throw new TapPdkTerminateByServerEx(getPdkId(), ErrorKit.getLastCause(cause));
             }
         }
@@ -66,8 +64,8 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
             // 提取用户名
             username = matcher.group(1);
         }
-        if (cause instanceof MongoException)  {
-            if ( ((MongoException) cause).getCode()==18 || ((MongoException) cause).getCode()==-4){
+        if (cause instanceof MongoException) {
+            if (((MongoException) cause).getCode() == 18 || ((MongoException) cause).getCode() == -4) {
                 throw new TapPdkUserPwdInvalidEx(getPdkId(), username, ErrorKit.getLastCause(cause));
             }
         }
@@ -75,13 +73,13 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
     @Override
     public void collectOffsetInvalid(Object offset, Throwable cause) {
-        if (cause instanceof MongoException && (((MongoException) cause).getCode())==286) {
+        if (cause instanceof MongoException && (((MongoException) cause).getCode()) == 286) {
             throw new TapPdkOffsetOutOfLogEx(getPdkId(), offset, ErrorKit.getLastCause(cause));
         }
     }
 
     public void collectReadPrivileges(Throwable cause) {
-        if (cause instanceof MongoException && (((MongoException) cause).getCode())==13) {
+        if (cause instanceof MongoException && (((MongoException) cause).getCode()) == 13) {
             Object operation = "Read";
             List<String> privileges = new ArrayList<>();
             privileges.add("Read");
@@ -90,7 +88,7 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     }
 
     public void collectWritePrivileges(Throwable cause) {
-        if (cause instanceof MongoException && (((MongoException) cause).getCode())==13) {
+        if (cause instanceof MongoException && (((MongoException) cause).getCode()) == 13) {
             Object operation = "Write";
             Pattern pattern = Pattern.compile("execute command '(.*)' on server");
             Matcher matcher = pattern.matcher(ErrorKit.getLastCause(cause).getMessage());
@@ -106,15 +104,15 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     public void collectWriteType(Object data, Throwable cause) {
         if (cause instanceof MongoBulkWriteException) {
             checkMongoBulkWriteError(data, (MongoBulkWriteException) cause);
-        }else if(cause instanceof TapMongoBulkWriteException){
+        } else if (cause instanceof TapMongoBulkWriteException) {
             Throwable throwable = cause.getCause();
-            if(throwable instanceof MongoBulkWriteException){
+            if (throwable instanceof MongoBulkWriteException) {
                 checkMongoBulkWriteError(data, (MongoBulkWriteException) throwable);
             }
         }
     }
 
-    protected void checkMongoBulkWriteError(Object data,MongoBulkWriteException cause){
+    protected void checkMongoBulkWriteError(Object data, MongoBulkWriteException cause) {
         for (BulkWriteError err : cause.getWriteErrors()) {
             if (Pattern.matches(".*cannot use the part \\([^)]+\\) to traverse the element \\([^)]+\\).*", err.getMessage())) {
                 Optional.ofNullable(data)
@@ -130,16 +128,20 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
     public void collectWriteLength(Object data, Throwable cause) {
         //gt 16M
-        if (cause instanceof MongoException && FromMongoBulkWriteExceptionGetWriteErrors(cause,13134)) {
-            if (null!=data && data instanceof List){
+        if (cause instanceof MongoException && FromMongoBulkWriteExceptionGetWriteErrors(cause, 13134)) {
+            if (null != data && data instanceof List) {
                 int index = ((MongoBulkWriteException) cause).getWriteErrors().get(0).getIndex();
                 data = ((List<TapRecordEvent>) data).get(index);
             }
             throw new TapPdkWriteLengthEx(getPdkId(), null, "BSON", data, ErrorKit.getLastCause(cause));
         }
     }
-    public void collectViolateUnique(Object data,Throwable cause) {
-        if (cause instanceof MongoBulkWriteException && FromMongoBulkWriteExceptionGetWriteErrors(cause,11000)) {
+
+    public void collectViolateUnique(Object data, Throwable cause) {
+        if (cause instanceof TapMongoBulkWriteException) {
+            cause = cause.getCause();
+        }
+        if (cause instanceof MongoBulkWriteException && FromMongoBulkWriteExceptionGetWriteErrors(cause, 11000)) {
             String targetFieldName = null;
             String errorMessage = cause.getMessage();
             // 定义正则表达式来匹配错误信息中的表名和字段信息  \{ (\w+): collection: (\w+)\.(\w+) .*_id: (\w+)
@@ -151,8 +153,8 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
                 String tableName = matcher.group(1);
                 targetFieldName = matcher.group(2);
             }
-            String constraintStr = "duplicate key error "+targetFieldName;
-            if (null!=data && data instanceof List){
+            String constraintStr = "duplicate key error " + targetFieldName;
+            if (null != data && data instanceof List) {
                 int index = ((MongoBulkWriteException) cause).getWriteErrors().get(0).getIndex();
                 data = ((List<TapRecordEvent>) data).get(index);
             }
@@ -166,11 +168,11 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     }
 
 
-    public boolean FromMongoBulkWriteExceptionGetWriteErrors(Throwable cause, int errorCode){
-        if (cause instanceof MongoBulkWriteException){
+    public boolean FromMongoBulkWriteExceptionGetWriteErrors(Throwable cause, int errorCode) {
+        if (cause instanceof MongoBulkWriteException) {
             List<BulkWriteError> writeErrors = ((MongoBulkWriteException) cause).getWriteErrors();
-            if (null!=writeErrors && writeErrors.size()>0){
-                if (writeErrors.get(0).getCode()==errorCode){
+            if (null != writeErrors && writeErrors.size() > 0) {
+                if (writeErrors.get(0).getCode() == errorCode) {
                     return true;
                 }
             }

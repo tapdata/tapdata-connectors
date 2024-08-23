@@ -16,6 +16,7 @@ import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.connector.tidb.ddl.TidbDDLSqlGenerator;
 import io.tapdata.connector.tidb.dml.TidbReader;
 import io.tapdata.connector.tidb.dml.TidbRecordWriter;
+import io.tapdata.connector.tidb.exception.TidbExceptionCollector;
 import io.tapdata.connector.tidb.util.HttpUtil;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
@@ -93,7 +94,7 @@ public class TidbConnector extends CommonDbConnector {
     }
 
     @Override
-    public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
+    public void onStart(TapConnectionContext tapConnectionContext) {
         this.tidbConfig = new TidbConfig().load(tapConnectionContext.getConnectionConfig());
         tidbJdbcContext = new TidbJdbcContext(tidbConfig);
         commonDbConfig = tidbConfig;
@@ -101,7 +102,7 @@ public class TidbConnector extends CommonDbConnector {
         initTimeZone();
         tapLogger = tapConnectionContext.getLog();
         started.set(true);
-
+        exceptionCollector = new TidbExceptionCollector();
         commonSqlMaker = new CommonSqlMaker('`');
         tidbReader = new TidbReader(tidbJdbcContext);
         ddlSqlGenerator = new TidbDDLSqlGenerator();

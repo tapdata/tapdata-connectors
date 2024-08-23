@@ -1,180 +1,139 @@
-## **Connection configuration help**
-### **1. POSTGRESQL installation instructions**
-Please follow the instructions below to ensure that the PostgreSQL database is successfully added and used in Tapdata.
-### **2. Supported version**
-PostgreSQL 9.4, 9.5, 9.6, 10.x, 11.x, 12 versions
-### **3. CDC principle and support**
-#### **3.1 Principles of CDC**
-PostgreSQL's logical decoding function first appeared in version 9.4. It is a mechanism that allows to extract the changes committed to the transaction log and process these changes in a user-friendly way through the output plugin.
-This output plugin must be installed before running the PostgreSQL server and enabled with a replication slot so that the client can use the changes.
-#### **3.2 CDC Support**
-- **Logical Decoding** (Logical Decoding): used to parse logic change events from WAL logs
-- **Replication Protocol** (Replication Protocol): Provides a mechanism for consumers to subscribe to (or even synchronously subscribe) database changes in real time
-- **Export snapshot**: Allows to export a consistent snapshot of the database (pg_export_snapshot)
-- **Replication Slot**: Used to save consumer offsets and track subscriber progress.
-  Therefore, based on the above, we need to install a logical decoder. The existing decoders are as options
+## **Connection Configuration Help**
+### **1.  VASTBASE Installation Instructions**
+Please follow the following instructions to ensure successful addition and use of the VASTBASE database in Tapdata.
+### **2.  Supported versions**
+VASTBASE-G100 version
+### **3.  CDC Principles and Support**
+#### **3.1 CDC principle**
+The logic decoding function of VASTBASE is the same as Postgres, which is a mechanism that allows extracting changes submitted to the transaction log and processing these changes in a user-friendly manner through output plugins.
 
-### **4. Prerequisites**
-#### **4.1 Modify REPLICA IDENTITY**
-This attribute determines the field of the log record when the data occurs `UPDATE, DELETE`
-- **DEFAULT**-Updates and deletes will contain the current value of the primary key column
-- **NOTHING**-Updates and deletes will not contain any previous values
-- **FULL**-Updates and deletes will include the previous values of all columns
-- **INDEX index name**-update and delete events will contain the previous value of the column included in the index definition named index name
-  If there are scenarios where multiple tables are merged and synchronized, Tapdata needs to adjust this attribute to FULL
-  Example
+#### **3.2 CDC support**
+- Logical Decoding: Used to parse logical change events from WAL logs
+- **Replication Protocol**: Provides consumers with a mechanism for real-time subscription (or even synchronous subscription) of database changes
+- **snapshot export** (export snapshot): allows exporting consistent snapshots of the database (pg_dexport_stnapshot)
+- **Replication Slot**: Used to store consumer offsets and track subscriber progress.
+So, based on the above, we need to install a logic decoder. The existing decoder provided is shown in the drop-down box
+
+### **4.  Prerequisite conditions**
+#### **4.1 Modify REPLICA Identity**
+This attribute determines the fields recorded in the log when data undergoes' Update, DELETE '
+- **DEFILT** - Update and delete current values that will include the primary key column
+- **NOTHING** - Updates and deletions will not include any previous values
+- **FULL** - Updating and deleting will include the previous values of all columns
+- **INDEX index name** - Update and delete events will include the previous values of columns included in the index definition named index name
+If there are scenarios where multiple tables are merged and synchronized, Tapdata needs to adjust this property to FULL
+Example
 ```
-alter table'[schema]'.'[table name]' REPLICA IDENTITY FULL`
+alter table '[schema]'.' [table name]' REPLICA IDENTITY FULL`
 ```
 
-#### **4.2 Plug-in installation**
-- [decorderbufs](https://github.com/debezium/postgres-decoderbufs)
-- [Protobuf-c 1.2+](https://github.com/protobuf-c/protobuf-c)
-- [protobuf](https://blog.csdn.net/gumingyaotangwei/article/details/78936608)
-- [PostGIS 2.1+ ](http://www.postgis.net/)
-- [wal2json](https://github.com/eulerto/wal2json/blob/master/README.md)
-- pgoutput(pg 10.0+)
-
-**Installation steps**<br>
-Take wal2json as an example, the installation steps are as follows<br>
-Ensure that the environment variable PATH contains "/bin"<br>
-```
-export PATH=$PATH:<postgres installation path>/bin
-```
-**Install plugin**<br>
-```
-git clone https://github.com/eulerto/wal2json -b master --single-branch \
-&& cd wal2json \
-&& USE_PGXS=1 make \
-&& USE_PGXS=1 make install \
-&& cd .. \
-&& rm -rf wal2json
-```
-Install plug-in error handling. The `make` command is executed, and an exception message similar to `fatal error: [xxx].h: No such file or directory` is encountered.<br>
-**Reason**: missing postgresql-server-dev<br>
-**Solution**: install postgresql-server-dev, take the debian system as an example<br>
-```
-// Version number such as: 9.4, 9.6, etc.
-apt-get install -y postgresql-server-dev-<version number>
-```
-**Configuration File**<br>
-If you are using a supported logic decoding plug-in (not pgoutput ), and it has been installed, configure the server to load the plug-in at startup:<br>
-```
-postgresql.conf
-shared_preload_libraries ='decoderbufs,wal2json'
-```
-Configure replication<br>
-```
-# REPLICATION
-wal_level = logical
-max_wal_senders = 1 # More than 0 is enough
-max_replication_slots = 1 # More than 0 is enough
-```
+#### **4.2 Plugin Installation**
+(Currently, VASTBASE comes with the wal2json plugin)
 
 #### **4.3 Permissions**
-##### **4.3.1 as source**
-- **Initialization**<br>
+##### **4.3.1 As a Source**
+- **Initialize**<br>
 ```
 GRANT SELECT ON ALL TABLES IN SCHEMA <schemaname> TO <username>;
 ```
-- **Increment**<br>
-  The user needs to have the replication login permission. If the log increment function is not required, the replication permission may not be set
+- **Incremental**<br>
+The user needs to have replication login permission. If the log increment function is not required, replication permission can be omitted
 ```
 CREATE ROLE <rolename> REPLICATION LOGIN;
-CREATE USER <username> ROLE <rolename> PASSWORD'<password>';
+CREATE USER <username> ROLE <rolename> PASSWORD '<password>';
 // or
-CREATE USER <username> WITH REPLICATION LOGIN PASSWORD'<password>';
+CREATE USER <username> WITH REPLICATION LOGIN PASSWORD '<password>';
 ```
-The configuration file pg_hba.conf needs to add the following content:<br>
+The configuration file pg_ hba. conf needs to add the following content:<br>
 ```
 pg_hba.conf
-local replication <youruser> trust
-host replication <youruser> 0.0.0.0/32 md5
-host replication <youruser> ::1/128 trust
+local   replication     <youruser>                     trust
+host    replication     <youruser>  0.0.0.0/32         md5
+host    replication     <youruser>  ::1/128            trust
 ```
 
 ##### **4.3.2 as a target**
 ```
-GRANT INSERT, UPDATE, DELETE, TRUNCATE
+GRANT INSERT,UPDATE,DELETE,TRUNCATE
 ON ALL TABLES IN SCHEMA <schemaname> TO <username>;
 ```
-> **Note**: The above are just basic permissions settings, the actual scene may be more complicated
+> **Note**: The above are only basic permission settings, and the actual scenario may be more complex
 
 ##### **4.4 Test Log Plugin**
-> **Note**: The following operations are recommended to be performed in a POC environment
->Connect to the postgres database, switch to the database that needs to be synchronized, and create a test table
+> **Attention**: The following operations are recommended to be performed in the POC environment
+>Connect to the VastBase database, switch to the database that needs to be synchronized, and create a test table
 ```
-- Assuming that the database to be synchronized is postgres and the model is public
-\c postgres
+-- Assuming the database to be synchronized is VastBase and the model is Public
+\c vastbase
 
 create table public.test_decode
 (
-  uid integer not null
-      constraint users_pk
-          primary key,
-  name varchar(50),
-  age integer,
-  score decimal
+uid    integer not null
+constraint users_pk
+primary key,
+name   varchar(50),
+age    integer,
+score  decimal
 )
 ```
-You can create a test table according to your own situation<br>
-- Create a slot connection, take the wal2json plugin as an example
+You can create a test form based on your own situation<br>
+- Create a slot connection using the wal2json plugin as an example
 ```
-select * from pg_create_logical_replication_slot('slot_test','wal2json')
+select * from pg_create_logical_replication_slot('slot_test', 'wal2json')
 ```
-- After the creation is successful, insert a piece of data into the test table<br>
-- Monitor the log, check the returned result, and see if there is any information about the insert operation just now<br>
+- After successful creation, insert a piece of data into the test table<br>
+- Monitor the logs, check the return results, and see if there is any information about the insertion operation just now<br>
 ```
 select * from pg_logical_slot_peek_changes('slot_test', null, null)
 ```
--After success, destroy the slot connection and delete the test table<br>
+- After success, destroy the slot connection and delete the test table<br>
 ```
 select * from pg_drop_replication_slot('slot_test')
 drop table public.test_decode
 ```
 #### **4.5 Exception Handling**
-- **Slot Cleanup**<br>
-  If tapdata is interrupted due to an uncontrollable exception (power failure, process crash, etc.), the slot connection cannot be deleted from the pg master node correctly, and a slot connection quota will always be occupied. You need to manually log in to the master node to delete
-  Query slot information
+- Slot cleaning
+If tapdata is interrupted by an uncontrollable exception (power outage, process crash, etc.), it will cause the slot connection to not be deleted correctly from the PG master node, and will continue to occupy one slot connection slot. Manual login to the master node is required to delete it
+Query slot information
 ```
-// Check if there is slot_name With tapdata_ cdc_ start information
- TABLE pg_replication_slots;
+//Check if there is any information with slot_name starting with tapdata_cdc_
+TABLE pg_replication_slots;
 ```
 - **Delete slot node**<br>
 ```
 select * from pg_drop_replication_slot('tapdata');
 ```
 - **Delete operation**<br>
-  When using the wal2json plug-in to decode, if the source table does not have a primary key, the delete operation of incremental synchronization cannot be achieved
+When decoding with the wal2json plugin, if the source table does not have a primary key, incremental synchronization deletion cannot be achieved
 
-#### **4.6 Incremental synchronization using the last update timestamp**
-##### **4.6.1 Noun Explanation**
-**schema**: Chinese is the model, pgsql has a total of 3 levels of directories, library -> model -> table. In the following command, the <schema> character needs to be filled in the name of the model where the table is located
-##### **4.6.2 Pre-preparation (this step only needs to be done once)**
-- **Create public function**
-  In the database, execute the following command
+#### **4.6 Incremental synchronization using the last updated timestamp**
+##### **4.6.1 Definition of Nouns**
+**Schema**: In Chinese, it means model. pgSQL has 3 levels of directories, Library ->Model ->Table. The<schema>character in the following command needs to be filled in with the model name where the table is located
+##### **4.6.2 Preparation in advance (this step only requires one operation)**
+- **Create a public function**
+In the database, execute the following command
 ```
 CREATE OR REPLACE FUNCTION <schema>.update_lastmodified_column()
-    RETURNS TRIGGER language plpgsql AS $$
-    BEGIN
-        NEW.last_update = now();
-        RETURN NEW;
-    END;
+RETURNS TRIGGER language plpgsql AS $$
+BEGIN
+NEW.last_update = now();
+RETURN NEW;
+END;
 $$;
 ```
-- **Create field and trigger**
-> **Note**: The following operations need to be performed once for each table
-Assume that the table whose last update needs to be added is named mytable
-- **Create last_update field**
+- **Create fields and triggers**
+>**Note**: The following operations need to be performed once for each table
+     Assuming that the table name for adding the last update is mytable
+- **Create last_uUpdate field**
 ```
 alter table <schema>.mytable add column last_udpate timestamp default now();
 ```
 - **Create trigger**
 ```
 create trigger trg_uptime before update on <schema>.mytable for each row execute procedure
-    update_lastmodified_column();
+update_lastmodified_column();
 ```
-### **5. Full type field support**
+### **5.  Full type field support**
 - smallint
 - integer
 - bigint
@@ -182,7 +141,7 @@ create trigger trg_uptime before update on <schema>.mytable for each row execute
 - real
 - double precision
 - character
-- character varying
+- varchar
 - text
 - bytea
 - bit
@@ -205,14 +164,14 @@ create trigger trg_uptime before update on <schema>.mytable for each row execute
 - uuid
 - xml
 - json
-- tsvector (cdc not supported, no error)
-- tsquery (cdc not supported, no error)
+- tsvector (does not support increment and does not report errors)
+- tsquery (does not support increment without error)
 - oid
-- regproc (cdc not supported, no error)
-- regprocedure (cdc not supported, no error)
-- regoper (cdc not supported, no error)
-- regoperator (cdc not supported, no error)
-- regclass (cdc not supported, no error)
-- regtype (cdc not supported, no error)
-- regconfig (cdc not supported, no error)
-- regdictionary (cdc not supported, no error)
+- regproc (does not support increment and does not report errors)
+- regprocedure (incremental does not support error free)
+- regoper (does not support increments and does not report errors)
+- regoperator (does not support increment without error)
+- regclass (does not support increment without error)
+- regtype (does not support increment without error)
+- regconfig (does not support increment and does not report errors)
+- dictionary (does not support increment and does not report errors)

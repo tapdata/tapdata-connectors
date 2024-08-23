@@ -4,7 +4,6 @@
     "icon": "icons/postgres.png",
     "doc" : "${doc}",
     "id": "postgres",
-    "authentication": "Alpha",
     "tags": ["Database", "ssl", "doubleActive"]
   },
   "configOptions": {
@@ -131,6 +130,10 @@
             {
               "label": "PGOUTPUT",
               "value": "pgoutput"
+            },
+            {
+              "label": "WALMINER",
+              "value": "walminer"
             }
           ]
         },

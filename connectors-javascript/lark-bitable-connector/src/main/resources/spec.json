@@ -4,7 +4,6 @@
     "icon": "icon/bitable.png",
     "doc" : "${doc}",
     "id": "feishu-bitable",
-    "authentication": "Beta",
     "tags": ["SaaS"]
   },
   "configOptions": {

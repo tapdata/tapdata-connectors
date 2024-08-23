@@ -4,8 +4,7 @@
     "icon": "icons/atlas.png",
     "doc" : "${doc}",
     "tags" : ["schema-free","Database"],
-    "id": "mongodb-atlas",
-    "authentication": "Alpha"
+    "id": "mongodb-atlas"
   },
   "configOptions": {
     "capabilities": [

@@ -4,7 +4,6 @@
     "icon": "icons/redis.png",
     "doc": "${doc}",
     "id": "redis",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {

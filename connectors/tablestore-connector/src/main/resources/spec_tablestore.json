@@ -4,7 +4,6 @@
     "icon": "icons/tablestore.png",
     "doc" : "${doc}",
     "id": "tablestore",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {

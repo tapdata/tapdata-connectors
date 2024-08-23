@@ -4,7 +4,6 @@
     "icon": "icons/kafka.png",
     "doc": "${doc}",
     "id": "kafka",
-    "authentication": "Alpha",
     "tags": [
       "Database",
       "schema-free"

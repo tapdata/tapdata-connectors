@@ -1,12 +1,12 @@
 ## **连接配置帮助**
-### **1. POSTGRESQL安装说明**
-请遵循以下说明以确保在 Tapdata 中成功添加和使用PostgreSQL数据库。
+### **1. VASTBASE安装说明**
+请遵循以下说明以确保在 Tapdata 中成功添加和使用VASTBASE数据库。
 ### **2. 支持版本**
-PostgreSQL 9.4、9.5、9.6、10.x、11.x、12版本
+VASTBASE-G100 版本
 ### **3. CDC原理和支持**
 #### **3.1 CDC原理**
-PostgreSQL 的逻辑解码功能最早出现在9.4版本中，它是一种机制，允许提取提交到事务日志中的更改，并通过输出插件以用户友好的方式处理这些更改。
-此输出插件必须在运行PostgreSQL服务器之前安装，并与一个复制槽一起启用，以便客户端能够使用更改。
+VASTBASE 的逻辑解码功能与Postgres相同，它是一种机制，允许提取提交到事务日志中的更改，并通过输出插件以用户友好的方式处理这些更改。
+
 #### **3.2 CDC支持**
 - **逻辑解码**（Logical Decoding）：用于从 WAL 日志中解析逻辑变更事件
 - **复制协议**（Replication Protocol）：提供了消费者实时订阅（甚至同步订阅）数据库变更的机制
@@ -28,48 +28,7 @@ alter table '[schema]'.'[table name]' REPLICA IDENTITY FULL`
 ```
 
 #### **4.2 插件安装**
-- [decorderbufs](https://github.com/debezium/postgres-decoderbufs)
-- [Protobuf-c 1.2+](https://github.com/protobuf-c/protobuf-c)
-- [protobuf ](https://blog.csdn.net/gumingyaotangwei/article/details/78936608)
-- [PostGIS 2.1+ ](http://www.postgis.net/)
-- [wal2json ](https://github.com/eulerto/wal2json/blob/master/README.md)
-- pgoutput(pg 10.0+)
-
-**安装步骤**<br>
-以 wal2json 为例，安装步骤如下<br>
-确保环境变量PATH中包含"/bin"<br>
-```
-export PATH=$PATH:<postgres安装路径>/bin
-```
-**安装插件**<br>
-```
-git clone https://github.com/eulerto/wal2json -b master --single-branch \
-&& cd wal2json \
-&& USE_PGXS=1 make \
-&& USE_PGXS=1 make install \
-&& cd .. \
-&& rm -rf wal2json
-```
-安装插件报错处理`make`命令执行，遇到类似 `fatal error: [xxx].h: No such file or directory `的异常信息<br>
-**原因**：缺少postgresql-server-dev<br>
-**解决方案**：安装postgresql-server-dev，以debian系统为例<br>
-```
-// 版本号例如:9.4, 9.6等
-apt-get install -y postgresql-server-dev-<版本号>
-```
-**配置文件**<br>
-如果你正在使用一个支持的逻辑解码插件(不能是 pgoutput )，并且它已经安装，配置服务器在启动时加载插件:<br>
-```
-postgresql.conf
-shared_preload_libraries = 'decoderbufs,wal2json'
-```
-配置replication<br>
-```
-# REPLICATION
-wal_level = logical
-max_wal_senders = 1 # 大于0即可
-max_replication_slots = 1 # 大于0即可
-```
+（目前VASTBASE自带wal2json插件）
 
 #### **4.3 权限**
 ##### **4.3.1 作为源**
@@ -102,10 +61,10 @@ ON ALL TABLES IN SCHEMA <schemaname> TO <username>;
 
 ##### **4.4  测试日志插件**
 > **注意**：以下操作建议在POC环境进行
->连接postgres数据库，切换至需要同步的数据库，创建一张测试表
+>连接vastbase数据库，切换至需要同步的数据库，创建一张测试表
 ```
--- 假设需要同步的数据库为postgres，模型为public
-\c postgres
+-- 假设需要同步的数据库为vastbase，模型为public
+\c vastbase
 
 create table public.test_decode
 (
@@ -182,7 +141,7 @@ create trigger trg_uptime before update on <schema>.mytable for each row execute
 - real
 - double precision
 - character
-- character varying
+- varchar
 - text
 - bytea
 - bit

@@ -180,7 +180,7 @@ public abstract class ConnectorBase implements TapConnector {
     }
 
     public static TestItem testItem(String item, int resultCode) {
-        return testItem(item, resultCode, null);
+        return new TestItem(item, resultCode, null);
     }
 
     public static TestItem testItem(String item, int resultCode, String information) {

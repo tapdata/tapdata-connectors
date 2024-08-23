@@ -4,7 +4,6 @@
     "icon": "icons/vastbase.png",
     "doc" : "${doc}",
     "id": "vastbase",
-    "authentication": "Alpha",
     "tags": ["Database", "ssl", "doubleActive"]
   },
   "configOptions": {
@@ -442,7 +441,7 @@
       "fixed": true,
       "to": "TapString"
     },
-    "character varying[($byte)]": {
+    "varchar[($byte)]": {
       "byte": 10485760,
       "priority": 1,
       "defaultByte": 10485760,
