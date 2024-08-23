@@ -4,7 +4,7 @@ import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
-import io.tapdata.connector.postgres.cdc.WalLogMiner;
+import io.tapdata.connector.postgres.cdc.WalLogMinerV2;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
@@ -399,7 +399,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            new WalLogMiner(postgresJdbcContext, tapLogger)
+            new WalLogMinerV2(postgresJdbcContext, tapLogger)
                     .watch(tableList, nodeContext.getTableMap())
                     .offset(offsetState)
                     .registerConsumer(consumer, recordSize)
@@ -446,7 +446,7 @@ public class PostgresConnector extends CommonDbConnector {
             });
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            new WalLogMiner(postgresJdbcContext, tapLogger)
+            new WalLogMinerV2(postgresJdbcContext, tapLogger)
                     .watch(schemaTableMap, nodeContext.getTableMap())
                     .offset(offsetState)
                     .registerConsumer(consumer, batchSize)
@@ -471,7 +471,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            String walLsn = timestampToWalLsn(offsetStartTime);
+            String walLsn = timestampToWalLsnV2(offsetStartTime);
             tapLogger.info("timestampToStreamOffset start at {}", walLsn);
             return walLsn;
         }
@@ -488,6 +488,36 @@ public class PostgresConnector extends CommonDbConnector {
             buildSlot(connectorContext, false);
         }
         return new PostgresOffset();
+    }
+
+    private String timestampToWalLsnV2(Long offsetStartTime) throws SQLException {
+        String walDirectory = getWalDirectory();
+        AtomicReference<String> lsn = new AtomicReference<>();
+        if (EmptyKit.isNull(offsetStartTime)) {
+            postgresJdbcContext.queryWithNext("SELECT pg_current_wal_lsn()", resultSet -> lsn.set(resultSet.getString(1)));
+        } else {
+            postgresJdbcContext.prepareQuery("SELECT * FROM pg_ls_waldir() where modification>? order by modification", Collections.singletonList(new Timestamp(offsetStartTime)), resultSet -> {
+                if (resultSet.next()) {
+                    lsn.set(resultSet.getString(1));
+                }
+            });
+            try (
+                    Connection connection = jdbcContext.getConnection();
+                    Statement statement = connection.createStatement();
+                    PreparedStatement preparedStatement = connection.prepareStatement("select * from walminer_contents where timestamp >= ? order by start_lsn limit 1")
+            ) {
+                statement.execute(String.format("select walminer_wal_add('%s')", walDirectory + lsn.get()));
+                statement.execute("select walminer_all()");
+                preparedStatement.setObject(1, new Timestamp(offsetStartTime));
+                try (ResultSet resultSet = preparedStatement.executeQuery()) {
+                    if (resultSet.next()) {
+                        lsn.set(resultSet.getString("start_lsn"));
+                    }
+                }
+                statement.execute("select walminer_stop()");
+            }
+        }
+        return lsn.get() + "," + lsn.get();
     }
 
     private String timestampToWalLsn(Long offsetStartTime) throws SQLException {
