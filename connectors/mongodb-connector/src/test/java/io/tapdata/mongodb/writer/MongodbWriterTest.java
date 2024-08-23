@@ -8,6 +8,8 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
+import io.tapdata.pdk.core.utils.CommonUtils;
+import io.tapdata.utils.AppType;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -37,6 +39,7 @@ class MongodbWriterTest {
 
 	@BeforeEach
 	void setUp() {
+		CommonUtils.setProperty("app_type", AppType.DAAS.name());
 		globalStateMap = new KVMap<Object>() {
 			Map<String, Object> map = new HashMap<>();
 			@Override
