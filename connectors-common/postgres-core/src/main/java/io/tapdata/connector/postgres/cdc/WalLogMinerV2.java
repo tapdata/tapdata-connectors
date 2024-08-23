@@ -367,6 +367,6 @@ public class WalLogMinerV2 {
     private static final String WALMINER_BY_LSN = "select walminer_by_lsn('%s', '%s', true)";
     private static final String WALMINER_CONTENTS_SCHEMA = "select * from walminer_contents where minerd=true and start_lsn>'%s' and schema='%s' order by start_lsn";
     private static final String WALMINER_CONTENTS_TABLE = "select * from walminer_contents where minerd=true and start_lsn>'%s' and schema='%s' and relation in ('%s') order by start_lsn";
-    private static final String MULTI_WALMINER_CONTENTS_SCHEMA = "select * from walminer_contents minerd=true and where start_lsn>'%s' and schema in ('%s') order by start_lsn";
-    private static final String MULTI_WALMINER_CONTENTS_TABLE = "select * from walminer_contents minerd=true and where start_lsn>'%s' and (%s) order by start_lsn";
+    private static final String MULTI_WALMINER_CONTENTS_SCHEMA = "select * from walminer_contents where minerd=true and start_lsn>'%s' and schema in ('%s') order by start_lsn";
+    private static final String MULTI_WALMINER_CONTENTS_TABLE = "select * from walminer_contents where minerd=true and start_lsn>'%s' and (%s) order by start_lsn";
 }
