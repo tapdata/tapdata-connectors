@@ -49,6 +49,7 @@ public class WalLogMinerV2 {
     private final PostgresConfig postgresConfig;
     private boolean withSchema;
     Map<String, List<String>> schemaTableMap;
+    private String dropTransactionId;
 
     public WalLogMinerV2(PostgresJdbcContext postgresJdbcContext, Log tapLogger) {
         this.postgresJdbcContext = postgresJdbcContext;
@@ -185,6 +186,21 @@ public class WalLogMinerV2 {
                         normalRedo.setTableName(relation);
                         normalRedo.setCdcSequenceStr(walSearchLsn + "," + continuesLsn);
                         collectRedo(normalRedo, resultSet);
+                        //双活情形下，需要过滤_tap_double_active记录的同事务数据
+                        if (Boolean.TRUE.equals(postgresConfig.getDoubleActive())) {
+                            if ("_tap_double_active".equals(relation)) {
+                                dropTransactionId = normalRedo.getTransactionId();
+                                continue;
+                            } else {
+                                if (null != dropTransactionId) {
+                                    if (dropTransactionId.equals(normalRedo.getTransactionId())) {
+                                        continue;
+                                    } else {
+                                        dropTransactionId = null;
+                                    }
+                                }
+                            }
+                        }
                         concurrentProcessor.runAsync(normalRedo, r -> {
                             try {
                                 if (parseRedo(r)) {
