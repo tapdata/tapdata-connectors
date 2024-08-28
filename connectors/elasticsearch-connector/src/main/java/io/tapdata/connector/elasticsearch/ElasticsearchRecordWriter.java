@@ -15,7 +15,6 @@ import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.action.support.WriteRequest;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
@@ -40,7 +39,6 @@ public class ElasticsearchRecordWriter {
     private boolean hasPk = false;
     private WriteListResult<TapRecordEvent> listResult;
     private final MessageDigest md = MessageDigest.getInstance("SHA-256");
-    private final Map<String, TapRecordEvent> eventMap = new HashMap<>();
 
     private ElasticsearchExceptionCollector exceptionCollector;
 
@@ -158,7 +156,6 @@ public class ElasticsearchRecordWriter {
         TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
         Map<String, Object> value = insertRecordEvent.getAfter();
         String id = getId(value).toString();
-        eventMap.put(id, insertRecordEvent);
         return new IndexRequest(tapTable.getId().toLowerCase()).id(id).source(value);
     }
 
@@ -166,15 +163,31 @@ public class ElasticsearchRecordWriter {
         TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
         Map<String, Object> value = updateRecordEvent.getAfter();
         String id = getId(value).toString();
-        eventMap.put(id, updateRecordEvent);
         return new UpdateRequest(tapTable.getId().toLowerCase(), id).retryOnConflict(3).doc(value);
     }
 
     private UpdateRequest upsertDocument(TapRecordEvent recordEvent) {
-        TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
-        Map<String, Object> value = updateRecordEvent.getAfter();
-        String id = getId(value).toString();
-        eventMap.put(id, updateRecordEvent);
+        Map<String, Object> value;
+        String id;
+        if (recordEvent instanceof TapInsertRecordEvent) {
+            TapInsertRecordEvent tapInsertRecordEvent = (TapInsertRecordEvent) recordEvent;
+            value = tapInsertRecordEvent.getAfter();
+            id = getId(value).toString();
+        } else if (recordEvent instanceof TapUpdateRecordEvent) {
+            TapUpdateRecordEvent tapUpdateRecordEvent = (TapUpdateRecordEvent) recordEvent;
+            value = tapUpdateRecordEvent.getAfter();
+            Map<String, Object> before = tapUpdateRecordEvent.getBefore();
+            if (null != before) {
+                id = getId(before).toString();
+                if (StringUtils.isBlank(id)) {
+                    id = getId(value).toString();
+                }
+            } else {
+                id = getId(value).toString();
+            }
+        } else {
+            throw new RuntimeException("Unsupported record event type: " + recordEvent.getClass().getName());
+        }
         return new UpdateRequest(tapTable.getId().toLowerCase(), id).retryOnConflict(3).doc(value).docAsUpsert(true);
     }
 
@@ -182,7 +195,6 @@ public class ElasticsearchRecordWriter {
         TapDeleteRecordEvent deleteRecordEvent = (TapDeleteRecordEvent) recordEvent;
         Map<String, Object> value = deleteRecordEvent.getBefore();
         String id = getId(value).toString();
-        eventMap.put(id, deleteRecordEvent);
         return new DeleteRequest(tapTable.getId().toLowerCase(), id);
     }
 
