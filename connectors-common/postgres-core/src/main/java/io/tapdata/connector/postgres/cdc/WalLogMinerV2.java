@@ -360,6 +360,7 @@ public class WalLogMinerV2 {
                 stringObjectEntry.setValue(stringBuilder.toString());
                 break;
             case "timestamp without time zone":
+            case "timestamp":
                 stringObjectEntry.setValue(Timestamp.valueOf((String) value).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
                 break;
             case "timestamp with time zone":
@@ -368,6 +369,7 @@ public class WalLogMinerV2 {
                 stringObjectEntry.setValue(Timestamp.valueOf(timestamp).toLocalDateTime().atZone(TimeZone.getTimeZone("GMT" + timezone + ":00").toZoneId()));
                 break;
             case "time without time zone":
+            case "time":
                 stringObjectEntry.setValue(LocalTime.parse((String) value).atDate(LocalDate.ofYearDay(1970, 1)).minusHours(postgresConfig.getZoneOffsetHour()));
                 break;
             case "time with time zone":
@@ -379,7 +381,7 @@ public class WalLogMinerV2 {
     }
 
     private static final String WALMINER_STOP = "select walminer_stop()";
-    private static final String WALMINER_NEXT_LSN = "select pg_lsn_smaller(pg_lsn_pli('%s',10000000), pg_current_wal_lsn())";
+    private static final String WALMINER_NEXT_LSN = "select pg_current_wal_lsn()";
     private static final String WALMINER_BY_LSN = "select walminer_by_lsn('%s', '%s', true)";
     private static final String WALMINER_CONTENTS_SCHEMA = "select * from walminer_contents where minerd=true and start_lsn>'%s' and schema='%s' order by start_lsn";
     private static final String WALMINER_CONTENTS_TABLE = "select * from walminer_contents where minerd=true and start_lsn>'%s' and schema='%s' and relation in ('%s') order by start_lsn";
