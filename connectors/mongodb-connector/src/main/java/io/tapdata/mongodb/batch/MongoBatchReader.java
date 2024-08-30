@@ -128,7 +128,7 @@ public class MongoBatchReader {
             bsonArray.add(bsonDocument);
             scheduler.scheduleAtFixedRate(() -> {
                 mongoClient.getDatabase(mongoConfig.getDatabase()).runCommand(new BsonDocument("refreshSessions", bsonArray));
-                log.info("refresh session");
+                log.debug("refresh session");
             }, 1, 1, TimeUnit.MINUTES);
             FindIterable<RawBsonDocument> findIterable = findIterable(param, clientSession);
             batchReadCursor(findIterable);
