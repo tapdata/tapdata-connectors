@@ -169,7 +169,7 @@ public class WalLogMinerV2 extends AbstractWalLogMiner {
                     }
                 }
                 statement.execute(WALMINER_STOP);
-                try (ResultSet resultSet = statement.executeQuery("select max(start_lsn),max(commit_lsn) from walminer_contents")) {
+                try (ResultSet resultSet = statement.executeQuery("select max(start_lsn||''),max(commit_lsn||'') from walminer_contents")) {
                     if (resultSet.next()) {
                         if (EmptyKit.isNotNull(resultSet.getString(1))) {
                             startLsn = resultSet.getString(1);
@@ -180,7 +180,7 @@ public class WalLogMinerV2 extends AbstractWalLogMiner {
                 if (commitLsn.equals(commitLsnTemp)) {
                     retry++;
                     if (retry > 5) {
-                        tapLogger.warn("Walminer retry more than 5 times, skip lsn");
+                        tapLogger.info("Walminer retry more than 5 times, skip lsn");
                         startLsn = nextLsn.get();
                     }
                 } else {
