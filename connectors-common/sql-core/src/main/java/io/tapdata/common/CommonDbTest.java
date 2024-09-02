@@ -3,6 +3,8 @@ package io.tapdata.common;
 import io.tapdata.constant.ConnectionTypeEnum;
 import io.tapdata.constant.DbTestItem;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.exception.testItem.TapTestConnectionEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestHostPortEx;
@@ -10,6 +12,7 @@ import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
 import io.tapdata.util.NetUtil;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.sql.Connection;
@@ -51,6 +54,7 @@ public class CommonDbTest implements AutoCloseable {
             testFunctionMap.put("testStreamRead", this::testStreamRead);
             testFunctionMap.put(TestItem.ITEM_TIME_DETECTION, this::testTimeDifference);
         }
+        testFunctionMap.put(TestItem.ITEM_DATASOURCE_INSTANCE_INFO, this::testDatasourceInstanceInfo);
     }
 
     public Boolean testOneByOne() {
@@ -175,6 +179,26 @@ public class CommonDbTest implements AutoCloseable {
             return timeDifference;
         }
         return 0L;
+    }
+    protected Boolean testDatasourceInstanceInfo() {
+        return true;
+    }
+    protected void buildDatasourceInstanceInfo(ConnectionOptions connectionOptions) {
+        if (StringUtils.isNotBlank(getDatasourceInstanceId())) {
+            Map<String, String> datasourceInstanceInfo = new HashMap<>();
+            datasourceInstanceInfo.put("tag", getDatasourceInstanceTag());
+            datasourceInstanceInfo.put("id", getDatasourceInstanceId());
+            connectionOptions.setDatasourceInstanceInfo(datasourceInstanceInfo);
+            consumer.accept(testItem(TestItem.ITEM_DATASOURCE_INSTANCE_INFO, TestItem.RESULT_SUCCESSFULLY, getDatasourceInstanceTag()));
+        }
+    }
+    public String getDatasourceInstanceTag() {
+        return String.join(":"
+                , commonDbConfig.getHost()
+                , String.valueOf(commonDbConfig.getPort()));
+    }
+    public String getDatasourceInstanceId() {
+        return StringKit.md5(getDatasourceInstanceTag());
     }
 
     //healthCheck-ping
