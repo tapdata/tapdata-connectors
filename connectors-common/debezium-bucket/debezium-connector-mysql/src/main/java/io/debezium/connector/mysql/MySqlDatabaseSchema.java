@@ -299,7 +299,7 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
     }
 
     protected String handleForUnparseableDDL(String ddlStatements){
-        Pattern pattern = Pattern.compile("(?:,\n\\sGLOBAL\\s+INDEX|,\n\\sUNIQUE\\s+GLOBAL\\s+INDEX)[\\s\\S]*?PARTITIONS \\d+", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Pattern pattern = Pattern.compile("(?:,\n\\sGLOBAL\\s+INDEX|,\n\\sUNIQUE\\s+GLOBAL\\s+INDEX)[\\s\\S]*?PARTITIONS \\d+|[\\s\\S]DEFAULT\\s+[^(,\\s]+\\(\\)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
         Matcher matcher = pattern.matcher(ddlStatements);
         List<String> ignoreSql = new ArrayList<>();
         AtomicReference<String> filteredSql = new AtomicReference<>(ddlStatements);
