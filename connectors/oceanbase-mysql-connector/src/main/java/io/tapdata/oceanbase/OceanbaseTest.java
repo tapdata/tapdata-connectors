@@ -41,6 +41,11 @@ public class OceanbaseTest extends MysqlConnectionTest implements AutoCloseable 
         }
         return true;
     }
+    @Override
+    protected Boolean testDatasourceInstanceInfo() {
+        buildDatasourceInstanceInfo(connectionOptions);
+        return true;
+    }
 
     private static final String ITEM_OB_LOG_PROXY = "ObLogProxy";
 }

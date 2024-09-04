@@ -7,6 +7,7 @@ import io.tapdata.connector.kafka.admin.DefaultAdmin;
 import io.tapdata.connector.kafka.config.AdminConfiguration;
 import io.tapdata.connector.kafka.config.KafkaConfig;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -35,13 +36,15 @@ public class KafkaTest extends CommonDbTest {
     private KafkaService kafkaService;
     private boolean isSchemaRegister;
     private KafkaSRService kafkaSRService;
+    protected ConnectionOptions connectionOptions;
 
-    public KafkaTest(KafkaConfig kafkaConfig, Consumer<TestItem> consumer, KafkaService kafkaService, CommonDbConfig config, Boolean isSchemaRegister, KafkaSRService kafkaSRService) {
+    public KafkaTest(KafkaConfig kafkaConfig, Consumer<TestItem> consumer, KafkaService kafkaService, CommonDbConfig config, Boolean isSchemaRegister, KafkaSRService kafkaSRService, ConnectionOptions connectionOptions) {
         super(config, consumer);
         this.kafkaConfig = kafkaConfig;
         this.kafkaService = kafkaService;
         this.isSchemaRegister = isSchemaRegister;
         this.kafkaSRService = kafkaSRService;
+        this.connectionOptions = connectionOptions;
     }
 
     @Override
@@ -140,6 +143,11 @@ public class KafkaTest extends CommonDbTest {
 
     public Boolean testStreamRead() {
         consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY));
+        return true;
+    }
+    @Override
+    protected Boolean testDatasourceInstanceInfo() {
+        buildDatasourceInstanceInfo(connectionOptions);
         return true;
     }
 }
