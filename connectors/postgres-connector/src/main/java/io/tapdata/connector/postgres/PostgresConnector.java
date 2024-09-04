@@ -4,7 +4,7 @@ import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
-import io.tapdata.connector.postgres.cdc.WalLogMiner;
+import io.tapdata.connector.postgres.cdc.WalLogMinerV2;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
@@ -52,6 +52,7 @@ import org.postgresql.util.PGobject;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.*;
+import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -399,7 +400,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            new WalLogMiner(postgresJdbcContext, tapLogger)
+            new WalLogMinerV2(postgresJdbcContext, tapLogger)
                     .watch(tableList, nodeContext.getTableMap())
                     .offset(offsetState)
                     .registerConsumer(consumer, recordSize)
@@ -423,9 +424,6 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
-        cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
-        testReplicateIdentity(nodeContext.getTableMap());
-        buildSlot(nodeContext, true);
         Map<String, List<String>> schemaTableMap = new HashMap<>();
         for (ConnectionConfigWithTables withTables : connectionConfigWithTables) {
             if (null == withTables.getConnectionConfig())
@@ -448,24 +446,35 @@ public class PostgresConnector extends CommonDbConnector {
                 return tableList;
             });
         }
-        cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerConsumer(consumer, batchSize);
-        cdcRunner.startCdcRunner();
-        if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
-            Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
-            if (throwable instanceof SQLException) {
-                exceptionCollector.collectTerminateByServer(throwable);
-                exceptionCollector.collectCdcConfigInvalid(throwable);
-                exceptionCollector.revealException(throwable);
+        if ("walminer".equals(postgresConfig.getLogPluginName())) {
+            new WalLogMinerV2(postgresJdbcContext, tapLogger)
+                    .watch(schemaTableMap, nodeContext.getTableMap())
+                    .offset(offsetState)
+                    .registerConsumer(consumer, batchSize)
+                    .startMiner(this::isAlive);
+        } else {
+            cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+            testReplicateIdentity(nodeContext.getTableMap());
+            buildSlot(nodeContext, true);
+            cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerConsumer(consumer, batchSize);
+            cdcRunner.startCdcRunner();
+            if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
+                Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
+                if (throwable instanceof SQLException) {
+                    exceptionCollector.collectTerminateByServer(throwable);
+                    exceptionCollector.collectCdcConfigInvalid(throwable);
+                    exceptionCollector.revealException(throwable);
+                }
+                throw throwable;
             }
-            throw throwable;
         }
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            String walLsn = timestampToWalLsn(offsetStartTime);
-            tapLogger.info("timestampToStreamOffset start at {}", walLsn);
-            return walLsn;
+            String timestamp = timestampToWalLsnV2(offsetStartTime);
+            tapLogger.info("timestampToStreamOffset start at {}", timestamp);
+            return timestamp;
         }
         if (EmptyKit.isNotNull(offsetStartTime)) {
             tapLogger.warn("Postgres specified time start increment is not supported except walminer, use the current time as the start increment");
@@ -480,6 +489,47 @@ public class PostgresConnector extends CommonDbConnector {
             buildSlot(connectorContext, false);
         }
         return new PostgresOffset();
+    }
+
+    private String getTimestampOffset(Long offsetStartTime) throws SQLException {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+        AtomicReference<Timestamp> timestamp = new AtomicReference<>();
+        if (EmptyKit.isNull(offsetStartTime)) {
+            postgresJdbcContext.queryWithNext("SELECT clock_timestamp()", resultSet -> timestamp.set(resultSet.getTimestamp(1)));
+            return sdf.format(timestamp.get());
+        } else {
+            return sdf.format(offsetStartTime);
+        }
+    }
+
+    private String timestampToWalLsnV2(Long offsetStartTime) throws SQLException {
+        String walDirectory = getWalDirectory();
+        AtomicReference<String> lsn = new AtomicReference<>();
+        if (EmptyKit.isNull(offsetStartTime)) {
+            postgresJdbcContext.queryWithNext("SELECT pg_current_wal_lsn()", resultSet -> lsn.set(resultSet.getString(1)));
+        } else {
+            postgresJdbcContext.prepareQuery("SELECT * FROM pg_ls_waldir() where modification>? order by modification", Collections.singletonList(new Timestamp(offsetStartTime)), resultSet -> {
+                if (resultSet.next()) {
+                    lsn.set(resultSet.getString(1));
+                }
+            });
+            try (
+                    Connection connection = jdbcContext.getConnection();
+                    Statement statement = connection.createStatement();
+                    PreparedStatement preparedStatement = connection.prepareStatement("select * from walminer_contents where timestamp >= ? order by start_lsn limit 1")
+            ) {
+                statement.execute(String.format("select walminer_wal_add('%s')", walDirectory + lsn.get()));
+                statement.execute("select walminer_all()");
+                preparedStatement.setObject(1, new Timestamp(offsetStartTime));
+                try (ResultSet resultSet = preparedStatement.executeQuery()) {
+                    if (resultSet.next()) {
+                        lsn.set(resultSet.getString("start_lsn"));
+                    }
+                }
+                statement.execute("select walminer_stop()");
+            }
+        }
+        return lsn.get() + "," + lsn.get() + ",0";
     }
 
     private String timestampToWalLsn(Long offsetStartTime) throws SQLException {

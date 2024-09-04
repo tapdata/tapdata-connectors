@@ -137,7 +137,7 @@ public class MongodbWriter {
 			.removedCount(deleted.get()));
 	}
 
-	private void removeOidIfNeed(List<TapRecordEvent> tapRecordEvents, Collection<String> pks) {
+	protected void removeOidIfNeed(List<TapRecordEvent> tapRecordEvents, Collection<String> pks) {
 		if (null == tapRecordEvents || null == pks) {
 			return;
 		}
@@ -146,6 +146,13 @@ public class MongodbWriter {
 		}
 		// remove _id in after
 		for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
+			Object mergeInfoObj = tapRecordEvent.getInfo(MergeInfo.EVENT_INFO_KEY);
+			if (mergeInfoObj instanceof MergeInfo) {
+				MergeInfo mergeInfo = (MergeInfo) mergeInfoObj;
+				if (mergeInfo.getLevel() > 1) {
+					continue;
+				}
+			}
 			Map<String, Object> after = null;
 			if (tapRecordEvent instanceof TapInsertRecordEvent) {
 				after = ((TapInsertRecordEvent) tapRecordEvent).getAfter();

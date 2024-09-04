@@ -4,16 +4,10 @@ import io.tapdata.common.concurrent.ConcurrentProcessor;
 import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
-import io.tapdata.entity.event.dml.TapInsertRecordEvent;
-import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
-import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 
 import java.sql.*;
 import java.util.ArrayList;
@@ -21,35 +15,18 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static io.tapdata.base.ConnectorBase.list;
 
-public class WalLogMiner {
+public class WalLogMiner extends AbstractWalLogMiner {
 
-    private PostgresJdbcContext postgresJdbcContext;
-    private Log tapLogger;
-    private StreamReadConsumer consumer;
-    private int recordSize;
-    private List<String> tableList;
-    private boolean filterSchema;
-    private KVReadOnlyMap<TapTable> tableMap;
     private String walFile;
     private String walDir;
     private String walLsn;
-    private AtomicReference<Throwable> threadException = new AtomicReference<>();
-    private PostgresCDCSQLParser sqlParser = new PostgresCDCSQLParser();
-
 
     public WalLogMiner(PostgresJdbcContext postgresJdbcContext, Log tapLogger) {
-        this.postgresJdbcContext = postgresJdbcContext;
-        this.tapLogger = tapLogger;
-    }
-
-    public WalLogMiner watch(List<String> tableList, KVReadOnlyMap<TapTable> tableMap) {
-        this.tableList = tableList;
-        filterSchema = tableList.size() > 50;
-        this.tableMap = tableMap;
-        return this;
+        super(postgresJdbcContext, tapLogger);
     }
 
     public WalLogMiner offset(Object offsetState) {
@@ -66,12 +43,6 @@ public class WalLogMiner {
         } else {
             throw new TapPdkOffsetOutOfLogEx("postgres", offsetState, new IllegalStateException("offsetState must be a string"));
         }
-        return this;
-    }
-
-    public WalLogMiner registerConsumer(StreamReadConsumer consumer, int recordSize) {
-        this.consumer = consumer;
-        this.recordSize = recordSize;
         return this;
     }
 
@@ -92,6 +63,7 @@ public class WalLogMiner {
                 }
             }
             Thread t = new Thread(() -> {
+                consumer.streamReadStarted();
                 NormalRedo lastRedo = null;
                 AtomicReference<List<TapEvent>> events = new AtomicReference<>(list());
                 while (isAlive.get()) {
@@ -115,10 +87,12 @@ public class WalLogMiner {
                     }
                 }
             });
-            t.setName("Db2GrpcLogMiner-Consumer");
+            t.setName("wal-miner-Consumer");
             t.start();
+            boolean print = true;
             while (isAlive.get()) {
                 if (EmptyKit.isNotNull(threadException.get())) {
+                    consumer.streamReadEnded();
                     throw new RuntimeException(threadException.get());
                 }
                 if (first) {
@@ -129,7 +103,9 @@ public class WalLogMiner {
                     try (ResultSet resultSet = preparedStatement.executeQuery()) {
                         if (resultSet.next()) {
                             lastModified = resultSet.getTimestamp("modification");
-                            walFile = resultSet.getString("name");
+                            String name = resultSet.getString("name");
+                            print = !walFile.equals(name);
+                            walFile = name;
                         } else {
                             TapSimplify.sleep(1000);
                             continue;
@@ -138,74 +114,69 @@ public class WalLogMiner {
                 }
                 statement.execute(String.format(WALMINER_WAL_ADD, walDir + walFile));
                 statement.execute(WALMINER_ALL);
-                try (ResultSet resultSet = statement.executeQuery(getAnalysisSql(filterSchema, walLsn, postgresJdbcContext.getConfig().getSchema(), tableList))) {
+                String analysisSql = getAnalysisSql(walLsn);
+                if (print) {
+                    tapLogger.info("Start mining wal file: " + walDir + walFile);
+                }
+                try (ResultSet resultSet = statement.executeQuery(analysisSql)) {
                     while (resultSet.next()) {
                         String relation = resultSet.getString("relation");
-                        if (filterSchema && !tableList.contains(relation)) {
-                            continue;
+                        String schema = resultSet.getString("schema");
+                        walLsn = resultSet.getString("start_lsn");
+                        if (withSchema) {
+                            if (filterSchema && !schemaTableMap.get(schema).contains(relation)) {
+                                continue;
+                            }
+                        } else {
+                            if (filterSchema && !tableList.contains(relation)) {
+                                continue;
+                            }
                         }
                         NormalRedo normalRedo = new NormalRedo();
+                        normalRedo.setNameSpace(schema);
                         normalRedo.setTableName(relation);
+                        normalRedo.setCdcSequenceStr(walDir + walFile + "," + walLsn);
                         collectRedo(normalRedo, resultSet);
                         concurrentProcessor.runAsync(normalRedo, r -> {
                             try {
-                                parseRedo(r);
-                                return r;
+                                if (parseRedo(r)) {
+                                    return r;
+                                }
                             } catch (Throwable e) {
                                 threadException.set(e);
-                                return null;
                             }
+                            return null;
                         });
                     }
                 }
             }
+            consumer.streamReadEnded();
         }
     }
 
-    private void collectRedo(NormalRedo normalRedo, ResultSet resultSet) throws SQLException {
-        normalRedo.setOperation(resultSet.getString("sqlkind"));
-        normalRedo.setCdcSequenceStr(walDir + walFile + "," + resultSet.getString("start_lsn"));
-        normalRedo.setTransactionId(resultSet.getString("xid"));
-        normalRedo.setTimestamp(resultSet.getTimestamp("timestamp").getTime());
-        normalRedo.setSqlRedo(resultSet.getString("op_text"));
-        normalRedo.setSqlUndo(resultSet.getString("undo_text"));
-    }
-
-    private String getAnalysisSql(boolean filterSchema, String startLsn, String schema, List<String> tableList) {
-        if (filterSchema) {
-            return String.format(WALMINER_CONTENTS_SCHEMA, startLsn, schema);
+    private String getAnalysisSql(String startLsn) {
+        if (withSchema) {
+            if (filterSchema) {
+                return String.format(MULTI_WALMINER_CONTENTS_SCHEMA, startLsn, String.join("','", schemaTableMap.keySet()));
+            } else {
+                return String.format(MULTI_WALMINER_CONTENTS_TABLE, startLsn, schemaTableMap.entrySet().stream().map(e ->
+                        String.format("schema='%s' and relation in ('%s')", e.getKey(), String.join("','", e.getValue()))).collect(Collectors.joining(" or ")));
+            }
         } else {
-            return String.format(WALMINER_CONTENTS_TABLE, startLsn, schema, String.join("','", tableList));
+            if (filterSchema) {
+                return String.format(WALMINER_CONTENTS_SCHEMA, startLsn, postgresConfig.getSchema());
+            } else {
+                return String.format(WALMINER_CONTENTS_TABLE, startLsn, postgresConfig.getSchema(), String.join("','", tableList));
+            }
         }
-    }
-
-    private TapEvent createEvent(NormalRedo normalRedo) {
-        TapEvent tapEvent;
-        switch (normalRedo.getOperation()) {
-            case "1":
-                tapEvent = new TapInsertRecordEvent().init().after(normalRedo.getRedoRecord()).referenceTime(normalRedo.getTimestamp());
-                break;
-            case "2":
-                tapEvent = new TapUpdateRecordEvent().init().after(normalRedo.getRedoRecord()).before(normalRedo.getUndoRecord()).referenceTime(normalRedo.getTimestamp());
-                break;
-            case "3":
-                tapEvent = new TapDeleteRecordEvent().init().before(normalRedo.getRedoRecord()).referenceTime(normalRedo.getTimestamp());
-                break;
-            default:
-                throw new IllegalStateException("Unexpected value: " + normalRedo.getOperation());
-        }
-        return tapEvent;
-    }
-
-    private void parseRedo(NormalRedo normalRedo) {
-        normalRedo.setRedoRecord(sqlParser.from(normalRedo.getSqlRedo(), false).getData());
-        normalRedo.setUndoRecord(sqlParser.from(normalRedo.getSqlUndo(), true).getData());
     }
 
     private static final String WALMINER_FIND_NEXT_WAL = "SELECT * FROM pg_ls_waldir() where modification>? order by modification limit 1";
     private static final String WALMINER_FIND_WAL = "select * from pg_ls_waldir() where name='%s'";
     private static final String WALMINER_WAL_ADD = "select walminer_wal_add('%s')";
     private static final String WALMINER_ALL = "select walminer_all()";
-    private static final String WALMINER_CONTENTS_SCHEMA = "select * from walminer_contents where start_lsn>'%s' and schema='%s'";
-    private static final String WALMINER_CONTENTS_TABLE = "select * from walminer_contents where start_lsn>'%s' and schema='%s' and relation in ('%s')";
+    private static final String WALMINER_CONTENTS_SCHEMA = "select * from walminer_contents where minerd=true and start_lsn>'%s' and schema='%s'";
+    private static final String WALMINER_CONTENTS_TABLE = "select * from walminer_contents where minerd=true and start_lsn>'%s' and schema='%s' and relation in ('%s')";
+    private static final String MULTI_WALMINER_CONTENTS_SCHEMA = "select * from walminer_contents minerd=true and where start_lsn>'%s' and schema in ('%s')";
+    private static final String MULTI_WALMINER_CONTENTS_TABLE = "select * from walminer_contents minerd=true and where start_lsn>'%s' and (%s)";
 }

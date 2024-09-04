@@ -344,6 +344,29 @@
             }
           ]
         },
+        "batchReadThreadSize": {
+          "required": true,
+          "type": "string",
+          "title": "${batchReadThreadSize}",
+          "default": 4,
+          "x-index": 13,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 1,
+            "max": 16
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".hashSplit"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "partitionRoot": {
           "type": "boolean",
           "title": "${partitionRoot}",
@@ -393,6 +416,7 @@
       "hashSplit": "Hash split",
       "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the hash value, suitable for large table full-stage sharded synchronization",
       "maxSplit": "Maximum number of splits",
+      "batchReadThreadSize": "Batch read thread size",
       "partitionRoot": "Partition table CDC root table",
       "partitionRootTooltip": "Only postgres-v13 and above and log plugin pgoutput are supported. When the switch is turned on, the partition table CDC event only perceives the root table, and when the switch is turned off, only perceives each sub-table"
     },
@@ -419,6 +443,7 @@
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "开关打开时，可以根据哈希值进行分片，适用于大表全量阶段分片同步",
       "maxSplit": "最大分片数",
+      "batchReadThreadSize": "批量读取线程数",
       "partitionRoot": "分区表CDC根表",
       "partitionRootTooltip": "仅postgres-v13以上且日志插件pgoutput时才支持，开关打开时，分区表CDC事件仅感知根表，关闭时，仅感知各子表"
     },
@@ -445,6 +470,7 @@
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "開關打開時，可以根據哈希值進行分片，適用於大表全量階段分片同步",
       "maxSplit": "最大分片數",
+      "batchReadThreadSize": "批量讀取線程數",
       "partitionRoot": "分區表CDC根表",
       "partitionRootTooltip": "僅postgres-v13以上且日誌插件pgoutput時才支持，開關打開時，分區表CDC事件僅感知根表，關閉時，僅感知各子表"
     }

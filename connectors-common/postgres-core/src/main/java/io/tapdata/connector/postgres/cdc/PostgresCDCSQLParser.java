@@ -44,11 +44,42 @@ public class PostgresCDCSQLParser extends CDCSQLParser {
         throw sr.ex("SQL must start with 'INSERT' or 'DELETE' or 'UPDATE'");
     }
 
+    protected ResultDO updateBuild(SQLReader sr) {
+        String tmp;
+        ResultDO result = new ResultDO(Operate.UPDATE);
+
+        setTableName(sr, result);
+        if (!sr.equalsIgnoreCaseAndMove("set") || !sr.nextAndSkip(isSkip)) {
+            throw sr.ex("Not found 'set' after table name");
+        }
+        if (sr.getData().length() > sr.position() + 6 && sr.getData().substring(sr.position(), sr.position() + 6).equalsIgnoreCase("where ")) {
+            return null;
+        }
+        // load set
+        while (true) {
+            tmp = loadName(sr, CANNOT_FIND_COLUMN_NAME);
+            sr.nextAndSkip(isSkip);
+            result.putData(tmp, loadConditionValue(sr));
+            sr.nextAndSkip(isSkip);
+            if (sr.current(',')) {
+                sr.nextAndSkip(isSkip);
+                continue;
+            }
+            break;
+        }
+
+        setWhere(sr, result);
+        return result;
+    }
+
     protected ResultDO undoUpdateBuild(SQLReader sr) {
         ResultDO result = new ResultDO(Operate.UPDATE);
         setTableName(sr, result);
         if (!sr.equalsIgnoreCaseAndMove("set") || !sr.nextAndSkip(isSkip)) {
             throw sr.ex("Not found 'set' after table name");
+        }
+        if (sr.getData().length() > sr.position() + 6 && sr.getData().substring(sr.position(), sr.position() + 6).equalsIgnoreCase("where ")) {
+            return null;
         }
         // load set
         while (true) {
@@ -114,6 +145,8 @@ public class PostgresCDCSQLParser extends CDCSQLParser {
             return sr.loadInQuote(50, escape);
         } else if (isNumber.check(sr.current())) {
             return sr.loadIn(isBinary, "Can't found number value");
+        } else if (judgeBit(sr)) {
+            return loadValue(sr);
         } else {
             String tmp = loadName(sr, "Can't found function name");
             if ("true".equalsIgnoreCase(tmp)) {
@@ -127,6 +160,16 @@ public class PostgresCDCSQLParser extends CDCSQLParser {
             }
             throw sr.ex("Value error '" + tmp + "'");
         }
+    }
+
+    public boolean judgeBit(SQLReader sr) {
+        if (sr.length() >= sr.position() + 3) {
+            if(sr.getData().charAt(sr.position()) == 'B' && sr.getData().charAt(sr.position() + 1) == '\'') {
+                sr.moveTo(sr.position() + 1);
+                return true;
+            }
+        }
+        return false;
     }
 
     protected void setWhere(SQLReader sr, ResultDO result) {

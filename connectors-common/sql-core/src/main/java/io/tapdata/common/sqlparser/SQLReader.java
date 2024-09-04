@@ -111,7 +111,12 @@ public class SQLReader {
     public String loadIn(IChecker fn, String errorMsg) {
         int begin = position;
         while (fn.check(current)) {
-            next();
+            if (hasNext()) {
+                next();
+            } else {
+                position++;
+                break;
+            }
         }
         if (begin < position) {
             try {
