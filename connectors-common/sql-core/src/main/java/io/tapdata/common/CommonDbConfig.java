@@ -104,7 +104,7 @@ public class CommonDbConfig implements Serializable {
      * @return ? extends CommonDbConfig
      */
     public CommonDbConfig load(Map<String, Object> map) {
-        properties = new Properties();
+        properties = EmptyKit.isNull(properties) ? new Properties() : properties;
         assert beanUtils != null;
         beanUtils.mapToBean(map, this);
         if (EmptyKit.isBlank(timezone)) {
