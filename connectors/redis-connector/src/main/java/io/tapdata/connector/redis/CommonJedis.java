@@ -32,6 +32,9 @@ public class CommonJedis implements JedisCommands, Closeable {
                 .blockingSocketTimeoutMillis(60000)
                 .connectionTimeoutMillis(5000)
                 .socketTimeoutMillis(5000);
+        if (EmptyKit.isNotBlank(redisConfig.getUsername())) {
+            clientConfigBuilder.user(redisConfig.getUsername());
+        }
         if (EmptyKit.isNotBlank(redisConfig.getPassword())) {
             clientConfigBuilder.password(redisConfig.getPassword());
         }
