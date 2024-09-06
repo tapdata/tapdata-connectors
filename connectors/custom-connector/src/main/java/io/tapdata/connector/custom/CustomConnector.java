@@ -24,6 +24,7 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.FormatUtils;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -35,6 +36,7 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.entity.message.CommandInfo;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import javax.script.Invocable;
@@ -59,6 +61,7 @@ public class CustomConnector extends ConnectorBase {
     private CustomConfig customConfig;
     private ScriptEngine initScriptEngine;
     private ConcurrentHashMap<String, ScriptEngine> writeEnginePool;
+    private final static String pdkId = "custom";
 
     private void initConnection(TapConnectionContext connectorContext) throws ScriptException {
         customConfig = new CustomConfig().load(connectorContext.getConnectionConfig());
@@ -421,6 +424,7 @@ public class CustomConnector extends ConnectorBase {
         AtomicLong insert = new AtomicLong(0);
         AtomicLong update = new AtomicLong(0);
         AtomicLong delete = new AtomicLong(0);
+        List<Map<String, Object>> list = new ArrayList<>();
         for (TapRecordEvent event : tapRecordEvents) {
             Map<String, Object> temp = new HashMap<>();
             if (event instanceof TapInsertRecordEvent) {
@@ -437,16 +441,28 @@ public class CustomConnector extends ConnectorBase {
                 delete.incrementAndGet();
             }
             temp.put("from", tapTable.getId());
-            try {
-                ScriptUtil.executeScript(scriptEngine, ScriptUtil.TARGET_FUNCTION_NAME, new ArrayList<Map<String, Object>>() {{
-                    add(temp);
-                }});
-                result.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get());
-            } catch (Exception e) {
-                result.addError(event, e);
-                break;
+            if(!customConfig.getBatchProcess()){
+                try {
+                    ScriptUtil.executeScript(scriptEngine, ScriptUtil.TARGET_FUNCTION_NAME, new ArrayList<Map<String, Object>>() {{
+                        add(temp);
+                    }});
+                    result.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get());
+                } catch (Exception e) {
+                    result.addError(event, e);
+                    break;
+                }
+            }else{
+                list.add(temp);
             }
         }
+       if(CollectionUtils.isNotEmpty(list)){
+           try {
+               ScriptUtil.executeScript(scriptEngine, ScriptUtil.TARGET_FUNCTION_NAME, list);
+               result.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get());
+           } catch (Exception e) {
+               throw new TapPdkRetryableEx(pdkId,e);
+           }
+       }
         writeListResultConsumer.accept(result);
     }
 
