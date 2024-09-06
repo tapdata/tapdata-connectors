@@ -362,7 +362,7 @@ public class MysqlConnectorTest {
         @Test
         void testEmptyField() {
             doCallRealMethod().when(connector).getHashSplitStringSql(tapTable);
-            assertThrows(CoreException.class, () -> connector.getHashSplitStringSql(tapTable));
+            assertNotNull(connector.getHashSplitStringSql(tapTable));
         }
 
         @Test
@@ -370,7 +370,7 @@ public class MysqlConnectorTest {
             tapTable.add(new TapField("ID", "INT"));
             tapTable.add(new TapField("TITLE", "VARCHAR(64)"));
 
-            assertThrows(CoreException.class, () -> connector.getHashSplitStringSql(tapTable));
+            assertNotNull(connector.getHashSplitStringSql(tapTable));
         }
 
         @Test

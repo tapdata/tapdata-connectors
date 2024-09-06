@@ -24,7 +24,7 @@ public class GeometryConverter implements CustomConverter<SchemaBuilder, Relatio
                              ConverterRegistration<SchemaBuilder> registration) {
 
         if (geometryTypes.contains(column.typeName())) {
-            registration.register(geometrySchema, x -> EmptyKit.isNull(x) ? null : x.toString());
+            registration.register(geometrySchema, x -> EmptyKit.isNull(x) ? null : x);
         }
     }
 }
