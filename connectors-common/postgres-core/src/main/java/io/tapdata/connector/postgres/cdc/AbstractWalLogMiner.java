@@ -45,6 +45,7 @@ public abstract class AbstractWalLogMiner {
     protected boolean withSchema;
     protected Map<String, List<String>> schemaTableMap;
     protected String dropTransactionId;
+    protected String walLogDirectory;
 
     public AbstractWalLogMiner(PostgresJdbcContext postgresJdbcContext, Log tapLogger) {
         this.postgresJdbcContext = postgresJdbcContext;
@@ -77,6 +78,11 @@ public abstract class AbstractWalLogMiner {
                 dataTypeMap.putAll(table.getNameFieldMap().entrySet().stream().collect(Collectors.toMap(v -> schema + "." + tableName + "." + v.getKey(), e -> e.getValue().getPureDataType())));
             }
         }));
+        return this;
+    }
+
+    public AbstractWalLogMiner withWalLogDirectory(String walLogDirectory) {
+        this.walLogDirectory = walLogDirectory;
         return this;
     }
 

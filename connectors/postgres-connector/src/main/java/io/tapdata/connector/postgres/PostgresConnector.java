@@ -402,6 +402,7 @@ public class PostgresConnector extends CommonDbConnector {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             new WalLogMinerV2(postgresJdbcContext, tapLogger)
                     .watch(tableList, nodeContext.getTableMap())
+                    .withWalLogDirectory(getWalDirectory())
                     .offset(offsetState)
                     .registerConsumer(consumer, recordSize)
                     .startMiner(this::isAlive);
@@ -449,6 +450,7 @@ public class PostgresConnector extends CommonDbConnector {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             new WalLogMinerV2(postgresJdbcContext, tapLogger)
                     .watch(schemaTableMap, nodeContext.getTableMap())
+                    .withWalLogDirectory(getWalDirectory())
                     .offset(offsetState)
                     .registerConsumer(consumer, batchSize)
                     .startMiner(this::isAlive);

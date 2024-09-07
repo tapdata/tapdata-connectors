@@ -11,6 +11,7 @@ import io.tapdata.kit.EmptyKit;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -77,6 +78,7 @@ public class WalLogMinerV2 extends AbstractWalLogMiner {
         AtomicReference<String> nextLsn = new AtomicReference<>();
         int retry = 0;
         Connection connection = postgresJdbcContext.getConnection();
+        connection.setAutoCommit(true);
         Statement statement = connection.createStatement();
         try {
             while (isAlive.get()) {
@@ -97,24 +99,59 @@ public class WalLogMinerV2 extends AbstractWalLogMiner {
                     continue;
                 }
                 tapLogger.info("Start mining wal lsn range: {} - {}", startLsn, nextLsn.get());
+                boolean addFile = false;
                 while (isAlive.get()) {
                     try {
                         statement.execute(String.format(WALMINER_BY_LSN, startLsn, nextLsn.get()));
                         break;
                     } catch (Exception e) {
                         try {
-                            statement.execute(WALMINER_STOP);
+                            if (e instanceof SQLException && "XX000".equals(((SQLException) e).getSQLState())) {
+                                tapLogger.warn("check point not found, retry use add file from {} to {}", startLsn, nextLsn.get());
+                                String startFile = null;
+                                String endFile = null;
+                                try (ResultSet resultSet = statement.executeQuery(String.format(WALMINER_GET_WAL_NAME, startLsn))) {
+                                    if (resultSet.next()) {
+                                        startFile = resultSet.getString(1);
+                                    }
+                                }
+                                try (ResultSet resultSet = statement.executeQuery(String.format(WALMINER_GET_WAL_NAME, nextLsn.get()))) {
+                                    if (resultSet.next()) {
+                                        endFile = resultSet.getString(1);
+                                    }
+                                }
+                                List<String> walFileNames = getWalFileNames(startFile, endFile);
+                                if (EmptyKit.isNotEmpty(walFileNames)) {
+                                    addFile = true;
+                                    for (String walFileName : walFileNames) {
+                                        statement.execute(String.format(WALMINER_WAL_ADD, walLogDirectory + walFileName));
+                                    }
+                                    statement.execute(WALMINER_ALL);
+                                } else {
+                                    statement.execute(String.format(WALMINER_BY_LSN_VAGUE, startLsn, nextLsn.get()));
+                                }
+                                break;
+                            } else {
+                                statement.execute(WALMINER_STOP);
+                            }
                         } catch (Exception ignore) {
                             tapLogger.warn("Walminer by lsn occurs error, change statement and retry: from {} to {}", startLsn, nextLsn.get());
                             EmptyKit.closeQuietly(statement);
                             EmptyKit.closeQuietly(connection);
                             connection = postgresJdbcContext.getConnection();
+                            connection.setAutoCommit(true);
                             statement = connection.createStatement();
                         }
                         TapSimplify.sleep(2000);
                     }
                 }
-                String analysisSql = getAnalysisSql(startLsn);
+                String analysisSql;
+                if (addFile) {
+                    analysisSql = getAnalysisSqlForFile(startLsn, nextLsn.get());
+                } else {
+                    analysisSql = getAnalysisSql(startLsn);
+                }
+
                 try (ResultSet resultSet = statement.executeQuery(analysisSql)) {
                     while (resultSet.next()) {
                         String relation = resultSet.getString("relation");
@@ -213,6 +250,40 @@ public class WalLogMinerV2 extends AbstractWalLogMiner {
         }
     }
 
+    private List<String> getWalFileNames(String startFile, String endFile) {
+        if (EmptyKit.isNull(startFile) || EmptyKit.isNull(endFile)) {
+            return Collections.emptyList();
+        }
+        List<String> walFileNames = new ArrayList<>();
+        try {
+            postgresJdbcContext.query(String.format(WALMINER_LIST_FILES, startFile, endFile), rs -> {
+                while (rs.next()) {
+                    walFileNames.add(rs.getString(1));
+                }
+            });
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+        return walFileNames;
+    }
+
+    private String getAnalysisSqlForFile(String startLsn, String nextLsn) {
+        if (withSchema) {
+            if (filterSchema) {
+                return String.format(MULTI_WALMINER_CONTENTS_SCHEMA_FILE, startLsn, nextLsn, String.join("','", schemaTableMap.keySet()));
+            } else {
+                return String.format(MULTI_WALMINER_CONTENTS_TABLE_FILE, startLsn, nextLsn, schemaTableMap.entrySet().stream().map(e ->
+                        String.format("schema='%s' and relation in ('%s')", e.getKey(), String.join("','", e.getValue()))).collect(Collectors.joining(" or ")));
+            }
+        } else {
+            if (filterSchema) {
+                return String.format(WALMINER_CONTENTS_SCHEMA_FILE, startLsn, nextLsn, postgresConfig.getSchema());
+            } else {
+                return String.format(WALMINER_CONTENTS_TABLE_FILE, startLsn, nextLsn, postgresConfig.getSchema(), String.join("','", tableList));
+            }
+        }
+    }
+
     private String getWalminerNextLsn(String currentLsn, String walSearchLsn) {
         //16进制转10进制
         long current = getLongValueFromLsn(currentLsn);
@@ -230,10 +301,19 @@ public class WalLogMinerV2 extends AbstractWalLogMiner {
         return Long.parseLong(array[0], 16) * 4294967296L + Long.parseLong(array[1], 16);
     }
 
+    private static final String WALMINER_LIST_FILES = "SELECT name FROM pg_ls_waldir() where name between '%s' and '%s'";
+    private static final String WALMINER_GET_WAL_NAME = "select pg_walfile_name('%s')";
+    private static final String WALMINER_WAL_ADD = "select walminer_wal_add('%s')";
+    private static final String WALMINER_ALL = "select walminer_all()";
     private static final String WALMINER_CURRENT_LSN = "select pg_current_wal_lsn()";
+    private static final String WALMINER_BY_LSN_VAGUE = "select walminer_by_lsn('%s', '%s')";
     private static final String WALMINER_BY_LSN = "select walminer_by_lsn('%s', '%s', true)";
     private static final String WALMINER_CONTENTS_SCHEMA = "select * from walminer_contents where minerd=true and commit_lsn>'%s' and schema='%s' order by start_lsn";
     private static final String WALMINER_CONTENTS_TABLE = "select * from walminer_contents where minerd=true and commit_lsn>'%s' and schema='%s' and relation in ('%s') order by start_lsn";
     private static final String MULTI_WALMINER_CONTENTS_SCHEMA = "select * from walminer_contents where minerd=true and commit_lsn>'%s' and schema in ('%s') order by start_lsn";
     private static final String MULTI_WALMINER_CONTENTS_TABLE = "select * from walminer_contents where minerd=true and commit_lsn>'%s' and (%s) order by start_lsn";
+    private static final String WALMINER_CONTENTS_SCHEMA_FILE = "select * from walminer_contents where minerd=true and commit_lsn>'%s' and commit_lsn<='%s' and schema='%s' order by start_lsn";
+    private static final String WALMINER_CONTENTS_TABLE_FILE = "select * from walminer_contents where minerd=true and commit_lsn>'%s' and commit_lsn<='%s' and schema='%s' and relation in ('%s') order by start_lsn";
+    private static final String MULTI_WALMINER_CONTENTS_SCHEMA_FILE = "select * from walminer_contents where minerd=true and commit_lsn>'%s' and commit_lsn<='%s' and schema in ('%s') order by start_lsn";
+    private static final String MULTI_WALMINER_CONTENTS_TABLE_FILE = "select * from walminer_contents where minerd=true and commit_lsn>'%s' and commit_lsn<='%s' and (%s) order by start_lsn";
 }
