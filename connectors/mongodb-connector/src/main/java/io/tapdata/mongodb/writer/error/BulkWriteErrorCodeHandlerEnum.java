@@ -14,7 +14,7 @@ import java.util.Map;
  **/
 public enum BulkWriteErrorCodeHandlerEnum {
 	CODE_28(28, new Code28Handler()),
-	CODE_11000(11000, new Code11000Handler()),
+//	CODE_11000(11000, new Code11000Handler()),
 	CODE_2(2, new Code2Handler()),
 	;
 	private final int code;
