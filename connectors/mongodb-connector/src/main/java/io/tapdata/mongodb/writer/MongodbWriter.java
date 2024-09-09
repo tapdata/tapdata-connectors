@@ -262,13 +262,6 @@ public class MongodbWriter {
 	private BulkWriteModel buildBulkWriteModel(List<TapRecordEvent> tapRecordEvents, TapTable table, AtomicLong inserted, AtomicLong updated, AtomicLong deleted, Collection<String> pks) {
 		BulkWriteModel bulkWriteModel = new BulkWriteModel(pks.contains("_id"));
 		for (TapRecordEvent recordEvent : tapRecordEvents) {
-			if (!(recordEvent instanceof TapInsertRecordEvent)) {
-				bulkWriteModel.setAllInsert(false);
-			}
-			if (bulkWriteModel.isAllInsert()) {
-				bulkWriteModel.addOnlyInsertModel(new InsertOneModel<>(new Document(((TapInsertRecordEvent) recordEvent).getAfter())));
-			}
-
 			UpdateOptions options = new UpdateOptions().upsert(true);
 			final Map<String, Object> info = recordEvent.getInfo();
 			if (MapUtils.isNotEmpty(info) && info.containsKey(MergeInfo.EVENT_INFO_KEY)) {
