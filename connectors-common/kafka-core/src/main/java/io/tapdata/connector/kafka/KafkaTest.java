@@ -150,4 +150,9 @@ public class KafkaTest extends CommonDbTest {
         buildDatasourceInstanceInfo(connectionOptions);
         return true;
     }
+
+    @Override
+    public String datasourceInstanceTag() {
+        return kafkaConfig.getNameSrvAddr();
+    }
 }

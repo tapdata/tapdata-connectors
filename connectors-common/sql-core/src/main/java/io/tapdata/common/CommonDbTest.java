@@ -184,21 +184,21 @@ public class CommonDbTest implements AutoCloseable {
         return true;
     }
     protected void buildDatasourceInstanceInfo(ConnectionOptions connectionOptions) {
-        if (StringUtils.isNotBlank(getDatasourceInstanceId())) {
+        if (StringUtils.isNotBlank(datasourceInstanceId())) {
             Map<String, String> datasourceInstanceInfo = new HashMap<>();
-            datasourceInstanceInfo.put("tag", getDatasourceInstanceTag());
-            datasourceInstanceInfo.put("id", getDatasourceInstanceId());
+            datasourceInstanceInfo.put("tag", datasourceInstanceTag());
+            datasourceInstanceInfo.put("id", datasourceInstanceId());
             connectionOptions.setDatasourceInstanceInfo(datasourceInstanceInfo);
-            consumer.accept(testItem(TestItem.ITEM_DATASOURCE_INSTANCE_INFO, TestItem.RESULT_SUCCESSFULLY, getDatasourceInstanceTag()));
+            consumer.accept(testItem(TestItem.ITEM_DATASOURCE_INSTANCE_INFO, TestItem.RESULT_SUCCESSFULLY, datasourceInstanceTag()));
         }
     }
-    public String getDatasourceInstanceTag() {
+    public String datasourceInstanceTag() {
         return String.join(":"
                 , commonDbConfig.getHost()
                 , String.valueOf(commonDbConfig.getPort()));
     }
-    public String getDatasourceInstanceId() {
-        return StringKit.md5(getDatasourceInstanceTag());
+    public String datasourceInstanceId() {
+        return StringKit.md5(datasourceInstanceTag());
     }
 
     //healthCheck-ping
