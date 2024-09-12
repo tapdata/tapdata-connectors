@@ -33,7 +33,7 @@ public class CommonDbTest implements AutoCloseable {
     protected final String uuid = UUID.randomUUID().toString();
     protected static final String TEST_HOST_PORT_MESSAGE = "connected to %s:%s succeed!";
     protected static final String TEST_CONNECTION_LOGIN = "login succeed!";
-    protected static final String TEST_WRITE_TABLE = "tapdata___test";
+    protected static final String TEST_WRITE_TABLE = "tap___test";
 
     public CommonDbTest() {
 
