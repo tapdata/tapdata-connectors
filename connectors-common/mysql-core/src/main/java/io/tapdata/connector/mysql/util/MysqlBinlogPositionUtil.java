@@ -103,7 +103,7 @@ public class MysqlBinlogPositionUtil implements AutoCloseable {
 
             long eventTs = event.getHeader().getTimestamp();
             if (eventTs != 0) {
-                if (eventTs <= ts) {
+                if (eventTs < ts) {
                     if (-1 == findPosition.get()) {
                         logger.info("Check MysqlBinlogPosition in {}, first event: {}", filename, event);
                     }
