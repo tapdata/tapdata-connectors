@@ -52,6 +52,7 @@ import org.postgresql.util.PGobject;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.*;
+import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -401,6 +402,7 @@ public class PostgresConnector extends CommonDbConnector {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             new WalLogMinerV2(postgresJdbcContext, tapLogger)
                     .watch(tableList, nodeContext.getTableMap())
+                    .withWalLogDirectory(getWalDirectory())
                     .offset(offsetState)
                     .registerConsumer(consumer, recordSize)
                     .startMiner(this::isAlive);
@@ -448,6 +450,7 @@ public class PostgresConnector extends CommonDbConnector {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             new WalLogMinerV2(postgresJdbcContext, tapLogger)
                     .watch(schemaTableMap, nodeContext.getTableMap())
+                    .withWalLogDirectory(getWalDirectory())
                     .offset(offsetState)
                     .registerConsumer(consumer, batchSize)
                     .startMiner(this::isAlive);
@@ -471,9 +474,9 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            String walLsn = timestampToWalLsnV2(offsetStartTime);
-            tapLogger.info("timestampToStreamOffset start at {}", walLsn);
-            return walLsn;
+            String timestamp = timestampToWalLsnV2(offsetStartTime);
+            tapLogger.info("timestampToStreamOffset start at {}", timestamp);
+            return timestamp;
         }
         if (EmptyKit.isNotNull(offsetStartTime)) {
             tapLogger.warn("Postgres specified time start increment is not supported except walminer, use the current time as the start increment");
@@ -488,6 +491,17 @@ public class PostgresConnector extends CommonDbConnector {
             buildSlot(connectorContext, false);
         }
         return new PostgresOffset();
+    }
+
+    private String getTimestampOffset(Long offsetStartTime) throws SQLException {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+        AtomicReference<Timestamp> timestamp = new AtomicReference<>();
+        if (EmptyKit.isNull(offsetStartTime)) {
+            postgresJdbcContext.queryWithNext("SELECT clock_timestamp()", resultSet -> timestamp.set(resultSet.getTimestamp(1)));
+            return sdf.format(timestamp.get());
+        } else {
+            return sdf.format(offsetStartTime);
+        }
     }
 
     private String timestampToWalLsnV2(Long offsetStartTime) throws SQLException {
@@ -517,7 +531,7 @@ public class PostgresConnector extends CommonDbConnector {
                 statement.execute("select walminer_stop()");
             }
         }
-        return lsn.get() + "," + lsn.get();
+        return lsn.get() + "," + lsn.get() + ",0";
     }
 
     private String timestampToWalLsn(Long offsetStartTime) throws SQLException {

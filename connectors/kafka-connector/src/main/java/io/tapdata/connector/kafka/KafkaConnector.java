@@ -247,7 +247,7 @@ public class KafkaConnector extends ConnectorBase {
             onStart(connectionContext);
             CommonDbConfig config = new CommonDbConfig();
             config.set__connectionType(kafkaConfig.get__connectionType());
-            KafkaTest kafkaTest = new KafkaTest(kafkaConfig, consumer, this.kafkaService, config, isSchemaRegister, kafkaSRService);
+            KafkaTest kafkaTest = new KafkaTest(kafkaConfig, consumer, this.kafkaService, config, isSchemaRegister, kafkaSRService, connectionOptions);
             kafkaTest.testOneByOne();
         } catch (Throwable throwable) {
             TapLogger.error(TAG, throwable.getMessage());

@@ -113,6 +113,7 @@ public class MysqlConnector extends CommonDbConnector {
         commonSqlMaker = new CommonSqlMaker('`');
         tapLogger = tapConnectionContext.getLog();
         exceptionCollector = new MysqlExceptionCollector();
+        ((MysqlExceptionCollector) exceptionCollector).setMysqlConfig(mysqlConfig);
         this.version = mysqlJdbcContext.queryVersion();
         ArrayList<Map<String, Object>> inconsistentNodes = MysqlUtil.compareMasterSlaveCurrentTime(mysqlConfig, contextMapForMasterSlave);
         if (null != inconsistentNodes && inconsistentNodes.size() == 2) {
@@ -547,8 +548,10 @@ public class MysqlConnector extends CommonDbConnector {
 
     @Override
     protected String getHashSplitStringSql(TapTable tapTable) {
-        Collection<String> pks = tapTable.primaryKeys();
-        if (pks.isEmpty()) throw new CoreException("No primary keys found for table: " + tapTable.getName());
+        Collection<String> pks = tapTable.primaryKeys(true);
+        if (pks.isEmpty()) {
+            pks = tapTable.getNameFieldMap().keySet();
+        }
         if (pks.size() == 1) {
             return "CRC32(" + pks.iterator().next() + ")";
         }

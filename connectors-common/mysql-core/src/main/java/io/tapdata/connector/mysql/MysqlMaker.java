@@ -280,8 +280,8 @@ public class MysqlMaker implements SqlMaker {
     }
 
     protected String createTableAppendField(TapField tapField) {
-        String datatype = tapField.getDataType().toUpperCase();
-        String fieldSql = "  `" + tapField.getName() + "`" + " " + tapField.getDataType().toUpperCase();
+        String datatype = tapField.getDataType();
+        String fieldSql = "  `" + tapField.getName() + "`" + " " + datatype;
 
         // auto increment
         // mysql a table can only create one auto-increment column, and must be the primary key
