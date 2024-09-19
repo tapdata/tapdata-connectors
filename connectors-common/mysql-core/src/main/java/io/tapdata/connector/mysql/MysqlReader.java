@@ -306,6 +306,7 @@ public class MysqlReader implements Closeable {
 //					.with("converters", "time")
 //					.with("time.type", "io.tapdata.connector.mysql.converters.TimeConverter")
 //					.with("time.schema.name", "io.debezium.mysql.type.Time")
+                    .with("enable.time.adjuster",false)
                     .with("snapshot.locking.mode", "none");
 //            if (EmptyKit.isNotBlank(mysqlConfig.getTimezone())) {
 //                builder.with("database.serverTimezone", mysqlJdbcContext.queryTimeZone());
