@@ -486,13 +486,15 @@ public class MysqlConnector extends CommonDbConnector {
                     } else {
                         data.put(columnName, buildIllegalDate(recordEvent, illegalDateConsumer, string, illegalDateFieldName, columnName));
                     }
+                } else if (null == value) {
+                    data.put(columnName, null);
                 } else {
                     if ("TIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                         data.put(columnName, string);
                     } else if ("YEAR".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                        data.put(columnName, EmptyKit.isNull(value) ? null : resultSet.getInt(i + 1));
+                        data.put(columnName, resultSet.getInt(i + 1));
                     } else if ("TIMESTAMP".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                        data.put(columnName, EmptyKit.isNull(value) ? null : ((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
+                        data.put(columnName, ((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
                     } else if ("DATE".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
                         if (mysqlConfig.getOldVersionTimezone()) {
                             data.put(columnName, resultSet.getString(i + 1));
@@ -501,13 +503,11 @@ public class MysqlConnector extends CommonDbConnector {
                         } else {
                             data.put(columnName, value);
                         }
-                    } else if ("DATETIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                        if (value instanceof LocalDateTime) {
-                            if (mysqlConfig.getOldVersionTimezone()) {
-                                data.put(columnName, ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000)));
-                            } else {
-                                data.put(columnName, ((LocalDateTime) value).minusHours(zoneOffsetHour));
-                            }
+                    } else if ("DATETIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1)) && value instanceof LocalDateTime) {
+                        if (mysqlConfig.getOldVersionTimezone()) {
+                            data.put(columnName, ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000)));
+                        } else {
+                            data.put(columnName, ((LocalDateTime) value).minusHours(zoneOffsetHour));
                         }
                     } else {
                         data.put(columnName, value);
