@@ -22,6 +22,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.partition.TapSubPartitionTableInfo;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.TapArrayValue;
 import io.tapdata.entity.schema.value.TapDateTimeValue;
@@ -92,6 +93,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * PDK for Postgresql
@@ -447,7 +449,7 @@ public class PostgresConnector extends CommonDbConnector {
                     .registerConsumer(consumer, recordSize)
                     .startMiner(this::isAlive);
         } else {
-            cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+            cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
             cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
@@ -465,7 +467,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
-        cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+        cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
         testReplicateIdentity(nodeContext.getTableMap());
         buildSlot(nodeContext, true);
         Map<String, List<String>> schemaTableMap = new HashMap<>();
