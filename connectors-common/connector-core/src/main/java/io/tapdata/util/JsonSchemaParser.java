@@ -59,6 +59,7 @@ public class JsonSchemaParser {
                 case BOOLEAN:
                 case INTEGER:
                 case TEXT:
+                case BINARY:
                     table.add(this.buildField(parentFieldName, fieldName, jsonType));
                     break;
                 case NULL:
