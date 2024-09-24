@@ -19,6 +19,6 @@ public class JsonDeserializer implements Deserializer<Object> {
         if (jsonStr.startsWith("{")) {
             return KafkaUtils.parseJsonObject(data);
         }
-        return KafkaUtils.parseList(data, Object.class);
+        return KafkaUtils.parseList(jsonStr, Object.class);
     }
 }

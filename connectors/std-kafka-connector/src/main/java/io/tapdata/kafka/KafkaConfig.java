@@ -51,12 +51,12 @@ public class KafkaConfig extends BasicConfig implements ConnectionClusterURI, IC
     }
 
     public KafkaSerialization getConnectionKeySerialization() {
-        String keySerializer = connectionConfigGet("keySerialization", KafkaSerialization.BYTE_ARRAY.getType());
+        String keySerializer = connectionConfigGet("keySerialization", KafkaSerialization.BINARY.getType());
         return KafkaSerialization.fromString(keySerializer);
     }
 
     public KafkaSerialization getConnectionValueSerialization() {
-        String valueSerializer = connectionConfigGet("valueSerialization", KafkaSerialization.BYTE_ARRAY.getType());
+        String valueSerializer = connectionConfigGet("valueSerialization", KafkaSerialization.BINARY.getType());
         return KafkaSerialization.fromString(valueSerializer);
     }
 

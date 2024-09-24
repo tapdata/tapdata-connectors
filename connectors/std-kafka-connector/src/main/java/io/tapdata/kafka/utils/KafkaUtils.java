@@ -3,7 +3,9 @@ package io.tapdata.kafka.utils;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.parser.Feature;
-import com.alibaba.fastjson.serializer.*;
+import com.alibaba.fastjson.serializer.SerializeConfig;
+import com.alibaba.fastjson.serializer.SerializeFilter;
+import com.alibaba.fastjson.serializer.SerializerFeature;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -55,7 +57,11 @@ public class KafkaUtils {
     }
 
     public static JSONObject parseJsonObject(byte[] bytes) {
-        return JSON.parseObject(new String(bytes), features);
+        return parseJsonObject(new String(bytes));
+    }
+
+    public static JSONObject parseJsonObject(String jsonStr) {
+        return JSON.parseObject(jsonStr, features);
     }
 
     public static <T> T parseObject(byte[] bytes, Class<T> clz) {
@@ -63,7 +69,7 @@ public class KafkaUtils {
     }
 
     public static <T> List<T> parseList(byte[] bytes, Class<T> clz) {
-        return JSON.parseArray(new String(bytes), clz);
+        return parseList(new String(bytes), clz);
     }
 
     public static <T> List<T> parseList(String jsonStr, Class<T> clz) {

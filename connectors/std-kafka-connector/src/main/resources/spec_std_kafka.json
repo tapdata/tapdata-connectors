@@ -79,7 +79,7 @@
               "required": true,
               "type": "string",
               "title": "${keySerialization}",
-              "default": "ByteArray",
+              "default": "Binary",
               "x-decorator": "FormItem",
               "x-component": "Select",
               "x-decorator-props": {
@@ -88,12 +88,16 @@
               "x-index": 21,
               "enum": [
                 {
-                  "label": "Json",
-                  "value": "Json"
+                  "label": "Binary",
+                  "value": "Binary"
                 },
                 {
-                  "label": "ByteArray",
-                  "value": "ByteArray"
+                  "label": "JsonArray",
+                  "value": "JsonArray"
+                },
+                {
+                  "label": "JsonObject",
+                  "value": "JsonObject"
                 },
                 {
                   "label": "String",
@@ -121,7 +125,7 @@
               "required": true,
               "type": "string",
               "title": "${valueSerialization}",
-              "default": "ByteArray",
+              "default": "Binary",
               "x-decorator": "FormItem",
               "x-component": "Select",
               "x-decorator-props": {
@@ -130,16 +134,16 @@
               "x-index": 22,
               "enum": [
                 {
-                  "label": "Standard",
-                  "value": "Standard"
+                  "label": "Binary",
+                  "value": "Binary"
                 },
                 {
-                  "label": "Json",
-                  "value": "Json"
+                  "label": "JsonArray",
+                  "value": "JsonArray"
                 },
                 {
-                  "label": "ByteArray",
-                  "value": "ByteArray"
+                  "label": "JsonObject",
+                  "value": "JsonObject"
                 },
                 {
                   "label": "String",

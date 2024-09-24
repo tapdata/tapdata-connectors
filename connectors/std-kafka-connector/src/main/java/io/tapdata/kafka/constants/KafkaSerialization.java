@@ -8,10 +8,9 @@ package io.tapdata.kafka.constants;
  */
 public enum KafkaSerialization {
 
-    STANDARD("Standard", "MAP", true),
-    JSON_ARRAY("JsonArray", "ARRAY", true),
-    JSON_OBJECT("JsonObject", "MAP", true),
-    BYTE_ARRAY("ByteArray", "BINARY"),
+    JSON_ARRAY("JsonArray", "ARRAY", true, "Json"),
+    JSON_OBJECT("JsonObject", "MAP", true, "Json"),
+    BINARY("Binary", "BINARY", true),
     STRING("String", "STRING"),
 //    TEXT("Text", "TEXT", "String"),
 //    ARRAY("Array", "ARRAY", "ByteArray"),
