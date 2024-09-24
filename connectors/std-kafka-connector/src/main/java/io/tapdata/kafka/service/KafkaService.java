@@ -390,7 +390,9 @@ public class KafkaService implements IKafkaService {
                     logger.warn("cannot change the number of replicasSize of an existing table, will skip");
                 }
                 if (partitionNum < existTopicPartition) {
-                    logger.warn("The number of partitions set is less than or equal to the number of partitions of the existing table，will skip");
+                    logger.warn("The number of partitions set is less than to the number of partitions of the existing table，will skip");
+                } else if (partitionNum == existTopicPartition) {
+                    logger.info("The number of partitions set is equal to the number of partitions of the existing table");
                 } else {
                     getAdminService().increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
                 }
