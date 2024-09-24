@@ -59,6 +59,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.sql.Date;
+import java.sql.SQLException;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -81,20 +82,22 @@ public class TidbConnector extends CommonDbConnector {
     private TidbConfig tidbConfig;
     private TidbJdbcContext tidbJdbcContext;
     private TimeZone timezone;
+    private TimeZone dbTimezone;
     private TidbReader tidbReader;
     AtomicReference<Throwable> throwableCatch = new AtomicReference<>();
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
 
-    protected void initTimeZone() {
+    protected void initTimeZone() throws SQLException {
         if (EmptyKit.isBlank(tidbConfig.getTimezone())) {
             tidbConfig.setTimezone("+00:00");
         }
         timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
+        dbTimezone = tidbJdbcContext.queryTimeZone();
     }
 
     @Override
-    public void onStart(TapConnectionContext tapConnectionContext) {
+    public void onStart(TapConnectionContext tapConnectionContext) throws SQLException {
         this.tidbConfig = new TidbConfig().load(tapConnectionContext.getConnectionConfig());
         tidbJdbcContext = new TidbJdbcContext(tidbConfig);
         commonDbConfig = tidbConfig;
@@ -189,6 +192,7 @@ public class TidbConnector extends CommonDbConnector {
         nodeContext.getLog().info("Source timezone: {}", timezone.toZoneId().toString());
         ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
                 .withZone(timezone)
+                .withDbZone(dbTimezone)
                 .withCdcServer(cdcServer)
                 .withFeedId(feedId)
                 .withAlive(this::isAlive)

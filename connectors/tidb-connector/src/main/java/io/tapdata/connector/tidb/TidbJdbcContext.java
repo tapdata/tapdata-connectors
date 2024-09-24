@@ -52,9 +52,6 @@ public class TidbJdbcContext extends MysqlJdbcContextV2 implements Serializable 
     }
 
     public TimeZone queryTimeZone() throws SQLException {
-        if (EmptyKit.isNotBlank(((MysqlConfig) getConfig()).getTimezone())) {
-            return TimeZone.getTimeZone(ZoneId.of(((MysqlConfig) getConfig()).getTimezone()));
-        }
         AtomicReference<Long> timeOffset = new AtomicReference<>();
         queryWithNext("SELECT ROUND(TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW()) / 3600) AS timeoffset",
                 resultSet -> timeOffset.set(resultSet.getLong(1)));

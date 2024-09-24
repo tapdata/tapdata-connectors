@@ -137,7 +137,8 @@ class DDLManager implements Activity {
                     new VersionInfo(
                             String.valueOf(newDDLTableVersion.getTableVersion()),
                             newDDLTableVersion.getTableColumns(),
-                            handler.processInfo.timezone
+                            handler.processInfo.timezone,
+                            handler.processInfo.dbTimezone
                     )
             );
         }
@@ -159,13 +160,13 @@ class DDLManager implements Activity {
         String version;
         Map<String, Convert> info;
 
-        public VersionInfo(String v, List<Map<String, Object>> info, TimeZone timezone) {
+        public VersionInfo(String v, List<Map<String, Object>> info, TimeZone timezone, TimeZone dbTimezone) {
             this.version = v;
             this.info = new HashMap<>();
             if (CollectionUtils.isNotEmpty(info)) {
                 for (Map<String, Object> convertInfo : info) {
                     String columnName = String.valueOf(convertInfo.get(Convert.COLUMN_NAME));
-                    this.info.put(columnName, Convert.instance(convertInfo, timezone));
+                    this.info.put(columnName, Convert.instance(convertInfo, timezone, dbTimezone));
                 }
             }
         }
