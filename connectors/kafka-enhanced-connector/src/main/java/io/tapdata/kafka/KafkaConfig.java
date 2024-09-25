@@ -2,6 +2,7 @@ package io.tapdata.kafka;
 
 import io.tapdata.connector.config.BasicConfig;
 import io.tapdata.connector.config.ConnectionClusterURI;
+import io.tapdata.connector.config.ConnectionDatasourceInstanceInfo;
 import io.tapdata.connector.config.ConnectionExtParams;
 import io.tapdata.kafka.config.IConnectionACL;
 import io.tapdata.kafka.constants.KafkaAcksType;
@@ -24,7 +25,11 @@ import java.util.concurrent.TimeUnit;
  * @author <a href="mailto:harsen_lin@163.com">Harsen</a>
  * @version v1.0 2024/8/27 14:36 Create
  */
-public class KafkaConfig extends BasicConfig implements ConnectionClusterURI, IConnectionACL, ConnectionExtParams {
+public class KafkaConfig extends BasicConfig implements
+    ConnectionClusterURI,
+    ConnectionDatasourceInstanceInfo,
+    IConnectionACL,
+    ConnectionExtParams {
 
     public KafkaConfig(TapConnectionContext context) {
         super(context);

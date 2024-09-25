@@ -6,8 +6,11 @@ import io.tapdata.connector.tester.IStep;
 import io.tapdata.kafka.KafkaConfig;
 import io.tapdata.kafka.KafkaTester;
 import io.tapdata.kafka.service.KafkaAdminService;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.exception.testItem.TapTestAuthEx;
+
+import java.util.ArrayList;
 
 /**
  * Kafka-基础测试
@@ -55,6 +58,20 @@ public class KafkaCommonStep extends AbsStep<KafkaConfig, KafkaTester> implement
                 }
             }
         }
+        return IStep.CHECK_ITEM_APPLY;
+    }
+
+    @Override
+    public boolean testInstanceUniqueId(TestItem testItem) {
+        options().setInstanceUniqueId(StringKit.md5(String.join("|"
+            , config().getConnectionClusterURI()
+            , config().getConnectionSchemaMode().name()
+            , config().getConnectionKeySerialization().name()
+            , config().getConnectionValueSerialization().name()
+        )));
+        options().setNamespaces(new ArrayList<>());
+        testItem.setResult(TestItem.RESULT_SUCCESSFULLY);
+        testItem.setInformation(options().getInstanceUniqueId());
         return IStep.CHECK_ITEM_APPLY;
     }
 
