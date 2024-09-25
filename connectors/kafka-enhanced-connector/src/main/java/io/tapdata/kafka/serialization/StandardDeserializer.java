@@ -27,21 +27,25 @@ public class StandardDeserializer implements Deserializer<TapEvent> {
     public TapEvent deserialize(String topic, byte[] bytes) {
         if (null == bytes) return null;
 
-        JSONObject json = KafkaUtils.parseJsonObject(bytes);
-        EventOperation op = StandardEventUtils.getOp(json);
-        if (null == op) return toTapUnknownRecordEvent(topic, bytes);
+        try {
+            JSONObject json = KafkaUtils.parseJsonObject(bytes);
+            EventOperation op = StandardEventUtils.getOp(json);
+            if (null == op) return toTapUnknownRecordEvent(topic, bytes);
 
-        switch (op) {
-            case DML_INSERT:
-                return toTapInsertRecordEvent(topic, json);
-            case DML_UPDATE:
-                return toTapTapUpdateRecordEvent(topic, json);
-            case DML_DELETE:
-                return toTapDeleteRecordEvent(topic, json);
-            case DML_UNKNOWN:
-                return toTapUnknownRecordEvent(topic, json);
-            default:
-                return toTapUnknownRecordEvent(topic, bytes);
+            switch (op) {
+                case DML_INSERT:
+                    return toTapInsertRecordEvent(topic, json);
+                case DML_UPDATE:
+                    return toTapTapUpdateRecordEvent(topic, json);
+                case DML_DELETE:
+                    return toTapDeleteRecordEvent(topic, json);
+                case DML_UNKNOWN:
+                    return toTapUnknownRecordEvent(topic, json);
+                default:
+                    return toTapUnknownRecordEvent(topic, bytes);
+            }
+        } catch (Exception e) {
+            return toTapUnknownRecordEvent(topic, bytes);
         }
     }
 

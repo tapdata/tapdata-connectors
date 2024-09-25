@@ -1,5 +1,6 @@
 package io.tapdata.kafka.serialization;
 
+import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.*;
 import io.tapdata.events.EventOperation;
@@ -21,6 +22,16 @@ public class StandardSerializer implements Serializer<TapEvent> {
     @Override
     public byte[] serialize(String topic, TapEvent data) {
         Map<String, Object> map = new HashMap<>();
+        StandardEventUtils.setTs(map, data.getTime());
+        if (data instanceof TapBaseEvent) {
+            TapBaseEvent recordEvent = (TapBaseEvent) data;
+            StandardEventUtils.setOpTs(map, recordEvent.getReferenceTime());
+            StandardEventUtils.setTable(map, recordEvent.getTableId());
+            StandardEventUtils.setNamespaces(map, recordEvent.getNamespaces());
+        } else {
+            StandardEventUtils.setTable(map, topic);
+        }
+
         if (data instanceof TapRecordEvent) {
             if (data instanceof TapInsertRecordEvent) {
                 toDmlInsertMap(map, (TapInsertRecordEvent) data);
@@ -39,19 +50,7 @@ public class StandardSerializer implements Serializer<TapEvent> {
         return KafkaUtils.toJsonBytes(map);
     }
 
-    private void fillTapEventInfo(Map<String, Object> map, TapEvent event) {
-        StandardEventUtils.setTs(map, event.getTime());
-    }
-
-    private void fillTapRecordEventInfo(Map<String, Object> map, TapRecordEvent recordEvent) {
-        fillTapEventInfo(map, recordEvent);
-        StandardEventUtils.setOpTs(map, recordEvent.getReferenceTime());
-        StandardEventUtils.setTable(map, recordEvent.getTableId());
-        StandardEventUtils.setNamespaces(map, recordEvent.getNamespaces());
-    }
-
     private void toDmlInsertMap(Map<String, Object> map, TapInsertRecordEvent recordEvent) {
-        fillTapRecordEventInfo(map, recordEvent);
         StandardEventUtils.setOp(map, EventOperation.DML_INSERT);
         StandardEventUtils.setAfter(map, recordEvent.getAfter());
     }
