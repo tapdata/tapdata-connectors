@@ -1,7 +1,7 @@
 {
   "properties": {
     "name": "Kafka-Enhanced",
-    "icon": "icons/std_kafka.png",
+    "icon": "icons/kafka_enhanced.png",
     "doc": "${doc}",
     "id": "kafka_enhanced",
     "tags": [
@@ -464,7 +464,7 @@
   "messages": {
     "default": "en_US",
     "en_US": {
-      "doc": "docs/std_kafka_en_US.md",
+      "doc": "docs/kafka_enhanced_en_US.md",
       "connectMode": "Connection mode",
       "connectModeKafka": "Kafka",
       "connectModeZookeeper": "Zookeeper",
@@ -511,7 +511,7 @@
       "extParamsTypeProducer": "Production configuration"
     },
     "zh_CN": {
-      "doc": "docs/std_kafka_zh_CN.md",
+      "doc": "docs/kafka_enhanced_zh_CN.md",
       "connectMode": "连接方式",
       "connectModeKafka": "Kafka",
       "connectModeZookeeper": "Zookeeper",
@@ -558,7 +558,7 @@
       "extParamsTypeProducer": "生产配置"
     },
     "zh_TW": {
-      "doc": "docs/std_kafka_zh_TW.md",
+      "doc": "docs/kafka_enhanced_zh_TW.md",
       "connectMode": "連線方式",
       "connectModeKafka": "Kafka",
       "connectModeZookeeper": "Zookeeper",
