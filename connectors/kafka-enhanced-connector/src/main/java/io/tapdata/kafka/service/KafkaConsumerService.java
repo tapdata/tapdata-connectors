@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 
 /**
@@ -149,8 +150,10 @@ public class KafkaConsumerService implements AutoCloseable {
 
     private void run(KafkaOffset offset, List<Map<TopicPartition, Long>> concurrentItems, int batchSize, BiConsumer<List<TapEvent>, Object> consumer) throws Exception {
         String executorGroup = String.format("%s-%s-consumer", KafkaEnhancedConnector.PDK_ID, config.getStateMapFirstConnectorId());
+        AtomicReference<Exception> exception = new AtomicReference<>();
         try (
             AsyncBatchPusher<ConsumerRecord<Object, Object>, TapEvent> batchPusher = AsyncBatchPusher.<ConsumerRecord<Object, Object>, TapEvent>create(
+                exception,
                 String.format("%s-batchPusher", executorGroup),
                 offset::setOffset, // offset 推进
                 tapEvents -> {
@@ -161,10 +164,10 @@ public class KafkaConsumerService implements AutoCloseable {
             ).batchSize(batchSize).maxDelay(batchMaxDelay)) {
             // 将初始化的 offset 推送到目标，让指定时间的增量任务下次启动时拿到 offset
             sendHeartBeatEvent(consumer, offset);
-            service.getExecutorService().submit(batchPusher);
+            service.getExecutorService().execute(batchPusher);
 
             // 并发消费数据
-            ConcurrentUtils.runWithList(service.getExecutorService(), executorGroup, concurrentItems, (ex, index, partitionOffsets) -> {
+            ConcurrentUtils.runWithList(service.getExecutorService(), exception, executorGroup, concurrentItems, (ex, index, partitionOffsets) -> {
                 Properties properties = config.buildConsumerConfig(true);
                 properties.put(ConsumerConfig.GROUP_ID_CONFIG, String.format("%s-%s", executorGroup, index));
                 try (KafkaConsumer<Object, Object> kafkaConsumer = new KafkaConsumer<>(properties)) {

@@ -21,7 +21,10 @@ public interface ConcurrentUtils {
     Logger LOGGER = LoggerFactory.getLogger(ConcurrentUtils.class);
 
     static <T> void runWithQueue(ExecutorService executorService, String name, Queue<T> queue, int limit, BooleanSupplier stopping, Runner<T> consumer) throws Exception {
-        AtomicReference<Exception> exception = new AtomicReference<>();
+        runWithQueue(executorService, new AtomicReference<>(), name, queue, limit, stopping, consumer);
+    }
+
+    static <T> void runWithQueue(ExecutorService executorService, AtomicReference<Exception> exception, String name, Queue<T> queue, int limit, BooleanSupplier stopping, Runner<T> consumer) throws Exception {
         int concurrentSize = Math.min(limit, queue.size());
         List<CompletableFuture<Void>> futures = new ArrayList<>(concurrentSize);
         for (int i = 0; i < concurrentSize; i++) {
@@ -39,7 +42,9 @@ public interface ConcurrentUtils {
                         consumer.run(val);
                     }
                 } catch (Exception e) {
-                    exception.compareAndSet(null, e);
+                    if (!exception.compareAndSet(null, e)) {
+                        exception.get().addSuppressed(e);
+                    }
                 } finally {
                     LOGGER.debug("Completed of queue {}", threadName);
                 }
@@ -56,7 +61,10 @@ public interface ConcurrentUtils {
     }
 
     static <T> void runWithList(ExecutorService executorService, String name, List<T> items, IndexRunner<T> consumer) throws Exception {
-        AtomicReference<Exception> exception = new AtomicReference<>();
+        runWithList(executorService, new AtomicReference<>(), name, items, consumer);
+    }
+
+    static <T> void runWithList(ExecutorService executorService, AtomicReference<Exception> exception, String name, List<T> items, IndexRunner<T> consumer) throws Exception {
         int latchSize = items.size();
         List<CompletableFuture<Void>> futures = new ArrayList<>(latchSize);
         for (int i = 0; i < latchSize; i++) {

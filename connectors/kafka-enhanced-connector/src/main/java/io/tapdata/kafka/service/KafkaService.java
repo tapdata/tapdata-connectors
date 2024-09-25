@@ -42,6 +42,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -201,8 +202,10 @@ public class KafkaService implements IKafkaService {
             }
             List<TapEntry<String, Function<Object, Object>>> fieldTypeConverts = KafkaUtils.setFieldTypeConvert(table, new ArrayList<>());
             AtomicInteger index = new AtomicInteger(0);
+            AtomicReference<Exception> exception = new AtomicReference<>();
             String executorGroup = String.format("%s-%s-batchRead", KafkaEnhancedConnector.PDK_ID, config.getStateMapFirstConnectorId());
             try (AsyncBatchPusher<ConsumerRecord<Object, Object>, TapEvent> batchPusher = AsyncBatchPusher.<ConsumerRecord<Object, Object>, TapEvent>create(
+                exception,
                 String.format("%s-batchPusher", executorGroup),
                 consumerRecord -> {
                 },
@@ -212,7 +215,7 @@ public class KafkaService implements IKafkaService {
                 getExecutorService().execute(batchPusher); // 开始推送数据
 
                 // 并发消费数据
-                ConcurrentUtils.runWithQueue(getExecutorService(), executorGroup, concurrentQueue, concurrentSize, stopping::get, concurrentItem -> {
+                ConcurrentUtils.runWithQueue(getExecutorService(), exception, executorGroup, concurrentQueue, concurrentSize, stopping::get, concurrentItem -> {
                     int partition = concurrentItem.getKey();
                     Long endOffset = endTopicOffsets.get(concurrentItem.getKey());
                     if (null == endOffset) {

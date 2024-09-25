@@ -10,6 +10,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -25,6 +26,7 @@ public class AsyncBatchPusher<O, T> implements Runnable, AutoCloseable {
     private int batchSize = 100;
     private long maxDelay = 2000;
     private long lastTime;
+    private final AtomicReference<Exception> exception;
     private final String name;
     private final Consumer<List<T>> submitConsumer;
     private final Consumer<O> offsetConsumer;
@@ -34,8 +36,9 @@ public class AsyncBatchPusher<O, T> implements Runnable, AutoCloseable {
     private final AtomicBoolean stopping = new AtomicBoolean(false);
     private final AtomicBoolean completed = new AtomicBoolean(false);
 
-    public AsyncBatchPusher(String name, Consumer<O> offsetConsumer, Consumer<List<T>> submitConsumer, BooleanSupplier isRunning) {
+    public AsyncBatchPusher(AtomicReference<Exception> exception, String name, Consumer<O> offsetConsumer, Consumer<List<T>> submitConsumer, BooleanSupplier isRunning) {
         this.lastTime = System.currentTimeMillis();
+        this.exception = exception;
         this.name = name;
         this.offsetConsumer = offsetConsumer;
         this.submitConsumer = submitConsumer;
@@ -75,8 +78,13 @@ public class AsyncBatchPusher<O, T> implements Runnable, AutoCloseable {
                     if (batchList.size() >= batchSize || (System.currentTimeMillis() - lastTime > maxDelay && !batchList.isEmpty())) {
                         batchList = push(batchList);
                     }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                } catch (Exception e) {
+                    if (!exception.compareAndSet(null, e)) {
+                        exception.get().addSuppressed(e);
+                    }
+                    if (e instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                    }
                 }
             }
         } finally {
@@ -88,7 +96,7 @@ public class AsyncBatchPusher<O, T> implements Runnable, AutoCloseable {
     public void add(O offset, T record) {
         try {
             while (!offer(new TapEntry<>(offset, record))) {
-                if (!isRunning.getAsBoolean())  {
+                if (!isRunning.getAsBoolean()) {
                     throw new InterruptedException("not running");
                 }
             }
@@ -117,7 +125,7 @@ public class AsyncBatchPusher<O, T> implements Runnable, AutoCloseable {
         }
     }
 
-    public static <O, T> AsyncBatchPusher<O, T> create(String name, Consumer<O> offsetConsumer, Consumer<List<T>> submitConsumer, BooleanSupplier isRunning) {
-        return new AsyncBatchPusher<>(name, offsetConsumer, submitConsumer, isRunning);
+    public static <O, T> AsyncBatchPusher<O, T> create(AtomicReference<Exception> exception, String name, Consumer<O> offsetConsumer, Consumer<List<T>> submitConsumer, BooleanSupplier isRunning) {
+        return new AsyncBatchPusher<>(exception, name, offsetConsumer, submitConsumer, isRunning);
     }
 }
