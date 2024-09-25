@@ -22,10 +22,10 @@ public enum JsonType {
         if (obj instanceof Map) {
             return JsonType.OBJECT;
         }
+        if (obj instanceof byte[]) {
+            return BINARY;
+        }
         if ((obj instanceof Collection) || obj.getClass().isArray()) {
-            if (obj instanceof byte[]) {
-                return BINARY;
-            }
             return JsonType.ARRAY;
         }
         if (obj instanceof Number) {

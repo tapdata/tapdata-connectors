@@ -52,7 +52,7 @@ public interface ConcurrentUtils {
     }
 
     static <T> void runWithQueue(ExecutorService executorService, String name, Queue<T> queue, int limit, Runner<T> consumer) throws Exception {
-        runWithQueue(executorService, name, queue, limit, () -> !Thread.interrupted(), consumer);
+        runWithQueue(executorService, name, queue, limit, Thread::interrupted, consumer);
     }
 
     static <T> void runWithList(ExecutorService executorService, String name, List<T> items, IndexRunner<T> consumer) throws Exception {

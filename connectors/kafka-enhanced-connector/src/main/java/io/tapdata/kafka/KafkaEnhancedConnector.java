@@ -26,9 +26,9 @@ import java.util.function.Consumer;
  * @author <a href="mailto:harsen_lin@163.com">Harsen</a>
  * @version v1.0 2024/8/19 14:21 Create
  */
-@TapConnectorClass("spec_std_kafka.json")
-public class StdKafkaConnector extends ConnectorBase {
-    public static final String PDK_ID = "StdKafka";
+@TapConnectorClass("spec_kafka_enhanced.json")
+public class KafkaEnhancedConnector extends ConnectorBase {
+    public static final String PDK_ID = "kafka_enhanced";
 
     private IKafkaService kafkaService;
     protected KafkaConfig kafkaConfig;

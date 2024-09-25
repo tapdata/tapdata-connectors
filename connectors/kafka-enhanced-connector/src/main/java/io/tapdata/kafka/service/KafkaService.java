@@ -69,7 +69,7 @@ public class KafkaService implements IKafkaService {
         this.logger = config.tapConnectionContext().getLog();
         this.executorService = Executors.newFixedThreadPool(200, r -> {
             Thread thread = new Thread(r);
-            thread.setName(String.format("%s-executor-%s", StdKafkaConnector.PDK_ID, thread.getId()));
+            thread.setName(String.format("%s-executor-%s", KafkaEnhancedConnector.PDK_ID, thread.getId()));
             return thread;
         });
         this.schemaModeService = AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
@@ -93,7 +93,7 @@ public class KafkaService implements IKafkaService {
     @Override
     public synchronized KafkaProducer<Object, Object> getProducer() {
         if (kafkaProducer == null) {
-            logger.info("Creating producer for {}", StdKafkaConnector.PDK_ID);
+            logger.info("Creating producer for {}", KafkaEnhancedConnector.PDK_ID);
             kafkaProducer = new KafkaProducer<>(config.buildProducerConfig());
         }
         return kafkaProducer;
@@ -102,7 +102,7 @@ public class KafkaService implements IKafkaService {
     @Override
     public synchronized IKafkaAdminService getAdminService() {
         if (adminService == null) {
-            logger.info("Creating adminService for {}", StdKafkaConnector.PDK_ID);
+            logger.info("Creating adminService for {}", KafkaEnhancedConnector.PDK_ID);
             adminService = new KafkaAdminService(config, logger);
         }
         return adminService;
@@ -173,7 +173,7 @@ public class KafkaService implements IKafkaService {
         } catch (TapRuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new TapPdkTerminateByServerEx(StdKafkaConnector.PDK_ID, e);
+            throw new TapPdkTerminateByServerEx(KafkaEnhancedConnector.PDK_ID, e);
         }
     }
 
@@ -201,7 +201,7 @@ public class KafkaService implements IKafkaService {
             }
             List<TapEntry<String, Function<Object, Object>>> fieldTypeConverts = KafkaUtils.setFieldTypeConvert(table, new ArrayList<>());
             AtomicInteger index = new AtomicInteger(0);
-            String executorGroup = String.format("%s-%s-batchRead", StdKafkaConnector.PDK_ID, config.getStateMapFirstConnectorId());
+            String executorGroup = String.format("%s-%s-batchRead", KafkaEnhancedConnector.PDK_ID, config.getStateMapFirstConnectorId());
             try (AsyncBatchPusher<ConsumerRecord<Object, Object>, TapEvent> batchPusher = AsyncBatchPusher.<ConsumerRecord<Object, Object>, TapEvent>create(
                 String.format("%s-batchPusher", executorGroup),
                 consumerRecord -> {
@@ -239,7 +239,7 @@ public class KafkaService implements IKafkaService {
                                 if (TapUnknownRecordEvent.TYPE == event.getType()) {
                                     TapUnknownRecordEvent unknownRecordEvent = (TapUnknownRecordEvent) event;
                                     String errorMsg = String.format("unknown event %s(%d-%d): %s", topic, consumerRecord.partition(), consumerRecord.offset(), unknownRecordEvent.getData());
-                                    throw new TapPdkSkippableDataEx(errorMsg, StdKafkaConnector.PDK_ID);
+                                    throw new TapPdkSkippableDataEx(errorMsg, KafkaEnhancedConnector.PDK_ID);
                                 }
                                 KafkaUtils.convertWithFieldType(fieldTypeConverts, event);
                                 batchPusher.add(consumerRecord, event);
@@ -255,7 +255,7 @@ public class KafkaService implements IKafkaService {
         } catch (TapRuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new TapPdkTerminateByServerEx(StdKafkaConnector.PDK_ID, e);
+            throw new TapPdkTerminateByServerEx(KafkaEnhancedConnector.PDK_ID, e);
         }
     }
 
@@ -277,8 +277,8 @@ public class KafkaService implements IKafkaService {
                 if (offset instanceof KafkaOffset) {
                     return (KafkaOffset) o;
                 }
-                throw new TapPdkConfigEx("streamOffset must be of type KafkaOffset: " + o.getClass().getName(), StdKafkaConnector.PDK_ID);
-            }).orElseThrow(() -> new TapPdkConfigEx("streamRead offset is null", StdKafkaConnector.PDK_ID));
+                throw new TapPdkConfigEx("streamOffset must be of type KafkaOffset: " + o.getClass().getName(), KafkaEnhancedConnector.PDK_ID);
+            }).orElseThrow(() -> new TapPdkConfigEx("streamRead offset is null", KafkaEnhancedConnector.PDK_ID));
 
             // 补全分区信息（如：全量过程为主题添加了分区）
             KafkaOffsetUtils.fillPartitions(this, tables, streamOffset, true);
@@ -293,7 +293,7 @@ public class KafkaService implements IKafkaService {
         } catch (TapRuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new TapPdkTerminateByServerEx(StdKafkaConnector.PDK_ID, e);
+            throw new TapPdkTerminateByServerEx(KafkaEnhancedConnector.PDK_ID, e);
         }
     }
 
@@ -322,7 +322,7 @@ public class KafkaService implements IKafkaService {
         } catch (TapRuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new TapPdkTerminateByServerEx(StdKafkaConnector.PDK_ID, e);
+            throw new TapPdkTerminateByServerEx(KafkaEnhancedConnector.PDK_ID, e);
         }
     }
 

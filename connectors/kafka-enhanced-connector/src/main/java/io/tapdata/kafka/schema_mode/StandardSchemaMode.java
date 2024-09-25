@@ -6,7 +6,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.kafka.StdKafkaConnector;
+import io.tapdata.kafka.KafkaEnhancedConnector;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.AbsSchemaMode;
 import io.tapdata.kafka.IKafkaService;
@@ -42,7 +42,7 @@ public class StandardSchemaMode extends AbsSchemaMode {
         Queue<String> toBeLoadTables = tables.stream().filter(Objects::nonNull).distinct().collect(Collectors.toCollection(ConcurrentLinkedQueue::new));
         List<TapTable> results = new LinkedList<>();
         try {
-            String executorGroup = String.format("%s-discoverSchema", StdKafkaConnector.PDK_ID);
+            String executorGroup = String.format("%s-discoverSchema", KafkaEnhancedConnector.PDK_ID);
             ConcurrentUtils.runWithQueue(kafkaService.getExecutorService(), executorGroup, toBeLoadTables, 20, table -> {
                 TapTable sampleTable = new TapTable(table);
                 kafkaService.<Long, Object>sampleValue(Collections.singletonList(table), null, record -> {

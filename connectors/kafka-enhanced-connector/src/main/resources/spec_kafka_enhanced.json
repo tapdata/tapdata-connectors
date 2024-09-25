@@ -1,9 +1,9 @@
 {
   "properties": {
-    "name": "StdKafka",
+    "name": "Kafka-Enhanced",
     "icon": "icons/std_kafka.png",
     "doc": "${doc}",
-    "id": "std_kafka",
+    "id": "kafka_enhanced",
     "tags": [
       "schema-free",
       "NoHeartbeat"
