@@ -1,14 +1,9 @@
 package io.tapdata.connector.dws;
 
-import io.tapdata.common.WriteRecorder;
 import io.tapdata.connector.dws.bean.DwsTapTable;
-import io.tapdata.connector.dws.config.DwsConfig;
 import io.tapdata.connector.postgres.dml.PostgresWriteRecorder;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
-import io.tapdata.entity.schema.TapIndexField;
-import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
@@ -17,7 +12,10 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.*;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class DwsWriteRecorder extends PostgresWriteRecorder {
@@ -42,22 +40,22 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
         if (EmptyKit.isEmpty(after)) {
             return;
         }
-        if (EmptyKit.isNotEmpty(uniqueCondition)) {
-            if (dwsTapTable.isPartition()){
+        if (EmptyKit.isEmpty(uniqueCondition) || "just_insert".equals(insertPolicy)) {
+            justInsert(after);
+        } else {
+            if (dwsTapTable.isPartition()) {
                 if (insertPolicy.equals("ignore_on_exists")) {
                     conflictIgnoreInsert(after);
                 } else {
                     conflictUpdateInsert(after);
                 }
-            }else {
+            } else {
                 if (insertPolicy.equals("ignore_on_exists")) {
                     notExistsInsert(after);
                 } else {
                     conflictUpdateInsert(after);
                 }
             }
-        }else {
-            justInsert(after);
         }
         preparedStatement.addBatch();
     }
@@ -66,7 +64,7 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
     private void buildConflictKeysForPartition() {
         Collection<String> conflictKeys = tapTable.primaryKeys(false);
         if (null == conflictKeys || conflictKeys.isEmpty()) {
-            if (null!=tapTable.getIndexList()){
+            if (null != tapTable.getIndexList()) {
                 TapIndex firstUniqueIndex = tapTable.getIndexList()
                         .stream()
                         .filter(index -> index.isUnique())
@@ -88,7 +86,7 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
     private void conflictUpdateInsert(Map<String, Object> after) throws SQLException {
         //INSERT INTO "web_returns_p6" VALUES(20230201,7,7,7) ON CONFLICT("WR_RETURNED_DATE_SK","WR_ITEM_SK") DO UPDATE SET "WR_RETURNED_TIME_SK" = 7, "WR_REFUNDED_CUSTOMER_SK" = 8;
         boolean isPartition = dwsTapTable.isPartition();
-        if (isPartition){
+        if (isPartition) {
             buildConflictKeysForPartition();
         }
         Set<String> setKeys = buildSetKeys();
@@ -117,7 +115,7 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
 
     private void conflictIgnoreInsert(Map<String, Object> after) throws SQLException {
         boolean isPartition = dwsTapTable.isPartition();
-        if (isPartition){
+        if (isPartition) {
             buildConflictKeysForPartition();
         }
         if (EmptyKit.isNull(preparedStatement)) {
@@ -234,9 +232,9 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
         }
         checkDistributeValue(after, before);
         if (updatePolicy.equals(ConnectionOptions.DML_UPDATE_POLICY_INSERT_ON_NON_EXISTS)) {
-            if (dwsTapTable.isPartition()){
+            if (dwsTapTable.isPartition()) {
                 conflictUpdateInsert(after);
-            }else {
+            } else {
                 insertUpdate(after, DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition));
             }
         } else {
@@ -356,6 +354,7 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
         }
         return obj;
     }
+
     protected void dealNullBefore(Map<String, Object> before, int pos) throws SQLException {
         if (hasPk) {
             for (String key : before.keySet()) {
