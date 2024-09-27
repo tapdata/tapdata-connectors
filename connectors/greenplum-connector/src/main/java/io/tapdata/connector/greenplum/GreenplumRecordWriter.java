@@ -2,12 +2,13 @@ package io.tapdata.connector.greenplum;
 
 import io.tapdata.common.JdbcContext;
 import io.tapdata.common.RecordWriter;
+import io.tapdata.common.dml.NormalRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.entity.schema.TapTable;
 
 import java.sql.SQLException;
 
-public class GreenplumRecordWriter extends RecordWriter {
+public class GreenplumRecordWriter extends NormalRecordWriter {
 
     public GreenplumRecordWriter(JdbcContext jdbcContext, TapTable tapTable) throws SQLException {
         super(jdbcContext, tapTable);

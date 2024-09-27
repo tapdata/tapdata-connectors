@@ -22,6 +22,7 @@ public class CustomConfig implements Serializable {
     private String historyScript = "";
     private Boolean customAfterOpr;
     private String customAfterScript = "";
+    private Boolean batchProcess = false;
 
     public CustomConfig load(Map<String, Object> map) {
         assert beanUtils != null;
@@ -122,5 +123,13 @@ public class CustomConfig implements Serializable {
 
     public void setCustomAfterScript(String customAfterScript) {
         this.customAfterScript = customAfterScript;
+    }
+
+    public Boolean getBatchProcess() {
+        return batchProcess;
+    }
+
+    public void setBatchProcess(Boolean batchProcess) {
+        this.batchProcess = batchProcess;
     }
 }

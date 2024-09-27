@@ -304,6 +304,12 @@ public class MysqlConnectionTest extends CommonDbTest {
         return true;
     }
 
+    @Override
+    protected Boolean testDatasourceInstanceInfo() {
+        buildDatasourceInstanceInfo(connectionOptions);
+        return true;
+    }
+
     public Boolean testCreateTablePrivilege() {
         try {
             boolean missed = checkMySqlCreateTablePrivilege(commonDbConfig.getUser());

@@ -3,6 +3,8 @@ package io.tapdata.mongodb.batch;
 import com.mongodb.MongoInterruptedException;
 import com.mongodb.client.*;
 import com.mongodb.client.model.Sorts;
+import io.tapdata.common.concurrent.ConcurrentProcessor;
+import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
@@ -21,12 +23,12 @@ import org.bson.conversions.Bson;
 import org.bson.io.ByteBufferBsonInput;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -102,17 +104,17 @@ public class MongoBatchReader {
 //        }
         if (mongoConfig.isNoCursorTimeout() && null != clientSession) {
             findIterable = collection.find(clientSession).batchSize(batchSize).noCursorTimeout(true);
-        }else{
+        } else {
             findIterable = collection.find().batchSize(batchSize);
         }
         return findIterable;
     }
 
     public void batchReadCollection(ReadParam param) {
-        if(mongoConfig.isNoCursorTimeout()){
+        if (mongoConfig.isNoCursorTimeout()) {
             batchReadCursorNoCursorTimeout(param);
-        }else{
-            batchReadCursor(findIterable(param,null));
+        } else {
+            batchReadCursor(findIterable(param, null));
         }
     }
 
@@ -120,52 +122,87 @@ public class MongoBatchReader {
         Log log = connectorContext.getLog();
         MongoClient mongoClient = param.getMongoClient();
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-        try(ClientSession clientSession = mongoClient.startSession()){
+        try (ClientSession clientSession = mongoClient.startSession()) {
             BsonDocument bsonDocument = clientSession.getServerSession().getIdentifier();
             BsonArray bsonArray = new BsonArray();
             bsonArray.add(bsonDocument);
-            scheduler.scheduleAtFixedRate(()->{
-                mongoClient.getDatabase(mongoConfig.getDatabase()).runCommand(new BsonDocument("refreshSessions",bsonArray));
-                log.info("refresh session");
-            },1,1, TimeUnit.MINUTES);
-            FindIterable<RawBsonDocument> findIterable = findIterable(param,clientSession);
+            scheduler.scheduleAtFixedRate(() -> {
+                mongoClient.getDatabase(mongoConfig.getDatabase()).runCommand(new BsonDocument("refreshSessions", bsonArray));
+                log.debug("refresh session");
+            }, 1, 1, TimeUnit.MINUTES);
+            FindIterable<RawBsonDocument> findIterable = findIterable(param, clientSession);
             batchReadCursor(findIterable);
         } finally {
             scheduler.shutdownNow();
         }
     }
 
-    public void batchReadCursor(FindIterable<RawBsonDocument> findIterable){
-        AtomicReference<List<TapEvent>> tapEvents = new AtomicReference<>(list());
+    public void batchReadCursor(FindIterable<RawBsonDocument> findIterable) {
         DocumentCodec codec = new DocumentCodec();
         DecoderContext decoderContext = DecoderContext.builder().build();
-        int numThreads = 8;
-        ExecutorService executorService = Executors.newWorkStealingPool(numThreads);
+        AtomicReference<Exception> throwableAtomicReference = new AtomicReference<>();
+        ConcurrentProcessor<Object, Object> concurrentProcessor = TapExecutors.createSimple(8, 32, "MongoBatchReader-Processor");
+        Thread t = new Thread(() -> {
+            List<TapEvent> events = list();
+            while (checkAlive.getAsBoolean()) {
+                try {
+                    Object obj = concurrentProcessor.get(2, TimeUnit.SECONDS);
+                    if (EmptyKit.isNotNull(obj)) {
+                        if (obj instanceof TapEvent) {
+                            events.add((TapEvent) obj);
+                            if (events.size() >= eventBatchSize) {
+                                tapReadOffsetConsumer.accept(events, new HashMap<>());
+                                events = new ArrayList<>();
+                            }
+                        } else if (obj instanceof CountDownLatch) {
+                            if (events.size() > 0) {
+                                tapReadOffsetConsumer.accept(events, new HashMap<>());
+                                events = new ArrayList<>();
+                            }
+                            ((CountDownLatch) obj).countDown();
+                        }
+                    } else {
+                        if (events.size() > 0) {
+                            tapReadOffsetConsumer.accept(events, new HashMap<>());
+                            events = new ArrayList<>();
+                        }
+                    }
+                } catch (Exception e) {
+                    throwableAtomicReference.set(e);
+                }
+            }
+        });
+        t.setName("MongoBatchReader-Consumer");
+        t.start();
         try (MongoCursor<RawBsonDocument> mongoCursor = findIterable.iterator()) {
             while (mongoCursor.hasNext()) {
+                if (EmptyKit.isNotNull(throwableAtomicReference.get())) {
+                    throw throwableAtomicReference.get();
+                }
                 RawBsonDocument lastDocument = mongoCursor.next();
-                executorService.submit(() -> {
-                    ByteBuffer byteBuffer = lastDocument.getByteBuffer().asNIO();
-                    try (BsonBinaryReader reader = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBuffer)))) {
-                        emit(codec.decode(reader, decoderContext), tapEvents);
+                concurrentProcessor.runAsync(lastDocument, e -> {
+                    try {
+                        ByteBuffer byteBuffer = lastDocument.getByteBuffer().asNIO();
+                        try (BsonBinaryReader reader = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBuffer)))) {
+                            return insertRecordEvent(convert(codec.decode(reader, decoderContext)), table.getId());
+                        }
+                    } catch (Exception er) {
+                        throwableAtomicReference.set(er);
+                        return null;
                     }
                 });
-                if (!checkAlive.getAsBoolean()) return;
             }
-            executorService.shutdown();
-            //等待所有线程执行完毕
-            while (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
-                if (!checkAlive.getAsBoolean()) return;
-            }
-            if (EmptyKit.isNotEmpty(tapEvents.get())) {
-                tapReadOffsetConsumer.accept(tapEvents.get(), new HashMap<>());
+            CountDownLatch countDownLatch = new CountDownLatch(1);
+            concurrentProcessor.runAsync(countDownLatch, e -> e);
+            while (checkAlive.getAsBoolean()) {
+                if (countDownLatch.await(500L, TimeUnit.MILLISECONDS)) {
+                    break;
+                }
             }
         } catch (Exception e) {
             doException(e);
         } finally {
-            if (!executorService.isShutdown()) {
-                executorService.shutdown();
-            }
+            concurrentProcessor.close();
         }
     }
 

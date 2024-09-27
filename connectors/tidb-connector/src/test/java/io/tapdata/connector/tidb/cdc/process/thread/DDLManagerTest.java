@@ -319,7 +319,7 @@ class DDLManagerTest {
             Map<String, Object> convertInfo = new HashMap<>();
             convertInfo.put(Convert.COLUMN_NAME, "name");
             info.add(convertInfo);
-            new DDLManager.VersionInfo("v", info, TimeZone.getDefault());
+            new DDLManager.VersionInfo("v", info, TimeZone.getDefault(), TimeZone.getDefault());
         }
     }
 }

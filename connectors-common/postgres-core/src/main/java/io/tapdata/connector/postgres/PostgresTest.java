@@ -161,4 +161,9 @@ public class PostgresTest extends CommonDbTest {
         }
         return true;
     }
+    @Override
+    protected Boolean testDatasourceInstanceInfo() {
+        buildDatasourceInstanceInfo(connectionOptions);
+        return true;
+    }
 }

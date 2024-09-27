@@ -702,12 +702,12 @@ public class TidbConnectorTest {
         @Nested
         class initTimeZone {
             @Test
-            void testNormal() {
+            void testNormal() throws SQLException {
                 doCallRealMethod().when(connector).initTimeZone();
                 Assertions.assertDoesNotThrow(connector::initTimeZone);
             }
             @Test
-            void test1() {
+            void test1() throws SQLException {
                 tidbConfig.setTimezone("+08:00");
                 doCallRealMethod().when(connector).initTimeZone();
                 Assertions.assertDoesNotThrow(connector::initTimeZone);

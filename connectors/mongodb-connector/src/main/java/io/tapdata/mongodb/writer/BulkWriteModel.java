@@ -14,7 +14,7 @@ import java.util.List;
  * @create 2023-04-23 18:34
  **/
 public class BulkWriteModel {
-	private boolean allInsert = false;
+	private boolean allInsert;
 	// 如果有update/delete事件，则使用这个write model list
 	// 或者写入遇到了重复值错误，则使用这个write model list
 	private List<WriteModel<Document>> allOpWriteModels;
@@ -67,11 +67,7 @@ public class BulkWriteModel {
 	}
 
 	public List<WriteModel<Document>> getWriteModels() {
-		if (allInsert) {
-			return CollectionUtils.isNotEmpty(onlyInsertWriteModels) ? onlyInsertWriteModels : allOpWriteModels;
-		} else {
-			return allOpWriteModels;
-		}
+		return allOpWriteModels;
 	}
 
 	public void clearAll() {

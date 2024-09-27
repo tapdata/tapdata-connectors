@@ -4,7 +4,7 @@
     "icon": "icons/custom.png",
     "doc": "${doc}",
     "id": "custom",
-    "tags": ["Database"]
+    "tags": ["schema-free","Database"]
   },
   "configOptions": {
     "connection": {
@@ -141,6 +141,26 @@
           },
           "x-index": 60
         },
+        "batchProcess": {
+          "type": "boolean",
+          "title": "${batchProcess}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "default": false,
+          "show": false,
+          "x-index": 61,
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"source\" ? null:\"none\"}}",
+                "required": "{{$deps[0]!==\"source\" ? true:false}}"
+              }
+            }
+          }
+        },
         "targetScripTitle": {
           "title": "${targetScript}",
           "type": "void",
@@ -160,7 +180,7 @@
               }
             }
           },
-          "x-index": 61
+          "x-index": 62
         },
         "targetScript": {
           "title": " ",
@@ -302,7 +322,8 @@
       "targetScript": "Target data processing script",
       "cdcScript": "Incremental Data Script",
       "historyScript": "History Script",
-      "customAfterOpr": "After operation"
+      "customAfterOpr": "After operation",
+      "batchProcess": "Target batch processing"
     },
     "zh_CN": {
       "doc": "docs/custom_zh_CN.md",
@@ -319,7 +340,8 @@
       "targetScript": "目标数据处理脚本",
       "cdcScript": "增量数据脚本",
       "historyScript": "历史数据脚本",
-      "customAfterOpr": "后置操作"
+      "customAfterOpr": "后置操作",
+      "batchProcess": "目标批量处理"
     },
     "zh_TW": {
       "doc": "docs/custom_zh_TW.md",
@@ -336,7 +358,8 @@
       "targetScript": "目標數據處理腳本",
       "cdcScript": "增量數據腳本",
       "historyScript": "歷史數據腳本",
-      "customAfterOpr": "後置操作"
+      "customAfterOpr": "後置操作",
+      "batchProcess": "目標批量處理"
     }
   },
   "dataTypes": {

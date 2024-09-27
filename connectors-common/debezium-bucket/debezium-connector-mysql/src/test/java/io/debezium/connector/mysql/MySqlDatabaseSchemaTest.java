@@ -444,4 +444,26 @@ public class MySqlDatabaseSchemaTest {
                 "PARTITIONS 16";
         assertEquals(expect, actual);
     }
+
+    @Test
+    public void testHandleForUnparseableDDL_filterDefaultFunction(){
+        String ddlStatements = "CREATE TABLE Orders (" +
+                "  OrderID INT NOT NULL," +
+                "  OrderQuantity INT NOT NULL," +
+                "  OrderPrice DECIMAL(18,2)," +
+                "  OrderDate DATETIME DEFAULT CURRENT_TIMESTAMP() COMMENT '时间'," +
+                "  created_at DATETIME DEFAULT sysdate() COMMENT '时间'" +
+                ");";
+        final Configuration config = DATABASE.defaultConfig().build();
+        mysql = getSchema(config);
+        String actual = mysql.handleForUnparseableDDL(ddlStatements);
+        String expect = "CREATE TABLE Orders (" +
+                "  OrderID INT NOT NULL," +
+                "  OrderQuantity INT NOT NULL," +
+                "  OrderPrice DECIMAL(18,2)," +
+                "  OrderDate DATETIME COMMENT '时间'," +
+                "  created_at DATETIME COMMENT '时间'" +
+                ");";
+        assertEquals(expect, actual);
+    }
 }

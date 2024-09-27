@@ -301,12 +301,16 @@
             "kafkaCompressionType": {
               "type": "string",
               "title": "${kafkaCompressionType}",
-              "default": "gzip",
+              "default": "lz4",
               "x-decorator": "FormItem",
               "x-component": "Select",
               "apiServerKey": "kafkaCompressionType",
               "x-index": 120,
               "enum": [
+                {
+                  "label": "${kafkaCompressionTypeUncompressed}",
+                  "value": "uncompressed"
+                },
                 {
                   "label": "gzip",
                   "value": "gzip"
@@ -441,6 +445,7 @@
       "write_most_isr": "Write to most ISR partitions",
       "write_all_isr": "Write to all ISR partitions",
       "kafkaCompressionType": "Message compression type",
+      "kafkaCompressionTypeUncompressed": "uncompressed",
       "kafkaIgnorePushError": "Ignore push message exception",
       "schemaRegister": "schemaRegister",
       "schemaRegisterTip": "To register a center using third-party mode, an additional address is required. If basic authentication is enabled, authentication information is also required",
@@ -483,6 +488,7 @@
       "write_most_isr": "写入大多数ISR分区",
       "write_all_isr": "写入所有ISR分区",
       "kafkaCompressionType": "消息压缩类型",
+      "kafkaCompressionTypeUncompressed": "不压缩",
       "kafkaIgnorePushError": "忽略推送消息异常",
       "schemaRegister": "模式注册",
       "schemaRegisterTip": "使用第三方模式注册中心，需要额外提供地址，若打开基本认证还需要提供认证信息等",
@@ -525,6 +531,7 @@
       "write_most_isr": "寫入大多數ISR分區",
       "write_all_isr": "寫入所有ISR分區",
       "kafkaCompressionType": "消息壓縮類型",
+      "kafkaCompressionTypeUncompressed": "不壓縮",
       "kafkaIgnorePushError": "忽略推理消息異常",
       "schemaRegister": "模式註冊",
       "schemaRegisterTip": "使用第三方模式註冊中心，需要額外提供地址，若打開基本認證還需要提供認證信息等",

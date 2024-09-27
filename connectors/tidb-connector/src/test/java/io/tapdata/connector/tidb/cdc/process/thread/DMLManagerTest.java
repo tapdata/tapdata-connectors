@@ -149,7 +149,7 @@ class DMLManagerTest {
 
         @Test
         void testNotNull() {
-            DDLManager.VersionInfo versionInfo = new DDLManager.VersionInfo("v", new ArrayList<>(), TimeZone.getDefault());
+            DDLManager.VersionInfo versionInfo = new DDLManager.VersionInfo("v", new ArrayList<>(), TimeZone.getDefault(), TimeZone.getDefault());
             tableVersionMap.put("table", versionInfo);
             try(MockedStatic<FileUtils> fu = mockStatic(FileUtils.class)) {
                 fu.when(() -> FileUtils.delete(file)).thenAnswer(a->null);

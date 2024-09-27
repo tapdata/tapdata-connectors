@@ -91,7 +91,7 @@ public interface Convert {
         return builder.toString();
     }
 
-    static Convert instance(Map<String, Object> convertInfo, TimeZone timezone) {
+    static Convert instance(Map<String, Object> convertInfo, TimeZone timezone, TimeZone dbTimezone) {
         String columnType = String.valueOf(convertInfo.get(COLUMN_TYPE)).toUpperCase();
         Object columnPrecision = convertInfo.get(COLUMN_PRECISION);
         Object columnScale = convertInfo.get(COLUMN_SCALE);
@@ -144,7 +144,7 @@ public interface Convert {
             case "DOUBLE UNSIGNED":
                 return new DoubleConvert(true, String.valueOf(columnPrecision), String.valueOf(columnScale));
             case "TIMESTAMP":
-                return new TimestampConvert(String.valueOf(Optional.ofNullable(columnPrecision).orElse(columnScale)), timezone);
+                return new TimestampConvert(String.valueOf(Optional.ofNullable(columnPrecision).orElse(columnScale)), timezone, dbTimezone);
             case "DATETIME":
                 return new DateTimeConvert(String.valueOf(Optional.ofNullable(columnPrecision).orElse(columnScale)), timezone);
             case "TIME":

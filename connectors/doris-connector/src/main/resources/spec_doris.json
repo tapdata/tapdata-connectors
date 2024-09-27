@@ -733,6 +733,11 @@
       "byte": "16385",
       "to": "TapNumber",
       "queryOnly": true
+    },
+    "text": {
+      "to": "TapString",
+      "byte": "64k",
+      "pkEnablement": false
     }
   }
 }

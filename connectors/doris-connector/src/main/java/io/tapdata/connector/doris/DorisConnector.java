@@ -234,14 +234,14 @@ public class DorisConnector extends CommonDbConnector {
         }
         stringBuilder.append("`) DISTRIBUTED BY HASH(`");
         //generate distributed key
-        if (EmptyKit.isEmpty(primaryKeys)) {
-            if (EmptyKit.isEmpty(dorisConfig.getDistributedKey())) {
+        if (EmptyKit.isEmpty(dorisConfig.getDistributedKey())) {
+            if (EmptyKit.isEmpty(primaryKeys)) {
                 stringBuilder.append(String.join("`,`", tapTable.getNameFieldMap().keySet()));
             } else {
-                stringBuilder.append(String.join("`,`", dorisConfig.getDistributedKey()));
+                stringBuilder.append(String.join("`,`", primaryKeys));
             }
         } else {
-            stringBuilder.append(String.join("`,`", primaryKeys));
+            stringBuilder.append(String.join("`,`", dorisConfig.getDistributedKey()));
         }
         //generate bucket
         stringBuilder.append("`) BUCKETS ").append(dorisConfig.getBucket()).append(" PROPERTIES(");

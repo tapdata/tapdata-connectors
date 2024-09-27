@@ -57,28 +57,9 @@ import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.sql.ResultSetMetaData;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
-import java.util.TimeZone;
-import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -300,12 +281,16 @@ public class MysqlReader implements Closeable {
                     .with("database.history.store.only.captured.tables.ddl", true)
                     .with(MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE, MySqlConnectorConfig.SnapshotLockingMode.NONE)
                     .with("max.queue.size", mysqlConfig.getMaximumQueueSize())
-                    .with("max.batch.size", mysqlConfig.getMaximumQueueSize()/8)
+                    .with("max.batch.size", mysqlConfig.getMaximumQueueSize() / 8)
                     .with(MySqlConnectorConfig.SERVER_ID, randomServerId())
+                    .with("converters", "geometry")
+                    .with("geometry.type", "io.tapdata.connector.mysql.GeometryConverter")
+                    .with("geometry.schema.name", "io.debezium.mysql.type.Geometry")
                     .with("time.precision.mode", "adaptive_time_microseconds")
 //					.with("converters", "time")
 //					.with("time.type", "io.tapdata.connector.mysql.converters.TimeConverter")
 //					.with("time.schema.name", "io.debezium.mysql.type.Time")
+                    .with("enable.time.adjuster",false)
                     .with("snapshot.locking.mode", "none");
 //            if (EmptyKit.isNotBlank(mysqlConfig.getTimezone())) {
 //                builder.with("database.serverTimezone", mysqlJdbcContext.queryTimeZone());
@@ -337,7 +322,18 @@ public class MysqlReader implements Closeable {
             }
 //			builder.with("database.history", "io.debezium.relational.history.MemoryDatabaseHistory");
             builder.with("database.history", "io.tapdata.connector.mysql.StateMapHistoryBackingStore");
-
+            //开启ssl
+            if (mysqlConfig.getUseSSL()) {
+                builder.with("database.useSSL", "true");
+                builder.with("database.requireSSL", "true");
+                if ("true".equals(mysqlConfig.getProperties().getProperty("verifyServerCertificate"))) {
+                    builder.with("database.ssl.mode", "required");
+                    builder.with("database.database.ssl.keystore", mysqlConfig.getProperties().getProperty("clientCertificateKeyStoreUrl").replace("file:", ""));
+                    builder.with("database.database.ssl.keystore.password", mysqlConfig.getProperties().getProperty("clientCertificateKeyStorePassword"));
+                    builder.with("database.database.ssl.truststore", mysqlConfig.getProperties().getProperty("trustCertificateKeyStoreUrl").replace("file:", ""));
+                    builder.with("database.database.ssl.truststore.password", mysqlConfig.getProperties().getProperty("trustCertificateKeyStorePassword"));
+                }
+            }
             Configuration configuration = builder.build();
             StringBuilder configStr = new StringBuilder("Starting binlog reader with config {\n");
             configuration.withMaskedPasswords().asMap().forEach((k, v) -> configStr.append("  ")
@@ -452,7 +448,7 @@ public class MysqlReader implements Closeable {
                     try {
                         json = StringCompressUtil.compress(json);
                     } catch (IOException e) {
-                        tapLogger.warn("Compress Mysql schema history failed, string: " +(json.length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : json) + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
+                        tapLogger.warn("Compress Mysql schema history failed, string: " + (json.length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : json) + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
                         return;
                     }
                     tapConnectorContext.getStateMap().put(MYSQL_SCHEMA_HISTORY, json);
@@ -795,7 +791,7 @@ public class MysqlReader implements Closeable {
                 value = Instant.parse((CharSequence) value).atZone(dbTimeZone.toZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC);
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
-            value = (Integer) value * 24 * 60 * 60 * 1000L;
+            value = ((Integer) value).longValue() * 24 * 60 * 60 * 1000L;
         }
         return value;
     }
@@ -830,7 +826,7 @@ public class MysqlReader implements Closeable {
                 }
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
-            value = (Integer) value * 24 * 60 * 60 * 1000L + diff;
+            value = ((Integer) value).longValue() * 24 * 60 * 60 * 1000L + diff;
         }
         return value;
     }
