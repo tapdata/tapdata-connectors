@@ -8,7 +8,7 @@ import java.util.Map;
 
 public class RocketmqConfig extends MqConfig implements Serializable {
 
-    private String producerGroup;
+    private String producerGroup = "tapdata";
     private String consumerGroup;
     private boolean useTLS;
 

@@ -791,7 +791,7 @@ public class MysqlReader implements Closeable {
                 value = Instant.parse((CharSequence) value).atZone(dbTimeZone.toZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC);
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
-            value = (Integer) value * 24 * 60 * 60 * 1000L;
+            value = ((Integer) value).longValue() * 24 * 60 * 60 * 1000L;
         }
         return value;
     }
@@ -826,7 +826,7 @@ public class MysqlReader implements Closeable {
                 }
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
-            value = (Integer) value * 24 * 60 * 60 * 1000L + diff;
+            value = ((Integer) value).longValue() * 24 * 60 * 60 * 1000L + diff;
         }
         return value;
     }

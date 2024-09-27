@@ -118,7 +118,7 @@ class ConvertTest {
         convertInfo.put(Convert.COLUMN_TYPE, columnType);
         convertInfo.put(Convert.COLUMN_PRECISION, columnPrecision);
         convertInfo.put(Convert.COLUMN_SCALE, columnScale);
-        Convert instance = Convert.instance(convertInfo, TimeZone.getDefault());
+        Convert instance = Convert.instance(convertInfo, TimeZone.getDefault(), TimeZone.getDefault());
         Assertions.assertNotNull(instance);
         Assertions.assertEquals(c.getName(), instance.getClass().getName());
     }
