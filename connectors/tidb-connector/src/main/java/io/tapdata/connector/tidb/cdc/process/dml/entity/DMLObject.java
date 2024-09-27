@@ -9,6 +9,9 @@ import java.util.Map;
 
 public class DMLObject extends TiData {
 
+    /**
+     * TiCDC 默认值为 0
+     */
     @JsonProperty("id")
     Long id;
 
@@ -30,9 +33,15 @@ public class DMLObject extends TiData {
     @JsonProperty("type")
     String type;
 
+    /**
+     * 产生该条消息的事件发生时的 13 位（毫秒级）时间戳
+     */
     @JsonProperty("es")
     Long es;
 
+    /**
+     * TiCDC 生成该条消息时的 13 位（毫秒级）时间戳
+     */
     @JsonProperty("ts")
     Long ts;
 

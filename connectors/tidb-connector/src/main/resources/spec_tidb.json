@@ -451,6 +451,7 @@
       "to": "TapNumber",
       "bit": 32,
       "precision": 10,
+      "unsigned": "unsigned",
       "value": [
         0,
         4294967295
@@ -469,6 +470,7 @@
       "to": "TapNumber",
       "bit": 64,
       "precision": 20,
+      "unsigned": "unsigned",
       "value": [
         0,
         18446744073709551615
