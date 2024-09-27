@@ -104,7 +104,7 @@ public class RocketmqService extends AbstractMqService {
 
     @Override
     protected <T> Map<String, Object> analyzeTable(Object object, T topic, TapTable tapTable) throws Exception {
-        DefaultMQPullConsumer mqConsumer  = new DefaultMQPullConsumer(MixAll.TOOLS_CONSUMER_GROUP, (RPCHook) null);
+        DefaultMQPullConsumer mqConsumer = new DefaultMQPullConsumer(MixAll.TOOLS_CONSUMER_GROUP, (RPCHook) null);
         mqConsumer.setNamesrvAddr(mqConfig.getNameSrvAddr());
         mqConsumer.start();
         tapTable.setId((String) topic);
@@ -144,7 +144,7 @@ public class RocketmqService extends AbstractMqService {
     @Override
     public int countTables() throws Throwable {
         if (EmptyKit.isEmpty(mqConfig.getMqTopicSet())) {
-            DefaultMQAdminExt defaultMQAdminExt = new DefaultMQAdminExt();
+            DefaultMQAdminExt defaultMQAdminExt = new DefaultMQAdminExt(getRPCHook());
             defaultMQAdminExt.setNamesrvAddr(mqConfig.getNameSrvAddr());
             defaultMQAdminExt.start();
             Set<String> list = defaultMQAdminExt.fetchAllTopicList().getTopicList();
@@ -157,7 +157,7 @@ public class RocketmqService extends AbstractMqService {
 
     @Override
     public void loadTables(int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-        DefaultMQAdminExt defaultMQAdminExt = new DefaultMQAdminExt();
+        DefaultMQAdminExt defaultMQAdminExt = new DefaultMQAdminExt(getRPCHook());
         defaultMQAdminExt.setNamesrvAddr(mqConfig.getNameSrvAddr());
         defaultMQAdminExt.start();
         Set<String> existTopicSet = defaultMQAdminExt.fetchAllTopicList().getTopicList()
@@ -187,9 +187,10 @@ public class RocketmqService extends AbstractMqService {
         submitTables(tableSize, consumer, null, destinationSet);
         defaultMQAdminExt.shutdown();
     }
+
     @Override
     protected <T> void submitTables(int tableSize, Consumer<List<TapTable>> consumer, Object object, Set<T> destinationSet) {
-        DefaultMQPullConsumer mqConsumer  = new DefaultMQPullConsumer(MixAll.TOOLS_CONSUMER_GROUP, (RPCHook) null);
+        DefaultMQPullConsumer mqConsumer = new DefaultMQPullConsumer(MixAll.TOOLS_CONSUMER_GROUP, (RPCHook) null);
         mqConsumer.setNamesrvAddr(mqConfig.getNameSrvAddr());
         try {
             mqConsumer.start();
@@ -201,7 +202,7 @@ public class RocketmqService extends AbstractMqService {
             CountDownLatch countDownLatch = new CountDownLatch(tables.size());
             executorService = Executors.newFixedThreadPool(tables.size());
             tables.forEach(table -> executorService.submit(() -> {
-                TapTable tapTable = new TapTable();
+                TapTable tapTable = new TapTable((String) table);
                 List<MessageExt> messageViewList = Lists.newArrayList();
                 try {
                     SCHEMA_PARSER.parse(tapTable, analyzeTable(object, table, tapTable));
@@ -233,10 +234,11 @@ public class RocketmqService extends AbstractMqService {
                         SCHEMA_PARSER.parse(tapTable, messageBody);
                     }
                 } catch (Exception e) {
-                    TapLogger.error(TAG, "topic[{}] value [{}] can not parse to json, ignore...", tapTable.getName(), messageViewList.get(0).getBody());
+                    tapLogger.warn("topic[{}] value [{}] can not parse to json, ignore...", tapTable.getName(), messageViewList.get(0).getBody());
+                } finally {
+                    tableList.add(tapTable);
+                    countDownLatch.countDown();
                 }
-                tableList.add(tapTable);
-                countDownLatch.countDown();
             }));
             try {
                 countDownLatch.await();
@@ -248,6 +250,18 @@ public class RocketmqService extends AbstractMqService {
             }
             consumer.accept(tableList);
         });
+    }
+
+    public boolean createTopic(String topic) throws Exception {
+        DefaultMQAdminExt defaultMQAdminExt = new DefaultMQAdminExt(getRPCHook());
+        defaultMQAdminExt.setNamesrvAddr(mqConfig.getNameSrvAddr());
+        try {
+            defaultMQAdminExt.start();
+            defaultMQAdminExt.createTopic(defaultMQAdminExt.getCreateTopicKey(), topic, 1);
+        } finally {
+            defaultMQAdminExt.shutdown();
+        }
+        return false;
     }
 
     @Override
@@ -266,6 +280,9 @@ public class RocketmqService extends AbstractMqService {
             }
             Message message = new Message();
             message.setTopic(tapTable.getId());
+            if (EmptyKit.isNotBlank(((RocketmqConfig) mqConfig).getProduceTags())) {
+                message.setTags(((RocketmqConfig) mqConfig).getProduceTags());
+            }
             byte[] body = null;
             MqOp mqOp = MqOp.INSERT;
             if (event instanceof TapInsertRecordEvent) {
@@ -328,7 +345,11 @@ public class RocketmqService extends AbstractMqService {
         litePullConsumer.setNamesrvAddr(mqConfig.getNameSrvAddr());
         litePullConsumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
         litePullConsumer.start();
-        litePullConsumer.subscribe(tableName, "*");
+        if (EmptyKit.isNotBlank(((RocketmqConfig) mqConfig).getConsumeExpression())) {
+            litePullConsumer.subscribe(tableName, ((RocketmqConfig) mqConfig).getConsumeExpression());
+        } else {
+            litePullConsumer.subscribe(tableName, "*");
+        }
         try {
             while (consuming.get()) {
                 List<MessageExt> messageList = litePullConsumer.poll(SINGLE_MAX_LOAD_TIMEOUT * 3);
@@ -384,7 +405,11 @@ public class RocketmqService extends AbstractMqService {
                             litePullConsumer = new DefaultLitePullConsumer(((RocketmqConfig) mqConfig).getConsumerGroup(), getRPCHook());
                             litePullConsumer.setNamesrvAddr(mqConfig.getNameSrvAddr());
                             litePullConsumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
-                            litePullConsumer.subscribe(tableName, "*");
+                            if (EmptyKit.isNotBlank(((RocketmqConfig) mqConfig).getConsumeExpression())) {
+                                litePullConsumer.subscribe(tableName, ((RocketmqConfig) mqConfig).getConsumeExpression());
+                            } else {
+                                litePullConsumer.subscribe(tableName, "*");
+                            }
                             try {
                                 litePullConsumer.start();
                             } catch (MQClientException e) {
