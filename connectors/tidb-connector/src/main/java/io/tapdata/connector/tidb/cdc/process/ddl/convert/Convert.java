@@ -2,7 +2,6 @@ package io.tapdata.connector.tidb.cdc.process.ddl.convert;
 
 import io.tapdata.entity.error.CoreException;
 
-import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -33,18 +32,21 @@ public interface Convert {
         if (precision < 0) precision = 0;
         if (fromValue instanceof String) {
             try {
-                return LocalDate.parse((String) fromValue, DateTimeFormatter.ofPattern(String.format(format, Convert.timePrecision(precision))));
+                DateTimeFormatter formatter = dateTimeFormatter(format, precision, timezone);
+                return LocalDate.parse((String) fromValue, formatter);
             } catch (Exception e) {
                 throw new CoreException(101, e, e.getMessage());
             }
         }
         return fromValue;
     }
+
     default Object covertToTime(Object fromValue, int precision, String format, TimeZone timezone) {
         if (precision < 0) precision = 0;
         if (fromValue instanceof String) {
             try {
-                return LocalTime.parse((String) fromValue, DateTimeFormatter.ofPattern(String.format(format, Convert.timePrecision(precision))));
+                DateTimeFormatter formatter = dateTimeFormatter(format, precision, timezone);
+                return LocalTime.parse((String) fromValue, formatter);
             } catch (Exception e) {
                 throw new CoreException(101, e, e.getMessage());
             }
@@ -56,7 +58,8 @@ public interface Convert {
         if (precision < 0) precision = 0;
         if (fromValue instanceof String) {
             try {
-                return LocalDateTime.parse((String) fromValue, DateTimeFormatter.ofPattern(String.format(format, Convert.timePrecision(precision)))).atZone(timezone.toZoneId()).toInstant();
+                DateTimeFormatter formatter = dateTimeFormatter(format, precision, timezone);
+                return LocalDateTime.parse((String) fromValue, formatter).atZone(timezone.toZoneId()).toInstant();
             } catch (Exception e) {
                 throw new CoreException(101, e, e.getMessage());
             }
@@ -65,21 +68,28 @@ public interface Convert {
     }
 
     default Object covertToDateTime(Object fromValue, int precision, String format, TimeZone timezone) {
-        if  (precision < 1) return covertDateTime(fromValue, precision, format, timezone);
+        if (precision < 1) return covertDateTime(fromValue, precision, format, timezone);
         if (fromValue instanceof String) {
             try {
                 DateTimeFormatter formatter = new DateTimeFormatterBuilder()
-                        .appendPattern(format)
-                        .optionalStart()
-                        .appendFraction(ChronoField.NANO_OF_SECOND, 0, precision, true)
-                        .optionalEnd()
-                        .toFormatter();
+                    .appendPattern(format)
+                    .optionalStart()
+                    .appendFraction(ChronoField.NANO_OF_SECOND, 0, precision, true)
+                    .optionalEnd()
+                    .toFormatter();
                 return LocalDateTime.parse((String) fromValue, formatter);
             } catch (Exception e) {
                 throw new CoreException(101, e, e.getMessage());
             }
         }
         return fromValue;
+    }
+
+    static DateTimeFormatter dateTimeFormatter(String format, int precision, TimeZone timezone) {
+        String precisionFormat = String.format(format, Convert.timePrecision(precision));
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(precisionFormat);
+        if (null != timezone) formatter = formatter.withZone(timezone.toZoneId());
+        return formatter;
     }
 
     static String timePrecision(int precision) {
@@ -91,7 +101,7 @@ public interface Convert {
         return builder.toString();
     }
 
-    static Convert instance(Map<String, Object> convertInfo, TimeZone timezone) {
+    static Convert instance(Map<String, Object> convertInfo, TimeZone timezone, TimeZone dbTimezone) {
         String columnType = String.valueOf(convertInfo.get(COLUMN_TYPE)).toUpperCase();
         Object columnPrecision = convertInfo.get(COLUMN_PRECISION);
         Object columnScale = convertInfo.get(COLUMN_SCALE);
@@ -144,7 +154,7 @@ public interface Convert {
             case "DOUBLE UNSIGNED":
                 return new DoubleConvert(true, String.valueOf(columnPrecision), String.valueOf(columnScale));
             case "TIMESTAMP":
-                return new TimestampConvert(String.valueOf(Optional.ofNullable(columnPrecision).orElse(columnScale)), timezone);
+                return new TimestampConvert(String.valueOf(Optional.ofNullable(columnPrecision).orElse(columnScale)), timezone, dbTimezone);
             case "DATETIME":
                 return new DateTimeConvert(String.valueOf(Optional.ofNullable(columnPrecision).orElse(columnScale)), timezone);
             case "TIME":

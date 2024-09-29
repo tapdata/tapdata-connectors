@@ -259,8 +259,14 @@ public final class ProcessHandler implements Activity {
         String cdcServer;
         TidbConfig tidbConfig;
         TimeZone timezone;
+        TimeZone dbTimezone;
         public ProcessInfo withZone(TimeZone timezone) {
             this.timezone = timezone;
+            return this;
+        }
+
+        public ProcessInfo withDbZone(TimeZone dbTimezone) {
+            this.dbTimezone = dbTimezone;
             return this;
         }
 

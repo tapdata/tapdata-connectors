@@ -8,8 +8,10 @@ import java.util.Map;
 
 public class RocketmqConfig extends MqConfig implements Serializable {
 
-    private String producerGroup;
+    private String producerGroup = "tapdata";
     private String consumerGroup;
+    private String produceTags;
+    private String consumeExpression;
     private boolean useTLS;
 
     public RocketmqConfig load(Map<String, Object> map) {
@@ -42,5 +44,21 @@ public class RocketmqConfig extends MqConfig implements Serializable {
 
     public void setUseTLS(boolean useTLS) {
         this.useTLS = useTLS;
+    }
+
+    public String getProduceTags() {
+        return produceTags;
+    }
+
+    public void setProduceTags(String produceTags) {
+        this.produceTags = produceTags;
+    }
+
+    public String getConsumeExpression() {
+        return consumeExpression;
+    }
+
+    public void setConsumeExpression(String consumeExpression) {
+        this.consumeExpression = consumeExpression;
     }
 }

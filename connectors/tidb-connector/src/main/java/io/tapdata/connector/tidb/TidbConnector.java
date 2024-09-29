@@ -28,14 +28,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.value.TapArrayValue;
-import io.tapdata.entity.schema.value.TapBooleanValue;
-import io.tapdata.entity.schema.value.TapDateTimeValue;
-import io.tapdata.entity.schema.value.TapDateValue;
-import io.tapdata.entity.schema.value.TapMapValue;
-import io.tapdata.entity.schema.value.TapTimeValue;
-import io.tapdata.entity.schema.value.TapValue;
-import io.tapdata.entity.schema.value.TapYearValue;
+import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
@@ -45,11 +38,7 @@ import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import io.tapdata.pdk.apis.entity.ConnectionOptions;
-import io.tapdata.pdk.apis.entity.FilterResults;
-import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
-import io.tapdata.pdk.apis.entity.TestItem;
-import io.tapdata.pdk.apis.entity.WriteListResult;
+import io.tapdata.pdk.apis.entity.*;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
@@ -59,18 +48,14 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.sql.Date;
+import java.sql.SQLException;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.TimeZone;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -81,20 +66,22 @@ public class TidbConnector extends CommonDbConnector {
     private TidbConfig tidbConfig;
     private TidbJdbcContext tidbJdbcContext;
     private TimeZone timezone;
+    private TimeZone dbTimezone;
     private TidbReader tidbReader;
     AtomicReference<Throwable> throwableCatch = new AtomicReference<>();
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
 
-    protected void initTimeZone() {
+    protected void initTimeZone() throws SQLException {
         if (EmptyKit.isBlank(tidbConfig.getTimezone())) {
             tidbConfig.setTimezone("+00:00");
         }
         timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
+        dbTimezone = tidbJdbcContext.queryTimeZone();
     }
 
     @Override
-    public void onStart(TapConnectionContext tapConnectionContext) {
+    public void onStart(TapConnectionContext tapConnectionContext) throws SQLException {
         this.tidbConfig = new TidbConfig().load(tapConnectionContext.getConnectionConfig());
         tidbJdbcContext = new TidbJdbcContext(tidbConfig);
         commonDbConfig = tidbConfig;
@@ -145,42 +132,24 @@ public class TidbConnector extends CommonDbConnector {
 
         // source functions
         connectorFunctions.supportBatchCount(this::batchCount);
-        connectorFunctions.supportBatchRead(this::batchReadV3);
+        connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
         connectorFunctions.supportStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
 
+        // codecs
+        codecRegistry.registerFromTapValue(TapMapValue.class, "longtext", tapValue -> toJson(tapValue.getValue()));
+        codecRegistry.registerFromTapValue(TapArrayValue.class, "longtext", tapValue -> toJson(tapValue.getValue()));
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
             if (tapDateTimeValue.getValue() != null && tapDateTimeValue.getValue().getTimeZone() == null) {
                 tapDateTimeValue.getValue().setTimeZone(timezone);
             }
             return formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS");
         });
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
-            if (tapDateValue.getValue() != null && tapDateValue.getValue().getTimeZone() == null) {
-                tapDateValue.getValue().setTimeZone(timezone);
-            }
-            return formatTapDateTime(tapDateValue.getValue(), "yyyy-MM-dd");
-        });
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().isContainsIllegal() ? tapDateValue.getValue().getIllegalDate() : tapDateValue.getValue().toInstant());
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
-        codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> {
-            if (tapYearValue.getValue() != null && tapYearValue.getValue().getTimeZone() == null) {
-                tapYearValue.getValue().setTimeZone(timezone);
-            }
-            return formatTapDateTime(tapYearValue.getValue(), "yyyy");
-        });
-        codecRegistry.registerFromTapValue(TapBooleanValue.class, "tinyint(1)", TapValue::getValue);
-
-        codecRegistry.registerFromTapValue(TapMapValue.class, "longtext", tapMapValue -> {
-            if (tapMapValue != null && tapMapValue.getValue() != null) return toJson(tapMapValue.getValue());
-            return "null";
-        });
-        codecRegistry.registerFromTapValue(TapArrayValue.class, "longtext", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) return toJson(tapValue.getValue());
-            return "null";
-        });
-
+        codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
     }
 
     protected void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
@@ -189,6 +158,7 @@ public class TidbConnector extends CommonDbConnector {
         nodeContext.getLog().info("Source timezone: {}", timezone.toZoneId().toString());
         ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
                 .withZone(timezone)
+                .withDbZone(dbTimezone)
                 .withCdcServer(cdcServer)
                 .withFeedId(feedId)
                 .withAlive(this::isAlive)
@@ -394,8 +364,7 @@ public class TidbConnector extends CommonDbConnector {
                     entry.setValue(((LocalDateTime) value).minusHours(tidbConfig.getZoneOffsetHour()));
                 }
             }  else if (value instanceof java.sql.Date) {
-                ZoneId zoneId = null == timezone ? ZoneId.systemDefault() : timezone.toZoneId();
-                entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(zoneId).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
+                entry.setValue(((Date) value).toLocalDate());
             } else if (value instanceof Timestamp) {
                 if (isTimestamp) {
                     entry.setValue(((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));

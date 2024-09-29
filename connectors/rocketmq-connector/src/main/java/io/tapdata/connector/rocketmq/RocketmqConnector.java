@@ -4,6 +4,7 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.connector.rocketmq.config.RocketmqConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.TapDateTimeValue;
@@ -20,6 +21,7 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
+import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -60,6 +62,7 @@ public class RocketmqConnector extends ConnectorBase {
 
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportConnectionCheckFunction(this::checkConnection);
+        connectorFunctions.supportCreateTableV2(this::createTableV2);
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportBatchRead(this::batchRead);
         connectorFunctions.supportStreamRead(this::streamRead);
@@ -98,6 +101,16 @@ public class RocketmqConnector extends ConnectorBase {
     @Override
     public int tableCount(TapConnectionContext connectionContext) throws Throwable {
         return rocketmqService.countTables();
+    }
+
+    protected CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) {
+        CreateTableOptions createTableOptions = new CreateTableOptions();
+        try {
+            createTableOptions.setTableExists(rocketmqService.createTopic(tapCreateTableEvent.getTableId()));
+        } catch (Exception e) {
+            createTableOptions.setTableExists(false);
+        }
+        return createTableOptions;
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {

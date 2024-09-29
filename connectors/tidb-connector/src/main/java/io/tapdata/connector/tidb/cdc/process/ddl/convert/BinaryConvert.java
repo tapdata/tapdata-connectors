@@ -1,5 +1,7 @@
 package io.tapdata.connector.tidb.cdc.process.ddl.convert;
 
+import java.nio.charset.StandardCharsets;
+
 public class BinaryConvert implements Convert {
     @Override
     public Object convert(Object fromValue) {
@@ -7,6 +9,6 @@ public class BinaryConvert implements Convert {
         if (fromValue instanceof byte[]) {
             return fromValue;
         }
-        return String.valueOf(fromValue).getBytes();
+        return String.valueOf(fromValue).getBytes(StandardCharsets.ISO_8859_1);
     }
 }
