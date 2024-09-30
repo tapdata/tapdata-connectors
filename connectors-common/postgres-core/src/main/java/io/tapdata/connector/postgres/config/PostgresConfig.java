@@ -20,6 +20,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String logPluginName = "pgoutput"; //default log plugin for postgres, pay attention to lower version
     private Boolean closeNotNull = false;
     private Boolean partitionRoot = false;
+    private Integer maximumQueueSize = 800;
 
     //customize
     public PostgresConfig() {
@@ -83,5 +84,13 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setPartitionRoot(Boolean partitionRoot) {
         this.partitionRoot = partitionRoot;
+    }
+
+    public Integer getMaximumQueueSize() {
+        return maximumQueueSize;
+    }
+
+    public void setMaximumQueueSize(Integer maximumQueueSize) {
+        this.maximumQueueSize = maximumQueueSize;
     }
 }
