@@ -192,7 +192,7 @@ public class DbKit {
         }
         Map<String, Object> lastAfter = new HashMap<>();
         for (Map.Entry<String, Object> entry : after.entrySet()) {
-            if (EmptyKit.isNull(entry.getValue()) && EmptyKit.isNull(lastBefore.get(entry.getKey())) || EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(lastBefore.get(entry.getKey()))) {
+            if (EmptyKit.isNull(entry.getValue()) && lastBefore.containsKey(entry.getKey()) && EmptyKit.isNull(lastBefore.get(entry.getKey())) || EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(lastBefore.get(entry.getKey()))) {
                 continue;
             }
             lastAfter.put(entry.getKey(), entry.getValue());
