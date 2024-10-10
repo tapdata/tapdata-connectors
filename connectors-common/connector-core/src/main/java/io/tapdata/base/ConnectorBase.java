@@ -392,8 +392,12 @@ public abstract class ConnectorBase implements TapConnector {
         return retryOptions;
     }
 
+    protected CopyOnWriteArraySet<List<DataMap>> splitTableForMultiDiscoverSchema(List<DataMap> tables, int tableSize) {
+        return new CopyOnWriteArraySet<>(DbKit.splitToPieces(tables, tableSize));
+    }
+
     protected void multiThreadDiscoverSchema(List<DataMap> tables, int tableSize, Consumer<List<TapTable>> consumer) {
-        CopyOnWriteArraySet<List<DataMap>> tableLists = new CopyOnWriteArraySet<>(DbKit.splitToPieces(tables, tableSize));
+        CopyOnWriteArraySet<List<DataMap>> tableLists = splitTableForMultiDiscoverSchema(tables, tableSize);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         CountDownLatch countDownLatch = new CountDownLatch(5);
         ExecutorService executorService = Executors.newFixedThreadPool(5);
