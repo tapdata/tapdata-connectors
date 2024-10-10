@@ -242,6 +242,8 @@ public class ClickhouseConnector extends CommonDbConnector {
         List<String> sqlList = fieldDDLHandlers.handle(tapFieldBaseEvent, tapConnectorContext);
         if (null == sqlList) {
             return;
+        } else {
+            sqlList = new ArrayList<>(sqlList);
         }
         sqlList.add("OPTIMIZE TABLE `" + clickhouseConfig.getDatabase() + "`.`" + tapFieldBaseEvent.getTableId() + "` FINAL");
         jdbcContext.batchExecute(sqlList);
@@ -368,7 +370,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         clickhouseConfig = new ClickhouseConfig().load(connectionContext.getConnectionConfig());
         try (
-                ClickhouseTest clickhouseTest = new ClickhouseTest(clickhouseConfig, consumer,connectionOptions)
+                ClickhouseTest clickhouseTest = new ClickhouseTest(clickhouseConfig, consumer, connectionOptions)
         ) {
             clickhouseTest.testOneByOne();
             return connectionOptions;
