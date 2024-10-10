@@ -18,6 +18,7 @@
         <module>doris-connector</module>
         <module>oceanbase-mysql-connector</module>
 		<module>kafka-connector</module>
+		<module>kafka-enhanced-connector</module>
         <module>rabbitmq-connector</module>
         <module>rocketmq-connector</module>
 		<module>activemq-connector</module>
