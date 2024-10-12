@@ -23,6 +23,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -182,7 +183,7 @@ public class ClickhouseConnector extends CommonDbConnector {
                 return formatTapDateTimeV2(tapTimeValue.getValue(), "HH:mm:ss.SS");
             }
         });
-        codecRegistry.registerFromTapValue(TapYearValue.class, "char(4)", TapValue::getOriginValue);
+        codecRegistry.registerFromTapValue(TapYearValue.class, "FixedString(4)", TapValue::getOriginValue);
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "String", tapValue -> {
             if (tapValue != null && tapValue.getValue() != null)
                 return new String(Base64.encodeBase64(tapValue.getValue()));
@@ -394,15 +395,20 @@ public class ClickhouseConnector extends CommonDbConnector {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
                 } else if (value instanceof Timestamp) {
                     entry.setValue(Instant.ofEpochMilli(((Timestamp) value).getTime()).atZone(ZoneOffset.UTC).toLocalDateTime().minusHours(clickhouseConfig.getZoneOffsetHour()));
-                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().startsWith("Date32")) {
-                    entry.setValue(LocalDate.parse((String) value).atStartOfDay());
-                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().startsWith("DateTime64")) {
-                    String dataFormat = dataFormatMap.get(tapTable.getId() + "." + entry.getKey());
-                    if (EmptyKit.isNull(dataFormat)) {
-                        dataFormat = DateUtil.determineDateFormat((String) value);
-                        dataFormatMap.put(tapTable.getId() + "." + entry.getKey(), dataFormat);
+                } else if (value instanceof String) {
+                    String dataType = tapTable.getNameFieldMap().get(entry.getKey()).getDataType();
+                    if (dataType.startsWith("Date32")) {
+                        entry.setValue(LocalDate.parse((String) value).atStartOfDay());
+                    } else if (dataType.startsWith("DateTime64")) {
+                        String dataFormat = dataFormatMap.get(tapTable.getId() + "." + entry.getKey());
+                        if (EmptyKit.isNull(dataFormat)) {
+                            dataFormat = DateUtil.determineDateFormat((String) value);
+                            dataFormatMap.put(tapTable.getId() + "." + entry.getKey(), dataFormat);
+                        }
+                        entry.setValue(DateUtil.parseInstantWithHour((String) value, dataFormat, clickhouseConfig.getZoneOffsetHour()));
+                    } else if (dataType.startsWith("FixedString")) {
+                        entry.setValue(StringKit.trimTailBlank(value));
                     }
-                    entry.setValue(DateUtil.parseInstantWithHour((String) value, dataFormat, clickhouseConfig.getZoneOffsetHour()));
                 }
             }
         }

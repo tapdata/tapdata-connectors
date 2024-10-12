@@ -116,14 +116,9 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
 
     protected Object filterValue(Object value, String dataType) {
         if (dataType.startsWith("char")) {
-            return trimTailBlank(value);
+            return StringKit.trimTailBlank(value);
         }
         return value;
-    }
-
-    private String trimTailBlank(Object str) {
-        if (null == str) return null;
-        return ("_" + str).trim().substring(1);
     }
 
 }

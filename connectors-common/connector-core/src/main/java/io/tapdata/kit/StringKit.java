@@ -337,4 +337,9 @@ public class StringKit {
         }
         return byteArray;
     }
+
+    public static String trimTailBlank(Object str) {
+        if (null == str) return null;
+        return ("_" + str).trim().substring(1);
+    }
 }

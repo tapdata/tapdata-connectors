@@ -102,12 +102,18 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         if (EmptyKit.isNull(dataType)) {
             return value;
         }
+        if (EmptyKit.isNull(value)) {
+            return null;
+        }
         if (dataType.contains("Int")) {
             if (value instanceof Float) {
                 return ((Float) value).intValue();
             } else if (value instanceof Double) {
                 return ((Double) value).intValue();
             }
+        }
+        if (dataType.startsWith("Decimal")) {
+            return value.toString();
         }
         return value;
     }
