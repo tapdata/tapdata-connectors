@@ -57,6 +57,7 @@ public class ClickhouseConnector extends CommonDbConnector {
     protected ClickhouseConfig clickhouseConfig;
     protected ClickhouseJdbcContext clickhouseJdbcContext;
     protected String clickhouseVersion;
+    protected TimeZone dbTimeZone;
 
     private final ClickhouseBatchWriter clickhouseWriter = new ClickhouseBatchWriter(TAG);
     private ExecutorService executorService;
@@ -90,6 +91,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         commonDbConfig = clickhouseConfig;
         jdbcContext = clickhouseJdbcContext;
         clickhouseVersion = clickhouseJdbcContext.queryVersion();
+        dbTimeZone = TimeZone.getTimeZone(clickhouseJdbcContext.queryTimeZone());
         commonSqlMaker = new ClickhouseSqlMaker().withVersion(clickhouseVersion);
         tapLogger = connectionContext.getLog();
         exceptionCollector = new ClickhouseExceptionCollector();
@@ -196,7 +198,7 @@ public class ClickhouseConnector extends CommonDbConnector {
             if (clickhouseConfig.getOldVersionTimezone()) {
                 return tapDateTimeValue.getValue().toTimestamp();
             } else {
-                return Timestamp.from(tapDateTimeValue.getValue().toInstant().atZone(clickhouseConfig.getZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC).toInstant());
+                return Timestamp.from(tapDateTimeValue.getValue().toInstant().atZone(clickhouseConfig.getZoneId()).toLocalDateTime().atZone(dbTimeZone.toZoneId()).toInstant());
             }
         });
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
@@ -394,7 +396,7 @@ public class ClickhouseConnector extends CommonDbConnector {
                 if (value instanceof java.sql.Date) {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
                 } else if (value instanceof Timestamp) {
-                    entry.setValue(Instant.ofEpochMilli(((Timestamp) value).getTime()).atZone(ZoneOffset.UTC).toLocalDateTime().minusHours(clickhouseConfig.getZoneOffsetHour()));
+                    entry.setValue(Instant.ofEpochMilli(((Timestamp) value).getTime()).atZone(dbTimeZone.toZoneId()).toLocalDateTime().minusHours(clickhouseConfig.getZoneOffsetHour()));
                 } else if (value instanceof String) {
                     String dataType = tapTable.getNameFieldMap().get(entry.getKey()).getDataType();
                     if (dataType.startsWith("Date32")) {
