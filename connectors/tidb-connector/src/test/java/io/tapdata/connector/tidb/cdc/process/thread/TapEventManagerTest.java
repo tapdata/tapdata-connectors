@@ -229,7 +229,7 @@ class TapEventManagerTest {
                 to.when(() -> TapEventManager.TiOffset.computeIfAbsent("table", offset, 1L, 1L)).thenReturn(new HashMap<>());
                 to.when(() -> TapEventManager.TiOffset.getEs(anyMap())).thenReturn(2L);
                 Assertions.assertDoesNotThrow(() -> manager.handleDML(dmlObject));
-                verify(log, times(1)).debug(anyString(), anyString(), anyLong(), anyLong(), anyString());
+                verify(log, times(1)).warn(anyString(), anyString(), anyLong(), anyLong(), anyString());
                 verify(dmlEventParser, times(0)).analyse(dmlObject, null, log);
                 verify(consumer, times(0)).accept(anyList(), anyMap());
             }

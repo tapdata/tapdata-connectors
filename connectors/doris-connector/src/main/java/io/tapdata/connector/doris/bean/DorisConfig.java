@@ -48,6 +48,11 @@ public class DorisConfig extends CommonDbConfig {
         return "jdbc:mysql://%s:%s/%s?rewriteBatchedStatements=true%s";
     }
 
+    @Override
+    public String getConnectionString() {
+        return getHost() + ":" + getPort() + "/" + getDatabase();
+    }
+
     public String getDatabaseUrl() {
         if (EmptyKit.isNull(this.getExtParams())) {
             this.setExtParams("");

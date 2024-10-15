@@ -13,11 +13,7 @@ import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import org.apache.commons.collections4.CollectionUtils;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 class TapEventManager {
@@ -66,10 +62,10 @@ class TapEventManager {
         Long lastTableVersion = TiOffset.getVersion(offset, table);
         if (null != lastTableVersion && lastTableVersion.compareTo(tableVersion) >= 0) {
             log.debug("Skip a history ddl event, table: {}, table version: {}, last version: {}, data: {}",
-                    table,
-                    tableVersion,
-                    lastTableVersion,
-                    TapSimplify.toJson(ddlObject));
+                table,
+                tableVersion,
+                lastTableVersion,
+                TapSimplify.toJson(ddlObject));
             return;
         }
         TiOffset.updateVersion(offset, table, tableVersion);
@@ -79,24 +75,29 @@ class TapEventManager {
 
     protected void handleDML(DMLObject dmlObject) {
         Long es = Activity.getTOSTime(dmlObject.getEs());
+        Long tableVersion = dmlObject.getTableVersion();
         String table = dmlObject.getTable();
-        Map<String, Long> offsetMap = TiOffset.computeIfAbsent(table, offset, es, dmlObject.getTableVersion());
+        Map<String, Long> offsetMap = TiOffset.computeIfAbsent(table, offset, es, tableVersion);
         Long lastEs = TiOffset.getEs(offsetMap);
         if (null != lastEs && lastEs.compareTo(es) > 0) {
-            log.debug("Skip a history dml event, table: {}, cdc offset: {}, last offset: {}, data: {}",
-                    table,
-                    es,
-                    lastEs,
-                    TapSimplify.toJson(dmlObject));
+            log.warn("Skip a history dml event, table: {}, cdc offset: {}, last offset: {}, data: {}",
+                table,
+                es,
+                lastEs,
+                TapSimplify.toJson(dmlObject));
             return;
         }
         List<TapEvent> tapRecordEvents = dmlEventParser.analyse(dmlObject, null, log);
         if (CollectionUtils.isNotEmpty(tapRecordEvents)) {
+            TiOffset.updateNotNull(offset, table, es, tableVersion);
             consumer.accept(tapRecordEvents, this.offset);
         }
     }
 
     public static class TiOffset {
+        public static final String KEY_ES = "offset";
+        public static final String KEY_TABLE_VERSION = "tableVersion";
+
         private TiOffset() {
 
         }
@@ -104,25 +105,40 @@ class TapEventManager {
         public static Map<String, Long> computeIfAbsent(String table, Map<String, Map<String, Long>> offset, Long ts, Long version) {
             return offset.computeIfAbsent(table, key -> {
                 Map<String, Long> map = new HashMap<>();
-                map.put("offset", ts);
-                map.put("tableVersion", version);
+                map.put(KEY_ES, ts);
+                map.put(KEY_TABLE_VERSION, version);
                 return map;
             });
         }
 
         public static Long getEs(Map<String, Long> offsetMap) {
-            return offsetMap.get("offset");
+            return offsetMap.get(KEY_ES);
         }
 
         public static Long getVersion(Map<String, Map<String, Long>> offset, String table) {
             Map<String, Long> tableOffset = Optional.ofNullable(offset.get(table)).orElse(new HashMap<>());
-            return tableOffset.get("tableVersion");
+            return tableOffset.get(KEY_TABLE_VERSION);
         }
 
         public static void updateVersion(Map<String, Map<String, Long>> offset, String table, Long tableVersion) {
-            Map<String, Long> tableOffset = Optional.ofNullable(offset.get(table)).orElse(new HashMap<>());
-            tableOffset.put("tableVersion", tableVersion);
-            offset.put(table, tableOffset);
+            offset.compute(table, (k, v) -> {
+                if (null == v) {
+                    v = new HashMap<>();
+                }
+                v.put(KEY_TABLE_VERSION, tableVersion);
+                return v;
+            });
+        }
+
+        public static void updateNotNull(Map<String, Map<String, Long>> tableOffset, String table, Long offset, Long tableVersion) {
+            tableOffset.compute(table, (k, v) -> {
+                if (null == v) {
+                    v = new HashMap<>();
+                }
+                if (null != offset) v.put(KEY_ES, offset);
+                if (null != tableVersion) v.put(KEY_TABLE_VERSION, tableVersion);
+                return v;
+            });
         }
 
         public static Long getMinOffset(Object offset) {
@@ -135,10 +151,9 @@ class TapEventManager {
                     List<String> table = new ArrayList<>(o.keySet());
                     for (String tab : table) {
                         Map<String, Long> info = o.get(tab);
-                        Long ts = info.get("offset");
-                        if (null == ts) continue;
-                        if (ts.compareTo(min) < 0) {
-                            min = ts;
+                        Long ts = info.get(KEY_ES);
+                        if (null != ts) {
+                            min = Math.min(min, ts);
                         }
                     }
                     return min;
