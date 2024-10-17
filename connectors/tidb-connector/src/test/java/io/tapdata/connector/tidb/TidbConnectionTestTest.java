@@ -14,11 +14,12 @@ import org.mockito.MockedStatic;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -98,6 +99,17 @@ class TiDbConnectionTestTest {
             }
         }
 
+    }
+    @Nested
+    class TestWriteOrReadPrivilegeTest{
+        @Test
+        void test1(){
+            when(tidbConnectionTest.testWriteOrReadPrivilege(anyString(),anyList(),anyString(),anyString())).thenCallRealMethod();
+            List<String> tableList=new ArrayList<>();
+            tidbConnectionTest.testWriteOrReadPrivilege("72=GRANT SELECT ON wallet_db.tableName TO 'tidb_to_kafka_roof'@'172.31.32.72'",tableList,"wallet_db","read");
+            String tableName = tableList.get(0);
+            assertEquals("tableName",tableName);
+        }
     }
 
     @Nested

@@ -204,7 +204,8 @@ public class TidbConnectionTest extends CommonDbTest {
                 return true;
             }
         }else if (grantSql.contains(databaseName + ".")) {
-            String table = grantSql.substring(grantSql.indexOf(databaseName + "."), grantSql.indexOf("TO")).trim();
+            String grantPrefixDatabase = databaseName + ".";
+            String table = grantSql.substring(grantSql.indexOf(grantPrefixDatabase) + databaseName.length()+1, grantSql.indexOf("TO")).trim();
             if (privilege) {
                 tableList.add(table);
             }
