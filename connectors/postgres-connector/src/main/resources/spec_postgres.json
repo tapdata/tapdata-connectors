@@ -24,6 +24,9 @@
       },
       {
         "id": "batch_read_hash_split"
+      },
+      {
+        "id": "source_support_partition"
       }
     ],
     "connection": {

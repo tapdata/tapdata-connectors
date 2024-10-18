@@ -10,6 +10,8 @@ import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
+import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
+import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
@@ -20,8 +22,17 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.partition.TapSubPartitionTableInfo;
 import io.tapdata.entity.schema.type.TapType;
-import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.schema.value.TapArrayValue;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapMapValue;
+import io.tapdata.entity.schema.value.TapRawValue;
+import io.tapdata.entity.schema.value.TapStringValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
+import io.tapdata.entity.schema.value.TapValue;
+import io.tapdata.entity.schema.value.TapYearValue;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
@@ -42,25 +53,48 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
+import io.tapdata.pdk.apis.functions.connector.common.vo.TapPartitionResult;
 import io.tapdata.pdk.apis.functions.connector.source.ConnectionConfigWithTables;
-import org.postgresql.geometric.*;
+import org.postgresql.geometric.PGbox;
+import org.postgresql.geometric.PGcircle;
+import org.postgresql.geometric.PGline;
+import org.postgresql.geometric.PGlseg;
+import org.postgresql.geometric.PGpath;
+import org.postgresql.geometric.PGpoint;
+import org.postgresql.geometric.PGpolygon;
 import org.postgresql.jdbc.PgArray;
 import org.postgresql.jdbc.PgSQLXML;
 import org.postgresql.util.PGInterval;
 import org.postgresql.util.PGobject;
 
 import java.math.BigDecimal;
+import java.sql.Connection;
 import java.sql.Date;
-import java.sql.*;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TimeZone;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * PDK for Postgresql
@@ -77,6 +111,7 @@ public class PostgresConnector extends CommonDbConnector {
     private Object slotName; //must be stored in stateMap
     protected String postgresVersion;
     protected Map<String, Boolean> writtenTableMap = new ConcurrentHashMap<>();
+    protected PostgresPartitionContext postgresPartitionContext;
 
     @Override
     public void onStart(TapConnectionContext connectorContext) {
@@ -88,12 +123,14 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     @Override
-    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
+    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws SQLException {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer, connectionOptions).initContext()
+                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer, connectionOptions)
+                        .initContext()
+                        .withPostgresVersion();
         ) {
             postgresTest.testOneByOne();
             connectionOptions.setInstanceUniqueId(StringKit.md5(String.join("|"
@@ -215,6 +252,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
         connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
+        connectorFunctions.supportQueryPartitionTablesByParentName(this::discoverPartitionInfoByParentName);
         connectorFunctions.supportStreamReadMultiConnectionFunction(this::streamReadMultiConnection);
 
     }
@@ -265,7 +303,7 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
-    private static final String PG_REPLICATE_IDENTITY = "select relname, relreplident from pg_class\n" +
+    private static final String PG_REPLICATE_IDENTITY = "select relname, relreplident from pg_class " +
             "where relnamespace=(select oid from pg_namespace where nspname='%s') and relname in (%s)";
 
     private void testReplicateIdentity(KVReadOnlyMap<TapTable> tableMap) {
@@ -335,6 +373,8 @@ public class PostgresConnector extends CommonDbConnector {
         });
         commonSqlMaker = new PostgresSqlMaker().closeNotNull(postgresConfig.getCloseNotNull());
         postgresVersion = postgresJdbcContext.queryVersion();
+        postgresJdbcContext.withPostgresVersion(postgresVersion);
+        postgresTest.withPostgresVersion(postgresVersion);
         ddlSqlGenerator = new PostgresDDLSqlGenerator();
         tapLogger = connectionContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();
@@ -343,6 +383,10 @@ public class PostgresConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
         exceptionCollector = new PostgresExceptionCollector();
+        postgresPartitionContext = new PostgresPartitionContext(tapLogger)
+                .withJdbcContext(jdbcContext)
+                .withPostgresVersion(postgresVersion)
+                .withPostgresConfig(postgresConfig);
     }
 
     private void openIdentity(TapTable tapTable) throws SQLException {
@@ -407,7 +451,7 @@ public class PostgresConnector extends CommonDbConnector {
                     .registerConsumer(consumer, recordSize)
                     .startMiner(this::isAlive);
         } else {
-            cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+            cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
             cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
@@ -425,6 +469,9 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
+        cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
+        testReplicateIdentity(nodeContext.getTableMap());
+        buildSlot(nodeContext, true);
         Map<String, List<String>> schemaTableMap = new HashMap<>();
         for (ConnectionConfigWithTables withTables : connectionConfigWithTables) {
             if (null == withTables.getConnectionConfig())
@@ -455,7 +502,7 @@ public class PostgresConnector extends CommonDbConnector {
                     .registerConsumer(consumer, batchSize)
                     .startMiner(this::isAlive);
         } else {
-            cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+            cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
             cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerConsumer(consumer, batchSize);
@@ -705,5 +752,42 @@ public class PostgresConnector extends CommonDbConnector {
         if (pks.isEmpty()) throw new CoreException("No primary keys found for table: " + tapTable.getName());
 
         return "abs(('x' || MD5(CONCAT_WS(',', \"" + String.join("\", \"", pks) + "\")))::bit(64)::bigint)";
+    }
+
+    public void discoverPartitionInfoByParentName(TapConnectorContext connectorContext, List<TapTable> table, Consumer<Collection<TapPartitionResult>> consumer) throws SQLException {
+        postgresPartitionContext.discoverPartitionInfoByParentName(connectorContext, table, consumer);
+    }
+
+    @Override
+    public List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
+        return postgresPartitionContext.discoverPartitionInfo(tapTableList);
+    }
+
+    protected CopyOnWriteArraySet<List<DataMap>> splitTableForMultiDiscoverSchema(List<DataMap> tables, int tableSize) {
+        if (Integer.parseInt(postgresVersion) < 100000) {
+            return super.splitTableForMultiDiscoverSchema(tables, tableSize);
+        }
+        return new CopyOnWriteArraySet<>(splitToPieces(tables, tableSize));
+    }
+
+    List<List<DataMap>> splitToPieces(List<DataMap> data, int eachPieceSize) {
+        if (EmptyKit.isEmpty(data)) {
+            return new ArrayList<>();
+        }
+        if (eachPieceSize <= 0) {
+            throw new IllegalArgumentException("Param Error");
+        }
+        List<List<DataMap>> result = new ArrayList<>();
+        List<DataMap> subList = new ArrayList<>();
+        result.add(subList);
+        for (DataMap datum : data) {
+            String tableType = String.valueOf(datum.get("tableType"));
+            if (subList.size() >= eachPieceSize && !TableType.CHILD_TABLE.equals(tableType)) {
+                subList = new ArrayList<>();
+                result.add(subList);
+            }
+            subList.add(datum);
+        }
+        return result;
     }
 }
