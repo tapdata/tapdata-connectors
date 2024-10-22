@@ -26,6 +26,8 @@ public class DorisConfig extends CommonDbConfig {
 
     private Boolean useHTTPS =false;
 
+    private Integer backendNum;
+
     //customize
     public DorisConfig() {
         setDbType("doris");
@@ -113,6 +115,14 @@ public class DorisConfig extends CommonDbConfig {
 
     public int getBucket() {
         return bucket;
+    }
+
+    public Integer getBackendNum() {
+        return backendNum;
+    }
+
+    public void setBackendNum(Integer backendNum) {
+        this.backendNum = backendNum;
     }
 
     public Boolean getUseHTTPS() {
