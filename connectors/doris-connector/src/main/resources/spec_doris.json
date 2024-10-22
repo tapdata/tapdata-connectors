@@ -82,6 +82,18 @@
           "apiServerKey": "database_password",
           "x-index": 60
         },
+        "backendNum": {
+          "type": "string",
+          "title": "${backendNum}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "backend_Num",
+          "required": false,
+          "x-decorator-props": {
+            "tooltip": "${backendNumTip}"
+          },
+          "x-index": 61
+        },
         "OPTIONAL_FIELDS": {
           "type": "void",
           "properties": {
@@ -521,7 +533,9 @@
       "tablePropertiesTip": "Table properties, for example: {replication_num: 3, storage_format: v2}",
       "propKey": "Property Name",
       "propValue": "Property Value",
-      "useHTTPS": "Enable HTTPS"
+      "useHTTPS": "Enable HTTPS",
+      "backendNum": "The number of BE nodes",
+      "backendNumTip": "During Doris connection testing, a table is created and data is written to Doris for testing. It is necessary to obtain the number of BE nodes when building a table. If the table is not built according to the number of BE nodes, it may cause an error. admin permission is required to obtain the number of BE nodes. If you do not want to grant admin permission, please enter the number of BE manually to avoid errors in the table."
     },
     "zh_CN": {
       "host": "数据库地址",
@@ -555,7 +569,9 @@
       "tablePropertiesTip": "表属性，例如：{replication_num: 3, storage_format: v2}",
       "propKey": "属性名",
       "propValue": "属性值",
-      "useHTTPS": "开启HTTPS"
+      "useHTTPS": "开启HTTPS",
+      "backendNum": "BE节点的数量",
+      "backendNumTip": "Doris连接测试时，会在Doris建表并写入数据进行测试。在建表时需要获取BE节点数量，如果不根据BE数量去建表可能会导致报错。获取BE节点的数量需要admin 权限，如果不想授予admin权限，请手动输入BE数量，以免建表报错。"
     },
     "zh_TW": {
       "host": "數據庫地址",
@@ -589,7 +605,9 @@
       "tablePropertiesTip": "表屬性，例如：{replication_num: 3, storage_format: v2}",
       "propKey": "屬性名",
       "propValue": "屬性值",
-      "useHTTPS": "開啓HTTPS"
+      "useHTTPS": "開啓HTTPS",
+      "backendNum": "BE節點的數量",
+      "backendNumTip": "Doris連接測試時，會在Doris建表並寫入數據進行測試。在建表時需要獲取BE節點數量，如果不根據BE數量去建表可能會導致報錯。獲取BE節點的數量需要admin 權限，如果不想授予admin權限，請手動輸入BE數量，以免建表報錯。"
     }
   },
   "dataTypes": {
