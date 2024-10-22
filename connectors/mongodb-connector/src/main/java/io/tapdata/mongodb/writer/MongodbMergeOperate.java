@@ -252,11 +252,12 @@ public class MongodbMergeOperate {
 		if (null == mergeResult) {
 			firstMergeResult = true;
 			MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
+			Map<String, Object> updateJoinKeyAfter = updateJoinKey.getAfter();
 			Map<String, Object> updateJoinKeyBefore = updateJoinKey.getBefore();
 			List<Map<String, String>> joinKeys = currentProperty.getJoinKeys();
 			Document filter;
 			mergeResult = new MergeResult();
-			filter = unsetFilter(updateJoinKeyBefore, joinKeys);
+			filter = unsetFilter(updateJoinKeyBefore, updateJoinKeyAfter, joinKeys, sharedJoinKeys);
 			if (null != updateJoinKey.getParentBefore()) {
 				filter.putAll(updateJoinKey.getParentBefore());
 			}
@@ -810,10 +811,17 @@ public class MongodbMergeOperate {
 		return document;
 	}
 
-	protected static Document unsetFilter(Map<String, Object> data, List<Map<String, String>> joinKeys) {
+	protected static Document unsetFilter(Map<String, Object> before, Map<String, Object> after, List<Map<String, String>> joinKeys, Set<String> sharedJoinKeys) {
 		Document document = new Document();
 		for (Map<String, String> joinKey : joinKeys) {
-			document.put(joinKey.get("target"), MapUtil.getValueByKey(data, joinKey.get("target")));
+			String key = joinKey.get("target");
+			Object value;
+			if (sharedJoinKeys.contains(key)) {
+				value = MapUtil.getValueByKey(after, key);
+			} else {
+				value = MapUtil.getValueByKey(before, key);
+			}
+			document.put(key, value);
 		}
 		return document;
 	}
