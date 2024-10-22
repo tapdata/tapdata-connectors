@@ -484,15 +484,21 @@ class MongodbMergeOperateTest {
 	@DisplayName("Method unsetFilter test")
 	class unsetFilterTest {
 
-		private Document data;
+		private Document before;
+		private Document after;
 		private List<Map<String, String>> joinKeys;
+		private Set<String> shareJoinKeys;
 
 		@BeforeEach
 		void setUp() {
-			data = new Document("id1", 1)
+			before = new Document("id1", 1)
 					.append("type1", "xxx")
 					.append("f1", "zzzz")
 					.append("f2", 625.85);
+			after = new Document("id1", 2)
+					.append("type1", "zzz")
+					.append("f1", "yyyy")
+					.append("f2", 123.45);
 			joinKeys = new ArrayList<>();
 			joinKeys.add(new HashMap<String, String>() {{
 				put("source", "id");
@@ -502,13 +508,15 @@ class MongodbMergeOperateTest {
 				put("source", "type");
 				put("target", "type1");
 			}});
+			shareJoinKeys = new HashSet<>();
+			shareJoinKeys.add("id1");
 		}
 
 		@Test
 		@DisplayName("test main process")
 		void test1() {
-			Document filter = MongodbMergeOperate.unsetFilter(data, joinKeys);
-			assertEquals(new Document("id1", 1).append("type1", "xxx"), filter);
+			Document filter = MongodbMergeOperate.unsetFilter(before, after, joinKeys, shareJoinKeys);
+			assertEquals(new Document("id1", 2).append("type1", "xxx"), filter);
 		}
 	}
 }
