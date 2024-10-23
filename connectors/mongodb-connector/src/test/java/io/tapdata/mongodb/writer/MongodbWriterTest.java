@@ -289,7 +289,7 @@ class MongodbWriterTest {
 		}
 
 		@Test
-		@DisplayName("")
+		@DisplayName("test update have remove fields")
 		void test3() {
 			List<String> pks = new ArrayList<>();
 			pks.add("id");
