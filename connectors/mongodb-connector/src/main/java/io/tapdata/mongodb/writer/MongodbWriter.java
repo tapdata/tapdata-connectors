@@ -366,7 +366,7 @@ public class MongodbWriter {
 					MongodbUtil.removeIdIfNeed(pks, after);
 					u.append("$set", after);
 					Document unsetDoc = wrapUnset(recordEvent);
-					if (null != unsetDoc) {
+					if (MapUtils.isNotEmpty(unsetDoc)) {
 						u.append("$unset", unsetDoc);
 					}
 					writeModel = new UpdateManyModel<>(pkFilter, u, options);
