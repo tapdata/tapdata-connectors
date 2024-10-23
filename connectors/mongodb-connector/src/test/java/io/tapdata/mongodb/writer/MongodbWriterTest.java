@@ -1,21 +1,32 @@
 package io.tapdata.mongodb.writer;
 
 import com.mongodb.client.MongoClient;
+import com.mongodb.client.model.UpdateManyModel;
+import com.mongodb.client.model.UpdateOneModel;
+import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.model.WriteModel;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
@@ -39,6 +50,7 @@ class MongodbWriterTest {
 	void setUp() {
 		globalStateMap = new KVMap<Object>() {
 			Map<String, Object> map = new HashMap<>();
+
 			@Override
 			public Object get(String key) {
 				return map.get(key);
@@ -99,7 +111,7 @@ class MongodbWriterTest {
 			mongodbWriter.removeOidIfNeed(tapRecordEvents, pks);
 
 			assertEquals(2, tapRecordEvents.size());
-			assertEquals("1", ((TapInsertRecordEvent)tapRecordEvents.get(0)).getAfter().get("_id"));
+			assertEquals("1", ((TapInsertRecordEvent) tapRecordEvents.get(0)).getAfter().get("_id"));
 			assertEquals("2", ((TapInsertRecordEvent) tapRecordEvents.get(1)).getAfter().get("_id"));
 
 			pks.add("title");
@@ -107,7 +119,7 @@ class MongodbWriterTest {
 			mongodbWriter.removeOidIfNeed(tapRecordEvents, pks);
 
 			assertEquals(2, tapRecordEvents.size());
-			assertEquals("1", ((TapInsertRecordEvent)tapRecordEvents.get(0)).getAfter().get("_id"));
+			assertEquals("1", ((TapInsertRecordEvent) tapRecordEvents.get(0)).getAfter().get("_id"));
 			assertEquals("2", ((TapInsertRecordEvent) tapRecordEvents.get(1)).getAfter().get("_id"));
 		}
 
@@ -125,9 +137,9 @@ class MongodbWriterTest {
 			mongodbWriter.removeOidIfNeed(tapRecordEvents, pks);
 
 			assertEquals(3, tapRecordEvents.size());
-			assertFalse(((TapInsertRecordEvent)tapRecordEvents.get(0)).getAfter().containsKey("_id"));
-			assertFalse(((TapInsertRecordEvent)tapRecordEvents.get(1)).getAfter().containsKey("_id"));
-			assertFalse(((TapUpdateRecordEvent)tapRecordEvents.get(2)).getAfter().containsKey("_id"));
+			assertFalse(((TapInsertRecordEvent) tapRecordEvents.get(0)).getAfter().containsKey("_id"));
+			assertFalse(((TapInsertRecordEvent) tapRecordEvents.get(1)).getAfter().containsKey("_id"));
+			assertFalse(((TapUpdateRecordEvent) tapRecordEvents.get(2)).getAfter().containsKey("_id"));
 		}
 
 		@Test
@@ -151,8 +163,8 @@ class MongodbWriterTest {
 			mongodbWriter.removeOidIfNeed(tapRecordEvents, pks);
 
 			assertEquals(2, tapRecordEvents.size());
-			assertFalse(((TapInsertRecordEvent)tapRecordEvents.get(0)).getAfter().containsKey("_id"));
-			assertTrue(((TapInsertRecordEvent)tapRecordEvents.get(1)).getAfter().containsKey("_id"));
+			assertFalse(((TapInsertRecordEvent) tapRecordEvents.get(0)).getAfter().containsKey("_id"));
+			assertTrue(((TapInsertRecordEvent) tapRecordEvents.get(1)).getAfter().containsKey("_id"));
 		}
 
 		@Test
@@ -181,8 +193,116 @@ class MongodbWriterTest {
 			assertDoesNotThrow(() -> mongodbWriter.removeOidIfNeed(tapRecordEvents, pks));
 
 			assertEquals(2, tapRecordEvents.size());
-			assertNull(((TapInsertRecordEvent)tapRecordEvents.get(0)).getAfter());
-			assertNull(((TapInsertRecordEvent)tapRecordEvents.get(1)).getAfter());
+			assertNull(((TapInsertRecordEvent) tapRecordEvents.get(0)).getAfter());
+			assertNull(((TapInsertRecordEvent) tapRecordEvents.get(1)).getAfter());
+		}
+	}
+
+	@Nested
+	@DisplayName("Method wrapUnset test")
+	class wrapUnsetTest {
+		@Test
+		@DisplayName("test insert event")
+		void test1() {
+			TapInsertRecordEvent tapInsertRecordEvent = TapInsertRecordEvent.create()
+					.after(new Document("id", 1).append("f1", 1).append("f2", 1))
+					.removedFields(new ArrayList<String>() {{
+						add("f2");
+					}});
+			Document document = mongodbWriter.wrapUnset(tapInsertRecordEvent);
+			assertEquals(1, document.size());
+			assertInstanceOf(Boolean.class, document.get("f2"));
+			assertTrue((Boolean) document.get("f2"));
+		}
+
+		@Test
+		@DisplayName("test update event")
+		void test2() {
+			TapUpdateRecordEvent tapUpdateRecordEvent = TapUpdateRecordEvent.create()
+					.before(new Document("id", 1).append("f1", 1).append("f2", 1))
+					.after(new Document("id", 1).append("f1", 2).append("f2", 2))
+					.removedFields(new ArrayList<String>() {{
+						add("f2");
+					}});
+			Document document = mongodbWriter.wrapUnset(tapUpdateRecordEvent);
+			assertEquals(1, document.size());
+			assertInstanceOf(Boolean.class, document.get("f2"));
+			assertTrue((Boolean) document.get("f2"));
+		}
+
+		@Test
+		@DisplayName("test delete event")
+		void test3() {
+			TapDeleteRecordEvent tapDeleteRecordEvent = TapDeleteRecordEvent.create()
+					.before(new Document("id", 1));
+			Document document = mongodbWriter.wrapUnset(tapDeleteRecordEvent);
+			assertNull(document);
+		}
+	}
+
+	@Nested
+	@DisplayName("Method normalWriteMode test")
+	class normalWriteModeTest {
+
+		private TapTable tapTable;
+
+		@BeforeEach
+		void setUp() {
+			tapTable = new TapTable("test");
+			tapTable.putField("id", new TapField("id", "int"));
+			tapTable.putField("f1", new TapField("f1", "int"));
+			tapTable.putField("f2", new TapField("f2", "int"));
+		}
+
+		@Test
+		@DisplayName("test insert have remove fields, insert policy is update_on_exists")
+		void test1() {
+			ReflectionTestUtils.setField(mongodbWriter, "insertPolicy", ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS);
+			List<String> pks = new ArrayList<>();
+			pks.add("id");
+			List<String> removeFields = new ArrayList<>();
+			removeFields.add("f2");
+			TapInsertRecordEvent tapInsertRecordEvent = TapInsertRecordEvent.create()
+					.after(new Document("id", 1).append("f1", 1).append("f2", 1))
+					.removedFields(removeFields);
+			WriteModel<Document> writeModel = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapInsertRecordEvent);
+			assertInstanceOf(UpdateManyModel.class, writeModel);
+			Document update = (Document) ((UpdateManyModel<Document>) writeModel).getUpdate();
+			assertTrue(update.containsKey("$unset"));
+		}
+
+		@Test
+		@DisplayName("test insert have remove fields, insert policy is just_insert")
+		void test2() {
+			ReflectionTestUtils.setField(mongodbWriter, "insertPolicy", ConnectionOptions.DML_INSERT_POLICY_JUST_INSERT);
+			List<String> pks = new ArrayList<>();
+			pks.add("id");
+			List<String> removeFields = new ArrayList<>();
+			removeFields.add("f2");
+			TapInsertRecordEvent tapInsertRecordEvent = TapInsertRecordEvent.create()
+					.after(new Document("id", 1).append("f1", 1).append("f2", 1))
+					.removedFields(removeFields);
+			WriteModel<Document> writeModel = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapInsertRecordEvent);
+			assertInstanceOf(UpdateManyModel.class, writeModel);
+			Document update = (Document) ((UpdateManyModel<Document>) writeModel).getUpdate();
+			assertTrue(update.containsKey("$unset"));
+		}
+
+		@Test
+		@DisplayName("")
+		void test3() {
+			List<String> pks = new ArrayList<>();
+			pks.add("id");
+			List<String> removeFields = new ArrayList<>();
+			removeFields.add("f2");
+			TapUpdateRecordEvent tapUpdateRecordEvent = TapUpdateRecordEvent.create()
+					.before(new Document("id", 1).append("f1", 1).append("f2", 1))
+					.after(new Document("id", 1).append("f1", 2).append("f2", 2))
+					.removedFields(removeFields);
+			WriteModel<Document> writeModel = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapUpdateRecordEvent);
+			assertInstanceOf(UpdateManyModel.class, writeModel);
+			Document update = (Document) ((UpdateManyModel<Document>) writeModel).getUpdate();
+			assertTrue(update.containsKey("$unset"));
 		}
 	}
 }
