@@ -401,7 +401,7 @@ public class MongodbWriter {
 		}
 		Document unsetDoc = new Document();
 		for (String removeField : removedFields) {
-			if (after.keySet().stream().noneMatch(v -> v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
+			if (after.keySet().stream().noneMatch(v -> v.equals(removeField) || v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
 				unsetDoc.append(removeField, true);
 			}
 		}
