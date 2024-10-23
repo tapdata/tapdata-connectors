@@ -205,7 +205,7 @@ class MongodbWriterTest {
 		@DisplayName("test insert event")
 		void test1() {
 			TapInsertRecordEvent tapInsertRecordEvent = TapInsertRecordEvent.create()
-					.after(new Document("id", 1).append("f1", 1).append("f2", 1))
+					.after(new Document("id", 1).append("f1", 1))
 					.removedFields(new ArrayList<String>() {{
 						add("f2");
 					}});
@@ -219,8 +219,8 @@ class MongodbWriterTest {
 		@DisplayName("test update event")
 		void test2() {
 			TapUpdateRecordEvent tapUpdateRecordEvent = TapUpdateRecordEvent.create()
-					.before(new Document("id", 1).append("f1", 1).append("f2", 1))
-					.after(new Document("id", 1).append("f1", 2).append("f2", 2))
+					.before(new Document("id", 1).append("f1", 1))
+					.after(new Document("id", 1).append("f1", 2))
 					.removedFields(new ArrayList<String>() {{
 						add("f2");
 					}});
@@ -263,7 +263,7 @@ class MongodbWriterTest {
 			List<String> removeFields = new ArrayList<>();
 			removeFields.add("f2");
 			TapInsertRecordEvent tapInsertRecordEvent = TapInsertRecordEvent.create()
-					.after(new Document("id", 1).append("f1", 1).append("f2", 1))
+					.after(new Document("id", 1).append("f1", 1))
 					.removedFields(removeFields);
 			WriteModel<Document> writeModel = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapInsertRecordEvent);
 			assertInstanceOf(UpdateManyModel.class, writeModel);
@@ -280,7 +280,7 @@ class MongodbWriterTest {
 			List<String> removeFields = new ArrayList<>();
 			removeFields.add("f2");
 			TapInsertRecordEvent tapInsertRecordEvent = TapInsertRecordEvent.create()
-					.after(new Document("id", 1).append("f1", 1).append("f2", 1))
+					.after(new Document("id", 1).append("f1", 1))
 					.removedFields(removeFields);
 			WriteModel<Document> writeModel = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapInsertRecordEvent);
 			assertInstanceOf(UpdateManyModel.class, writeModel);
@@ -296,8 +296,8 @@ class MongodbWriterTest {
 			List<String> removeFields = new ArrayList<>();
 			removeFields.add("f2");
 			TapUpdateRecordEvent tapUpdateRecordEvent = TapUpdateRecordEvent.create()
-					.before(new Document("id", 1).append("f1", 1).append("f2", 1))
-					.after(new Document("id", 1).append("f1", 2).append("f2", 2))
+					.before(new Document("id", 1).append("f1", 1))
+					.after(new Document("id", 1).append("f1", 2))
 					.removedFields(removeFields);
 			WriteModel<Document> writeModel = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapUpdateRecordEvent);
 			assertInstanceOf(UpdateManyModel.class, writeModel);
