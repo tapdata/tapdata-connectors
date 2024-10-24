@@ -22,8 +22,14 @@
     <dependencies>
         <dependency>
             <groupId>io.tapdata</groupId>
-            <artifactId>vastbase-core</artifactId>
+            <artifactId>postgres-core</artifactId>
             <version>1.0-SNAPSHOT</version>
+            <exclusions>
+                <exclusion>
+                    <artifactId>postgresql</artifactId>
+                    <groupId>org.postgresql</groupId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>cn.com.vastdata</groupId>

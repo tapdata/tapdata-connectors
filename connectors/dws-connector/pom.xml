@@ -43,7 +43,12 @@
             <groupId>io.tapdata</groupId>
             <artifactId>postgres-connector</artifactId>
             <version>1.0-SNAPSHOT</version>
-            <scope>compile</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.postgresql</groupId>
+                    <artifactId>postgresql</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
     </dependencies>
 
