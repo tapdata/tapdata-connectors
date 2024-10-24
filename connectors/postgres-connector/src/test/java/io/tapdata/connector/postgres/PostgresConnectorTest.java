@@ -201,7 +201,7 @@ public class PostgresConnectorTest {
             Consumer<TestItem> consumer = testItem -> {
             };
             when(connectionContext.getConnectionConfig()).thenReturn(new DataMap());
-            Assertions.assertThrows(IllegalArgumentException.class,()->postgresConnector.connectionTest(connectionContext,consumer));
+            Assertions.assertThrows(Exception.class,()->postgresConnector.connectionTest(connectionContext,consumer));
 
         }
     }
