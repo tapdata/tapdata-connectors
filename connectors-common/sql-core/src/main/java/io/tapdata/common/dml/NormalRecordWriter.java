@@ -1,5 +1,6 @@
 package io.tapdata.common.dml;
 
+import io.netty.buffer.PooledByteBufAllocator;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.JdbcContext;
 import io.tapdata.common.exception.AbstractExceptionCollector;
@@ -68,6 +69,9 @@ public class NormalRecordWriter {
         try {
             insertRecorder.setVersion(version);
             insertRecorder.setInsertPolicy(insertPolicy);
+            if (commonDbConfig.getEnableFileInput()) {
+                insertRecorder.enableFileInput(new PooledByteBufAllocator().directBuffer(commonDbConfig.getBufferCapacity().intValue()));
+            }
             insertRecorder.setTapLogger(tapLogger);
             updateRecorder.setVersion(version);
             updateRecorder.setUpdatePolicy(updatePolicy);

@@ -49,6 +49,9 @@ public class CommonDbConfig implements Serializable {
     protected Integer zoneOffsetHour;
     protected ZoneId sysZoneId;
 
+    protected Boolean enableFileInput = false;
+    protected Long bufferCapacity = 10000000L;
+
     private Boolean useSSL = false;
     private String sslCa;
     private String sslCert;
@@ -321,6 +324,22 @@ public class CommonDbConfig implements Serializable {
 
     public void setSysZoneId(ZoneId sysZoneId) {
         this.sysZoneId = sysZoneId;
+    }
+
+    public Boolean getEnableFileInput() {
+        return enableFileInput;
+    }
+
+    public void setEnableFileInput(Boolean enableFileInput) {
+        this.enableFileInput = enableFileInput;
+    }
+
+    public Long getBufferCapacity() {
+        return bufferCapacity;
+    }
+
+    public void setBufferCapacity(Long bufferCapacity) {
+        this.bufferCapacity = bufferCapacity;
     }
 
     public Boolean getUseSSL() {

@@ -408,6 +408,24 @@
               }
             }
           ]
+        },
+        "enableFileInput": {
+          "type": "boolean",
+          "title": "${enableFileInput}",
+          "default": false,
+          "x-index": 17,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -441,7 +459,8 @@
       "partitionRoot": "Partition table CDC root table",
       "partitionRootTooltip": "Only postgres-v13 and above and log plugin pgoutput are supported. When the switch is turned on, the partition table CDC event only perceives the root table, and when the switch is turned off, only perceives each sub-table",
       "maximumQueueSize": "Maximum queue size",
-      "maximumQueueSizeTip": "The queue size for reading incremental data in PostgreSQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting"
+      "maximumQueueSizeTip": "The queue size for reading incremental data in PostgreSQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting",
+      "enableFileInput": "Enable file input"
     },
     "zh_CN": {
       "doc": "docs/postgres_zh_CN.md",
@@ -470,7 +489,8 @@
       "partitionRoot": "分区表CDC根表",
       "partitionRootTooltip": "仅postgres-v13以上且日志插件pgoutput时才支持，开关打开时，分区表CDC事件仅感知根表，关闭时，仅感知各子表",
       "maximumQueueSize": "最大队列大小",
-      "maximumQueueSizeTip": "PostgreSQL读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置"
+      "maximumQueueSizeTip": "PostgreSQL读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置",
+      "enableFileInput": "启用文件输入"
     },
     "zh_TW": {
       "doc": "docs/postgres_zh_TW.md",
@@ -499,7 +519,8 @@
       "partitionRoot": "分區表CDC根表",
       "partitionRootTooltip": "僅postgres-v13以上且日誌插件pgoutput時才支持，開關打開時，分區表CDC事件僅感知根表，關閉時，僅感知各子表",
       "maximumQueueSize": "最大隊列大小",
-      "maximumQueueSizeTip": "PostgreSQL讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置"
+      "maximumQueueSizeTip": "PostgreSQL讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置",
+      "enableFileInput": "啟用文件輸入"
     }
   },
   "dataTypes": {

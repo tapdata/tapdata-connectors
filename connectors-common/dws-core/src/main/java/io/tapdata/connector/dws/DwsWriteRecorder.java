@@ -18,6 +18,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static io.tapdata.common.dml.WritePolicyEnum.IGNORE_ON_EXISTS;
+import static io.tapdata.common.dml.WritePolicyEnum.JUST_INSERT;
+
+
 public class DwsWriteRecorder extends PostgresWriteRecorder {
     private DwsTapTable dwsTapTable;
     private Set<String> conflictKeys;
@@ -40,17 +44,17 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
         if (EmptyKit.isEmpty(after)) {
             return;
         }
-        if (EmptyKit.isEmpty(uniqueCondition) || "just_insert".equals(insertPolicy)) {
+        if (EmptyKit.isEmpty(uniqueCondition) || JUST_INSERT == insertPolicy) {
             justInsert(after);
         } else {
             if (dwsTapTable.isPartition()) {
-                if (insertPolicy.equals("ignore_on_exists")) {
+                if (insertPolicy == IGNORE_ON_EXISTS) {
                     conflictIgnoreInsert(after);
                 } else {
                     conflictUpdateInsert(after);
                 }
             } else {
-                if (insertPolicy.equals("ignore_on_exists")) {
+                if (insertPolicy == IGNORE_ON_EXISTS) {
                     notExistsInsert(after);
                 } else {
                     conflictUpdateInsert(after);
