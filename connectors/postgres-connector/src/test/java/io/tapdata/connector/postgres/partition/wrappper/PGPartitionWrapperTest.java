@@ -5,10 +5,7 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.partition.TapPartitionField;
-import io.tapdata.entity.schema.partition.type.TapPartitionHash;
-import io.tapdata.entity.schema.partition.type.TapPartitionList;
-import io.tapdata.entity.schema.partition.type.TapPartitionStage;
-import io.tapdata.entity.schema.partition.type.TapPartitionType;
+import io.tapdata.entity.schema.partition.type.*;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -71,6 +68,9 @@ public class PGPartitionWrapperTest {
     @Test
     void testRangeWrapper() {
         PGPartitionWrapper rangeWrap = PGPartitionWrapper.instance(RANGE);
+
+        Assertions.assertEquals(TapPartitionStage.RANGE, rangeWrap.type());
+
         TapTable table = new TapTable();
         table.setId("test");
 
@@ -81,6 +81,37 @@ public class PGPartitionWrapperTest {
             Assertions.assertNotNull(result);
             Assertions.assertEquals(1, result.size());
         });
+
+        List<TapPartitionType> result =
+                rangeWrap.parse(table, "FOR VALUES FROM ('1') TO ('2000')", null, log);
+        Assertions.assertNotNull(result);
+
+        result =
+                rangeWrap.parse(table, "test", null, log);
+        Assertions.assertNull(result);
+
+        result =
+                rangeWrap.parse(table, "FOR VALUES FROM ('1','2') TO ('2000')", null, log);
+        Assertions.assertNull(result);
+
+        TapRangeValue.ValueType valueType = ((RangeWrapper) rangeWrap).valueType(RangeWrapper.MAXVALUE);
+        Assertions.assertEquals(valueType, TapRangeValue.ValueType.MAX);
+
+        valueType = ((RangeWrapper) rangeWrap).valueType(RangeWrapper.MINVALUE);
+        Assertions.assertEquals(valueType, TapRangeValue.ValueType.MIN);
+
+        valueType = ((RangeWrapper) rangeWrap).valueType("");
+        Assertions.assertEquals(valueType, TapRangeValue.ValueType.NORMAL);
+    }
+
+    @Test
+    void testInheritWrapper() {
+        PGPartitionWrapper inheritWrap = PGPartitionWrapper.instance(INHERIT);
+
+        Assertions.assertEquals(TapPartitionStage.INHERIT, inheritWrap.type());
+
+        List<TapPartitionType> result = inheritWrap.parse(null, null, null, null);
+        Assertions.assertNull(result);
     }
 
     @Test
