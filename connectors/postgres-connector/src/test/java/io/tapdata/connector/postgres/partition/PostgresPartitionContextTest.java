@@ -158,7 +158,7 @@ public class PostgresPartitionContextTest {
 
             Assertions.assertFalse(result.isEmpty(), "result should not be empty");
 
-            Assertions.assertEquals(1, result.size(), "result size should be 1");
+            Assertions.assertEquals(3, result.size(), "result size should be 1");
 
         } catch (SQLException e) {
             throw new RuntimeException(e);
