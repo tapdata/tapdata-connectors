@@ -2,10 +2,12 @@ package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
+import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.partition.TapPartition;
 import io.tapdata.entity.schema.type.*;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -23,7 +25,12 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -197,5 +204,31 @@ public class PostgresConnectorTest {
             Assertions.assertThrows(IllegalArgumentException.class,()->postgresConnector.connectionTest(connectionContext,consumer));
 
         }
+    }
+
+    @Test
+    void testSplitTableForMultiDiscoverSchema() {
+        PostgresConnector postgresConnector = new PostgresConnector();
+
+        AtomicInteger counter = new AtomicInteger(0);
+
+        List<DataMap> tables = Stream.generate(() -> {
+            DataMap dataMap = new DataMap();
+            dataMap.put("id", "integer");
+            dataMap.put("name", "string");
+            dataMap.put("tableType", counter.get() < 5 ? TableType.PARENT_TABLE : TableType.CHILD_TABLE);
+            counter.incrementAndGet();
+            return dataMap;
+        }).limit(10).collect(Collectors.toList());
+        postgresConnector.postgresVersion = "1";
+        CopyOnWriteArraySet<List<DataMap>> result = postgresConnector.splitTableForMultiDiscoverSchema(tables, 1);
+        Assertions.assertNotNull(result);
+        Assertions.assertEquals(2, result.size());
+
+        postgresConnector.postgresVersion = "100001";
+        result = postgresConnector.splitTableForMultiDiscoverSchema(tables, 1);
+        Assertions.assertNotNull(result);
+        Assertions.assertEquals(2, result.size());
+
     }
 }
