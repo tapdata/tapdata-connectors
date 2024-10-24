@@ -21,10 +21,16 @@ import java.util.concurrent.atomic.AtomicReference;
 public class PostgresJdbcContext extends JdbcContext {
 
     private final static String TAG = PostgresJdbcContext.class.getSimpleName();
+    String postgresVersion;
 
     public PostgresJdbcContext(PostgresConfig config) {
         super(config);
         exceptionCollector = new PostgresExceptionCollector();
+    }
+
+    public PostgresJdbcContext withPostgresVersion(String postgresVersion) {
+        this.postgresVersion = postgresVersion;
+        return this;
     }
 
     /**
@@ -62,7 +68,10 @@ public class PostgresJdbcContext extends JdbcContext {
 
     @Override
     protected String queryAllTablesSql(String schema, List<String> tableNames) {
-        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND t.table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
+        if (Integer.parseInt(postgresVersion) < 100000) {
+            return String.format(PG_ALL_TABLE_LOWER_VERSION, getConfig().getDatabase(), schema, tableSql);
+        }
         return String.format(PG_ALL_TABLE, getConfig().getDatabase(), schema, tableSql);
     }
 
@@ -95,12 +104,46 @@ public class PostgresJdbcContext extends JdbcContext {
         return dataMap;
     }
 
+    protected final static String PG_ALL_TABLE_LOWER_VERSION = "SELECT t.table_name \"tableName\",\n" +
+            "       (select max(cast(obj_description(relfilenode, 'pg_class') as varchar)) as \"tableComment\"\n" +
+            "        from pg_class c\n" +
+            "        where relname = t.table_name)\n" +
+            "FROM information_schema.tables t WHERE t.table_type='BASE TABLE' and t.table_catalog='%s' AND t.table_schema='%s' %s ORDER BY t.table_name";
+
     protected final static String PG_ALL_TABLE =
-            "SELECT t.table_name \"tableName\",\n" +
-                    "       (select max(cast(obj_description(relfilenode, 'pg_class') as varchar)) as \"tableComment\"\n" +
-                    "        from pg_class c\n" +
-                    "        where relname = t.table_name)\n" +
-                    "FROM information_schema.tables t WHERE t.table_type='BASE TABLE' and t.table_catalog='%s' AND t.table_schema='%s' %s ORDER BY t.table_name";
+            "SELECT\n" +
+                    "    t.table_name AS \"tableName\",\n" +
+                    "    (SELECT\n" +
+                    "         COALESCE(\n" +
+                    "                 CAST(obj_description(c.oid, 'pg_class') AS varchar),\n" +
+                    "                 ''\n" +
+                    "             )\n" +
+                    "     FROM pg_class c\n" +
+                    "     WHERE c.relname = t.table_name\n" +
+                    "       AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = t.table_schema)\n" +
+                    "    ) AS \"tableComment\",\n" +
+                    "    CASE\n" +
+                    "        WHEN EXISTS (SELECT 1 FROM pg_partitioned_table pt WHERE pt.partrelid = c.oid) THEN 'Parent Table'\n" +
+                    "        WHEN EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = c.oid) THEN 'Child Table'\n" +
+                    "        ELSE 'Regular Table'\n" +
+                    "        END AS \"tableType\"\n" +
+                    "FROM\n" +
+                    "    information_schema.tables t\n" +
+                    "        JOIN\n" +
+                    "    pg_class c ON c.relname = t.table_name AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = t.table_schema)\n" +
+                    "        LEFT JOIN\n" +
+                    "    pg_inherits i ON i.inhrelid = c.oid\n" +
+                    "WHERE\n" +
+                    "        t.table_type = 'BASE TABLE'\n" +
+                    "  AND t.table_catalog = '%s'\n" +
+                    "  AND t.table_schema = '%s'\n %s " +
+                    "ORDER BY\n" +
+                    "    CASE\n" +
+                    "        WHEN EXISTS (SELECT 1 FROM pg_partitioned_table pt WHERE pt.partrelid = c.oid) \n" +
+                    "            THEN c.oid\n" +
+                    "            ELSE i.inhparent\n" +
+                    "        END,\n" +
+                    "    t.table_name";
 
     protected final static String PG_ALL_COLUMN =
             "SELECT\n" +
