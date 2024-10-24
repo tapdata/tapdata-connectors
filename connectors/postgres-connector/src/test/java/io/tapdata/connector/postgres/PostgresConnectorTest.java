@@ -2,6 +2,7 @@ package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.JdbcContext;
+import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
 import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
@@ -16,6 +17,7 @@ import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
+import io.tapdata.pdk.apis.functions.connector.common.vo.TapPartitionResult;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -24,6 +26,8 @@ import org.mockito.Mockito;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.SQLException;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -230,5 +234,32 @@ public class PostgresConnectorTest {
         Assertions.assertNotNull(result);
         Assertions.assertEquals(2, result.size());
 
+        Assertions.assertThrows(IllegalArgumentException.class, () -> {
+            postgresConnector.splitTableForMultiDiscoverSchema(tables, -1);
+        });
+
+        tables.clear();
+        result = postgresConnector.splitTableForMultiDiscoverSchema(tables, 1);
+        Assertions.assertNotNull(result);
+        Assertions.assertEquals(0, result.size());
+
+    }
+
+    @Test
+    void testDiscoverPartitionInfoByParentName() throws SQLException {
+        PostgresConnector postgresConnector = new PostgresConnector();
+
+        PostgresPartitionContext postgresPartitionContext = mock(PostgresPartitionContext.class);
+        postgresConnector.postgresPartitionContext = postgresPartitionContext;
+
+        TapConnectorContext connectorContext = mock(TapConnectorContext.class);
+        Consumer<Collection<TapPartitionResult>> consumer = (c) -> {};
+
+        postgresConnector.discoverPartitionInfoByParentName(connectorContext, null, consumer);
+
+        verify(postgresPartitionContext, times(1)).discoverPartitionInfoByParentName(any(), any(), any());
+
+        postgresConnector.discoverPartitionInfo(Collections.emptyList());
+        verify(postgresPartitionContext, times(1)).discoverPartitionInfo(anyList());
     }
 }
