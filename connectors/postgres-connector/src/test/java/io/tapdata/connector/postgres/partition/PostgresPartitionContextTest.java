@@ -6,6 +6,7 @@ import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.logger.TapLog;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.partition.TapPartition;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapPartitionResult;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
@@ -13,9 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -162,6 +161,54 @@ public class PostgresPartitionContextTest {
 
         } catch (SQLException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void testUpdatePk() {
+        try (PostgresJdbcContext jdbcCtx = mock(PostgresJdbcContext.class)) {
+            PostgresPartitionContext ctx = new PostgresPartitionContext(new TapLog())
+                    .withPostgresVersion("160004")
+                    .withPostgresConfig(postgresConfig)
+                    .withJdbcContext(jdbcCtx);
+
+            TapTable table = new TapTable();
+            table.setId("test");
+            table.setName("test");
+            table.setPartitionMasterTableId("test");
+            table.setPartitionInfo(new TapPartition());
+            table.setNameFieldMap(new LinkedHashMap<>());
+            table.getNameFieldMap().put("id", new TapField("id", "int"));
+            table.getNameFieldMap().put("name", new TapField("name", "string"));
+
+            TapTable subTable = new TapTable();
+            subTable.setId("test_1");
+            subTable.setName("test_1");
+            subTable.setPartitionMasterTableId("test");
+            subTable.setPartitionInfo(new TapPartition());
+            subTable.setNameFieldMap(new LinkedHashMap<>());
+            TapField idField = new TapField("id", "int");
+            subTable.getNameFieldMap().put("id", idField);
+            subTable.getNameFieldMap().put("name", new TapField("name", "string"));
+
+            ctx.updatePk(table, subTable);
+            Assertions.assertNotNull(table.primaryKeys());
+            Assertions.assertEquals(0, table.primaryKeys().size());
+
+            subTable = new TapTable();
+            subTable.setId("test_1");
+            subTable.setName("test_1");
+            subTable.setPartitionMasterTableId("test");
+            subTable.setPartitionInfo(new TapPartition());
+            subTable.setNameFieldMap(new LinkedHashMap<>());
+            idField = new TapField("id", "int");
+            subTable.getNameFieldMap().put("id", idField);
+            subTable.getNameFieldMap().put("name", new TapField("name", "string"));
+            idField.setPrimaryKey(Boolean.TRUE);
+            idField.setPrimaryKeyPos(1);
+            ctx.updatePk(table, subTable);
+            Assertions.assertNotNull(table.getNameFieldMap().get("id").getPrimaryKey());
+            Assertions.assertTrue(table.getNameFieldMap().get("id").getPrimaryKey());
         }
     }
 
