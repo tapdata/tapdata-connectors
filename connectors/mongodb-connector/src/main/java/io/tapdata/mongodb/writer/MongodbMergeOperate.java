@@ -67,7 +67,8 @@ public class MongodbMergeOperate {
 						mergeLookupResults,
 						updateJoinKeys,
 						sharedJoinKeys,
-						mergeFilter
+						mergeFilter,
+						level
 				);
 
 				if (CollectionUtils.isNotEmpty(mergeResults)) {
@@ -100,7 +101,8 @@ public class MongodbMergeOperate {
 			List<MergeLookupResult> mergeLookupResults,
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
 			Set<String> sharedJoinKeys,
-			MergeFilter mergeFilter
+			MergeFilter mergeFilter,
+			int topLevel
 	) {
 		recursiveMerge(
 				mergeBundle,
@@ -112,7 +114,8 @@ public class MongodbMergeOperate {
 				updateJoinKeys,
 				sharedJoinKeys,
 				null,
-				mergeFilter
+				mergeFilter,
+				topLevel
 		);
 	}
 
@@ -126,7 +129,8 @@ public class MongodbMergeOperate {
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
 			Set<String> sharedJoinKeys,
 			MergeTableProperties parentProperties,
-			MergeFilter mergeFilter
+			MergeFilter mergeFilter,
+			int topLevel
 	) {
 		boolean unsetResultNull = null == unsetResult;
 		switch (properties.getMergeType()) {
@@ -137,7 +141,7 @@ public class MongodbMergeOperate {
 				}
 				break;
 			case updateWrite:
-				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys, mergeFilter);
+				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys, mergeFilter, topLevel);
 				if (unsetResultNull) {
 					addUnsetMerge(mergeResults, unsetResult);
 				}
@@ -176,7 +180,8 @@ public class MongodbMergeOperate {
 						updateJoinKeys,
 						mergeLookupResult.getSharedJoinKeys(),
 						properties,
-						mergeFilter
+						mergeFilter,
+						topLevel
 				);
 				recursiveOnce = true;
 			}
@@ -231,7 +236,7 @@ public class MongodbMergeOperate {
 	private static MergeResult updateWriteUnsetMerge(
 			MergeBundle mergeBundle, MergeTableProperties currentProperty,
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
-			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter) {
+			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter, int topLevel) {
 		if (null == currentProperty) {
 			return mergeResult;
 		}
@@ -257,7 +262,7 @@ public class MongodbMergeOperate {
 			List<Map<String, String>> joinKeys = currentProperty.getJoinKeys();
 			Document filter;
 			mergeResult = new MergeResult();
-			filter = unsetFilter(updateJoinKeyBefore, updateJoinKeyAfter, joinKeys, sharedJoinKeys);
+			filter = unsetFilter(updateJoinKeyBefore, updateJoinKeyAfter, joinKeys, topLevel);
 			if (null != updateJoinKey.getParentBefore()) {
 				filter.putAll(updateJoinKey.getParentBefore());
 			}
@@ -811,12 +816,12 @@ public class MongodbMergeOperate {
 		return document;
 	}
 
-	protected static Document unsetFilter(Map<String, Object> before, Map<String, Object> after, List<Map<String, String>> joinKeys, Set<String> sharedJoinKeys) {
+	protected static Document unsetFilter(Map<String, Object> before, Map<String, Object> after, List<Map<String, String>> joinKeys, int topLevel) {
 		Document document = new Document();
 		for (Map<String, String> joinKey : joinKeys) {
 			String key = joinKey.get("target");
 			Object value;
-			if (sharedJoinKeys.contains(key)) {
+			if (topLevel == 1) {
 				value = MapUtil.getValueByKey(after, key);
 			} else {
 				value = MapUtil.getValueByKey(before, key);

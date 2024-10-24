@@ -191,7 +191,8 @@ class MongodbMergeOperateTest {
 					mergeLookupResults,
 					null,
 					null,
-					mergeFilter
+					mergeFilter,
+					1
 			);
 			assertEquals(3, mergeResults.size());
 		}
@@ -487,7 +488,6 @@ class MongodbMergeOperateTest {
 		private Document before;
 		private Document after;
 		private List<Map<String, String>> joinKeys;
-		private Set<String> shareJoinKeys;
 
 		@BeforeEach
 		void setUp() {
@@ -508,15 +508,13 @@ class MongodbMergeOperateTest {
 				put("source", "type");
 				put("target", "type1");
 			}});
-			shareJoinKeys = new HashSet<>();
-			shareJoinKeys.add("id1");
 		}
 
 		@Test
 		@DisplayName("test main process")
 		void test1() {
-			Document filter = MongodbMergeOperate.unsetFilter(before, after, joinKeys, shareJoinKeys);
-			assertEquals(new Document("id1", 2).append("type1", "xxx"), filter);
+			Document filter = MongodbMergeOperate.unsetFilter(before, after, joinKeys, 1);
+			assertEquals(new Document("id1", 2).append("type1", "zzz"), filter);
 		}
 	}
 }
