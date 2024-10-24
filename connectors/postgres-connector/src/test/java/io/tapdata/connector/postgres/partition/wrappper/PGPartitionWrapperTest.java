@@ -2,13 +2,16 @@ package io.tapdata.connector.postgres.partition.wrappper;
 
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.partition.TapPartitionField;
 import io.tapdata.entity.schema.partition.type.TapPartitionHash;
 import io.tapdata.entity.schema.partition.type.TapPartitionList;
 import io.tapdata.entity.schema.partition.type.TapPartitionType;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import static io.tapdata.connector.postgres.partition.TableType.*;
@@ -77,6 +80,28 @@ public class PGPartitionWrapperTest {
             Assertions.assertNotNull(result);
             Assertions.assertEquals(1, result.size());
         });
+    }
 
+    @Test
+    void testPartitionFields() {
+        Log log = mock(Log.class);
+
+        Assertions.assertDoesNotThrow(() -> {
+            List<TapPartitionField> result = PGPartitionWrapper.partitionFields(null, "test", null, "test", log);
+            Assertions.assertNull(result);
+        });
+
+        TapTable table = new TapTable();
+
+        table.setNameFieldMap(new LinkedHashMap<>());
+
+        Assertions.assertThrows(CoreException.class, () -> {
+            List<TapPartitionField> result = PGPartitionWrapper.partitionFields(table, RANGE, "", "test", log);
+            Assertions.assertNotNull(result);
+        });
+        Assertions.assertThrows(CoreException.class, () -> {
+            List<TapPartitionField> result = PGPartitionWrapper.partitionFields(table, RANGE, "test", "test", log);
+            Assertions.assertNotNull(result);
+        });
     }
 }
