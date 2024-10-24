@@ -7,6 +7,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.partition.TapPartitionField;
 import io.tapdata.entity.schema.partition.type.TapPartitionHash;
 import io.tapdata.entity.schema.partition.type.TapPartitionList;
+import io.tapdata.entity.schema.partition.type.TapPartitionStage;
 import io.tapdata.entity.schema.partition.type.TapPartitionType;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -104,4 +105,12 @@ public class PGPartitionWrapperTest {
             Assertions.assertNotNull(result);
         });
     }
+
+    @Test
+    void testType() {
+        Log log = mock(Log.class);
+        TapPartitionStage result = PGPartitionWrapper.type("", "test", log);
+        Assertions.assertNull(result);
+    }
+
 }
