@@ -1,6 +1,7 @@
 package io.tapdata.connector.tdengine;
 
 import com.google.common.collect.Lists;
+import com.taosdata.jdbc.tmq.ConsumerRecords;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.connector.tdengine.bean.TDengineColumn;
@@ -36,6 +37,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -47,6 +49,8 @@ public class TDengineConnector extends CommonDbConnector {
     private TDengineConfig tdengineConfig;
     private TDengineJdbcContext tdengineJdbcContext;
     private String connectionTimezone;
+    private AtomicBoolean streamReadStarted = new AtomicBoolean(false);
+    private ConsumerRecords<Map<String, Object>> firstRecords;
 
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Exception {
@@ -74,6 +78,7 @@ public class TDengineConnector extends CommonDbConnector {
 
     @Override
     public void onStop(TapConnectionContext connectionContext) {
+        streamReadStarted.set(false);
         EmptyKit.closeQuietly(tdengineJdbcContext);
     }
 
@@ -231,10 +236,13 @@ public class TDengineConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
+        streamReadStarted.set(true);
+        TapSimplify.sleep(2000);
         createTopic(tables, false);
         TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
         tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
-        tDengineSubscribe.subscribe(this::isAlive);
+        tDengineSubscribe.setFirstRecords(firstRecords);
+        tDengineSubscribe.subscribe(this::isAlive, false, streamReadStarted);
     }
 
     private Object timestampToStreamOffset(TapConnectorContext tapConnectorContext, Long startTime) throws Throwable {
@@ -248,6 +256,12 @@ public class TDengineConnector extends CommonDbConnector {
         }
         createTopic(tables, true);
         tapConnectorContext.getStateMap().put("tap_topic", tables);
+        new Thread(() -> {
+            TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
+            tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), null, 1, null);
+            tDengineSubscribe.subscribe(this::isAlive, true, streamReadStarted);
+            firstRecords = tDengineSubscribe.getFirstRecords();
+        }).start();
         return new TDengineOffset();
     }
 

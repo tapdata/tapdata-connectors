@@ -132,15 +132,11 @@ public class TDengineJdbcContext extends JdbcContext {
     public void queryWithStream(String sql, ResultSetConsumer resultSetConsumer) throws SQLException {
         try (
                 Connection connection = getConnection();
-                Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)
+                Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+                ResultSet resultSet = statement.executeQuery(sql)
         ) {
-            statement.setFetchSize(Integer.MIN_VALUE); //protected from OM
-            try (
-                    ResultSet resultSet = statement.executeQuery(sql)
-            ) {
-                if (EmptyKit.isNotNull(resultSet)) {
-                    resultSetConsumer.accept(resultSet);
-                }
+            if (EmptyKit.isNotNull(resultSet)) {
+                resultSetConsumer.accept(resultSet);
             }
         }
     }
