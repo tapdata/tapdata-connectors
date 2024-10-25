@@ -20,7 +20,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String logPluginName = "pgoutput"; //default log plugin for postgres, pay attention to lower version
     private Boolean closeNotNull = false;
     private Boolean partitionRoot = false;
-    private Integer maximumQueueSize = 800;
+    private Integer maximumQueueSize = 8000;
 
     //customize
     public PostgresConfig() {

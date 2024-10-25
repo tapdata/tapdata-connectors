@@ -148,7 +148,7 @@ public class PostgresJdbcContext extends JdbcContext {
                     "  AND i.oid = ix.indexrelid\n" +
                     "  AND a.attrelid = t.oid\n" +
                     "  AND a.attnum = ANY(ix.indkey)\n" +
-                    "  AND t.relkind = 'r'\n" +
+                    "  AND t.relkind IN ('r', 'p')\n" +
                     "  AND tt.table_name=t.relname\n" +
                     "  AND tt.table_catalog='%s'\n" +
                     "  AND tt.table_schema='%s' %s\n" +

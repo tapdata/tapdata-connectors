@@ -21,6 +21,9 @@ public class ElasticsearchConfig {
     private Integer replicasNumber = 1;
     private Integer fieldsLimit = 1000;
     private String fieldsMappingMode;
+    private boolean sslValidate;
+    private boolean validateCA;
+    private String sslCA;
 
     public String getDatetimeFormat() {
         return datetimeFormat;
@@ -116,5 +119,29 @@ public class ElasticsearchConfig {
 
     public void setFieldsMappingMode(String fieldsMappingMode) {
         this.fieldsMappingMode = fieldsMappingMode;
+    }
+
+    public boolean isSslValidate() {
+        return sslValidate;
+    }
+
+    public void setSslValidate(boolean sslValidate) {
+        this.sslValidate = sslValidate;
+    }
+
+    public String getSslCA() {
+        return sslCA;
+    }
+
+    public void setSslCA(String sslCA) {
+        this.sslCA = sslCA;
+    }
+
+    public boolean isValidateCA() {
+        return validateCA;
+    }
+
+    public void setValidateCA(boolean validateCA) {
+        this.validateCA = validateCA;
     }
 }

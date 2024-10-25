@@ -18,6 +18,7 @@ import org.apache.http.util.EntityUtils;
 import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.SQLSyntaxErrorException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -66,11 +67,23 @@ public class DorisTest extends CommonDbTest {
     protected Boolean testWritePrivilege() {
         try {
             AtomicInteger beCount = new AtomicInteger(0);
-            jdbcContext.normalQuery("show backends", resultSet -> {
-                while (resultSet.next()) {
-                    beCount.incrementAndGet();
+            try {
+                jdbcContext.normalQuery("show backends", resultSet -> {
+                    while (resultSet.next()) {
+                        beCount.incrementAndGet();
+                    }
+                });
+            } catch (SQLSyntaxErrorException e) {
+                if ("42000".equals(e.getSQLState())) {
+                    Integer backendNum = ((DorisConfig) commonDbConfig).getBackendNum();
+                    if (null != backendNum) {
+                        beCount.set(backendNum);
+                    } else {
+                        beCount.set(1);
+                    }
                 }
-            });
+            }
+
             List<String> sqls = new ArrayList<>();
             String schemaPrefix = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? ("`" + commonDbConfig.getSchema() + "`.") : "";
             if (jdbcContext.queryAllTables(Arrays.asList(TEST_WRITE_TABLE, TEST_WRITE_TABLE.toUpperCase())).size() > 0) {
