@@ -310,7 +310,7 @@ public class MongodbMergeOperate {
 			mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
 			String targetPath = currentProperty.getTargetPath();
 			if (StringUtils.isNotBlank(targetPath)) {
-				Document update = mergeResult.getUpdate();
+				Document update = null == mergeResult ? new Document() : mergeResult.getUpdate();
 				Document unsetDoc = new Document(targetPath, true);
 				if (update.containsKey(UNSET_KEY)) {
 					update.get(UNSET_KEY, Document.class).putAll(unsetDoc);
