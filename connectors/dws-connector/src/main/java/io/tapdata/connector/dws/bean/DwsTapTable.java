@@ -1,9 +1,11 @@
 package io.tapdata.connector.dws.bean;
 
-import io.tapdata.connector.dws.DwsJdbcContext;
 import io.tapdata.entity.schema.TapTable;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class DwsTapTable {

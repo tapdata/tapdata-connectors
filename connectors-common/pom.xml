@@ -14,7 +14,6 @@
 		<module>debezium-bucket</module>
 		<module>mysql-core</module>
 		<module>postgres-core</module>
-		<module>dws-core</module>
         <module>mq-core</module>
 		<module>kafka-core</module>
         <module>file-connector-core</module>

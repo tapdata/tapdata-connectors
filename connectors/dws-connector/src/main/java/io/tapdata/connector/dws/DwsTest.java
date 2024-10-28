@@ -2,7 +2,6 @@ package io.tapdata.connector.dws;
 
 import com.google.common.collect.Lists;
 import io.tapdata.common.CommonDbTest;
-import io.tapdata.connector.dws.config.DwsConfig;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
@@ -23,12 +22,12 @@ public class DwsTest extends CommonDbTest {
         super();
     }
 
-    public DwsTest(DwsConfig dwsConfig, Consumer<TestItem> consumer) {
-        super(dwsConfig, consumer);
+    public DwsTest(PostgresConfig postgresConfig, Consumer<TestItem> consumer) {
+        super(postgresConfig, consumer);
     }
 
     public DwsTest initContext() {
-        jdbcContext = new DwsJdbcContext((DwsConfig) commonDbConfig);
+        jdbcContext = new DwsJdbcContext((PostgresConfig) commonDbConfig);
         return this;
     }
 
@@ -39,7 +38,7 @@ public class DwsTest extends CommonDbTest {
 
     //Test number of tables and privileges
     protected static String getTestCreateTable() {
-        String  TEST_CREATE_TABLE = "create table %s(col1 int not null,col2 int, primary key(col1))";
+        String TEST_CREATE_TABLE = "create table %s(col1 int not null,col2 int, primary key(col1))";
         return TEST_CREATE_TABLE;
     }
 
@@ -47,6 +46,7 @@ public class DwsTest extends CommonDbTest {
         String TEST_UPDATE_RECORD = "update %s set col2=1 where 1=1";
         return TEST_UPDATE_RECORD;
     }
+
     @Override
     protected Boolean testWritePrivilege() {
         try {
@@ -103,7 +103,7 @@ public class DwsTest extends CommonDbTest {
             connection.close();
             List<String> testSqls = TapSimplify.list();
             String testSlotName = "test_tapdata_" + UUID.randomUUID().toString().replaceAll("-", "_");
-            testSqls.add(String.format(PG_LOG_PLUGIN_CREATE_TEST, testSlotName, ((DwsConfig) commonDbConfig).getLogPluginName()));
+            testSqls.add(String.format(PG_LOG_PLUGIN_CREATE_TEST, testSlotName, ((PostgresConfig) commonDbConfig).getLogPluginName()));
             testSqls.add(PG_LOG_PLUGIN_DROP_TEST);
             jdbcContext.batchExecute(testSqls);
             consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY, "Cdc can work normally"));

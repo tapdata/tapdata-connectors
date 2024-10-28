@@ -21,11 +21,6 @@
     <dependencies>
         <dependency>
             <groupId>io.tapdata</groupId>
-            <artifactId>dws-core</artifactId>
-            <version>1.0-SNAPSHOT</version>
-        </dependency>
-        <dependency>
-            <groupId>io.tapdata</groupId>
             <artifactId>tapdata-pdk-api</artifactId>
             <version>${tapdata.pdk.api.version}</version>
             <scope>provided</scope>
@@ -38,6 +33,11 @@
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>pdk-error-code</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.huaweicloud.dws</groupId>
+            <artifactId>huaweicloud-dws-jdbc</artifactId>
+            <version>8.1.0</version>
         </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>

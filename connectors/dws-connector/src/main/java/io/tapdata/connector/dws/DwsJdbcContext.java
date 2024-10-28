@@ -1,19 +1,15 @@
 package io.tapdata.connector.dws;
 
 import io.tapdata.common.JdbcContext;
-import io.tapdata.connector.dws.config.DwsConfig;
-import io.tapdata.connector.dws.exception.DwsExceptionCollector;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.entity.logger.TapLogger;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -22,9 +18,9 @@ public class DwsJdbcContext extends JdbcContext {
 
     private final static String TAG = DwsJdbcContext.class.getSimpleName();
 
-    public DwsJdbcContext(DwsConfig config) {
+    public DwsJdbcContext(PostgresConfig config) {
         super(config);
-        exceptionCollector = new DwsExceptionCollector();
+        exceptionCollector = new PostgresExceptionCollector();
     }
 
     /**
@@ -79,21 +75,20 @@ public class DwsJdbcContext extends JdbcContext {
     }
 
 
-
-    public List<String> queryDistributedKeys(String schema,String tableName) {
+    public List<String> queryDistributedKeys(String schema, String tableName) {
         List<String> distributedKeys = new ArrayList();
         try {
-            query(String.format("SELECT getdistributekey('\""+schema+"\".\""+tableName+"\"')"),
+            query(String.format("SELECT getdistributekey('\"" + schema + "\".\"" + tableName + "\"')"),
                     resultSet -> {
-                            if (null != resultSet && resultSet.next()) {
-                                String distributeStr = resultSet.getString(1);
-                                if (null != distributeStr){
-                                    String[] split = distributeStr.split(", ");
-                                    for (String key : split) {
-                                        distributedKeys.add(key);
-                                    }
+                        if (null != resultSet && resultSet.next()) {
+                            String distributeStr = resultSet.getString(1);
+                            if (null != distributeStr) {
+                                String[] split = distributeStr.split(", ");
+                                for (String key : split) {
+                                    distributedKeys.add(key);
                                 }
                             }
+                        }
                     });
         } catch (Throwable e) {
             TapLogger.error(TAG, "Execute queryAllIndexes failed, error: " + e.getMessage(), e);
