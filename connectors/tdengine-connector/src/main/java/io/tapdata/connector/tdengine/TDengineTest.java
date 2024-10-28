@@ -5,7 +5,6 @@ import com.taosdata.jdbc.tmq.TaosConsumer;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.tdengine.config.TDengineConfig;
 import io.tapdata.pdk.apis.entity.TestItem;
-import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
 
 import java.util.*;
 import java.util.function.Consumer;
@@ -40,7 +39,7 @@ public class TDengineTest extends CommonDbTest {
             String version = jdbcContext.queryVersion();
             consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, "TDEngine " + version));
         } catch (Throwable throwable) {
-            consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(throwable), TestItem.RESULT_FAILED));
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, throwable.getMessage()));
         }
         return true;
     }
