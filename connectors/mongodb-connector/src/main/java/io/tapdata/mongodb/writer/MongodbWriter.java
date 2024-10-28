@@ -293,10 +293,11 @@ public class MongodbWriter {
 		return bulkWriteOptions;
 	}
 
-	private WriteModel<Document> normalWriteMode(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, UpdateOptions options, TapTable tapTable, Collection<String> pks, TapRecordEvent recordEvent) {
+	protected WriteModel<Document> normalWriteMode(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, UpdateOptions options, TapTable tapTable, Collection<String> pks, TapRecordEvent recordEvent) {
 		WriteModel<Document> writeModel = null;
 		if (recordEvent instanceof TapInsertRecordEvent) {
 			TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
+			Document unsetDoc = wrapUnset(recordEvent);
 
 			if (CollectionUtils.isNotEmpty(pks) && !ConnectionOptions.DML_INSERT_POLICY_JUST_INSERT.equals(insertPolicy)) {
 				final Document pkFilter = getPkFilter(pks, insertRecordEvent.getAfter());
@@ -304,19 +305,30 @@ public class MongodbWriter {
 				if (ConnectionOptions.DML_INSERT_POLICY_IGNORE_ON_EXISTS.equals(insertPolicy)) {
 					operation = "$setOnInsert";
 				}
-                if(shardKeyMap.containsKey(tapTable.getId())){
-					Map<String,Object> record = insertRecordEvent.getAfter();
+				if (shardKeyMap.containsKey(tapTable.getId())) {
+					Map<String, Object> record = insertRecordEvent.getAfter();
 					Set<String> shardKeySet = shardKeyMap.get(tapTable.getId());
-					if(CollectionUtils.isNotEmpty(shardKeySet)){
+					if (CollectionUtils.isNotEmpty(shardKeySet)) {
 						shardKeySet.forEach(shardKey -> {
-							if(record.containsKey(shardKey))pkFilter.append(shardKey,record.get(shardKey));
+							if (record.containsKey(shardKey)) pkFilter.append(shardKey, record.get(shardKey));
 						});
 					}
 				}
 				MongodbUtil.removeIdIfNeed(pks, insertRecordEvent.getAfter());
-				writeModel = new UpdateManyModel<>(pkFilter, new Document().append(operation, insertRecordEvent.getAfter()), options);
+				Document update = new Document(operation, insertRecordEvent.getAfter());
+				if (MapUtils.isNotEmpty(unsetDoc)) {
+					update.append("$unset", unsetDoc);
+				}
+				writeModel = new UpdateManyModel<>(pkFilter, update, options);
 			} else {
-				writeModel = new InsertOneModel<>(new Document(insertRecordEvent.getAfter()));
+				if (CollectionUtils.isNotEmpty(pks) && MapUtils.isNotEmpty(unsetDoc)) {
+					Document pkFilter = getPkFilter(pks, insertRecordEvent.getAfter());
+					Document update = new Document("$set", insertRecordEvent.getAfter())
+							.append("$unset", unsetDoc);
+					writeModel = new UpdateManyModel<>(pkFilter, update, options);
+				} else {
+					writeModel = new InsertOneModel<>(new Document(insertRecordEvent.getAfter()));
+				}
 			}
 			inserted.incrementAndGet();
 		} else if (recordEvent instanceof TapUpdateRecordEvent && CollectionUtils.isNotEmpty(pks)) {
@@ -329,7 +341,6 @@ public class MongodbWriter {
                 after = DbKit.getAfterForUpdate(after, before, allColumn, pks);
             }
 			Map<String, Object> info = recordEvent.getInfo();
-			List<String> removedFields = updateRecordEvent.getRemovedFields();
 			Document pkFilter;
 			Document u = new Document();
 			if (info != null && info.get("$op") != null) {
@@ -354,26 +365,12 @@ public class MongodbWriter {
 					}
 					MongodbUtil.removeIdIfNeed(pks, after);
 					u.append("$set", after);
-					if (removedFields != null && removedFields.size() > 0) {
-						Map<String, Object> unset = new HashMap<>();
-						for (String removeField : removedFields) {
-							if (after.keySet().stream().noneMatch(v ->  v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
-//										unset.put(f, true);
-								unset.put(removeField,true);
-							}
-						}
-						if (unset.size() > 0) {
-							u.append("$unset", unset);
-						}
+					Document unsetDoc = wrapUnset(recordEvent);
+					if (MapUtils.isNotEmpty(unsetDoc)) {
+						u.append("$unset", unsetDoc);
 					}
 					writeModel = new UpdateManyModel<>(pkFilter, u, options);
 				}
-//				if (info != null) {
-//					Object unset = info.get("$unset");
-//					if (unset != null) {
-//						u.append("$unset", unset);
-//					}
-//				}
 			}
 			updated.incrementAndGet();
 		} else if (recordEvent instanceof TapDeleteRecordEvent && CollectionUtils.isNotEmpty(pks)) {
@@ -387,6 +384,28 @@ public class MongodbWriter {
 		}
 
 		return writeModel;
+	}
+
+	protected Document wrapUnset(TapRecordEvent tapRecordEvent) {
+		List<String> removedFields = null;
+		Map<String, Object> after = null;
+		if (tapRecordEvent instanceof TapInsertRecordEvent) {
+			removedFields = ((TapInsertRecordEvent) tapRecordEvent).getRemovedFields();
+			after = ((TapInsertRecordEvent) tapRecordEvent).getAfter();
+		} else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
+			removedFields = ((TapUpdateRecordEvent) tapRecordEvent).getRemovedFields();
+			after = ((TapUpdateRecordEvent) tapRecordEvent).getAfter();
+		}
+		if (CollectionUtils.isEmpty(removedFields) || MapUtils.isEmpty(after)) {
+			return null;
+		}
+		Document unsetDoc = new Document();
+		for (String removeField : removedFields) {
+			if (after.keySet().stream().noneMatch(v -> v.equals(removeField) || v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
+				unsetDoc.append(removeField, true);
+			}
+		}
+		return unsetDoc;
 	}
 
 	public void onDestroy() {

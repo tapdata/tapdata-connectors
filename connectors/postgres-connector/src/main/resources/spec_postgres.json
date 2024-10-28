@@ -394,7 +394,7 @@
         "maximumQueueSize": {
           "type": "string",
           "title": "${maximumQueueSize}",
-          "default": 800,
+          "default": 8000,
           "x-index": 16,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",

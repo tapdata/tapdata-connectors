@@ -43,6 +43,7 @@ public class CommonDbConfig implements Serializable {
     private int batchReadThreadSize = 4;
     private Boolean doubleActive = false;
     private Boolean oldVersionTimezone = false;
+    private Integer writeThreadSize = 15;
     protected String timezone = "+00:00";
     protected ZoneId zoneId;
     protected Integer zoneOffsetHour;
@@ -280,6 +281,14 @@ public class CommonDbConfig implements Serializable {
 
     public void setOldVersionTimezone(Boolean oldVersionTimezone) {
         this.oldVersionTimezone = oldVersionTimezone;
+    }
+
+    public Integer getWriteThreadSize() {
+        return writeThreadSize;
+    }
+
+    public void setWriteThreadSize(Integer writeThreadSize) {
+        this.writeThreadSize = writeThreadSize;
     }
 
     public String getTimezone() {

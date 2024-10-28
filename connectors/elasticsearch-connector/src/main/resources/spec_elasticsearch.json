@@ -59,6 +59,51 @@
           "x-component": "Password",
           "apiServerKey": "database_password",
           "x-index": 4
+        },
+        "sslValidate": {
+          "type": "boolean",
+          "title": "${isHttps}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "show": false,
+          "x-reactions": [
+            {
+              "target": "validateCA",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===true}}"
+                }
+              }
+            }
+          ],
+          "x-index": 110
+        },
+        "validateCA": {
+          "type": "boolean",
+          "title": "${validateCA}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "show": false,
+          "x-reactions": [
+            {
+              "target": "sslCA",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===true}}"
+                }
+              }
+            }
+          ],
+          "x-index": 115
+        },
+        "sslCA": {
+          "type": "string",
+          "title": "${httpsCert}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "fileNameField": "httpsCert",
+          "required": true,
+          "x-index": 120
         }
       }
     },
@@ -121,14 +166,27 @@
             "tooltip": "${time_format_tip}"
           }
         },
-        "fieldsLimit": {
+        "fieldsMappingMode": {
           "type": "string",
-          "title": "${fieldsLimit}",
+          "title": "${fieldsMappingMode}",
           "x-decorator": "FormItem",
-          "x-component": "InputNumber",
-          "required": true,
-          "default": 1000,
-          "x-index": 6
+          "x-component": "Select",
+          "default": "",
+          "x-index": 7,
+          "enum": [
+            {
+              "label": "${fieldsMappingModeDefault}",
+              "value": ""
+            },
+            {
+              "label": "${fieldsMappingModeAuto}",
+              "value": "AUTO"
+            },
+            {
+              "label": "${fieldsMappingModeSchema}",
+              "value": "SCHEMA"
+            }
+          ]
         }
       }
     }
@@ -151,7 +209,15 @@
       "date_time_format_tip": "example: yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
       "time_format": "Time format",
       "time_format_tip": "example: HH:mm:ss",
-      "fieldsLimit": "Fields Limit"
+      "fieldsLimit": "Fields Limit",
+      "fieldsMappingMode": "Field mapping mode",
+      "fieldsMappingModeDefault": "Default",
+      "fieldsMappingModeAuto": "Map according to the first data",
+      "fieldsMappingModeSchema": "Map according to the model"
+      "fieldsLimit": "Fields Limit",
+      "isHttps": "Whether HTTPS is enabled",
+      "validateCA": "Whether validate certificate",
+      "httpsCert": "Https self-signed certificate"
     },
     "zh_CN": {
       "doc": "docs/elasticsearch_zh_CN.md",
@@ -169,7 +235,15 @@
       "date_time_format_tip": "示例：yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
       "time_format": "Time格式",
       "time_format_tip": "示例：HH:mm:ss",
-      "fieldsLimit": "字段数量限制"
+      "fieldsLimit": "字段数量限制",
+      "fieldsMappingMode": "字段映射模式",
+      "fieldsMappingModeDefault": "默认",
+      "fieldsMappingModeAuto": "根据第一条数据映射",
+      "fieldsMappingModeSchema": "根据模型映射"
+      "fieldsLimit": "字段数量限制",
+      "isHttps": "是否启用Https",
+      "validateCA": "是否验证证书",
+      "httpsCert": "Https自签名证书"
     },
     "zh_TW": {
       "doc": "docs/elasticsearch_zh_TW.md",
@@ -187,7 +261,15 @@
       "date_time_format_tip": "示例：yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
       "time_format": "Time格式",
       "time_format_tip": "示例：HH:mm:ss",
-      "fieldsLimit": "字段數量限制"
+      "fieldsLimit": "字段數量限制",
+      "fieldsMappingMode": "欄位對映模式",
+      "fieldsMappingModeDefault": "默认",
+      "fieldsMappingModeAuto": "根據第一條資料映射",
+      "fieldsMappingModeSchema": "根據模型對應"
+      "fieldsLimit": "字段數量限制",
+      "isHttps": "是否啟用Https",
+      "validateCA": "是否驗證證書",
+      "httpsCert": "Https自簽名證書"
     }
   },
   "dataTypes": {

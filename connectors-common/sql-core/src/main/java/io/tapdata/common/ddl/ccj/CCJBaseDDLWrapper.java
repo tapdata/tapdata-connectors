@@ -98,6 +98,7 @@ public abstract class CCJBaseDDLWrapper extends BaseDDLWrapper<Alter> {
 
         private String split;
         private Boolean withSchema = false;
+        private Boolean caseSensitive = null;
 
         public CCJDDLWrapperConfig split(String split) {
             this.split = split;
@@ -108,12 +109,20 @@ public abstract class CCJBaseDDLWrapper extends BaseDDLWrapper<Alter> {
             this.withSchema = withSchema;
         }
 
+        public void caseSensitive(Boolean caseSensitive) {
+            this.caseSensitive = caseSensitive;
+        }
+
         public String getSplit() {
             return null == split ? "" : split;
         }
 
         public Boolean getWithSchema() {
             return null != withSchema && withSchema;
+        }
+
+        public Boolean getCaseSensitive() {
+            return caseSensitive;
         }
     }
 }

@@ -12,6 +12,7 @@ public enum JsonType {
     ARRAY,
     TEXT,
     INTEGER,
+    BINARY,
     ;
 
     public static JsonType of(Object obj) {
@@ -20,6 +21,9 @@ public enum JsonType {
         }
         if (obj instanceof Map) {
             return JsonType.OBJECT;
+        }
+        if (obj instanceof byte[]) {
+            return BINARY;
         }
         if ((obj instanceof Collection) || obj.getClass().isArray()) {
             return JsonType.ARRAY;

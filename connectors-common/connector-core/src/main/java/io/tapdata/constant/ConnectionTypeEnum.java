@@ -17,6 +17,14 @@ public enum ConnectionTypeEnum {
         return type;
     }
 
+    public boolean hasSource() {
+        return this == SOURCE || this == SOURCE_AND_TARGET;
+    }
+
+    public boolean hasTarget() {
+        return this == TARGET || this == SOURCE_AND_TARGET;
+    }
+
     public static ConnectionTypeEnum fromValue(String value) {
         for (ConnectionTypeEnum connectionType : ConnectionTypeEnum.values()) {
             if (connectionType.getType().equals(value)) {
