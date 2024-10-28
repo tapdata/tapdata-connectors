@@ -28,14 +28,28 @@ public class TDengineJdbcContext extends JdbcContext {
     private static final String TAG = TDengineJdbcContext.class.getSimpleName();
 
     public static final String DATABASE_TIMEZON_SQL = "select TIMEZONE()";
+    public static final String DATABASE_VERSION_SQL = "select server_version()";
 
     public TDengineJdbcContext(TDengineConfig config) {
         super(config);
     }
 
     @Override
-    public String queryVersion() {
-        return null;
+    public String queryVersion() throws SQLException {
+        String version = null;
+        TapLogger.debug(TAG, "Get version sql: " + DATABASE_VERSION_SQL);
+        try (
+                Connection connection = getConnection();
+                Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery(DATABASE_VERSION_SQL)
+        ) {
+            while (resultSet.next()) {
+                version = resultSet.getString(1);
+            }
+        } catch (Exception e) {
+            return super.queryVersion();
+        }
+        return version;
     }
 
     public String timezone() throws Exception {
