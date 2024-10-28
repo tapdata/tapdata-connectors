@@ -46,6 +46,7 @@ public class TDengineConnector extends CommonDbConnector {
     private TDengineConfig tdengineConfig;
     private TDengineJdbcContext tdengineJdbcContext;
     private String connectionTimezone;
+    private String tdengineVersion;
     private AtomicBoolean streamReadStarted = new AtomicBoolean(false);
     private ConsumerRecords<Map<String, Object>> firstRecords;
 
@@ -58,6 +59,7 @@ public class TDengineConnector extends CommonDbConnector {
         if ("Database Timezone".equals(this.connectionTimezone) || StringUtils.isBlank(this.connectionTimezone)) {
             this.connectionTimezone = tdengineJdbcContext.timezone();
         }
+        this.tdengineVersion = tdengineJdbcContext.queryVersion();
         commonDbConfig = tdengineConfig;
         jdbcContext = tdengineJdbcContext;
         commonSqlMaker = new CommonSqlMaker(tdengineConfig.getEscapeChar());
@@ -236,7 +238,7 @@ public class TDengineConnector extends CommonDbConnector {
         streamReadStarted.set(true);
         TapSimplify.sleep(2000);
         createTopic(tables, false);
-        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
+        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog(), tdengineVersion);
         tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
         tDengineSubscribe.setFirstRecords(firstRecords);
         tDengineSubscribe.subscribe(this::isAlive, false, streamReadStarted);
@@ -254,7 +256,7 @@ public class TDengineConnector extends CommonDbConnector {
         createTopic(tables, true);
         tapConnectorContext.getStateMap().put("tap_topic", tables);
         new Thread(() -> {
-            TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
+            TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog(), tdengineVersion);
             tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), null, 1, null);
             tDengineSubscribe.subscribe(this::isAlive, true, streamReadStarted);
             firstRecords = tDengineSubscribe.getFirstRecords();
