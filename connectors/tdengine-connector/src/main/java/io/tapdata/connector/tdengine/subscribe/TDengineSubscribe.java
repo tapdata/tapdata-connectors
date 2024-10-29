@@ -169,10 +169,19 @@ public class TDengineSubscribe {
     private TapEvent consumeRecord(ConsumerRecord<Map<String, Object>> record) {
         Map<String, Object> recordValue = record.value();
         String tableName = getTableName(record.getTopic());
+        parseVarchar(recordValue);
         TapInsertRecordEvent tapInsertRecordEvent = insertRecordEvent(recordValue, tableName);
         String timeString = recordValue.get(timestampColumnMap.get(tableName)).toString();
         tapInsertRecordEvent.setReferenceTime(Timestamp.valueOf(timeString).getTime());
         return tapInsertRecordEvent;
+    }
+
+    private void parseVarchar(Map<String, Object> data) {
+        for (Map.Entry<String, Object> entry : data.entrySet()) {
+            if (entry.getValue() instanceof byte[]) {
+                entry.setValue(new String((byte[]) entry.getValue()));
+            }
+        }
     }
 
 }
