@@ -9,7 +9,9 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.exception.*;
 import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
 import io.tapdata.kit.ErrorKit;
+import io.tapdata.mongodb.error.MongodbErrorCode;
 import io.tapdata.mongodb.writer.error.TapMongoBulkWriteException;
+import org.bson.BsonMaximumSizeExceededException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -127,13 +129,8 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     }
 
     public void collectWriteLength(Object data, Throwable cause) {
-        //gt 16M
-        if (cause instanceof MongoException && FromMongoBulkWriteExceptionGetWriteErrors(cause, 13134)) {
-            if (null != data && data instanceof List) {
-                int index = ((MongoBulkWriteException) cause).getWriteErrors().get(0).getIndex();
-                data = ((List<TapRecordEvent>) data).get(index);
-            }
-            throw new TapPdkWriteLengthEx(getPdkId(), null, "BSON", data, ErrorKit.getLastCause(cause));
+        if (cause instanceof BsonMaximumSizeExceededException) {
+            throw new TapCodeException(MongodbErrorCode.EXCEEDS_16M_LIMIT, "The single document size limit for MongoDB is 16MB, which is a hard limit that cannot be changed. If the data you attempt to insert or update exceeds this limit, MongoDB will throw this error.");
         }
     }
 
