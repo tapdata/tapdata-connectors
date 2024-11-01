@@ -2,6 +2,7 @@ package io.tapdata.mongodb;
 
 import com.alibaba.fastjson.JSON;
 import com.mongodb.MongoBulkWriteException;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.bulk.BulkWriteError;
 import io.tapdata.common.exception.AbstractExceptionCollector;
@@ -40,7 +41,7 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
         if (cause instanceof TapPdkBaseException) return;
         if (cause instanceof MongoException) {
             throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause))
-//                    .withServerErrorCode(String.valueOf(((MongoException) cause).getCode()))
+                    .withServerErrorCode(String.valueOf(((MongoException) cause).getCode()))
                     ;
         }
     }
@@ -75,7 +76,7 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
     @Override
     public void collectOffsetInvalid(Object offset, Throwable cause) {
-        if (cause instanceof MongoException && (((MongoException) cause).getCode()) == 286) {
+        if (cause instanceof MongoCommandException && (((MongoCommandException) cause).getCode()) == 286) {
             throw new TapPdkOffsetOutOfLogEx(getPdkId(), offset, ErrorKit.getLastCause(cause));
         }
     }
@@ -90,6 +91,11 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     }
 
     public void collectWritePrivileges(Throwable cause) {
+        if (cause instanceof TapMongoBulkWriteException) {
+            if (ErrorKit.getLastCause(cause).getMessage().contains("Performing an update on the path '_id' would modify the immutable field '_id'")) {
+                throw new TapCodeException(MongodbErrorCode.MODIFY_ON_ID, "The _id field in MongoDB is the default primary key and cannot be modified. The _id value must be unique within a collection and is immutable. If you try to modify the _id field, MongoDB will throw this error.");
+            }
+        }
         if (cause instanceof MongoException && (((MongoException) cause).getCode()) == 13) {
             Object operation = "Write";
             Pattern pattern = Pattern.compile("execute command '(.*)' on server");
@@ -161,7 +167,9 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
     @Override
     public void collectCdcConfigInvalid(Throwable cause) {
-        super.collectCdcConfigInvalid(cause);
+        if (cause instanceof MongoCommandException && ((MongoCommandException) cause).getCode() == 40573) {
+            throw new TapCodeException(MongodbErrorCode.NO_REPLICA_SET, "Incremental dependency on MongoDB's changeStream feature, which requires the support of a replica set or sharded cluster, as it relies on replication to keep track of real-time changes in data. If the MongoDB instance is not configured as a replica set, the changeStream feature cannot be used.");
+        }
     }
 
 
