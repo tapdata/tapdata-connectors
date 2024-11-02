@@ -213,8 +213,7 @@
       "fieldsMappingMode": "Field mapping mode",
       "fieldsMappingModeDefault": "Default",
       "fieldsMappingModeAuto": "Map according to the first data",
-      "fieldsMappingModeSchema": "Map according to the model"
-      "fieldsLimit": "Fields Limit",
+      "fieldsMappingModeSchema": "Map according to the model",
       "isHttps": "Whether HTTPS is enabled",
       "validateCA": "Whether validate certificate",
       "httpsCert": "Https self-signed certificate"
@@ -239,8 +238,7 @@
       "fieldsMappingMode": "字段映射模式",
       "fieldsMappingModeDefault": "默认",
       "fieldsMappingModeAuto": "根据第一条数据映射",
-      "fieldsMappingModeSchema": "根据模型映射"
-      "fieldsLimit": "字段数量限制",
+      "fieldsMappingModeSchema": "根据模型映射",
       "isHttps": "是否启用Https",
       "validateCA": "是否验证证书",
       "httpsCert": "Https自签名证书"
@@ -265,8 +263,7 @@
       "fieldsMappingMode": "欄位對映模式",
       "fieldsMappingModeDefault": "默认",
       "fieldsMappingModeAuto": "根據第一條資料映射",
-      "fieldsMappingModeSchema": "根據模型對應"
-      "fieldsLimit": "字段數量限制",
+      "fieldsMappingModeSchema": "根據模型對應",
       "isHttps": "是否啟用Https",
       "validateCA": "是否驗證證書",
       "httpsCert": "Https自簽名證書"

@@ -233,7 +233,7 @@ public class TDengineConnector extends CommonDbConnector {
             new TDengineRecordWriter(tdengineJdbcContext, tapTable, timestamp)
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .write(tapRecordEvents, consumer);
+                    .write(tapRecordEvents, consumer, this::isAlive);
         }
     }
 

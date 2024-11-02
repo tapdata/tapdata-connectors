@@ -1,6 +1,6 @@
 package io.tapdata.connector.tdengine;
 
-import io.tapdata.common.WriteRecorder;
+import io.tapdata.common.dml.NormalWriteRecorder;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-public class TDengineWriteRecorder extends WriteRecorder {
+public class TDengineWriteRecorder extends NormalWriteRecorder {
 
     private final String timestampField;
 
@@ -23,7 +23,7 @@ public class TDengineWriteRecorder extends WriteRecorder {
     }
 
     @Override
-    public void addInsertBatch(Map<String, Object> after) throws SQLException {
+    public void addInsertBatch(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (EmptyKit.isEmpty(after)) {
             return;
         }
@@ -32,7 +32,7 @@ public class TDengineWriteRecorder extends WriteRecorder {
     }
 
     //just insert
-    private void justInsert(Map<String, Object> after) throws SQLException {
+    protected void justInsert(Map<String, Object> after) throws SQLException {
         if (EmptyKit.isNull(preparedStatement)) {
             String insertSql = "INSERT INTO `" + schema + "`.`" + tapTable.getId() + "` ("
                     + allColumn.stream().map(k -> "`" + k + "`").collect(Collectors.joining(", ")) + ") " +
@@ -52,7 +52,7 @@ public class TDengineWriteRecorder extends WriteRecorder {
     }
 
     @Override
-    public void addDeleteBatch(Map<String, Object> before) throws SQLException {
+    public void addDeleteBatch(Map<String, Object> before, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (EmptyKit.isEmpty(before)) {
             return;
         }
