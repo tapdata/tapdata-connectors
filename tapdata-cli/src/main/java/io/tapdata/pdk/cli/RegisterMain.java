@@ -99,7 +99,7 @@ public class RegisterMain {
         MRS_HIVE3(BETA),
         MYSQL(GA, TAG_JDBC),
         MYSQL_PXC(BETA),
-        OCEANBASE(GA, TAG_JDBC),
+        OCEANBASE_MYSQL(GA, TAG_JDBC),
         OPENGAUSS(ALPHA, TAG_JDBC),
         POLAR_DB_MYSQL(BETA, TAG_JDBC),
         POLAR_DB_POSTGRES(BETA, TAG_JDBC),
