@@ -421,7 +421,7 @@
               "dependencies": ["$inputs"],
               "fulfill": {
                 "state": {
-                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                  "display": "{{$deps[0].length < 0 ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -833,6 +833,10 @@
     "regdictionary": {
       "to": "TapString",
       "preferByte": 255,
+      "queryOnly": true
+    },
+    "jsonb": {
+      "to": "TapString",
       "queryOnly": true
     }
   }

@@ -147,6 +147,7 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
             case "macaddr":
             case "json":
             case "geometry":
+            case "jsonb":
                 PGobject pGobject = new PGobject();
                 pGobject.setType(dataType);
                 pGobject.setValue(String.valueOf(value));
