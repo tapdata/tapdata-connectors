@@ -183,4 +183,24 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
             throw new RuntimeException(e);
         }
     }
+
+    protected void fileInsert(Map<String, Object> after) {
+        buffer.writeBytes((allColumn.stream().map(v -> parseObject(after.get(v))).collect(Collectors.joining(",")) + "\n").getBytes());
+    }
+
+    private String parseObject(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        if (value instanceof String) {
+            return ((String) value).replace("\n", "\\n").replace("\r", "\\r").replace(",", "\\,");
+        }
+        if (value instanceof byte[]) {
+            throw new UnsupportedOperationException("binary type not supported in file input");
+        }
+        if (value instanceof PGobject) {
+            return ((PGobject) value).getValue();
+        }
+        return String.valueOf(value);
+    }
 }
