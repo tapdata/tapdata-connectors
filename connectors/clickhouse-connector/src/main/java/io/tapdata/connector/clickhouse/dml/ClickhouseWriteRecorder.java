@@ -24,10 +24,7 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
     @Override
     public void addAndCheckCommit(TapRecordEvent recordEvent, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (recordEvent instanceof TapInsertRecordEvent) {
-            batchCache.add(recordEvent);
-            if (batchCache.size() >= 1000) {
-                executeBatch(listResult);
-            }
+            batchCacheSize++;
         }
     }
 
@@ -44,7 +41,7 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
-            case "insert_on_nonexists":
+            case INSERT_ON_NONEXISTS:
                 justInsert(lastAfter);
                 preparedStatement.addBatch();
                 break;
