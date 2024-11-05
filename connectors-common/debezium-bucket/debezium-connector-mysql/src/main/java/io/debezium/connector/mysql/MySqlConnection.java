@@ -49,12 +49,6 @@ public class MySqlConnection extends JdbcConnection {
     /**
      * Creates a new connection using the supplied configuration.
      *
-     * @param config {@link Configuration} instance, may not be null.
-     * @param sourceTimestampMode strategy for populating {@code source.ts_ms}.
-     * @param config
-     *            {@link Configuration} instance, may not be null.
-     * @param valueConverters
-     *            {@link SqlServerValueConverters} instance
      */
     public MySqlConnection(MySqlConnectionConfiguration connectionConfig) {
         super(connectionConfig.config(), connectionConfig.factory());
@@ -438,7 +432,11 @@ public class MySqlConnection extends JdbcConnection {
     }
 
     public boolean isTableIdCaseSensitive() {
-        return !"0".equals(readMySqlSystemVariables().get(MySqlSystemVariables.LOWER_CASE_TABLE_NAMES));
+        return 0 != lowerCaseTableNames();
+    }
+
+    public int lowerCaseTableNames() {
+        return Integer.parseInt(readMySqlSystemVariables().get(MySqlSystemVariables.LOWER_CASE_TABLE_NAMES));
     }
 
     /**
