@@ -8,10 +8,12 @@ import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.constant.DbTestItem;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.TapTestItemException;
 import io.tapdata.pdk.apis.exception.testItem.TapTestConnectionEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestCurrentTimeConsistentEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
@@ -41,6 +43,7 @@ public class MongodbTest extends CommonDbTest {
     private static final String CONFIG_DATABASE = "config";
     private static final String LOCAL_DATABASE = "local";
     private static final String ADMIN_DATABASE = "admin";
+    private final MongodbExceptionCollector exceptionCollector;
 
     static {
 
@@ -67,16 +70,17 @@ public class MongodbTest extends CommonDbTest {
         READ_WRITE_PRIVILEGE_ACTIONS.add("update");
     }
 
-    public MongodbTest(MongodbConfig mongodbConfig, Consumer<TestItem> consumer, MongoClient mongoClient,ConnectionOptions connectionOptions) {
+    public MongodbTest(MongodbConfig mongodbConfig, Consumer<TestItem> consumer, MongoClient mongoClient, ConnectionOptions connectionOptions) {
         super(mongodbConfig, consumer);
         this.mongodbConfig = mongodbConfig;
         this.mongoClient = mongoClient;
         this.connectionOptions = connectionOptions;
+        this.exceptionCollector = new MongodbExceptionCollector();
     }
 
     @Override
     protected List<String> supportVersions() {
-        return Arrays.asList("3.2.*", "3.4.*", "3.6.*", "4.0.*", "4.2.*","4.4.*","5.0.*");
+        return Arrays.asList("3.2.*", "3.4.*", "3.6.*", "4.0.*", "4.2.*", "4.4.*", "5.0.*");
     }
 
     @Override
@@ -116,6 +120,12 @@ public class MongodbTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY, TEST_CONNECTION_LOGIN));
             return true;
         } catch (Throwable e) {
+            try {
+                exceptionCollector.collectUserPwdInvalid(mongodbConfig.getUri(), e);
+            } catch (TapCodeException ex) {
+                consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestItemException(ex), TestItem.RESULT_FAILED));
+                return false;
+            }
             consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestConnectionEx(e), TestItem.RESULT_FAILED));
             return false;
         }
@@ -193,7 +203,7 @@ public class MongodbTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
                     "Warning: target is not replicaset or shards, can not use validator and progress feature."));
             return true;
-        }else if(isMaster.containsKey("msg") && "isdbgrid".equals(isMaster.getString("msg"))){
+        } else if (isMaster.containsKey("msg") && "isdbgrid".equals(isMaster.getString("msg"))) {
             return validateMongodbShardKeys(connectionStatus);
         }
         consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY));
@@ -266,7 +276,7 @@ public class MongodbTest extends CommonDbTest {
         return true;
     }
 
-    protected Boolean validateMongodbShardKeys(Document connectionStatus){
+    protected Boolean validateMongodbShardKeys(Document connectionStatus) {
         Document nodeAuthInfo = connectionStatus.get("authInfo", Document.class);
         List authUserPrivileges = nodeAuthInfo.get("authenticatedUserPrivileges", List.class);
         Map<String, Set<String>> resourcePrivilegesMap = adaptResourcePrivilegesMap(authUserPrivileges);
@@ -363,11 +373,11 @@ public class MongodbTest extends CommonDbTest {
         return true;
     }
 
-    public Boolean testTimeDifference(){
+    public Boolean testTimeDifference() {
         try {
             Long nowTime = MongodbUtil.getServerTime(mongoClient, mongodbConfig.getDatabase());
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));
-        }catch (MongoException e){
+        } catch (MongoException e) {
             consumer.accept(new TestItem(TestItem.ITEM_TIME_DETECTION, new TapTestCurrentTimeConsistentEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;

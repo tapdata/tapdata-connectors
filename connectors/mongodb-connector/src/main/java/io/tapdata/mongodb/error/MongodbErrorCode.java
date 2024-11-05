@@ -35,6 +35,8 @@ public interface MongodbErrorCode {
             solutionCN = "如果你需要修改 _id 字段，可以删除原始文档，然后插入一个新的文档，新文档的 _id 值是修改后的值。",
             level = TapExLevel.CRITICAL,
             type = TapExType.RUNTIME,
+            dynamicDescription = "Error event: {}",
+            dynamicDescriptionCN = "错误事件：{}",
             seeAlso = {"https://docs.mongodb.com/manual/reference/method/db.collection.update/#update-parameter"}
     )
     String MODIFY_ON_ID = "370002";

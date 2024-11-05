@@ -91,11 +91,6 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     }
 
     public void collectWritePrivileges(Throwable cause) {
-        if (cause instanceof TapMongoBulkWriteException) {
-            if (ErrorKit.getLastCause(cause).getMessage().contains("Performing an update on the path '_id' would modify the immutable field '_id'")) {
-                throw new TapCodeException(MongodbErrorCode.MODIFY_ON_ID, "The _id field in MongoDB is the default primary key and cannot be modified. The _id value must be unique within a collection and is immutable. If you try to modify the _id field, MongoDB will throw this error.");
-            }
-        }
         if (cause instanceof MongoException && (((MongoException) cause).getCode()) == 13) {
             Object operation = "Write";
             Pattern pattern = Pattern.compile("execute command '(.*)' on server");
@@ -113,6 +108,10 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
         if (cause instanceof MongoBulkWriteException) {
             checkMongoBulkWriteError(data, (MongoBulkWriteException) cause);
         } else if (cause instanceof TapMongoBulkWriteException) {
+            String message = ErrorKit.getLastCause(cause).getMessage();
+            if (message.contains("Performing an update on the path '_id' would modify the immutable field '_id'")) {
+                throw new TapCodeException(MongodbErrorCode.MODIFY_ON_ID, message).dynamicDescriptionParameters(data);
+            }
             Throwable throwable = cause.getCause();
             if (throwable instanceof MongoBulkWriteException) {
                 checkMongoBulkWriteError(data, (MongoBulkWriteException) throwable);

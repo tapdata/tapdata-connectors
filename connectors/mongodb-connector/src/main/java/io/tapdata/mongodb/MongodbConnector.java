@@ -385,19 +385,22 @@ public class MongodbConnector extends ConnectorBase {
 			) {
 				mongodbTest.testOneByOne();
 			}
-			int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
-			if (version >= 6) {
-				connectionOptions.capability(Capability.create(ConnectionOptions.CAPABILITY_SOURCE_INCREMENTAL_UPDATE_EVENT_HAVE_BEFORE));
-			}
 		} catch (Throwable throwable) {
 			exceptionCollector.collectTerminateByServer(throwable);
 			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),throwable);
 			exceptionCollector.collectReadPrivileges(throwable);
 			exceptionCollector.collectWritePrivileges(throwable);
-			TapLogger.error(TAG, throwable.getMessage());
 			consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Failed, " + throwable.getMessage()));
 		} finally {
 			onStop(connectionContext);
+		}
+		try {
+			int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
+			if (version >= 6) {
+				connectionOptions.capability(Capability.create(ConnectionOptions.CAPABILITY_SOURCE_INCREMENTAL_UPDATE_EVENT_HAVE_BEFORE));
+			}
+		} catch (Exception ignored) {
+
 		}
 		return connectionOptions;
 	}
