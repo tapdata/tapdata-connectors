@@ -264,4 +264,8 @@ public final class TableId implements DataCollectionId, Comparable<TableId> {
     public TableId toLowercase() {
         return new TableId(catalogName, schemaName, tableName.toLowerCase());
     }
+
+    public TableId toCatalogLowercase() {
+        return new TableId(catalogName.toLowerCase(), schemaName, tableName);
+    }
 }
