@@ -41,15 +41,37 @@ public interface MongodbErrorCode {
     String AUTH_FAIL = "370002";
 
     @TapExCode(
-            describe = "The user does not have the necessary permissions to perform the operation. This error is usually caused by insufficient user permissions.",
-            describeCN = "用户没有执行操作所需的权限。这个错误通常是由于用户权限不足引起的。",
-            solution = "1. Check user permissions: Ensure that the user has the necessary permissions to perform the operation.\n" +
-                    "2. Grant user permissions: If the user does not have the necessary permissions, you can grant the user the necessary permissions.\n" +
-                    "3. Use the correct user: Ensure that the user you are using has the necessary permissions to perform the operation.",
-            solutionCN = "1. 检查用户权限：确保用户有执行操作所需的权限。\n" +
-                    "2. 授予用户权限：如果用户没有执行操作所需的权限，可以授予用户所需的权限。\n" +
-                    "3. 使用正确的用户：确保你使用的用户有执行操作所需的权限。",
-            level = TapExLevel.CRITICAL,
+            describe = "The user does not have the necessary permissions to perform read operations on the database. This error is usually caused by insufficient user permissions.",
+            describeCN = "用户没有执行读操作所需的权限。这个错误通常是由于用户权限不足引起的。",
+            solution = "Check user permissions: Ensure that the user has the necessary permissions to perform read operations. You can refer to the following authorization:\n" +
+                    "<pre><code>use admin\n" +
+                    "db.createUser(\n" +
+                    "  {\n" +
+                    "    user: \"YourUser\",\n" +
+                    "    pwd: \"YourPassword\",\n" +
+                    "    roles: [\n" +
+                    "       { role: \"read\", db: \"YourDb\" },\n" +
+                    "       { role: \"read\", db: \"local\" },\n" +
+                    "       { role: \"read\", db: \"config\" },\n" +
+                    "       { role: \"clusterMonitor\", db: \"admin\" },\n" +
+                    "    ]\n" +
+                    "  }\n" +
+                    ")</code></pre>",
+            solutionCN = "检查用户权限：确保用户有执行读操作所需的权限。可以参考以下授权：\n" +
+                    "<pre><code>use admin\n" +
+                    "db.createUser(\n" +
+                    "  {\n" +
+                    "    user: \"YourUser\",\n" +
+                    "    pwd: \"YourPassword\",\n" +
+                    "    roles: [\n" +
+                    "       { role: \"read\", db: \"YourDb\" },\n" +
+                    "       { role: \"read\", db: \"local\" },\n" +
+                    "       { role: \"read\", db: \"config\" },\n" +
+                    "       { role: \"clusterMonitor\", db: \"admin\" },\n" +
+                    "    ]\n" +
+                    "  }\n" +
+                    ")</code></pre>",
+            level = TapExLevel.NORMAL,
             type = TapExType.RUNTIME,
             seeAlso = {"https://docs.mongodb.com/manual/reference/privilege-actions/"}
     )
@@ -82,11 +104,37 @@ public interface MongodbErrorCode {
                     "    ]\n" +
                     "  }\n" +
                     ")</code></pre>",
-            level = TapExLevel.CRITICAL,
+            level = TapExLevel.NORMAL,
             type = TapExType.RUNTIME,
             seeAlso = {"https://docs.mongodb.com/manual/reference/privilege-actions/"}
     )
     String WRITE_PRIVILEGES_MISSING = "370004";
+
+    @TapExCode(
+            describe = "MongoDB config database has no read permission. The config database is a special database used by MongoDB to store configuration information. If the config database is not readable or config.shards is not readable, MongoDB shard key information cannot be obtained, which also affects the normal use of CDC.",
+            describeCN = "MongoDB config 数据库无读取权限。config 数据库是 MongoDB 用来存储配置信息的特殊数据库。如果 config 数据库不可读取或 config.shards不可读取，MongoDB 分片键信息将无法获取，同样影响CDC正常使用。",
+            solution = "Recommend granting the config database the read permission as follows:\n" +
+                    "<pre><code>db.grantRolesToUser(\"YourUser\",[{ role: \"read\", db: \"config\" }])</code></pre>",
+            solutionCN = "推荐按以下方式授权 config 数据库：\n" +
+                    "<pre><code>db.grantRolesToUser(\"YourUser\",[{ role: \"read\", db: \"config\" }])</code></pre>",
+            level = TapExLevel.NORMAL,
+            type = TapExType.RUNTIME,
+            seeAlso = {"https://docs.mongodb.com/manual/reference/configuration-database/"}
+    )
+    String READ_CONFIG_DB_FAIL = "370008";
+
+    @TapExCode(
+            describe = "MongoDB local database has no read permission. The local database is a special database used by MongoDB to store local data. If the local database is not readable, MongoDB cannot obtain the necessary information, which also affects the normal use of CDC.",
+            describeCN = "MongoDB local 数据库无读取权限。local 数据库是 MongoDB 用来存储本地数据的特殊数据库。如果 local 数据库不可读取，MongoDB 将无法获取必要的信息，同样影响 CDC 的正常使用。",
+            solution = "Recommend granting the local database the read permission as follows:\n" +
+                    "<pre><code>db.grantRolesToUser(\"YourUser\",[{ role: \"read\", db: \"local\" }])</code></pre>",
+            solutionCN = "推荐按以下方式授权 local 数据库：\n" +
+                    "<pre><code>db.grantRolesToUser(\"YourUser\",[{ role: \"read\", db: \"local\" }])</code></pre>",
+            level = TapExLevel.NORMAL,
+            type = TapExType.RUNTIME,
+            seeAlso = {"https://docs.mongodb.com/manual/reference/local-database/"}
+    )
+    String READ_LOCAL_DB_FAIL = "370009";
 
     @TapExCode(
             describe = "The single document size limit for MongoDB is 16MB, which is a hard limit that cannot be changed. If the data you attempt to insert or update exceeds this limit, MongoDB will throw this error.",
