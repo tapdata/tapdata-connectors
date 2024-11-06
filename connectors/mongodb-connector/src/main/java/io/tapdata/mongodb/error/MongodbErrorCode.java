@@ -121,7 +121,7 @@ public interface MongodbErrorCode {
             type = TapExType.RUNTIME,
             seeAlso = {"https://docs.mongodb.com/manual/reference/configuration-database/"}
     )
-    String READ_CONFIG_DB_FAIL = "370008";
+    String READ_CONFIG_DB_FAIL = "370005";
 
     @TapExCode(
             describe = "MongoDB local database has no read permission. The local database is a special database used by MongoDB to store local data. If the local database is not readable, MongoDB cannot obtain the necessary information, which also affects the normal use of CDC.",
@@ -134,7 +134,7 @@ public interface MongodbErrorCode {
             type = TapExType.RUNTIME,
             seeAlso = {"https://docs.mongodb.com/manual/reference/local-database/"}
     )
-    String READ_LOCAL_DB_FAIL = "370009";
+    String READ_LOCAL_DB_FAIL = "370006";
 
     @TapExCode(
             describe = "The single document size limit for MongoDB is 16MB, which is a hard limit that cannot be changed. If the data you attempt to insert or update exceeds this limit, MongoDB will throw this error.",
@@ -149,7 +149,7 @@ public interface MongodbErrorCode {
             type = TapExType.RUNTIME,
             seeAlso = {"https://docs.mongodb.com/manual/reference/limits/"}
     )
-    String EXCEEDS_16M_LIMIT = "370005";
+    String EXCEEDS_16M_LIMIT = "370007";
 
     @TapExCode(
             describe = "The _id field in MongoDB is the default primary key and cannot be modified. The _id value must be unique within a collection and is immutable. If you try to modify the _id field, MongoDB will throw this error.",
@@ -163,7 +163,7 @@ public interface MongodbErrorCode {
             dynamicDescriptionCN = "错误事件：{}",
             seeAlso = {"https://docs.mongodb.com/manual/reference/method/db.collection.update/#update-parameter"}
     )
-    String MODIFY_ON_ID = "370006";
+    String MODIFY_ON_ID = "370008";
 
     @TapExCode(
             describe = "Incremental dependency on MongoDB's changeStream feature, which requires the support of a replica set or sharded cluster, as it relies on replication to keep track of real-time changes in data. If the MongoDB instance is not configured as a replica set, the changeStream feature cannot be used.",
@@ -190,5 +190,5 @@ public interface MongodbErrorCode {
             type = TapExType.RUNTIME,
             seeAlso = {"https://docs.mongodb.com/manual/changeStreams/", "https://docs.mongodb.com/manual/tutorial/deploy-replica-set/"}
     )
-    String NO_REPLICA_SET = "370007";
+    String NO_REPLICA_SET = "370009";
 }
