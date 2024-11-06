@@ -344,8 +344,10 @@ public class MongodbWriter {
 			Document pkFilter;
 			Document u = new Document();
 			if (info != null && info.get("$op") != null) {
-				pkFilter = new Document("_id", info.get("_id"));
-				u.putAll((Map<String, Object>) info.get("$op"));
+                Object id = info.get("_id");
+                id = MongodbUtil.convertValue(id);
+                pkFilter = new Document("_id", id);
+                ((Map<String, Object>) info.get("$op")).forEach((k, v) -> u.put(k, MongodbUtil.convertValue(v)));
 				u.remove("$v"); // Exists '$v' in update operation of MongoDB(v3.6), remove it because can't apply in write model.
 				boolean isUpdate = u.keySet().stream().anyMatch(k -> k.startsWith("$"));
 				if (isUpdate) {
