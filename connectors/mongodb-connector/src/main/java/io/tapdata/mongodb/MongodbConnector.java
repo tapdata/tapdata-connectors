@@ -26,9 +26,9 @@ import io.tapdata.entity.utils.ParagraphFormatter;
 import io.tapdata.exception.TapPdkTerminateByServerEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.batch.MongoBatchReader;
-import io.tapdata.mongodb.entity.ReadParam;
-import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.entity.MongoCdcOffset;
+import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.mongodb.entity.ReadParam;
 import io.tapdata.mongodb.reader.MongodbOpLogStreamV3Reader;
 import io.tapdata.mongodb.reader.MongodbStreamReader;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
@@ -43,6 +43,7 @@ import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
 import io.tapdata.pdk.apis.exception.NotSupportedException;
+import io.tapdata.pdk.apis.exception.TapTestItemException;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
@@ -386,11 +387,15 @@ public class MongodbConnector extends ConnectorBase {
 				mongodbTest.testOneByOne();
 			}
 		} catch (Throwable throwable) {
-			exceptionCollector.collectTerminateByServer(throwable);
-			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),throwable);
-			exceptionCollector.collectReadPrivileges(throwable);
-			exceptionCollector.collectWritePrivileges(throwable);
-			consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Failed, " + throwable.getMessage()));
+            try {
+                exceptionCollector.collectTerminateByServer(throwable);
+                exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),throwable);
+                exceptionCollector.collectReadPrivileges(throwable);
+                exceptionCollector.collectWritePrivileges(throwable);
+                consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Failed, " + throwable.getMessage()));
+            } catch (Exception e) {
+                consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestItemException(e), TestItem.RESULT_FAILED));
+            }
 		} finally {
 			onStop(connectionContext);
 		}
@@ -1213,13 +1218,8 @@ public class MongodbConnector extends ConnectorBase {
 			throw new RuntimeException("load mongo config failed from connection config");
 		}
 		if (mongoClient == null) {
-			try {
-				mongoClient = MongodbUtil.createMongoClient(mongoConfig);
-				mongoDatabase = mongoClient.getDatabase(mongoConfig.getDatabase());
-			} catch (Throwable e) {
-				exceptionCollector.collectTerminateByServer(e);
-				throw new RuntimeException(String.format("create mongodb connection failed %s", e.getMessage()), e);
-			}
+			mongoClient = MongodbUtil.createMongoClient(mongoConfig);
+			mongoDatabase = mongoClient.getDatabase(mongoConfig.getDatabase());
 		}
 		mongodbExecuteCommandFunction.setLog(connectionContext.getLog());
 	}

@@ -13,6 +13,73 @@ import io.tapdata.exception.TapExType;
 public interface MongodbErrorCode {
 
     @TapExCode(
+            describe = "The MongoDB connection URI is invalid. The connection URI must be in the correct format and contain the necessary connection information. For more information, see the connection page example.",
+            describeCN = "MongoDB 连接 URI 无效。连接 URI 必须是正确的格式，并且包含必要的连接信息，详细信息参考连接页面样例",
+            solution = "1. Check the connection URI format: The connection URI must be in the correct format, refer to the connection page example\n" +
+                    "2. Check the connection information: Ensure that the connection URI contains the necessary connection information, such as username, password, host, port, and database name.\n" +
+                    "3. Check if the username and password in the URI contain special characters: If the username and password contain special characters, URL encoding is required.",
+            solutionCN = "1. 检查连接 URI 格式：连接 URI 必须是正确的格式，参考连接页面样例\n" +
+                    "2. 检查连接信息：确保连接 URI 包含必要的连接信息，如用户名、密码、主机、端口和数据库名称。\n" +
+                    "3. 检查 URI 中用户名密码是否含特殊字符：如果用户名密码中含有特殊字符，需要进行 URL 编码。",
+            level = TapExLevel.CRITICAL,
+            type = TapExType.RUNTIME,
+            seeAlso = {"https://docs.mongodb.com/manual/reference/connection-string/"}
+    )
+    String INVALID_URI = "370001";
+
+    @TapExCode(
+            describe = "This error is usually due to an incorrect username or password, or the MONGO URI does not specify authSource for admin authentication.",
+            describeCN = "这个错误通常是用户名或密码不正确，也可能是 MONGO URI 没有指定 authSource 为 admin 身份认证",
+            solution = "Ensure that the username and password are correct, or try adding ?authSource=admin or &authSource=admin to the URI connection string.",
+            solutionCN = "确保用户名和密码无误，或尝试 URI 连接串添加 ?authSource=admin 或 &authSource=admin",
+            level = TapExLevel.CRITICAL,
+            type = TapExType.RUNTIME,
+            dynamicDescription = "Username: {}",
+            dynamicDescriptionCN = "用户：{}",
+            seeAlso = {"https://docs.mongodb.com/manual/reference/connection-string/"}
+    )
+    String AUTH_FAIL = "370002";
+
+    @TapExCode(
+            describe = "The user does not have the necessary permissions to perform the operation. This error is usually caused by insufficient user permissions.",
+            describeCN = "用户没有执行操作所需的权限。这个错误通常是由于用户权限不足引起的。",
+            solution = "1. Check user permissions: Ensure that the user has the necessary permissions to perform the operation.\n" +
+                    "2. Grant user permissions: If the user does not have the necessary permissions, you can grant the user the necessary permissions.\n" +
+                    "3. Use the correct user: Ensure that the user you are using has the necessary permissions to perform the operation.",
+            solutionCN = "1. 检查用户权限：确保用户有执行操作所需的权限。\n" +
+                    "2. 授予用户权限：如果用户没有执行操作所需的权限，可以授予用户所需的权限。\n" +
+                    "3. 使用正确的用户：确保你使用的用户有执行操作所需的权限。",
+            level = TapExLevel.CRITICAL,
+            type = TapExType.RUNTIME,
+            seeAlso = {"https://docs.mongodb.com/manual/reference/privilege-actions/"}
+    )
+    String READ_PRIVILEGES_MISSING = "370003";
+
+    @TapExCode(
+            describe = "The user does not have the necessary permissions to perform write operations on the database. This error is usually caused by insufficient user permissions.",
+            describeCN = "用户对库没有执行写操作所需的权限。这个错误通常是由于用户权限不足引起的。",
+            solution = "1. Check user permissions: Ensure that the user has the necessary permissions to perform the operation.\n" +
+                    "2. Grant user permissions: If the user does not have the necessary permissions, you can grant the user the necessary permissions.\n" +
+                    "3. Use the correct user: Ensure that the user you are using has the necessary permissions to perform the operation.",
+            solutionCN = "检查用户权限：确保用户有执行写操作所需的权限。\n" +
+                    "<pre><code>use admin\n" +
+                    "db.createUser(\n" +
+                    "  {\n" +
+                    "    user: \"tapdata\",\n" +
+                    "    pwd: \"my_password\",\n" +
+                    "    roles: [\n" +
+                    "       { role: \"readWrite\", db: \"demodata\" },\n" +
+                    "       { role: \"clusterMonitor\", db: \"admin\" },\n" +
+                    "    ]\n" +
+                    "  }\n" +
+                    ")</code></pre>",
+            level = TapExLevel.CRITICAL,
+            type = TapExType.RUNTIME,
+            seeAlso = {"https://docs.mongodb.com/manual/reference/privilege-actions/"}
+    )
+    String WRITE_PRIVILEGES_MISSING = "370004";
+
+    @TapExCode(
             describe = "The single document size limit for MongoDB is 16MB, which is a hard limit that cannot be changed. If the data you attempt to insert or update exceeds this limit, MongoDB will throw this error.",
             describeCN = "MongoDB 的单个文档大小限制是 16MB，这是一个硬性限制，不能更改。如果你尝试插入或更新的数据超过了这个限制，MongoDB 将会抛出这个错误。",
             solution = "1. Optimize data structure: delete unnecessary fields, compress variable-length fields (such as strings), and use more space-saving data types.\n" +
@@ -25,7 +92,7 @@ public interface MongodbErrorCode {
             type = TapExType.RUNTIME,
             seeAlso = {"https://docs.mongodb.com/manual/reference/limits/"}
     )
-    String EXCEEDS_16M_LIMIT = "370001";
+    String EXCEEDS_16M_LIMIT = "370005";
 
     @TapExCode(
             describe = "The _id field in MongoDB is the default primary key and cannot be modified. The _id value must be unique within a collection and is immutable. If you try to modify the _id field, MongoDB will throw this error.",
@@ -39,7 +106,7 @@ public interface MongodbErrorCode {
             dynamicDescriptionCN = "错误事件：{}",
             seeAlso = {"https://docs.mongodb.com/manual/reference/method/db.collection.update/#update-parameter"}
     )
-    String MODIFY_ON_ID = "370002";
+    String MODIFY_ON_ID = "370006";
 
     @TapExCode(
             describe = "Incremental dependency on MongoDB's changeStream feature, which requires the support of a replica set or sharded cluster, as it relies on replication to keep track of real-time changes in data. If the MongoDB instance is not configured as a replica set, the changeStream feature cannot be used.",
@@ -66,5 +133,5 @@ public interface MongodbErrorCode {
             type = TapExType.RUNTIME,
             seeAlso = {"https://docs.mongodb.com/manual/changeStreams/", "https://docs.mongodb.com/manual/tutorial/deploy-replica-set/"}
     )
-    String NO_REPLICA_SET = "370003";
+    String NO_REPLICA_SET = "370007";
 }

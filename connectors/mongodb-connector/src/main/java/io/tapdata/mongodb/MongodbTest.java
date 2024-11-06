@@ -11,6 +11,7 @@ import io.tapdata.constant.DbTestItem;
 import io.tapdata.exception.TapCodeException;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.mongodb.error.MongodbErrorCode;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.exception.TapTestItemException;
@@ -181,7 +182,7 @@ public class MongodbTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY));
             return true;
         } else {
-            consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "Source mongodb instance must be the shards or replica set."));
+            consumer.accept(new TestItem(TestItem.ITEM_READ, new TapTestItemException(new TapCodeException(MongodbErrorCode.NO_REPLICA_SET,  "Source mongodb instance must be the shards or replica set.")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return false;
         }
     }
@@ -195,7 +196,7 @@ public class MongodbTest extends CommonDbTest {
         MongoDatabase mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
         Document connectionStatus = mongoDatabase.runCommand(new Document("connectionStatus", 1).append("showPrivileges", 1));
         if (!validateReadOrWriteDatabase(connectionStatus, mongodbConfig.getDatabase(), READ_WRITE_PRIVILEGE_ACTIONS)) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, "Missing readWrite privileges on" + mongodbConfig.getDatabase() + "database"));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestItemException(new TapCodeException(MongodbErrorCode.WRITE_PRIVILEGES_MISSING, "Missing write privileges")), TestItem.RESULT_FAILED));
             return false;
         }
         Document isMaster = mongoDatabase.runCommand(new Document("isMaster", 1));

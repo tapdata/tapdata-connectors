@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
+import com.mongodb.MongoSecurityException;
 import com.mongodb.bulk.BulkWriteError;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -41,14 +42,12 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
         if (cause instanceof TapPdkBaseException) return;
         if (cause instanceof MongoException) {
             throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause))
-                    .withServerErrorCode(String.valueOf(((MongoException) cause).getCode()))
-                    ;
+                    .withServerErrorCode(String.valueOf(((MongoException) cause).getCode()));
         }
     }
 
     @Override
     public void collectTerminateByServer(Throwable cause) {
-
         if (cause instanceof MongoException && (((MongoException) cause).getCode()) == -3) {
             if (cause.getMessage().contains("Timed out after 30000 ms while waiting to connect")) {
                 throw new TapPdkTerminateByServerEx(getPdkId(), ErrorKit.getLastCause(cause));
@@ -59,6 +58,9 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
     @Override
     public void collectUserPwdInvalid(String uri, Throwable cause) {
+        if (cause instanceof IllegalArgumentException && cause.getMessage().contains("The connection string contains invalid")) {
+            throw new TapCodeException(MongodbErrorCode.INVALID_URI, "Invalid MongoDB connection URI");
+        }
         String username = null;
         // 定义正则表达式模式
         Pattern pattern = Pattern.compile("mongodb://(.*?):");
@@ -67,9 +69,9 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
             // 提取用户名
             username = matcher.group(1);
         }
-        if (cause instanceof MongoException) {
+        if (cause instanceof MongoSecurityException) {
             if (((MongoException) cause).getCode() == 18 || ((MongoException) cause).getCode() == -4) {
-                throw new TapPdkUserPwdInvalidEx(getPdkId(), username, ErrorKit.getLastCause(cause));
+                throw new TapCodeException(MongodbErrorCode.AUTH_FAIL, "Authentication failed").dynamicDescriptionParameters(username);
             }
         }
     }
