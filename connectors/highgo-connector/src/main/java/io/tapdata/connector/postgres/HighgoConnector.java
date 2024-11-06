@@ -393,7 +393,7 @@ public class HighgoConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+        cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
         testReplicateIdentity(nodeContext.getTableMap());
         buildSlot(nodeContext, true);
         cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
