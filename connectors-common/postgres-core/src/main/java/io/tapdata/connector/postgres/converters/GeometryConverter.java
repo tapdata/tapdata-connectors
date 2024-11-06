@@ -9,7 +9,7 @@ import java.util.Properties;
 
 public class GeometryConverter extends BaseTapdataConverter {
 
-    private final List<String> geometryTypes = Arrays.asList("point", "line", "lseg", "box", "path", "polygon", "circle");
+    private final List<String> geometryTypes = Arrays.asList("point", "line", "lseg", "box", "path", "polygon", "circle", "geometry");
 
     @Override
     SchemaBuilder initSchemaBuilder(Properties props) {
