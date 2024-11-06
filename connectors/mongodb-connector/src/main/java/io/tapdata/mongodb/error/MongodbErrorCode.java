@@ -58,17 +58,26 @@ public interface MongodbErrorCode {
     @TapExCode(
             describe = "The user does not have the necessary permissions to perform write operations on the database. This error is usually caused by insufficient user permissions.",
             describeCN = "用户对库没有执行写操作所需的权限。这个错误通常是由于用户权限不足引起的。",
-            solution = "1. Check user permissions: Ensure that the user has the necessary permissions to perform the operation.\n" +
-                    "2. Grant user permissions: If the user does not have the necessary permissions, you can grant the user the necessary permissions.\n" +
-                    "3. Use the correct user: Ensure that the user you are using has the necessary permissions to perform the operation.",
-            solutionCN = "检查用户权限：确保用户有执行写操作所需的权限。\n" +
+            solution = "check user permissions: Ensure that the user has the necessary permissions to perform write operations. You can refer to the following authorization:\n" +
                     "<pre><code>use admin\n" +
                     "db.createUser(\n" +
                     "  {\n" +
-                    "    user: \"tapdata\",\n" +
-                    "    pwd: \"my_password\",\n" +
+                    "    user: \"YourUser\",\n" +
+                    "    pwd: \"YourPassword\",\n" +
                     "    roles: [\n" +
-                    "       { role: \"readWrite\", db: \"demodata\" },\n" +
+                    "       { role: \"readWrite\", db: \"YourDb\" },\n" +
+                    "       { role: \"clusterMonitor\", db: \"admin\" },\n" +
+                    "    ]\n" +
+                    "  }\n" +
+                    ")</code></pre>",
+            solutionCN = "检查用户权限：确保用户有执行写操作所需的权限。可以参考以下授权：\n" +
+                    "<pre><code>use admin\n" +
+                    "db.createUser(\n" +
+                    "  {\n" +
+                    "    user: \"YourUser\",\n" +
+                    "    pwd: \"YourPassword\",\n" +
+                    "    roles: [\n" +
+                    "       { role: \"readWrite\", db: \"YourDb\" },\n" +
                     "       { role: \"clusterMonitor\", db: \"admin\" },\n" +
                     "    ]\n" +
                     "  }\n" +
