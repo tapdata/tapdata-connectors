@@ -10,6 +10,7 @@ import io.tapdata.connector.tdengine.config.TDengineConfig;
 import io.tapdata.connector.tdengine.ddl.TDengineDDLSqlGenerator;
 import io.tapdata.connector.tdengine.subscribe.TDengineSubscribe;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
@@ -21,6 +22,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -37,6 +39,7 @@ import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -46,6 +49,7 @@ public class TDengineConnector extends CommonDbConnector {
     private TDengineConfig tdengineConfig;
     private TDengineJdbcContext tdengineJdbcContext;
     private String connectionTimezone;
+    private String tdengineVersion;
     private AtomicBoolean streamReadStarted = new AtomicBoolean(false);
     private ConsumerRecords<Map<String, Object>> firstRecords;
 
@@ -58,6 +62,7 @@ public class TDengineConnector extends CommonDbConnector {
         if ("Database Timezone".equals(this.connectionTimezone) || StringUtils.isBlank(this.connectionTimezone)) {
             this.connectionTimezone = tdengineJdbcContext.timezone();
         }
+        this.tdengineVersion = tdengineJdbcContext.queryVersion();
         commonDbConfig = tdengineConfig;
         jdbcContext = tdengineJdbcContext;
         commonSqlMaker = new CommonSqlMaker(tdengineConfig.getEscapeChar());
@@ -228,7 +233,7 @@ public class TDengineConnector extends CommonDbConnector {
             new TDengineRecordWriter(tdengineJdbcContext, tapTable, timestamp)
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .write(tapRecordEvents, consumer);
+                    .write(tapRecordEvents, consumer, this::isAlive);
         }
     }
 
@@ -236,7 +241,7 @@ public class TDengineConnector extends CommonDbConnector {
         streamReadStarted.set(true);
         TapSimplify.sleep(2000);
         createTopic(tables, false);
-        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
+        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog(), tdengineVersion);
         tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
         tDengineSubscribe.setFirstRecords(firstRecords);
         tDengineSubscribe.subscribe(this::isAlive, false, streamReadStarted);
@@ -254,7 +259,7 @@ public class TDengineConnector extends CommonDbConnector {
         createTopic(tables, true);
         tapConnectorContext.getStateMap().put("tap_topic", tables);
         new Thread(() -> {
-            TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
+            TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog(), tdengineVersion);
             tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), null, 1, null);
             tDengineSubscribe.subscribe(this::isAlive, true, streamReadStarted);
             firstRecords = tDengineSubscribe.getFirstRecords();
@@ -365,6 +370,35 @@ public class TDengineConnector extends CommonDbConnector {
         AtomicInteger tableCount = new AtomicInteger();
         tdengineJdbcContext.queryWithNext(String.format("SELECT COUNT(1) FROM information_schema.ins_tables where db_name = '%s'", tdengineConfig.getDatabase()), resultSet -> tableCount.set(resultSet.getInt(1)));
         return tableCount.get();
+    }
+
+    protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        ((TDengineJdbcContext) jdbcContext).queryWithStream(sql, resultSet -> {
+            List<TapEvent> tapEvents = list();
+            //get all column names
+            List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+            try {
+                while (isAlive() && resultSet.next()) {
+                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                    processDataMap(dataMap, tapTable);
+                    tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
+                    if (tapEvents.size() == eventBatchSize) {
+                        eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
+                        tapEvents = list();
+                    }
+                }
+            } catch (SQLException e) {
+                exceptionCollector.collectTerminateByServer(e);
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+                exceptionCollector.revealException(e);
+                throw e;
+            }
+            //last events those less than eventBatchSize
+            if (EmptyKit.isNotEmpty(tapEvents)) {
+                eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
+            }
+        });
     }
 
 }

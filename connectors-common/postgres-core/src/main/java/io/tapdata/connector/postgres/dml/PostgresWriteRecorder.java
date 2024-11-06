@@ -1,15 +1,19 @@
 package io.tapdata.connector.postgres.dml;
 
+import io.netty.buffer.ByteBufInputStream;
 import io.tapdata.common.dml.NormalWriteRecorder;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
+import org.postgresql.copy.CopyManager;
 import org.postgresql.core.BaseConnection;
 import org.postgresql.jdbc.PgSQLXML;
 import org.postgresql.util.PGobject;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -19,6 +23,8 @@ import java.util.Map;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.stream.Collectors;
+
+import static io.tapdata.common.dml.WritePolicyEnum.LOG_ON_NONEXISTS;
 
 public class PostgresWriteRecorder extends NormalWriteRecorder {
 
@@ -141,6 +147,7 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
             case "macaddr":
             case "json":
             case "geometry":
+            case "jsonb":
                 PGobject pGobject = new PGobject();
                 pGobject.setType(dataType);
                 pGobject.setValue(String.valueOf(value));
@@ -160,5 +167,40 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
             return Boolean.TRUE.equals(value) ? 1 : 0;
         }
         return value;
+    }
+
+    public void addAndCheckCommit(TapRecordEvent recordEvent, WriteListResult<TapRecordEvent> listResult) {
+        batchCacheSize++;
+        if (updatePolicy == LOG_ON_NONEXISTS && recordEvent instanceof TapUpdateRecordEvent) {
+            batchCache.add(recordEvent);
+        }
+    }
+
+    public void fileInput() throws SQLException {
+        try (ByteBufInputStream byteBufInputStream = new ByteBufInputStream(buffer)) {
+            new CopyManager(connection.unwrap(BaseConnection.class)).copyIn("COPY " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " FROM STDIN DELIMITER ','", byteBufInputStream);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    protected void fileInsert(Map<String, Object> after) {
+        buffer.writeBytes((allColumn.stream().map(v -> parseObject(after.get(v))).collect(Collectors.joining(",")) + "\n").getBytes());
+    }
+
+    private String parseObject(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        if (value instanceof String) {
+            return ((String) value).replace("\n", "\\n").replace("\r", "\\r").replace(",", "\\,");
+        }
+        if (value instanceof byte[]) {
+            throw new UnsupportedOperationException("binary type not supported in file input");
+        }
+        if (value instanceof PGobject) {
+            return ((PGobject) value).getValue();
+        }
+        return String.valueOf(value);
     }
 }

@@ -1,17 +1,10 @@
 package io.tapdata.connector.dws;
 
-import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.dws.bean.DwsTapTable;
-import io.tapdata.connector.dws.config.DwsConfig;
 import io.tapdata.connector.postgres.PostgresConnector;
-import io.tapdata.connector.postgres.PostgresJdbcContext;
-import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
-import io.tapdata.connector.postgres.PostgresTest;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
-import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
-import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
@@ -29,9 +22,7 @@ import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
@@ -52,7 +43,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
@@ -66,7 +56,6 @@ import java.util.stream.Collectors;
  */
 @TapConnectorClass("spec_dws.json")
 public class DwsConnector extends PostgresConnector {
-    protected DwsConfig dwsConfig;
     protected DwsJdbcContext dwsJdbcContext;
     private DwsTest dwsTest;
     protected String postgresVersion;
@@ -83,11 +72,11 @@ public class DwsConnector extends PostgresConnector {
 
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
-        dwsConfig = (DwsConfig) new DwsConfig().load(connectionContext.getConnectionConfig());
+        postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
-        connectionOptions.connectionString(dwsConfig.getConnectionString());
+        connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                DwsTest dwsTest = new DwsTest(dwsConfig, consumer).initContext()
+                DwsTest dwsTest = new DwsTest(postgresConfig, consumer).initContext()
         ) {
             dwsTest.testOneByOne();
             return connectionOptions;
@@ -185,20 +174,20 @@ public class DwsConnector extends PostgresConnector {
     protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
         TapTable table = createTableEvent.getTable();
         Collection<String> primaryKeys = table.primaryKeys();
-        TapField distributeKey=null;
-        if(primaryKeys.isEmpty()){
+        TapField distributeKey = null;
+        if (primaryKeys.isEmpty()) {
             distributeKey = table.getNameFieldMap().values().iterator().next();
-        }else{
+        } else {
             String firstPk = primaryKeys.iterator().next();
             distributeKey = table.getNameFieldMap().get(firstPk);
         }
-        Pattern pattern = Pattern.compile("nvarchar2\\(\\d+\\)",Pattern.CASE_INSENSITIVE);
-        if(pattern.matcher(distributeKey.getDataType()).matches()){
+        Pattern pattern = Pattern.compile("nvarchar2\\(\\d+\\)", Pattern.CASE_INSENSITIVE);
+        if (pattern.matcher(distributeKey.getDataType()).matches()) {
             distributeKey.setDataType("nvarchar2");
         }
         LinkedHashMap<String, TapField> nameFieldMap = table.getNameFieldMap();
         for (Map.Entry<String, TapField> tapFieldEntry : nameFieldMap.entrySet()) {
-            if (tapFieldEntry.equals(distributeKey.getName())){
+            if (tapFieldEntry.equals(distributeKey.getName())) {
                 tapFieldEntry.setValue(distributeKey);
                 break;
             }
@@ -218,11 +207,11 @@ public class DwsConnector extends PostgresConnector {
 
     //initialize jdbc context, slot name, version
     private void initConnection(TapConnectionContext connectionContext) {
-        dwsConfig = (DwsConfig) new DwsConfig().load(connectionContext.getConnectionConfig());
-        dwsTest = new DwsTest(dwsConfig, testItem -> {
+        postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
+        dwsTest = new DwsTest(postgresConfig, testItem -> {
         }).initContext();
-        dwsJdbcContext = new DwsJdbcContext(dwsConfig);
-        commonDbConfig = dwsConfig;
+        dwsJdbcContext = new DwsJdbcContext(postgresConfig);
+        commonDbConfig = postgresConfig;
         jdbcContext = dwsJdbcContext;
         commonSqlMaker = new CommonSqlMaker();
         postgresVersion = dwsJdbcContext.queryVersion();
@@ -268,7 +257,7 @@ public class DwsConnector extends PostgresConnector {
             dwsTapTableMap.put(tapTable.getId(), dwsTapTable.get());
             connectorContext.getLog().info("DwsTapTableMap has been loaded successfully,tapTable:{},isPartition:{},getDistributedKeys:{}",
                     dwsTapTableMap.get(tapTable.getId()).getTapTable(),
-                    dwsTapTableMap.get(tapTable.getId()).isPartition(),dwsTapTableMap.get(tapTable.getId()).getDistributedKeys());
+                    dwsTapTableMap.get(tapTable.getId()).isPartition(), dwsTapTableMap.get(tapTable.getId()).getDistributedKeys());
         }
 
         if (isTransaction) {
@@ -327,10 +316,11 @@ public class DwsConnector extends PostgresConnector {
                         .collect(Collectors.joining(","))).append(") local");
         return sb.toString();
     }
+
     @Override
     protected void createIndex(TapConnectorContext connectorContext, TapTable tapTable, TapCreateIndexEvent createIndexEvent) throws SQLException {
         //判断是否为分区表  SELECT * FROM PG_PARTITION where relname='tableName'
-        if(discoverPartition(tapTable.getName())){
+        if (discoverPartition(tapTable.getName())) {
             //分区
             List<String> sqlList = TapSimplify.list();
             List<TapIndex> indexList = createIndexEvent.getIndexList()
@@ -345,14 +335,14 @@ public class DwsConnector extends PostgresConnector {
             }
             jdbcContext.batchExecute(sqlList);
 
-        }else{
+        } else {
             super.createIndex(connectorContext, tapTable, createIndexEvent);
         }
     }
 
     protected void createUniqueIndexForLogicPkIfNeed(TapConnectorContext connectorContext, TapTable tapTable) throws SQLException {
         Collection<String> primaryKeys = tapTable.primaryKeys(false);
-        if (null != primaryKeys && !primaryKeys.isEmpty()){
+        if (null != primaryKeys && !primaryKeys.isEmpty()) {
             return;
         }
         TapCreateIndexEvent tapCreateIndexEvent = new TapCreateIndexEvent();
@@ -366,7 +356,7 @@ public class DwsConnector extends PostgresConnector {
         createIndex(connectorContext, dwsTapTable.getTapTable(), tapCreateIndexEvent);
     }
 
-    protected List<String> queryForDistributedKeys(TapTable tapTable){
-        return dwsJdbcContext.queryDistributedKeys(dwsJdbcContext.getConfig().getSchema(),tapTable.getName());
+    protected List<String> queryForDistributedKeys(TapTable tapTable) {
+        return dwsJdbcContext.queryDistributedKeys(dwsJdbcContext.getConfig().getSchema(), tapTable.getName());
     }
 }

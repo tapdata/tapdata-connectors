@@ -2,9 +2,7 @@ package io.tapdata.connector.adb.dml;
 
 import io.tapdata.common.dml.NormalWriteRecorder;
 import io.tapdata.connector.mysql.util.MysqlUtil;
-import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
@@ -18,6 +16,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import static io.tapdata.common.dml.WritePolicyEnum.LOG_ON_NONEXISTS;
 
 public class AliyunADBWriteRecorder extends NormalWriteRecorder {
 
@@ -60,7 +60,7 @@ public class AliyunADBWriteRecorder extends NormalWriteRecorder {
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
-            case "insert_on_nonexists":
+            case INSERT_ON_NONEXISTS:
                 insertUpdate(lastAfter, lastBefore, listResult);
                 preparedStatement.addBatch();
                 break;
@@ -74,7 +74,7 @@ public class AliyunADBWriteRecorder extends NormalWriteRecorder {
         int res = statement.executeUpdate("UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
                 after.keySet().stream().map(k -> filterSetOrWhere(after, k, false)).collect(Collectors.joining(", ")) + " WHERE " +
                 before.keySet().stream().map(k -> filterSetOrWhere(before, k, true)).collect(Collectors.joining(" AND ")));
-        if (0 >= res && "log_on_nonexists".equals(updatePolicy)) {
+        if (0 >= res && LOG_ON_NONEXISTS == updatePolicy) {
             tapLogger.info("update record ignored, after: {}, before: {}", after, before);
         }
         atomicLong.incrementAndGet();
@@ -141,7 +141,7 @@ public class AliyunADBWriteRecorder extends NormalWriteRecorder {
 
     @Override
     public void executeBatch(WriteListResult<TapRecordEvent> listResult) throws SQLException {
-        long succeed = batchCache.size();
+        long succeed = batchCacheSize;
         if (succeed <= 0) {
             return;
         }
@@ -150,6 +150,7 @@ public class AliyunADBWriteRecorder extends NormalWriteRecorder {
                 preparedStatement.executeBatch();
                 preparedStatement.clearBatch();
                 batchCache.clear();
+                batchCacheSize = 0;
             }
         } catch (SQLException e) {
             Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
@@ -157,16 +158,6 @@ public class AliyunADBWriteRecorder extends NormalWriteRecorder {
             throw e;
         }
         atomicLong.addAndGet(succeed);
-    }
-
-    @Override
-    public void addAndCheckCommit(TapRecordEvent recordEvent, WriteListResult<TapRecordEvent> listResult) throws SQLException {
-        if (recordEvent instanceof TapInsertRecordEvent || (recordEvent instanceof TapUpdateRecordEvent && "insert_on_nonexists".equals(updatePolicy))) {
-            batchCache.add(recordEvent);
-            if (batchCache.size() >= 1000) {
-                executeBatch(listResult);
-            }
-        }
     }
 
     public void releaseResource() {

@@ -1,6 +1,7 @@
 package io.tapdata.connector.mysql.dml;
 
 import io.tapdata.common.dml.NormalWriteRecorder;
+import io.tapdata.common.dml.WritePolicyEnum;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
@@ -28,12 +29,12 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
     }
 
     protected String getLargeInsertSql() {
-        if ("update_on_exists".equals(insertPolicy)) {
+        if (WritePolicyEnum.UPDATE_ON_EXISTS == insertPolicy) {
             return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
                     + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
                     + String.join(", ", largeSqlValues) + " ON DUPLICATE KEY UPDATE "
                     + allColumn.stream().map(k -> escapeChar + k + escapeChar + "=values(" + escapeChar + k + escapeChar + ")").collect(Collectors.joining(", "));
-        } else if ("ignore_on_exists".equals(insertPolicy)) {
+        } else if (WritePolicyEnum.IGNORE_ON_EXISTS == insertPolicy) {
             return "INSERT IGNORE INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
                     + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
                     + String.join(", ", largeSqlValues);
