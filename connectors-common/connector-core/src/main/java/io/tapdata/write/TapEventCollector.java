@@ -143,26 +143,23 @@ final class TapEventCollector {
                 Map<String, List<TapRecordEvent>> eventGroup;
                 int groupSize = 0;
                 if (this.eventCollector != null) {
-//                    synchronized (this.pendingLock) {
                     eventGroup = this.pendingUploadEvents.stream()
                             .filter(e -> Objects.nonNull(e) && (Objects.isNull(tableIdList) || tableIdList.contains(e.getTableId())))
                             .collect(Collectors.groupingBy(TapBaseEvent::getTableId));
                     for (Map.Entry<String, List<TapRecordEvent>> entry : eventGroup.entrySet()) {
                         List<TapRecordEvent> eventList = entry.getValue();
-                        groupSize += Objects.isNull(eventList) || eventList.isEmpty() ? 0 : eventList.size();
+                        if (Objects.isNull(eventList) || eventList.isEmpty()) continue;
+                        groupSize += eventList.size();
                         this.eventCollector.collected(this.writeListResultConsumer, eventList, this.collectedTable.get(entry.getKey()));
                     }
-//                        eventGroup.forEach((tab, events) -> this.eventCollector.collected(this.writeListResultConsumer, events, this.collectedTable.get(tab)));
-//                    }
                 }
-//                synchronized (this.pendingLock) {
                 if (Objects.isNull(tableIdList) || groupSize == this.pendingUploadEvents.size()) {
                     this.pendingUploadEvents = null;
                 } else {
                     this.pendingUploadEvents = this.pendingUploadEvents.stream()
-                            .filter(e -> Objects.nonNull(e) && !tableIdList.contains(e.getTableId())).collect(Collectors.toCollection(CopyOnWriteArrayList::new));
+                            .filter(e -> Objects.nonNull(e) && !tableIdList.contains(e.getTableId()))
+                            .collect(Collectors.toCollection(CopyOnWriteArrayList::new));
                 }
-//                }
             }
         } finally {
             touch = System.nanoTime();
@@ -177,6 +174,7 @@ final class TapEventCollector {
         if (Objects.nonNull(eventList) && !eventList.isEmpty()) {
             this.eventProcessor.covert(eventList, table);
             this.events.addAll(eventList);
+            this.collectedTable.put(table.getId(), table);
             Optional.ofNullable(eventList.get(0))
                     .flatMap(event ->
                             Optional.ofNullable(event.getTableId()))
@@ -198,9 +196,7 @@ final class TapEventCollector {
                                 }
                             }
                         }
-                        this.collectedTable.put(tableId, table);
                     });
-            //this.collectedTable.put(table.getId(), table);
         }
         tryUpload(this.events.size() > this.maxRecords);
     }

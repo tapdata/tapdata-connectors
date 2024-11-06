@@ -17,11 +17,17 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.partition.TapSubPartitionTableInfo;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.entity.utils.cache.Entry;
+import io.tapdata.entity.utils.cache.Iterator;
+import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.NumberKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.codehaus.plexus.util.StringUtils;
@@ -33,10 +39,10 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
-import java.util.List;
-import java.util.Map;
-import java.util.TimeZone;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * CDC runner for Postgresql
@@ -48,6 +54,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 
     private static final String TAG = PostgresCdcRunner.class.getSimpleName();
     private final PostgresConfig postgresConfig;
+    private final TapConnectorContext connectorContext;
     private PostgresDebeziumConfig postgresDebeziumConfig;
     private PostgresOffset postgresOffset;
     private int recordSize;
@@ -57,8 +64,9 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private String dropTransactionId = null;
     private boolean withSchema = false;
 
-    public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext) throws SQLException {
+    public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext, TapConnectorContext connectorContext) throws SQLException {
         this.postgresConfig = (PostgresConfig) postgresJdbcContext.getConfig();
+        this.connectorContext = connectorContext;
         if (postgresConfig.getOldVersionTimezone()) {
             this.timeZone = postgresJdbcContext.queryTimeZone();
         } else {
@@ -76,6 +84,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         if (postgresConfig.getDoubleActive()) {
             observedTableList.add("_tap_double_active");
         }
+        appendSubPartitionTables(connectorContext, observedTableList);
         postgresDebeziumConfig = new PostgresDebeziumConfig()
                 .use(postgresConfig)
                 .use(timeZone)
@@ -92,6 +101,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 return v;
             });
         }
+        appendSubPartitionTables(connectorContext, schemaTableMap);
         postgresDebeziumConfig = new PostgresDebeziumConfig()
                 .use(postgresConfig)
                 .use(timeZone)
@@ -268,5 +278,59 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             dataMap.put(field.name(), obj);
         });
         return dataMap;
+    }
+
+    /**
+     * Append sub partition tables for master tables
+     * @param connectorContext node context
+     * @param tables watch table, can be partition table or normal table, only process partition table
+     */
+    private void appendSubPartitionTables(TapConnectorContext connectorContext, List<String> tables) {
+
+        if (connectorContext == null || EmptyKit.isEmpty(tables)) {
+            return;
+        }
+        KVReadOnlyMap<TapTable> tableMap = connectorContext.getTableMap();
+        tables.addAll(getSubPartitionTables(tableMap, tables));
+    }
+
+    /**
+     * Append sub partition tables for master tables
+     * @param connectorContext node context
+     * @param schemaTableMap schema and table map, can be partition table or normal table, only process partition table
+     */
+    private void appendSubPartitionTables(TapConnectorContext connectorContext, Map<String, List<String>> schemaTableMap) {
+        if (connectorContext == null || EmptyKit.isEmpty(schemaTableMap)) {
+            return;
+        }
+        schemaTableMap.forEach((schema, tables) ->
+            tables.addAll(getSubPartitionTables(connectorContext.getTableMap(), tables))
+        );
+    }
+
+    private List<String> getSubPartitionTables(KVReadOnlyMap<TapTable> tableMap, List<String> tables) {
+        if (tableMap == null || EmptyKit.isEmpty(tables)) {
+            return Collections.emptyList();
+        }
+        Iterator<Entry<TapTable>> iterator = tableMap.iterator();
+        Map<String, TapTable> normalTableMap = new HashMap<>();
+        while (iterator.hasNext()) {
+            Entry<TapTable> entry = iterator.next();
+            normalTableMap.put(entry.getKey(), entry.getValue());
+        }
+        List<String> subPartitionTableNames = new ArrayList<>();
+        tables.forEach(table -> {
+            TapTable tableInfo = normalTableMap.get(table);
+            if (tableInfo != null && tableInfo.checkIsMasterPartitionTable()) {
+                subPartitionTableNames.addAll(
+                    tableInfo.getPartitionInfo().getSubPartitionTableInfo()
+                        .stream()
+                        .map(TapSubPartitionTableInfo::getTableName)
+                        .filter(n -> !tables.contains(n))
+                        .collect(Collectors.toList())
+                );
+            }
+        });
+        return subPartitionTableNames;
     }
 }
