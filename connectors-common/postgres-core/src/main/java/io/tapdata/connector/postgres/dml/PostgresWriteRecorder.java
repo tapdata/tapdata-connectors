@@ -18,18 +18,40 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.TimeZone;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static io.tapdata.common.dml.WritePolicyEnum.LOG_ON_NONEXISTS;
 
 public class PostgresWriteRecorder extends NormalWriteRecorder {
 
+    private final Map<String, String> oidColumnTypeMap;
+
     public PostgresWriteRecorder(Connection connection, TapTable tapTable, String schema) {
         super(connection, tapTable, schema);
+        oidColumnTypeMap = tapTable.getNameFieldMap().entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, v -> getAlias(StringKit.removeParentheses(v.getValue().getDataType().replace(" array", "")))));
+    }
+
+    private String getAlias(String type) {
+        switch (type) {
+            case "character":
+                return "char";
+            case "character varying":
+                return "varchar";
+            case "timestamp without time zone":
+                return "timestamp";
+            case "timestamp with time zone":
+                return "timestamptz";
+            case "double precision":
+                return "float8";
+            case "real":
+                return "float4";
+            case "time without time zone":
+                return "time";
+            case "time with time zone":
+                return "timetz";
+        }
+        return type;
     }
 
     @Override
@@ -132,6 +154,9 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
             }
             return pGobject;
         }
+        if (value instanceof List) {
+            return connection.createArrayOf(dataType, ((List) value).toArray());
+        }
         switch (dataType) {
             case "interval":
             case "point":
@@ -202,5 +227,14 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
             return ((PGobject) value).getValue();
         }
         return String.valueOf(value);
+    }
+
+    protected void setPrepareStatement(int pos, Map<String, Object> data, String key) throws SQLException {
+        String dataType = columnTypeMap.get(key);
+        if (EmptyKit.isNotNull(dataType) && dataType.endsWith(" array")) {
+            preparedStatement.setObject(pos, filterValue(data.get(key), oidColumnTypeMap.get(key)));
+        } else {
+            preparedStatement.setObject(pos, filterValue(data.get(key), columnTypeMap.get(key)));
+        }
     }
 }
