@@ -226,7 +226,7 @@ public abstract class NormalWriteRecorder {
         preparedStatement.clearParameters();
         int pos = 1;
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, after, key);
         }
     }
 
@@ -276,7 +276,7 @@ public abstract class NormalWriteRecorder {
         preparedStatement.clearParameters();
         int pos = 1;
         for (String key : after.keySet()) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, after, key);
         }
         setBeforeValue(containsNull, before, pos);
     }
@@ -351,15 +351,19 @@ public abstract class NormalWriteRecorder {
         }
     }
 
+    protected void setPrepareStatement(int pos, Map<String, Object> data, String key) throws SQLException {
+        preparedStatement.setObject(pos, filterValue(data.get(key), columnTypeMap.get(key)));
+    }
+
     protected void setBeforeValue(boolean containsNull, Map<String, Object> before, int pos) throws SQLException {
         if (!containsNull) {
             for (String key : before.keySet()) {
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, before, key);
             }
         } else {
             for (String key : before.keySet()) {
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, before, key);
+                setPrepareStatement(pos++, before, key);
             }
         }
     }
