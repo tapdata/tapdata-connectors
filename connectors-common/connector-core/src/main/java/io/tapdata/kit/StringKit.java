@@ -319,4 +319,9 @@ public class StringKit {
         }
         return String.valueOf(converted);
     }
+
+    //正则表达式去除括号及括号内的内容
+    public static String removeParentheses(String str) {
+        return str.replaceAll("\\(.*?\\)", "");
+    }
 }

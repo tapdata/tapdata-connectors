@@ -14,16 +14,38 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.TimeZone;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class PostgresWriteRecorder extends NormalWriteRecorder {
 
+    private final Map<String, String> oidColumnTypeMap;
+
     public PostgresWriteRecorder(Connection connection, TapTable tapTable, String schema) {
         super(connection, tapTable, schema);
+        oidColumnTypeMap = tapTable.getNameFieldMap().entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, v -> getAlias(StringKit.removeParentheses(v.getValue().getDataType().replace(" array", "")))));
+    }
+
+    private String getAlias(String type) {
+        switch (type) {
+            case "character":
+                return "char";
+            case "character varying":
+                return "varchar";
+            case "timestamp without time zone":
+                return "timestamp";
+            case "timestamp with time zone":
+                return "timestamptz";
+            case "double precision":
+                return "float8";
+            case "real":
+                return "float4";
+            case "time without time zone":
+                return "time";
+            case "time with time zone":
+                return "timetz";
+        }
+        return type;
     }
 
     @Override
@@ -84,19 +106,6 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         }
     }
 
-    @Override
-    protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
-        if (!containsNull) {
-            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
-                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
-        } else {
-            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
-                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
-                            .collect(Collectors.joining(" AND "));
-        }
-    }
-
-    @Override
     protected String getUpdateSql(Map<String, Object> after, Map<String, Object> before, boolean containsNull) {
         if (!containsNull) {
             return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
@@ -105,6 +114,17 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         } else {
             return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
                     after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
+                            .collect(Collectors.joining(" AND "));
+        }
+    }
+
+    protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
+        if (!containsNull) {
+            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
+                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+        } else {
+            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
                     before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
                             .collect(Collectors.joining(" AND "));
         }
@@ -127,6 +147,9 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
                 pGobject.setValue(String.valueOf(value));
             }
             return pGobject;
+        }
+        if (value instanceof List) {
+            return connection.createArrayOf(dataType, ((List) value).toArray());
         }
         switch (dataType) {
             case "interval":
@@ -163,5 +186,14 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
             return Boolean.TRUE.equals(value) ? 1 : 0;
         }
         return value;
+    }
+
+    protected void setPrepareStatement(int pos, Map<String, Object> data, String key) throws SQLException {
+        String dataType = columnTypeMap.get(key);
+        if (EmptyKit.isNotNull(dataType) && dataType.endsWith(" array")) {
+            preparedStatement.setObject(pos, filterValue(data.get(key), oidColumnTypeMap.get(key)));
+        } else {
+            preparedStatement.setObject(pos, filterValue(data.get(key), columnTypeMap.get(key)));
+        }
     }
 }

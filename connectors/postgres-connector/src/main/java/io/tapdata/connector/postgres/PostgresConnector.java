@@ -138,7 +138,16 @@ public class PostgresConnector extends CommonDbConnector {
             return "null";
         });
         codecRegistry.registerFromTapValue(TapArrayValue.class, "text", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) return toJson(tapValue.getValue());
+            if (tapValue != null && tapValue.getValue() != null) {
+                if (tapValue.getOriginType().endsWith(" array")) {
+                    if (tapValue.getOriginValue() instanceof PgArray) {
+                        return tapValue.getOriginValue();
+                    } else {
+                        return tapValue.getValue();
+                    }
+                }
+                return toJson(tapValue.getValue());
+            }
             return "null";
         });
 
