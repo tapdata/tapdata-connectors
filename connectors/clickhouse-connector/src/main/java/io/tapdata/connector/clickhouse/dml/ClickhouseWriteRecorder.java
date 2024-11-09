@@ -1,6 +1,7 @@
 package io.tapdata.connector.clickhouse.dml;
 
 import io.tapdata.common.dml.NormalWriteRecorder;
+import io.tapdata.connector.clickhouse.config.ClickhouseConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
@@ -19,6 +20,10 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
     public ClickhouseWriteRecorder(Connection connection, TapTable tapTable, String schema) {
         super(connection, tapTable, schema);
         setEscapeChar('`');
+    }
+
+    public void addIsDeleted() {
+        allColumn.add("is_deleted");
     }
 
     @Override

@@ -145,6 +145,10 @@ public abstract class NormalWriteRecorder {
         }
     }
 
+    public void addBatchCacheSize() {
+        batchCacheSize++;
+    }
+
     public void releaseResource() {
         preparedStatementMap.forEach((key, value) -> EmptyKit.closeQuietly(value));
         Optional.ofNullable(buffer).ifPresent(ByteBuf::release);
