@@ -62,6 +62,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     private ConnectionString connectionString;
     private ConcurrentProcessor<ChangeStreamDocument<RawBsonDocument>, OffsetEvent> concurrentProcessor;
     private MongodbExceptionCollector mongodbExceptionCollector;
+    private String dropTransactionId;
 
     public MongodbV4StreamReader setPreImage(boolean isPreImage) {
         this.isPreImage = isPreImage;
@@ -89,6 +90,9 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     @Override
     public void read(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) throws Exception {
         openChangeStreamPreAndPostImages(tableList);
+        if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive())) {
+            tableList.add("_tap_double_active");
+        }
         List<Bson> pipeline = singletonList(Aggregates.match(
                 Filters.in("ns.coll", tableList)
         ));
@@ -219,6 +223,23 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         }
         if (collectionName == null) {
             return null;
+        }
+        BsonDocument transactionDocument = event.getLsid();
+        //双活情形下，需要过滤_tap_double_active记录的同事务数据
+        if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive()) && EmptyKit.isNotNull(transactionDocument)) {
+            String transactionId = transactionDocument.getBinary("id").asUuid().toString();
+            if ("_tap_double_active".equals(collectionName)) {
+                dropTransactionId = transactionId;
+                return null;
+            } else {
+                if (null != dropTransactionId) {
+                    if (dropTransactionId.equals(transactionId)) {
+                        return null;
+                    } else {
+                        dropTransactionId = null;
+                    }
+                }
+            }
         }
         OffsetEvent offsetEvent = null;
         OperationType operationType = event.getOperationType();
