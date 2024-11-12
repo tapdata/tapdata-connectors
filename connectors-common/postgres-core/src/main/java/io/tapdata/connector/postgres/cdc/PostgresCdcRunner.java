@@ -268,7 +268,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             if (obj instanceof ByteBuffer) {
                 obj = struct.getBytes(field.name());
             } else if (obj instanceof Struct) {
-                obj = NumberKit.debeziumBytes2long(((Struct) obj).getBytes("value")).divide(BigInteger.TEN.pow((int) ((Struct) obj).get("scale")));
+                obj = new BigDecimal(NumberKit.debeziumBytes2long(((Struct) obj).getBytes("value"))).divide(BigDecimal.TEN.pow((int) ((Struct) obj).get("scale")));
             } else if (obj instanceof String && EmptyKit.isNotNull(field.schema().name())) {
                 if (field.schema().name().endsWith("ZonedTimestamp")) {
                     obj = Instant.parse((String) obj).atZone(ZoneOffset.UTC);
