@@ -33,6 +33,7 @@ import org.apache.kafka.connect.source.SourceRecord;
 import org.codehaus.plexus.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -267,7 +268,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             if (obj instanceof ByteBuffer) {
                 obj = struct.getBytes(field.name());
             } else if (obj instanceof Struct) {
-                obj = BigDecimal.valueOf(NumberKit.bytes2long(((Struct) obj).getBytes("value")), (int) ((Struct) obj).get("scale"));
+                obj = NumberKit.debeziumBytes2long(((Struct) obj).getBytes("value")).divide(BigInteger.TEN.pow((int) ((Struct) obj).get("scale")));
             } else if (obj instanceof String && EmptyKit.isNotNull(field.schema().name())) {
                 if (field.schema().name().endsWith("ZonedTimestamp")) {
                     obj = Instant.parse((String) obj).atZone(ZoneOffset.UTC);
