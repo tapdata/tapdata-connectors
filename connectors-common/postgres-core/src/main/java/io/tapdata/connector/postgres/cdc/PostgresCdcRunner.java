@@ -33,7 +33,6 @@ import org.apache.kafka.connect.source.SourceRecord;
 import org.codehaus.plexus.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -43,7 +42,6 @@ import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * CDC runner for Postgresql
@@ -55,6 +53,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 
     private static final String TAG = PostgresCdcRunner.class.getSimpleName();
     private final PostgresConfig postgresConfig;
+    private final PostgresJdbcContext postgresJdbcContext;
     private final TapConnectorContext connectorContext;
     private PostgresDebeziumConfig postgresDebeziumConfig;
     private PostgresOffset postgresOffset;
@@ -64,8 +63,10 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     protected TimeZone timeZone;
     private String dropTransactionId = null;
     private boolean withSchema = false;
+    private final Map<String, Boolean> replicaFull = new HashMap<>();
 
     public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext, TapConnectorContext connectorContext) throws SQLException {
+        this.postgresJdbcContext = postgresJdbcContext;
         this.postgresConfig = (PostgresConfig) postgresJdbcContext.getConfig();
         this.connectorContext = connectorContext;
         if (postgresConfig.getOldVersionTimezone()) {
@@ -80,11 +81,30 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         return this;
     }
 
+    private static final String PG_QUERY_REPLICA_FULL = "select relname from pg_class where relnamespace=(select oid from pg_namespace where nspname='%s') and relreplident='f' and relname in ('%s')";
+
+    private Map<String, Boolean> getReplicaFullTables(String schema, List<String> tables) {
+        Map<String, Boolean> replicaFull = new HashMap<>();
+        if (EmptyKit.isEmpty(tables)) {
+            return replicaFull;
+        }
+        try {
+            postgresJdbcContext.query(String.format(PG_QUERY_REPLICA_FULL, schema, String.join("','", tables)), resultSet -> {
+                while (resultSet.next()) {
+                    replicaFull.put(schema + "." + resultSet.getString(1), true);
+                }
+            });
+        } catch (Exception ignored) {
+        }
+        return replicaFull;
+    }
+
     public PostgresCdcRunner watch(List<String> observedTableList) {
         withSchema = false;
         if (postgresConfig.getDoubleActive()) {
             observedTableList.add("_tap_double_active");
         }
+        replicaFull.putAll(getReplicaFullTables(postgresConfig.getSchema(), observedTableList));
         appendSubPartitionTables(connectorContext, observedTableList);
         postgresDebeziumConfig = new PostgresDebeziumConfig()
                 .use(postgresConfig)
@@ -102,6 +122,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 return v;
             });
         }
+        schemaTableMap.forEach((schema, tables) -> replicaFull.putAll(getReplicaFullTables(schema, tables)));
         appendSubPartitionTables(connectorContext, schemaTableMap);
         postgresDebeziumConfig = new PostgresDebeziumConfig()
                 .use(postgresConfig)
@@ -213,7 +234,12 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                     }
                 }
                 Struct after = struct.getStruct("after");
-                Struct before = struct.getStruct("before");
+                Struct before;
+                if (Boolean.TRUE.equals(replicaFull.get(schema + "." + table)) || EmptyKit.isNull(sr.key())) {
+                    before = struct.getStruct("before");
+                } else {
+                    before = (Struct) sr.key();
+                }
                 TapRecordEvent event = null;
                 switch (op) { //snapshot.mode = 'never'
                     case "c": //after running --insert
@@ -283,8 +309,9 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 
     /**
      * Append sub partition tables for master tables
+     *
      * @param connectorContext node context
-     * @param tables watch table, can be partition table or normal table, only process partition table
+     * @param tables           watch table, can be partition table or normal table, only process partition table
      */
     private void appendSubPartitionTables(TapConnectorContext connectorContext, List<String> tables) {
 
@@ -297,15 +324,16 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 
     /**
      * Append sub partition tables for master tables
+     *
      * @param connectorContext node context
-     * @param schemaTableMap schema and table map, can be partition table or normal table, only process partition table
+     * @param schemaTableMap   schema and table map, can be partition table or normal table, only process partition table
      */
     private void appendSubPartitionTables(TapConnectorContext connectorContext, Map<String, List<String>> schemaTableMap) {
         if (connectorContext == null || EmptyKit.isEmpty(schemaTableMap)) {
             return;
         }
         schemaTableMap.forEach((schema, tables) ->
-            tables.addAll(getSubPartitionTables(connectorContext.getTableMap(), tables))
+                tables.addAll(getSubPartitionTables(connectorContext.getTableMap(), tables))
         );
     }
 
@@ -324,11 +352,11 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             TapTable tableInfo = normalTableMap.get(table);
             if (tableInfo != null && tableInfo.checkIsMasterPartitionTable()) {
                 subPartitionTableNames.addAll(
-                    tableInfo.getPartitionInfo().getSubPartitionTableInfo()
-                        .stream()
-                        .map(TapSubPartitionTableInfo::getTableName)
-                        .filter(n -> !tables.contains(n))
-                        .collect(Collectors.toList())
+                        tableInfo.getPartitionInfo().getSubPartitionTableInfo()
+                                .stream()
+                                .map(TapSubPartitionTableInfo::getTableName)
+                                .filter(n -> !tables.contains(n))
+                                .collect(Collectors.toList())
                 );
             }
         });
