@@ -668,7 +668,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         }
     }
 
-    private synchronized void syncEventSubmit(List<TapEvent> eventList, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+    protected synchronized void syncEventSubmit(List<TapEvent> eventList, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         eventsOffsetConsumer.accept(eventList, TapSimplify.list());
     }
 
