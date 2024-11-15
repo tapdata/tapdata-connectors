@@ -1,6 +1,7 @@
 package io.tapdata.connector.tdengine;
 
 import io.tapdata.common.JdbcContext;
+import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.connector.tdengine.config.TDengineConfig;
 import io.tapdata.connector.tdengine.kit.TDengineDbKit;
 import io.tapdata.entity.logger.TapLogger;
@@ -12,6 +13,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Collections;
 import java.util.List;
@@ -26,14 +28,28 @@ public class TDengineJdbcContext extends JdbcContext {
     private static final String TAG = TDengineJdbcContext.class.getSimpleName();
 
     public static final String DATABASE_TIMEZON_SQL = "select TIMEZONE()";
+    public static final String DATABASE_VERSION_SQL = "select server_version()";
 
     public TDengineJdbcContext(TDengineConfig config) {
         super(config);
     }
 
     @Override
-    public String queryVersion() {
-        return null;
+    public String queryVersion() throws SQLException {
+        String version = null;
+        TapLogger.debug(TAG, "Get version sql: " + DATABASE_VERSION_SQL);
+        try (
+                Connection connection = getConnection();
+                Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery(DATABASE_VERSION_SQL)
+        ) {
+            while (resultSet.next()) {
+                version = resultSet.getString(1);
+            }
+        } catch (Exception e) {
+            return super.queryVersion();
+        }
+        return version;
     }
 
     public String timezone() throws Exception {
@@ -57,9 +73,12 @@ public class TDengineJdbcContext extends JdbcContext {
         TapLogger.debug(TAG, "Query some tables, schema: " + getConfig().getDatabase());
         List<DataMap> tableList = TapSimplify.list();
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
+        String stableSql = EmptyKit.isNotEmpty(tableNames) ? "AND stable_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
         String typeSql = EmptyKit.isNotEmpty(((TDengineConfig) getConfig()).getLoadTableOptions()) ? "AND type IN (" + StringKit.joinString(((TDengineConfig) getConfig()).getLoadTableOptions(), "'", ",") + ")" : "";
         try {
-            query(String.format("select * from (select db_name, table_name, table_comment, type from information_schema.ins_tables union all select db_name, stable_name, table_comment, \"SUPER_TABLE\" from information_schema.ins_stables) where db_name = '%s' %s %s;", getConfig().getDatabase(), tableSql, typeSql),
+            query(String.format("select db_name, table_name, table_comment, type from information_schema.ins_tables " +
+                            "where db_name = '%s' %s %s" +
+                            "union all select db_name, stable_name, table_comment, \"SUPER_TABLE\" from information_schema.ins_stables where db_name = '%s' %s;", getConfig().getDatabase(), tableSql, typeSql, getConfig().getDatabase(), stableSql),
                     resultSet -> tableList.addAll(TDengineDbKit.getDataFromResultSet(resultSet)));
         } catch (Throwable e) {
             TapLogger.error(TAG, "Execute queryAllTables failed, error: " + e.getMessage(), e);
@@ -122,6 +141,18 @@ public class TDengineJdbcContext extends JdbcContext {
     @Override
     public List<DataMap> queryAllIndexes(List<String> tableNames) {
         return Collections.emptyList();
+    }
+
+    public void queryWithStream(String sql, ResultSetConsumer resultSetConsumer) throws SQLException {
+        try (
+                Connection connection = getConnection();
+                Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+                ResultSet resultSet = statement.executeQuery(sql)
+        ) {
+            if (EmptyKit.isNotNull(resultSet)) {
+                resultSetConsumer.accept(resultSet);
+            }
+        }
     }
 
 }
