@@ -8,6 +8,7 @@ import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
 import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
@@ -35,6 +36,7 @@ import org.apache.commons.lang3.StringUtils;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -65,7 +67,7 @@ public class OceanbaseConnector extends MysqlConnector {
         mysqlConfig = new OceanbaseConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         try (
-                OceanbaseTest oceanbaseTest = new OceanbaseTest((OceanbaseConfig) mysqlConfig, consumer,connectionOptions)
+                OceanbaseTest oceanbaseTest = new OceanbaseTest((OceanbaseConfig) mysqlConfig, consumer, connectionOptions)
         ) {
             oceanbaseTest.testOneByOne();
             return connectionOptions;
@@ -204,6 +206,11 @@ public class OceanbaseConnector extends MysqlConnector {
         OceanbaseReader oceanbaseReader = new OceanbaseReader((OceanbaseConfig) mysqlConfig);
         oceanbaseReader.init(tableList, nodeContext.getTableMap(), offsetState, recordSize, consumer);
         oceanbaseReader.start(this::isAlive);
+    }
+
+    protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        mysqlJdbcContext.query(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
     }
 
 }

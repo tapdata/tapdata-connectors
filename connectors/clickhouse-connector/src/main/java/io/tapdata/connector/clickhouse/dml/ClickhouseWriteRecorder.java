@@ -1,6 +1,7 @@
 package io.tapdata.connector.clickhouse.dml;
 
 import io.tapdata.common.dml.NormalWriteRecorder;
+import io.tapdata.connector.clickhouse.config.ClickhouseConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
@@ -21,13 +22,14 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         setEscapeChar('`');
     }
 
+    public void addIsDeleted() {
+        allColumn.add("is_deleted");
+    }
+
     @Override
     public void addAndCheckCommit(TapRecordEvent recordEvent, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (recordEvent instanceof TapInsertRecordEvent) {
-            batchCache.add(recordEvent);
-            if (batchCache.size() >= 1000) {
-                executeBatch(listResult);
-            }
+            batchCacheSize++;
         }
     }
 
@@ -44,7 +46,7 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
-            case "insert_on_nonexists":
+            case INSERT_ON_NONEXISTS:
                 justInsert(lastAfter);
                 preparedStatement.addBatch();
                 break;

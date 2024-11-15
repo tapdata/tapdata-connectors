@@ -14,7 +14,6 @@
         "id": "dml_insert_policy",
         "alternatives": [
           "update_on_exists",
-          "ignore_on_exists",
           "just_insert"
         ]
       },
@@ -245,6 +244,27 @@
               }
             }
           ]
+        },
+        "mixFastWrite": {
+          "type": "boolean",
+          "title": "${mixFastWrite}",
+          "default": false,
+          "x-index": 2,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${mixFastWriteTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -265,6 +285,8 @@
       "timezone": "timezone",
       "timezoneTip": "Specify the time zone, otherwise the database time zone will be used by default",
       "mergeMinutes": "Optimize Interval (Minutes)",
+      "mixFastWrite": "Mix Fast Write",
+      "mixFastWriteTooltip": "Enable mix fast write, but the target table will create is_deleted, delete_time columns, insert strategy is used for insert, update, delete, greatly improve performance",
       "doc": "docs/clickhouse_en_US.md"
     },
     "zh_CN": {
@@ -281,6 +303,8 @@
       "timezone": "时区",
       "timezoneTip": "指定时区，否则默认使用数据库时区",
       "mergeMinutes": "合并分区间隔(分钟)",
+      "mixFastWrite": "混合快速写入",
+      "mixFastWriteTooltip": "启用混合快速写入，但目标表会多创建is_deleted, delete_time列, 增删改统一使用插入策略大大提升性能",
       "doc": "docs/clickhouse_zh_CN.md"
     },
     "zh_TW": {
@@ -297,6 +321,8 @@
       "timezone": "時區",
       "timezoneTip": "指定時區，否則默認使用數據庫時區",
       "mergeMinutes": "合併分區間隔(分鐘)",
+      "mixFastWrite": "混合快速寫入",
+      "mixFastWriteTooltip": "啟用混合快速寫入，但目標表會多創建is_deleted, delete_time列, 增刪改統一使用插入策略大大提升性能",
       "doc": "docs/clickhouse_zh_TW.md"
     }
   },

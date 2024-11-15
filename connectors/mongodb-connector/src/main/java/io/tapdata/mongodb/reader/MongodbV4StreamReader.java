@@ -17,9 +17,9 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
-import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.mongodb.MongodbExceptionCollector;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
@@ -61,10 +61,16 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     private DecoderContext decoderContext;
     private ConnectionString connectionString;
     private ConcurrentProcessor<ChangeStreamDocument<RawBsonDocument>, OffsetEvent> concurrentProcessor;
+    private MongodbExceptionCollector mongodbExceptionCollector;
+    private String dropTransactionId;
 
     public MongodbV4StreamReader setPreImage(boolean isPreImage) {
         this.isPreImage = isPreImage;
         return this;
+    }
+
+    public MongodbV4StreamReader() {
+        this.mongodbExceptionCollector = new MongodbExceptionCollector();
     }
 
     @Override
@@ -82,8 +88,11 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     }
 
     @Override
-    public void read(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
+    public void read(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) throws Exception {
         openChangeStreamPreAndPostImages(tableList);
+        if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive())) {
+            tableList.add("_tap_double_active");
+        }
         List<Bson> pipeline = singletonList(Aggregates.match(
                 Filters.in("ns.coll", tableList)
         ));
@@ -113,7 +122,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 changeStream.fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
             }
             consumer.streamReadStarted();
-            AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
+            AtomicReference<Exception> throwableAtomicReference = new AtomicReference<>();
             try (final MongoChangeStreamCursor<ChangeStreamDocument<RawBsonDocument>> streamCursor = changeStream.cursor()) {
                 Thread t = new Thread(() -> {
                     List<TapEvent> events = list();
@@ -158,7 +167,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         }
                     });
                 }
-            } catch (Throwable throwable) {
+            } catch (Exception throwable) {
                 if (!running.get()) {
                     final String message = throwable.getMessage();
                     if (throwable instanceof IllegalStateException && EmptyKit.isNotEmpty(message) && (message.contains("state should be: open") || message.contains("Cursor has been closed"))) {
@@ -171,16 +180,13 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
                 if (throwable instanceof MongoCommandException) {
                     MongoCommandException mongoCommandException = (MongoCommandException) throwable;
-                    if (mongoCommandException.getErrorCode() == 286) {
-                        throw new TapPdkOffsetOutOfLogEx(connectorContext.getSpecification().getId(), offset, throwable);
-                    }
-
+                    mongodbExceptionCollector.collectOffsetInvalid(offset, throwable);
+                    mongodbExceptionCollector.collectCdcConfigInvalid(throwable);
                     if (mongoCommandException.getErrorCode() == 211) {
                         throw new TapPdkRetryableEx(connectorContext.getSpecification().getId(), throwable);
                     }
                 }
-
-                throw new RuntimeException(throwable);
+                throw throwable;
                 //else {
                 //TapLogger.warn(TAG,"Read change stream from {}, failed {} " ,MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage());
                 //TapLogger.debug(TAG, "Read change stream from {}, failed {}, error {}", MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage(), getStackString(throwable));
@@ -217,6 +223,23 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         }
         if (collectionName == null) {
             return null;
+        }
+        BsonDocument transactionDocument = event.getLsid();
+        //双活情形下，需要过滤_tap_double_active记录的同事务数据
+        if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive()) && EmptyKit.isNotNull(transactionDocument)) {
+            String transactionId = transactionDocument.getBinary("id").asUuid().toString();
+            if ("_tap_double_active".equals(collectionName)) {
+                dropTransactionId = transactionId;
+                return null;
+            } else {
+                if (null != dropTransactionId) {
+                    if (dropTransactionId.equals(transactionId)) {
+                        return null;
+                    } else {
+                        dropTransactionId = null;
+                    }
+                }
+            }
         }
         OffsetEvent offsetEvent = null;
         OperationType operationType = event.getOperationType();

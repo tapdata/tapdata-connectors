@@ -4,6 +4,7 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoBulkWriteException;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.bulk.BulkWriteResult;
+import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -16,6 +17,7 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.kit.DbKit;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
@@ -86,12 +88,26 @@ public class MongodbWriter {
 		if (CollectionUtils.isEmpty(tapRecordEvents)) {
 			return;
 		}
+		if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive())) {
+			try (ClientSession session = mongoClient.startSession()) {
+				session.startTransaction();
+				Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
+				UpdateOptions options = new UpdateOptions().upsert(true);
+				mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
+				write(table, tapRecordEvents, writeListResultConsumer, session);
+				session.commitTransaction();
+			}
+		} else {
+			write(table, tapRecordEvents, writeListResultConsumer, null);
+		}
+	}
+
+	private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
 		AtomicLong inserted = new AtomicLong(0); //insert count
 		AtomicLong updated = new AtomicLong(0); //update count
 		AtomicLong deleted = new AtomicLong(0); //delete count
 
 		WriteListResult<TapRecordEvent> writeListResult = writeListResult();
-
 		MongoCollection<Document> collection = getMongoCollection(table.getId());
 
 		Object pksCache = table.primaryKeys(true);
@@ -116,7 +132,11 @@ public class MongodbWriter {
 			bulkWriteOptions = buildBulkWriteOptions(bulkWriteModel);
 			try {
 				List<WriteModel<Document>> writeModels = bulkWriteModel.getWriteModels();
-				collection.bulkWrite(writeModels, bulkWriteOptions);
+				if (EmptyKit.isNotNull(session)) {
+					collection.bulkWrite(session, writeModels, bulkWriteOptions);
+				} else {
+					collection.bulkWrite(writeModels, bulkWriteOptions);
+				}
 				bulkWriteModel.clearAll();
 			} catch (MongoBulkWriteException e) {
 				Consumer<RuntimeException> errorConsumer = mongoBulkWriteException::set;
@@ -132,9 +152,9 @@ public class MongodbWriter {
 
 		//Need to tell incremental engine the write result
 		writeListResultConsumer.accept(writeListResult
-			.insertedCount(inserted.get())
-			.modifiedCount(updated.get())
-			.removedCount(deleted.get()));
+				.insertedCount(inserted.get())
+				.modifiedCount(updated.get())
+				.removedCount(deleted.get()));
 	}
 
 	protected void removeOidIfNeed(List<TapRecordEvent> tapRecordEvents, Collection<String> pks) {

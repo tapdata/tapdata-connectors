@@ -21,7 +21,7 @@
         <HikariCP.version>4.0.3</HikariCP.version>
         <commons-lang.version>3.12.0</commons-lang.version>
         <guava.version>31.0.1-jre</guava.version>
-        <tapdata.pdk.api.version>1.3.9-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.4.1-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
 
     <artifactId>oceanbase-mysql-connector</artifactId>

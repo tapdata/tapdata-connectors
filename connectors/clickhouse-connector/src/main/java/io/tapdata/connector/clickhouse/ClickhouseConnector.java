@@ -42,7 +42,6 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -262,7 +261,11 @@ public class ClickhouseConnector extends CommonDbConnector {
         StringBuilder sql = new StringBuilder("CREATE TABLE IF NOT EXISTS ");
         sql.append(TapTableWriter.sqlQuota(".", clickhouseConfig.getDatabase(), tapTable.getId()));
         sql.append("(").append(commonSqlMaker.buildColumnDefinition(tapTable, true));
-        sql.setLength(sql.length() - 1);
+        if (clickhouseConfig.getMixFastWrite()) {
+            sql.append(",is_deleted UInt8 DEFAULT 0, delete_time DateTime DEFAULT now()");
+        } else {
+            sql.setLength(sql.length() - 1);
+        }
 
         // primary key
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
@@ -278,6 +281,10 @@ public class ClickhouseConnector extends CommonDbConnector {
             sql.append(" ORDER BY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
         } else {
             sql.append(" ORDER BY tuple()");
+        }
+
+        if (clickhouseConfig.getMixFastWrite()) {
+            sql.append(" TTL delete_time + INTERVAL 1 SECOND DELETE WHERE is_deleted = 1");
         }
 
         try {

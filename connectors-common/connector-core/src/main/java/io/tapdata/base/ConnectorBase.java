@@ -273,6 +273,7 @@ public abstract class ConnectorBase implements TapConnector {
 
     private final AtomicBoolean isAlive = new AtomicBoolean(false);
     private final AtomicBoolean isDestroyed = new AtomicBoolean(false);
+    private final AtomicBoolean isLight = new AtomicBoolean(false);
 
     public boolean isAlive() {
         return isAlive.get() && !Thread.currentThread().isInterrupted();
@@ -285,7 +286,19 @@ public abstract class ConnectorBase implements TapConnector {
         }
     }
 
+    @Override
+    public void lightInit(TapConnectionContext connectionContext) throws Throwable {
+        if (isAlive.compareAndSet(false, true)) {
+            onLightStart(connectionContext);
+            isLight.set(true);
+        }
+    }
+
     public abstract void onStart(TapConnectionContext connectionContext) throws Throwable;
+
+    public void onLightStart(TapConnectionContext connectionContext) throws Throwable {
+        onStart(connectionContext);
+    }
 
 //    public abstract void onDestroy(TapConnectionContext connectionContext) throws Throwable;
 
@@ -392,8 +405,12 @@ public abstract class ConnectorBase implements TapConnector {
         return retryOptions;
     }
 
+    protected CopyOnWriteArraySet<List<DataMap>> splitTableForMultiDiscoverSchema(List<DataMap> tables, int tableSize) {
+        return new CopyOnWriteArraySet<>(DbKit.splitToPieces(tables, tableSize));
+    }
+
     protected void multiThreadDiscoverSchema(List<DataMap> tables, int tableSize, Consumer<List<TapTable>> consumer) {
-        CopyOnWriteArraySet<List<DataMap>> tableLists = new CopyOnWriteArraySet<>(DbKit.splitToPieces(tables, tableSize));
+        CopyOnWriteArraySet<List<DataMap>> tableLists = splitTableForMultiDiscoverSchema(tables, tableSize);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         CountDownLatch countDownLatch = new CountDownLatch(5);
         ExecutorService executorService = Executors.newFixedThreadPool(5);
@@ -440,6 +457,12 @@ public abstract class ConnectorBase implements TapConnector {
 
     protected synchronized void syncSchemaSubmit(List<TapTable> tapTables, Consumer<List<TapTable>> consumer) {
         consumer.accept(tapTables);
+    }
+
+    protected void throwNonSupportWhenLightInit() {
+        if (isLight.get()) {
+            throw new UnsupportedOperationException("This feature is not available with light init, please use full init");
+        }
     }
 
 }

@@ -2,14 +2,18 @@ package io.tapdata.mongodb;
 
 import com.alibaba.fastjson.JSON;
 import com.mongodb.MongoBulkWriteException;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
+import com.mongodb.MongoSecurityException;
 import com.mongodb.bulk.BulkWriteError;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.exception.*;
 import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
 import io.tapdata.kit.ErrorKit;
+import io.tapdata.mongodb.error.MongodbErrorCode;
 import io.tapdata.mongodb.writer.error.TapMongoBulkWriteException;
+import org.bson.BsonMaximumSizeExceededException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,14 +42,12 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
         if (cause instanceof TapPdkBaseException) return;
         if (cause instanceof MongoException) {
             throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause))
-//                    .withServerErrorCode(String.valueOf(((MongoException) cause).getCode()))
-                    ;
+                    .withServerErrorCode(String.valueOf(((MongoException) cause).getCode()));
         }
     }
 
     @Override
     public void collectTerminateByServer(Throwable cause) {
-
         if (cause instanceof MongoException && (((MongoException) cause).getCode()) == -3) {
             if (cause.getMessage().contains("Timed out after 30000 ms while waiting to connect")) {
                 throw new TapPdkTerminateByServerEx(getPdkId(), ErrorKit.getLastCause(cause));
@@ -56,6 +58,9 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
     @Override
     public void collectUserPwdInvalid(String uri, Throwable cause) {
+        if (cause instanceof IllegalArgumentException && cause.getMessage().contains("The connection string contains invalid")) {
+            throw new TapCodeException(MongodbErrorCode.INVALID_URI, "Invalid MongoDB connection URI");
+        }
         String username = null;
         // 定义正则表达式模式
         Pattern pattern = Pattern.compile("mongodb://(.*?):");
@@ -64,16 +69,16 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
             // 提取用户名
             username = matcher.group(1);
         }
-        if (cause instanceof MongoException) {
+        if (cause instanceof MongoSecurityException) {
             if (((MongoException) cause).getCode() == 18 || ((MongoException) cause).getCode() == -4) {
-                throw new TapPdkUserPwdInvalidEx(getPdkId(), username, ErrorKit.getLastCause(cause));
+                throw new TapCodeException(MongodbErrorCode.AUTH_FAIL, "Authentication failed").dynamicDescriptionParameters(username);
             }
         }
     }
 
     @Override
     public void collectOffsetInvalid(Object offset, Throwable cause) {
-        if (cause instanceof MongoException && (((MongoException) cause).getCode()) == 286) {
+        if (cause instanceof MongoCommandException && (((MongoCommandException) cause).getCode()) == 286) {
             throw new TapPdkOffsetOutOfLogEx(getPdkId(), offset, ErrorKit.getLastCause(cause));
         }
     }
@@ -105,6 +110,10 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
         if (cause instanceof MongoBulkWriteException) {
             checkMongoBulkWriteError(data, (MongoBulkWriteException) cause);
         } else if (cause instanceof TapMongoBulkWriteException) {
+            String message = ErrorKit.getLastCause(cause).getMessage();
+            if (message.contains("Performing an update on the path '_id' would modify the immutable field '_id'")) {
+                throw new TapCodeException(MongodbErrorCode.MODIFY_ON_ID, message).dynamicDescriptionParameters(data);
+            }
             Throwable throwable = cause.getCause();
             if (throwable instanceof MongoBulkWriteException) {
                 checkMongoBulkWriteError(data, (MongoBulkWriteException) throwable);
@@ -127,13 +136,8 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     }
 
     public void collectWriteLength(Object data, Throwable cause) {
-        //gt 16M
-        if (cause instanceof MongoException && FromMongoBulkWriteExceptionGetWriteErrors(cause, 13134)) {
-            if (null != data && data instanceof List) {
-                int index = ((MongoBulkWriteException) cause).getWriteErrors().get(0).getIndex();
-                data = ((List<TapRecordEvent>) data).get(index);
-            }
-            throw new TapPdkWriteLengthEx(getPdkId(), null, "BSON", data, ErrorKit.getLastCause(cause));
+        if (cause instanceof BsonMaximumSizeExceededException) {
+            throw new TapCodeException(MongodbErrorCode.EXCEEDS_16M_LIMIT, "The single document size limit for MongoDB is 16MB, which is a hard limit that cannot be changed. If the data you attempt to insert or update exceeds this limit, MongoDB will throw this error.");
         }
     }
 
@@ -164,7 +168,9 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
     @Override
     public void collectCdcConfigInvalid(Throwable cause) {
-        super.collectCdcConfigInvalid(cause);
+        if (cause instanceof MongoCommandException && ((MongoCommandException) cause).getCode() == 40573) {
+            throw new TapCodeException(MongodbErrorCode.NO_REPLICA_SET, "Incremental dependency on MongoDB's changeStream feature, which requires the support of a replica set or sharded cluster, as it relies on replication to keep track of real-time changes in data. If the MongoDB instance is not configured as a replica set, the changeStream feature cannot be used.");
+        }
     }
 
 

@@ -11,6 +11,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 
 import java.lang.reflect.Field;
@@ -34,11 +35,13 @@ public class TDengineSubscribe {
     private int recordSize;
     private StreamReadConsumer consumer;
     private ConsumerRecords<Map<String, Object>> firstRecords;
+    private Boolean oldVersion;
 
 
-    public TDengineSubscribe(TDengineJdbcContext tdengineJdbcContext, Log tapLogger) {
+    public TDengineSubscribe(TDengineJdbcContext tdengineJdbcContext, Log tapLogger, String version) {
         this.tdengineJdbcContext = tdengineJdbcContext;
         this.tapLogger = tapLogger;
+        this.oldVersion = StringKit.compareVersion(version, "3.2.2.0") <= 0;
     }
 
     public void init(List<String> tableList, KVReadOnlyMap<TapTable> tableMap,
@@ -74,7 +77,12 @@ public class TDengineSubscribe {
             properties.setProperty(TMQConstants.VALUE_DESERIALIZER,
                     "io.tapdata.connector.tdengine.subscribe.TDengineResultDeserializer");
 
-            List<String> topicList = tableList.stream().map(v -> String.format("`tap_topic_%s`", v)).collect(Collectors.toList());
+            List<String> topicList;
+            if (oldVersion) {
+                topicList = tableList.stream().map(v -> String.format("`tap_topic_%s`", v)).collect(Collectors.toList());
+            } else {
+                topicList = tableList.stream().map(v -> String.format("tap_topic_%s", v)).collect(Collectors.toList());
+            }
             // poll data
             try (TaosConsumer<Map<String, Object>> taosConsumer = new TaosConsumer<>(properties)) {
                 taosConsumer.subscribe(topicList);
@@ -133,7 +141,9 @@ public class TDengineSubscribe {
         if (EmptyKit.isEmpty(topic)) {
             return null;
         }
-        topic = topic.substring(1, topic.length() - 1);
+        if (oldVersion) {
+            topic = topic.substring(1, topic.length() - 1);
+        }
         if (topic.startsWith("tap_topic_")) {
             return topic.substring(10);
         }
@@ -159,10 +169,19 @@ public class TDengineSubscribe {
     private TapEvent consumeRecord(ConsumerRecord<Map<String, Object>> record) {
         Map<String, Object> recordValue = record.value();
         String tableName = getTableName(record.getTopic());
+        parseVarchar(recordValue);
         TapInsertRecordEvent tapInsertRecordEvent = insertRecordEvent(recordValue, tableName);
         String timeString = recordValue.get(timestampColumnMap.get(tableName)).toString();
         tapInsertRecordEvent.setReferenceTime(Timestamp.valueOf(timeString).getTime());
         return tapInsertRecordEvent;
+    }
+
+    private void parseVarchar(Map<String, Object> data) {
+        for (Map.Entry<String, Object> entry : data.entrySet()) {
+            if (entry.getValue() instanceof byte[]) {
+                entry.setValue(new String((byte[]) entry.getValue()));
+            }
+        }
     }
 
 }

@@ -15,15 +15,10 @@
 
     <properties>
         <java.version>8</java.version>
-        <tapdata.pdk.api.version>1.3.8-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.4.1-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
 
     <dependencies>
-        <dependency>
-            <groupId>io.tapdata</groupId>
-            <artifactId>dws-core</artifactId>
-            <version>1.0-SNAPSHOT</version>
-        </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>tapdata-pdk-api</artifactId>
@@ -40,10 +35,20 @@
             <artifactId>pdk-error-code</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.huaweicloud.dws</groupId>
+            <artifactId>huaweicloud-dws-jdbc</artifactId>
+            <version>8.1.0</version>
+        </dependency>
+        <dependency>
             <groupId>io.tapdata</groupId>
             <artifactId>postgres-connector</artifactId>
             <version>1.0-SNAPSHOT</version>
-            <scope>compile</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.postgresql</groupId>
+                    <artifactId>postgresql</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
     </dependencies>
 

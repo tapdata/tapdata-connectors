@@ -3,7 +3,7 @@
 		"name": "MongoDB",
 		"icon": "icons/mongodb.png",
 		"doc" : "${doc}",
-		"tags" : ["schema-free","Database"],
+		"tags" : ["schema-free","Database","doubleActive"],
 		"id": "mongodb"
 	},
 	"configOptions": {
@@ -16,7 +16,7 @@
 			},
 			{
 				"id": "dml_insert_policy",
-				"alternatives": ["update_on_exists", "ignore_on_exists"]
+				"alternatives": ["update_on_exists", "ignore_on_exists", "just_insert"]
 			},
 			{
 				"id": "dml_update_policy",

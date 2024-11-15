@@ -87,7 +87,7 @@ public class VastbaseConnector extends CommonDbConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer).initContext()
+                PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer, connectionOptions).initContext()
         ) {
             postgresTest.testOneByOne();
             return connectionOptions;
@@ -320,7 +320,7 @@ public class VastbaseConnector extends CommonDbConnector {
     private void initConnection(TapConnectionContext connectionContext) {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         postgresTest = new PostgresTest(postgresConfig, testItem -> {
-        }).initContext();
+        }, null).initContext();
         postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;
@@ -394,7 +394,7 @@ public class VastbaseConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        cdcRunner = new PostgresCdcRunner(postgresJdbcContext);
+        cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
         testReplicateIdentity(nodeContext.getTableMap());
         buildSlot(nodeContext, true);
         cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);

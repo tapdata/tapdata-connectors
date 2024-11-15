@@ -48,6 +48,7 @@ public final class MySqlTaskContext extends CdcSourceTaskContext {
     private final RecordMakers recordProcessor;
     private final Predicate<String> gtidSourceFilter;
     private final Predicate<String> ddlFilter;
+    private final int lowerCaseTableNames;
 
     /**
      * Whether table ids are compared ignoring letter casing.
@@ -80,9 +81,9 @@ public final class MySqlTaskContext extends CdcSourceTaskContext {
         String gtidSetExcludes = config.getString(MySqlConnectorConfig.GTID_SOURCE_EXCLUDES);
         this.gtidSourceFilter = gtidSetIncludes != null ? Predicates.includesUuids(gtidSetIncludes)
                 : (gtidSetExcludes != null ? Predicates.excludesUuids(gtidSetExcludes) : null);
-
+        this.lowerCaseTableNames = Integer.parseInt(connectionContext.readMySqlSystemVariables().get(MySqlSystemVariables.LOWER_CASE_TABLE_NAMES));
         if (tableIdCaseInsensitive == null) {
-            this.tableIdCaseInsensitive = !"0".equals(connectionContext.readMySqlSystemVariables().get(MySqlSystemVariables.LOWER_CASE_TABLE_NAMES));
+            this.tableIdCaseInsensitive = 0 != lowerCaseTableNames;
         }
         else {
             this.tableIdCaseInsensitive = tableIdCaseInsensitive;
@@ -90,7 +91,7 @@ public final class MySqlTaskContext extends CdcSourceTaskContext {
 
         // Set up the MySQL schema ...
         this.dbSchema = new MySqlSchema(connectorConfig, this.gtidSourceFilter, this.tableIdCaseInsensitive, topicSelector, filters);
-
+        this.dbSchema.setLowerCaseTableNames(lowerCaseTableNames);
         // Set up the record processor ...
         this.recordProcessor = new RecordMakers(dbSchema, source, topicSelector, connectorConfig.isEmitTombstoneOnDelete(), restartOffset);
 

@@ -8,10 +8,13 @@ import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.constant.DbTestItem;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.mongodb.error.MongodbErrorCode;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.TapTestItemException;
 import io.tapdata.pdk.apis.exception.testItem.TapTestConnectionEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestCurrentTimeConsistentEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
@@ -41,6 +44,7 @@ public class MongodbTest extends CommonDbTest {
     private static final String CONFIG_DATABASE = "config";
     private static final String LOCAL_DATABASE = "local";
     private static final String ADMIN_DATABASE = "admin";
+    private final MongodbExceptionCollector exceptionCollector;
 
     static {
 
@@ -67,16 +71,17 @@ public class MongodbTest extends CommonDbTest {
         READ_WRITE_PRIVILEGE_ACTIONS.add("update");
     }
 
-    public MongodbTest(MongodbConfig mongodbConfig, Consumer<TestItem> consumer, MongoClient mongoClient,ConnectionOptions connectionOptions) {
+    public MongodbTest(MongodbConfig mongodbConfig, Consumer<TestItem> consumer, MongoClient mongoClient, ConnectionOptions connectionOptions) {
         super(mongodbConfig, consumer);
         this.mongodbConfig = mongodbConfig;
         this.mongoClient = mongoClient;
         this.connectionOptions = connectionOptions;
+        this.exceptionCollector = new MongodbExceptionCollector();
     }
 
     @Override
     protected List<String> supportVersions() {
-        return Arrays.asList("3.2.*", "3.4.*", "3.6.*", "4.0.*", "4.2.*","4.4.*","5.0.*");
+        return Arrays.asList("3.2.*", "3.4.*", "3.6.*", "4.0.*", "4.2.*", "4.4.*", "5.0.*");
     }
 
     @Override
@@ -116,6 +121,12 @@ public class MongodbTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY, TEST_CONNECTION_LOGIN));
             return true;
         } catch (Throwable e) {
+            try {
+                exceptionCollector.collectUserPwdInvalid(mongodbConfig.getUri(), e);
+            } catch (TapCodeException ex) {
+                consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestItemException(ex), TestItem.RESULT_FAILED));
+                return false;
+            }
             consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestConnectionEx(e), TestItem.RESULT_FAILED));
             return false;
         }
@@ -161,7 +172,7 @@ public class MongodbTest extends CommonDbTest {
 //                return false;
 //            }
             if (!validateReadOrWriteDatabase(connectionStatus, database, READ_PRIVILEGE_ACTIONS)) {
-                consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_FAILED, "Missing read privileges on" + mongodbConfig.getDatabase() + "database"));
+                consumer.accept(new TestItem(TestItem.ITEM_READ, new TapTestItemException(new TapCodeException(MongodbErrorCode.READ_PRIVILEGES_MISSING, "Missing read privileges")), TestItem.RESULT_FAILED));
                 return false;
             }
             if (!validateOplog(connectionStatus)) {
@@ -171,7 +182,7 @@ public class MongodbTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY));
             return true;
         } else {
-            consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "Source mongodb instance must be the shards or replica set."));
+            consumer.accept(new TestItem(TestItem.ITEM_READ, new TapTestItemException(new TapCodeException(MongodbErrorCode.NO_REPLICA_SET, "Source mongodb instance must be the shards or replica set.")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return false;
         }
     }
@@ -185,15 +196,14 @@ public class MongodbTest extends CommonDbTest {
         MongoDatabase mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
         Document connectionStatus = mongoDatabase.runCommand(new Document("connectionStatus", 1).append("showPrivileges", 1));
         if (!validateReadOrWriteDatabase(connectionStatus, mongodbConfig.getDatabase(), READ_WRITE_PRIVILEGE_ACTIONS)) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, "Missing readWrite privileges on" + mongodbConfig.getDatabase() + "database"));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestItemException(new TapCodeException(MongodbErrorCode.WRITE_PRIVILEGES_MISSING, "Missing write privileges")), TestItem.RESULT_FAILED));
             return false;
         }
         Document isMaster = mongoDatabase.runCommand(new Document("isMaster", 1));
         if (!isMaster.containsKey("msg") && !"isdbgrid".equals(isMaster.getString("msg")) && !isMaster.containsKey("setName")) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    "Warning: target is not replicaset or shards, can not use validator and progress feature."));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestItemException(new TapCodeException(MongodbErrorCode.NO_REPLICA_SET, "Not replicaSet or shards")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return true;
-        }else if(isMaster.containsKey("msg") && "isdbgrid".equals(isMaster.getString("msg"))){
+        } else if (isMaster.containsKey("msg") && "isdbgrid".equals(isMaster.getString("msg"))) {
             return validateMongodbShardKeys(connectionStatus);
         }
         consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY));
@@ -266,13 +276,12 @@ public class MongodbTest extends CommonDbTest {
         return true;
     }
 
-    protected Boolean validateMongodbShardKeys(Document connectionStatus){
+    protected Boolean validateMongodbShardKeys(Document connectionStatus) {
         Document nodeAuthInfo = connectionStatus.get("authInfo", Document.class);
         List authUserPrivileges = nodeAuthInfo.get("authenticatedUserPrivileges", List.class);
         Map<String, Set<String>> resourcePrivilegesMap = adaptResourcePrivilegesMap(authUserPrivileges);
         if (!resourcePrivilegesMap.containsKey(CONFIG_DATABASE) && !resourcePrivilegesMap.containsKey(CONFIG_DATABASE_COLLECTIONS)) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "Missing mongos config.collections collection's read privileges." +
-                    "will not be able to read the collection shard key."));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestItemException(new TapCodeException(MongodbErrorCode.READ_CONFIG_DB_FAIL, "Missing config read privileges")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return true;
         }
         Set<String> configDBPrivilegeSet = resourcePrivilegesMap.get(CONFIG_DATABASE);
@@ -280,12 +289,7 @@ public class MongodbTest extends CommonDbTest {
             configDBPrivilegeSet = resourcePrivilegesMap.get(CONFIG_DATABASE_COLLECTIONS);
         }
         if (configDBPrivilegeSet == null || !configDBPrivilegeSet.containsAll(READ_PRIVILEGE_ACTIONS)) {
-            Set<String> missActions = new HashSet<>(READ_PRIVILEGE_ACTIONS);
-            missActions.removeAll(configDBPrivilegeSet);
-            StringBuilder sb = new StringBuilder();
-            sb.append("Missing actions ").append(missActions).append(" on mongos config.shards collection, will not be able to use the incremental sync feature.");
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "Missing mongos config.collections collection's read privileges." +
-                    "will not be able to read the collection shard key."));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestItemException(new TapCodeException(MongodbErrorCode.READ_CONFIG_DB_FAIL, "Missing config.shards read privileges")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return true;
         }
         consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY));
@@ -299,8 +303,7 @@ public class MongodbTest extends CommonDbTest {
 
         Map<String, Set<String>> resourcePrivilegesMap = adaptResourcePrivilegesMap(authUserPrivileges);
         if (!resourcePrivilegesMap.containsKey(CONFIG_DATABASE) && !resourcePrivilegesMap.containsKey(CONFIG_DATABASE_SHARDS_COLLECTION)) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, "Missing mongos config.shards collection's read privileges." +
-                    "will not be able to use the incremental sync feature."));
+            consumer.accept(new TestItem(TestItem.ITEM_READ, new TapTestItemException(new TapCodeException(MongodbErrorCode.READ_CONFIG_DB_FAIL, "Missing config.shards read privileges")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return false;
         }
         Set<String> configDBPrivilegeSet = resourcePrivilegesMap.get(CONFIG_DATABASE);
@@ -311,9 +314,7 @@ public class MongodbTest extends CommonDbTest {
         if (configDBPrivilegeSet == null || !configDBPrivilegeSet.containsAll(READ_PRIVILEGE_ACTIONS)) {
             Set<String> missActions = new HashSet<>(READ_PRIVILEGE_ACTIONS);
             missActions.removeAll(configDBPrivilegeSet);
-            StringBuilder sb = new StringBuilder();
-            sb.append("Missing actions ").append(missActions).append(" on mongos config.shards collection, will not be able to use the incremental sync feature.");
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, String.valueOf(sb)));
+            consumer.accept(new TestItem(TestItem.ITEM_READ, new TapTestItemException(new TapCodeException(MongodbErrorCode.READ_CONFIG_DB_FAIL, "Missing config.shards read privileges")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return false;
         }
         consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY));
@@ -325,11 +326,9 @@ public class MongodbTest extends CommonDbTest {
         Document nodeAuthInfo = connectionStatus.get("authInfo", Document.class);
         List authUserPrivileges = nodeAuthInfo.get("authenticatedUserPrivileges", List.class);
         if (CollectionUtils.isNotEmpty(authUserPrivileges)) {
-
             Map<String, Set<String>> resourcePrivilegesMap = adaptResourcePrivilegesMap(authUserPrivileges);
             if (!resourcePrivilegesMap.containsKey(LOCAL_DATABASE) && !resourcePrivilegesMap.containsKey(LOCAL_DATABASEOPLOG_COLLECTION)) {
-                consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                        "Missing local.oplog.rs collection's read privileges, will not be able to use the incremental sync feature."));
+                consumer.accept(new TestItem(TestItem.ITEM_READ, new TapTestItemException(new TapCodeException(MongodbErrorCode.READ_LOCAL_DB_FAIL, "Missing local.oplog.rs read privileges")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
                 return false;
             }
         }
@@ -356,18 +355,18 @@ public class MongodbTest extends CommonDbTest {
     public Boolean testStreamRead() {
         Map<String, String> nodeConnURIs = MongodbUtil.nodesURI(mongoClient, mongodbConfig.getUri());
         if (nodeConnURIs.size() == 0 || nodeConnURIs.get("single") != null) {
-            consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "mongodb standalone mode not support cdc."));
+            consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestItemException(new TapCodeException(MongodbErrorCode.NO_REPLICA_SET, "mongodb standalone mode not support cdc.")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return false;
         }
         consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY));
         return true;
     }
 
-    public Boolean testTimeDifference(){
+    public Boolean testTimeDifference() {
         try {
             Long nowTime = MongodbUtil.getServerTime(mongoClient, mongodbConfig.getDatabase());
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));
-        }catch (MongoException e){
+        } catch (MongoException e) {
             consumer.accept(new TestItem(TestItem.ITEM_TIME_DETECTION, new TapTestCurrentTimeConsistentEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;

@@ -10,6 +10,7 @@ import io.tapdata.connector.tdengine.config.TDengineConfig;
 import io.tapdata.connector.tdengine.ddl.TDengineDDLSqlGenerator;
 import io.tapdata.connector.tdengine.subscribe.TDengineSubscribe;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
@@ -21,6 +22,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -34,9 +36,16 @@ import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.lang3.StringUtils;
 
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -46,6 +55,7 @@ public class TDengineConnector extends CommonDbConnector {
     private TDengineConfig tdengineConfig;
     private TDengineJdbcContext tdengineJdbcContext;
     private String connectionTimezone;
+    private String tdengineVersion;
     private AtomicBoolean streamReadStarted = new AtomicBoolean(false);
     private ConsumerRecords<Map<String, Object>> firstRecords;
 
@@ -58,6 +68,7 @@ public class TDengineConnector extends CommonDbConnector {
         if ("Database Timezone".equals(this.connectionTimezone) || StringUtils.isBlank(this.connectionTimezone)) {
             this.connectionTimezone = tdengineJdbcContext.timezone();
         }
+        this.tdengineVersion = tdengineJdbcContext.queryVersion();
         commonDbConfig = tdengineConfig;
         jdbcContext = tdengineJdbcContext;
         commonSqlMaker = new CommonSqlMaker(tdengineConfig.getEscapeChar());
@@ -228,7 +239,7 @@ public class TDengineConnector extends CommonDbConnector {
             new TDengineRecordWriter(tdengineJdbcContext, tapTable, timestamp)
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .write(tapRecordEvents, consumer);
+                    .write(tapRecordEvents, consumer, this::isAlive);
         }
     }
 
@@ -236,7 +247,7 @@ public class TDengineConnector extends CommonDbConnector {
         streamReadStarted.set(true);
         TapSimplify.sleep(2000);
         createTopic(tables, false);
-        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
+        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog(), tdengineVersion);
         tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
         tDengineSubscribe.setFirstRecords(firstRecords);
         tDengineSubscribe.subscribe(this::isAlive, false, streamReadStarted);
@@ -254,7 +265,7 @@ public class TDengineConnector extends CommonDbConnector {
         createTopic(tables, true);
         tapConnectorContext.getStateMap().put("tap_topic", tables);
         new Thread(() -> {
-            TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
+            TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog(), tdengineVersion);
             tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), null, 1, null);
             tDengineSubscribe.subscribe(this::isAlive, true, streamReadStarted);
             firstRecords = tDengineSubscribe.getFirstRecords();
@@ -365,6 +376,111 @@ public class TDengineConnector extends CommonDbConnector {
         AtomicInteger tableCount = new AtomicInteger();
         tdengineJdbcContext.queryWithNext(String.format("SELECT COUNT(1) FROM information_schema.ins_tables where db_name = '%s'", tdengineConfig.getDatabase()), resultSet -> tableCount.set(resultSet.getInt(1)));
         return tableCount.get();
+    }
+
+    protected void batchReadRestful(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        List<String> columnNames = list();
+        long offset = 0;
+        while (isAlive()) {
+            String querySql;
+            if (eventBatchSize > 0) {
+                querySql = sql + " limit " + eventBatchSize + " offset " + offset;
+            } else {
+                querySql = sql;
+            }
+            List<TapEvent> tapEvents = list();
+            jdbcContext.query(querySql, resultSet -> {
+                if (EmptyKit.isEmpty(columnNames)) {
+                    columnNames.addAll(DbKit.getColumnsFromResultSet(resultSet));
+                }
+                while (isAlive() && resultSet.next()) {
+                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                    processDataMap(dataMap, tapTable);
+                    tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
+                }
+            });
+            syncEventSubmit(tapEvents, eventsOffsetConsumer);
+            if (eventBatchSize == 0 || eventBatchSize > 0 && tapEvents.size() < eventBatchSize) {
+                break;
+            }
+            offset += eventBatchSize;
+        }
+    }
+
+    protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        try {
+            batchReadRestful(sql, tapTable, eventBatchSize, eventsOffsetConsumer);
+        } catch (SQLException e) {
+            exceptionCollector.collectTerminateByServer(e);
+            exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+            exceptionCollector.revealException(e);
+            throw e;
+        }
+    }
+
+    protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        String timestampColumn = tapTable.primaryKeys().stream().findFirst().orElseThrow(() -> new RuntimeException("no primary key"));
+        AtomicLong maxTimestamp = new AtomicLong();
+        AtomicLong minTimestamp = new AtomicLong();
+        jdbcContext.normalQuery(String.format("select `%s` from %s order by `%s` desc limit 1", timestampColumn, getSchemaAndTable(tapTable.getId()), timestampColumn), resultSet -> {
+            if (resultSet.next()) {
+                maxTimestamp.set(resultSet.getTimestamp(1).getTime());
+            }
+        });
+        jdbcContext.normalQuery(String.format("select `%s` from %s order by `%s` limit 1", timestampColumn, getSchemaAndTable(tapTable.getId()), timestampColumn), resultSet -> {
+            if (resultSet.next()) {
+                minTimestamp.set(resultSet.getTimestamp(1).getTime());
+            }
+        });
+        String[] splitTimestamps = new String[commonDbConfig.getMaxSplit()];
+        for (int i = 0; i < splitTimestamps.length - 1; i++) {
+            splitTimestamps[i] = new Timestamp(minTimestamp.get() + (maxTimestamp.get() - minTimestamp.get()) / commonDbConfig.getMaxSplit() * i - TimeZone.getDefault().getRawOffset()).toString();
+        }
+        splitTimestamps[commonDbConfig.getMaxSplit() - 1] = new Timestamp(maxTimestamp.get() - TimeZone.getDefault().getRawOffset()).toString();
+        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
+        ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
+        AtomicInteger concurrentIndex = new AtomicInteger(-1);
+        try {
+            for (int i = 0; i < commonDbConfig.getBatchReadThreadSize(); i++) {
+                executorService.submit(() -> {
+                    try {
+                        while (isAlive()) {
+                            int index = concurrentIndex.incrementAndGet();
+                            String splitSql;
+                            if (index >= commonDbConfig.getMaxSplit() - 1) {
+                                break;
+                            } else if (index == commonDbConfig.getMaxSplit() - 2) {
+                                splitSql = sql + String.format(" WHERE `%s` >= '%s' AND `%s` <= '%s'", timestampColumn, splitTimestamps[index], timestampColumn, splitTimestamps[index + 1]);
+                            } else {
+                                splitSql = sql + String.format(" WHERE `%s` >= '%s' AND `%s` < '%s'", timestampColumn, splitTimestamps[index], timestampColumn, splitTimestamps[index + 1]);
+                            }
+                            tapLogger.info("batchRead, splitSql[{}]", splitSql);
+                            batchReadRestful(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer);
+                        }
+                    } catch (Throwable e) {
+                        throwable.set(e);
+                    } finally {
+                        countDownLatch.countDown();
+                    }
+                });
+            }
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            if (EmptyKit.isNotNull(throwable.get())) {
+                exceptionCollector.collectTerminateByServer(throwable.get());
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), throwable.get());
+                exceptionCollector.revealException(throwable.get());
+                throw throwable.get();
+            }
+        } finally {
+            executorService.shutdown();
+        }
     }
 
 }
