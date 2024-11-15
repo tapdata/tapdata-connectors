@@ -152,6 +152,42 @@ public class MysqlConnector extends CommonDbConnector {
     }
 
     @Override
+    public void onLightStart(TapConnectionContext tapConnectionContext) throws Throwable {
+        mysqlConfig = new MysqlConfig().load(tapConnectionContext.getConnectionConfig());
+        mysqlConfig.load(tapConnectionContext.getNodeConfig());
+        contextMapForMasterSlave = MysqlUtil.buildContextMapForMasterSlave(mysqlConfig);
+        MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
+        MysqlJdbcContextV2 contextV2 = contextMapForMasterSlave.get(mysqlConfig.getHost() + mysqlConfig.getPort());
+        if (null != contextV2) {
+            mysqlJdbcContext = contextV2;
+        } else {
+            mysqlJdbcContext = new MysqlJdbcContextV2(mysqlConfig);
+        }
+        commonDbConfig = mysqlConfig;
+        jdbcContext = mysqlJdbcContext;
+        commonSqlMaker = new CommonSqlMaker('`');
+        tapLogger = tapConnectionContext.getLog();
+        exceptionCollector = new MysqlExceptionCollector();
+        ((MysqlExceptionCollector) exceptionCollector).setMysqlConfig(mysqlConfig);
+        this.version = "";
+        if (tapConnectionContext instanceof TapConnectorContext) {
+            this.mysqlWriter = new MysqlSqlBatchWriter(mysqlJdbcContext, this::isAlive);
+            this.dbZoneId = ZoneId.of("GMT");
+            this.zoneId = dbZoneId;
+            this.dbTimeZone = TimeZone.getTimeZone(dbZoneId);
+            this.timeZone = dbTimeZone;
+            this.zoneOffsetHour = timeZone.getRawOffset() / 1000 / 60 / 60;
+            ddlSqlGenerator = new MysqlDDLSqlGenerator(version, ((TapConnectorContext) tapConnectionContext).getTableMap());
+        }
+        fieldDDLHandlers = new BiClassHandlers<>();
+        fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
+        fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
+        fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
+        fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
+        started.set(true);
+    }
+
+    @Override
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
         codecRegistry.registerFromTapValue(TapMapValue.class, "json", tapValue -> toJson(tapValue.getValue()));
         codecRegistry.registerFromTapValue(TapArrayValue.class, "json", tapValue -> toJson(tapValue.getValue()));
@@ -687,6 +723,7 @@ public class MysqlConnector extends CommonDbConnector {
 
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
+        throwNonSupportWhenLightInit();
         mysqlReader.readBinlog(tapConnectorContext, tables, offset, batchSize, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, contextMapForMasterSlave);
     }
 
