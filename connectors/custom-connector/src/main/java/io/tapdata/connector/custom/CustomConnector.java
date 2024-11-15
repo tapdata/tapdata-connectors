@@ -329,6 +329,12 @@ public class CustomConnector extends ConnectorBase {
         }
 
         @Override
+        public void trace(String message, Object... params) {
+            logger.trace(message, params);
+            logRecords.add(new LogRecord("TRACE", FormatUtils.format(message, params), System.currentTimeMillis()));
+        }
+
+        @Override
         public void warn(String message, Object... params) {
             logger.warn(message, params);
             logRecords.add(new LogRecord("WARN", FormatUtils.format(message, params), System.currentTimeMillis()));
