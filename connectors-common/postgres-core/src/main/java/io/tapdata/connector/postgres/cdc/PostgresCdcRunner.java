@@ -351,13 +351,15 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         tables.forEach(table -> {
             TapTable tableInfo = normalTableMap.get(table);
             if (tableInfo != null && tableInfo.checkIsMasterPartitionTable()) {
-                subPartitionTableNames.addAll(
-                        tableInfo.getPartitionInfo().getSubPartitionTableInfo()
-                                .stream()
-                                .map(TapSubPartitionTableInfo::getTableName)
-                                .filter(n -> !tables.contains(n))
-                                .collect(Collectors.toList())
-                );
+                if (tableInfo.getPartitionInfo().getSubPartitionTableInfo() != null) {
+                    subPartitionTableNames.addAll(
+                            tableInfo.getPartitionInfo().getSubPartitionTableInfo()
+                                    .stream().filter(Objects::nonNull)
+                                    .map(TapSubPartitionTableInfo::getTableName)
+                                    .filter(n -> !tables.contains(n))
+                                    .collect(Collectors.toList())
+                    );
+                }
             }
         });
         return subPartitionTableNames;
