@@ -316,7 +316,7 @@
       "logPluginName" : "logPluginName",
       "logPluginNameTip": "The higher version PG comes with the PGOUTPUT plugin, but the before data in the logs is not complete. \nThe author recommends using WAL2JSON, and the installation method can be found in the MD documentation",
       "timezone": "timezone",
-      "timezoneTip": "Specify the time zone, otherwise the database time zone will be used by default",
+      "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
       "closeNotNull": "Ignore NotNull",
       "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded"
     },
@@ -337,7 +337,7 @@
       "logPluginName" : "日志插件",
       "logPluginNameTip": "高版本PG自带PGOUTPUT插件，但是日志的before数据并不完整，笔者推荐使用WAL2JSON，安装方式见MD文档",
       "timezone": "时区",
-      "timezoneTip": "指定时区，否则默认使用数据库时区",
+      "timezoneTip": "指定时区，否则不做时区处理",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "开关打开时会将非空限制丢弃"
     },
@@ -358,7 +358,7 @@
       "logPluginName" : "日誌插件",
       "logPluginNameTip": "高版本PG自帶PGOUTPUT插件，但是日誌的before數據並不完整，筆者推薦使用WAL2JSON，安裝方式見MD文檔",
       "timezone": "時區",
-      "timezoneTip": "指定時區，否則默認使用數據庫時區",
+      "timezoneTip": "指定時區，否則不做時區處理",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "開關打開時會將非空限制丟棄"
     }
