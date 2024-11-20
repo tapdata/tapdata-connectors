@@ -18,9 +18,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static io.tapdata.common.dml.WritePolicyEnum.IGNORE_ON_EXISTS;
-import static io.tapdata.common.dml.WritePolicyEnum.JUST_INSERT;
-
 
 public class DwsWriteRecorder extends PostgresWriteRecorder {
     private DwsTapTable dwsTapTable;
@@ -39,31 +36,19 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
         this.conflictKeys = dwsTapTable.buildConflictKeys();
     }
 
-    @Override
-    public void addInsertBatch(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
-        if (EmptyKit.isEmpty(after)) {
-            return;
-        }
-        if (EmptyKit.isEmpty(uniqueCondition) || JUST_INSERT == insertPolicy) {
-            justInsert(after);
-        } else {
-            if (dwsTapTable.isPartition()) {
-                if (insertPolicy == IGNORE_ON_EXISTS) {
-                    conflictIgnoreInsert(after);
-                } else {
-                    conflictUpdateInsert(after);
-                }
-            } else {
-                if (insertPolicy == IGNORE_ON_EXISTS) {
-                    notExistsInsert(after);
-                } else {
-                    conflictUpdateInsert(after);
-                }
-            }
-        }
-        preparedStatement.addBatch();
+    //插入唯一键冲突时转更新
+    protected void upsert(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
+        conflictUpdateInsert(after);
     }
 
+    //插入唯一键冲突时忽略
+    protected void insertIgnore(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
+        if (dwsTapTable.isPartition()) {
+            conflictIgnoreInsert(after);
+        } else {
+            notExistsInsert(after);
+        }
+    }
 
     private void buildConflictKeysForPartition() {
         Collection<String> conflictKeys = tapTable.primaryKeys(false);

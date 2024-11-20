@@ -208,6 +208,7 @@ public class DwsConnector extends PostgresConnector {
     //initialize jdbc context, slot name, version
     private void initConnection(TapConnectionContext connectionContext) {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
+        postgresConfig.load(connectionContext.getNodeConfig());
         dwsTest = new DwsTest(postgresConfig, testItem -> {
         }).initContext();
         dwsJdbcContext = new DwsJdbcContext(postgresConfig);
@@ -227,6 +228,10 @@ public class DwsConnector extends PostgresConnector {
 
     //write records as all events, prepared
     protected void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws SQLException {
+        if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
+            openIdentity(tapTable);
+            writtenTableMap.put(tapTable.getId(), true);
+        }
         String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
             insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;

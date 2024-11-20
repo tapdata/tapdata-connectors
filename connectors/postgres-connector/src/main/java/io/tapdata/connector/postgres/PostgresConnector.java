@@ -368,7 +368,7 @@ public class PostgresConnector extends CommonDbConnector {
                 .withPostgresConfig(postgresConfig);
     }
 
-    private void openIdentity(TapTable tapTable) throws SQLException {
+    protected void openIdentity(TapTable tapTable) throws SQLException {
         if (EmptyKit.isEmpty(tapTable.primaryKeys())
                 && (EmptyKit.isEmpty(tapTable.getIndexList()) || tapTable.getIndexList().stream().noneMatch(TapIndex::isUnique))) {
             jdbcContext.execute("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" REPLICA IDENTITY FULL");
