@@ -258,18 +258,23 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
 
     protected void justUpdate(Map<String, Object> after, Map<String, Object> before) throws SQLException {
         Set<String> setKeys = buildSetKeys();
-        if (EmptyKit.isNull(preparedStatement)) {
-            String sql = "UPDATE \"" + schema + "\".\"" + tapTable.getId() + "\" SET " +
-                    setKeys.stream().map(k -> "\"" + k + "\"=?").collect(Collectors.joining(", "));
-            if (hasPk) {
-                sql += " WHERE " +
-                        before.keySet().stream().map(k -> "\"" + k + "\"=?").collect(Collectors.joining(" AND "));
+        setKeys.removeIf(v -> !after.containsKey(v));
+        boolean containsNull = !hasPk && before.containsValue(null);
+        String preparedStatementKey = String.join(",", setKeys) + "|" + containsNull;
+        if (preparedStatementKey.equals(this.preparedStatementKey)) {
+            preparedStatement = preparedStatementMap.get(preparedStatementKey);
+        } else {
+            if (EmptyKit.isNull(this.preparedStatementKey)) {
+                preparedStatement = connection.prepareStatement(getUpdateSql(setKeys, before, containsNull));
+                preparedStatementMap.put(preparedStatementKey, preparedStatement);
             } else {
-                sql += " WHERE " +
-                        before.keySet().stream().map(k -> "(\"" + k + "\"=? OR (\"" + k + "\" IS NULL AND ?::text IS NULL))")
-                                .collect(Collectors.joining(" AND "));
+                preparedStatement = preparedStatementMap.get(preparedStatementKey);
+                if (EmptyKit.isNull(preparedStatement)) {
+                    preparedStatement = connection.prepareStatement(getUpdateSql(setKeys, before, containsNull));
+                    preparedStatementMap.put(preparedStatementKey, preparedStatement);
+                }
             }
-            preparedStatement = connection.prepareStatement(sql);
+            this.preparedStatementKey = preparedStatementKey;
         }
         preparedStatement.clearParameters();
         int pos = 1;
@@ -278,6 +283,20 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
         }
 
         dealNullBefore(before, pos);
+    }
+
+    protected String getUpdateSql(Set<String> setKeys, Map<String, Object> before, boolean containsNull) {
+        String sql = "UPDATE \"" + schema + "\".\"" + tapTable.getId() + "\" SET " +
+                setKeys.stream().map(k -> "\"" + k + "\"=?").collect(Collectors.joining(", "));
+        if (!containsNull) {
+            sql += " WHERE " +
+                    before.keySet().stream().map(k -> "\"" + k + "\"=?").collect(Collectors.joining(" AND "));
+        } else {
+            sql += " WHERE " +
+                    before.keySet().stream().map(k -> "(\"" + k + "\"=? OR (\"" + k + "\" IS NULL AND ?::text IS NULL))")
+                            .collect(Collectors.joining(" AND "));
+        }
+        return sql;
     }
 
     private void insertUpdate(Map<String, Object> after, Map<String, Object> before) throws SQLException {
