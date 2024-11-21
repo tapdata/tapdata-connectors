@@ -80,8 +80,8 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     /**
      * when your connector need to support partition table and main-curl table
-     *  you should impl this function to discover those tablies relations
-     * */
+     * you should impl this function to discover those tablies relations
+     */
     public List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
         return tapTableList;
     }
@@ -447,7 +447,12 @@ public abstract class CommonDbConnector extends ConnectorBase {
         if (null == sqlList) {
             return;
         }
-        jdbcContext.batchExecute(sqlList);
+        try {
+            jdbcContext.batchExecute(sqlList);
+        } catch (SQLException e) {
+            exceptionCollector.collectWritePrivileges("execute sqls: " + TapSimplify.toJson(sqlList), Collections.emptyList(), e);
+            throw e;
+        }
     }
 
     protected List<String> alterFieldAttr(TapFieldBaseEvent tapFieldBaseEvent, TapConnectorContext tapConnectorContext) {

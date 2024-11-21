@@ -426,7 +426,7 @@ public class MysqlConnector extends CommonDbConnector {
             }
 
         } catch (Throwable t) {
-            exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), t);
+            exceptionCollector.collectWritePrivileges("createTable :" + tapCreateTableEvent.getTableId(), Collections.emptyList(), t);
             throw new RuntimeException("Create table failed, message: " + t.getMessage(), t);
         }
         List<TapIndex> indexList = tapCreateTableEvent.getTable().getIndexList();
