@@ -146,7 +146,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         jdbcContext.queryAllTables(list(), batchSize, listConsumer);
     }
 
-    private CreateTableOptions createTable(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent, Boolean commentInField) throws SQLException {
+    protected CreateTableOptions createTable(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent, Boolean commentInField, String append) throws SQLException {
         if (Boolean.TRUE.equals(commonDbConfig.getDoubleActive())) {
             createDoubleActiveTempTable();
         }
@@ -168,7 +168,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             }
         }
         List<String> sqlList = TapSimplify.list();
-        sqlList.add(getCreateTableSql(tapTable, commentInField));
+        sqlList.add(getCreateTableSql(tapTable, commentInField) + " " + append);
         if (!commentInField) {
             //comment on table and column
             if (EmptyKit.isNotNull(tapTable.getComment())) {
@@ -194,12 +194,12 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     //for pg,oracle type
     protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
-        return createTable(connectorContext, createTableEvent, false);
+        return createTable(connectorContext, createTableEvent, false, "");
     }
 
     //for mysql type
     protected CreateTableOptions createTableV3(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
-        return createTable(connectorContext, createTableEvent, true);
+        return createTable(connectorContext, createTableEvent, true, "");
     }
 
     protected void createDoubleActiveTempTable() throws SQLException {

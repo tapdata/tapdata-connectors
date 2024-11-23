@@ -625,8 +625,8 @@ public class PostgresConnector extends CommonDbConnector {
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
         DataMap dataMap = postgresJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
-        tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("size")));
-        tableInfo.setStorageSize(new BigDecimal(dataMap.getString("rowcount")).longValue());
+        tableInfo.setNumOfRows(new BigDecimal(dataMap.getString("rowcount")).longValue());
+        tableInfo.setStorageSize(Long.valueOf(dataMap.getString("size")));
         return tableInfo;
     }
 
