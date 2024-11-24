@@ -386,6 +386,10 @@ public class MongodbConnector extends ConnectorBase {
 			) {
 				mongodbTest.testOneByOne();
 			}
+			int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
+			if (version >= 6) {
+				connectionOptions.capability(Capability.create(ConnectionOptions.CAPABILITY_SOURCE_INCREMENTAL_UPDATE_EVENT_HAVE_BEFORE));
+			}
 		} catch (Throwable throwable) {
             try {
                 exceptionCollector.collectTerminateByServer(throwable);
@@ -398,14 +402,6 @@ public class MongodbConnector extends ConnectorBase {
             }
 		} finally {
 			onStop(connectionContext);
-		}
-		try {
-			int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
-			if (version >= 6) {
-				connectionOptions.capability(Capability.create(ConnectionOptions.CAPABILITY_SOURCE_INCREMENTAL_UPDATE_EVENT_HAVE_BEFORE));
-			}
-		} catch (Exception ignored) {
-
 		}
 		return connectionOptions;
 	}
