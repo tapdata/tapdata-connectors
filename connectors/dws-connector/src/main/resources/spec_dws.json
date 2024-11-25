@@ -250,27 +250,6 @@
             }
           ]
         },
-        "isPartition": {
-          "type": "boolean",
-          "title": "${isPartition}",
-          "default": false,
-          "x-index": 7,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "tooltip": "${isPartitionTooltip}"
-          },
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ]
-        },
         "distributedKey": {
           "title": "${distributedKey}",
           "type": "array",
