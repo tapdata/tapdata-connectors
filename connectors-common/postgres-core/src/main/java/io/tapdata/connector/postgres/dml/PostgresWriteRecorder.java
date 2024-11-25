@@ -249,7 +249,7 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         for (String key : allColumn) {
             setPrepareStatement(pos++, after, key);
         }
-        for (String key : allColumn) {
+        for (String key : updatedColumn) {
             setPrepareStatement(pos++, after, key);
         }
     }
@@ -259,7 +259,7 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
                 + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
                 "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ON CONFLICT("
                 + uniqueCondition.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", "))
-                + ") DO UPDATE SET " + allColumn.stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", "));
+                + ") DO UPDATE SET " + updatedColumn.stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", "));
     }
 
     @Override
