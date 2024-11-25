@@ -6,6 +6,7 @@ import io.tapdata.kit.EmptyKit;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
@@ -23,7 +24,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String replaceBlank = "";
     private Boolean partitionRoot = false;
     private Integer maximumQueueSize = 8000;
-    private List<String> distributedKey;
+    private List<String> distributedKey = new ArrayList<>();
     private Boolean isPartition = false;
 
     //customize
