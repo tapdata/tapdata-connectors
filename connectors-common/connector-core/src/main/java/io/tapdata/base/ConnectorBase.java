@@ -286,14 +286,6 @@ public abstract class ConnectorBase implements TapConnector {
         }
     }
 
-    @Override
-    public void lightInit(TapConnectionContext connectionContext) throws Throwable {
-        if (isAlive.compareAndSet(false, true)) {
-            onLightStart(connectionContext);
-            isLight.set(true);
-        }
-    }
-
     public abstract void onStart(TapConnectionContext connectionContext) throws Throwable;
 
     public void onLightStart(TapConnectionContext connectionContext) throws Throwable {

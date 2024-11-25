@@ -10,8 +10,6 @@ import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
-import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
-import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
@@ -44,7 +42,6 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
-import io.tapdata.pdk.apis.functions.connector.common.vo.TapPartitionResult;
 import io.tapdata.pdk.apis.functions.connector.source.ConnectionConfigWithTables;
 import org.postgresql.geometric.*;
 import org.postgresql.jdbc.PgArray;
@@ -61,7 +58,6 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -81,7 +77,6 @@ public class PostgresConnector extends CommonDbConnector {
     private Object slotName; //must be stored in stateMap
     protected String postgresVersion;
     protected Map<String, Boolean> writtenTableMap = new ConcurrentHashMap<>();
-    protected PostgresPartitionContext postgresPartitionContext;
 
     @Override
     public void onStart(TapConnectionContext connectorContext) {
@@ -231,7 +226,6 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
         connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
-        connectorFunctions.supportQueryPartitionTablesByParentName(this::discoverPartitionInfoByParentName);
         connectorFunctions.supportStreamReadMultiConnectionFunction(this::streamReadMultiConnection);
 
     }
@@ -362,10 +356,6 @@ public class PostgresConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
         exceptionCollector = new PostgresExceptionCollector();
-        postgresPartitionContext = new PostgresPartitionContext(tapLogger)
-                .withJdbcContext(jdbcContext)
-                .withPostgresVersion(postgresVersion)
-                .withPostgresConfig(postgresConfig);
     }
 
     protected void openIdentity(TapTable tapTable) throws SQLException {
@@ -731,42 +721,5 @@ public class PostgresConnector extends CommonDbConnector {
         if (pks.isEmpty()) throw new CoreException("No primary keys found for table: " + tapTable.getName());
 
         return "abs(('x' || MD5(CONCAT_WS(',', \"" + String.join("\", \"", pks) + "\")))::bit(64)::bigint)";
-    }
-
-    public void discoverPartitionInfoByParentName(TapConnectorContext connectorContext, List<TapTable> table, Consumer<Collection<TapPartitionResult>> consumer) throws SQLException {
-        postgresPartitionContext.discoverPartitionInfoByParentName(connectorContext, table, consumer);
-    }
-
-    @Override
-    public List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
-        return postgresPartitionContext.discoverPartitionInfo(tapTableList);
-    }
-
-    protected CopyOnWriteArraySet<List<DataMap>> splitTableForMultiDiscoverSchema(List<DataMap> tables, int tableSize) {
-        if (Integer.parseInt(postgresVersion) < 100000) {
-            return super.splitTableForMultiDiscoverSchema(tables, tableSize);
-        }
-        return new CopyOnWriteArraySet<>(splitToPieces(tables, tableSize));
-    }
-
-    List<List<DataMap>> splitToPieces(List<DataMap> data, int eachPieceSize) {
-        if (EmptyKit.isEmpty(data)) {
-            return new ArrayList<>();
-        }
-        if (eachPieceSize <= 0) {
-            throw new IllegalArgumentException("Param Error");
-        }
-        List<List<DataMap>> result = new ArrayList<>();
-        List<DataMap> subList = new ArrayList<>();
-        result.add(subList);
-        for (DataMap datum : data) {
-            String tableType = String.valueOf(datum.get("tableType"));
-            if (subList.size() >= eachPieceSize && !TableType.CHILD_TABLE.equals(tableType)) {
-                subList = new ArrayList<>();
-                result.add(subList);
-            }
-            subList.add(datum);
-        }
-        return result;
     }
 }

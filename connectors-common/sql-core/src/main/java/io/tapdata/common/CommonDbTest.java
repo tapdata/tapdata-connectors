@@ -54,7 +54,6 @@ public class CommonDbTest implements AutoCloseable {
             testFunctionMap.put("testStreamRead", this::testStreamRead);
             testFunctionMap.put(TestItem.ITEM_TIME_DETECTION, this::testTimeDifference);
         }
-        testFunctionMap.put(TestItem.ITEM_DATASOURCE_INSTANCE_INFO, this::testDatasourceInstanceInfo);
     }
 
     public Boolean testOneByOne() {
@@ -184,13 +183,6 @@ public class CommonDbTest implements AutoCloseable {
         return true;
     }
     protected void buildDatasourceInstanceInfo(ConnectionOptions connectionOptions) {
-        if (StringUtils.isNotBlank(datasourceInstanceId())) {
-            Map<String, String> datasourceInstanceInfo = new HashMap<>();
-            datasourceInstanceInfo.put("tag", datasourceInstanceTag());
-            datasourceInstanceInfo.put("id", datasourceInstanceId());
-            connectionOptions.setDatasourceInstanceInfo(datasourceInstanceInfo);
-            consumer.accept(testItem(TestItem.ITEM_DATASOURCE_INSTANCE_INFO, TestItem.RESULT_SUCCESSFULLY, datasourceInstanceTag()));
-        }
     }
     public String datasourceInstanceTag() {
         return String.join(":"
