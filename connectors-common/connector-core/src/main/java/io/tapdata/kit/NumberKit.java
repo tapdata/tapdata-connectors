@@ -20,7 +20,7 @@ public class NumberKit {
     }
 
     public static BigInteger debeziumBytes2long(byte[] bs) {
-        if(bs[0] >= 0) {
+        if (bs[0] >= 0) {
             return new BigInteger(bs);
         } else {
             return new BigInteger(flipBytes(bs)).not();
@@ -33,6 +33,21 @@ public class NumberKit {
             flippedBytes[i] = (byte) ~bytes[i];  // 对每个字节进行按位取反
         }
         return flippedBytes;
+    }
+
+    public static void reverseBytes(byte[] bytes) {
+        if (bytes == null) {
+            return;
+        }
+        int left = 0;
+        int right = bytes.length - 1;
+        while (left < right) {
+            byte temp = bytes[left];
+            bytes[left] = bytes[right];
+            bytes[right] = temp;
+            left++;
+            right--;
+        }
     }
 
     public static void main(String[] args) {

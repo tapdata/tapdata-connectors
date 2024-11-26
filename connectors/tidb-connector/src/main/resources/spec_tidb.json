@@ -268,7 +268,7 @@
       "extParams": "Other connection string parameters",
       "extParamsTip": "Additional connection parameters in URI, you can write according to personalized scenarios",
       "timezone": "Timezone for Datetime",
-      "timezoneTip": "Specify the time zone, otherwise the database time zone will be used by default",
+      "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
       "doc": "docs/tidb_en_US.md"
     },
     "zh_CN": {
@@ -287,7 +287,7 @@
       "extParams": "其他连接串参数",
       "extParamsTip": "URI额外的连接参数，可以根据个性化场景书写",
       "timezone": "时间类型的时区",
-      "timezoneTip": "指定时区，否则默认使用数据库时区",
+      "timezoneTip": "指定时区，否则不做时区处理",
       "doc": "docs/tidb_zh_CN.md"
     },
     "zh_TW": {
@@ -306,7 +306,7 @@
       "extParams": "額外參數",
       "extParamsTip": "URI額外的連接參數，可以根據個性化場景書寫",
       "timezone": "时间类型的时区",
-      "timezoneTip": "指定時區，否則默認使用數據庫時區",
+      "timezoneTip": "指定時區，否則不做時區處理",
       "doc": "docs/tidb_zh_TW.md"
     }
   },

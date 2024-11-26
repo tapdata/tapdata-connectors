@@ -634,4 +634,19 @@ public class MongodbUtil {
 			dataMap.put(key, defaultValue);
 		}
 	}
+
+    public static Object convertValue(Object o) {
+        if (null == o) return null;
+        if (ObjectId.class.getName().equals(o.getClass().getName()) && !(o instanceof ObjectId)) {
+            return new ObjectId(o.toString());
+        } else if (o instanceof Map) {
+            ((Map<?, Object>) o).entrySet().forEach(en -> en.setValue(convertValue(en.getValue())));
+        } else if (o instanceof List) {
+            List<Object> list = (List<Object>) o;
+            for (int i = 0; i < list.size(); i++) {
+                list.set(i, convertValue(list.get(i)));
+            }
+        }
+        return o;
+    }
 }

@@ -211,14 +211,39 @@ public class MongodbConnector extends ConnectorBase {
 						}
 
 						collection.listIndexes().forEach((index) -> {
-							;
+							Object keyObj = index.get("key");
+							if (!(keyObj instanceof Document)) {
+								return;
+							}
+							Document keys = (Document) keyObj;
+
 							TapIndex tapIndex = new TapIndex();
 							// TODO: TapIndex struct not enough to represent index, so we encode index info in name
 							tapIndex.setName("__t__" + ((Document) index).toJson());
 
-							// add a empty tapIndexField
-							TapIndexField tapIndexField = new TapIndexField();
-							tapIndex.indexField(tapIndexField);
+							AtomicBoolean haveOid = new AtomicBoolean();
+							AtomicInteger keyCounter = new AtomicInteger();
+							keys.forEach((k, v) -> {
+								TapIndexField tapIndexField = new TapIndexField().name(k);
+								if (v instanceof Integer) {
+									tapIndexField.fieldAsc(v.equals(1));
+								} else {
+									tapIndexField.fieldAsc(true);
+								}
+								tapIndex.indexField(tapIndexField);
+								if (k.equals("_id")) {
+									haveOid.set(true);
+								}
+								keyCounter.incrementAndGet();
+							});
+							if (Boolean.TRUE.equals(index.get(UNIQUE_KEY))) {
+								tapIndex.unique(true);
+							} else {
+								tapIndex.unique(false);
+							}
+							if (haveOid.get() && keyCounter.get() == 1) {
+								tapIndex.unique(true);
+							}
 							TapLogger.info(TAG, "MongodbConnector discoverSchema table: {} index {}", name, ((Document) index).toJson());
 							table.add(tapIndex);
 						});
@@ -386,6 +411,10 @@ public class MongodbConnector extends ConnectorBase {
 			) {
 				mongodbTest.testOneByOne();
 			}
+			int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
+			if (version >= 6) {
+				connectionOptions.capability(Capability.create(ConnectionOptions.CAPABILITY_SOURCE_INCREMENTAL_UPDATE_EVENT_HAVE_BEFORE));
+			}
 		} catch (Throwable throwable) {
             try {
                 exceptionCollector.collectTerminateByServer(throwable);
@@ -398,14 +427,6 @@ public class MongodbConnector extends ConnectorBase {
             }
 		} finally {
 			onStop(connectionContext);
-		}
-		try {
-			int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
-			if (version >= 6) {
-				connectionOptions.capability(Capability.create(ConnectionOptions.CAPABILITY_SOURCE_INCREMENTAL_UPDATE_EVENT_HAVE_BEFORE));
-			}
-		} catch (Exception ignored) {
-
 		}
 		return connectionOptions;
 	}
