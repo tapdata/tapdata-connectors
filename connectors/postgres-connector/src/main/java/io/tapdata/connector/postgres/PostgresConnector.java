@@ -368,7 +368,7 @@ public class PostgresConnector extends CommonDbConnector {
                 .withPostgresConfig(postgresConfig);
     }
 
-    private void openIdentity(TapTable tapTable) throws SQLException {
+    protected void openIdentity(TapTable tapTable) throws SQLException {
         if (EmptyKit.isEmpty(tapTable.primaryKeys())
                 && (EmptyKit.isEmpty(tapTable.getIndexList()) || tapTable.getIndexList().stream().noneMatch(TapIndex::isUnique))) {
             jdbcContext.execute("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" REPLICA IDENTITY FULL");
@@ -625,8 +625,8 @@ public class PostgresConnector extends CommonDbConnector {
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
         DataMap dataMap = postgresJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
-        tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("size")));
-        tableInfo.setStorageSize(new BigDecimal(dataMap.getString("rowcount")).longValue());
+        tableInfo.setNumOfRows(new BigDecimal(dataMap.getString("rowcount")).longValue());
+        tableInfo.setStorageSize(Long.valueOf(dataMap.getString("size")));
         return tableInfo;
     }
 

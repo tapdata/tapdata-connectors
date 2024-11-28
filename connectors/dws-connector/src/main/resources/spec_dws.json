@@ -205,6 +205,96 @@
           ]
         }
       }
+    },
+    "node": {
+      "type": "object",
+      "properties": {
+        "closeNotNull": {
+          "type": "boolean",
+          "title": "${closeNotNull}",
+          "default": false,
+          "x-index": 1,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${closeNotNullTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "replaceBlank": {
+          "type": "string",
+          "title": "${replaceBlank}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${replaceBlankTooltip}"
+          },
+          "x-index": 5,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "distributedKey": {
+          "title": "${distributedKey}",
+          "type": "array",
+          "x-index": 10,
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${distributedKeyTip}"
+          },
+          "x-component": "FieldSelect",
+          "x-component-props": {
+            "allowCreate": false,
+            "multiple": true,
+            "filterable": true
+          },
+          "x-reactions": [
+            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
+            {
+              "dependencies":["$inputs", "type"],
+              "fulfill":{
+                "state":{
+                  "display": "{{$deps[0].length > 0 && $deps[1] !== 'database' ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "enableFileInput": {
+          "type": "boolean",
+          "title": "${enableFileInput}",
+          "default": false,
+          "x-index": 17,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        }
+      }
     }
   },
   "messages": {
@@ -219,7 +309,16 @@
       "user" : "user",
       "password" : "password",
       "logPluginName" : "logPluginName",
-      "timezone": "timezone"
+      "timezone": "timezone",
+      "closeNotNull": "Close NotNull",
+      "closeNotNullTooltip": "When the switch is turned on, the non-empty limit of the string type will be discarded",
+      "replaceBlank": "Replace Blank",
+      "replaceBlankTooltip": "Because the DWS database will automatically convert empty strings to null for storage of string types, when violating the not null constraint, it is used to replace the content of empty characters",
+      "enableFileInput": "Enable file input",
+      "isPartition": "Is partition table",
+      "isPartitionTooltip": "This configuration will not create a partition table automatically. If the target is a manually created partition table, please check to prevent writing policies from causing errors",
+      "distributedKey": "Distributed Key",
+      "distributedKeyTip": "Distributed key field, used for dn distribution, the selected field must be included by the primary key/unique key, not filled in by default according to the primary key field"
     },
     "zh_CN": {
       "doc": "docs/dws_zh_CN.md",
@@ -231,7 +330,16 @@
       "user" : "账号",
       "password" : "密码",
       "logPluginName" : "日志插件",
-      "timezone": "时区"
+      "timezone": "时区",
+      "closeNotNull": "忽略NotNull",
+      "closeNotNullTooltip": "开关打开时会将字符串类型的非空限制丢弃",
+      "replaceBlank": "替换空字符",
+      "replaceBlankTooltip": "由于DWS数据库字符串类型会自动将空字符串转为null存储，因此违背not null约束时，用于替换空字符的内容",
+      "enableFileInput": "启用文件输入",
+      "isPartition": "是否分区表",
+      "isPartitionTooltip": "该配置自动建表不会建分区表，如果目标是手动创建的分区表，请勾选防止写入策略导致错误",
+      "distributedKey": "分布列",
+      "distributedKeyTip": "分布列字段，用于dn分布，选取字段必须是被主键/唯一键包含，不填默认按主键字段"
     },
     "zh_TW": {
       "doc": "docs/dws_zh_TW.md",
@@ -243,7 +351,16 @@
       "user" : "賬號",
       "password" : "密碼",
       "logPluginName" : "日誌插件",
-      "timezone": "時區"
+      "timezone": "時區",
+      "closeNotNull": "忽略NotNull",
+      "closeNotNullTooltip": "開關打開時會將字符串類型的非空限制丟棄",
+      "replaceBlank": "替換空字符",
+      "replaceBlankTooltip": "由於DWS數據庫字符串類型會自動將空字符串轉為null存儲，因此違背not null約束時，用於替換空字符的內容",
+      "enableFileInput": "啟用文件輸入",
+      "isPartition": "是否分區表",
+      "isPartitionTooltip": "該配置自動建表不會建分區表，如果目標是手動創建的分區表，請勾選防止寫入策略導致錯誤",
+      "distributedKey": "分布列",
+      "distributedKeyTip": "分布列字段，用於dn分布，選取字段必須是被主鍵/唯一鍵包含，不填默認按主鍵字段"
     }
   },
   "dataTypes": {
@@ -318,22 +435,6 @@
       "fixed": false,
       "to": "TapNumber"
     },
-    "CHAR[($byte)]": {
-      "byte": 10485761,
-      "priority": 1,
-      "defaultByte": 1,
-      "fixed": true,
-      "to": "TapString"
-    },
-    "NCHAR[($byte)]": {
-      "byte": 10485761,
-      "priority": 2,
-      "defaultByte": 1,
-      "byteRatio": 3,
-      "queryOnly": true,
-      "fixed": true,
-      "to": "TapString"
-    },
     "character[($byte)]": {
       "byte": 10485761,
       "priority": 2,
@@ -348,13 +449,7 @@
       "preferByte": 2000,
       "to": "TapString"
     },
-    "VARCHAR2[($byte)]": {
-      "byte": 10485761,
-      "priority": 2,
-      "preferByte": 2000,
-      "to": "TapString"
-    },
-    "NVARCHAR2[($byte)]": {
+    "nvarchar2[($byte)]": {
       "byte": 10485761,
       "priority": 2,
       "to": "TapString"

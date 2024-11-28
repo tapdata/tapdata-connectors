@@ -6,7 +6,9 @@ import io.tapdata.kit.EmptyKit;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -19,8 +21,11 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     private String logPluginName = "pgoutput"; //default log plugin for postgres, pay attention to lower version
     private Boolean closeNotNull = false;
+    private String replaceBlank = "";
     private Boolean partitionRoot = false;
     private Integer maximumQueueSize = 8000;
+    private List<String> distributedKey = new ArrayList<>();
+    private Boolean isPartition = false;
 
     //customize
     public PostgresConfig() {
@@ -78,6 +83,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
         this.closeNotNull = closeNotNull;
     }
 
+    public String getReplaceBlank() {
+        return replaceBlank;
+    }
+
+    public void setReplaceBlank(String replaceBlank) {
+        this.replaceBlank = replaceBlank;
+    }
+
     public Boolean getPartitionRoot() {
         return partitionRoot;
     }
@@ -92,5 +105,21 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setMaximumQueueSize(Integer maximumQueueSize) {
         this.maximumQueueSize = maximumQueueSize;
+    }
+
+    public List<String> getDistributedKey() {
+        return distributedKey;
+    }
+
+    public void setDistributedKey(List<String> distributedKey) {
+        this.distributedKey = distributedKey;
+    }
+
+    public Boolean getIsPartition() {
+        return isPartition;
+    }
+
+    public void setIsPartition(Boolean isPartition) {
+        this.isPartition = isPartition;
     }
 }
