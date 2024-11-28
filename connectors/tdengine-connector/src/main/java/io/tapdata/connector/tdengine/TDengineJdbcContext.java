@@ -93,7 +93,7 @@ public class TDengineJdbcContext extends JdbcContext {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
         String typeSql = EmptyKit.isNotEmpty(((TDengineConfig) getConfig()).getLoadTableOptions()) ? "AND type IN (" + StringKit.joinString(((TDengineConfig) getConfig()).getLoadTableOptions(), "'", ",") + ")" : "";
         try {
-            query(String.format("select * from (select db_name, table_name, table_comment, type from information_schema.ins_tables union all select db_name, stable_name, table_comment, \"SUPER_TABLE\" from information_schema.ins_stables) where db_name = '%s' %s %s;", getConfig().getDatabase(), tableSql, typeSql),
+            query(String.format("select db_name, table_name, table_comment, type from information_schema.ins_tables where db_name='%s' %s %s union select db_name, stable_name, table_comment, \"SUPER_TABLE\" from information_schema.ins_stables where db_name = '%s' %s;", getConfig().getDatabase(), tableSql, typeSql,getConfig().getDatabase(), tableSql),
                     resultSet -> {
                         while (resultSet.next()) {
                             String tableName = resultSet.getString("table_name");
