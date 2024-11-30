@@ -35,6 +35,7 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.lang3.StringUtils;
 
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.*;
@@ -378,8 +379,7 @@ public class TDengineConnector extends CommonDbConnector {
         return tableCount.get();
     }
 
-    protected void batchReadRestful(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        List<String> columnNames = list();
+    protected void batchReadRestful(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, Timestamp min, Timestamp max) throws Throwable {
         long offset = 0;
         while (isAlive()) {
             String querySql;
@@ -389,16 +389,12 @@ public class TDengineConnector extends CommonDbConnector {
                 querySql = sql;
             }
             List<TapEvent> tapEvents = list();
-            jdbcContext.query(querySql, resultSet -> {
-                if (EmptyKit.isEmpty(columnNames)) {
-                    columnNames.addAll(DbKit.getColumnsFromResultSet(resultSet));
-                }
-                while (isAlive() && resultSet.next()) {
-                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
-                    processDataMap(dataMap, tapTable);
-                    tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
-                }
-            });
+            List<String> columnNames = list();
+            if (EmptyKit.isNull(min) && EmptyKit.isNull(max)) {
+                jdbcContext.query(querySql, resultSet -> allOverResultSet(resultSet, columnNames, tapTable, tapEvents));
+            } else {
+                jdbcContext.prepareQuery(querySql, Arrays.asList(min, max), resultSet -> allOverResultSet(resultSet, columnNames, tapTable, tapEvents));
+            }
             syncEventSubmit(tapEvents, eventsOffsetConsumer);
             if (eventBatchSize == 0 || eventBatchSize > 0 && tapEvents.size() < eventBatchSize) {
                 break;
@@ -407,10 +403,21 @@ public class TDengineConnector extends CommonDbConnector {
         }
     }
 
+    private void allOverResultSet(ResultSet resultSet, List<String> columnNames, TapTable tapTable, List<TapEvent> tapEvents) throws SQLException {
+        if (EmptyKit.isEmpty(columnNames)) {
+            columnNames.addAll(DbKit.getColumnsFromResultSet(resultSet));
+        }
+        while (isAlive() && resultSet.next()) {
+            DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+            processDataMap(dataMap, tapTable);
+            tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
+        }
+    }
+
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
         try {
-            batchReadRestful(sql, tapTable, eventBatchSize, eventsOffsetConsumer);
+            batchReadRestful(sql, tapTable, eventBatchSize, eventsOffsetConsumer, null, null);
         } catch (SQLException e) {
             exceptionCollector.collectTerminateByServer(e);
             exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
@@ -434,11 +441,11 @@ public class TDengineConnector extends CommonDbConnector {
                 minTimestamp.set(resultSet.getTimestamp(1).getTime());
             }
         });
-        String[] splitTimestamps = new String[commonDbConfig.getMaxSplit()];
+        Timestamp[] splitTimestamps = new Timestamp[commonDbConfig.getMaxSplit()];
         for (int i = 0; i < splitTimestamps.length - 1; i++) {
-            splitTimestamps[i] = new Timestamp(minTimestamp.get() + (maxTimestamp.get() - minTimestamp.get()) / commonDbConfig.getMaxSplit() * i - TimeZone.getDefault().getRawOffset()).toString();
+            splitTimestamps[i] = new Timestamp(minTimestamp.get() + (maxTimestamp.get() - minTimestamp.get()) / commonDbConfig.getMaxSplit() * i);
         }
-        splitTimestamps[commonDbConfig.getMaxSplit() - 1] = new Timestamp(maxTimestamp.get() - TimeZone.getDefault().getRawOffset()).toString();
+        splitTimestamps[commonDbConfig.getMaxSplit() - 1] = new Timestamp(maxTimestamp.get());
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
         ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
@@ -453,12 +460,12 @@ public class TDengineConnector extends CommonDbConnector {
                             if (index >= commonDbConfig.getMaxSplit() - 1) {
                                 break;
                             } else if (index == commonDbConfig.getMaxSplit() - 2) {
-                                splitSql = sql + String.format(" WHERE `%s` >= '%s' AND `%s` <= '%s'", timestampColumn, splitTimestamps[index], timestampColumn, splitTimestamps[index + 1]);
+                                splitSql = sql + String.format(" WHERE `%s` >= ? AND `%s` <= ?", timestampColumn, timestampColumn);
                             } else {
-                                splitSql = sql + String.format(" WHERE `%s` >= '%s' AND `%s` < '%s'", timestampColumn, splitTimestamps[index], timestampColumn, splitTimestamps[index + 1]);
+                                splitSql = sql + String.format(" WHERE `%s` >= ? AND `%s` < ?", timestampColumn, timestampColumn);
                             }
-                            tapLogger.info("batchRead, splitSql[{}]", splitSql);
-                            batchReadRestful(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer);
+                            tapLogger.info("batchRead, splitSql[{}], from {} to {}", splitSql, splitTimestamps[index], splitTimestamps[index + 1]);
+                            batchReadRestful(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer, splitTimestamps[index], splitTimestamps[index + 1]);
                         }
                     } catch (Throwable e) {
                         throwable.set(e);
