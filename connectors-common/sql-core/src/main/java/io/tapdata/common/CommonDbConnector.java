@@ -350,13 +350,13 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
-        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() == 1) {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
             jdbcContext.execute("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
         }
     }
 
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
-        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() == 1) {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
             jdbcContext.execute("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
         }
     }
