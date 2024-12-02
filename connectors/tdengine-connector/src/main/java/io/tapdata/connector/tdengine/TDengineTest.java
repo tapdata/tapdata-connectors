@@ -12,13 +12,13 @@ import java.util.function.Consumer;
 
 import static io.tapdata.base.ConnectorBase.testItem;
 
-// TODO: 2022/6/9 need to improve test items 
+// TODO: 2022/6/9 need to improve test items
 public class TDengineTest extends CommonDbTest {
 
-    protected static final String TEST_CREATE_TABLE = "create table %s(col1 timestamp, col2 int)";
+    protected static final String TEST_CREATE_TABLE = "create table if not exists %s(col1 timestamp, col2 int)";
     protected static final String TEST_WRITE_RECORD = "insert into %s values(now(), 0)";
     protected static final String TEST_DELETE_RECORD = "delete from %s";
-    protected static final String TEST_DROP_TABLE = "drop table %s";
+    protected static final String TEST_DROP_TABLE = "drop table if exists %s";
     protected static final String TEST_WRITE_SUCCESS = "Create,Insert,Delete,Drop succeed";
 
     protected static final String TEST_STREAM_READ_SUCCESS = "stream read succeed";
