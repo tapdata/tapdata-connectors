@@ -219,8 +219,10 @@ public class TDengineConnector extends CommonDbConnector {
 
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
         String tableId = tapDropTableEvent.getTableId();
-        String sql = String.format("DROP " + (tdengineConfig.getSupportSuperTable() ? "S" : "") + "TABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId);
-        tdengineJdbcContext.execute(sql);
+        List<String> dropSqls = new ArrayList<>();
+        dropSqls.add(String.format("DROP TABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId));
+        dropSqls.add(String.format("DROP STABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId));
+        tdengineJdbcContext.batchExecute(dropSqls);
     }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
