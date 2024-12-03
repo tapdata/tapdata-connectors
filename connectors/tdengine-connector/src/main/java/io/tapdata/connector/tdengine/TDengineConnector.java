@@ -322,6 +322,7 @@ public class TDengineConnector extends CommonDbConnector {
             List<TapTable> tapTableList = TapSimplify.list();
             List<String> subTableNames = subList.stream().map(v -> v.getString("table_name")).collect(Collectors.toList());
             List<DataMap> columnList = tdengineJdbcContext.queryAllColumns(subTableNames);
+            Map<String, Set<String>> tagsMap = tdengineJdbcContext.queryAllTags(subTableNames);
             //make up tapTable
             subList.forEach(subTable -> {
                 //1、table name/comment
@@ -354,6 +355,9 @@ public class TDengineConnector extends CommonDbConnector {
                             tapTable.add(tapField);
                         });
                 tapTable.setIndexList(tapIndexList);
+                if (tagsMap.containsKey(table)) {
+                    tapTable.setTableAttr(TapSimplify.map(TapSimplify.entry("tags", tagsMap.get(table))));
+                }
                 tapTableList.add(tapTable);
             });
             consumer.accept(tapTableList);
