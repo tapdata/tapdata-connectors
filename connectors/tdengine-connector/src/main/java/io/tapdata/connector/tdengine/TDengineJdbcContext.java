@@ -15,8 +15,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.function.Consumer;
 
 /**
@@ -93,7 +92,7 @@ public class TDengineJdbcContext extends JdbcContext {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
         String typeSql = EmptyKit.isNotEmpty(((TDengineConfig) getConfig()).getLoadTableOptions()) ? "AND type IN (" + StringKit.joinString(((TDengineConfig) getConfig()).getLoadTableOptions(), "'", ",") + ")" : "";
         try {
-            query(String.format("select db_name, table_name, table_comment, type from information_schema.ins_tables where db_name='%s' %s %s union select db_name, stable_name, table_comment, \"SUPER_TABLE\" from information_schema.ins_stables where db_name = '%s' %s;", getConfig().getDatabase(), tableSql, typeSql,getConfig().getDatabase(), tableSql),
+            query(String.format("select db_name, table_name, table_comment, type from information_schema.ins_tables where db_name='%s' %s %s union select db_name, stable_name, table_comment, \"SUPER_TABLE\" from information_schema.ins_stables where db_name = '%s' %s;", getConfig().getDatabase(), tableSql, typeSql, getConfig().getDatabase(), tableSql),
                     resultSet -> {
                         while (resultSet.next()) {
                             String tableName = resultSet.getString("table_name");
@@ -136,6 +135,27 @@ public class TDengineJdbcContext extends JdbcContext {
             TapLogger.error(TAG, "Execute queryAllColumns failed, error: " + e.getMessage(), e);
         }
         return columnList;
+    }
+
+    public Map<String, Set<String>> queryAllTags(List<String> tableNames) {
+        Map<String, Set<String>> tagsMap = new HashMap<>();
+        try {
+            String sql = String.format("select * from `information_schema`.`ins_tags` where db_name='%s' and stable_name in ('%s')", getConfig().getDatabase(), String.join("','", tableNames));
+            query(sql, resultSet -> TDengineDbKit.getDataFromResultSet(resultSet).forEach(dataMap -> {
+                String stableName = dataMap.getString("stable_name");
+                String tag = dataMap.getString("tag_name");
+                if (tagsMap.containsKey(stableName)) {
+                    tagsMap.get(stableName).add(tag);
+                } else {
+                    Set<String> tags = new HashSet<>();
+                    tags.add(tag);
+                    tagsMap.put(stableName, tags);
+                }
+            }));
+        } catch (Throwable e) {
+            TapLogger.error(TAG, "Execute queryAllTags failed, error: " + e.getMessage(), e);
+        }
+        return tagsMap;
     }
 
     @Override
