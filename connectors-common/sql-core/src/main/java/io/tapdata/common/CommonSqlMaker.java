@@ -7,9 +7,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.pdk.apis.entity.Projection;
-import io.tapdata.pdk.apis.entity.QueryOperator;
-import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.*;
 
 import java.text.DecimalFormat;
 import java.time.LocalDateTime;
@@ -21,6 +19,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static io.tapdata.pdk.apis.entity.SortOn.ASCENDING;
+
 /**
  * make sql
  *
@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 public class CommonSqlMaker {
 
     private char escapeChar = '"';
+    public static final String COLLATE = "COLLATE";
 
     public CommonSqlMaker() {
 
@@ -144,7 +145,7 @@ public class CommonSqlMaker {
     public void buildWhereClause(StringBuilder builder, TapAdvanceFilter filter) {
         if (EmptyKit.isNotEmpty(filter.getMatch()) || EmptyKit.isNotEmpty(filter.getOperators())) {
             builder.append(" WHERE ");
-            builder.append(buildKeyAndValue(filter.getMatch(), "AND", "="));
+            builder.append(buildKeyAndValueWithCollate(filter.getMatch(), "AND", "=", filter.getCollateList()));
         }
         if (EmptyKit.isNotEmpty(filter.getOperators())) {
             if (EmptyKit.isNotEmpty(filter.getMatch())) {
@@ -214,8 +215,30 @@ public class CommonSqlMaker {
     public void buildOrderClause(StringBuilder builder, TapAdvanceFilter filter) {
         if (EmptyKit.isNotEmpty(filter.getSortOnList())) {
             builder.append("ORDER BY ");
-            builder.append(filter.getSortOnList().stream().map(v -> v.toString(String.valueOf(escapeChar))).collect(Collectors.joining(", "))).append(' ');
+            List<Collate> collateList = filter.getCollateList();
+            builder.append(filter.getSortOnList().stream().map(v -> {
+                Collate collate = null;
+                if (EmptyKit.isNotEmpty(collateList)) {
+                    collate = collateList.stream()
+                            .filter(c -> c.getFieldName().equals(v.getKey()))
+                            .findFirst()
+                            .orElse(null);
+                }
+                if (null != collate) {
+                    return getOrderByFieldClauseWithCollate(v, collate);
+                } else {
+                    return v.toString(String.valueOf(escapeChar));
+                }
+            }).collect(Collectors.joining(", "))).append(' ');
         }
+    }
+
+    protected String getOrderByFieldClauseWithCollate(SortOn sortOn, Collate collate) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(escapeChar).append(sortOn.getKey()).append(escapeChar);
+        sb.append(' ').append(buildCollate(collate.getCollateName())).append(' ');
+        sb.append((sortOn.getSort() == ASCENDING ? "ASC" : "DESC"));
+        return sb.toString();
     }
 
     public void buildLimitOffsetClause(StringBuilder builder, TapAdvanceFilter filter) {
@@ -279,6 +302,30 @@ public class CommonSqlMaker {
             builder.delete(builder.length() - splitSymbol.length() - 1, builder.length());
         }
         return builder.toString();
+    }
+
+    public String buildKeyAndValueWithCollate(Map<String, Object> record, String splitSymbol, String operator, List<Collate> collateList) {
+        StringBuilder builder = new StringBuilder();
+        if (EmptyKit.isNotEmpty(record)) {
+            record.forEach((fieldName, value) -> {
+                builder.append(escapeChar).append(fieldName).append(escapeChar).append(operator);
+                builder.append(buildValueString(value));
+                Collate collate = EmptyKit.isEmpty(collateList) ? null : collateList.stream()
+                        .filter(c -> c.getFieldName().equals(fieldName))
+                        .findFirst()
+                        .orElse(null);
+                if (null != collate) {
+                    builder.append(' ').append(buildCollate(collate.getCollateName()));
+                }
+                builder.append(' ').append(splitSymbol).append(' ');
+            });
+            builder.delete(builder.length() - splitSymbol.length() - 1, builder.length());
+        }
+        return builder.toString();
+    }
+
+    protected String buildCollate(String collateName) {
+        return COLLATE + ' ' + escapeChar + collateName + escapeChar;
     }
 
     public String buildValueString(Object value) {
