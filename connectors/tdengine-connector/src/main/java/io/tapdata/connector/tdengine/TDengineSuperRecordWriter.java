@@ -4,6 +4,7 @@ import io.tapdata.connector.tdengine.config.TDengineConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 
@@ -16,7 +17,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -33,7 +36,7 @@ public class TDengineSuperRecordWriter {
         this.tDengineJdbcContext = tDengineJdbcContext;
         this.tapTable = tapTable;
         this.tDengineConfig = (TDengineConfig) tDengineJdbcContext.getConfig();
-        this.tags = tDengineConfig.getSuperTableTags();
+        this.tags = Optional.ofNullable(tDengineConfig.getSuperTableTags()).orElse((List<String>) Optional.ofNullable(tapTable.getTableAttr()).orElse(new HashMap<>()).get("tags"));
         this.otherColumns = tapTable.getNameFieldMap().keySet().stream().filter(key -> !tags.contains(key)).collect(Collectors.toList());
     }
 
@@ -79,7 +82,10 @@ public class TDengineSuperRecordWriter {
 
     protected String getSubTableName(List<String> tags, TapInsertRecordEvent tapRecordEvent) {
         StringBuilder subTableName = new StringBuilder();
-        if ("AutoHash".equals(tDengineConfig.getSubTableNameType())) {
+        if (EmptyKit.isEmpty(tDengineConfig.getSuperTableTags())) {
+            subTableName.append(tapTable.getId());
+            tags.forEach(t -> subTableName.append("_").append(tapRecordEvent.getAfter().get(t)));
+        } else if ("AutoHash".equals(tDengineConfig.getSubTableNameType())) {
             subTableName.append(tapTable.getId()).append("_");
             subTableName.append(StringKit.md5(tags.stream().map(tag -> String.valueOf(tapRecordEvent.getAfter().get(tag))).collect(Collectors.joining(","))));
         } else {

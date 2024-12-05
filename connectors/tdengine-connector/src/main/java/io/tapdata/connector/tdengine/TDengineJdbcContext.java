@@ -137,17 +137,17 @@ public class TDengineJdbcContext extends JdbcContext {
         return columnList;
     }
 
-    public Map<String, Set<String>> queryAllTags(List<String> tableNames) {
-        Map<String, Set<String>> tagsMap = new HashMap<>();
+    public Map<String, List<String>> queryAllTags(List<String> tableNames) {
+        Map<String, List<String>> tagsMap = new HashMap<>();
         try {
-            String sql = String.format("select * from `information_schema`.`ins_tags` where db_name='%s' and stable_name in ('%s')", getConfig().getDatabase(), String.join("','", tableNames));
+            String sql = String.format("select distinct stable_name, tag_name from `information_schema`.`ins_tags` where db_name='%s' and stable_name in ('%s')", getConfig().getDatabase(), String.join("','", tableNames));
             query(sql, resultSet -> TDengineDbKit.getDataFromResultSet(resultSet).forEach(dataMap -> {
                 String stableName = dataMap.getString("stable_name");
                 String tag = dataMap.getString("tag_name");
                 if (tagsMap.containsKey(stableName)) {
                     tagsMap.get(stableName).add(tag);
                 } else {
-                    Set<String> tags = new HashSet<>();
+                    List<String> tags = new ArrayList<>();
                     tags.add(tag);
                     tagsMap.put(stableName, tags);
                 }

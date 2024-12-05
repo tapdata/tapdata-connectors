@@ -180,20 +180,35 @@ public class TDengineConnector extends CommonDbConnector {
         }
         String timestamp = getTimestampColumn(tapTable);
         String sql = "CREATE " + (tdengineConfig.getSupportSuperTable() ? "S" : "") + "TABLE IF NOT EXISTS `"
-                + tdengineConfig.getDatabase() + "`.`" + tapTable.getId() + "` (" +
-                TDengineSqlMaker.buildColumnDefinition(tapTable, timestamp, tdengineConfig.getSupportSuperTable() ? tdengineConfig.getSuperTableTags() : Collections.emptyList());
-        sql += ")";
+                + tdengineConfig.getDatabase() + "`.`" + tapTable.getId() + "` (";
         if (tdengineConfig.getSupportSuperTable()) {
-            sql += " TAGS (" + tdengineConfig.getSuperTableTags().stream().map(v -> {
-                StringBuilder builder = new StringBuilder();
-                TapField tapField = tapTable.getNameFieldMap().get(v);
-                //ignore those which has no dataType
-                if (tapField.getDataType() == null) {
-                    return "";
+            List<String> tags;
+            if (EmptyKit.isEmpty(tdengineConfig.getSuperTableTags())) {
+                if (EmptyKit.isNull(tapTable.getTableAttr().get("tags"))) {
+                    tags = null;
+                } else {
+                    tags = (List<String>) tapTable.getTableAttr().get("tags");
                 }
-                builder.append('`').append(tapField.getName()).append("` ").append(tapField.getDataType()).append(' ');
-                return builder.toString();
-            }).collect(Collectors.joining(", ")) + ")";
+            } else {
+                tags = tdengineConfig.getSuperTableTags();
+            }
+            sql += TDengineSqlMaker.buildColumnDefinition(tapTable, timestamp, tags);
+            sql += ")";
+            if (EmptyKit.isNotEmpty(tags)) {
+                sql += " TAGS (" + tags.stream().map(v -> {
+                    StringBuilder builder = new StringBuilder();
+                    TapField tapField = tapTable.getNameFieldMap().get(v);
+                    //ignore those which has no dataType
+                    if (tapField.getDataType() == null) {
+                        return "";
+                    }
+                    builder.append('`').append(tapField.getName()).append("` ").append(tapField.getDataType()).append(' ');
+                    return builder.toString();
+                }).collect(Collectors.joining(", ")) + ")";
+            }
+        } else {
+            sql += TDengineSqlMaker.buildColumnDefinition(tapTable, timestamp, Collections.emptyList());
+            sql += ")";
         }
         try {
             List<String> sqls = TapSimplify.list();
@@ -322,7 +337,7 @@ public class TDengineConnector extends CommonDbConnector {
             List<TapTable> tapTableList = TapSimplify.list();
             List<String> subTableNames = subList.stream().map(v -> v.getString("table_name")).collect(Collectors.toList());
             List<DataMap> columnList = tdengineJdbcContext.queryAllColumns(subTableNames);
-            Map<String, Set<String>> tagsMap = tdengineJdbcContext.queryAllTags(subTableNames);
+            Map<String, List<String>> tagsMap = tdengineJdbcContext.queryAllTags(subTableNames);
             //make up tapTable
             subList.forEach(subTable -> {
                 //1、table name/comment
@@ -376,13 +391,6 @@ public class TDengineConnector extends CommonDbConnector {
 
             return connectionOptions;
         }
-    }
-
-    @Override
-    public int tableCount(TapConnectionContext connectionContext) throws SQLException {
-        AtomicInteger tableCount = new AtomicInteger();
-        tdengineJdbcContext.queryWithNext(String.format("SELECT COUNT(1) FROM information_schema.ins_tables where db_name = '%s'", tdengineConfig.getDatabase()), resultSet -> tableCount.set(resultSet.getInt(1)));
-        return tableCount.get();
     }
 
     protected void batchReadRestful(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, Timestamp min, Timestamp max) throws Throwable {

@@ -253,10 +253,10 @@
           "x-component": "Switch",
           "x-reactions": [
             {
-              "dependencies": ["$inputs", "type"],
+              "dependencies": ["$inputs"],
               "fulfill": {
                 "state": {
-                  "display": "{{$deps[0].length > 0 && $deps[1] !== 'database' ? \"visible\":\"hidden\"}}"
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -273,15 +273,16 @@
             "multiple": true,
             "filterable": true
           },
+          "required": true,
           "x-decorator-props": {
             "tooltip": "${superTableTagsTooltip}"
           },
           "x-reactions": ["{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
             {
-              "dependencies": [".supportSuperTable"],
+              "dependencies": [".supportSuperTable", "type"],
               "fulfill": {
                 "state": {
-                  "visible": "{{$deps[0] === true}}"
+                  "visible": "{{$deps[0] === true && $deps[1] !== 'database'}}"
                 }
               }
             }
@@ -299,10 +300,10 @@
           },
           "x-reactions": [
             {
-              "dependencies": [".supportSuperTable"],
+              "dependencies": [".supportSuperTable", "type"],
               "fulfill": {
                 "state": {
-                  "visible": "{{$deps[0] === true}}"
+                  "visible": "{{$deps[0] === true && $deps[1] !== 'database'}}"
                 }
               }
             }
