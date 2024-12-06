@@ -835,8 +835,8 @@ public class MysqlReader implements Closeable {
     }
 
     private String getExactlyOnceId(SourceRecord record) {
-        Struct source = (Struct) record.sourceOffset();
-        return source.getString("file") + "_" + source.getInt64("pos") + "_" + source.getInt64("row") + "_" + source.getInt64("event");
+        Map<String, ?> offset = record.sourceOffset();
+        return offset.get("file") + "_" + offset.get("pos") + "_" + offset.get("row") + "_" + offset.get("event");
     }
 
     private MysqlStreamOffset getMysqlStreamOffset(SourceRecord record) {
