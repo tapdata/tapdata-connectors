@@ -671,6 +671,7 @@ public class MysqlReader implements Closeable {
         }
         tapRecordEvent.setTableId(table);
         tapRecordEvent.setReferenceTime(eventTime);
+        tapRecordEvent.setExactlyOnceId(getExactlyOnceId(record));
         MysqlStreamOffset mysqlStreamOffset = getMysqlStreamOffset(record);
         tapLogger.debug("Read DML - Table: " + table + "\n  - Operation: " + mysqlOpType.getOp()
                 + "\n  - Before: " + before + "\n  - After: " + after + "\n  - Offset: " + mysqlStreamOffset);
@@ -701,6 +702,7 @@ public class MysqlReader implements Closeable {
                             tapDDLEvent.setTime(System.currentTimeMillis());
                             tapDDLEvent.setReferenceTime(eventTime);
                             tapDDLEvent.setOriginDDL(ddlStr);
+                            tapDDLEvent.setExactlyOnceId(getExactlyOnceId(record));
                             mysqlStreamEvents.add(mysqlStreamEvent);
                             tapLogger.info("Read DDL: " + ddlStr + ", about to be packaged as some event(s)");
                         }
@@ -711,6 +713,7 @@ public class MysqlReader implements Closeable {
                 tapDDLEvent.setTime(System.currentTimeMillis());
                 tapDDLEvent.setReferenceTime(eventTime);
                 tapDDLEvent.setOriginDDL(ddlStr);
+                tapDDLEvent.setExactlyOnceId(getExactlyOnceId(record));
                 mysqlStreamEvents.add(mysqlStreamEvent);
 //                throw new RuntimeException("Handle ddl failed: " + ddlStr + ", error: " + e.getMessage(), e);
             }
@@ -829,6 +832,11 @@ public class MysqlReader implements Closeable {
             value = ((Integer) value).longValue() * 24 * 60 * 60 * 1000L + diff;
         }
         return value;
+    }
+
+    private String getExactlyOnceId(SourceRecord record) {
+        Struct source = (Struct) record.sourceOffset();
+        return source.getString("file") + "_" + source.getInt64("pos") + "_" + source.getInt64("row") + "_" + source.getInt64("event");
     }
 
     private MysqlStreamOffset getMysqlStreamOffset(SourceRecord record) {
