@@ -56,10 +56,7 @@ import io.tapdata.pdk.apis.partition.TapPartitionFilter;
 import io.tapdata.pdk.apis.partition.splitter.StringCaseInsensitiveSplitter;
 import io.tapdata.pdk.apis.partition.splitter.TypeSplitterMap;
 
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
-import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -252,9 +249,9 @@ public class MysqlConnector extends CommonDbConnector {
         //connectorFunctions.supportQueryFieldMinMaxValueFunction(this::minMaxValue);
         //connectorFunctions.supportGetReadPartitionsFunction(this::getReadPartitions);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
-        connectorFunctions.supportTransactionBeginFunction(this::begin);
-        connectorFunctions.supportTransactionCommitFunction(this::commit);
-        connectorFunctions.supportTransactionRollbackFunction(this::rollback);
+        connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
+        connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
+        connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
 
     }
@@ -486,11 +483,28 @@ public class MysqlConnector extends CommonDbConnector {
         if (updateDmlPolicy == null) {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
-        new MysqlRecordWriter(mysqlJdbcContext, tapTable)
-                .setInsertPolicy(insertDmlPolicy)
-                .setUpdatePolicy(updateDmlPolicy)
-                .setTapLogger(tapLogger)
-                .write(tapRecordEvents, consumer, this::isAlive);
+        if(isTransaction){
+            String threadName = Thread.currentThread().getName();
+            Connection connection;
+            if (transactionConnectionMap.containsKey(threadName)) {
+                connection = transactionConnectionMap.get(threadName);
+            } else {
+                connection = mysqlJdbcContext.getConnection();
+                transactionConnectionMap.put(threadName, connection);
+            }
+            new MysqlRecordWriter(mysqlJdbcContext,connection, tapTable)
+                    .setInsertPolicy(insertDmlPolicy)
+                    .setUpdatePolicy(updateDmlPolicy)
+                    .setTapLogger(tapLogger)
+                    .write(tapRecordEvents, consumer, this::isAlive);
+        }else{
+            new MysqlRecordWriter(mysqlJdbcContext, tapTable)
+                    .setInsertPolicy(insertDmlPolicy)
+                    .setUpdatePolicy(updateDmlPolicy)
+                    .setTapLogger(tapLogger)
+                    .write(tapRecordEvents, consumer, this::isAlive);
+        }
+
     }
 
     private Map<String, Object> filterTimeForMysql(
