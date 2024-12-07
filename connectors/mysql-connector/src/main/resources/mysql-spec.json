@@ -34,6 +34,9 @@
       },
       {
         "id": "batch_read_hash_split"
+      },
+      {
+        "id": "source_support_exactly_once"
       }
     ],
     "supportDDL": {
