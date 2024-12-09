@@ -121,17 +121,19 @@ public class LocalFileStorage implements TapFileStorage {
                           Consumer<List<TapFile>> consumer,
                           AtomicReference<List<TapFile>> listAtomicReference) {
         File dir = new File(directoryPath);
-        for (File file : Objects.requireNonNull(dir.listFiles())) {
-            if (file.isFile()) {
-                if (FileMatchKit.matchRegs(file.getName(), includeRegs, excludeRegs)) {
-                    listAtomicReference.get().add(toTapFile(file));
-                    if (listAtomicReference.get().size() >= batchSize) {
-                        consumer.accept(listAtomicReference.get());
-                        listAtomicReference.set(new ArrayList<>());
+        if (null != dir.listFiles()) {
+            for (File file : Objects.requireNonNull(dir.listFiles())) {
+                if (file.isFile()) {
+                    if (FileMatchKit.matchRegs(file.getName(), includeRegs, excludeRegs)) {
+                        listAtomicReference.get().add(toTapFile(file));
+                        if (listAtomicReference.get().size() >= batchSize) {
+                            consumer.accept(listAtomicReference.get());
+                            listAtomicReference.set(new ArrayList<>());
+                        }
                     }
+                } else if (recursive) {
+                    getFiles(file.getAbsolutePath(), includeRegs, excludeRegs, true, batchSize, consumer, listAtomicReference);
                 }
-            } else if (recursive) {
-                getFiles(file.getAbsolutePath(), includeRegs, excludeRegs, true, batchSize, consumer, listAtomicReference);
             }
         }
     }
