@@ -225,6 +225,11 @@ public class MongodbTest extends CommonDbTest {
         Set<String> sourceDBPrivilegeSet = resourcePrivilegesMap.get(database);
         if (sourceDBPrivilegeSet == null) {
             sourceDBPrivilegeSet = resourcePrivilegesMap.get("");
+        } else {
+            Set<String> allDatabasePrivilegeSet = resourcePrivilegesMap.get("");
+            if (null != allDatabasePrivilegeSet) {
+                sourceDBPrivilegeSet.addAll(allDatabasePrivilegeSet);
+            }
         }
         if (sourceDBPrivilegeSet == null || !sourceDBPrivilegeSet.containsAll(expectActions)) {
             return false;
