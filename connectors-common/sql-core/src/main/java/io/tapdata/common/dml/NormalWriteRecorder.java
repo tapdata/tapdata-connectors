@@ -306,8 +306,13 @@ public abstract class NormalWriteRecorder {
                 insertUpdate(after, lastBefore, listResult);
                 break;
             default:
-//                Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
-                justUpdate(after, lastBefore, listResult);
+                Map<String, Object> lastAfter = new HashMap<>();
+                after.forEach((k, v) -> {
+                    if (allColumn.contains(k)) {
+                        lastAfter.put(k, v);
+                    }
+                });
+                justUpdate(lastAfter, lastBefore, listResult);
                 break;
         }
         preparedStatement.addBatch();
