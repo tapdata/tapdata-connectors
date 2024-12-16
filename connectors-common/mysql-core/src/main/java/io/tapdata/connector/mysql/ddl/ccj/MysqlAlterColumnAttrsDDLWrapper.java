@@ -3,6 +3,7 @@ package io.tapdata.connector.mysql.ddl.ccj;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.ddl.entity.ValueChange;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
@@ -16,6 +17,7 @@ import net.sf.jsqlparser.statement.create.table.ColDataType;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
@@ -92,6 +94,15 @@ public class MysqlAlterColumnAttrsDDLWrapper extends MysqlDDLWrapper {
                 if (EmptyKit.isNotNull(tapAlterFieldAttributesEvent.getNullableChange()) && !tapAlterFieldAttributesEvent.getNullableChange().getAfter()
                         && EmptyKit.isNotNull(tapAlterFieldAttributesEvent.getDefaultChange()) && EmptyKit.isNull(tapAlterFieldAttributesEvent.getDefaultChange().getAfter())) {
                     tapAlterFieldAttributesEvent.defaultChange(ValueChange.create(getDefaultValueForMysql(dataType)));
+                }
+                //Mysql change column type may not change the attributes, just rename
+                TapField originField = Objects.requireNonNull(tapTable).getNameFieldMap().get(alterExpression.getColumnOldName());
+                if (null != originField && originField.getDataType().equals(dataType)) {
+                    if (Objects.equals(originField.getNullable(), tapAlterFieldAttributesEvent.getNullableChange().getAfter()
+                            && Objects.equals(originField.getDefaultValue(), tapAlterFieldAttributesEvent.getDefaultChange().getAfter())
+                            && Objects.equals(originField.getComment(), tapAlterFieldAttributesEvent.getCommentChange().getAfter()))) {
+                        continue;
+                    }
                 }
                 tapAlterFieldAttributesEvent.dataType(ValueChange.create(dataType));
                 consumer.accept(tapAlterFieldAttributesEvent);
