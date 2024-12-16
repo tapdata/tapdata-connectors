@@ -12,6 +12,7 @@ import com.hierynomus.smbj.connection.Connection;
 import com.hierynomus.smbj.session.Session;
 import com.hierynomus.smbj.share.DiskShare;
 import com.hierynomus.smbj.share.File;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.file.TapFile;
 import io.tapdata.file.TapFileStorage;
 import io.tapdata.storage.kit.EmptyKit;
@@ -32,6 +33,7 @@ public class SmbFileStorage implements TapFileStorage {
     private Connection connection;
     private Session session;
     private DiskShare share;
+    private static final String TAG = SmbFileStorage.class.getSimpleName();
 
     @Override
     public void init(Map<String, Object> params) throws IOException {
@@ -53,16 +55,32 @@ public class SmbFileStorage implements TapFileStorage {
     @Override
     public void destroy() throws IOException {
         if (EmptyKit.isNotNull(share)) {
-            share.close();
+            try {
+                share.close();
+            } catch (Exception ignore) {
+                TapLogger.warn(TAG, String.format("SMB destroy DiskShare failed message %s", ignore.getMessage()));
+            }
         }
         if (EmptyKit.isNotNull(session)) {
-            session.close();
+            try {
+                session.close();
+            } catch (Exception ignore) {
+                TapLogger.warn(TAG, String.format("SMB destroy session failed message %s", ignore.getMessage()));
+            }
         }
         if (EmptyKit.isNotNull(connection)) {
-            connection.close();
+            try {
+                connection.close();
+            } catch (Exception ignore) {
+                TapLogger.warn(TAG, String.format("SMB destroy connection failed message %s", ignore.getMessage()));
+            }
         }
         if (EmptyKit.isNotNull(smbClient)) {
-            smbClient.close();
+            try {
+                smbClient.close();
+            } catch (Exception ignore) {
+                TapLogger.warn(TAG, String.format("SMB destroy smbClient failed message %s", ignore.getMessage()));
+            }
         }
     }
 
