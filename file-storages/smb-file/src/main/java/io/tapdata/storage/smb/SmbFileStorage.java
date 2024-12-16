@@ -45,7 +45,9 @@ public class SmbFileStorage implements TapFileStorage {
             ac = AuthenticationContext.anonymous();
         }
         session = connection.authenticate(ac);
-        share = (DiskShare) session.connectShare(smbConfig.getSmbShareDir());
+        if (EmptyKit.isNotBlank(smbConfig.getSmbShareDir())) {
+            share = (DiskShare) session.connectShare(smbConfig.getSmbShareDir());
+        }
     }
 
     @Override
@@ -105,7 +107,11 @@ public class SmbFileStorage implements TapFileStorage {
 
     @Override
     public boolean isFileExist(String path) {
-        return share.fileExists(path);
+        if (null != share) {
+            return share.fileExists(path);
+        } else {
+            return false;
+        }
     }
 
     @Override
@@ -198,7 +204,11 @@ public class SmbFileStorage implements TapFileStorage {
 
     @Override
     public boolean isDirectoryExist(String path) {
-        return share.folderExists(path);
+        if (null != share) {
+            return share.folderExists(path);
+        } else {
+            return false;
+        }
     }
 
     @Override
