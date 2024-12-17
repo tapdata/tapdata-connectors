@@ -246,6 +246,7 @@
           "x-index": 140
         },
         "smbShareDir": {
+          "required": true,
           "type": "string",
           "title": "${smbShareDir}",
           "x-decorator": "FormItem",
