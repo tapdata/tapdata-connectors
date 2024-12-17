@@ -6,6 +6,7 @@ import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
+import io.tapdata.connector.mysql.error.MysqlErrorCode;
 import io.tapdata.exception.*;
 import io.tapdata.kit.ErrorKit;
 
@@ -66,6 +67,9 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
     @Override
     public void collectWritePrivileges(Object operation, List<String> privileges, Throwable cause) {
         if (cause instanceof SQLException && "42000".equals(((SQLException) cause).getSQLState())) {
+            if(((SQLException) cause).getErrorCode() == 1118) {
+                throw new TapCodeException(MysqlErrorCode.EXCEEDS_65535_LIMIT, "The length of the row exceeds the limit of 65535 bytes.").dynamicDescriptionParameters(operation);
+            }
             throw new TapPdkWriteMissingPrivilegesEx(getPdkId(), operation, privileges, ErrorKit.getLastCause(cause));
         }
     }

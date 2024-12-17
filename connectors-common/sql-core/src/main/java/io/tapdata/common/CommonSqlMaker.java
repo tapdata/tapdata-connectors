@@ -7,9 +7,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.pdk.apis.entity.Projection;
-import io.tapdata.pdk.apis.entity.QueryOperator;
-import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.*;
 
 import java.text.DecimalFormat;
 import java.time.LocalDateTime;
@@ -21,6 +19,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static io.tapdata.pdk.apis.entity.SortOn.ASCENDING;
+
 /**
  * make sql
  *
@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 public class CommonSqlMaker {
 
     private char escapeChar = '"';
+    public static final String COLLATE = "COLLATE";
 
     public CommonSqlMaker() {
 
@@ -218,6 +219,7 @@ public class CommonSqlMaker {
         }
     }
 
+
     public void buildLimitOffsetClause(StringBuilder builder, TapAdvanceFilter filter) {
         if (EmptyKit.isNotNull(filter.getLimit())) {
             builder.append("LIMIT ").append(filter.getLimit()).append(' ');
@@ -280,6 +282,10 @@ public class CommonSqlMaker {
         }
         return builder.toString();
     }
+
+
+
+
 
     public String buildValueString(Object value) {
         StringBuilder builder = new StringBuilder();

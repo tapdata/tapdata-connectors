@@ -3,17 +3,20 @@ package io.tapdata.connector.doris;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.doris.bean.DorisConfig;
+import io.tapdata.connector.doris.ddl.DorisDDLSqlGenerator;
 import io.tapdata.connector.doris.streamload.DorisStreamLoader;
 import io.tapdata.connector.doris.streamload.DorisTableType;
 import io.tapdata.connector.doris.streamload.HttpUtil;
 import io.tapdata.connector.doris.streamload.exception.DorisRetryableException;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.entity.codec.TapCodecsRegistry;
-import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
+import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
@@ -52,14 +55,13 @@ import java.util.stream.Collectors;
 @TapConnectorClass("spec_doris.json")
 public class DorisConnector extends CommonDbConnector {
 
-    public static final String TAG = DorisConnector.class.getSimpleName();
     private DorisJdbcContext dorisJdbcContext;
     private DorisConfig dorisConfig;
     private final Map<String, DorisStreamLoader> dorisStreamLoaderMap = new ConcurrentHashMap<>();
 
 
     @Override
-    public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
+    public void onStart(TapConnectionContext tapConnectionContext) {
         this.dorisConfig = new DorisConfig().load(tapConnectionContext.getConnectionConfig());
         isConnectorStarted(tapConnectionContext, connectorContext -> dorisConfig.load(connectorContext.getNodeConfig()));
         dorisJdbcContext = new DorisJdbcContext(dorisConfig);
@@ -67,11 +69,18 @@ public class DorisConnector extends CommonDbConnector {
 //            dorisConfig.setUpdateSpecific(false);
 //            dorisConfig.setUniqueKeyType("Unique");
 //        }
+        if (tapConnectionContext instanceof TapConnectorContext) {
+            ddlSqlGenerator = new DorisDDLSqlGenerator();
+        }
         commonDbConfig = dorisConfig;
         jdbcContext = dorisJdbcContext;
         commonSqlMaker = new DorisSqlMaker();
         exceptionCollector = new DorisExceptionCollector();
-
+        fieldDDLHandlers = new BiClassHandlers<>();
+        fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
+        fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
+        fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
+        fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
     }
 
 
@@ -150,6 +159,10 @@ public class DorisConnector extends CommonDbConnector {
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
+        connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
+        connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
+        connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
+        connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
 
     }
 
@@ -344,6 +357,22 @@ public class DorisConnector extends CommonDbConnector {
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("TABLE_ROWS")));
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("DATA_LENGTH")));
         return tableInfo;
+    }
+
+    protected void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) throws SQLException {
+        List<String> sqlList = fieldDDLHandlers.handle(tapFieldBaseEvent, tapConnectorContext);
+        if (null == sqlList) {
+            return;
+        }
+        try {
+            jdbcContext.batchExecute(sqlList);
+        } catch (SQLException e) {
+            if (e.getErrorCode() == 1105 && e.getMessage().contains("Nothing is changed")) {
+                return;
+            }
+            exceptionCollector.collectWritePrivileges("execute sqls: " + TapSimplify.toJson(sqlList), Collections.emptyList(), e);
+            throw e;
+        }
     }
 
     @Override

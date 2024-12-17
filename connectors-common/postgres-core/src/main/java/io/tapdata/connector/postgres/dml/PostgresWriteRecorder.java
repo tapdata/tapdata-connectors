@@ -237,4 +237,138 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
             preparedStatement.setObject(pos, filterValue(data.get(key), columnTypeMap.get(key)));
         }
     }
+
+    //conflict
+    @Override
+    protected void upsert(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
+        if (EmptyKit.isNull(preparedStatement)) {
+            preparedStatement = connection.prepareStatement(getUpsertSql());
+        }
+        preparedStatement.clearParameters();
+        int pos = 1;
+        for (String key : allColumn) {
+            setPrepareStatement(pos++, after, key);
+        }
+        for (String key : updatedColumn) {
+            setPrepareStatement(pos++, after, key);
+        }
+    }
+
+    protected String getUpsertSql() {
+        return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
+                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
+                "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ON CONFLICT("
+                + uniqueCondition.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", "))
+                + ") DO UPDATE SET " + updatedColumn.stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", "));
+    }
+
+    @Override
+    protected void insertIgnore(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
+        if (EmptyKit.isNull(preparedStatement)) {
+            preparedStatement = connection.prepareStatement(getInsertIgnoreSql());
+        }
+        preparedStatement.clearParameters();
+        int pos = 1;
+        for (String key : allColumn) {
+            setPrepareStatement(pos++, after, key);
+        }
+    }
+
+    protected String getInsertIgnoreSql() {
+        return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
+                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
+                "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ON CONFLICT("
+                + uniqueCondition.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", "))
+                + ") DO NOTHING ";
+    }
+
+    //old postgres
+    protected void oldUpsert(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
+        boolean containsNull = !hasPk && uniqueCondition.stream().anyMatch(v -> EmptyKit.isNull(after.get(v)));
+        String preparedStatementKey = "|" + containsNull;
+        if (preparedStatementKey.equals(this.preparedStatementKey)) {
+            preparedStatement = preparedStatementMap.get(preparedStatementKey);
+        } else {
+            if (EmptyKit.isNull(this.preparedStatementKey)) {
+                preparedStatement = connection.prepareStatement(getInsertUpdateSql(containsNull));
+                preparedStatementMap.put(preparedStatementKey, preparedStatement);
+            } else {
+                executeBatch(listResult);
+                preparedStatement = preparedStatementMap.get(preparedStatementKey);
+                if (EmptyKit.isNull(preparedStatement)) {
+                    preparedStatement = connection.prepareStatement(getInsertUpdateSql(containsNull));
+                    preparedStatementMap.put(preparedStatementKey, preparedStatement);
+                }
+            }
+            this.preparedStatementKey = preparedStatementKey;
+        }
+        preparedStatement.clearParameters();
+        int pos = 1;
+        for (String key : updatedColumn) {
+            setPrepareStatement(pos++, after, key);
+        }
+        if (!containsNull) {
+            for (String key : uniqueCondition) {
+                setPrepareStatement(pos++, after, key);
+            }
+        } else {
+            for (String key : uniqueCondition) {
+                setPrepareStatement(pos++, after, key);
+                setPrepareStatement(pos++, after, key);
+            }
+        }
+        for (String key : allColumn) {
+            setPrepareStatement(pos++, after, key);
+        }
+    }
+
+    protected void oldInsertIgnore(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
+        boolean containsNull = !hasPk && uniqueCondition.stream().anyMatch(v -> EmptyKit.isNull(after.get(v)));
+        String preparedStatementKey = "|" + containsNull;
+        if (preparedStatementKey.equals(this.preparedStatementKey)) {
+            preparedStatement = preparedStatementMap.get(preparedStatementKey);
+        } else {
+            if (EmptyKit.isNull(this.preparedStatementKey)) {
+                preparedStatement = connection.prepareStatement(getOldInsertIgnoreSql(containsNull));
+                preparedStatementMap.put(preparedStatementKey, preparedStatement);
+            } else {
+                executeBatch(listResult);
+                preparedStatement = preparedStatementMap.get(preparedStatementKey);
+                if (EmptyKit.isNull(preparedStatement)) {
+                    preparedStatement = connection.prepareStatement(getOldInsertIgnoreSql(containsNull));
+                    preparedStatementMap.put(preparedStatementKey, preparedStatement);
+                }
+            }
+            this.preparedStatementKey = preparedStatementKey;
+        }
+        preparedStatement.clearParameters();
+        int pos = 1;
+        for (String key : allColumn) {
+            setPrepareStatement(pos++, after, key);
+        }
+        if (!containsNull) {
+            for (String key : uniqueCondition) {
+                setPrepareStatement(pos++, after, key);
+            }
+        } else {
+            for (String key : uniqueCondition) {
+                setPrepareStatement(pos++, after, key);
+                setPrepareStatement(pos++, after, key);
+            }
+        }
+    }
+
+    protected String getOldInsertIgnoreSql(boolean containsNull) {
+        if (!containsNull) {
+            return "INSERT INTO \"" + schema + "\".\"" + tapTable.getId() + "\" ("
+                    + allColumn.stream().map(k -> "\"" + k + "\"").collect(Collectors.joining(", ")) + ") SELECT "
+                    + StringKit.copyString("?", allColumn.size(), ",") + " WHERE NOT EXISTS (SELECT 1 FROM \"" + schema + "\".\"" + tapTable.getId()
+                    + "\"  WHERE " + uniqueCondition.stream().map(k -> "\"" + k + "\"=?").collect(Collectors.joining(" AND ")) + " )";
+        } else {
+            return "INSERT INTO \"" + schema + "\".\"" + tapTable.getId() + "\" ("
+                    + allColumn.stream().map(k -> "\"" + k + "\"").collect(Collectors.joining(", ")) + ") SELECT "
+                    + StringKit.copyString("?", allColumn.size(), ",") + " WHERE NOT EXISTS (SELECT 1 FROM \"" + schema + "\".\"" + tapTable.getId()
+                    + "\"  WHERE " + uniqueCondition.stream().map(k -> "(\"" + k + "\"=? OR (\"" + k + "\" IS NULL AND ?::text IS NULL))").collect(Collectors.joining(" AND ")) + " )";
+        }
+    }
 }

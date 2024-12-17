@@ -2,11 +2,22 @@ package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.pdk.apis.entity.Collate;
+import io.tapdata.pdk.apis.entity.SortOn;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import static io.tapdata.pdk.apis.entity.SortOn.ASCENDING;
 
 public class PostgresSqlMaker extends CommonSqlMaker {
 
     private Boolean closeNotNull;
+    private char escapeChar = '"';
 
     public PostgresSqlMaker closeNotNull(Boolean closeNotNull) {
         this.closeNotNull = closeNotNull;
@@ -21,6 +32,71 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         if (!nullable || tapField.getPrimaryKey()) {
             builder.append("NOT NULL").append(' ');
         }
+    }
+
+    @Override
+    public void buildWhereClause(StringBuilder builder, TapAdvanceFilter filter) {
+        if (EmptyKit.isNotEmpty(filter.getMatch()) || EmptyKit.isNotEmpty(filter.getOperators())) {
+            builder.append(" WHERE ");
+            builder.append(buildKeyAndValue(filter.getMatch(), "AND", "=",filter.getCollateList()));
+        }
+        if (EmptyKit.isNotEmpty(filter.getOperators())) {
+            if (EmptyKit.isNotEmpty(filter.getMatch())) {
+                builder.append("AND ");
+            }
+            builder.append(filter.getOperators().stream().map(v -> queryOperatorToString(v, String.valueOf(escapeChar))).collect(Collectors.joining(" AND "))).append(' ');
+        }
+    }
+
+    public String buildKeyAndValue(Map<String, Object> record, String splitSymbol, String operator,List<Collate> collateList) {
+        StringBuilder builder = new StringBuilder();
+        if (EmptyKit.isNotEmpty(record)) {
+            record.forEach((fieldName, value) -> {
+                builder.append(escapeChar).append(fieldName).append(escapeChar).append(operator);
+                builder.append(buildValueString(value));
+                Collate collate = EmptyKit.isEmpty(collateList) ? null : collateList.stream()
+                        .filter(c -> c.getFieldName().equals(fieldName))
+                        .findFirst()
+                        .orElse(null);
+                if (null != collate) {
+                    builder.append(' ').append(buildCollate(collate.getCollateName()));
+                }
+                builder.append(' ').append(splitSymbol).append(' ');
+            });
+            builder.delete(builder.length() - splitSymbol.length() - 1, builder.length());
+        }
+        return builder.toString();
+    }
+    public void buildOrderClause(StringBuilder builder, TapAdvanceFilter filter) {
+        if (EmptyKit.isNotEmpty(filter.getSortOnList())) {
+            builder.append("ORDER BY ");
+            List<Collate> collateList = filter.getCollateList();
+            builder.append(filter.getSortOnList().stream().map(v -> {
+                Collate collate = null;
+                if (EmptyKit.isNotEmpty(collateList)) {
+                    collate = collateList.stream()
+                            .filter(c -> c.getFieldName().equals(v.getKey()))
+                            .findFirst()
+                            .orElse(null);
+                }
+                if (null != collate) {
+                    return getOrderByFieldClauseWithCollate(v, collate);
+                } else {
+                    return v.toString(String.valueOf(escapeChar));
+                }
+            }).collect(Collectors.joining(", "))).append(' ');
+        }
+    }
+    protected String getOrderByFieldClauseWithCollate(SortOn sortOn, Collate collate) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(escapeChar).append(sortOn.getKey()).append(escapeChar);
+        sb.append(' ').append(buildCollate(collate.getCollateName())).append(' ');
+        sb.append((sortOn.getSort() == ASCENDING ? "ASC" : "DESC"));
+        return sb.toString();
+    }
+
+    protected String buildCollate(String collateName) {
+        return COLLATE + ' ' + escapeChar + collateName + escapeChar;
     }
 
 }

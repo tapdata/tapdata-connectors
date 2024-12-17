@@ -80,8 +80,8 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     /**
      * when your connector need to support partition table and main-curl table
-     *  you should impl this function to discover those tablies relations
-     * */
+     * you should impl this function to discover those tablies relations
+     */
     public List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
         return tapTableList;
     }
@@ -146,7 +146,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         jdbcContext.queryAllTables(list(), batchSize, listConsumer);
     }
 
-    private CreateTableOptions createTable(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent, Boolean commentInField) throws SQLException {
+    protected CreateTableOptions createTable(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent, Boolean commentInField, String append) throws SQLException {
         if (Boolean.TRUE.equals(commonDbConfig.getDoubleActive())) {
             createDoubleActiveTempTable();
         }
@@ -168,7 +168,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             }
         }
         List<String> sqlList = TapSimplify.list();
-        sqlList.add(getCreateTableSql(tapTable, commentInField));
+        sqlList.add(getCreateTableSql(tapTable, commentInField) + " " + append);
         if (!commentInField) {
             //comment on table and column
             if (EmptyKit.isNotNull(tapTable.getComment())) {
@@ -194,12 +194,12 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     //for pg,oracle type
     protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
-        return createTable(connectorContext, createTableEvent, false);
+        return createTable(connectorContext, createTableEvent, false, "");
     }
 
     //for mysql type
     protected CreateTableOptions createTableV3(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
-        return createTable(connectorContext, createTableEvent, true);
+        return createTable(connectorContext, createTableEvent, true, "");
     }
 
     protected void createDoubleActiveTempTable() throws SQLException {
@@ -350,13 +350,13 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
-        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() == 1) {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
             jdbcContext.execute("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
         }
     }
 
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
-        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() == 1) {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
             jdbcContext.execute("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
         }
     }
@@ -447,7 +447,12 @@ public abstract class CommonDbConnector extends ConnectorBase {
         if (null == sqlList) {
             return;
         }
-        jdbcContext.batchExecute(sqlList);
+        try {
+            jdbcContext.batchExecute(sqlList);
+        } catch (SQLException e) {
+            exceptionCollector.collectWritePrivileges("execute sqls: " + TapSimplify.toJson(sqlList), Collections.emptyList(), e);
+            throw e;
+        }
     }
 
     protected List<String> alterFieldAttr(TapFieldBaseEvent tapFieldBaseEvent, TapConnectorContext tapConnectorContext) {

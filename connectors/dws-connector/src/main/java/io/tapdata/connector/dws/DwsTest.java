@@ -7,12 +7,15 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
 import org.postgresql.Driver;
 
 import java.sql.Connection;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 import static io.tapdata.base.ConnectorBase.testItem;
 
@@ -33,7 +36,29 @@ public class DwsTest extends CommonDbTest {
 
     @Override
     protected List<String> supportVersions() {
-        return Lists.newArrayList("9.2");
+        return Lists.newArrayList("*.*");
+    }
+
+    protected Boolean testVersion() {
+        AtomicReference<String> version = new AtomicReference<>();
+        try {
+            jdbcContext.queryWithNext("select version()", resultSet -> {
+                String versionStr = resultSet.getString(1);
+                version.set(versionStr.substring(0, versionStr.lastIndexOf(")") + 1));
+            });
+            if (supportVersions().stream().noneMatch(v -> {
+                String reg = v.replaceAll("\\*", ".*");
+                Pattern pattern = Pattern.compile(reg);
+                return pattern.matcher(version.get()).matches();
+            })) {
+                consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, version.get() + " not supported well"));
+            } else {
+                consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, version.get()));
+            }
+        } catch (Exception e) {
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(e), TestItem.RESULT_FAILED));
+        }
+        return true;
     }
 
     //Test number of tables and privileges

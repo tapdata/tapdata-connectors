@@ -81,7 +81,7 @@ public class MongodbTest extends CommonDbTest {
 
     @Override
     protected List<String> supportVersions() {
-        return Arrays.asList("3.2.*", "3.4.*", "3.6.*", "4.0.*", "4.2.*", "4.4.*", "5.0.*");
+        return Collections.singletonList("*.*");
     }
 
     @Override
@@ -225,6 +225,11 @@ public class MongodbTest extends CommonDbTest {
         Set<String> sourceDBPrivilegeSet = resourcePrivilegesMap.get(database);
         if (sourceDBPrivilegeSet == null) {
             sourceDBPrivilegeSet = resourcePrivilegesMap.get("");
+        } else {
+            Set<String> allDatabasePrivilegeSet = resourcePrivilegesMap.get("");
+            if (null != allDatabasePrivilegeSet) {
+                sourceDBPrivilegeSet.addAll(allDatabasePrivilegeSet);
+            }
         }
         if (sourceDBPrivilegeSet == null || !sourceDBPrivilegeSet.containsAll(expectActions)) {
             return false;
