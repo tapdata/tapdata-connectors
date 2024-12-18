@@ -29,13 +29,14 @@ import io.tapdata.util.DateUtil;
 import org.apache.commons.lang3.StringUtils;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 public class OceanbaseReader {
 
@@ -67,7 +68,7 @@ public class OceanbaseReader {
         config.setUsername(oceanbaseConfig.getUser());
         config.setPassword(oceanbaseConfig.getPassword());
         config.setStartTimestamp((Long) offsetState);
-        config.setTableWhiteList(tableList.stream().map(table -> oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + "." + table).collect(Collectors.joining("|")));
+        config.setTableWhiteList(oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + ".*");
         LogProxyClient client = new LogProxyClient(oceanbaseConfig.getHost(), oceanbaseConfig.getLogProxyPort(), config);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         AtomicReference<List<TapEvent>> eventList = new AtomicReference<>(new ArrayList<>());
@@ -76,6 +77,9 @@ public class OceanbaseReader {
             @Override
             public void notify(LogMessage message) {
                 try {
+                    if (!tableList.contains(message.getTableName())) {
+                        return;
+                    }
                     Map<String, Object> after = DataMap.create();
                     Map<String, Object> before = DataMap.create();
                     analyzeMessage(message, after, before);
@@ -201,15 +205,25 @@ public class OceanbaseReader {
             case "DOUBLE":
             case "FLOAT":
                 return new BigDecimal(field.getValue().toString());
-            case "DATETIME":
-            case "DATE":
-            case "TIMESTAMP":
+            case "DATETIME": {
                 String dataFormat = dataFormatMap.get(table + "." + field.getFieldname());
                 if (EmptyKit.isNull(dataFormat)) {
                     dataFormat = DateUtil.determineDateFormat(field.getValue().toString());
                     dataFormatMap.put(table + "." + field.getFieldname(), dataFormat);
                 }
-                return DateUtil.parseInstant(field.getValue().toString(), dataFormat);
+                return DateUtil.parseInstantWithHour(field.getValue().toString(), dataFormat, oceanbaseConfig.getZoneOffsetHour());
+            }
+            case "DATE": {
+                return LocalDate.parse(field.getValue().toString()).atStartOfDay();
+            }
+            case "TIMESTAMP": {
+                String dataFormat = dataFormatMap.get(table + "." + field.getFieldname());
+                if (EmptyKit.isNull(dataFormat)) {
+                    dataFormat = DateUtil.determineDateFormat(field.getValue().toString());
+                    dataFormatMap.put(table + "." + field.getFieldname(), dataFormat);
+                }
+                return DateUtil.parseInstantWithZone(field.getValue().toString(), dataFormat, ZoneOffset.UTC);
+            }
             case "YEAR":
                 return Integer.parseInt(field.getValue().toString());
             case "BIT":

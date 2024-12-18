@@ -507,7 +507,7 @@ public class MysqlConnector extends CommonDbConnector {
 
     }
 
-    private Map<String, Object> filterTimeForMysql(
+    protected Map<String, Object> filterTimeForMysql(
             ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet) throws SQLException {
         return filterTimeForMysql(resultSet, metaData, dateTypeSet, null, null);
     }
@@ -590,7 +590,7 @@ public class MysqlConnector extends CommonDbConnector {
         return value;
     }
 
-    interface IllegalDateConsumer {
+    protected interface IllegalDateConsumer {
         void containsIllegalDate(TapRecordEvent event, boolean containsIllegalDate);
 
         void buildIllegalDateFieldName(TapRecordEvent event, List<String> illegalDateFieldName);
