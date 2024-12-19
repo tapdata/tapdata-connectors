@@ -34,7 +34,7 @@ public abstract class NormalWriteRecorder {
     protected final String schema;
 
     protected final List<String> allColumn;
-    protected final List<String> updatedColumn;
+    protected List<String> updatedColumn;
     protected final List<String> uniqueCondition;
     protected final Map<String, String> columnTypeMap;
     protected boolean hasPk = false;
@@ -69,11 +69,18 @@ public abstract class NormalWriteRecorder {
         } else {
             uniqueCondition = new ArrayList<>(tapTable.primaryKeys(true));
         }
+        if (EmptyKit.isEmpty(uniqueCondition)) {
+            removeBigColumnAsCondition();
+        }
         updatedColumn = allColumn.stream().filter(v -> !uniqueCondition.contains(v)).collect(Collectors.toList());
         if (EmptyKit.isEmpty(updatedColumn)) {
             updatedColumn.addAll(allColumn);
         }
         columnTypeMap = tapTable.getNameFieldMap().entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, v -> v.getValue().getDataType()));
+    }
+
+    protected void removeBigColumnAsCondition() {
+
     }
 
     public void setLargeSql(boolean largeSql) {
