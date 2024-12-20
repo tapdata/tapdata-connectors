@@ -33,8 +33,12 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import org.apache.commons.lang3.StringUtils;
 
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
-import java.util.List;
+import java.sql.Timestamp;
+import java.time.ZoneOffset;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -82,6 +86,7 @@ public class OceanbaseConnector extends MysqlConnector {
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
+        connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         connectorFunctions.supportStreamRead(this::streamRead);
         //If database need insert record before table created, then please implement the below two methods.
@@ -211,6 +216,59 @@ public class OceanbaseConnector extends MysqlConnector {
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
         mysqlJdbcContext.query(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
+    }
+
+    protected Map<String, Object> filterTimeForMysql(
+            ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet, TapRecordEvent recordEvent,
+            IllegalDateConsumer illegalDateConsumer) throws SQLException {
+        Map<String, Object> data = new HashMap<>();
+        List<String> illegalDateFieldName = new ArrayList<>();
+        for (int i = 0; i < metaData.getColumnCount(); i++) {
+            String columnName = metaData.getColumnName(i + 1);
+            if (!dateTypeSet.contains(columnName)) {
+                data.put(columnName, resultSet.getObject(i + 1));
+            } else {
+                Object value;
+                try {
+                    value = resultSet.getObject(i + 1);
+                } catch (Exception e) {
+                    value = null;
+                }
+                String string = resultSet.getString(i + 1);
+                //非法时间
+                if (EmptyKit.isNull(value) && EmptyKit.isNotNull(string)) {
+                    if (null == illegalDateConsumer || null == recordEvent) {
+                        data.put(columnName, null);
+                    } else {
+                        data.put(columnName, buildIllegalDate(recordEvent, illegalDateConsumer, string, illegalDateFieldName, columnName));
+                    }
+                } else if (null == value) {
+                    data.put(columnName, null);
+                } else {
+                    if ("TIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                        data.put(columnName, string);
+                    } else if ("YEAR".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                        data.put(columnName, resultSet.getInt(i + 1));
+                    } else if ("TIMESTAMP".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                        data.put(columnName, ((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
+                    } else if ("DATE".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
+                        if (value instanceof java.sql.Date) {
+                            data.put(columnName, ((java.sql.Date) value).toLocalDate().atStartOfDay());
+                        } else {
+                            data.put(columnName, value);
+                        }
+                    } else if ("DATETIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1)) && value instanceof Timestamp) {
+                        data.put(columnName, ((Timestamp) value).toLocalDateTime().minusHours(zoneOffsetHour));
+                    } else {
+                        data.put(columnName, value);
+                    }
+                }
+            }
+        }
+        if (null != illegalDateConsumer && null != recordEvent && !EmptyKit.isEmpty(illegalDateFieldName)) {
+            illegalDateConsumer.buildIllegalDateFieldName(recordEvent, illegalDateFieldName);
+        }
+        return data;
     }
 
 }
