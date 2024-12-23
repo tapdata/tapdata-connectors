@@ -11,7 +11,7 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.simplify.TapSimplify;
-import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -43,8 +43,8 @@ public class TapEventBuilder {
     private DummyOffset offset;
 
     private final Consumer<Map<String, Object>> heartbeatSetter;
-    private Map<String, String> cacheRString = new Object2ObjectOpenHashMap<>();
-    private Map<String, Double> cacheRNumber = new Object2ObjectOpenHashMap<>();
+    private Map<String, String> cacheRString = new Object2ObjectLinkedOpenHashMap<>();
+    private Map<String, Double> cacheRNumber = new Object2ObjectLinkedOpenHashMap<>();
     private Map<String, String> cacheRLongString = new HashMap<>();
     private Map<String, byte[]> cacheRLongBinary = new HashMap<>();
     private Map<String, Timestamp> cacheRDate = new HashMap<>();
@@ -93,7 +93,7 @@ public class TapEventBuilder {
     }
 
     public TapInsertRecordEvent generateInsertRecordEvent(TapTable table, List<FieldTypeCode> fieldTypeCodes) {
-        Map<String, Object> after = new Object2ObjectOpenHashMap<>(table.getNameFieldMap().size() * 2);
+        Map<String, Object> after = new Object2ObjectLinkedOpenHashMap<>(table.getNameFieldMap().size() * 2);
         for (FieldTypeCode fieldTypeCode : fieldTypeCodes) {
             after.put(fieldTypeCode.getTapField().getName(), generateEventValue(fieldTypeCode, RecordOperators.Insert));
         }
@@ -127,8 +127,8 @@ public class TapEventBuilder {
     }
 
     public TapUpdateRecordEvent generateUpdateRecordEvent(TapTable table, Map<String, Object> before, List<FieldTypeCode> fieldTypeCodes) {
-        before = (null == before) ? generateInsertRecordEvent(table).getAfter() : new Object2ObjectOpenHashMap<>(before);
-        Map<String, Object> after = new Object2ObjectOpenHashMap<>(before);
+        before = (null == before) ? generateInsertRecordEvent(table).getAfter() : new Object2ObjectLinkedOpenHashMap<>(before);
+        Map<String, Object> after = new Object2ObjectLinkedOpenHashMap<>(before);
         for (FieldTypeCode fieldTypeCode : fieldTypeCodes) {
             if (Boolean.FALSE.equals(fieldTypeCode.getTapField().getPrimaryKey())) {
                 after.put(fieldTypeCode.getTapField().getName(), generateEventValue(fieldTypeCode, RecordOperators.Update));
@@ -162,12 +162,12 @@ public class TapEventBuilder {
     public TapDeleteRecordEvent generateDeleteRecordEvent(TapTable table, Map<String, Object> before, List<FieldTypeCode> fieldTypeCodes) {
         String tableName = table.getName();
         if (null == before) {
-            before = new Object2ObjectOpenHashMap<>();
+            before = new Object2ObjectLinkedOpenHashMap<>();
             for (FieldTypeCode fieldTypeCode : fieldTypeCodes) {
                 before.put(fieldTypeCode.getTapField().getName(), generateEventValue(fieldTypeCode, RecordOperators.Update));
             }
         } else {
-            before = new Object2ObjectOpenHashMap<>(before);
+            before = new Object2ObjectLinkedOpenHashMap<>(before);
         }
         heartbeatSetter.accept(before);
 
