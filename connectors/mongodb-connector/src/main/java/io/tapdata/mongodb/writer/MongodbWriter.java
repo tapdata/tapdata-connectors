@@ -358,7 +358,7 @@ public class MongodbWriter {
             Map<String, Object> before = updateRecordEvent.getBefore();
             before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
             if (!((TapUpdateRecordEvent) recordEvent).getIsReplaceEvent()) {
-                after = DbKit.getAfterForUpdate(after, before, allColumn, pks);
+                after = DbKit.getAfterForUpdateMongo(after, before, allColumn, pks);
             }
 			Map<String, Object> info = recordEvent.getInfo();
 			Document pkFilter;
