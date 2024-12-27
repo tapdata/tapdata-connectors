@@ -1,5 +1,6 @@
 package io.tapdata.connector.doris.streamload;
 
+import cn.hutool.http.HttpInputStream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.tapdata.connector.doris.DorisJdbcContext;
 import io.tapdata.connector.doris.bean.DorisConfig;
@@ -13,6 +14,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -23,6 +25,7 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -154,6 +157,8 @@ public class DorisStreamLoader {
             columns.add(Constants.DORIS_DELETE_SIGN);
             HttpPutBuilder putBuilder = new HttpPutBuilder();
             InputStreamEntity entity = new InputStreamEntity(recordStream, recordStream.getContentLength());
+            entity.setContentEncoding("UTF-8");
+            entity.setContentType("application/json");
             putBuilder.setUrl(loadUrl)
                     // 前端表单传出来的值和tdd json加载的值可能有差别，如前端传的pwd可能是null，tdd的是空字符串
                     .baseAuth(dorisConfig.getUser(), dorisConfig.getPassword())
@@ -175,7 +180,9 @@ public class DorisStreamLoader {
             }
             HttpPut httpPut = putBuilder.build();
             TapLogger.debug(TAG, "Call stream load http api, url: {}, headers: {}", loadUrl, putBuilder.header);
-            return handlePreCommitResponse(httpClient.execute(httpPut));
+            try (CloseableHttpResponse execute = httpClient.execute(httpPut)) {
+                return handlePreCommitResponse(execute);
+            }
         } catch (DorisRetryableException e) {
             throw e;
         } catch (Exception e) {
