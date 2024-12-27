@@ -1,6 +1,5 @@
 package io.tapdata.connector.doris.streamload;
 
-import cn.hutool.http.HttpInputStream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.tapdata.connector.doris.DorisJdbcContext;
 import io.tapdata.connector.doris.bean.DorisConfig;
@@ -14,19 +13,15 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
