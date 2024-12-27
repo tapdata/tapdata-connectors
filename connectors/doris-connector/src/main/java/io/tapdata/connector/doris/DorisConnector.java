@@ -187,6 +187,10 @@ public class DorisConnector extends CommonDbConnector {
                 // TODO: 2023/4/28 jdbc writeRecord
             }
         } catch (Throwable t) {
+            dorisStreamLoaderMap.computeIfPresent(Thread.currentThread().getName(), (key, value) -> {
+                value.shutdown();
+                return null;
+            });
             exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
             throw t;
         }
