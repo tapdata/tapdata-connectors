@@ -735,11 +735,29 @@ public class JdbcConnection implements AutoCloseable {
     public <T> T prepareQueryAndMap(String preparedQueryString, StatementPreparer preparer, ResultSetMapper<T> mapper)
             throws SQLException {
         Objects.requireNonNull(mapper, "Mapper must be provided");
-        final PreparedStatement statement = createPreparedStatement(preparedQueryString);
-        preparer.accept(statement);
-        try (ResultSet resultSet = statement.executeQuery();) {
-            return mapper.apply(resultSet);
+        final int maxRetries = 3;
+        int retryCount = 0;
+        while (retryCount < maxRetries) {
+            try{
+                final PreparedStatement statement = createPreparedStatement(preparedQueryString);
+                preparer.accept(statement);
+                try (ResultSet resultSet = statement.executeQuery();) {
+                    return mapper.apply(resultSet);
+                }
+            } catch (SQLException e) {
+                String sqlState = e.getSQLState();
+                if ("08S01".equals(sqlState) || "40001".equals(sqlState)) {
+                    retryCount++;
+                    renewPreparedStatement(preparedQueryString); // 重置 PreparedStatement
+                    if (retryCount >= maxRetries) {
+                        throw new SQLException("Query failed after " + maxRetries + " retries", e);
+                    }
+                } else {
+                    throw e;
+                }
+            }
         }
+        throw new SQLException("Unexpected error: retry logic exited loop without returning result");
     }
 
     /**
@@ -1346,6 +1364,17 @@ public class JdbcConnection implements AutoCloseable {
 
     private PreparedStatement createPreparedStatement(String preparedQueryString) {
         return statementCache.computeIfAbsent(preparedQueryString, query -> {
+            try {
+                LOGGER.trace("Inserting prepared statement '{}' removed from the cache", query);
+                return connection().prepareStatement(query);
+            }
+            catch (SQLException e) {
+                throw new ConnectException(e);
+            }
+        });
+    }
+    private PreparedStatement renewPreparedStatement(String preparedQueryString) {
+        return statementCache.computeIfPresent(preparedQueryString, (query,statement) -> {
             try {
                 LOGGER.trace("Inserting prepared statement '{}' removed from the cache", query);
                 return connection().prepareStatement(query);
