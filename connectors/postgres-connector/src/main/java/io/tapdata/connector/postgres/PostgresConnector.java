@@ -14,6 +14,7 @@ import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
 import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
@@ -127,8 +128,8 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportCreateIndex(this::createIndex);
-//        connectorFunctions.supportQueryIndexes(this::queryIndexes);
-//        connectorFunctions.supportDeleteIndex(this::dropIndexes);
+        connectorFunctions.supportQueryIndexes(this::queryIndexes);
+        connectorFunctions.supportDeleteIndex(this::dropIndexes);
         // source
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
@@ -768,5 +769,16 @@ public class PostgresConnector extends CommonDbConnector {
             subList.add(datum);
         }
         return result;
+    }
+
+    protected void createIndex(TapConnectorContext connectorContext, TapTable tapTable, TapCreateIndexEvent createIndexEvent) throws SQLException {
+        super.createIndex(connectorContext, tapTable, createIndexEvent);
+        createIndexEvent.getIndexList().stream().filter(v -> Boolean.TRUE.equals(v.getCluster())).forEach(v -> {
+            try {
+                jdbcContext.execute("cluster " + getSchemaAndTable(tapTable.getId()) + " using \"" + v.getName() + "\"");
+            } catch (SQLException e) {
+                tapLogger.warn("Cluster index failed, table:{}, index:{}", tapTable.getId(), v.getName());
+            }
+        });
     }
 }
