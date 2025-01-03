@@ -2,6 +2,7 @@ package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
+import io.tapdata.common.dml.NormalRecordWriter;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
 import io.tapdata.connector.postgres.cdc.WalLogMinerV2;
@@ -19,6 +20,7 @@ import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
 import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
@@ -66,6 +68,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * PDK for Postgresql
@@ -81,7 +84,9 @@ public class PostgresConnector extends CommonDbConnector {
     private PostgresCdcRunner cdcRunner; //only when task start-pause this variable can be shared
     private Object slotName; //must be stored in stateMap
     protected String postgresVersion;
-    protected Map<String, Boolean> writtenTableMap = new ConcurrentHashMap<>();
+    protected Map<String, DataMap> writtenTableMap = new ConcurrentHashMap<>();
+    protected static final String HAS_UNIQUE_INDEX = "HAS_UNIQUE_INDEX";
+    protected static final String REMOVE_AUTO_INCR = "REMOVE_AUTO_INCR";
     protected PostgresPartitionContext postgresPartitionContext;
 
     @Override
@@ -386,9 +391,27 @@ public class PostgresConnector extends CommonDbConnector {
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             openIdentity(tapTable);
             hasUniqueIndex = makeSureHasUnique(tapTable);
-            writtenTableMap.put(tapTable.getId(), hasUniqueIndex);
+            writtenTableMap.put(tapTable.getId(), DataMap.create().kv(HAS_UNIQUE_INDEX, hasUniqueIndex));
         } else {
-            hasUniqueIndex = writtenTableMap.get(tapTable.getId());
+            hasUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_UNIQUE_INDEX, false);
+        }
+        if (postgresConfig.getCreateAutoInc()) {
+            if (!writtenTableMap.get(tapTable.getId()).containsKey(REMOVE_AUTO_INCR)) {
+                List<TapField> fields = tapTable.getNameFieldMap().values().stream().filter(TapField::getAutoInc).collect(Collectors.toList());
+                if (EmptyKit.isNotEmpty(fields) && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
+                    List<String> autoIncFields = fields.stream().map(TapField::getName).collect(Collectors.toList());
+                    TapRecordEvent event = tapRecordEvents.stream().filter(e -> e instanceof TapInsertRecordEvent).findFirst().orElse(null);
+                    if (event != null) {
+                        List<String> alterSqls = new ArrayList<>();
+                        fields.forEach(field -> {
+                            Object currentValue = ((TapInsertRecordEvent) event).getAfter().get(field.getName());
+                            alterSqls.add("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" ALTER COLUMN \"" + field.getName() + "\" ADD GENERATED ALWAYS AS IDENTITY (START WITH " + currentValue + " INCREMENT BY 1)");
+                        });
+                        jdbcContext.batchExecute(alterSqls);
+                        writtenTableMap.get(tapTable.getId()).put(REMOVE_AUTO_INCR, autoIncFields);
+                    }
+                }
+            }
         }
         String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
@@ -398,6 +421,7 @@ public class PostgresConnector extends CommonDbConnector {
         if (updateDmlPolicy == null) {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
+        NormalRecordWriter postgresRecordWriter;
         if (isTransaction) {
             String threadName = Thread.currentThread().getName();
             Connection connection;
@@ -407,19 +431,20 @@ public class PostgresConnector extends CommonDbConnector {
                 connection = postgresJdbcContext.getConnection();
                 transactionConnectionMap.put(threadName, connection);
             }
-            new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
+            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(tapLogger)
-                    .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
-
+                    .setTapLogger(tapLogger);
         } else {
-            new PostgresRecordWriter(postgresJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
+            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(tapLogger)
-                    .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
+                    .setTapLogger(tapLogger);
         }
+        if (postgresConfig.getCreateAutoInc()) {
+            postgresRecordWriter.setRemoveAutoInc((List) writtenTableMap.get(tapTable.getId()).get(REMOVE_AUTO_INCR));
+        }
+        postgresRecordWriter.write(tapRecordEvents, writeListResultConsumer, this::isAlive);
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {

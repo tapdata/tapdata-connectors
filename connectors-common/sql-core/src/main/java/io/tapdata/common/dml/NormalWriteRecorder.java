@@ -182,6 +182,13 @@ public abstract class NormalWriteRecorder {
         this.tapLogger = tapLogger;
     }
 
+    public void setRemoveAutoInc(List<String> autoIncFields) {
+        if (EmptyKit.isNotEmpty(autoIncFields)) {
+            allColumn.removeIf(autoIncFields::contains);
+            updatedColumn.removeIf(autoIncFields::contains);
+        }
+    }
+
     public void setEscapeChar(char escapeChar) {
         this.escapeChar = escapeChar;
     }

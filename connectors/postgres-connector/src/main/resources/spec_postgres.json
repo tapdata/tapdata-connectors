@@ -303,6 +303,27 @@
             }
           ]
         },
+        "createAutoInc": {
+          "type": "boolean",
+          "title": "${createAutoInc}",
+          "default": false,
+          "x-index": 5,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${createAutoIncTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "hashSplit": {
           "type": "boolean",
           "title": "${hashSplit}",
@@ -455,6 +476,8 @@
       "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
       "closeNotNull": "Ignore NotNull",
       "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded",
+      "createAutoInc": "Synchronize auto-increment columns",
+      "createAutoIncTooltip": "When the switch is turned on, the auto-increment attribute is synchronized when entering the increment, please turn off the multi-threaded increment, otherwise it will cause inconsistent auto-increment data",
       "hashSplit": "Hash split",
       "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the hash value, suitable for large table full-stage sharded synchronization",
       "maxSplit": "Maximum number of splits",
@@ -485,6 +508,8 @@
       "timezoneTip": "指定时区，否则不做时区处理",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "开关打开时会将非空限制丢弃",
+      "createAutoInc": "同步自增列",
+      "createAutoIncTooltip": "开关打开时会在进入增量时同步自增属性，请关闭增量多线程，否则会导致自增数据不一致",
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "开关打开时，可以根据哈希值进行分片，适用于大表全量阶段分片同步",
       "maxSplit": "最大分片数",
@@ -515,6 +540,8 @@
       "timezoneTip": "指定時區，否則不做時區處理",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "開關打開時會將非空限制丟棄",
+      "createAutoInc": "同步自增列",
+      "createAutoIncTooltip": "開關打開時會在進入增量時同步自增屬性，請關閉增量多線程，否則會導致自增數據不一致",
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "開關打開時，可以根據哈希值進行分片，適用於大表全量階段分片同步",
       "maxSplit": "最大分片數",
