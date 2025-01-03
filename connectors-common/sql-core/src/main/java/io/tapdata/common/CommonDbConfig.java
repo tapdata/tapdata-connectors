@@ -43,6 +43,7 @@ public class CommonDbConfig implements Serializable {
     private int batchReadThreadSize = 4;
     private Boolean doubleActive = false;
     private Boolean oldVersionTimezone = false;
+    private Boolean createAutoInc = false;
     private Integer writeThreadSize = 15;
     protected String timezone = "+00:00";
     protected ZoneId zoneId;
@@ -284,6 +285,14 @@ public class CommonDbConfig implements Serializable {
 
     public void setOldVersionTimezone(Boolean oldVersionTimezone) {
         this.oldVersionTimezone = oldVersionTimezone;
+    }
+
+    public Boolean getCreateAutoInc() {
+        return createAutoInc;
+    }
+
+    public void setCreateAutoInc(Boolean createAutoInc) {
+        this.createAutoInc = createAutoInc;
     }
 
     public Integer getWriteThreadSize() {
