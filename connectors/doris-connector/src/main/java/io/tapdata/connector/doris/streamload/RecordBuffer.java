@@ -137,7 +137,9 @@ public class RecordBuffer {
             currentReadBuffer = null;
             return -1;
         }
-        currentReadBuffer.get(b, off, len);
+        int available = currentReadBuffer.remaining();
+        int nRead = Math.min(available, len);
+        currentReadBuffer.get(b, off, nRead);
         if (currentReadBuffer.remaining() == 0) {
             recycleBuffer(currentReadBuffer);
             currentReadBuffer = null;
