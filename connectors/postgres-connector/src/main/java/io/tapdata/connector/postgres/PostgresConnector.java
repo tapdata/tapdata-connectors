@@ -401,7 +401,7 @@ public class PostgresConnector extends CommonDbConnector {
                 if (EmptyKit.isNotEmpty(fields) && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
                     List<String> autoIncFields = fields.stream().map(TapField::getName).collect(Collectors.toList());
                     TapRecordEvent event = tapRecordEvents.stream().filter(e -> e instanceof TapInsertRecordEvent).findFirst().orElse(null);
-                    if (event != null) {
+                    if (event != null && (System.currentTimeMillis() - event.getReferenceTime()) / 1000 < 10) {
                         List<String> alterSqls = new ArrayList<>();
                         fields.forEach(field -> {
                             Object currentValue = ((TapInsertRecordEvent) event).getAfter().get(field.getName());
