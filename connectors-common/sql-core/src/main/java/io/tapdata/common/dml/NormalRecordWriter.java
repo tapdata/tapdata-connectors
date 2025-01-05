@@ -42,7 +42,6 @@ public class NormalRecordWriter {
     protected Log tapLogger;
     protected boolean largeSql = false;
     protected CommonDbConfig commonDbConfig;
-    protected List<String> autoIncFields;
 
     public NormalRecordWriter(JdbcContext jdbcContext, TapTable tapTable) throws SQLException {
         this.commonDbConfig = jdbcContext.getConfig();
@@ -74,9 +73,6 @@ public class NormalRecordWriter {
                 insertRecorder.enableFileInput(new PooledByteBufAllocator().directBuffer(commonDbConfig.getBufferCapacity().intValue()));
             }
             insertRecorder.setTapLogger(tapLogger);
-            if (commonDbConfig.getCreateAutoInc()) {
-                insertRecorder.setRemoveAutoInc(autoIncFields);
-            }
             updateRecorder.setVersion(version);
             updateRecorder.setUpdatePolicy(updatePolicy);
             updateRecorder.setTapLogger(tapLogger);
@@ -167,10 +163,6 @@ public class NormalRecordWriter {
     public NormalRecordWriter setTapLogger(Log tapLogger) {
         this.tapLogger = tapLogger;
         return this;
-    }
-
-    public void setRemoveAutoInc(List<String> autoIncFields) {
-        this.autoIncFields = autoIncFields;
     }
 
     protected String upsertDoubleActive() {
