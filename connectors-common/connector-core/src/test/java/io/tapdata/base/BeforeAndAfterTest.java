@@ -336,7 +336,7 @@ class BeforeAndAfterTest {
                 entry("name", "jarad"),
                 entry("birth", "2022-05-29")
         );
-//        lastAfter.put("age", null);
+        lastAfter.put("age", null);
         assertBeforeAndAfter(COMMON_ALL_COLUMN, COMMON_UNIQUE_CONDITION, after, before, lastAfter, lastBefore);
     }
 }
