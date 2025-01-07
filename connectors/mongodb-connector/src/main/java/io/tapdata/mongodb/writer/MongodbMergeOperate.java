@@ -295,7 +295,7 @@ public class MongodbMergeOperate {
 		return mergeResult;
 	}
 
-	private static MergeResult updateIntoArrayUnsetMerge(
+	public static MergeResult updateIntoArrayUnsetMerge(
 			MergeBundle mergeBundle, MergeTableProperties currentProperty,
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult,
 			MergeTableProperties parentProperties, MergeFilter mergeFilter) {
@@ -356,10 +356,18 @@ public class MongodbMergeOperate {
 		if (mergeResult.getOperation() == null) {
 			mergeResult.setOperation(MergeResult.Operation.UPDATE);
 		}
-
 		Document updateOpDoc;
 		if (mergeBundle.isDataExists()) {
-			updateOpDoc = buildPullDocument(MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(), arrayKeys, array, targetPath);
+			Map<String, Object> data = MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter();
+			Map<String, Object> pullData = new HashMap<>();
+			for (String key : arrayKeys) {
+				Object value = MapUtil.getValueByKey(updateJoinKeyBefore, key);
+				if (null == value) {
+					value = MapUtil.getValueByKey(data, key);
+				}
+				pullData.put(key, value);
+			}
+			updateOpDoc = buildPullDocument(pullData, arrayKeys, array, targetPath);
 			if (mergeResult.getUpdate().containsKey("$pull")) {
 				mergeResult.getUpdate().get("$pull", Document.class).putAll(updateOpDoc);
 			} else {
@@ -367,11 +375,11 @@ public class MongodbMergeOperate {
 			}
 		} else {
 			if (StringUtils.isNotBlank(targetPath)) {
-				updateOpDoc = new Document(targetPath, true);
-				if (mergeResult.getUpdate().containsKey("$unset")) {
-					mergeResult.getUpdate().get("$unset", Document.class).putAll(updateOpDoc);
+				updateOpDoc = new Document(targetPath, new ArrayList<>());
+				if (mergeResult.getUpdate().containsKey("$set")) {
+					mergeResult.getUpdate().get("$set", Document.class).putAll(updateOpDoc);
 				} else {
-					mergeResult.getUpdate().put("$unset", updateOpDoc);
+					mergeResult.getUpdate().put("$set", updateOpDoc);
 				}
 			}
 		}
