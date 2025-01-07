@@ -295,7 +295,7 @@ public class MongodbMergeOperate {
 		return mergeResult;
 	}
 
-	private static MergeResult updateIntoArrayUnsetMerge(
+	public static MergeResult updateIntoArrayUnsetMerge(
 			MergeBundle mergeBundle, MergeTableProperties currentProperty,
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult,
 			MergeTableProperties parentProperties, MergeFilter mergeFilter) {
