@@ -635,8 +635,7 @@ public class PostgresConnector extends CommonDbConnector {
 
 
     private String buildHashSql(TapAdvanceFilter filter, TapTable table) {
-        StringBuilder sql = new StringBuilder("select SUM(MOD(" +
-                " (select n.md5 from (" +
+        StringBuilder sql = new StringBuilder("select SUM(MOD(n.md5, 64)) from (" +
                 "  select case when t.num < 0 then t.num + 18446744073709551616 when t.num > 0 then t.num end as md5" +
                 "  from (select (cast(");
         sql.append("CAST(( 'x' || SUBSTRING(MD5(CONCAT_WS('', ");
@@ -685,7 +684,7 @@ public class PostgresConnector extends CommonDbConnector {
         sql.append(" )) FROM 1 FOR 16)) AS bit(64)) as BIGINT)) AS num " +
                 "  FROM ").append("\"" + table.getName() + "\"  ");
         sql.append(commonSqlMaker.buildCommandWhereSql(filter, ""));
-        sql.append(") t) n),64))");
+        sql.append(") t) n");
         return sql.toString();
     }
 
