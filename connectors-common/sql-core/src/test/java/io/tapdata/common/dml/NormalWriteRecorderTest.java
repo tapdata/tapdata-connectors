@@ -1,6 +1,5 @@
 package io.tapdata.common.dml;
 
-import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -40,7 +39,7 @@ public class NormalWriteRecorderTest {
         void testNormal() throws SQLException {
             doAnswer(invocationOnMock -> null).when(recorder).insertUpdate(any(), any(), any());
             doAnswer(invocationOnMock -> null).when(recorder).insertUpdate(any(), any(), any());
-            ReflectionTestUtils.setField(recorder, "updatePolicy", ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS);
+            ReflectionTestUtils.setField(recorder, "updatePolicy", WritePolicyEnum.IGNORE_ON_NONEXISTS);
             Map<String, Object> after = map(entry("id", 1), entry("name", "name"));
             Map<String, Object> before = map(entry("id", 1));
             doCallRealMethod().when(recorder).addUpdateBatch(any(), any(), any());
@@ -53,7 +52,7 @@ public class NormalWriteRecorderTest {
         void testInsertUpdate() throws SQLException {
             doAnswer(invocationOnMock -> null).when(recorder).insertUpdate(any(), any(), any());
             doAnswer(invocationOnMock -> null).when(recorder).insertUpdate(any(), any(), any());
-            ReflectionTestUtils.setField(recorder, "updatePolicy", ConnectionOptions.DML_UPDATE_POLICY_INSERT_ON_NON_EXISTS);
+            ReflectionTestUtils.setField(recorder, "updatePolicy", WritePolicyEnum.INSERT_ON_NONEXISTS);
             Map<String, Object> after = map(entry("id", 1), entry("name", "name"));
             Map<String, Object> before = map(entry("id", 1));
             doCallRealMethod().when(recorder).addUpdateBatch(any(), any(), any());
@@ -66,7 +65,7 @@ public class NormalWriteRecorderTest {
         void testEmptyAfter() throws SQLException {
             doAnswer(invocationOnMock -> null).when(recorder).insertUpdate(any(), any(), any());
             doAnswer(invocationOnMock -> null).when(recorder).insertUpdate(any(), any(), any());
-            ReflectionTestUtils.setField(recorder, "updatePolicy", ConnectionOptions.DML_UPDATE_POLICY_INSERT_ON_NON_EXISTS);
+            ReflectionTestUtils.setField(recorder, "updatePolicy", WritePolicyEnum.INSERT_ON_NONEXISTS);
             Map<String, Object> after = Collections.emptyMap();
             Map<String, Object> before = map(entry("id", 1));
             doCallRealMethod().when(recorder).addUpdateBatch(any(), any(), any());

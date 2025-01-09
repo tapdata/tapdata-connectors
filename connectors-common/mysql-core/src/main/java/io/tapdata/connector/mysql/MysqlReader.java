@@ -791,7 +791,9 @@ public class MysqlReader implements Closeable {
                     value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
                 }
             } else if (value instanceof String) {
-                value = Instant.parse((CharSequence) value).atZone(dbTimeZone.toZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC);
+                if (StringUtils.isNotBlank((CharSequence) value)) {
+                    value = Instant.parse((CharSequence) value).atZone(dbTimeZone.toZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC);
+                }
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
             value = ((Integer) value).longValue() * 24 * 60 * 60 * 1000L;

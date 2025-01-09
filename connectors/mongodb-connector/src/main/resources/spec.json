@@ -196,7 +196,8 @@
 										}
 									}
 								}
-							]
+							],
+							"apiServerKey": "ssl"
 						},
 						"ssl_tips1": {
 							"type": "void",
@@ -231,14 +232,16 @@
 							"x-component": "TextFileReader",
 							"fileNameField": "sslKeyFile",
 							"required": true,
-							"x-index": 90
+							"x-index": 90,
+							"apiServerKey": "sslKey"
 						},
 						"sslPass": {
 							"type": "string",
 							"title": "${dataForm_form_sslPass}",
 							"x-decorator": "FormItem",
 							"x-component": "Password",
-							"x-index": 100
+							"x-index": 100,
+							"apiServerKey": "sslPass"
 						},
 						"sslValidate": {
 							"type": "boolean",
@@ -256,7 +259,8 @@
 									}
 								}
 							],
-							"x-index": 110
+							"x-index": 110,
+							"apiServerKey": "sslValidate"
 						},
 						"sslCA": {
 							"type": "string",
@@ -265,7 +269,8 @@
 							"x-component": "TextFileReader",
 							"fileNameField": "sslCAFile",
 							"required": true,
-							"x-index": 120
+							"x-index": 120,
+							"apiServerKey": "sslCA"
 						},
 						"mongodbLoadSchemaSampleSize": {
 							"title": "${load_schema_sample_size}",

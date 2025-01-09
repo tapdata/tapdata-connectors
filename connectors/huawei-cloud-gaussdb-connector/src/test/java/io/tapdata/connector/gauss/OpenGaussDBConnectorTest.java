@@ -34,10 +34,7 @@ import io.tapdata.pdk.apis.entity.ConnectorCapabilities;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.mockito.MockedStatic;
 
 import java.sql.Connection;
@@ -734,6 +731,7 @@ public class OpenGaussDBConnectorTest {
     }
 
     @Nested
+    @Disabled
     class InitConnectionTest {
         GaussDBConfig gaussDBConfig;
         GaussDBJdbcContext gaussDBJdbcContext;

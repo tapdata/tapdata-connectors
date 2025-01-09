@@ -25,7 +25,7 @@ import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
-import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -195,7 +195,7 @@ public class DummyConnector extends ConnectorBase {
         Set<RecordOperators> operators = config.getIncrementalTypes();
 
         TapTable table;
-        Map<String, List<FieldTypeCode>> tableNameFieldTypeCodeMap = new Object2ObjectOpenHashMap<>();
+        Map<String, List<FieldTypeCode>> tableNameFieldTypeCodeMap = new Object2ObjectLinkedOpenHashMap<>();
         Map<String, Object> insertAfter;
         TapInsertRecordEvent insertRecordEvent;
         builder.reset(offsetState, SyncStage.Incremental);

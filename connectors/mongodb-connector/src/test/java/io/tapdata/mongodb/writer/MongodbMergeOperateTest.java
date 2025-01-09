@@ -9,6 +9,7 @@ import io.tapdata.mongodb.entity.MergeBundle;
 import io.tapdata.mongodb.entity.MergeFilter;
 import io.tapdata.mongodb.entity.MergeResult;
 import io.tapdata.mongodb.merge.MergeFilterManager;
+import io.tapdata.pdk.apis.entity.merge.MergeInfo;
 import io.tapdata.pdk.apis.entity.merge.MergeLookupResult;
 import io.tapdata.pdk.apis.entity.merge.MergeTableProperties;
 import org.bson.Document;
@@ -515,6 +516,104 @@ class MongodbMergeOperateTest {
 		void test1() {
 			Document filter = MongodbMergeOperate.unsetFilter(before, after, joinKeys, 1);
 			assertEquals(new Document("id1", 2).append("type1", "zzz"), filter);
+		}
+	}
+
+	@Nested
+	@DisplayName("Method updateIntoArrayUnsetMerge test")
+	class updateIntoArrayUnsetMergeTest {
+		@Test
+		@DisplayName("test data exists")
+		void test1() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("id", 1);
+			before.put("src", "x");
+			before.put("seq", 1);
+			before.put("name", "test");
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("src", "y");
+			after.put("seq", 1);
+			after.put("name", "test1");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE, before, after);
+			mergeBundle.setDataExists(true);
+			MergeTableProperties currentProperty = new MergeTableProperties();
+			currentProperty.setId("1");
+			currentProperty.setTargetPath("array");
+			currentProperty.setJoinKeys(new ArrayList<Map<String, String>>(){{
+				add(new HashMap<String, String>(){{
+					put("source", "id");
+					put("target", "id");
+				}});
+				add(new HashMap<String, String>() {{
+					put("source", "src");
+					put("target", "src");
+				}});
+			}});
+			currentProperty.setArrayKeys(new ArrayList<String>() {{
+				add("id");
+				add("src");
+				add("seq");
+			}});
+			currentProperty.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys = new HashMap<>();
+			MergeInfo.UpdateJoinKey updateJoinKey = new MergeInfo.UpdateJoinKey(new Document("id", 1).append("src", "x"), new Document("id", 1).append("src", "y"), new Document("id", 1).append("src", "x"));
+			updateJoinKeys.put("1", updateJoinKey);
+			MergeResult mergeResult = new MergeResult();
+			MergeTableProperties parentProperties = new MergeTableProperties();
+			parentProperties.setId("2");
+			parentProperties.setMergeType(MergeTableProperties.MergeType.updateOrInsert);
+			MergeFilter mergeFilter = new MergeFilter(true);
+			MergeResult result = MongodbMergeOperate.updateIntoArrayUnsetMerge(mergeBundle, currentProperty, updateJoinKeys, mergeResult, parentProperties, mergeFilter);
+			assertEquals("{\"id\": 1, \"src\": \"x\"}", result.getFilter().toJson());
+			assertEquals("{\"$pull\": {\"array\": {\"id\": 1, \"src\": \"x\", \"seq\": 1}}}", result.getUpdate().toJson());
+		}
+
+		@Test
+		@DisplayName("test data not exists")
+		void test2() {
+			Map<String, Object> before = new HashMap<>();
+			before.put("id", 1);
+			before.put("src", "x");
+			before.put("seq", 1);
+			before.put("name", "test");
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("src", "y");
+			after.put("seq", 1);
+			after.put("name", "test1");
+			MergeBundle mergeBundle = new MergeBundle(MergeBundle.EventOperation.UPDATE, before, after);
+			mergeBundle.setDataExists(false);
+			MergeTableProperties currentProperty = new MergeTableProperties();
+			currentProperty.setId("1");
+			currentProperty.setTargetPath("array");
+			currentProperty.setJoinKeys(new ArrayList<Map<String, String>>(){{
+				add(new HashMap<String, String>(){{
+					put("source", "id");
+					put("target", "id");
+				}});
+				add(new HashMap<String, String>() {{
+					put("source", "src");
+					put("target", "src");
+				}});
+			}});
+			currentProperty.setArrayKeys(new ArrayList<String>() {{
+				add("id");
+				add("src");
+				add("seq");
+			}});
+			currentProperty.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys = new HashMap<>();
+			MergeInfo.UpdateJoinKey updateJoinKey = new MergeInfo.UpdateJoinKey(new Document("id", 1).append("src", "x"), new Document("id", 1).append("src", "y"), new Document("id", 1).append("src", "x"));
+			updateJoinKeys.put("1", updateJoinKey);
+			MergeResult mergeResult = new MergeResult();
+			MergeTableProperties parentProperties = new MergeTableProperties();
+			parentProperties.setId("2");
+			parentProperties.setMergeType(MergeTableProperties.MergeType.updateOrInsert);
+			MergeFilter mergeFilter = new MergeFilter(true);
+			MergeResult result = MongodbMergeOperate.updateIntoArrayUnsetMerge(mergeBundle, currentProperty, updateJoinKeys, mergeResult, parentProperties, mergeFilter);
+			assertEquals("{\"id\": 1, \"src\": \"x\"}", result.getFilter().toJson());
+			assertEquals("{\"$set\": {\"array\": []}}", result.getUpdate().toJson());
 		}
 	}
 }

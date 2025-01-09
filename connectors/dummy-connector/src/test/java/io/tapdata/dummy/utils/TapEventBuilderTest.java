@@ -7,7 +7,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
-import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -395,7 +395,7 @@ class TapEventBuilderTest {
 		@Test
 		@DisplayName("test all type, call method generateEventValue(TapField, RecordOperators)")
 		void test1() {
-			Map<String, Object> after = new Object2ObjectOpenHashMap<>();
+			Map<String, Object> after = new Object2ObjectLinkedOpenHashMap<>();
 			table.getNameFieldMap().forEach((name, tapField) -> {
 				Object value = tapEventBuilder.generateEventValue(tapField, RecordOperators.Insert);
 				after.put(name, value);
@@ -407,7 +407,7 @@ class TapEventBuilderTest {
 		@Test
 		@DisplayName("test all type, call method generateEventValue(FieldTypeCode, RecordOperators)")
 		void test2() {
-			Map<String, Object> after = new Object2ObjectOpenHashMap<>();
+			Map<String, Object> after = new Object2ObjectLinkedOpenHashMap<>();
 			List<FieldTypeCode> fieldCodes = TypeMappingUtils.toFieldCodes(table.getNameFieldMap());
 			fieldCodes.forEach(fieldTypeCode -> {
 				Object value = tapEventBuilder.generateEventValue(fieldTypeCode, RecordOperators.Insert);

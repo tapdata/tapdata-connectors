@@ -7,7 +7,9 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.pdk.apis.entity.*;
+import io.tapdata.pdk.apis.entity.Projection;
+import io.tapdata.pdk.apis.entity.QueryOperator;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 
 import java.text.DecimalFormat;
 import java.time.LocalDateTime;
@@ -18,8 +20,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-
-import static io.tapdata.pdk.apis.entity.SortOn.ASCENDING;
 
 /**
  * make sql
@@ -68,6 +68,9 @@ public class CommonSqlMaker {
             builder.append(escapeChar).append(tapField.getName()).append(escapeChar).append(' ').append(tapField.getDataType()).append(' ');
             buildDefaultDefinition(builder, tapField);
             buildNullDefinition(builder, tapField);
+            if (Boolean.TRUE.equals(tapField.getAutoInc())) {
+                buildAutoIncDefinition(builder, tapField);
+            }
             if (needComment) {
                 buildCommentDefinition(builder, tapField);
             }
@@ -90,6 +93,10 @@ public class CommonSqlMaker {
                 builder.append("'").append(tapField.getDefaultValue()).append("' ");
             }
         }
+    }
+
+    protected void buildAutoIncDefinition(StringBuilder builder, TapField tapField) {
+
     }
 
     protected void buildCommentDefinition(StringBuilder builder, TapField tapField) {
@@ -155,7 +162,7 @@ public class CommonSqlMaker {
         }
     }
 
-    public  String buildCommandWhereSql(TapAdvanceFilter filter, String defaultWhereSql) {
+    public String buildCommandWhereSql(TapAdvanceFilter filter, String defaultWhereSql) {
         if (null == defaultWhereSql) {
             defaultWhereSql = "";
         }
@@ -184,7 +191,7 @@ public class CommonSqlMaker {
 
     public static Object getMap(Object map, String key) {
         if (map instanceof Map) {
-            Map<String, Object> m = (Map<String, Object>)map;
+            Map<String, Object> m = (Map<String, Object>) map;
             return m.get(key);
         }
         return null;
@@ -282,9 +289,6 @@ public class CommonSqlMaker {
         }
         return builder.toString();
     }
-
-
-
 
 
     public String buildValueString(Object value) {

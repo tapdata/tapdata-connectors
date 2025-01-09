@@ -14,6 +14,7 @@ import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
 import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
@@ -127,8 +128,8 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportCreateIndex(this::createIndex);
-//        connectorFunctions.supportQueryIndexes(this::queryIndexes);
-//        connectorFunctions.supportDeleteIndex(this::dropIndexes);
+        connectorFunctions.supportQueryIndexes(this::queryIndexes);
+        connectorFunctions.supportDeleteIndex(this::dropIndexes);
         // source
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
@@ -350,7 +351,9 @@ public class PostgresConnector extends CommonDbConnector {
             slotName = tapConnectorContext.getStateMap().get("tapdata_pg_slot");
             postgresConfig.load(tapConnectorContext.getNodeConfig());
         });
-        commonSqlMaker = new PostgresSqlMaker().closeNotNull(postgresConfig.getCloseNotNull());
+        commonSqlMaker = new PostgresSqlMaker()
+                .closeNotNull(postgresConfig.getCloseNotNull())
+                .autoIncStartValue(postgresConfig.getAutoIncStartValue());
         postgresVersion = postgresJdbcContext.queryVersion();
         postgresJdbcContext.withPostgresVersion(postgresVersion);
         postgresTest.withPostgresVersion(postgresVersion);
@@ -632,8 +635,7 @@ public class PostgresConnector extends CommonDbConnector {
 
 
     private String buildHashSql(TapAdvanceFilter filter, TapTable table) {
-        StringBuilder sql = new StringBuilder("select SUM(MOD(" +
-                " (select n.md5 from (" +
+        StringBuilder sql = new StringBuilder("select SUM(MOD(n.md5, 64)) from (" +
                 "  select case when t.num < 0 then t.num + 18446744073709551616 when t.num > 0 then t.num end as md5" +
                 "  from (select (cast(");
         sql.append("CAST(( 'x' || SUBSTRING(MD5(CONCAT_WS('', ");
@@ -682,7 +684,7 @@ public class PostgresConnector extends CommonDbConnector {
         sql.append(" )) FROM 1 FOR 16)) AS bit(64)) as BIGINT)) AS num " +
                 "  FROM ").append("\"" + table.getName() + "\"  ");
         sql.append(commonSqlMaker.buildCommandWhereSql(filter, ""));
-        sql.append(") t) n),64))");
+        sql.append(") t) n");
         return sql.toString();
     }
 
@@ -768,5 +770,16 @@ public class PostgresConnector extends CommonDbConnector {
             subList.add(datum);
         }
         return result;
+    }
+
+    protected void createIndex(TapConnectorContext connectorContext, TapTable tapTable, TapCreateIndexEvent createIndexEvent) throws SQLException {
+        super.createIndex(connectorContext, tapTable, createIndexEvent);
+        createIndexEvent.getIndexList().stream().filter(v -> Boolean.TRUE.equals(v.getCluster())).forEach(v -> {
+            try {
+                jdbcContext.execute("cluster " + getSchemaAndTable(tapTable.getId()) + " using \"" + v.getName() + "\"");
+            } catch (SQLException e) {
+                tapLogger.warn("Cluster index failed, table:{}, index:{}", tapTable.getId(), v.getName());
+            }
+        });
     }
 }
