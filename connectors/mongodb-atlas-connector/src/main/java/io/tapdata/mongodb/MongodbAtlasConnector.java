@@ -12,7 +12,10 @@ import io.tapdata.mongodb.atlasTest.MongodbAtlasTest;
 import io.tapdata.mongodb.util.MongoShardUtil;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
+import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
+import io.tapdata.pdk.apis.entity.FilterResults;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TestItem;
 import org.apache.commons.collections4.ListUtils;
 import org.bson.BsonDocument;
@@ -261,5 +264,9 @@ public class MongodbAtlasConnector extends MongodbConnector {
         }catch (Exception e){
             this.canListCollections = false;
         }
+    }
+
+    protected void queryByAdvanceFilter(TapConnectorContext connectorContext, TapAdvanceFilter tapAdvanceFilter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
+        queryByAdvanceFilter(connectorContext, tapAdvanceFilter, table, consumer, false);
     }
 }

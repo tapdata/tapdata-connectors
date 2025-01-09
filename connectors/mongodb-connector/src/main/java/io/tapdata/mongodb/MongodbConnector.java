@@ -1345,7 +1345,7 @@ public class MongodbConnector extends ConnectorBase {
 		}
 	}
 
-	private void queryByAdvanceFilter(TapConnectorContext connectorContext, TapAdvanceFilter tapAdvanceFilter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
+	protected void queryByAdvanceFilter(TapConnectorContext connectorContext, TapAdvanceFilter tapAdvanceFilter, TapTable table, Consumer<FilterResults> consumer, boolean noCursorTimeout) throws Throwable {
 		MongoCollection<Document> collection = getMongoCollection(table.getId());
 		List<Bson> bsonList = new ArrayList<>();
 		DataMap match = tapAdvanceFilter.getMatch();
@@ -1444,8 +1444,10 @@ public class MongodbConnector extends ConnectorBase {
 		if (batchSize == null) {
 			batchSize = 1000;
 		}
-		iterable.batchSize(batchSize);
-		iterable.noCursorTimeout(true);
+        iterable.batchSize(batchSize);
+        if (noCursorTimeout) {
+            iterable.noCursorTimeout(true);
+        }
 		try (final MongoCursor<Document> mongoCursor = iterable.iterator()) {
 			while (mongoCursor.hasNext()) {
 				filterResults.add(mongoCursor.next());
@@ -1458,6 +1460,10 @@ public class MongodbConnector extends ConnectorBase {
 		if (filterResults.resultSize() > 0)
 			consumer.accept(filterResults);
 	}
+
+    protected void queryByAdvanceFilter(TapConnectorContext connectorContext, TapAdvanceFilter tapAdvanceFilter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
+        queryByAdvanceFilter(connectorContext, tapAdvanceFilter, table, consumer, true);
+    }
 
 	/**
 	 * The method invocation life circle is below,
