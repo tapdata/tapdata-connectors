@@ -1,15 +1,10 @@
 package io.tapdata.mongodb.reader;
 
 import com.mongodb.*;
-import com.mongodb.client.ChangeStreamIterable;
-import com.mongodb.client.MongoChangeStreamCursor;
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.*;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.changestream.*;
-import io.tapdata.common.concurrent.ConcurrentProcessor;
-import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -30,15 +25,11 @@ import org.bson.*;
 import org.bson.codecs.DecoderContext;
 import org.bson.codecs.DocumentCodec;
 import org.bson.conversions.Bson;
-import org.bson.io.ByteBufferBsonInput;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static io.tapdata.base.ConnectorBase.*;
 import static java.util.Collections.singletonList;
@@ -51,18 +42,15 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
     public static final String TAG = MongodbV4StreamReader.class.getSimpleName();
 
+    private BsonDocument resumeToken = null;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private MongoClient mongoClient;
     private MongoDatabase mongoDatabase;
     private MongodbConfig mongodbConfig;
     private KVMap<Object> globalStateMap;
     private boolean isPreImage;
-    private DocumentCodec codec;
-    private DecoderContext decoderContext;
-    private ConnectionString connectionString;
-    private ConcurrentProcessor<ChangeStreamDocument<RawBsonDocument>, OffsetEvent> concurrentProcessor;
 
-    public MongodbV4StreamReader setPreImage(boolean isPreImage) {
+    public MongodbV4StreamReader setPreImage(boolean isPreImage){
         this.isPreImage = isPreImage;
         return this;
     }
@@ -75,10 +63,6 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
         }
         running.compareAndSet(false, true);
-        codec = new DocumentCodec();
-        decoderContext = DecoderContext.builder().build();
-        concurrentProcessor = TapExecutors.createSimple(8, 32, "MongodbV4StreamReader-Processor");
-        connectionString = new ConnectionString(mongodbConfig.getUri());
     }
 
     @Override
@@ -94,69 +78,166 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 //        pipeline = new ArrayList<>();
 //        List<Bson> collList = tableList.stream().map(t -> Filters.eq("ns.coll", t)).collect(Collectors.toList());
 //        List<Bson> pipeline1 = asList(Aggregates.match(Filters.or(collList)));
+
+        ConnectionString connectionString = new ConnectionString(mongodbConfig.getUri());
         FullDocument fullDocumentOption = FullDocument.UPDATE_LOOKUP;
         FullDocumentBeforeChange fullDocumentBeforeChangeOption = FullDocumentBeforeChange.WHEN_AVAILABLE;
+        List<TapEvent> tapEvents = list();
         while (running.get()) {
-            ChangeStreamIterable<RawBsonDocument> changeStream;
+            ChangeStreamIterable<Document> changeStream;
             if (offset != null) {
                 //报错之后， 再watch一遍
                 //如果完全没事件， 就需要从当前时间开始watch
                 if (offset instanceof Integer) {
-                    changeStream = mongoDatabase.watch(pipeline, RawBsonDocument.class).startAtOperationTime(new BsonTimestamp((Integer) offset, 0)).fullDocument(fullDocumentOption);
+                    changeStream = mongoDatabase.watch(pipeline).startAtOperationTime(new BsonTimestamp((Integer) offset, 0)).fullDocument(fullDocumentOption);
                 } else {
-                    changeStream = mongoDatabase.watch(pipeline, RawBsonDocument.class).resumeAfter((BsonDocument) offset).fullDocument(fullDocumentOption);
+                    changeStream = mongoDatabase.watch(pipeline).resumeAfter((BsonDocument) offset).fullDocument(fullDocumentOption);
                 }
             } else {
-                changeStream = mongoDatabase.watch(pipeline, RawBsonDocument.class).fullDocument(fullDocumentOption);
+                changeStream = mongoDatabase.watch(pipeline).fullDocument(fullDocumentOption);
             }
-            if (isPreImage) {
+            if(isPreImage){
                 changeStream.fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
             }
             consumer.streamReadStarted();
-            AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
-            try (final MongoChangeStreamCursor<ChangeStreamDocument<RawBsonDocument>> streamCursor = changeStream.cursor()) {
-                Thread t = new Thread(() -> {
-                    List<TapEvent> events = list();
-                    OffsetEvent lastOffsetEvent = null;
-                    while (running.get()) {
-                        try {
-                            OffsetEvent event = concurrentProcessor.get(2, TimeUnit.SECONDS);
-                            if (EmptyKit.isNotNull(event)) {
-                                lastOffsetEvent = event;
-                                events.add(event.getEvent());
-                                if (events.size() >= eventBatchSize) {
-                                    consumer.accept(events, event.getOffset());
-                                    events = new ArrayList<>();
-                                }
-                            } else {
-                                if (events.size() > 0) {
-                                    consumer.accept(events, lastOffsetEvent.getOffset());
-                                    events = new ArrayList<>();
-                                }
-                            }
-                        } catch (Exception e) {
-                            throwableAtomicReference.set(e);
-                        }
-                    }
-                });
-                t.setName("MongodbV4StreamReader-Consumer");
-                t.start();
+            try (final MongoChangeStreamCursor<ChangeStreamDocument<Document>> streamCursor = changeStream.cursor()) {
                 while (running.get()) {
-                    if (EmptyKit.isNotNull(throwableAtomicReference.get())) {
-                        throw throwableAtomicReference.get();
-                    }
-                    ChangeStreamDocument<RawBsonDocument> event = streamCursor.tryNext();
+                    ChangeStreamDocument<Document> event = streamCursor.tryNext();
                     if (event == null) {
+                        if (!tapEvents.isEmpty()) {
+                            consumer.accept(tapEvents, offset);
+                            tapEvents = list();
+                        }
                         continue;
                     }
-                    concurrentProcessor.runAsync(event, e -> {
-                        try {
-                            return emit(e);
-                        } catch (Exception er) {
-                            throwableAtomicReference.set(er);
-                            return null;
+                    if (tapEvents.size() >= eventBatchSize) {
+                        consumer.accept(tapEvents, offset);
+                        tapEvents = list();
+                    }
+
+                    MongoNamespace mongoNamespace = event.getNamespace();
+
+                    String collectionName = null;
+                    if (mongoNamespace != null) {
+                        collectionName = mongoNamespace.getCollectionName();
+                    }
+                    if (collectionName == null)
+                        continue;
+                    offset = event.getResumeToken();
+                    OperationType operationType = event.getOperationType();
+                    Document fullDocument = event.getFullDocument();
+                    Document fullDocumentBeforeChange = event.getFullDocumentBeforeChange();
+                    if (operationType == OperationType.INSERT) {
+                        DataMap after = new DataMap();
+                        after.putAll(fullDocument);
+                        TapInsertRecordEvent recordEvent = insertRecordEvent(after, collectionName);
+                        recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
+                        tapEvents.add(recordEvent);
+                    } else if (operationType == OperationType.DELETE) {
+                        DataMap before = new DataMap();
+                        if (event.getDocumentKey() != null) {
+                            final Document documentKey = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
+                            if(isPreImage && MapUtils.isNotEmpty(fullDocumentBeforeChange)){
+                                before.putAll(fullDocumentBeforeChange);
+                            }else{
+                                before.put("_id", documentKey.get("_id"));
+                            }
+                            // Queries take a long time and are disabled when not needed, QPS went down from 4000 to 400.
+                            // If you need other field data in delete event can't be disabled.
+                            TapDeleteRecordEvent recordEvent;
+                            if (mongodbConfig.isEnableFillingModifiedData()) {
+                                final Map lookupData = MongodbLookupUtil.findDeleteCacheByOid(connectionString, collectionName, documentKey.get("_id"), globalStateMap);
+                                recordEvent = deleteDMLEvent(MapUtils.isNotEmpty(lookupData) && lookupData.containsKey("data") && lookupData.get("data") instanceof Map
+                                        ? (Map<String, Object>) lookupData.get("data") : before, collectionName);
+                            } else {
+                                recordEvent = deleteDMLEvent(before, collectionName);
+                            }
+
+                            recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
+                            tapEvents.add(recordEvent);
+                        } else {
+                            TapLogger.warn(TAG, "Document key is null, failed to delete. {}", event);
                         }
-                    });
+                    } else if (operationType == OperationType.UPDATE || operationType == OperationType.REPLACE) {
+                        DataMap before = new DataMap();
+                        DataMap after = new DataMap();
+                        if (MapUtils.isEmpty(fullDocument)) {
+                            if (fullDocumentOption == FullDocument.DEFAULT) {
+                                final Document documentKey = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
+                                try (final MongoCursor<Document> mongoCursor = mongoDatabase.getCollection(collectionName).find(documentKey).iterator();) {
+                                    if (mongoCursor.hasNext()) {
+                                        fullDocument = mongoCursor.next();
+                                    }
+                                }
+                            }
+
+                            if (MapUtils.isEmpty(fullDocument) && mongodbConfig.isSkipDeletedEventsOnFilling()) {
+                                TapLogger.warn(TAG, "Found update event already deleted in collection {}, _id {}", collectionName, event.getDocumentKey().get("_id"));
+                                continue;
+                            }
+                        }
+                        if (event.getDocumentKey() != null) {
+                            UpdateDescription updateDescription = event.getUpdateDescription();
+                            if(isPreImage && MapUtils.isNotEmpty(fullDocumentBeforeChange)){
+                                before.putAll(fullDocumentBeforeChange);
+                            }
+                            if (MapUtils.isNotEmpty(fullDocument)) {
+                                after.putAll(fullDocument);
+                            } else if (null != updateDescription) {
+                                Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
+                                after.putAll(decodeDocument);
+                                if (null != updateDescription.getUpdatedFields()) {
+                                    decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
+                                    for (String key : decodeDocument.keySet()) {
+                                        after.put(key, decodeDocument.get(key));
+                                    }
+                                }
+                            }
+
+                            TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
+//							Map<String, Object> info = new DataMap();
+//							Map<String, Object> unset = new DataMap();
+                            List<String> removedFields = new ArrayList<>();
+                            if (updateDescription != null) {
+                                for (String f:updateDescription.getRemovedFields()) {
+
+                                    if (after.keySet().stream().noneMatch(v -> v.equals(f))) {
+//										unset.put(f, true);
+                                        removedFields.add(f);
+                                    }
+//									if (!after.containsKey(f)) {
+//										unset.put(f, true);
+//									}
+                                }
+//								if (unset.size() > 0) {
+//									info.put("$unset", unset);
+//								}
+                                if (removedFields.size() > 0) {
+                                    recordEvent.removedFields(removedFields);
+                                }
+                            }
+//							recordEvent.setInfo(info);
+                            recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
+                            recordEvent.setIsReplaceEvent(operationType.equals(OperationType.REPLACE));
+                            tapEvents.add(recordEvent);
+                        } else {
+                            throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));
+                        }
+
+
+
+
+                        // The default mode FullDocument.DEFAULT indicates that the reverse lookup phase is entered
+                        // and need to switch to FullDocument.UPDATE_LOOKUP
+                        if (fullDocumentOption == FullDocument.DEFAULT) {
+                            if (!tapEvents.isEmpty()) {
+                                consumer.accept(tapEvents, offset);
+                                tapEvents = list();
+                            }
+                            fullDocumentOption = FullDocument.UPDATE_LOOKUP;
+                            break;
+                        }
+                    }
                 }
             } catch (Throwable throwable) {
                 if (!running.get()) {
@@ -164,7 +245,8 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     if (throwable instanceof IllegalStateException && EmptyKit.isNotEmpty(message) && (message.contains("state should be: open") || message.contains("Cursor has been closed"))) {
                         return;
                     }
-                    if (throwable instanceof MongoInterruptedException) {
+
+                    if (throwable instanceof MongoInterruptedException || throwable instanceof InterruptedException) {
                         return;
                     }
                 }
@@ -175,153 +257,30 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         throw new TapPdkOffsetOutOfLogEx(connectorContext.getSpecification().getId(), offset, throwable);
                     }
 
+                    if (mongoCommandException.getErrorCode() == 10334) {
+                        fullDocumentOption = FullDocument.DEFAULT;
+                        continue;
+                    }
+
                     if (mongoCommandException.getErrorCode() == 211) {
                         throw new TapPdkRetryableEx(connectorContext.getSpecification().getId(), throwable);
                     }
                 }
 
-                throw new RuntimeException(throwable);
+                if (throwable instanceof MongoQueryException) {
+                    MongoQueryException mongoQueryException = (MongoQueryException) throwable;
+                    if (mongoQueryException.getErrorCode() == 10334) {
+                        fullDocumentOption = FullDocument.DEFAULT;
+                        continue;
+                    }
+                }
                 //else {
                 //TapLogger.warn(TAG,"Read change stream from {}, failed {} " ,MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage());
                 //TapLogger.debug(TAG, "Read change stream from {}, failed {}, error {}", MongodbUtil.maskUriPassword(mongodbConfig.getUri()), throwable.getMessage(), getStackString(throwable));
                 //}
-            } finally {
-                concurrentProcessor.close();
+                throw throwable;
             }
         }
-    }
-
-    static class OffsetEvent {
-        private final Object offset;
-        private final TapEvent event;
-
-        public OffsetEvent(TapEvent event, Object offset) {
-            this.offset = offset;
-            this.event = event;
-        }
-
-        public Object getOffset() {
-            return offset;
-        }
-
-        public TapEvent getEvent() {
-            return event;
-        }
-    }
-
-    private OffsetEvent emit(ChangeStreamDocument<RawBsonDocument> event) {
-        MongoNamespace mongoNamespace = event.getNamespace();
-        String collectionName = null;
-        if (mongoNamespace != null) {
-            collectionName = mongoNamespace.getCollectionName();
-        }
-        if (collectionName == null) {
-            return null;
-        }
-        OffsetEvent offsetEvent = null;
-        OperationType operationType = event.getOperationType();
-        Document fullDocumentBeforeChange = null;
-        if (EmptyKit.isNotNull(event.getFullDocumentBeforeChange())) {
-            ByteBuffer byteBufferBefore = event.getFullDocumentBeforeChange().getByteBuffer().asNIO();
-            try (BsonBinaryReader readerBefore = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBufferBefore)))) {
-                fullDocumentBeforeChange = codec.decode(readerBefore, decoderContext);
-            }
-        }
-        if(null == event.getFullDocument()){
-            if (operationType == OperationType.DELETE) {
-                DataMap before = new DataMap();
-                if (event.getDocumentKey() != null) {
-                    final Document documentKey = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
-                    if (isPreImage && MapUtils.isNotEmpty(fullDocumentBeforeChange)) {
-                        before.putAll(fullDocumentBeforeChange);
-                    } else {
-                        before.put("_id", documentKey.get("_id"));
-                    }
-                    // Queries take a long time and are disabled when not needed, QPS went down from 4000 to 400.
-                    // If you need other field data in delete event can't be disabled.
-                    TapDeleteRecordEvent recordEvent;
-                    if (mongodbConfig.isEnableFillingModifiedData()) {
-                        final Map lookupData = MongodbLookupUtil.findDeleteCacheByOid(connectionString, collectionName, documentKey.get("_id"), globalStateMap);
-                        recordEvent = deleteDMLEvent(MapUtils.isNotEmpty(lookupData) && lookupData.containsKey("data") && lookupData.get("data") instanceof Map
-                                ? (Map<String, Object>) lookupData.get("data") : before, collectionName);
-                    } else {
-                        recordEvent = deleteDMLEvent(before, collectionName);
-                    }
-
-                    recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
-                    offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
-                } else {
-                    TapLogger.warn(TAG, "Document key is null, failed to delete. {}", event);
-                }
-            }
-        }else{
-            ByteBuffer byteBuffer = event.getFullDocument().getByteBuffer().asNIO();
-
-            try (
-                    BsonBinaryReader reader = new BsonBinaryReader(new ByteBufferBsonInput(new ByteBufNIO(byteBuffer)))
-            ) {
-                Document fullDocument = codec.decode(reader, decoderContext);
-                if (operationType == OperationType.INSERT) {
-                    DataMap after = new DataMap();
-                    after.putAll(fullDocument);
-                    TapInsertRecordEvent recordEvent = insertRecordEvent(after, collectionName);
-                    recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
-                    offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
-                } else if (operationType == OperationType.UPDATE || operationType == OperationType.REPLACE) {
-                    DataMap before = new DataMap();
-                    DataMap after = new DataMap();
-                    if (event.getDocumentKey() != null) {
-                        UpdateDescription updateDescription = event.getUpdateDescription();
-                        if (isPreImage && MapUtils.isNotEmpty(fullDocumentBeforeChange)) {
-                            before.putAll(fullDocumentBeforeChange);
-                        }
-                        if (MapUtils.isNotEmpty(fullDocument)) {
-                            after.putAll(fullDocument);
-                        } else if (null != updateDescription) {
-                            Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
-                            after.putAll(decodeDocument);
-                            if (null != updateDescription.getUpdatedFields()) {
-                                decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
-                                for (String key : decodeDocument.keySet()) {
-                                    after.put(key, decodeDocument.get(key));
-                                }
-                            }
-                        }
-
-                        TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
-//							Map<String, Object> info = new DataMap();
-//							Map<String, Object> unset = new DataMap();
-                        List<String> removedFields = new ArrayList<>();
-                        if (updateDescription != null) {
-                            for (String f : updateDescription.getRemovedFields()) {
-
-                                if (after.keySet().stream().noneMatch(v -> v.equals(f))) {
-//										unset.put(f, true);
-                                    removedFields.add(f);
-                                }
-//									if (!after.containsKey(f)) {
-//										unset.put(f, true);
-//									}
-                            }
-//								if (unset.size() > 0) {
-//									info.put("$unset", unset);
-//								}
-                            if (removedFields.size() > 0) {
-                                recordEvent.removedFields(removedFields);
-                            }
-                        }
-//							recordEvent.setInfo(info);
-                        recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
-                        recordEvent.setIsReplaceEvent(operationType.equals(OperationType.REPLACE));
-                        offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
-                    } else {
-                        throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));
-                    }
-                }
-        }
-
-        }
-        return offsetEvent;
     }
 
     @Override
@@ -342,12 +301,12 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     }
 
     protected void openChangeStreamPreAndPostImages(List<String> tableList) {
-        if (isPreImage) {
-            for (String tableName : tableList) {
+        if(isPreImage){
+            for(String tableName : tableList){
                 try {
                     openChangeStream(tableName);
-                } catch (MongoException e) {
-                    if (e.getCode() == 26) {
+                }catch (MongoException e){
+                    if (e.getCode() == 26){
                         mongoDatabase.createCollection(tableName);
                         openChangeStream(tableName);
                         return;
@@ -360,8 +319,8 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
     private void openChangeStream(String tableName) {
         BsonDocument bsonDocument = new BsonDocument();
-        bsonDocument.put("collMod", new BsonString(tableName));
-        bsonDocument.put("changeStreamPreAndPostImages", new BsonDocument("enabled", new BsonBoolean(true)));
+        bsonDocument.put("collMod",new BsonString(tableName));
+        bsonDocument.put("changeStreamPreAndPostImages",new BsonDocument("enabled",new BsonBoolean(true)));
         mongoDatabase.runCommand(bsonDocument);
     }
 
