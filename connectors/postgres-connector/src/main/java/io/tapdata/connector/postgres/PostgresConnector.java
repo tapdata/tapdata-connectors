@@ -351,10 +351,16 @@ public class PostgresConnector extends CommonDbConnector {
             slotName = tapConnectorContext.getStateMap().get("tapdata_pg_slot");
             postgresConfig.load(tapConnectorContext.getNodeConfig());
         });
-        commonSqlMaker = new PostgresSqlMaker()
-                .closeNotNull(postgresConfig.getCloseNotNull())
-                .autoIncStartValue(postgresConfig.getAutoIncStartValue());
         postgresVersion = postgresJdbcContext.queryVersion();
+        if (Boolean.TRUE.equals(postgresConfig.getCreateAutoInc()) && postgresVersion.compareTo("100000") >= 0) {
+            commonSqlMaker = new PostgresSqlMaker()
+                    .closeNotNull(postgresConfig.getCloseNotNull())
+                    .createAutoInc(postgresConfig.getCreateAutoInc())
+                    .autoIncStartValue(postgresConfig.getAutoIncStartValue());
+        } else {
+            commonSqlMaker = new PostgresSqlMaker()
+                    .closeNotNull(postgresConfig.getCloseNotNull());
+        }
         postgresJdbcContext.withPostgresVersion(postgresVersion);
         postgresTest.withPostgresVersion(postgresVersion);
         ddlSqlGenerator = new PostgresDDLSqlGenerator();
