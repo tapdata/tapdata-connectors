@@ -77,7 +77,7 @@ public class TDengineJdbcContext extends JdbcContext {
         try {
             query(String.format("select db_name, table_name, table_comment, type from information_schema.ins_tables " +
                             "where db_name = '%s' %s %s" +
-                            "union all select db_name, stable_name, table_comment, \"SUPER_TABLE\" from information_schema.ins_stables where db_name = '%s' %s;", getConfig().getDatabase(), tableSql, typeSql, getConfig().getDatabase(), stableSql),
+                            "union select db_name, stable_name, table_comment, \"SUPER_TABLE\" from information_schema.ins_stables where db_name = '%s' %s;", getConfig().getDatabase(), tableSql, typeSql, getConfig().getDatabase(), stableSql),
                     resultSet -> tableList.addAll(TDengineDbKit.getDataFromResultSet(resultSet)));
         } catch (Throwable e) {
             TapLogger.error(TAG, "Execute queryAllTables failed, error: " + e.getMessage(), e);
