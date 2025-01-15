@@ -45,6 +45,9 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
+        if (EmptyKit.isEmpty(lastAfter)) {
+            return;
+        }
         switch (updatePolicy) {
             case INSERT_ON_NONEXISTS:
                 justInsert(lastAfter);
