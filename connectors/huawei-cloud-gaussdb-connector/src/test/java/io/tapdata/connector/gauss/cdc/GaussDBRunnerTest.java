@@ -466,11 +466,10 @@ public class GaussDBRunnerTest {
             streamBuilder = mock(ChainedLogicalStreamBuilder.class);
             start = mock(PGReplicationStream.class);
 
-            when(streamBuilder.withSlotOption("standby-connection", true)).thenReturn(streamBuilder);
             when(streamBuilder.withSlotOption("decode-style", "b")).thenReturn(streamBuilder);
             when(streamBuilder.withSlotOption("sending-batch", 1)).thenReturn(streamBuilder);
             when(streamBuilder.withSlotOption("max-txn-in-memory", 100)).thenReturn(streamBuilder);
-            when(streamBuilder.withSlotOption("max-reorderbuffer-in-memory", 50)).thenReturn(streamBuilder);
+            when(streamBuilder.withSlotOption("max-reorderbuffer-in-memory", 5)).thenReturn(streamBuilder);
             when(streamBuilder.withSlotOption("include-user", true)).thenReturn(streamBuilder);
             when(streamBuilder.withSlotOption("enable-heartbeat", true)).thenReturn(streamBuilder);
             when(streamBuilder.withSlotOption("include-xids", true)).thenReturn(streamBuilder);
@@ -479,11 +478,10 @@ public class GaussDBRunnerTest {
         }
 
         void assertVerify(int times, boolean isCloud) throws SQLException {
-            verify(streamBuilder, times(times)).withSlotOption("standby-connection", true);
             verify(streamBuilder, times(times)).withSlotOption("decode-style", "b");
             verify(streamBuilder, times(times)).withSlotOption("sending-batch", 1);
             verify(streamBuilder, times(times)).withSlotOption("max-txn-in-memory", 100);
-            verify(streamBuilder, times(times)).withSlotOption("max-reorderbuffer-in-memory", 50);
+            verify(streamBuilder, times(times)).withSlotOption("max-reorderbuffer-in-memory", 5);
             verify(streamBuilder, times(times)).withSlotOption("include-user", true);
             verify(streamBuilder, times(isCloud ? 0 : times)).withSlotOption("enable-heartbeat", true);
             verify(streamBuilder, times(times)).withSlotOption("include-xids", true);
