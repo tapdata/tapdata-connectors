@@ -66,6 +66,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.logging.LogManager;
 import java.util.stream.Collectors;
 
 import static io.tapdata.connector.mysql.util.MysqlUtil.randomServerId;
@@ -97,10 +98,12 @@ public class MysqlReader implements Closeable {
     private TimeZone dbTimeZone;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     private final ExceptionCollector exceptionCollector;
+    private MysqlSchemaHistoryTransfer schemaHistoryTransfer;
     private String dropTransactionId = null;
     private final MysqlConfig mysqlConfig;
     protected Log tapLogger;
     private long diff = 0;
+    private TapConnectorContext tapConnectorContext;
 
     public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, Supplier<Boolean> isAlive) {
         this.mysqlJdbcContext = mysqlJdbcContext;
@@ -223,6 +226,7 @@ public class MysqlReader implements Closeable {
         try {
             initDebeziumServerName(tapConnectorContext);
             this.tapTableMap = tapConnectorContext.getTableMap();
+            this.tapConnectorContext = tapConnectorContext;
             this.ddlParserType = ddlParserType;
             String offsetStr = "";
             JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
@@ -263,6 +267,10 @@ public class MysqlReader implements Closeable {
             tapLogger.info("Starting mysql cdc, server name: " + serverName);
             this.eventQueue = new LinkedBlockingQueue<>(10);
             this.streamReadConsumer = consumer;
+            LockManager.mysqlSchemaHistoryTransferManager.computeIfAbsent(serverName, key -> {
+                this.schemaHistoryTransfer = new MysqlSchemaHistoryTransfer();
+                return this.schemaHistoryTransfer;
+            });
             initMysqlSchemaHistory(tapConnectorContext);
             this.mysqlSchemaHistoryMonitor = new ScheduledThreadPoolExecutor(1);
             this.mysqlSchemaHistoryMonitor.scheduleAtFixedRate(() -> saveMysqlSchemaHistory(tapConnectorContext),
@@ -429,7 +437,7 @@ public class MysqlReader implements Closeable {
                     mysqlSchemaHistory = InstanceFactory.instance(JsonParser.class).fromJson((String) mysqlSchemaHistory,
                             new TypeHolder<Map<String, LinkedHashSet<String>>>() {
                             });
-                    MysqlSchemaHistoryTransfer.historyMap.putAll((Map) mysqlSchemaHistory);
+                    LockManager.getSchemaHistoryTransfer(serverName).getHistoryMap().putAll((Map) mysqlSchemaHistory);
                 }
             }
         } finally {
@@ -442,9 +450,9 @@ public class MysqlReader implements Closeable {
         try {
             tapConnectorContext.configContext();
             Thread.currentThread().setName("Save-Mysql-Schema-History-" + serverName);
-            if (!MysqlSchemaHistoryTransfer.isSave()) {
-                MysqlSchemaHistoryTransfer.executeWithLock(n -> !isAlive.get(), () -> {
-                    String json = InstanceFactory.instance(JsonParser.class).toJson(MysqlSchemaHistoryTransfer.historyMap);
+            if (!schemaHistoryTransfer.isSave()) {
+                schemaHistoryTransfer.executeWithLock(n -> !isAlive.get(), () -> {
+                    String json = InstanceFactory.instance(JsonParser.class).toJson(schemaHistoryTransfer.getHistoryMap());
                     try {
                         json = StringCompressUtil.compress(json);
                     } catch (IOException e) {
@@ -452,7 +460,7 @@ public class MysqlReader implements Closeable {
                         return;
                     }
                     tapConnectorContext.getStateMap().put(MYSQL_SCHEMA_HISTORY, json);
-                    MysqlSchemaHistoryTransfer.save();
+                    schemaHistoryTransfer.save();
                 });
             }
         } finally {
@@ -482,6 +490,10 @@ public class MysqlReader implements Closeable {
             } catch (IOException e) {
                 tapLogger.warn("Close CDC engine failed, error: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
             }
+        });
+        saveMysqlSchemaHistory(tapConnectorContext);
+        LockManager.mysqlSchemaHistoryTransferManager.computeIfPresent(serverName, (key, value) -> {
+            return null;
         });
         Optional.ofNullable(mysqlSchemaHistoryMonitor).ifPresent(ExecutorService::shutdownNow);
     }
