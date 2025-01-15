@@ -3,9 +3,11 @@ package io.tapdata.mongodb;
 import com.alibaba.fastjson.JSONObject;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoException;
+import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.connection.ClusterSettings;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.constant.DbTestItem;
 import io.tapdata.exception.TapCodeException;
@@ -89,6 +91,7 @@ public class MongodbTest extends CommonDbTest {
         StringBuilder failHosts;
         List<String> hosts = mongodbConfig.getHosts();
         failHosts = new StringBuilder();
+        StringBuilder successHosts = new StringBuilder();
         for (String host : hosts) {
             String[] split = host.split(":");
             String hostname = split[0];
@@ -98,16 +101,23 @@ public class MongodbTest extends CommonDbTest {
             }
             try {
                 NetUtil.validateHostPortWithSocket(hostname, port);
+                successHosts.append(host).append(",");
             } catch (Exception e) {
                 failHosts.append(host).append(",");
             }
         }
         if (EmptyKit.isNotBlank(String.valueOf(failHosts))) {
             failHosts = new StringBuilder(failHosts.substring(0, failHosts.length() - 1));
-            consumer.accept(testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_FAILED, JSONObject.toJSONString(failHosts)));
-            return false;
+            if (EmptyKit.isBlank(String.valueOf(successHosts))) {
+                consumer.accept(testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_FAILED, JSONObject.toJSONString(failHosts)));
+                return false;
+            }
+            consumer.accept(testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN, JSONObject.toJSONString(failHosts)));
+            return true;
         }
-        consumer.accept(testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_SUCCESSFULLY));
+        ClusterSettings clusterSettings = mongoClient.getClusterDescription().getClusterSettings();
+        List<ServerAddress> clientHost = Optional.ofNullable(clusterSettings.getHosts()).orElse(new ArrayList<>());
+        consumer.accept(testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_SUCCESSFULLY, clientHost.toString()));
         return true;
     }
 
