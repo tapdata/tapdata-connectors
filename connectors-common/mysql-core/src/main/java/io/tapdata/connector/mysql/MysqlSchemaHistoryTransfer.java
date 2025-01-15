@@ -14,11 +14,11 @@ import java.util.function.Predicate;
  * @create 2022-05-25 16:10
  **/
 public class MysqlSchemaHistoryTransfer {
-	public static Map<String, Set<String>> historyMap = new ConcurrentHashMap<>();
-	private static AtomicBoolean saved = new AtomicBoolean(false);
-	private static ReentrantLock lock = new ReentrantLock();
+	private   Map<String, Set<String>> historyMap = new ConcurrentHashMap<>();
+	private AtomicBoolean saved = new AtomicBoolean(false);
+	private ReentrantLock lock = new ReentrantLock(true);
 
-	public static void executeWithLock(Predicate<?> stop, Runner runner) {
+	public void executeWithLock(Predicate<?> stop, Runner runner) {
 		try {
 			tryLock(stop);
 			runner.execute();
@@ -27,13 +27,13 @@ public class MysqlSchemaHistoryTransfer {
 		}
 	}
 
-	private static void tryLock(Predicate<?> stop) {
+	private void tryLock(Predicate<?> stop) {
 		while (true) {
 			if (null != stop && stop.test(null)) {
 				break;
 			}
 			try {
-				if (MysqlSchemaHistoryTransfer.lock.tryLock(3L, TimeUnit.SECONDS)) {
+				if (this.lock.tryLock(2, TimeUnit.MINUTES)) {
 					break;
 				}
 			} catch (InterruptedException e) {
@@ -42,20 +42,24 @@ public class MysqlSchemaHistoryTransfer {
 		}
 	}
 
-	private static void unLock() {
-		MysqlSchemaHistoryTransfer.lock.unlock();
+	private void unLock() {
+		this.lock.unlock();
 	}
 
-	public static boolean isSave() {
-		return MysqlSchemaHistoryTransfer.saved.get();
+	public boolean isSave() {
+		return this.saved.get();
 	}
 
-	public static void unSave() {
-		MysqlSchemaHistoryTransfer.saved.set(false);
+	public void unSave() {
+		this.saved.set(false);
 	}
 
-	public static void save() {
-		MysqlSchemaHistoryTransfer.saved.set(true);
+	public Map<String, Set<String>> getHistoryMap() {
+		return historyMap;
+	}
+
+	public void save() {
+		this.saved.set(true);
 	}
 
 	public interface Runner {
