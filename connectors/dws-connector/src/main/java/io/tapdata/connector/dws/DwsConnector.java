@@ -180,6 +180,8 @@ public class DwsConnector extends PostgresConnector {
                     append.append("distribute by hash(\"").append(String.join("\",\"", postgresConfig.getDistributedKey())).append("\")");
                 }
             }
+        } else if (EmptyKit.isNotEmpty(primaryKeys)) {
+            append.append("distribute by hash(\"").append(String.join("\",\"", primaryKeys)).append("\")");
         }
         return createTable(connectorContext, createTableEvent, false, append.toString());
     }
