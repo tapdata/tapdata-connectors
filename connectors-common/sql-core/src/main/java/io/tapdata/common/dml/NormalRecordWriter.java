@@ -18,9 +18,7 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Collections;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -40,6 +38,8 @@ public class NormalRecordWriter {
     };
     protected boolean isTransaction = false;
     protected Log tapLogger;
+    protected List<String> autoIncFields;
+    protected Map<String, Object> autoIncMap = new HashMap<>();
     protected boolean largeSql = false;
     protected CommonDbConfig commonDbConfig;
 
@@ -94,6 +94,13 @@ public class NormalRecordWriter {
                     deleteRecorder.executeBatch(listResult);
                     TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
                     insertRecorder.addInsertBatch(insertRecordEvent.getAfter(), listResult);
+                    if (EmptyKit.isNotEmpty(autoIncFields)) {
+                        autoIncFields.forEach(field -> {
+                            if (EmptyKit.isNotNull(insertRecordEvent.getAfter().get(field))) {
+                                autoIncMap.put(field, insertRecordEvent.getAfter().get(field));
+                            }
+                        });
+                    }
                     insertRecorder.addAndCheckCommit(recordEvent, listResult);
                 } else if (recordEvent instanceof TapUpdateRecordEvent) {
                     insertRecorder.executeBatch(listResult);
@@ -163,6 +170,14 @@ public class NormalRecordWriter {
     public NormalRecordWriter setTapLogger(Log tapLogger) {
         this.tapLogger = tapLogger;
         return this;
+    }
+
+    public void setAutoIncFields(List<String> autoIncFields) {
+        this.autoIncFields = autoIncFields;
+    }
+
+    public Map<String, Object> getAutoIncMap() {
+        return autoIncMap;
     }
 
     protected String upsertDoubleActive() {

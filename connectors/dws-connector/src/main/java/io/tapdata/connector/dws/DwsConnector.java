@@ -268,9 +268,9 @@ public class DwsConnector extends PostgresConnector {
         boolean hasUniqueIndex;
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             hasUniqueIndex = makeSureHasUnique(tapTable);
-            writtenTableMap.put(tapTable.getId(), hasUniqueIndex);
+            writtenTableMap.put(tapTable.getId(), DataMap.create().kv(HAS_UNIQUE_INDEX, hasUniqueIndex));
         } else {
-            hasUniqueIndex = writtenTableMap.get(tapTable.getId());
+            hasUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_UNIQUE_INDEX, false);
         }
         String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {

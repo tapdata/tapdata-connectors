@@ -17,7 +17,6 @@ public class PostgresSqlMaker extends CommonSqlMaker {
 
     private Boolean closeNotNull;
     private Boolean createAutoInc = false;
-    private Long autoIncStartValue = 1000000L;
     private char escapeChar = '"';
 
     public PostgresSqlMaker closeNotNull(Boolean closeNotNull) {
@@ -27,11 +26,6 @@ public class PostgresSqlMaker extends CommonSqlMaker {
 
     public PostgresSqlMaker createAutoInc(Boolean createAutoInc) {
         this.createAutoInc = createAutoInc;
-        return this;
-    }
-
-    public PostgresSqlMaker autoIncStartValue(long autoIncStartValue) {
-        this.autoIncStartValue = autoIncStartValue;
         return this;
     }
 
@@ -50,9 +44,7 @@ public class PostgresSqlMaker extends CommonSqlMaker {
             return;
         }
         long startValue;
-        if (EmptyKit.isNotNull(autoIncStartValue)) {
-            startValue = autoIncStartValue;
-        } else if (EmptyKit.isNotNull(tapField.getAutoIncStartValue())) {
+        if (EmptyKit.isNotNull(tapField.getAutoIncStartValue())) {
             startValue = tapField.getAutoIncStartValue();
         } else {
             startValue = 1;
