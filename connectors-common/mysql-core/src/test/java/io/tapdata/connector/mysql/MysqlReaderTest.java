@@ -285,10 +285,12 @@ public class MysqlReaderTest {
         Log tapLogger;
         TapConnectorContext tapConnectorContext;
         KVMap<Object> stateMap;
+        MysqlSchemaHistoryTransfer mysqlSchemaHistoryTransfer;
 
         @BeforeEach
         void init() {
-            MysqlSchemaHistoryTransfer.historyMap = new ConcurrentHashMap<>();
+            this.mysqlSchemaHistoryTransfer = new MysqlSchemaHistoryTransfer();
+            LockManager.mysqlSchemaHistoryTransferManager.put("name", this.mysqlSchemaHistoryTransfer);
             reader = mock(MysqlReader.class);
             tapLogger = mock(Log.class);
             reader.tapLogger = tapLogger;
@@ -301,10 +303,6 @@ public class MysqlReaderTest {
             doNothing().when(tapLogger).debug(anyString(), anyLong());
         }
 
-        @AfterEach
-        void close() {
-            MysqlSchemaHistoryTransfer.historyMap.clear();
-        }
 
         @Nested
         class initMysqlSchemaHistory {
@@ -344,27 +342,34 @@ public class MysqlReaderTest {
 
         @Nested
         class saveMysqlSchemaHistory {
+            MysqlSchemaHistoryTransfer mysqlSchemaHistoryTransfer;
             @BeforeEach
             void init() {
+                this.mysqlSchemaHistoryTransfer = mock(MysqlSchemaHistoryTransfer.class);
                 doNothing().when(stateMap).put(anyString(), anyString());
                 doNothing().when(tapConnectorContext).configContext();
                 doNothing().when(tapLogger).warn(anyString());
+                reader.tapLogger = tapLogger;
                 doCallRealMethod().when(reader).saveMysqlSchemaHistory(tapConnectorContext);
+                ReflectionTestUtils.setField(reader,"schemaHistoryTransfer",mysqlSchemaHistoryTransfer);
             }
 
             @Test
             void testNormal() {
-                try (MockedStatic<MysqlSchemaHistoryTransfer> msht = mockStatic(MysqlSchemaHistoryTransfer.class);
-                     MockedStatic<StringCompressUtil> scu = mockStatic(StringCompressUtil.class)) {
-                    msht.when(MysqlSchemaHistoryTransfer::isSave).thenReturn(false);
-                    msht.when(() -> MysqlSchemaHistoryTransfer.executeWithLock(any(Predicate.class), any(MysqlSchemaHistoryTransfer.Runner.class))).thenAnswer(a -> {
+                try (
+                        MockedStatic<StringCompressUtil> scu = mockStatic(StringCompressUtil.class)) {
+                    when(mysqlSchemaHistoryTransfer.isSave()).thenReturn(false);
+                    doAnswer((a) -> {
+                        return null;
+                    }).when(mysqlSchemaHistoryTransfer).executeWithLock(any(Predicate.class), any(MysqlSchemaHistoryTransfer.Runner.class));
+                    doAnswer(a -> {
                         Predicate predicate = a.getArgument(0, Predicate.class);
                         predicate.test(null);
                         MysqlSchemaHistoryTransfer.Runner argument = a.getArgument(1, MysqlSchemaHistoryTransfer.Runner.class);
                         argument.execute();
                         return null;
-                    });
-                    msht.when(MysqlSchemaHistoryTransfer::save).thenAnswer(a -> null);
+                    }).when(mysqlSchemaHistoryTransfer).executeWithLock(any(Predicate.class), any(MysqlSchemaHistoryTransfer.Runner.class));
+                    doAnswer(a -> null).when(mysqlSchemaHistoryTransfer).save();
                     scu.when(() -> StringCompressUtil.compress(anyString())).thenReturn("");
                     reader.saveMysqlSchemaHistory(tapConnectorContext);
                 }
@@ -373,15 +378,15 @@ public class MysqlReaderTest {
             void testIsSave() {
                 try (MockedStatic<MysqlSchemaHistoryTransfer> msht = mockStatic(MysqlSchemaHistoryTransfer.class);
                      MockedStatic<StringCompressUtil> scu = mockStatic(StringCompressUtil.class)) {
-                    msht.when(MysqlSchemaHistoryTransfer::isSave).thenReturn(true);
-                    msht.when(() -> MysqlSchemaHistoryTransfer.executeWithLock(any(Predicate.class), any(MysqlSchemaHistoryTransfer.Runner.class))).thenAnswer(a -> {
+                    msht.when(mysqlSchemaHistoryTransfer::isSave).thenReturn(true);
+                    msht.when(() -> mysqlSchemaHistoryTransfer.executeWithLock(any(Predicate.class), any(MysqlSchemaHistoryTransfer.Runner.class))).thenAnswer(a -> {
                         Predicate predicate = a.getArgument(0, Predicate.class);
                         predicate.test(null);
                         MysqlSchemaHistoryTransfer.Runner argument = a.getArgument(1, MysqlSchemaHistoryTransfer.Runner.class);
                         argument.execute();
                         return null;
                     });
-                    msht.when(MysqlSchemaHistoryTransfer::save).thenAnswer(a -> null);
+                    msht.when(mysqlSchemaHistoryTransfer::save).thenAnswer(a -> null);
                     scu.when(() -> StringCompressUtil.compress(anyString())).thenReturn("");
                     reader.saveMysqlSchemaHistory(tapConnectorContext);
                 }
@@ -391,13 +396,13 @@ public class MysqlReaderTest {
             void testException() {
                 try (MockedStatic<MysqlSchemaHistoryTransfer> msht = mockStatic(MysqlSchemaHistoryTransfer.class);
                      MockedStatic<StringCompressUtil> scu = mockStatic(StringCompressUtil.class)) {
-                    msht.when(MysqlSchemaHistoryTransfer::isSave).thenReturn(false);
-                    msht.when(() -> MysqlSchemaHistoryTransfer.executeWithLock(any(Predicate.class), any(MysqlSchemaHistoryTransfer.Runner.class))).thenAnswer(a -> {
+                    msht.when(mysqlSchemaHistoryTransfer::isSave).thenReturn(false);
+                    msht.when(() -> mysqlSchemaHistoryTransfer.executeWithLock(any(Predicate.class), any(MysqlSchemaHistoryTransfer.Runner.class))).thenAnswer(a -> {
                         MysqlSchemaHistoryTransfer.Runner argument = a.getArgument(1, MysqlSchemaHistoryTransfer.Runner.class);
                         argument.execute();
                         return null;
                     });
-                    msht.when(MysqlSchemaHistoryTransfer::save).thenAnswer(a -> null);
+                    msht.when(mysqlSchemaHistoryTransfer::save).thenAnswer(a -> null);
                     scu.when(() -> StringCompressUtil.compress(anyString())).thenAnswer(a -> { throw new IOException("");});
                     reader.saveMysqlSchemaHistory(tapConnectorContext);
                 }
