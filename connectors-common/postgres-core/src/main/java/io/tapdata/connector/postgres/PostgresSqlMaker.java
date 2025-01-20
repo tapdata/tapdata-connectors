@@ -16,19 +16,7 @@ import static io.tapdata.pdk.apis.entity.SortOn.ASCENDING;
 
 public class PostgresSqlMaker extends CommonSqlMaker {
 
-    private Boolean closeNotNull;
-    private Boolean createAutoInc = false;
     private char escapeChar = '"';
-
-    public PostgresSqlMaker closeNotNull(Boolean closeNotNull) {
-        this.closeNotNull = closeNotNull;
-        return this;
-    }
-
-    public PostgresSqlMaker createAutoInc(Boolean createAutoInc) {
-        this.createAutoInc = createAutoInc;
-        return this;
-    }
 
     protected void buildNullDefinition(StringBuilder builder, TapField tapField) {
         boolean nullable = !(EmptyKit.isNotNull(tapField.getNullable()) && !tapField.getNullable());
@@ -54,9 +42,6 @@ public class PostgresSqlMaker extends CommonSqlMaker {
     }
 
     protected void buildAutoIncDefinition(StringBuilder builder, TapField tapField) {
-        if (!Boolean.TRUE.equals(createAutoInc)) {
-            return;
-        }
         long startValue;
         if (EmptyKit.isNotNull(tapField.getAutoIncStartValue())) {
             startValue = tapField.getAutoIncStartValue();

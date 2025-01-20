@@ -12,12 +12,6 @@ import java.text.DecimalFormat;
  * Date: 2023/5/29
  **/
 public class YashandbSqlMaker extends CommonSqlMaker {
-    private Boolean closeNotNull;
-
-    public YashandbSqlMaker closeNotNull(Boolean closeNotNull) {
-        this.closeNotNull = closeNotNull;
-        return this;
-    }
 
     protected void buildNullDefinition(StringBuilder builder, TapField tapField) {
         boolean nullable = !(EmptyKit.isNotNull(tapField.getNullable()) && !tapField.getNullable());
