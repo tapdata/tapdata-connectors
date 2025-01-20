@@ -1,6 +1,7 @@
 package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonSqlMaker;
+import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.Collate;
@@ -36,6 +37,19 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         }
         if (!nullable || tapField.getPrimaryKey()) {
             builder.append("NOT NULL").append(' ');
+        }
+    }
+
+    protected void buildDefaultDefinition(StringBuilder builder, TapField tapField) {
+        if (EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
+            builder.append("DEFAULT").append(' ');
+            if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
+                builder.append(PostgresColumn.PostgresDefaultFunction.valueOf(tapField.getDefaultFunction().toString())).append(' ');
+            } else if (tapField.getDefaultValue() instanceof Number) {
+                builder.append(tapField.getDefaultValue()).append(' ');
+            } else {
+                builder.append("'").append(tapField.getDefaultValue()).append("' ");
+            }
         }
     }
 
