@@ -6,6 +6,9 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * @author Jarad
  * @date 2022/4/20
@@ -50,6 +53,35 @@ public class PostgresColumn extends CommonColumn {
             return defaultValue.substring(0, defaultValue.lastIndexOf("::"));
         } else {
             return defaultValue;
+        }
+    }
+
+    public enum PostgresDefaultFunction {
+        _CURRENT_TIMESTAMP("current_timestamp"),
+        _CURRENT_USER("current_user");
+
+        private final String function;
+        private static final Map<String, String> map = new HashMap<>();
+
+        static {
+            for (PostgresDefaultFunction value : PostgresDefaultFunction.values()) {
+                map.put(value.function, value.name());
+            }
+        }
+
+        PostgresDefaultFunction(String function) {
+            this.function = function;
+        }
+
+        public static String parseFunction(String key) {
+            if (map.containsKey(key)) {
+                return map.get(key);
+            }
+            return null;
+        }
+
+        public String getFunction() {
+            return function;
         }
     }
 }
