@@ -31,6 +31,9 @@ public class CommonSqlMaker {
 
     private char escapeChar = '"';
     public static final String COLLATE = "COLLATE";
+    protected Boolean closeNotNull = false;
+    protected Boolean createAutoInc = false;
+    protected Boolean applyDefault = false;
 
     public CommonSqlMaker() {
 
@@ -38,6 +41,21 @@ public class CommonSqlMaker {
 
     public CommonSqlMaker(char escapeChar) {
         this.escapeChar = escapeChar;
+    }
+
+    public <T extends CommonSqlMaker> T closeNotNull(Boolean closeNotNull) {
+        this.closeNotNull = closeNotNull;
+        return (T) this;
+    }
+
+    public <T extends CommonSqlMaker> T createAutoInc(Boolean createAutoInc) {
+        this.createAutoInc = createAutoInc;
+        return (T) this;
+    }
+
+    public <T extends CommonSqlMaker> T applyDefault(Boolean applyDefault) {
+        this.applyDefault = applyDefault;
+        return (T) this;
     }
 
     public char getEscapeChar() {
@@ -66,9 +84,11 @@ public class CommonSqlMaker {
                 return "";
             }
             builder.append(escapeChar).append(tapField.getName()).append(escapeChar).append(' ').append(tapField.getDataType()).append(' ');
-            buildDefaultDefinition(builder, tapField);
+            if (Boolean.TRUE.equals(applyDefault) && EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
+                buildDefaultDefinition(builder, tapField);
+            }
             buildNullDefinition(builder, tapField);
-            if (Boolean.TRUE.equals(tapField.getAutoInc())) {
+            if (Boolean.TRUE.equals(createAutoInc) && Boolean.TRUE.equals(tapField.getAutoInc())) {
                 buildAutoIncDefinition(builder, tapField);
             }
             if (needComment) {

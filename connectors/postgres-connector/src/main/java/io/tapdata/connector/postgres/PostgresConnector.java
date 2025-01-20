@@ -356,13 +356,12 @@ public class PostgresConnector extends CommonDbConnector {
             postgresConfig.load(tapConnectorContext.getNodeConfig());
         });
         postgresVersion = postgresJdbcContext.queryVersion();
+        commonSqlMaker = new PostgresSqlMaker().closeNotNull(postgresConfig.getCloseNotNull());
         if (Boolean.TRUE.equals(postgresConfig.getCreateAutoInc()) && postgresVersion.compareTo("100000") >= 0) {
-            commonSqlMaker = new PostgresSqlMaker()
-                    .closeNotNull(postgresConfig.getCloseNotNull())
-                    .createAutoInc(postgresConfig.getCreateAutoInc());
-        } else {
-            commonSqlMaker = new PostgresSqlMaker()
-                    .closeNotNull(postgresConfig.getCloseNotNull());
+            commonSqlMaker.createAutoInc(true);
+        }
+        if (Boolean.TRUE.equals(postgresConfig.getApplyDefault())) {
+            commonSqlMaker.applyDefault(true);
         }
         postgresJdbcContext.withPostgresVersion(postgresVersion);
         postgresTest.withPostgresVersion(postgresVersion);

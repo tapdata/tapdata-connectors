@@ -6,13 +6,6 @@ import io.tapdata.kit.EmptyKit;
 
 public class DwsSqlMaker extends CommonSqlMaker {
 
-    private Boolean closeNotNull;
-
-    public DwsSqlMaker closeNotNull(Boolean closeNotNull) {
-        this.closeNotNull = closeNotNull;
-        return this;
-    }
-
     protected void buildNullDefinition(StringBuilder builder, TapField tapField) {
         boolean nullable = !(EmptyKit.isNotNull(tapField.getNullable()) && !tapField.getNullable());
         String dataType = tapField.getDataType().toUpperCase();
