@@ -23,22 +23,24 @@ public class StateMapHistoryBackingStore extends AbstractDatabaseHistory {
 	private final DocumentReader reader = DocumentReader.defaultReader();
 	private String serverName;
 
+	private MysqlSchemaHistoryTransfer schemaHistoryTransfer;
+
 	@Override
 	public void configure(Configuration config, HistoryRecordComparator comparator, DatabaseHistoryListener listener, boolean useCatalogBeforeSchema) {
 		super.configure(config, comparator, listener, useCatalogBeforeSchema);
 		this.serverName = config.getString("database.history.connector.id");
+		schemaHistoryTransfer = LockManager.getSchemaHistoryTransfer(serverName);
 	}
 
 	@Override
 	protected void storeRecord(HistoryRecord record) throws DatabaseHistoryException {
-
-		MysqlSchemaHistoryTransfer.executeWithLock(null, () -> {
+		schemaHistoryTransfer.executeWithLock(null, () -> {
 			try {
 				Document document = record.document();
 				String hrJson = writer.write(document);
-				Set<String> schemaSet = MysqlSchemaHistoryTransfer.historyMap.computeIfAbsent(serverName, k -> new LinkedHashSet<>());
+				Set<String> schemaSet = schemaHistoryTransfer.getHistoryMap().computeIfAbsent(serverName, k -> new LinkedHashSet<>());
 				schemaSet.add(hrJson);
-				MysqlSchemaHistoryTransfer.unSave();
+				schemaHistoryTransfer.unSave();
 			} catch (IOException e) {
 				throw new RuntimeException(e);
 			}
@@ -47,7 +49,7 @@ public class StateMapHistoryBackingStore extends AbstractDatabaseHistory {
 
 	@Override
 	protected void recoverRecords(Consumer<HistoryRecord> records) {
-		Set<String> schemaSet = MysqlSchemaHistoryTransfer.historyMap.get(serverName);
+		Set<String> schemaSet = schemaHistoryTransfer.getHistoryMap().get(serverName);
 		if (CollectionUtils.isEmpty(schemaSet)) return;
 		schemaSet.forEach(schemaJson -> {
 			Document document;
@@ -63,7 +65,7 @@ public class StateMapHistoryBackingStore extends AbstractDatabaseHistory {
 
 	@Override
 	public boolean exists() {
-		return MysqlSchemaHistoryTransfer.historyMap.containsKey(serverName) && CollectionUtils.isNotEmpty(MysqlSchemaHistoryTransfer.historyMap.get(serverName));
+		return schemaHistoryTransfer.getHistoryMap().containsKey(serverName) && CollectionUtils.isNotEmpty(schemaHistoryTransfer.getHistoryMap().get(serverName));
 	}
 
 	@Override
