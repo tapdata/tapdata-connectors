@@ -25,6 +25,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
+import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapDate;
 import io.tapdata.entity.schema.type.TapTime;
@@ -36,6 +37,7 @@ import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkRetryableEx;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -68,6 +70,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * @author samuel
@@ -826,4 +829,40 @@ public class MysqlConnector extends CommonDbConnector {
         });
     }
 
+    @Override
+    protected TapIndex makeTapIndex(String key, List<DataMap> value) {
+        TapIndex index = new TapIndex();
+        index.setName(key);
+        List<TapIndexField> fieldList = TapSimplify.list();
+        value.forEach(v -> {
+            TapIndexField field = new TapIndexField();
+            field.setFieldAsc("1".equals(v.getString("isAsc")));
+            field.setName(v.getString("columnName"));
+            field.setSubPart(v.getInteger("subPart"));
+            fieldList.add(field);
+        });
+        index.setUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isUnique")))));
+        index.setPrimary(value.stream().anyMatch(v -> ("1".equals(v.getString("isPk")))));
+        index.setIndexFields(fieldList);
+        return index;
+    }
+
+    protected String getCreateIndexSql(TapTable tapTable, TapIndex tapIndex) {
+        StringBuilder sb = new StringBuilder("create ");
+        char escapeChar = commonDbConfig.getEscapeChar();
+        if (tapIndex.isUnique()) {
+            sb.append("unique ");
+        }
+        sb.append("index ");
+        if (EmptyKit.isNotBlank(tapIndex.getName())) {
+            sb.append(escapeChar).append(tapIndex.getName()).append(escapeChar);
+        } else {
+            sb.append(escapeChar).append(DbKit.buildIndexName(tapTable.getId())).append(escapeChar);
+        }
+        sb.append(" on ").append(getSchemaAndTable(tapTable.getId())).append('(')
+                .append(tapIndex.getIndexFields().stream().map(f -> escapeChar + f.getName() + escapeChar +
+                                (f.getSubPart() != null ? ( "(" + f.getSubPart() + ")") : "") + " " + (f.getFieldAsc() ? "asc" : "desc"))
+                        .collect(Collectors.joining(","))).append(')');
+        return sb.toString();
+    }
 }
