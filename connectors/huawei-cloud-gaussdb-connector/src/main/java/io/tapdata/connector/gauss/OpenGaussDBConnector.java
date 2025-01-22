@@ -248,6 +248,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         });
         commonSqlMaker = GaussDBSqlMaker.instance().closeNotNull(gaussDBConfig.getCloseNotNull());
         gaussDBVersion = gaussJdbcContext.queryVersion();
+        gaussJdbcContext.withPostgresVersion(gaussDBVersion);
         ddlSqlGenerator = GaussDBDDLSqlGenerator.instance();
         tapLogger = connectionContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();

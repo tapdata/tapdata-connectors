@@ -180,6 +180,8 @@ public class DwsConnector extends PostgresConnector {
                     append.append("distribute by hash(\"").append(String.join("\",\"", postgresConfig.getDistributedKey())).append("\")");
                 }
             }
+        } else if (EmptyKit.isNotEmpty(primaryKeys)) {
+            append.append("distribute by hash(\"").append(String.join("\",\"", primaryKeys)).append("\")");
         }
         return createTable(connectorContext, createTableEvent, false, append.toString());
     }
@@ -266,9 +268,9 @@ public class DwsConnector extends PostgresConnector {
         boolean hasUniqueIndex;
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             hasUniqueIndex = makeSureHasUnique(tapTable);
-            writtenTableMap.put(tapTable.getId(), hasUniqueIndex);
+            writtenTableMap.put(tapTable.getId(), DataMap.create().kv(HAS_UNIQUE_INDEX, hasUniqueIndex));
         } else {
-            hasUniqueIndex = writtenTableMap.get(tapTable.getId());
+            hasUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_UNIQUE_INDEX, false);
         }
         String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {

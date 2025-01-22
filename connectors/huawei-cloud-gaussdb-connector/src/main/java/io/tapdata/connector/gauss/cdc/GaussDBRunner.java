@@ -277,11 +277,11 @@ public class GaussDBRunner extends DebeziumCdcRunner {
         if (null == streamBuilder) {
             throw new CoreException("Can not init GaussDB Replication Stream, message: Chained Logical Stream is empty");
         }
-        streamBuilder = streamBuilder.withSlotOption("standby-connection", true);//强制备机解码
+//        streamBuilder = streamBuilder.withSlotOption("standby-connection", true);//强制备机解码
         streamBuilder = streamBuilder.withSlotOption("decode-style", "b");//解码格式
         streamBuilder = streamBuilder.withSlotOption("sending-batch", 1);//批量发送解码结果
         streamBuilder = streamBuilder.withSlotOption("max-txn-in-memory", 100); //单个解码事务落盘内存阈值为100MB
-        streamBuilder = streamBuilder.withSlotOption("max-reorderbuffer-in-memory", 50); //正在处理的解码事务落盘内存阈值为
+        streamBuilder = streamBuilder.withSlotOption("max-reorderbuffer-in-memory", 5); //正在处理的解码事务落盘内存阈值为
         //streamBuilder = streamBuilder.withSlotOption("exclude-users", "userA") //不返回用户userA执行事务的逻辑日志
         streamBuilder = streamBuilder.withSlotOption("include-user", true); //事务BEGIN逻辑日志携带用户名字
 

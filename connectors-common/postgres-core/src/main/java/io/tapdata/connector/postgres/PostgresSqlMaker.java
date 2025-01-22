@@ -1,6 +1,7 @@
 package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonSqlMaker;
+import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.Collate;
@@ -15,25 +16,7 @@ import static io.tapdata.pdk.apis.entity.SortOn.ASCENDING;
 
 public class PostgresSqlMaker extends CommonSqlMaker {
 
-    private Boolean closeNotNull;
-    private Boolean createAutoInc = false;
-    private Long autoIncStartValue = 1000000L;
     private char escapeChar = '"';
-
-    public PostgresSqlMaker closeNotNull(Boolean closeNotNull) {
-        this.closeNotNull = closeNotNull;
-        return this;
-    }
-
-    public PostgresSqlMaker createAutoInc(Boolean createAutoInc) {
-        this.createAutoInc = createAutoInc;
-        return this;
-    }
-
-    public PostgresSqlMaker autoIncStartValue(long autoIncStartValue) {
-        this.autoIncStartValue = autoIncStartValue;
-        return this;
-    }
 
     protected void buildNullDefinition(StringBuilder builder, TapField tapField) {
         boolean nullable = !(EmptyKit.isNotNull(tapField.getNullable()) && !tapField.getNullable());
@@ -45,14 +28,22 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         }
     }
 
-    protected void buildAutoIncDefinition(StringBuilder builder, TapField tapField) {
-        if (!Boolean.TRUE.equals(createAutoInc)) {
-            return;
+    protected void buildDefaultDefinition(StringBuilder builder, TapField tapField) {
+        if (EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
+            builder.append("DEFAULT").append(' ');
+            if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
+                builder.append(PostgresColumn.PostgresDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction()).append(' ');
+            } else if (tapField.getDefaultValue() instanceof Number) {
+                builder.append(tapField.getDefaultValue()).append(' ');
+            } else {
+                builder.append("'").append(tapField.getDefaultValue()).append("' ");
+            }
         }
+    }
+
+    protected void buildAutoIncDefinition(StringBuilder builder, TapField tapField) {
         long startValue;
-        if (EmptyKit.isNotNull(autoIncStartValue)) {
-            startValue = autoIncStartValue;
-        } else if (EmptyKit.isNotNull(tapField.getAutoIncStartValue())) {
+        if (EmptyKit.isNotNull(tapField.getAutoIncStartValue())) {
             startValue = tapField.getAutoIncStartValue();
         } else {
             startValue = 1;

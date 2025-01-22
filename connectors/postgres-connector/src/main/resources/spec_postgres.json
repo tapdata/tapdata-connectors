@@ -324,10 +324,10 @@
             }
           ]
         },
-        "autoIncStartValue": {
+        "autoIncJumpValue": {
           "required": true,
           "type": "string",
-          "title": "${autoIncStartValue}",
+          "title": "${autoIncJumpValue}",
           "default": 1000000,
           "x-index": 6,
           "x-decorator": "FormItem",
@@ -338,6 +338,27 @@
               "fulfill": {
                 "state": {
                   "display": "{{$deps[0].length > 0 && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "applyDefault": {
+          "type": "boolean",
+          "title": "${applyDefault}",
+          "default": false,
+          "x-index": 7,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${applyDefaultTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -497,7 +518,9 @@
       "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded",
       "createAutoInc": "Synchronize auto-increment columns",
       "createAutoIncTooltip": "Only PG 10 and above are supported. When the switch is turned on, the auto-increment attribute is synchronized when entering the incremental",
-      "autoIncStartValue": "Auto-increment start value",
+      "autoIncJumpValue": "Auto-increment key jump value",
+      "applyDefault": "Apply default value",
+      "applyDefaultTooltip": "When the switch is turned on, the default value is applied to the target. If there are unadapted functions or expressions, it may cause an error",
       "hashSplit": "Hash split",
       "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the hash value, suitable for large table full-stage sharded synchronization",
       "maxSplit": "Maximum number of splits",
@@ -530,7 +553,9 @@
       "closeNotNullTooltip": "开关打开时会将非空限制丢弃",
       "createAutoInc": "同步自增列",
       "createAutoIncTooltip": "仅支持PG10版本以上，开关打开时会在进入增量时同步自增属性",
-      "autoIncStartValue": "自增起始值",
+      "autoIncJumpValue": "自增键跳跃值",
+      "applyDefault": "应用默认值",
+      "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错",
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "开关打开时，可以根据哈希值进行分片，适用于大表全量阶段分片同步",
       "maxSplit": "最大分片数",
@@ -563,7 +588,9 @@
       "closeNotNullTooltip": "開關打開時會將非空限制丟棄",
       "createAutoInc": "同步自增列",
       "createAutoIncTooltip": "僅支持PG10版本以上，開關打開時會在進入增量時同步自增屬性",
-      "autoIncStartValue": "自增起始值",
+      "autoIncJumpValue": "自增鍵跳躍值",
+      "applyDefault": "應用默認值",
+      "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯",
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "開關打開時，可以根據哈希值進行分片，適用於大表全量階段分片同步",
       "maxSplit": "最大分片數",

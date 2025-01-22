@@ -198,9 +198,6 @@ public class DbKit {
             }
             lastAfter.put(entry.getKey(), entry.getValue());
         }
-        if (EmptyKit.isEmpty(lastAfter)) {
-            return after;
-        }
         return lastAfter;
     }
 

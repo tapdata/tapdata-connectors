@@ -368,6 +368,7 @@ public class MongodbUtil {
 
 		AtomicReference<String> primaryHost = new AtomicReference<>();
 		ConnectionString connectionString = new ConnectionString(mongoUri);
+		Set<String> invalidHosts = new HashSet<>();
 		try {
 			List<String> hosts = connectionString.getHosts();
 			if (EmptyKit.isNotEmpty(hosts)) {
@@ -380,6 +381,8 @@ public class MongodbUtil {
 						if (result.getBoolean("ismaster")) {
 							primaryHost.set(host);
 						}
+					} catch (Exception e) {
+						invalidHosts.add(host);
 					} finally {
 						if (client != null) {
 							try {
@@ -394,7 +397,10 @@ public class MongodbUtil {
 		}
 		// 如果 primaryHost 为空, 给第一个地址, 等报错后续继续选择
 		if (primaryHost.get() == null) {
-			primaryHost.set(connectionString.getHosts().get(0));
+			List<String> validHosts = connectionString.getHosts().stream().filter(t -> !invalidHosts.contains(t)).collect(Collectors.toList());
+			if (validHosts.size() > 0) {
+				primaryHost.set(validHosts.get(0));
+			}
 		}
 
 		if (primaryHost.get() != null) {

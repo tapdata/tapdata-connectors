@@ -731,7 +731,6 @@ public class OpenGaussDBConnectorTest {
     }
 
     @Nested
-    @Disabled
     class InitConnectionTest {
         GaussDBConfig gaussDBConfig;
         GaussDBJdbcContext gaussDBJdbcContext;

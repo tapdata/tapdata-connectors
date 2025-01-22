@@ -2,6 +2,7 @@ package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
+import io.tapdata.common.dml.NormalRecordWriter;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
 import io.tapdata.connector.postgres.cdc.WalLogMinerV2;
@@ -66,6 +67,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * PDK for Postgresql
@@ -81,7 +83,9 @@ public class PostgresConnector extends CommonDbConnector {
     private PostgresCdcRunner cdcRunner; //only when task start-pause this variable can be shared
     private Object slotName; //must be stored in stateMap
     protected String postgresVersion;
-    protected Map<String, Boolean> writtenTableMap = new ConcurrentHashMap<>();
+    protected Map<String, DataMap> writtenTableMap = new ConcurrentHashMap<>();
+    protected static final String HAS_UNIQUE_INDEX = "HAS_UNIQUE_INDEX";
+    protected static final String HAS_AUTO_INCR = "HAS_AUTO_INCR";
     protected PostgresPartitionContext postgresPartitionContext;
 
     @Override
@@ -352,14 +356,12 @@ public class PostgresConnector extends CommonDbConnector {
             postgresConfig.load(tapConnectorContext.getNodeConfig());
         });
         postgresVersion = postgresJdbcContext.queryVersion();
+        commonSqlMaker = new PostgresSqlMaker().closeNotNull(postgresConfig.getCloseNotNull());
         if (Boolean.TRUE.equals(postgresConfig.getCreateAutoInc()) && postgresVersion.compareTo("100000") >= 0) {
-            commonSqlMaker = new PostgresSqlMaker()
-                    .closeNotNull(postgresConfig.getCloseNotNull())
-                    .createAutoInc(postgresConfig.getCreateAutoInc())
-                    .autoIncStartValue(postgresConfig.getAutoIncStartValue());
-        } else {
-            commonSqlMaker = new PostgresSqlMaker()
-                    .closeNotNull(postgresConfig.getCloseNotNull());
+            commonSqlMaker.createAutoInc(true);
+        }
+        if (Boolean.TRUE.equals(postgresConfig.getApplyDefault())) {
+            commonSqlMaker.applyDefault(true);
         }
         postgresJdbcContext.withPostgresVersion(postgresVersion);
         postgresTest.withPostgresVersion(postgresVersion);
@@ -391,12 +393,22 @@ public class PostgresConnector extends CommonDbConnector {
     //write records as all events, prepared
     protected void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws SQLException {
         boolean hasUniqueIndex;
+        List<String> autoIncFields = new ArrayList<>();
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             openIdentity(tapTable);
             hasUniqueIndex = makeSureHasUnique(tapTable);
-            writtenTableMap.put(tapTable.getId(), hasUniqueIndex);
+            writtenTableMap.put(tapTable.getId(), DataMap.create().kv(HAS_UNIQUE_INDEX, hasUniqueIndex));
         } else {
-            hasUniqueIndex = writtenTableMap.get(tapTable.getId());
+            hasUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_UNIQUE_INDEX, false);
+        }
+        if (postgresConfig.getCreateAutoInc() && postgresVersion.compareTo("100000") >= 0) {
+            if (!writtenTableMap.get(tapTable.getId()).containsKey(HAS_AUTO_INCR)) {
+                List<TapField> fields = tapTable.getNameFieldMap().values().stream().filter(TapField::getAutoInc).collect(Collectors.toList());
+                autoIncFields.addAll(fields.stream().map(TapField::getName).collect(Collectors.toList()));
+                writtenTableMap.get(tapTable.getId()).put(HAS_AUTO_INCR, autoIncFields);
+            } else {
+                autoIncFields.addAll(writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>()));
+            }
         }
         String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
@@ -406,6 +418,7 @@ public class PostgresConnector extends CommonDbConnector {
         if (updateDmlPolicy == null) {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
+        NormalRecordWriter postgresRecordWriter;
         if (isTransaction) {
             String threadName = Thread.currentThread().getName();
             Connection connection;
@@ -415,18 +428,29 @@ public class PostgresConnector extends CommonDbConnector {
                 connection = postgresJdbcContext.getConnection();
                 transactionConnectionMap.put(threadName, connection);
             }
-            new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
+            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(tapLogger)
-                    .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
-
+                    .setTapLogger(tapLogger);
         } else {
-            new PostgresRecordWriter(postgresJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
+            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(tapLogger)
-                    .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
+                    .setTapLogger(tapLogger);
+        }
+        if (postgresConfig.getCreateAutoInc() && postgresVersion.compareTo("100000") >= 0 && EmptyKit.isNotEmpty(autoIncFields)
+                && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
+            postgresRecordWriter.setAutoIncFields(autoIncFields);
+            postgresRecordWriter.write(tapRecordEvents, writeListResultConsumer, this::isAlive);
+            if (EmptyKit.isNotEmpty(postgresRecordWriter.getAutoIncMap())) {
+                List<String> alterSqls = new ArrayList<>();
+                postgresRecordWriter.getAutoIncMap().forEach((k, v) -> {
+                    alterSqls.add("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" ALTER COLUMN \"" + k + "\" SET GENERATED BY DEFAULT RESTART WITH " + (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue()));
+                });
+                jdbcContext.batchExecute(alterSqls);
+            }
+        } else {
+            postgresRecordWriter.write(tapRecordEvents, writeListResultConsumer, this::isAlive);
         }
     }
 

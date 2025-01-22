@@ -64,7 +64,7 @@ public class GaussDBTest extends CommonDbTest {
     }
 
     public GaussDBTest initContext() {
-        jdbcContext = new PostgresJdbcContext(getCommonDbConfig());
+        jdbcContext = new PostgresJdbcContext(getCommonDbConfig()).withPostgresVersion("92000");
         return this;
     }
 

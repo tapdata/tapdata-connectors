@@ -44,7 +44,8 @@ public class CommonDbConfig implements Serializable {
     private Boolean doubleActive = false;
     private Boolean oldVersionTimezone = false;
     private Boolean createAutoInc = false;
-    private long autoIncStartValue = 1000000L;
+    private long autoIncJumpValue = 1000000L;
+    private Boolean applyDefault = false;
     private Integer writeThreadSize = 15;
     protected String timezone = "+00:00";
     protected ZoneId zoneId;
@@ -296,12 +297,20 @@ public class CommonDbConfig implements Serializable {
         this.createAutoInc = createAutoInc;
     }
 
-    public long getAutoIncStartValue() {
-        return autoIncStartValue;
+    public long getAutoIncJumpValue() {
+        return autoIncJumpValue;
     }
 
-    public void setAutoIncStartValue(long autoIncStartValue) {
-        this.autoIncStartValue = autoIncStartValue;
+    public void setAutoIncJumpValue(long autoIncJumpValue) {
+        this.autoIncJumpValue = autoIncJumpValue;
+    }
+
+    public Boolean getApplyDefault() {
+        return applyDefault;
+    }
+
+    public void setApplyDefault(Boolean applyDefault) {
+        this.applyDefault = applyDefault;
     }
 
     public Integer getWriteThreadSize() {

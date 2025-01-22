@@ -314,6 +314,9 @@ public abstract class NormalWriteRecorder {
                 break;
             default:
                 Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
+                if (EmptyKit.isEmpty(lastAfter)) {
+                    return;
+                }
                 justUpdate(lastAfter, lastBefore, listResult);
                 break;
         }
