@@ -14,7 +14,9 @@ public class GaussColumn extends PostgresColumn {
     public TapField getTapField() {
         if (null == columnName) return null;
         if (null == dataType) return null;
-        String remarksTemp = "Type oid[" + columnTypeOid + "] " + (null == this.remarks ? "" : this.remarks);
+        String remarksTemp =
+//                "Type oid[" + columnTypeOid + "] " +
+                (null == this.remarks ? "" : this.remarks);
         return new TapField(LogicUtil.replaceAll(this.columnName, "\"",""),
                 LogicUtil.replaceAll(this.dataType.toUpperCase(),"\"",""))
                 .nullable(this.isNullable())
