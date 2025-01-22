@@ -397,7 +397,6 @@
 						"layout": "horizontal",
 						"tooltip": "${preImageTips}"
 					},
-					"default": false,
 					"x-reactions": {
 						"dependencies": [
 							"$outputs"
@@ -405,7 +404,7 @@
 						"fulfill": {
 							"state": {
 								"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0}}",
-								"value": "{{$self.visible ? true : false}}"
+								"value": "{{$self.visible && $self.value === undefined ? true : $self.value}}"
 							}
 						}
 					},
