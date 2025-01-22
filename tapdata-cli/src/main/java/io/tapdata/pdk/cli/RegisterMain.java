@@ -78,7 +78,7 @@ public class RegisterMain {
         HIVE1(BETA),
         HIVE3(BETA),
         HTTP_RECEIVER(BETA),
-        HUAWEI_GAUSS_DB(GA, TAG_JDBC),
+        HUAWEI_CLOUD_GAUSSDB(GA, TAG_JDBC),
         HUBSPOT(BETA),
         HUDI(BETA),
         JSON(ALPHA, TAG_FILE),
