@@ -93,7 +93,7 @@ public class PostgresJdbcContext extends JdbcContext {
         list.add("size");
         list.add("rowcount");
         try {
-            query(String.format(TABLE_INFO_SQL, tableName, getConfig().getDatabase(), getConfig().getSchema()), resultSet -> {
+            query(String.format(TABLE_INFO_SQL, getConfig().getSchema(), tableName, getConfig().getDatabase(), getConfig().getSchema()), resultSet -> {
                 while (resultSet.next()) {
                     dataMap.putAll(DbKit.getRowFromResultSet(resultSet, list));
                 }
@@ -200,7 +200,7 @@ public class PostgresJdbcContext extends JdbcContext {
 
     protected final static String TABLE_INFO_SQL = "SELECT\n" +
             " pg_total_relation_size('\"' || table_schema || '\".\"' || table_name || '\"') AS size,\n" +
-            " (select reltuples from pg_class  pc where pc.relname = t1.table_name ) as rowcount \n" +
+            " (select reltuples from pg_class pc, pg_namespace pn where pc.relname = t1.table_name and pc.relnamespace=pn.oid and pn.nspname='%s') as rowcount \n" +
             " FROM information_schema.tables t1 where t1.table_name ='%s' and t1.table_catalog='%s' and t1.table_schema='%s' ";
 
     private final static String POSTGRES_TIMEZONE = "select date_part('hour', now() - now() at time zone 'UTC')";
