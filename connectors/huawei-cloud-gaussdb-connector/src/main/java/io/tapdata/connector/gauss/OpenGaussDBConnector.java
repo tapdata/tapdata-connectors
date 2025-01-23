@@ -395,7 +395,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         Integer lsn = nodeContext.getNodeConfig().getInteger("flushLsn");
         long flushLsn = (null == lsn ? 0L : lsn) * 60L * 1000L;
         cdcRunner.useSlot(slotName.toString());
-        cdcRunner.watch(tables);
+        cdcRunner.watch(tables, tableList, nodeContext.getTableMap());
         cdcRunner.supplierIsAlive(this::isAlive);
         cdcRunner.offset(offsetState);
         cdcRunner.waitTime(flushLsn);

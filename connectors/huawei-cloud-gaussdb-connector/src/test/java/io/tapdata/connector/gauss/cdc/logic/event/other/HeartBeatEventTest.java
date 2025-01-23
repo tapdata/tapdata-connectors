@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.nio.ByteBuffer;
+import java.util.HashMap;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -71,16 +72,14 @@ public class HeartBeatEventTest {
     @Nested
     class CollectTest {
         ByteBuffer logEvent;
-        AnalyzeLog.AnalyzeParam param;
         byte[] bytes;
 
         @BeforeEach
         void init() {
             logEvent = mock(ByteBuffer.class);
-            param = mock(AnalyzeLog.AnalyzeParam.class);
             bytes = new byte[0];
 
-            when(event.analyze(logEvent, param)).thenCallRealMethod();
+            when(event.analyze(logEvent, new HashMap<>())).thenCallRealMethod();
         }
 
         @Test
@@ -92,7 +91,7 @@ public class HeartBeatEventTest {
                 tap.when(() -> {
                     LogicUtil.byteToLong(any(byte[].class));
                 }).thenReturn(1L);
-                Event.EventEntity<TapEvent> collect = event.analyze(logEvent, param);
+                Event.EventEntity<TapEvent> collect = event.analyze(logEvent, new HashMap<>());
                 Assertions.assertNotNull(collect);
                 tap.verify(() -> {
                     LogicUtil.read(any(ByteBuffer.class), anyInt());

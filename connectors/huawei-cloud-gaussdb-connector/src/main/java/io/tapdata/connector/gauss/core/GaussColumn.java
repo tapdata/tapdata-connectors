@@ -4,6 +4,7 @@ import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.kit.StringKit;
 
 import java.util.Optional;
 
@@ -19,6 +20,7 @@ public class GaussColumn extends PostgresColumn {
                 (null == this.remarks ? "" : this.remarks);
         return new TapField(LogicUtil.replaceAll(this.columnName, "\"",""),
                 LogicUtil.replaceAll(this.dataType.toUpperCase(),"\"",""))
+                .pureDataType(this.pureDataType)
                 .nullable(this.isNullable())
                 .defaultValue(columnDefaultValue)
                 .comment(remarksTemp);
@@ -29,6 +31,11 @@ public class GaussColumn extends PostgresColumn {
         String dataType = dataMap.getString("dataType");
         if (null != dataType) {
             this.dataType = LogicUtil.replaceAll(dataType,"[]", " array"); //'dataType' with precision and scale (postgres has its function)
+        }
+        this.pureDataType = dataMap.getString("pureDataType");
+        if ("USER-DEFINED".equals(this.pureDataType)) {
+            this.dataType = StringKit.removeParentheses(this.dataType);
+            this.pureDataType = this.dataType;
         }
         this.nullable = dataMap.getString("nullable");
         this.remarks = dataMap.getString("columnComment");
