@@ -13,7 +13,7 @@ import java.util.StringJoiner;
 public interface DMLEvent extends Event<TapEvent> {
 
     @Override
-    public default Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, AnalyzeParam param) {
+    default Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, Map<String, Map<String, String>> dataTypeMap) {
         CollectEntity instance = CollectEntity.instance();
         byte[] bOrA = null;
         int bOrACount = 2;
@@ -29,9 +29,9 @@ public interface DMLEvent extends Event<TapEvent> {
             Map<String, Object> kvMap = new HashMap<>();
             Map<String, Integer> kTypeMap = new HashMap<>();
             switch (bOrAChar.toUpperCase()) {
-                case "N" :
-                case "O" :
-                    collectAttr(logEvent, kvMap, kTypeMap, param);
+                case "N":
+                case "O":
+                    collectAttr(logEvent, kvMap, kTypeMap, dataTypeMap.get(new String(table)));
                     if (bOrACount > 1) {
                         bOrACount--;
                     } else {
@@ -61,37 +61,37 @@ public interface DMLEvent extends Event<TapEvent> {
         return collect(instance);
     }
 
-    public Event.EventEntity<TapEvent> collect(CollectEntity entity);
+    Event.EventEntity<TapEvent> collect(CollectEntity entity);
 
-    public default void collectAttr(ByteBuffer logEvent, Map<String, Object> kvMap, Map<String, Integer> kTypeMap, AnalyzeParam param) {
+    default void collectAttr(ByteBuffer logEvent, Map<String, Object> kvMap, Map<String, Integer> kTypeMap, Map<String, String> dataTypeMap) {
         byte[] attrNum = LogicUtil.read(logEvent, 2);
         int attrNums = LogicUtil.bytesToInt(attrNum);//, 32);
         Map<String, Object> temp = new HashMap<>();
         try {
             for (int index = 0; index < attrNums; index++) {
-                    byte[] attrName = LogicUtil.read(logEvent, 2, 32);
-                    byte[] oid = LogicUtil.read(logEvent, 4);
-                    byte[] value = LogicUtil.readValue(logEvent, 4, 32);
-                    String fieldName = new String(attrName);
-                    if (fieldName.startsWith("\"")) {
-                        fieldName = fieldName.substring(1);
-                    }
-                    if (fieldName.endsWith("\"")) {
-                        fieldName = fieldName.substring(0, fieldName.length() -1);
-                    }
-                    int typeId = LogicUtil.bytesToInt(oid);//, 32);
-                    temp.put(fieldName, value);
-                    kTypeMap.put(fieldName, typeId);
+                byte[] attrName = LogicUtil.read(logEvent, 2, 32);
+                byte[] oid = LogicUtil.read(logEvent, 4);
+                byte[] value = LogicUtil.readValue(logEvent, 4, 32);
+                String fieldName = new String(attrName);
+                if (fieldName.startsWith("\"")) {
+                    fieldName = fieldName.substring(1);
+                }
+                if (fieldName.endsWith("\"")) {
+                    fieldName = fieldName.substring(0, fieldName.length() - 1);
+                }
+                int typeId = LogicUtil.bytesToInt(oid);//, 32);
+                temp.put(fieldName, value);
+                kTypeMap.put(fieldName, typeId);
             }
             kvMap.putAll(temp);
         } catch (IllegalDataLengthException e) {
             StringJoiner j = new StringJoiner(", ");
-            temp.forEach((k,v)->{
+            temp.forEach((k, v) -> {
                 String value;
                 if (null == v) {
                     value = "null";
                 } else {
-                    value = new String((byte[])v);
+                    value = new String((byte[]) v);
                 }
                 j.add(k + ":" + value);
             });

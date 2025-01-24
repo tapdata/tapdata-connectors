@@ -53,9 +53,11 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 
 import java.math.BigDecimal;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
+import java.sql.Date;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -393,7 +395,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         Integer lsn = nodeContext.getNodeConfig().getInteger("flushLsn");
         long flushLsn = (null == lsn ? 0L : lsn) * 60L * 1000L;
         cdcRunner.useSlot(slotName.toString());
-        cdcRunner.watch(tables);
+        cdcRunner.watch(tables, tableList, nodeContext.getTableMap());
         cdcRunner.supplierIsAlive(this::isAlive);
         cdcRunner.offset(offsetState);
         cdcRunner.waitTime(flushLsn);
@@ -642,5 +644,31 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         .registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate())
         .registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"))
         ;
+    }
+
+    @Override
+    protected void processDataMap(DataMap dataMap, TapTable tapTable) {
+        for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof Timestamp) {
+                if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                    continue;
+                }
+                if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("WITH TIME ZONE")) {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(gaussDBConfig.getZoneOffsetHour()));
+                } else {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
+                }
+            } else if (value instanceof Time) {
+                if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                    continue;
+                }
+                if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("WITH TIME ZONE")) {
+                    entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(gaussDBConfig.getZoneOffsetHour()));
+                } else {
+                    entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneOffset.UTC));
+                }
+            }
+        }
     }
 }

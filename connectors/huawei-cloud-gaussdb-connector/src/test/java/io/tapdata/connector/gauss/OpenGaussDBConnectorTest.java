@@ -1580,7 +1580,7 @@ public class OpenGaussDBConnectorTest {
             doNothing().when(connector).buildSlot(connectorContext, true);
             when(connectorContext.getNodeConfig()).thenReturn(nodeConfig);
             when(cdcRunner.useSlot(anyString())).thenReturn(cdcRunner);
-            when(cdcRunner.watch(anyList())).thenReturn(cdcRunner);
+            when(cdcRunner.watch(anyList(), anyList(), any())).thenReturn(cdcRunner);
             when(cdcRunner.supplierIsAlive(any(Supplier.class))).thenReturn(cdcRunner);
             when(cdcRunner.offset(any(Object.class))).thenReturn(cdcRunner);
             when(cdcRunner.waitTime(anyLong())).thenReturn(cdcRunner);
@@ -1603,7 +1603,7 @@ public class OpenGaussDBConnectorTest {
                 verify(connectorContext, times(1)).getNodeConfig();
                 verify(nodeConfig, times(1)).getInteger("flushLsn");
                 verify(cdcRunner, times(1)).useSlot(anyString());
-                verify(cdcRunner, times(1)).watch(anyList());
+                verify(cdcRunner, times(1)).watch(anyList(), anyList(), any());
                 verify(cdcRunner, times(1)).supplierIsAlive(any(Supplier.class));
                 verify(cdcRunner, times(1)).offset(any(Object.class));
                 verify(cdcRunner, times(1)).waitTime(anyLong());

@@ -275,13 +275,7 @@ class BeforeAndAfterTest {
                 entry("age", 18),
                 entry("birth", "2022-05-29")
         );
-        Map<String, Object> lastAfter = map(
-                entry("id1", 1),
-                entry("id2", 3),
-                entry("name", "jarad"),
-                entry("age", 18),
-                entry("birth", "2022-05-29")
-        );
+        Map<String, Object> lastAfter = map();
         assertBeforeAndAfter(COMMON_ALL_COLUMN, NONE_UNIQUE_CONDITION, after, before, lastAfter, lastBefore);
     }
 
@@ -308,13 +302,7 @@ class BeforeAndAfterTest {
                 entry("id1", 1),
                 entry("id2", 3)
         );
-        Map<String, Object> lastAfter = map(
-                entry("id1", 1),
-                entry("id2", 3),
-                entry("name", "jarad"),
-                entry("age", 18),
-                entry("birth", "2022-05-29")
-        );
+        Map<String, Object> lastAfter = map();
         assertBeforeAndAfter(COMMON_ALL_COLUMN, COMMON_UNIQUE_CONDITION, after, before, lastAfter, lastBefore);
     }
 
