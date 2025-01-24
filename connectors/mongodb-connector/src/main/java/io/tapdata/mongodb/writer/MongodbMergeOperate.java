@@ -485,7 +485,7 @@ public class MongodbMergeOperate {
 		}
 		appendAllParentMergeFilters(mergeResult, mergeFilter);
 
-		Map<String, Object> value = MapUtils.isNotEmpty(mergeBundle.getAfter()) ? mergeBundle.getAfter() : mergeBundle.getBefore();
+		Map<String, Object> value = MapUtils.isNotEmpty(after) ? after : before;
 		Map<String, Object> removeFields = mergeBundle.getRemovefields();
 
 		String updatePatch = targetPath;
