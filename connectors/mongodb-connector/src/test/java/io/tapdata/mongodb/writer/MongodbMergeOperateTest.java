@@ -14,6 +14,7 @@ import io.tapdata.pdk.apis.entity.merge.MergeLookupResult;
 import io.tapdata.pdk.apis.entity.merge.MergeTableProperties;
 import org.bson.Document;
 import org.bson.conversions.Bson;
+import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -540,8 +541,8 @@ class MongodbMergeOperateTest {
 			MergeTableProperties currentProperty = new MergeTableProperties();
 			currentProperty.setId("1");
 			currentProperty.setTargetPath("array");
-			currentProperty.setJoinKeys(new ArrayList<Map<String, String>>(){{
-				add(new HashMap<String, String>(){{
+			currentProperty.setJoinKeys(new ArrayList<Map<String, String>>() {{
+				add(new HashMap<String, String>() {{
 					put("source", "id");
 					put("target", "id");
 				}});
@@ -587,8 +588,8 @@ class MongodbMergeOperateTest {
 			MergeTableProperties currentProperty = new MergeTableProperties();
 			currentProperty.setId("1");
 			currentProperty.setTargetPath("array");
-			currentProperty.setJoinKeys(new ArrayList<Map<String, String>>(){{
-				add(new HashMap<String, String>(){{
+			currentProperty.setJoinKeys(new ArrayList<Map<String, String>>() {{
+				add(new HashMap<String, String>() {{
 					put("source", "id");
 					put("target", "id");
 				}});
@@ -614,6 +615,139 @@ class MongodbMergeOperateTest {
 			MergeResult result = MongodbMergeOperate.updateIntoArrayUnsetMerge(mergeBundle, currentProperty, updateJoinKeys, mergeResult, parentProperties, mergeFilter);
 			assertEquals("{\"id\": 1, \"src\": \"x\"}", result.getFilter().toJson());
 			assertEquals("{\"$set\": {\"array\": []}}", result.getUpdate().toJson());
+		}
+	}
+
+	@Nested
+	@DisplayName("Method removeIdIfNeed test")
+	class removeIdIfNeedTest {
+		@Test
+		@DisplayName("test main process")
+		void test1() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("_id", new ObjectId());
+			data.put("f1", 1);
+			data.put("f2", 1);
+			data.put("f3", 1);
+			MergeTableProperties mergeTableProperties = new MergeTableProperties();
+			mergeTableProperties.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			List<Map<String, String>> joinKeys = new ArrayList<>();
+			joinKeys.add(new HashMap<String, String>(){{
+				put("source", "f1");
+				put("target", "f1");
+			}});
+			joinKeys.add(new HashMap<String, String>(){{
+				put("source", "f2");
+				put("target", "f2");
+			}});
+			mergeTableProperties.setJoinKeys(joinKeys);
+			MongodbMergeOperate.removeIdIfNeed(data, mergeTableProperties);
+			assertFalse(data.containsKey("_id"));
+		}
+
+		@Test
+		@DisplayName("test merge type is updateIntoArray")
+		void test2() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("_id", new ObjectId());
+			data.put("f1", 1);
+			data.put("f2", 1);
+			data.put("f3", 1);
+			MergeTableProperties mergeTableProperties = new MergeTableProperties();
+			mergeTableProperties.setMergeType(MergeTableProperties.MergeType.updateIntoArray);
+			List<Map<String, String>> joinKeys = new ArrayList<>();
+			joinKeys.add(new HashMap<String, String>(){{
+				put("source", "f1");
+				put("target", "f1");
+			}});
+			joinKeys.add(new HashMap<String, String>(){{
+				put("source", "f2");
+				put("target", "f2");
+			}});
+			mergeTableProperties.setJoinKeys(joinKeys);
+			MongodbMergeOperate.removeIdIfNeed(data, mergeTableProperties);
+			assertTrue(data.containsKey("_id"));
+		}
+
+		@Test
+		@DisplayName("test target path is not empty")
+		void test3() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("_id", new ObjectId());
+			data.put("f1", 1);
+			data.put("f2", 1);
+			data.put("f3", 1);
+			MergeTableProperties mergeTableProperties = new MergeTableProperties();
+			mergeTableProperties.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			List<Map<String, String>> joinKeys = new ArrayList<>();
+			joinKeys.add(new HashMap<String, String>(){{
+				put("source", "f1");
+				put("target", "f1");
+			}});
+			joinKeys.add(new HashMap<String, String>(){{
+				put("source", "f2");
+				put("target", "f2");
+			}});
+			mergeTableProperties.setJoinKeys(joinKeys);
+			mergeTableProperties.setTargetPath("xxx");
+			MongodbMergeOperate.removeIdIfNeed(data, mergeTableProperties);
+			assertTrue(data.containsKey("_id"));
+		}
+
+		@Test
+		@DisplayName("test data is empty")
+		void test4() {
+			Map<String, Object> data = new HashMap<>();
+			MergeTableProperties mergeTableProperties = new MergeTableProperties();
+			mergeTableProperties.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			List<Map<String, String>> joinKeys = new ArrayList<>();
+			joinKeys.add(new HashMap<String, String>(){{
+				put("source", "f1");
+				put("target", "f1");
+			}});
+			joinKeys.add(new HashMap<String, String>(){{
+				put("source", "f2");
+				put("target", "f2");
+			}});
+			mergeTableProperties.setJoinKeys(joinKeys);
+			mergeTableProperties.setTargetPath("xxx");
+			assertDoesNotThrow(() -> MongodbMergeOperate.removeIdIfNeed(data, mergeTableProperties));
+		}
+
+		@Test
+		@DisplayName("test merge table properties is null")
+		void test5() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("_id", new ObjectId());
+			data.put("f1", 1);
+			data.put("f2", 1);
+			data.put("f3", 1);
+			MongodbMergeOperate.removeIdIfNeed(data, null);
+			assertTrue(data.containsKey("_id"));
+		}
+
+		@Test
+		@DisplayName("test join keys contains value _id")
+		void test6() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("_id", new ObjectId());
+			data.put("f1", 1);
+			data.put("f2", 1);
+			data.put("f3", 1);
+			MergeTableProperties mergeTableProperties = new MergeTableProperties();
+			mergeTableProperties.setMergeType(MergeTableProperties.MergeType.updateWrite);
+			List<Map<String, String>> joinKeys = new ArrayList<>();
+			joinKeys.add(new HashMap<String, String>(){{
+				put("source", "f1");
+				put("target", "f1");
+			}});
+			joinKeys.add(new HashMap<String, String>(){{
+				put("source", "_id");
+				put("target", "f2");
+			}});
+			mergeTableProperties.setJoinKeys(joinKeys);
+			MongodbMergeOperate.removeIdIfNeed(data, mergeTableProperties);
+			assertTrue(data.containsKey("_id"));
 		}
 	}
 }

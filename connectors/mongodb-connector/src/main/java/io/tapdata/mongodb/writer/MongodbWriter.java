@@ -114,8 +114,6 @@ public class MongodbWriter {
 		if (null == pksCache) pksCache = table.primaryKeys();
 		final Collection<String> pks = (Collection<String>) pksCache;
 
-		removeOidIfNeed(tapRecordEvents, pks);
-
 		// daas data will cache local
 		if (!is_cloud && mongodbConfig.isEnableSaveDeleteData()) {
 			MongodbLookupUtil.lookUpAndSaveDeleteMessage(tapRecordEvents, this.globalStateMap, this.connectionString, pks, collection);
@@ -155,35 +153,6 @@ public class MongodbWriter {
 				.insertedCount(inserted.get())
 				.modifiedCount(updated.get())
 				.removedCount(deleted.get()));
-	}
-
-	protected void removeOidIfNeed(List<TapRecordEvent> tapRecordEvents, Collection<String> pks) {
-		if (null == tapRecordEvents || null == pks) {
-			return;
-		}
-		if (pks.contains("_id")) {
-			return;
-		}
-		// remove _id in after
-		for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
-			Object mergeInfoObj = tapRecordEvent.getInfo(MergeInfo.EVENT_INFO_KEY);
-			if (mergeInfoObj instanceof MergeInfo) {
-				MergeInfo mergeInfo = (MergeInfo) mergeInfoObj;
-				if (mergeInfo.getLevel() > 1) {
-					continue;
-				}
-			}
-			Map<String, Object> after = null;
-			if (tapRecordEvent instanceof TapInsertRecordEvent) {
-				after = ((TapInsertRecordEvent) tapRecordEvent).getAfter();
-			} else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
-				after = ((TapUpdateRecordEvent) tapRecordEvent).getAfter();
-			}
-			if (null == after) {
-				continue;
-			}
-			after.remove("_id");
-		}
 	}
 
 	public void writeUpdateRecordWithLog(TapRecordEvent tapRecordEvent, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {

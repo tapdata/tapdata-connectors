@@ -458,6 +458,7 @@ public class MongodbMergeOperate {
 		final MergeBundle.EventOperation operation = mergeBundle.getOperation();
 		Map<String, Object> before = mergeBundle.getBefore();
 		Map<String, Object> after = mergeBundle.getAfter();
+		removeIdIfNeed(after, currentProperty);
 		Map<String, Object> filterMap = buildFilterMap(operation, after, before);
 		Document filter = filter(
 				filterMap,
@@ -932,5 +933,26 @@ public class MongodbMergeOperate {
 			result.putAll(after);
 		}
 		return result;
+	}
+
+	protected static void removeIdIfNeed(Map<String, Object> data, MergeTableProperties mergeTableProperties) {
+		if (MapUtils.isEmpty(data) || null == mergeTableProperties) {
+			return;
+		}
+		MergeTableProperties.MergeType mergeType = mergeTableProperties.getMergeType();
+		if (mergeType != MergeTableProperties.MergeType.updateWrite) {
+			return;
+		}
+		String targetPath = mergeTableProperties.getTargetPath();
+		if (StringUtils.isNotBlank(targetPath)) {
+			return;
+		}
+		List<Map<String, String>> joinKeys = mergeTableProperties.getJoinKeys();
+		for (Map<String, String> joinKey : joinKeys) {
+			if (joinKey.containsValue("_id")) {
+				return;
+			}
+		}
+		data.remove("_id");
 	}
 }
