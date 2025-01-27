@@ -544,12 +544,12 @@ public class GaussDBRunnerTest {
             runner.supplier = supplier;
             try (MockedStatic<LogicReplicationDiscreteImpl> logic = mockStatic(LogicReplicationDiscreteImpl.class)) {
                 logic.when(() -> {
-                    LogicReplicationDiscreteImpl.instance(consumer, any(), 100, offset, supplier);
+                    LogicReplicationDiscreteImpl.instance(consumer, any(), 0, 100, offset, supplier);
                 }).thenReturn(factory);
                 EventFactory<ByteBuffer> factory = runner.initEventFactory();
                 Assertions.assertNotNull(factory);
                 logic.verify(() -> {
-                    LogicReplicationDiscreteImpl.instance(consumer, any(), 100, offset, supplier);
+                    LogicReplicationDiscreteImpl.instance(consumer, any(), 0,100, offset, supplier);
                 }, times(1));
             }
         }

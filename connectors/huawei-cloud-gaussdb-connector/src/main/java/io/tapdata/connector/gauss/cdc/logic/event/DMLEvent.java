@@ -4,16 +4,25 @@ import io.tapdata.connector.gauss.cdc.logic.event.dml.CollectEntity;
 import io.tapdata.connector.gauss.entity.IllegalDataLengthException;
 import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.kit.EmptyKit;
+import io.tapdata.util.DateUtil;
 
 import java.nio.ByteBuffer;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.StringJoiner;
+import java.util.concurrent.ConcurrentHashMap;
 
-public interface DMLEvent extends Event<TapEvent> {
+public abstract class DMLEvent implements Event<TapEvent> {
+
+    private int offsetHour = 0;
 
     @Override
-    default Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, Map<String, Map<String, String>> dataTypeMap) {
+    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, Map<String, Map<String, String>> dataTypeMap) {
         CollectEntity instance = CollectEntity.instance();
         byte[] bOrA = null;
         int bOrACount = 2;
@@ -31,7 +40,7 @@ public interface DMLEvent extends Event<TapEvent> {
             switch (bOrAChar.toUpperCase()) {
                 case "N":
                 case "O":
-                    collectAttr(logEvent, kvMap, kTypeMap, dataTypeMap.get(new String(table)));
+                    collectAttr(logEvent, kvMap, kTypeMap, dataTypeMap, new String(table));
                     if (bOrACount > 1) {
                         bOrACount--;
                     } else {
@@ -61,9 +70,14 @@ public interface DMLEvent extends Event<TapEvent> {
         return collect(instance);
     }
 
-    Event.EventEntity<TapEvent> collect(CollectEntity entity);
+    protected abstract Event.EventEntity<TapEvent> collect(CollectEntity entity);
 
-    default void collectAttr(ByteBuffer logEvent, Map<String, Object> kvMap, Map<String, Integer> kTypeMap, Map<String, String> dataTypeMap) {
+    public <T extends DMLEvent> T offsetHour(int offsetHour) {
+        this.offsetHour = offsetHour;
+        return (T) this;
+    }
+
+    public void collectAttr(ByteBuffer logEvent, Map<String, Object> kvMap, Map<String, Integer> kTypeMap, Map<String, Map<String, String>> dataTypeMap, String table) {
         byte[] attrNum = LogicUtil.read(logEvent, 2);
         int attrNums = LogicUtil.bytesToInt(attrNum);//, 32);
         Map<String, Object> temp = new HashMap<>();
@@ -80,7 +94,7 @@ public interface DMLEvent extends Event<TapEvent> {
                     fieldName = fieldName.substring(0, fieldName.length() - 1);
                 }
                 int typeId = LogicUtil.bytesToInt(oid);//, 32);
-                temp.put(fieldName, value);
+                temp.put(fieldName, filterDateTime(fieldName, value, dataTypeMap.get(table), table));
                 kTypeMap.put(fieldName, typeId);
             }
             kvMap.putAll(temp);
@@ -95,7 +109,29 @@ public interface DMLEvent extends Event<TapEvent> {
                 }
                 j.add(k + ":" + value);
             });
-            throw new IllegalDataLengthException(e.getMessage() + "[" + j.toString() + "] ");
+            throw new IllegalDataLengthException(e.getMessage() + "[" + j + "] ");
         }
+    }
+
+    private Object filterDateTime(String fieldName, byte[] value, Map<String, String> dataTypeMap, String table) {
+        if (null == dataTypeMap) {
+            return value;
+        }
+        String dataType = dataTypeMap.get(fieldName);
+        if (null == dataType) {
+            return value;
+        }
+        String valueStr = new String(value);
+        switch (dataType) {
+            case "TIMESTAMP WITH TIME ZONE":
+                return LocalDateTime.parse(valueStr.substring(0, valueStr.length() - 3).replace(" ", "T")).minusHours(Integer.parseInt(valueStr.substring(valueStr.length() - 3))).atZone(ZoneOffset.UTC);
+            case "TIME WITH TIME ZONE":
+                return LocalTime.parse(valueStr.substring(0, valueStr.length() - 3)).atDate(LocalDate.ofYearDay(1970, 1)).minusHours(Integer.parseInt(valueStr.substring(valueStr.length() - 3))).atZone(ZoneOffset.UTC);
+            case "TIMESTAMP WITHOUT TIME ZONE":
+                return LocalDateTime.parse(valueStr.replace(" ", "T")).minusHours(offsetHour);
+            case "TIME WITHOUT TIME ZONE":
+                return LocalTime.parse(valueStr).atDate(LocalDate.ofYearDay(1970, 1)).minusHours(offsetHour);
+        }
+        return value;
     }
 }

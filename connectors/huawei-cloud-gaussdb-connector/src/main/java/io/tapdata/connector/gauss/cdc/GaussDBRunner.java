@@ -301,7 +301,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
     }
 
     protected EventFactory<ByteBuffer> initEventFactory() {
-        return LogicReplicationDiscreteImpl.instance(consumer, dataTypeMap, 100, offset, supplier);
+        return LogicReplicationDiscreteImpl.instance(consumer, dataTypeMap, gaussDBConfig.getZoneOffsetHour(), 100, offset, supplier);
     }
 
     public GaussDBRunner supplierIsAlive(Supplier<Boolean> supplier) {

@@ -20,7 +20,7 @@ public class GaussColumn extends PostgresColumn {
                 (null == this.remarks ? "" : this.remarks);
         return new TapField(LogicUtil.replaceAll(this.columnName, "\"",""),
                 LogicUtil.replaceAll(this.dataType.toUpperCase(),"\"",""))
-                .pureDataType(this.pureDataType)
+                .pureDataType(this.pureDataType.toUpperCase())
                 .nullable(this.isNullable())
                 .defaultValue(columnDefaultValue)
                 .comment(remarksTemp);

@@ -54,7 +54,6 @@ import io.tapdata.pdk.apis.functions.connection.TableInfo;
 
 import java.math.BigDecimal;
 import java.sql.*;
-import java.sql.Date;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -67,7 +66,7 @@ import java.util.function.Consumer;
  * @author Gavin'Xiao
  * @date 2024/01/16 18:37:00
  * gauss db as source and target
- * */
+ */
 @TapConnectorClass("spec_gauss_db.json")
 public class OpenGaussDBConnector extends CommonDbConnector {
     protected static final String CLEAN_SLOT_SQL = "SELECT COUNT(*) FROM pg_replication_slots WHERE slot_name='%s' AND active='false'";
@@ -96,7 +95,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     }
 
     @Override
-    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer)  throws Throwable {
+    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws Throwable {
         gaussDBConfig = (GaussDBConfig) GaussDBConfig.instance().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(gaussDBConfig.getConnectionString());
@@ -144,7 +143,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             //逻辑复制槽名称必须小于64个字符
             String plugin = Optional.ofNullable(connectorContext.getConnectionConfig().getString("logPluginName"))
                     .orElse(CdcConstant.GAUSS_DB_SLOT_DEFAULT_PLUGIN);
-            slotName = CdcConstant.GAUSS_DB_SLOT_SFF + LogicUtil.replaceAll(UUID.randomUUID().toString(),"-", "_");
+            slotName = CdcConstant.GAUSS_DB_SLOT_SFF + LogicUtil.replaceAll(UUID.randomUUID().toString(), "-", "_");
             gaussJdbcContext.execute(String.format(CREATE_SLOT_SQL, slotName, plugin));
             connectorContext.getStateMap().put(CdcConstant.GAUSS_DB_SLOT_TAG, slotName);
             sleep(3000L);
@@ -291,6 +290,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
     protected boolean isTransaction() {
         return isTransaction;
     }
+
     //write records as all events, prepared
     protected void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws SQLException {
         boolean hasUniqueIndex = hasUniqueIndex(tapTable);
@@ -328,7 +328,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         return transactionConnectionMap;
     }
 
-    protected String initInsertDmlPolicy(ConnectorCapabilities capabilities){
+    protected String initInsertDmlPolicy(ConnectorCapabilities capabilities) {
         if (null == capabilities) {
             return ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
         }
@@ -367,7 +367,8 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             log.warn("Postgres specified time start increment is not supported, use the current time as the start increment");
         }
         //test streamRead log plugin
-        Consumer<TestItem> consumer = testItem -> { };
+        Consumer<TestItem> consumer = testItem -> {
+        };
         GaussDBTest.instance(gaussDBConfig, consumer, gaussDBTest -> {
             boolean canCdc = Boolean.TRUE.equals(gaussDBTest.testStreamRead());
             if (canCdc) {
@@ -480,169 +481,169 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 .supportTransactionCommitFunction(this::commitTransaction)
                 .supportTransactionRollbackFunction(this::rollbackTransaction);
         codec.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
-            if (tapRawValue != null && tapRawValue.getValue() != null) return toJson(tapRawValue.getValue());
-            return "null";
-        }).registerFromTapValue(TapMapValue.class, "json", tapMapValue -> {
-            if (tapMapValue != null && tapMapValue.getValue() != null) return toJson(tapMapValue.getValue());
-            return "null";
-        }).registerFromTapValue(TapArrayValue.class, "json", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) return toJson(tapValue.getValue());
-            return "null";
-        }).registerToTapValue(PgArray.class, (value, tapType) -> {
-            PgArray pgArray = (PgArray) value;
-            try (ResultSet resultSet = pgArray.getResultSet()) {
-                return new TapArrayValue(DbKit.getDataArrayByColumnName(resultSet, "VALUE"));
-            } catch (SQLException e) {
-                throw new RuntimeException(e);
-            }
-        }).registerToTapValue(com.huawei.opengauss.jdbc.jdbc.PgArray.class, (value, tapType) -> {
-            PgArray pgArray = (PgArray) value;
-            try (ResultSet resultSet = pgArray.getResultSet()) {
-                return new TapArrayValue(DbKit.getDataArrayByColumnName(resultSet, "VALUE"));
-            } catch (SQLException e) {
-                throw new RuntimeException(e);
-            }
-        }).registerToTapValue(PgSQLXML.class, (value, tapType) -> {
-            try {
-                return new TapStringValue(((PgSQLXML) value).getString());
-            } catch (SQLException e) {
-                throw new RuntimeException(e);
-            }
-        }).registerToTapValue(com.huawei.opengauss.jdbc.jdbc.PgSQLXML.class, (value, tapType) -> {
-            com.huawei.opengauss.jdbc.jdbc.PgSQLXML xml = (com.huawei.opengauss.jdbc.jdbc.PgSQLXML)value;
-            try {
-                TapStringValue tapStringValue = new TapStringValue(xml.getString());
-                tapStringValue.setOriginValue(value);
-                return tapStringValue;
-            } catch (Exception e) {
-                TapStringValue tapStringValue = new TapStringValue(null);
-                tapStringValue.setOriginValue(value);
-                return tapStringValue;
-            }
-        }).registerToTapValue(PGbox.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(PGClob.class, (value, tapType) -> {
-            if (value instanceof PGClob) {
-                PGClob clob = (PGClob) value;
-                try {
-                    long length = clob.length();
-                    if (length > 0) {
-                        return new TapStringValue(clob.getSubString(1, (int)length));
+                    if (tapRawValue != null && tapRawValue.getValue() != null) return toJson(tapRawValue.getValue());
+                    return "null";
+                }).registerFromTapValue(TapMapValue.class, "json", tapMapValue -> {
+                    if (tapMapValue != null && tapMapValue.getValue() != null) return toJson(tapMapValue.getValue());
+                    return "null";
+                }).registerFromTapValue(TapArrayValue.class, "json", tapValue -> {
+                    if (tapValue != null && tapValue.getValue() != null) return toJson(tapValue.getValue());
+                    return "null";
+                }).registerToTapValue(PgArray.class, (value, tapType) -> {
+                    PgArray pgArray = (PgArray) value;
+                    try (ResultSet resultSet = pgArray.getResultSet()) {
+                        return new TapArrayValue(DbKit.getDataArrayByColumnName(resultSet, "VALUE"));
+                    } catch (SQLException e) {
+                        throw new RuntimeException(e);
                     }
-                } catch (SQLException ignore) {
+                }).registerToTapValue(com.huawei.opengauss.jdbc.jdbc.PgArray.class, (value, tapType) -> {
+                    PgArray pgArray = (PgArray) value;
+                    try (ResultSet resultSet = pgArray.getResultSet()) {
+                        return new TapArrayValue(DbKit.getDataArrayByColumnName(resultSet, "VALUE"));
+                    } catch (SQLException e) {
+                        throw new RuntimeException(e);
+                    }
+                }).registerToTapValue(PgSQLXML.class, (value, tapType) -> {
+                    try {
+                        return new TapStringValue(((PgSQLXML) value).getString());
+                    } catch (SQLException e) {
+                        throw new RuntimeException(e);
+                    }
+                }).registerToTapValue(com.huawei.opengauss.jdbc.jdbc.PgSQLXML.class, (value, tapType) -> {
+                    com.huawei.opengauss.jdbc.jdbc.PgSQLXML xml = (com.huawei.opengauss.jdbc.jdbc.PgSQLXML) value;
+                    try {
+                        TapStringValue tapStringValue = new TapStringValue(xml.getString());
+                        tapStringValue.setOriginValue(value);
+                        return tapStringValue;
+                    } catch (Exception e) {
+                        TapStringValue tapStringValue = new TapStringValue(null);
+                        tapStringValue.setOriginValue(value);
+                        return tapStringValue;
+                    }
+                }).registerToTapValue(PGbox.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(PGClob.class, (value, tapType) -> {
+                    if (value instanceof PGClob) {
+                        PGClob clob = (PGClob) value;
+                        try {
+                            long length = clob.length();
+                            if (length > 0) {
+                                return new TapStringValue(clob.getSubString(1, (int) length));
+                            }
+                        } catch (SQLException ignore) {
 
-                }
-            }
-            return new TapStringValue(null);
-        }).registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGbox.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(PGcircle.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGcircle.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGline.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(PGline.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGlseg.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(PGlseg.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpath.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(PGpath.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(PGobject.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(com.huawei.opengauss.jdbc.util.PGobject.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(PGpoint.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpoint.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(PGpolygon.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpolygon.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(UUID.class, (value, tapType) -> new TapStringValue(value.toString()))
-        .registerToTapValue(PGInterval.class, (value, tapType) -> {
-            //P1Y1M1DT12H12M12.312312S
-            PGInterval pgInterval = (PGInterval) value;
-            String interval = "P" + pgInterval.getYears() + "Y" +
-                    pgInterval.getMonths() + "M" +
-                    pgInterval.getDays() + "DT" +
-                    pgInterval.getHours() + "H" +
-                    pgInterval.getMinutes() + "M" +
-                    pgInterval.getSeconds() + "S";
-            return new TapStringValue(interval);
-        }).registerToTapValue(com.huawei.opengauss.jdbc.util.PGInterval.class, (value, tapType) -> {
-            //P1Y1M1DT12H12M12.312312S
-            PGInterval pgInterval = (PGInterval) value;
-            String interval = "P" + pgInterval.getYears() + "Y" +
-                    pgInterval.getMonths() + "M" +
-                    pgInterval.getDays() + "DT" +
-                    pgInterval.getHours() + "H" +
-                    pgInterval.getMinutes() + "M" +
-                    pgInterval.getSeconds() + "S";
-            return new TapStringValue(interval);
-        }).registerToTapValue(byte[].class, (value, tapType) -> {
-            byte[] bytes = (byte[])value;
-            if (bytes.length == 0) return new TapStringValue("");
-            byte type = tapType.getType();
-            String dataValue = new String(bytes);
-            switch (type) {
-                case TapType.TYPE_DATETIME:
-                    TapDateTime tapDateTime = (TapDateTime)tapType;
-                    DateTime dateTime = new DateTime(TimeUtil.parseDateTime(dataValue, tapDateTime.getFraction(), tapDateTime.getWithTimeZone()));
-                    return new TapDateValue(dateTime);
-                case TapType.TYPE_DATE:
-                    TapDate tapDate = (TapDate)tapType;
-                    DateTime date = new DateTime(TimeUtil.parseDateTime(dataValue, 0, tapDate.getWithTimeZone()));
-                    return new TapDateValue(date);
-                case TapType.TYPE_ARRAY:
-                    try {
-                        return new TapArrayValue((List<Object>) fromJson(dataValue));
-                    } catch (Exception e) {
-                        return new TapRawValue(value);
-                    }
-                case TapType.TYPE_MAP:
-                    try {
-                        return new TapMapValue((Map<String, Object>) fromJson(dataValue));
-                    } catch (Exception e) {
-                        return new TapRawValue(value);
-                    }
-                case TapType.TYPE_BOOLEAN:
-                    return new TapBooleanValue(Boolean.parseBoolean(dataValue));
-                case TapType.TYPE_YEAR:
-                    DateTime year = new DateTime(TimeUtil.parseDate(dataValue, "yyyy"));
-                    return new TapYearValue(year);
-                case TapType.TYPE_TIME:
-                    DateTime time = new DateTime(TimeUtil.parseDate(dataValue, "hh:mm:ss"));
-                    return new TapTimeValue(time);
-                case TapType.TYPE_RAW:
-                    return new TapRawValue(value);
-                case TapType.TYPE_NUMBER:
-                    TapNumberValue numberValue = new TapNumberValue();
-                    TapNumber tNumber = (TapNumber)tapType;
-                    Integer bit = tNumber.getBit();
-                    try {
-                        numberValue.setValue(Double.parseDouble(dataValue));
-                    } catch (Exception e) {
-                        return new TapRawValue(value);
-                    }
-                    try {
-                        if (null == bit) {
-                            numberValue.setOriginValue(dataValue);
-                        } else if(bit <= 4) {
-                            numberValue.setOriginValue(Byte.parseByte(dataValue));
-                        } else if (bit <= 16) {
-                            numberValue.setOriginValue(Short.parseShort(dataValue));
-                        } else if (bit <= 32) {
-                            numberValue.setOriginValue(Integer.parseInt(dataValue));
-                        } else {
-                            numberValue.setOriginValue(Long.parseLong(dataValue));
                         }
-                    } catch (Exception e) {
-                        numberValue.setOriginValue(dataValue);
                     }
-                    return numberValue;
-                case TapType.TYPE_BINARY:
-                    return new TapBinaryValue(bytes);
-                case TapType.TYPE_STRING:
-                    return new TapStringValue(dataValue);
-                default:
-                    return new TapRawValue(value);
-            }
-        })
-        //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object
-        .registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime())
-        .registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp())
-        .registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate())
-        .registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"))
+                    return new TapStringValue(null);
+                }).registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGbox.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(PGcircle.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGcircle.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGline.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(PGline.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGlseg.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(PGlseg.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpath.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(PGpath.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(PGobject.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(com.huawei.opengauss.jdbc.util.PGobject.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(PGpoint.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpoint.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(PGpolygon.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(com.huawei.opengauss.jdbc.geometric.PGpolygon.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(UUID.class, (value, tapType) -> new TapStringValue(value.toString()))
+                .registerToTapValue(PGInterval.class, (value, tapType) -> {
+                    //P1Y1M1DT12H12M12.312312S
+                    PGInterval pgInterval = (PGInterval) value;
+                    String interval = "P" + pgInterval.getYears() + "Y" +
+                            pgInterval.getMonths() + "M" +
+                            pgInterval.getDays() + "DT" +
+                            pgInterval.getHours() + "H" +
+                            pgInterval.getMinutes() + "M" +
+                            pgInterval.getSeconds() + "S";
+                    return new TapStringValue(interval);
+                }).registerToTapValue(com.huawei.opengauss.jdbc.util.PGInterval.class, (value, tapType) -> {
+                    //P1Y1M1DT12H12M12.312312S
+                    PGInterval pgInterval = (PGInterval) value;
+                    String interval = "P" + pgInterval.getYears() + "Y" +
+                            pgInterval.getMonths() + "M" +
+                            pgInterval.getDays() + "DT" +
+                            pgInterval.getHours() + "H" +
+                            pgInterval.getMinutes() + "M" +
+                            pgInterval.getSeconds() + "S";
+                    return new TapStringValue(interval);
+                }).registerToTapValue(byte[].class, (value, tapType) -> {
+                    byte[] bytes = (byte[]) value;
+                    if (bytes.length == 0) return new TapStringValue("");
+                    byte type = tapType.getType();
+                    String dataValue = new String(bytes);
+                    switch (type) {
+                        case TapType.TYPE_DATETIME:
+                            TapDateTime tapDateTime = (TapDateTime) tapType;
+                            DateTime dateTime = new DateTime(TimeUtil.parseDateTime(dataValue, tapDateTime.getFraction(), tapDateTime.getWithTimeZone()));
+                            return new TapDateValue(dateTime);
+                        case TapType.TYPE_DATE:
+                            TapDate tapDate = (TapDate) tapType;
+                            DateTime date = new DateTime(TimeUtil.parseDateTime(dataValue, 0, tapDate.getWithTimeZone()));
+                            return new TapDateValue(date);
+                        case TapType.TYPE_ARRAY:
+                            try {
+                                return new TapArrayValue((List<Object>) fromJson(dataValue));
+                            } catch (Exception e) {
+                                return new TapRawValue(value);
+                            }
+                        case TapType.TYPE_MAP:
+                            try {
+                                return new TapMapValue((Map<String, Object>) fromJson(dataValue));
+                            } catch (Exception e) {
+                                return new TapRawValue(value);
+                            }
+                        case TapType.TYPE_BOOLEAN:
+                            return new TapBooleanValue(Boolean.parseBoolean(dataValue));
+                        case TapType.TYPE_YEAR:
+                            DateTime year = new DateTime(TimeUtil.parseDate(dataValue, "yyyy"));
+                            return new TapYearValue(year);
+                        case TapType.TYPE_TIME:
+                            DateTime time = new DateTime(TimeUtil.parseDate(dataValue, "hh:mm:ss"));
+                            return new TapTimeValue(time);
+                        case TapType.TYPE_RAW:
+                            return new TapRawValue(value);
+                        case TapType.TYPE_NUMBER:
+                            TapNumberValue numberValue = new TapNumberValue();
+                            TapNumber tNumber = (TapNumber) tapType;
+                            Integer bit = tNumber.getBit();
+                            try {
+                                numberValue.setValue(Double.parseDouble(dataValue));
+                            } catch (Exception e) {
+                                return new TapRawValue(value);
+                            }
+                            try {
+                                if (null == bit) {
+                                    numberValue.setOriginValue(dataValue);
+                                } else if (bit <= 4) {
+                                    numberValue.setOriginValue(Byte.parseByte(dataValue));
+                                } else if (bit <= 16) {
+                                    numberValue.setOriginValue(Short.parseShort(dataValue));
+                                } else if (bit <= 32) {
+                                    numberValue.setOriginValue(Integer.parseInt(dataValue));
+                                } else {
+                                    numberValue.setOriginValue(Long.parseLong(dataValue));
+                                }
+                            } catch (Exception e) {
+                                numberValue.setOriginValue(dataValue);
+                            }
+                            return numberValue;
+                        case TapType.TYPE_BINARY:
+                            return new TapBinaryValue(bytes);
+                        case TapType.TYPE_STRING:
+                            return new TapStringValue(dataValue);
+                        default:
+                            return new TapRawValue(value);
+                    }
+                })
+                //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object
+                .registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime())
+                .registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp())
+                .registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate())
+                .registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"))
         ;
     }
 

@@ -30,9 +30,10 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
     protected CdcOffset offset;
     protected int transactionIndex = 0;
     protected Map<String, Map<String, String>> dataTypeMap;
+    protected int offsetHour;
     protected Supplier<Boolean> supplier;
 
-    private LogicReplicationDiscreteImpl(StreamReadConsumer consumer, Map<String, Map<String, String>> dataTypeMap, int batchSize, CdcOffset offset, Supplier<Boolean> supplier) {
+    private LogicReplicationDiscreteImpl(StreamReadConsumer consumer, Map<String, Map<String, String>> dataTypeMap, int offsetHour, int batchSize, CdcOffset offset, Supplier<Boolean> supplier) {
         this.eventAccept = consumer;
         if (batchSize > CdcConstant.CDC_MAX_BATCH_SIZE || batchSize <= CdcConstant.CDC_MIN_BATCH_SIZE) {
             batchSize = CdcConstant.CDC_DEFAULT_BATCH_SIZE;
@@ -43,11 +44,12 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
         }
         this.offset = offset;
         this.dataTypeMap = dataTypeMap;
+        this.offsetHour = offsetHour;
         this.supplier = supplier;
     }
 
-    public static EventFactory<ByteBuffer> instance(StreamReadConsumer consumer, Map<String, Map<String, String>> dataTypeMap, int batchSize, CdcOffset offset, Supplier<Boolean> supplier) {
-        return new LogicReplicationDiscreteImpl(consumer, dataTypeMap, batchSize, offset, supplier);
+    public static EventFactory<ByteBuffer> instance(StreamReadConsumer consumer, Map<String, Map<String, String>> dataTypeMap, int offsetHour, int batchSize, CdcOffset offset, Supplier<Boolean> supplier) {
+        return new LogicReplicationDiscreteImpl(consumer, dataTypeMap, offsetHour, batchSize, offset, supplier);
     }
 
     protected boolean hasNext(ByteBuffer buffer) {
@@ -121,15 +123,15 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
                 offset.withTransactionTimestamp(event.timestamp());
                 break;
             case CdcConstant.INSERT_TAG:
-                event = InsertEvent.instance().analyze(logEvent, dataTypeMap);
+                event = InsertEvent.instance().offsetHour(offsetHour).analyze(logEvent, dataTypeMap);
                 advanceTransactionOffset();
                 break;
             case CdcConstant.UPDATE_TAG:
-                event = UpdateEvent.instance().analyze(logEvent, dataTypeMap);
+                event = UpdateEvent.instance().offsetHour(offsetHour).analyze(logEvent, dataTypeMap);
                 advanceTransactionOffset();
                 break;
             case CdcConstant.DELETE_TAG:
-                event = DeleteEvent.instance().analyze(logEvent, dataTypeMap);
+                event = DeleteEvent.instance().offsetHour(offsetHour).analyze(logEvent, dataTypeMap);
                 advanceTransactionOffset();
                 break;
             case CdcConstant.COMMIT_TAG:

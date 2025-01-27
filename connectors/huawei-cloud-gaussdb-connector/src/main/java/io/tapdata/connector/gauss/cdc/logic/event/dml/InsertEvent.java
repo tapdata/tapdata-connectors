@@ -7,7 +7,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 
 import java.nio.ByteBuffer;
 
-public class InsertEvent implements DMLEvent {
+public class InsertEvent extends DMLEvent {
     private InsertEvent() {
 
     }
