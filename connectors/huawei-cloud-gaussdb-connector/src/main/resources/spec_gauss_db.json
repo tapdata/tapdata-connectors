@@ -412,6 +412,7 @@
     },
     "numeric[($precision,$scale)]": {
       "to": "TapNumber",
+      "fixed": true,
       "precision": [
         1,
         1000
