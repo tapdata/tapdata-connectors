@@ -1129,11 +1129,11 @@ public class OpenGaussDBConnectorTest {
         void assertVerify(int instance1, int instance2) {
             Assertions.assertDoesNotThrow(() -> {
                 try (MockedStatic<GaussDBRecordWriter> gw = mockStatic(GaussDBRecordWriter.class)){
-                    gw.when(() -> GaussDBRecordWriter.instance(gaussJdbcContext, tapTable, version)).thenReturn(writer);
-                    gw.when(() -> GaussDBRecordWriter.instance(gaussJdbcContext, connection, tapTable, version)).thenReturn(writer);
+                    gw.when(() -> new GaussDBRecordWriter(gaussJdbcContext, tapTable)).thenReturn(writer);
+                    gw.when(() -> new GaussDBRecordWriter(gaussJdbcContext, connection, tapTable)).thenReturn(writer);
                     connector.writeRecord(connectorContext, tapRecordEvents, tapTable, writeListResultConsumer);
-                    gw.verify(() -> GaussDBRecordWriter.instance(gaussJdbcContext, tapTable, version), times(instance1));
-                    gw.verify(() -> GaussDBRecordWriter.instance(gaussJdbcContext, connection, tapTable, version), times(instance2));
+                    gw.verify(() -> new GaussDBRecordWriter(gaussJdbcContext, tapTable), times(instance1));
+                    gw.verify(() -> new GaussDBRecordWriter(gaussJdbcContext, connection, tapTable), times(instance2));
                 } finally {
                     verify(connector, times(1)).hasUniqueIndex(tapTable);
                     verify(connectorContext, times(1)).getConnectorCapabilities();

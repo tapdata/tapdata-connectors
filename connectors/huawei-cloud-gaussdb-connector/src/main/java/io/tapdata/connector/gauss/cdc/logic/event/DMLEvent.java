@@ -4,8 +4,8 @@ import io.tapdata.connector.gauss.cdc.logic.event.dml.CollectEntity;
 import io.tapdata.connector.gauss.entity.IllegalDataLengthException;
 import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.entity.event.TapEvent;
-import io.tapdata.kit.EmptyKit;
-import io.tapdata.util.DateUtil;
+import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.kit.StringKit;
 
 import java.nio.ByteBuffer;
 import java.time.LocalDate;
@@ -15,7 +15,6 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.StringJoiner;
-import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class DMLEvent implements Event<TapEvent> {
 
@@ -114,6 +113,9 @@ public abstract class DMLEvent implements Event<TapEvent> {
     }
 
     private Object filterDateTime(String fieldName, byte[] value, Map<String, String> dataTypeMap, String table) {
+        if (null == value) {
+            return null;
+        }
         if (null == dataTypeMap) {
             return value;
         }
@@ -123,15 +125,34 @@ public abstract class DMLEvent implements Event<TapEvent> {
         }
         String valueStr = new String(value);
         switch (dataType) {
-            case "TIMESTAMP WITH TIME ZONE":
+            case "bit":
+                return "1".equals(valueStr);
+            case "bytea":
+                return decodeBytea(value);
+            case "json":
+                return valueStr;
+            case "blob":
+                return StringKit.toByteArray(valueStr);
+            case "money":
+                return Double.parseDouble(valueStr.replace("$", ""));
+            case "timestamp with time zone":
                 return LocalDateTime.parse(valueStr.substring(0, valueStr.length() - 3).replace(" ", "T")).minusHours(Integer.parseInt(valueStr.substring(valueStr.length() - 3))).atZone(ZoneOffset.UTC);
-            case "TIME WITH TIME ZONE":
+            case "time with time zone":
                 return LocalTime.parse(valueStr.substring(0, valueStr.length() - 3)).atDate(LocalDate.ofYearDay(1970, 1)).minusHours(Integer.parseInt(valueStr.substring(valueStr.length() - 3))).atZone(ZoneOffset.UTC);
-            case "TIMESTAMP WITHOUT TIME ZONE":
+            case "timestamp without time zone":
+            case "smalldatetime":
                 return LocalDateTime.parse(valueStr.replace(" ", "T")).minusHours(offsetHour);
-            case "TIME WITHOUT TIME ZONE":
+            case "time without time zone":
                 return LocalTime.parse(valueStr).atDate(LocalDate.ofYearDay(1970, 1)).minusHours(offsetHour);
         }
         return value;
+    }
+
+    private byte[] decodeBytea(byte[] bytes) {
+        byte[] newBytes = new byte[bytes.length / 2 - 1];
+        for (int i = 2; i < bytes.length; i += 2) {
+            newBytes[i / 2 - 1] = (byte) ((bytes[i] - 48) * 16 + bytes[i + 1] - 48);
+        }
+        return newBytes;
     }
 }

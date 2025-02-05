@@ -29,7 +29,6 @@ import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapDate;
 import io.tapdata.entity.schema.type.TapDateTime;
-import io.tapdata.entity.schema.type.TapNumber;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
@@ -297,10 +296,9 @@ public class OpenGaussDBConnector extends CommonDbConnector {
         ConnectorCapabilities capabilities = connectorContext.getConnectorCapabilities();
         String insertDmlPolicy = initInsertDmlPolicy(capabilities);
         String updateDmlPolicy = initUpdateDmlPolicy(capabilities);
-        String version = getGaussDBVersion(hasUniqueIndex);
         GaussDBRecordWriter writer = isTransaction() ?
-                GaussDBRecordWriter.instance(gaussJdbcContext, initConnectionIsTransaction(), tapTable, version) :
-                GaussDBRecordWriter.instance(gaussJdbcContext, tapTable, version);
+                new GaussDBRecordWriter(gaussJdbcContext, initConnectionIsTransaction(), tapTable) :
+                new GaussDBRecordWriter(gaussJdbcContext, tapTable);
         writer.setInsertPolicy(insertDmlPolicy)
                 .setUpdatePolicy(updateDmlPolicy)
                 .setTapLogger(connectorContext.getLog())
@@ -607,30 +605,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                         case TapType.TYPE_RAW:
                             return new TapRawValue(value);
                         case TapType.TYPE_NUMBER:
-                            TapNumberValue numberValue = new TapNumberValue();
-                            TapNumber tNumber = (TapNumber) tapType;
-                            Integer bit = tNumber.getBit();
-                            try {
-                                numberValue.setValue(Double.parseDouble(dataValue));
-                            } catch (Exception e) {
-                                return new TapRawValue(value);
-                            }
-                            try {
-                                if (null == bit) {
-                                    numberValue.setOriginValue(dataValue);
-                                } else if (bit <= 4) {
-                                    numberValue.setOriginValue(Byte.parseByte(dataValue));
-                                } else if (bit <= 16) {
-                                    numberValue.setOriginValue(Short.parseShort(dataValue));
-                                } else if (bit <= 32) {
-                                    numberValue.setOriginValue(Integer.parseInt(dataValue));
-                                } else {
-                                    numberValue.setOriginValue(Long.parseLong(dataValue));
-                                }
-                            } catch (Exception e) {
-                                numberValue.setOriginValue(dataValue);
-                            }
-                            return numberValue;
+                            return new TapNumberValue(new BigDecimal(dataValue).doubleValue());
                         case TapType.TYPE_BINARY:
                             return new TapBinaryValue(bytes);
                         case TapType.TYPE_STRING:
@@ -640,10 +615,22 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                     }
                 })
                 //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object
-                .registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime())
-                .registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp())
+                .registerFromTapValue(TapTimeValue.class, tapTimeValue -> {
+                    if (EmptyKit.isNotNull(tapTimeValue.getValue().getTimeZone())) {
+                        return tapTimeValue.getValue().toInstant().atZone(ZoneId.systemDefault()).toLocalTime();
+                    } else {
+                        return tapTimeValue.getValue().toInstant().atZone(gaussDBConfig.getZoneId()).toLocalTime();
+                    }
+                })
+                .registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
+                    if (EmptyKit.isNotNull(tapDateTimeValue.getValue().getTimeZone())) {
+                        return tapDateTimeValue.getValue().toTimestamp();
+                    } else {
+                        return tapDateTimeValue.getValue().toInstant().atZone(gaussDBConfig.getZoneId()).toLocalDateTime();
+                    }
+                })
                 .registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate())
-                .registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"))
+                .registerFromTapValue(TapYearValue.class, "character(4)", TapValue::getOriginValue);
         ;
     }
 
@@ -655,7 +642,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
                     continue;
                 }
-                if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("WITH TIME ZONE")) {
+                if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
                     entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(gaussDBConfig.getZoneOffsetHour()));
                 } else {
                     entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
@@ -664,10 +651,14 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
                     continue;
                 }
-                if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("WITH TIME ZONE")) {
+                if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().endsWith("with time zone")) {
                     entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(gaussDBConfig.getZoneOffsetHour()));
                 } else {
                     entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneOffset.UTC));
+                }
+            } else if (value instanceof PGobject) {
+                if (tapTable.getNameFieldMap().get(entry.getKey()).getDataType().startsWith("bit")) {
+                    entry.setValue(((PGobject) value).getValue().getBytes());
                 }
             }
         }
