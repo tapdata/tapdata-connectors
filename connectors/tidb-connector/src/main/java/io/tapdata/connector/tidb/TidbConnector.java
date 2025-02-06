@@ -353,6 +353,9 @@ public class TidbConnector extends CommonDbConnector {
             Object value = entry.getValue();
             TapField field = tapTable.getNameFieldMap().get(entry.getKey());
             String dataType = field.getDataType();
+            if (dataType == null) {
+                continue;
+            }
             boolean isTimestamp = dataType.startsWith("timestamp") || dataType.startsWith("TIMESTAMP");
             if (value instanceof LocalDateTime) {
                 if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
@@ -364,7 +367,11 @@ public class TidbConnector extends CommonDbConnector {
                     entry.setValue(((LocalDateTime) value).minusHours(tidbConfig.getZoneOffsetHour()));
                 }
             }  else if (value instanceof java.sql.Date) {
-                entry.setValue(((Date) value).toLocalDate());
+                if (dataType.startsWith("year")) {
+                    entry.setValue(((Date) value).toLocalDate().getYear());
+                } else {
+                    entry.setValue(((Date) value).toLocalDate().atStartOfDay());
+                }
             } else if (value instanceof Timestamp) {
                 if (isTimestamp) {
                     entry.setValue(((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
