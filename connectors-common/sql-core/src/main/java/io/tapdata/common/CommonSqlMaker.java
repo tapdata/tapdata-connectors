@@ -83,7 +83,7 @@ public class CommonSqlMaker {
             if (tapField.getDataType() == null) {
                 return "";
             }
-            builder.append(escapeChar).append(tapField.getName()).append(escapeChar).append(' ').append(tapField.getDataType()).append(' ');
+            buildDataTypeDefinition(builder, tapField);
             if (Boolean.TRUE.equals(applyDefault) && EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
                 buildDefaultDefinition(builder, tapField);
             }
@@ -96,6 +96,10 @@ public class CommonSqlMaker {
             }
             return builder.toString();
         }).collect(Collectors.joining(", "));
+    }
+
+    protected void buildDataTypeDefinition(StringBuilder builder, TapField tapField) {
+        builder.append(escapeChar).append(tapField.getName()).append(escapeChar).append(' ').append(tapField.getDataType()).append(' ');
     }
 
     protected void buildNullDefinition(StringBuilder builder, TapField tapField) {

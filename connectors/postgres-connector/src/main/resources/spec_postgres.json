@@ -303,6 +303,26 @@
             }
           ]
         },
+        "tableOwner": {
+          "type": "string",
+          "title": "${tableOwner}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 3,
+          "x-decorator-props": {
+            "tooltip": "${tableOwnerTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "createAutoInc": {
           "type": "boolean",
           "title": "${createAutoInc}",
@@ -516,6 +536,8 @@
       "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
       "closeNotNull": "Ignore NotNull",
       "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded",
+      "tableOwner": "Specify table owner",
+      "tableOwnerTooltip": "You can specify the table owner, if not specified, it defaults to the current user",
       "createAutoInc": "Synchronize auto-increment columns",
       "createAutoIncTooltip": "Only PG 10 and above are supported. When the switch is turned on, the auto-increment attribute is synchronized when entering the incremental",
       "autoIncJumpValue": "Auto-increment key jump value",
@@ -551,6 +573,8 @@
       "timezoneTip": "指定时区，否则不做时区处理",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "开关打开时会将非空限制丢弃",
+      "tableOwner": "指定表所有者",
+      "tableOwnerTooltip": "可以指定表所有者，不指定则默认为当前用户",
       "createAutoInc": "同步自增列",
       "createAutoIncTooltip": "仅支持PG10版本以上，开关打开时会在进入增量时同步自增属性",
       "autoIncJumpValue": "自增键跳跃值",
@@ -586,6 +610,8 @@
       "timezoneTip": "指定時區，否則不做時區處理",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "開關打開時會將非空限制丟棄",
+      "tableOwner": "指定表所有者",
+      "tableOwnerTooltip": "可以指定表所有者，不指定則默認為當前用戶",
       "createAutoInc": "同步自增列",
       "createAutoIncTooltip": "僅支持PG10版本以上，開關打開時會在進入增量時同步自增屬性",
       "autoIncJumpValue": "自增鍵跳躍值",

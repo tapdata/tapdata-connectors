@@ -21,6 +21,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     private String logPluginName = "pgoutput"; //default log plugin for postgres, pay attention to lower version
     private Boolean closeNotNull = false;
+    private String tableOwner = "";
     private String replaceBlank = "";
     private Boolean partitionRoot = false;
     private Integer maximumQueueSize = 8000;
@@ -81,6 +82,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setCloseNotNull(Boolean closeNotNull) {
         this.closeNotNull = closeNotNull;
+    }
+
+    public String getTableOwner() {
+        return tableOwner;
+    }
+
+    public void setTableOwner(String tableOwner) {
+        this.tableOwner = tableOwner;
     }
 
     public String getReplaceBlank() {

@@ -16,10 +16,7 @@ import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
-import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
-import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
-import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
-import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
+import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
@@ -48,6 +45,7 @@ import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapPartitionResult;
 import io.tapdata.pdk.apis.functions.connector.source.ConnectionConfigWithTables;
+import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.postgresql.geometric.*;
 import org.postgresql.jdbc.PgArray;
 import org.postgresql.jdbc.PgSQLXML;
@@ -388,6 +386,14 @@ public class PostgresConnector extends CommonDbConnector {
 
     protected boolean makeSureHasUnique(TapTable tapTable) throws SQLException {
         return jdbcContext.queryAllIndexes(Collections.singletonList(tapTable.getId())).stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
+    }
+
+    protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
+        CreateTableOptions options = super.createTableV2(connectorContext, createTableEvent);
+        if (EmptyKit.isNotBlank(postgresConfig.getTableOwner())) {
+            jdbcContext.execute(String.format("alter table %s owner to %s", getSchemaAndTable(createTableEvent.getTableId()), postgresConfig.getTableOwner()));
+        }
+        return options;
     }
 
     //write records as all events, prepared
