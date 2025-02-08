@@ -159,11 +159,14 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
         Map<String, TapField> fieldMap = tapTable.getNameFieldMap();
         for (String field : fieldMap.keySet()) {
-            String fieldDefault = (String) fieldMap.get(field).getDefaultValue();
-            if (EmptyKit.isNotEmpty(fieldDefault)) {
-                if (fieldDefault.contains("'")) {
-                    fieldDefault = fieldDefault.replaceAll("'", "''");
-                    fieldMap.get(field).setDefaultValue(fieldDefault);
+            Object defaultValue = fieldMap.get(field).getDefaultValue();
+            if (defaultValue instanceof String) {
+                String fieldDefault = (String) fieldMap.get(field).getDefaultValue();
+                if (EmptyKit.isNotEmpty(fieldDefault)) {
+                    if (fieldDefault.contains("'")) {
+                        fieldDefault = fieldDefault.replaceAll("'", "''");
+                        fieldMap.get(field).setDefaultValue(fieldDefault);
+                    }
                 }
             }
         }
