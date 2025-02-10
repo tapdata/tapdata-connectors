@@ -157,7 +157,11 @@ public class DbKit {
     }
 
     public static String buildIndexName(String table) {
-        return "TAPIDX_" + table.substring(Math.max(table.length() - 10, 0)) + UUID.randomUUID().toString().replaceAll("-", "").substring(20);
+        return "IDX_" + table.substring(Math.max(table.length() - 10, 0)) + UUID.randomUUID().toString().replaceAll("-", "").substring(20);
+    }
+
+    public static String buildForeignKeyName(String table) {
+        return "FK_" + table.substring(Math.max(table.length() - 10, 0)) + UUID.randomUUID().toString().replaceAll("-", "").substring(20);
     }
 
     public static <T> List<List<T>> splitToPieces(List<T> data, int eachPieceSize) {

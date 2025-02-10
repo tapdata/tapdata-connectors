@@ -18,9 +18,7 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.schema.TapField;
-import io.tapdata.entity.schema.TapIndex;
-import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.*;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
@@ -132,6 +130,8 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportCreateIndex(this::createIndex);
         connectorFunctions.supportQueryIndexes(this::queryIndexes);
         connectorFunctions.supportDeleteIndex(this::dropIndexes);
+        connectorFunctions.supportQueryConstraints(this::queryConstraint);
+        connectorFunctions.supportCreateConstraint(this::createConstraint);
         // source
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);

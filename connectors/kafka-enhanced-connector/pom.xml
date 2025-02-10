@@ -15,7 +15,7 @@
 
     <properties>
         <java.version>8</java.version>
-        <tapdata.pdk.api.version>1.4.1-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.4.4-SNAPSHOT</tapdata.pdk.api.version>
         <kafka.version>2.8.2</kafka.version>
         <slf4j.version>1.7.25</slf4j.version>
     </properties>

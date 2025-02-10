@@ -87,6 +87,11 @@ public class PostgresJdbcContext extends JdbcContext {
         return String.format(PG_ALL_INDEX, getConfig().getDatabase(), schema, tableSql);
     }
 
+    @Override
+    protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
+        return String.format(PG_ALL_FOREIGN_KEY, getConfig().getSchema(), EmptyKit.isEmpty(tableNames) ? "" : " and pc.relname in ('" + String.join("','", tableNames) + "')");
+    }
+
     public DataMap getTableInfo(String tableName) {
         DataMap dataMap = DataMap.create();
         List<String> list = new ArrayList<>();
@@ -193,10 +198,33 @@ public class PostgresJdbcContext extends JdbcContext {
                     "  AND a.attnum = ANY(ix.indkey)\n" +
                     "  AND t.relkind IN ('r', 'p')\n" +
                     "  AND tt.table_name=t.relname\n" +
+                    "  AND tt.table_schema=(select nspname from pg_namespace where oid=t.relnamespace)\n" +
                     "  AND tt.table_catalog='%s'\n" +
                     "  AND tt.table_schema='%s' %s\n" +
                     "ORDER BY t.relname, i.relname, a.attnum";
 
+    protected final static String PG_ALL_FOREIGN_KEY = "select con.\"constraintName\",con.\"tableName\",con.\"referencesTableName\",con.\"onUpdate\",con.\"onDelete\",\n" +
+            "(select column_name from information_schema.columns where table_schema=con.nspname and table_name=con.\"tableName\" and ordinal_position=con.fk) fk,\n" +
+            "(select column_name from information_schema.columns where table_schema=con.nspname and table_name=con.\"referencesTableName\" and ordinal_position=con.rfk) rfk\n" +
+            "from\n" +
+            "(select c.conname \"constraintName\",pn.nspname,\n" +
+            "pc.relname \"tableName\",\n" +
+            "(select relname from pg_class where oid=c.confrelid) \"referencesTableName\",\n" +
+            "unnest(conkey) fk, unnest(confkey) rfk,\n" +
+            "(case c.confupdtype\n" +
+            "    when 'a' then 'NO_ACTION'\n" +
+            "    when 'n' then 'SET_NULL'\n" +
+            "    when 'r' then 'RESTRICT'\n" +
+            "    when 'c' then 'CASCADE' else 'SET_DEFAULT' end) \"onUpdate\",\n" +
+            "(case c.confdeltype\n" +
+            "    when 'a' then 'NO_ACTION'\n" +
+            "    when 'n' then 'SET_NULL'\n" +
+            "    when 'r' then 'RESTRICT'\n" +
+            "    when 'c' then 'CASCADE' else 'SET_DEFAULT' end) \"onDelete\"\n" +
+            "from pg_constraint c\n" +
+            "join pg_class pc on c.conrelid = pc.oid\n" +
+            "join pg_namespace pn on c.connamespace = pn.oid\n" +
+            "where c.contype='f' and pn.nspname='%s' %s) con";
 
     protected final static String TABLE_INFO_SQL = "SELECT\n" +
             " pg_total_relation_size('\"' || table_schema || '\".\"' || table_name || '\"') AS size,\n" +
