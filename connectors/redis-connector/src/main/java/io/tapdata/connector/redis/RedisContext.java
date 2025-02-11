@@ -78,7 +78,7 @@ public class RedisContext implements AutoCloseable {
         String username = EmptyKit.isBlank(redisConfig.getUsername()) ? null : redisConfig.getUsername();
         String password = EmptyKit.isBlank(redisConfig.getPassword()) ? null : redisConfig.getPassword();
         if (deployModeEnum == DeployModeEnum.STANDALONE) {
-            jedisPool = new JedisPool(jedisPoolConfig, redisConfig.getHost(), redisConfig.getPort(), POOL_TIMEOUT, username, password);
+            jedisPool = new JedisPool(jedisPoolConfig, redisConfig.getHost(), redisConfig.getPort(), POOL_TIMEOUT, username, password, redisConfig.getDatabase());
         } else if (deployModeEnum == DeployModeEnum.SENTINEL) {
             final List<LinkedHashMap<String, Integer>> hostPorts = redisConfig.getSentinelAddress();
             Set<String> sentinelHostPort = new HashSet<>(hostPorts.size());
