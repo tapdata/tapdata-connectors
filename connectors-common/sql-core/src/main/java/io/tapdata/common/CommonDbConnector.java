@@ -116,7 +116,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                         tapTable.add(tapField);
                     });
             tapTable.setIndexList(tapIndexList);
-            tapTable.setConstraintList(makeForeignKey(fkList));
+            tapTable.setConstraintList(makeForeignKey(fkList, table));
             tapTableList.add(tapTable);
         });
         syncSchemaSubmit(discoverPartitionInfo(tapTableList), consumer);
@@ -124,7 +124,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     //some datasource makePrimaryKeyAndIndex in not the same way, such as db2
     protected void makePrimaryKeyAndIndex(List<DataMap> indexList, String table, List<String> primaryKey, List<TapIndex> tapIndexList) {
-        Map<String, List<DataMap>> indexMap = indexList.stream().filter(idx -> table.equals(idx.getString("tableName")))
+        Map<String, List<DataMap>> indexMap = indexList.stream().filter(idx -> table.equals(idx.getString("tableName")) && EmptyKit.isNotBlank(idx.getString("indexName")))
                 .collect(Collectors.groupingBy(idx -> idx.getString("indexName"), LinkedHashMap::new, Collectors.toList()));
         indexMap.forEach((key, value) -> {
             if (value.stream().anyMatch(v -> ("1".equals(v.getString("isPk"))))) {
@@ -138,9 +138,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return new CommonColumn(dataMap).getTapField();
     }
 
-    protected List<TapConstraint> makeForeignKey(List<DataMap> fkList) {
+    protected List<TapConstraint> makeForeignKey(List<DataMap> fkList, String table) {
         List<TapConstraint> tapConstraints = new ArrayList<>();
-        fkList.stream().filter(Objects::nonNull).collect(Collectors.groupingBy(map -> map.getString("constraintName"))).forEach((constraintName, fk) -> tapConstraints.add(makeTapConstraint(constraintName, fk)));
+        fkList.stream().filter(v -> Objects.nonNull(v) && table.equals(v.getString("tableName"))).collect(Collectors.groupingBy(map -> map.getString("constraintName"))).forEach((constraintName, fk) -> tapConstraints.add(makeTapConstraint(constraintName, fk)));
         return tapConstraints;
     }
 
@@ -511,7 +511,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
-        return makeForeignKey(constraintList);
+        return makeForeignKey(constraintList, tableName);
     }
 
     protected void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) throws SQLException {

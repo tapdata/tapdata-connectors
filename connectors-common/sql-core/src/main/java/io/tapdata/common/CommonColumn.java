@@ -17,6 +17,9 @@ public class CommonColumn {
     protected String remarks;
     protected String columnDefaultValue;
     protected String autoInc;
+    protected String seedValue;
+    protected String incrementValue;
+    protected String autoIncCacheValue;
     protected String pureDataType;
     protected Integer dataLength;
     protected Integer dataPrecision;
