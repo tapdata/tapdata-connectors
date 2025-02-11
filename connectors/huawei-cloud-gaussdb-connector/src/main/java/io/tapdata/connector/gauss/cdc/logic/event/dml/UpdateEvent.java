@@ -8,7 +8,7 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import java.nio.ByteBuffer;
 
 
-public class UpdateEvent implements DMLEvent {
+public class UpdateEvent extends DMLEvent {
     private UpdateEvent() {
 
     }

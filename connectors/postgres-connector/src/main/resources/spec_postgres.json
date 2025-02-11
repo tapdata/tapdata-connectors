@@ -646,18 +646,11 @@
       "to": "TapNumber"
     },
     "real": {
-      "bit": 32,
-      "priority": 2,
-      "precision": [
-        1,
-        6
-      ],
-      "scale": [
-        0,
-        6
-      ],
-      "fixed": false,
-      "to": "TapNumber"
+      "to": "TapNumber",
+      "bit": 4,
+      "defaultPrecision": 24,
+      "defaultScale": 8,
+      "fixed": false
     },
     "double precision": {
       "priority": 2,
@@ -917,6 +910,12 @@
     "jsonb": {
       "to": "TapString",
       "queryOnly": true
+    },
+    "money": {
+      "to": "TapMoney",
+      "defaultPrecision": 19,
+      "defaultScale": 4,
+      "fixed": true
     }
   }
 }

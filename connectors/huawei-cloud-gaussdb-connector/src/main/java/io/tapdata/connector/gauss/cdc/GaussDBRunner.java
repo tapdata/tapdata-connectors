@@ -16,6 +16,8 @@ import io.tapdata.connector.postgres.cdc.DebeziumCdcRunner;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 
@@ -29,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static io.tapdata.base.ConnectorBase.list;
 
@@ -45,6 +48,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
     protected PGReplicationStream stream;
     protected PgConnection conn;
     protected String whiteTableList;
+    protected Map<String, Map<String,String>> dataTypeMap;
     protected EventFactory<ByteBuffer> eventFactory;
     protected long waitTime;
     protected Supplier<Boolean> supplier;
@@ -297,7 +301,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
     }
 
     protected EventFactory<ByteBuffer> initEventFactory() {
-        return LogicReplicationDiscreteImpl.instance(consumer, 100, offset, supplier);
+        return LogicReplicationDiscreteImpl.instance(consumer, dataTypeMap, gaussDBConfig.getZoneOffsetHour(), 100, offset, supplier);
     }
 
     public GaussDBRunner supplierIsAlive(Supplier<Boolean> supplier) {
@@ -318,9 +322,16 @@ public class GaussDBRunner extends DebeziumCdcRunner {
         return this;
     }
 
-    public GaussDBRunner watch(List<String> observedTableList) {
+    public GaussDBRunner watch(List<String> observedTableList, List<String> originTableList, KVReadOnlyMap<TapTable> tableMap) {
         if (null != observedTableList && !observedTableList.isEmpty()) {
             whiteTableList = String.join(",", observedTableList);
+            dataTypeMap = new ConcurrentHashMap<>();
+            originTableList.forEach(tableName -> {
+                TapTable table = tableMap.get(tableName);
+                if (EmptyKit.isNotNull(table)) {
+                    dataTypeMap.put(table.getId(), table.getNameFieldMap().entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().getPureDataType())));
+                }
+            });
         }
         return this;
     }

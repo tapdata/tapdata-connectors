@@ -352,12 +352,16 @@ public abstract class CommonDbConnector extends ConnectorBase {
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
             jdbcContext.execute("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
+        } else {
+            tapLogger.warn("Table {} not exists, skip truncate", tapClearTableEvent.getTableId());
         }
     }
 
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
             jdbcContext.execute("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
+        } else {
+            tapLogger.warn("Table {} not exists, skip drop", tapDropTableEvent.getTableId());
         }
     }
 
@@ -398,7 +402,6 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void createIndex(TapConnectorContext connectorContext, TapTable tapTable, TapCreateIndexEvent createIndexEvent) throws SQLException {
-        List<String> sqlList = TapSimplify.list();
         List<TapIndex> indexList = createIndexEvent.getIndexList()
                 .stream()
                 .filter(v -> discoverIndex(tapTable.getId())
@@ -406,10 +409,22 @@ public abstract class CommonDbConnector extends ConnectorBase {
                         .noneMatch(i -> DbKit.ignoreCreateIndex(i, v)))
                 .collect(Collectors.toList());
         if (EmptyKit.isNotEmpty(indexList)) {
-            indexList.stream().filter(i -> !i.isPrimary()).forEach(i ->
-                    sqlList.add(getCreateIndexSql(tapTable, i)));
+            indexList.stream().filter(i -> !i.isPrimary()).forEach(i -> {
+                try {
+                    jdbcContext.execute(getCreateIndexSql(tapTable, i));
+                } catch (SQLException e) {
+                    String rename = i.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                    tapLogger.warn("Create index failed {}, rename {} to {} and retry ...", e.getMessage(), i.getName(), rename);
+                    i.setName(rename);
+                    String sql = getCreateIndexSql(tapTable, i);
+                    try {
+                        jdbcContext.execute(sql);
+                    } catch (SQLException e1) {
+                        tapLogger.warn("Create index failed again {}, please execute it manually [{}]", e1.getMessage(), sql);
+                    }
+                }
+            });
         }
-        jdbcContext.batchExecute(sqlList);
     }
 
     protected TapIndex makeTapIndex(String key, List<DataMap> value) {

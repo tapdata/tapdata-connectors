@@ -1,27 +1,30 @@
 package io.tapdata.connector.gauss.cdc.logic.event.transcation.discrete;
 
 import io.tapdata.connector.gauss.cdc.logic.event.Event;
-import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.connector.gauss.cdc.logic.param.EventParam;
+import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.connector.gauss.util.TimeUtil;
 import io.tapdata.entity.event.TapEvent;
 
 import java.nio.ByteBuffer;
+import java.util.Map;
 
 public class CommitTransaction implements Event<TapEvent> {
     private CommitTransaction() {
 
     }
+
     public static CommitTransaction instance() {
         return new CommitTransaction();
     }
+
     @Override
     public EventEntity<TapEvent> process(ByteBuffer logEvent, EventParam processParam) {
         return null;
     }
 
     @Override
-    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, AnalyzeParam param) {
+    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, Map<String, Map<String, String>> dataTypeMap) {
         byte[] xidTag = LogicUtil.read(logEvent, 1);
         String xTagChar = new String(xidTag);
         byte[] xid = null;
