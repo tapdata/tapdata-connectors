@@ -189,4 +189,17 @@ public class NormalRecordWriter {
         return "update " + escapeChar + commonDbConfig.getSchema() + escapeChar + "." + escapeChar + "_tap_double_active" + escapeChar + " set " +
                 escapeChar + "c2" + escapeChar + " = '" + UUID.randomUUID() + "' where " + escapeChar + "c1" + escapeChar + " = '1'";
     }
+
+    public void closeConstraintCheck() throws SQLException {
+        String sql = getCloseConstraintCheckSql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+    }
+
+    protected String getCloseConstraintCheckSql() {
+        return null;
+    }
 }

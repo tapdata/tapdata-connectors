@@ -18,7 +18,9 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.schema.*;
+import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.schema.TapIndex;
+import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
@@ -443,6 +445,9 @@ public class PostgresConnector extends CommonDbConnector {
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
                     .setTapLogger(tapLogger);
+        }
+        if (EmptyKit.isNotEmpty(tapTable.getConstraintList())) {
+            postgresRecordWriter.closeConstraintCheck();
         }
         if (postgresConfig.getCreateAutoInc() && postgresVersion.compareTo("100000") >= 0 && EmptyKit.isNotEmpty(autoIncFields)
                 && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {

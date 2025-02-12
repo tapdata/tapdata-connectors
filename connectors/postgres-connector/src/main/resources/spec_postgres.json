@@ -17,6 +17,10 @@
         "alternatives": ["ignore_on_nonexists", "insert_on_nonexists", "log_on_nonexists"]
       },
       {
+        "id": "dml_check_policy",
+        "alternatives": ["ignore_all_check", "default_check"]
+      },
+      {
         "id": "api_server_supported"
       },
       {
