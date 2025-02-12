@@ -524,7 +524,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         }
         sb.append(')');
         if (commentInField && EmptyKit.isNotBlank(tapTable.getComment())) {
-            sb.append(" comment='").append(tapTable.getComment()).append("'");
+            sb.append(" comment='").append(tapTable.getComment().replaceAll("'", "''")).append("'");
         }
         return sb.toString();
     }
@@ -549,14 +549,14 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     private String getTableCommentSql(TapTable tapTable) {
         return "comment on table " + getSchemaAndTable(tapTable.getId()) +
-                " is '" + tapTable.getComment() + '\'';
+                " is '" + tapTable.getComment().replace("'", "''") + '\'';
     }
 
     private String getColumnCommentSql(TapTable tapTable, TapField tapField) {
         char escapeChar = commonDbConfig.getEscapeChar();
         return "comment on column " + getSchemaAndTable(tapTable.getId()) + '.' +
                 escapeChar + tapField.getName() + escapeChar +
-                " is '" + tapField.getComment() + '\'';
+                " is '" + tapField.getComment().replace("'", "''") + '\'';
     }
 
     private String getSelectSql(TapTable tapTable) {
