@@ -184,8 +184,8 @@ public class ClickhouseConnector extends CommonDbConnector {
         });
         codecRegistry.registerFromTapValue(TapYearValue.class, "char(4)", TapValue::getOriginValue);
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "String", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null)
-                return new String(Base64.encodeBase64(tapValue.getValue()));
+            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
+                return new String(Base64.encodeBase64(tapValue.getValue().getValue()));
             return null;
         });
 
