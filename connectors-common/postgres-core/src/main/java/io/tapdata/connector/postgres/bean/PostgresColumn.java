@@ -6,6 +6,7 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -29,21 +30,54 @@ public class PostgresColumn extends CommonColumn {
             this.pureDataType = this.dataType;
         }
         this.nullable = dataMap.getString("nullable");
+        this.autoInc = dataMap.getString("autoInc");
+        this.seedValue = dataMap.getString("seedValue");
+        this.incrementValue = dataMap.getString("incrementValue");
+        this.autoIncCacheValue = dataMap.getString("cacheValue");
         this.remarks = dataMap.getString("columnComment");
         //create table in target has no need to set default value
-        this.columnDefaultValue = null;
-//        this.columnDefaultValue = getDefaultValue(dataMap.getString("column_default"));
+//        this.columnDefaultValue = null;
+        this.columnDefaultValue = getDefaultValue(dataMap.getString("columnDefault"));
     }
 
     @Override
     public TapField getTapField() {
-        return new TapField(this.columnName, this.dataType).pureDataType(this.pureDataType).nullable(this.isNullable()).
-                defaultValue(columnDefaultValue).comment(this.remarks);
+        TapField field = new TapField(this.columnName, this.dataType).pureDataType(this.pureDataType)
+                .nullable(this.isNullable()).autoInc(isAutoInc())
+                .defaultValue(columnDefaultValue).comment(this.remarks);
+        if (isAutoInc()) {
+            if (EmptyKit.isNotNull(seedValue)) {
+                field.autoIncStartValue(Long.parseLong(seedValue));
+            }
+            if (EmptyKit.isNotNull(incrementValue)) {
+                field.autoIncrementValue(Long.parseLong(incrementValue));
+            }
+            if (EmptyKit.isNotNull(autoIncCacheValue)) {
+                field.setAutoIncCacheValue(Long.parseLong(autoIncCacheValue));
+            }
+            Object defaultValueObj = columnDefaultValue;
+            String tapDefaultFunction = null;
+            if (EmptyKit.isNotNull(columnDefaultValue)) {
+                tapDefaultFunction = PostgresDefaultFunction.parseFunction(columnDefaultValue);
+                if (columnDefaultValue.matches("-?\\d+(\\.\\d+)?")) {
+                    defaultValueObj = new BigDecimal(columnDefaultValue);
+                } else {
+                    defaultValueObj = columnDefaultValue;
+                }
+            }
+            field.defaultValue(defaultValueObj).defaultFunction(tapDefaultFunction);
+        }
+        return field;
     }
 
     @Override
     protected Boolean isNullable() {
         return "YES".equals(this.nullable);
+    }
+
+    @Override
+    protected Boolean isAutoInc() {
+        return "YES".equals(this.autoInc);
     }
 
     private String getDefaultValue(String defaultValue) {

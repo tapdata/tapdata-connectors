@@ -59,6 +59,7 @@ public class PostgresJdbcContext extends JdbcContext {
             return TimeZone.getTimeZone(ZoneId.of(decimalFormat.format(timeOffset.get()) + ":00"));
         }
     }
+
     @Override
     public Long queryTimestamp() throws SQLException {
         AtomicReference<Timestamp> currentTime = new AtomicReference<>();
@@ -157,6 +158,12 @@ public class PostgresJdbcContext extends JdbcContext {
                     "    col.data_type \"pureDataType\",\n" +
                     "    col.column_default \"columnDefault\",\n" +
                     "    col.is_nullable \"nullable\",\n" +
+                    "    col.is_identity \"autoInc\",\n" +
+                    "    col.identity_start AS \"seedValue\",\n" +
+                    "    col.identity_increment AS \"incrementValue\",\n" +
+                    "       (SELECT seqcache\n" +
+                    "        FROM pg_sequence\n" +
+                    "        WHERE seqrelid = pg_get_serial_sequence('\"'||col.table_schema||'\".\"'||col.table_name||'\"', col.column_name)::regclass) \"cacheValue\"," +
                     "       (SELECT max(d.description)\n" +
                     "        FROM pg_catalog.pg_class c,\n" +
                     "             pg_description d\n" +
