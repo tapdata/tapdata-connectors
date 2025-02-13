@@ -169,6 +169,85 @@
             }
           }
         },
+        "useSasl": {
+          "type": "boolean",
+          "title": "${useSasl}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-index": 21
+        },
+        "saslMechanism": {
+          "type": "string",
+          "title": "${saslMechanism}",
+          "default": "PLAIN",
+          "x-decorator": "FormItem",
+          "x-component": "Radio.Group",
+          "x-component-props": {
+            "optionType": "button"
+          },
+          "x-index": 22,
+          "enum": [
+            {
+              "label": "PLAIN",
+              "value": "PLAIN"
+            },
+            {
+              "label": "SCRAM-SHA-256",
+              "value": "SCRAM-SHA-256"
+            },
+            {
+              "label": "SCRAM-SHA-512",
+              "value": "SCRAM-SHA-512"
+            }
+          ],
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]===true}}"
+              }
+            },
+            "dependencies": [
+              "useSasl"
+            ]
+          }
+        },
+        "saslUserPassword": {
+          "type": "void",
+          "x-component": "FormGrid",
+          "x-component-props": {
+            "minColumns": [
+              2
+            ]
+          },
+          "x-index": 23,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]===true && ['PLAIN','SCRAM-SHA-256','SCRAM-SHA-512'].includes($deps[1])}}"
+              }
+            },
+            "dependencies": [
+              "useSasl", "saslMechanism"
+            ]
+          },
+          "properties": {
+            "saslUsername": {
+              "type": "string",
+              "title": "${saslUsername}",
+              "x-decorator": "FormItem",
+              "x-component": "Input",
+              "x-index": 1
+            },
+            "saslPassword": {
+              "type": "string",
+              "title": "${saslPassword}",
+              "x-decorator": "FormItem",
+              "x-component": "Password",
+              "x-index": 2
+            }
+          }
+        },
         "OPTIONAL_FIELDS": {
           "type": "void",
           "properties": {
@@ -492,6 +571,12 @@
       "replicasSizeTip": "Used when creating a topic, default: 1",
       "partitionSize": "Number of partitions",
       "partitionSizeTip": "Used when creating a topic, default: 3 (if the number of server partitions is less than this configuration, it will be increased)",
+      "useSasl": "Enable SASL",
+      "saslMechanism": "Mechanism",
+      "saslUserPassword": "User And Password",
+      "saslUsername": "Username",
+      "saslPassword": "Password",
+      "useSsl": "Enable SSL",
       "acksType": "ACK confirmation mechanism",
       "acksTypeNotSure": "No confirmation",
       "acksTypeJustWriteMaster": "Write only Master partition",
@@ -539,6 +624,12 @@
       "replicasSizeTip": "创建主题时使用，默认：1",
       "partitionSize": "分区数",
       "partitionSizeTip": "创建主题时使用，默认：3（如果服务端分区数少于此配置，则会进行增加）",
+      "useSasl": "启用 SASL",
+      "saslMechanism": "安全机制",
+      "saslUserPassword": "用户密码",
+      "saslUsername": "用户",
+      "saslPassword": "密码",
+      "useSsl": "启用 SSL",
       "acksType": "ACK 确认机制",
       "acksTypeNotSure": "不确认",
       "acksTypeJustWriteMaster": "仅写入 Master 分区",
@@ -586,6 +677,12 @@
       "replicasSizeTip": "建立主題時使用，預設：1",
       "partitionSize": "分區數",
       "partitionSizeTip": "建立主題時使用，預設：3（如果服務端分區數少於此配置，則會進行增加）",
+      "useSasl": "啟用 SASL",
+      "saslMechanism": "安全機制",
+      "saslUserPassword": "用戶密碼",
+      "saslUsername": "用戶",
+      "saslPassword": "密碼",
+      "useSsl": "啟用 SSL",
       "acksType": "ACK 確認機制",
       "acksTypeNotSure": "不確認",
       "acksTypeJustWriteMaster": "僅寫入 Master 分割區",
