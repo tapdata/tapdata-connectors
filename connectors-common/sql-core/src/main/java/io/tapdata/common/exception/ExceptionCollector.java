@@ -25,4 +25,12 @@ public interface ExceptionCollector {
     void collectCdcConfigInvalid(Throwable cause) throws RuntimeException;
 
     void revealException(Throwable cause) throws RuntimeException;
+
+    default boolean violateConstraintName(Throwable cause) {
+        return false;
+    }
+
+    default boolean violateIndexName(Throwable cause) {
+        return false;
+    }
 }

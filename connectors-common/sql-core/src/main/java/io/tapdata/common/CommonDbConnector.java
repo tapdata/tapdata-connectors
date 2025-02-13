@@ -4,6 +4,7 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.ddl.DDLSqlGenerator;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
+import io.tapdata.entity.TapConstraintException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
@@ -436,24 +437,32 @@ public abstract class CommonDbConnector extends ConnectorBase {
         }
     }
 
-    protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent) throws SQLException {
+    protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent) {
         List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
         if (EmptyKit.isNotEmpty(constraintList)) {
+            TapConstraintException exception = new TapConstraintException(tapTable.getId());
             constraintList.forEach(c -> {
+                String sql = getCreateConstraintSql(tapTable, c);
                 try {
-                    jdbcContext.execute(getCreateConstraintSql(tapTable, c));
-                } catch (SQLException e) {
-                    String rename = c.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
-                    tapLogger.warn("Create constraint failed {}, rename {} to {} and retry ...", e.getMessage(), c.getName(), rename);
-                    c.setName(rename);
-                    String sql = getCreateConstraintSql(tapTable, c);
-                    try {
-                        jdbcContext.execute(sql);
-                    } catch (SQLException e1) {
-                        tapLogger.warn("Create constraint failed again {}, please execute it manually [{}]", e1.getMessage(), sql);
+                    jdbcContext.execute(sql);
+                } catch (Exception e) {
+                    if (!exceptionCollector.violateConstraintName(e)) {
+                        exception.addException(c, sql, e);
+                    } else {
+                        String rename = c.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                        c.setName(rename);
+                        sql = getCreateConstraintSql(tapTable, c);
+                        try {
+                            jdbcContext.execute(sql);
+                        } catch (Exception e1) {
+                            exception.addException(c, sql, e1);
+                        }
                     }
                 }
             });
+            if (EmptyKit.isNotEmpty(exception.getExceptions())) {
+                throw exception;
+            }
         }
     }
 
