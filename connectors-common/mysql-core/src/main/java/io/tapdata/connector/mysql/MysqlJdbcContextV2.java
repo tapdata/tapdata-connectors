@@ -229,7 +229,9 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "       COLUMN_NAME `columnName`,\n" +
                     "       COLUMN_TYPE `dataType`,\n" +
                     "       IS_NULLABLE `nullable`,\n" +
-                    "       COLUMN_COMMENT `columnComment`\n" +
+                    "       COLUMN_COMMENT `columnComment`,\n" +
+                    "       COLUMN_DEFAULT `columnDefault`,\n" +
+                    "       IF(EXTRA = 'auto_increment', 1, 0) `autoInc`" +
                     "FROM INFORMATION_SCHEMA.COLUMNS\n" +
                     "WHERE TABLE_SCHEMA = '%s' %s\n" +
                     "ORDER BY ORDINAL_POSITION";

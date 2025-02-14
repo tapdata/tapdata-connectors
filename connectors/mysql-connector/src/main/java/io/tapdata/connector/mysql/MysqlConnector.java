@@ -18,7 +18,6 @@ import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.codec.ToTapValueCodec;
-import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -87,6 +86,9 @@ public class MysqlConnector extends CommonDbConnector {
     protected ZoneId zoneId;
     protected ZoneId dbZoneId;
     protected int zoneOffsetHour;
+    protected long autoIncrementValue = 1;
+    protected long autoIncCacheValue = 1;
+    protected long autoStartValue = 1;
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
@@ -146,6 +148,33 @@ public class MysqlConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
         started.set(true);
+    }
+
+    @Override
+    public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws SQLException {
+        mysqlJdbcContext.normalQuery("SHOW VARIABLES LIKE 'auto_inc%'", rs -> {
+            while (rs.next()) {
+                String variableName = rs.getString("Variable_name");
+                if ("auto_increment_increment".equals(variableName)) {
+                    autoIncrementValue = rs.getLong("Value");
+                } else if ("auto_increment_offset".equals(variableName)) {
+                    autoStartValue = rs.getLong("Value");
+                }
+            }
+        });
+        mysqlJdbcContext.normalQuery("SHOW VARIABLES LIKE 'innodb_autoinc_lock_mode'", rs -> {
+            if (rs.next()) {
+                String value = rs.getString("Value");
+                if ("0".equals(value)) {
+                    autoIncCacheValue = 1;
+                } else if ("1".equals(value)) {
+                    autoIncCacheValue = 100;
+                } else {
+                    autoIncCacheValue = 1000;
+                }
+            }
+        });
+        super.discoverSchema(connectionContext, tables, tableSize, consumer);
     }
 
     @Override
@@ -395,7 +424,11 @@ public class MysqlConnector extends CommonDbConnector {
     }
 
     protected TapField makeTapField(DataMap dataMap) {
-        return new MysqlColumn(dataMap).withVersion(version).getTapField();
+        return new MysqlColumn(dataMap).withVersion(version)
+                .withSeedValue(autoStartValue)
+                .withIncrementValue(autoIncrementValue)
+                .withAutoIncCacheValue(autoIncCacheValue)
+                .getTapField();
     }
 
     protected CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws SQLException {
@@ -483,7 +516,7 @@ public class MysqlConnector extends CommonDbConnector {
         if (updateDmlPolicy == null) {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
-        if(isTransaction){
+        if (isTransaction) {
             String threadName = Thread.currentThread().getName();
             Connection connection;
             if (transactionConnectionMap.containsKey(threadName)) {
@@ -492,12 +525,12 @@ public class MysqlConnector extends CommonDbConnector {
                 connection = mysqlJdbcContext.getConnection();
                 transactionConnectionMap.put(threadName, connection);
             }
-            new MysqlRecordWriter(mysqlJdbcContext,connection, tapTable)
+            new MysqlRecordWriter(mysqlJdbcContext, connection, tapTable)
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
                     .setTapLogger(tapLogger)
                     .write(tapRecordEvents, consumer, this::isAlive);
-        }else{
+        } else {
             new MysqlRecordWriter(mysqlJdbcContext, tapTable)
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
