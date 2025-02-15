@@ -80,7 +80,7 @@ public class PostgresColumn extends CommonColumn {
         return "YES".equals(this.autoInc);
     }
 
-    private String getDefaultValue(String defaultValue) {
+    protected String getDefaultValue(String defaultValue) {
         if (EmptyKit.isNull(defaultValue) || defaultValue.startsWith("NULL::")) {
             return null;
         } else if (defaultValue.contains("::")) {

@@ -37,7 +37,7 @@ public class CommonColumn {
         this.dataScale = dataMap.getInteger("dataScale");
         this.nullable = dataMap.getString("nullable");
         this.remarks = dataMap.getString("columnComment");
-        this.columnDefaultValue = null;
+        this.columnDefaultValue = getDefaultValue(dataMap.getString("columnDefault"));
     }
 
     protected Boolean isNullable() {
@@ -51,5 +51,9 @@ public class CommonColumn {
     public TapField getTapField() {
         return new TapField(this.columnName, this.dataType).nullable(this.isNullable()).
                 defaultValue(columnDefaultValue).comment(this.remarks);
+    }
+
+    protected String getDefaultValue(String defaultValue) {
+        return null;
     }
 }
