@@ -5,7 +5,6 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 
-import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -39,17 +38,7 @@ public class MysqlColumn extends CommonColumn {
                     .autoIncrementValue(incrementValue)
                     .autoIncCacheValue(autoIncCacheValue);
         }
-        Object defaultValueObj = columnDefaultValue;
-        String tapDefaultFunction = null;
-        if (EmptyKit.isNotNull(columnDefaultValue)) {
-            tapDefaultFunction = MysqlDefaultFunction.parseFunction(columnDefaultValue);
-            if (columnDefaultValue.matches("-?\\d+(\\.\\d+)?")) {
-                defaultValueObj = new BigDecimal(columnDefaultValue);
-            } else {
-                defaultValueObj = columnDefaultValue;
-            }
-        }
-        field.defaultValue(defaultValueObj).defaultFunction(tapDefaultFunction);
+        generateDefaultValue(field);
         return field;
     }
 
@@ -79,6 +68,10 @@ public class MysqlColumn extends CommonColumn {
             return true;
         }
         return "YES".equals(this.nullable);
+    }
+
+    protected String parseDefaultFunction(String defaultValue) {
+        return MysqlDefaultFunction.parseFunction(columnDefaultValue);
     }
 
     public enum MysqlDefaultFunction {

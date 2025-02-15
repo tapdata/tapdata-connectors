@@ -90,7 +90,7 @@ public class PostgresJdbcContext extends JdbcContext {
 
     @Override
     protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
-        return String.format(PG_ALL_FOREIGN_KEY, getConfig().getSchema(), EmptyKit.isEmpty(tableNames) ? "" : " and pc.relname in ('" + String.join("','", tableNames) + "')");
+        return String.format(PG_ALL_FOREIGN_KEY, getConfig().getSchema(), EmptyKit.isEmpty(tableNames) ? "" : " and pc.relname in (" + StringKit.joinString(tableNames, "'", ",") + ")");
     }
 
     public DataMap getTableInfo(String tableName) {

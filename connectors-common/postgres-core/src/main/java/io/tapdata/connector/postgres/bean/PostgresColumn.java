@@ -6,7 +6,6 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 
-import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -55,18 +54,8 @@ public class PostgresColumn extends CommonColumn {
             if (EmptyKit.isNotNull(autoIncCacheValue)) {
                 field.setAutoIncCacheValue(Long.parseLong(autoIncCacheValue));
             }
-            Object defaultValueObj = columnDefaultValue;
-            String tapDefaultFunction = null;
-            if (EmptyKit.isNotNull(columnDefaultValue)) {
-                tapDefaultFunction = PostgresDefaultFunction.parseFunction(columnDefaultValue);
-                if (columnDefaultValue.matches("-?\\d+(\\.\\d+)?")) {
-                    defaultValueObj = new BigDecimal(columnDefaultValue);
-                } else {
-                    defaultValueObj = columnDefaultValue;
-                }
-            }
-            field.defaultValue(defaultValueObj).defaultFunction(tapDefaultFunction);
         }
+        generateDefaultValue(field);
         return field;
     }
 
@@ -90,9 +79,13 @@ public class PostgresColumn extends CommonColumn {
         }
     }
 
+    protected String parseDefaultFunction(String defaultValue) {
+        return PostgresDefaultFunction.parseFunction(columnDefaultValue);
+    }
+
     public enum PostgresDefaultFunction {
-        _CURRENT_TIMESTAMP("current_timestamp"),
-        _CURRENT_USER("current_user");
+        _CURRENT_TIMESTAMP("CURRENT_TIMESTAMP"),
+        _CURRENT_USER("CURRENT_USER");
 
         private final String function;
         private static final Map<String, String> map = new HashMap<>();

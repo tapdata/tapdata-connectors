@@ -2,6 +2,9 @@ package io.tapdata.common;
 
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.kit.EmptyKit;
+
+import java.math.BigDecimal;
 
 /**
  * attributes for common columns
@@ -54,6 +57,24 @@ public class CommonColumn {
     }
 
     protected String getDefaultValue(String defaultValue) {
+        return null;
+    }
+
+    protected void generateDefaultValue(TapField field) {
+        Object defaultValueObj = columnDefaultValue;
+        String tapDefaultFunction = null;
+        if (EmptyKit.isNotNull(columnDefaultValue)) {
+            tapDefaultFunction = parseDefaultFunction(columnDefaultValue);
+            if (columnDefaultValue.matches("-?\\d+(\\.\\d+)?")) {
+                defaultValueObj = new BigDecimal(columnDefaultValue);
+            } else {
+                defaultValueObj = columnDefaultValue;
+            }
+        }
+        field.defaultValue(defaultValueObj).defaultFunction(tapDefaultFunction);
+    }
+
+    protected String parseDefaultFunction(String defaultValue) {
         return null;
     }
 }
