@@ -590,9 +590,13 @@ public abstract class CommonDbConnector extends ConnectorBase {
         }
         sb.append(')');
         if (commentInField && EmptyKit.isNotBlank(tapTable.getComment())) {
-            sb.append(" comment='").append(tapTable.getComment().replaceAll("'", "''")).append("'");
+            commentOnTable(sb, tapTable);
         }
         return sb.toString();
+    }
+
+    protected void commentOnTable(StringBuilder sb, TapTable tapTable) {
+        sb.append(" comment='").append(tapTable.getComment().replaceAll("'", "''")).append("'");
     }
 
     protected String getCreateIndexSql(TapTable tapTable, TapIndex tapIndex) {
