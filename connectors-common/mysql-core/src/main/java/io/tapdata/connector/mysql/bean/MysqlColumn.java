@@ -5,6 +5,10 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 
+import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.Map;
+
 
 /**
  * @author jarad
@@ -27,12 +31,26 @@ public class MysqlColumn extends CommonColumn {
 
     @Override
     public TapField getTapField() {
-        return new TapField(this.columnName, this.dataType)
+        TapField field = new TapField(this.columnName, this.dataType)
                 .nullable(this.isNullable()).autoInc(isAutoInc())
-                .defaultValue(columnDefaultValue).comment(this.remarks)
-                .autoIncStartValue(seedValue)
-                .autoIncrementValue(incrementValue)
-                .autoIncCacheValue(autoIncCacheValue);
+                .defaultValue(columnDefaultValue).comment(this.remarks);
+        if (isAutoInc()) {
+            field.autoIncStartValue(seedValue)
+                    .autoIncrementValue(incrementValue)
+                    .autoIncCacheValue(autoIncCacheValue);
+        }
+        Object defaultValueObj = columnDefaultValue;
+        String tapDefaultFunction = null;
+        if (EmptyKit.isNotNull(columnDefaultValue)) {
+            tapDefaultFunction = MysqlDefaultFunction.parseFunction(columnDefaultValue);
+            if (columnDefaultValue.matches("-?\\d+(\\.\\d+)?")) {
+                defaultValueObj = new BigDecimal(columnDefaultValue);
+            } else {
+                defaultValueObj = columnDefaultValue;
+            }
+        }
+        field.defaultValue(defaultValueObj).defaultFunction(tapDefaultFunction);
+        return field;
     }
 
     public MysqlColumn withVersion(String version) {
@@ -61,6 +79,35 @@ public class MysqlColumn extends CommonColumn {
             return true;
         }
         return "YES".equals(this.nullable);
+    }
+
+    public enum MysqlDefaultFunction {
+        _CURRENT_TIMESTAMP("CURRENT_TIMESTAMP"),
+        _GENERATE_UUID("uuid()");
+
+        private final String function;
+        private static final Map<String, String> map = new HashMap<>();
+
+        static {
+            for (MysqlDefaultFunction value : MysqlDefaultFunction.values()) {
+                map.put(value.function, value.name());
+            }
+        }
+
+        MysqlDefaultFunction(String function) {
+            this.function = function;
+        }
+
+        public static String parseFunction(String key) {
+            if (map.containsKey(key)) {
+                return map.get(key);
+            }
+            return null;
+        }
+
+        public String getFunction() {
+            return function;
+        }
     }
 
 }

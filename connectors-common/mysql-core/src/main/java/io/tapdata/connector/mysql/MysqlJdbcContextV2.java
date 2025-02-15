@@ -73,6 +73,12 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         return String.format(MYSQL_ALL_INDEX, schema, tableSql);
     }
 
+    @Override
+    protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND k.TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
+        return String.format(MYSQL_ALL_FOREIGN_KEY, schema, tableSql);
+    }
+
     public DataMap getTableInfo(String tableName) {
         DataMap dataMap = DataMap.create();
         List<String> list = new ArrayList<>();
@@ -260,6 +266,24 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "ORDER BY\n" +
                     "\tINDEX_NAME,\n" +
                     "\tSEQ_IN_INDEX";
+
+    private final static String MYSQL_ALL_FOREIGN_KEY =
+            "SELECT\n" +
+            "    k.CONSTRAINT_NAME `constraintName`,\n" +
+            "    k.TABLE_NAME `tableName`,\n" +
+            "    k.REFERENCED_TABLE_NAME `referencesTableName`,\n" +
+            "    c.DELETE_RULE `onDelete`,\n" +
+            "    c.UPDATE_RULE `onUpdate`,\n" +
+            "    k.COLUMN_NAME `fk`,\n" +
+            "    k.REFERENCED_COLUMN_NAME `rfk`\n" +
+            "FROM\n" +
+            "    information_schema.KEY_COLUMN_USAGE k\n" +
+            "JOIN information_schema.REFERENTIAL_CONSTRAINTS c\n" +
+            "ON c.CONSTRAINT_SCHEMA=k.TABLE_SCHEMA\n" +
+            "AND c.CONSTRAINT_NAME=k.CONSTRAINT_NAME\n" +
+            "WHERE\n" +
+            "    k.REFERENCED_TABLE_NAME IS NOT NULL\n" +
+            "    AND k.CONSTRAINT_SCHEMA = '%s' %s";
 
     private final static String MYSQL_VERSION = "SELECT VERSION()";
     private final static String MYSQL_CURRENT_TIME = "SELECT NOW();";
