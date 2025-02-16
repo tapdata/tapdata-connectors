@@ -554,7 +554,7 @@
       "pkEnablement": false
     },
     "json": {
-      "to": "TapMap",
+      "to": "TapJson",
       "byte": "4g",
       "pkEnablement": false
     },

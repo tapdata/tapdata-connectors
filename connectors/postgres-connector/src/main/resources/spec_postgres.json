@@ -875,12 +875,10 @@
       "queryOnly": true
     },
     "xml": {
-      "to": "TapString",
-      "queryOnly": true
+      "to": "TapXml"
     },
     "json": {
-      "to": "TapString",
-      "queryOnly": true
+      "to": "TapJson"
     },
     "tsvector": {
       "to": "TapString",
