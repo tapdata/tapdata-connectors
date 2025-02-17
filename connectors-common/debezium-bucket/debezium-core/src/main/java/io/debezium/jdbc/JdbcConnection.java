@@ -746,7 +746,7 @@ public class JdbcConnection implements AutoCloseable {
                 }
             } catch (SQLException e) {
                 String sqlState = e.getSQLState();
-                if ("08S01".equals(sqlState) || "40001".equals(sqlState)) {
+                if ("08S01".equals(sqlState) || "S1009".equals(sqlState)) {
                     retryCount++;
                     renewPreparedStatement(preparedQueryString); // 重置 PreparedStatement
                     if (retryCount >= maxRetries) {
