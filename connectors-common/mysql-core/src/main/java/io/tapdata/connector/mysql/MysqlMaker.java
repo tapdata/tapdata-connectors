@@ -1,5 +1,6 @@
 package io.tapdata.connector.mysql;
 
+import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.entity.MysqlSnapshotOffset;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.tencent.db.mysql.MysqlJdbcContext;
@@ -301,16 +302,17 @@ public class MysqlMaker implements SqlMaker {
         }
 
         // default value
-        String defaultValue = tapField.getDefaultValue() == null ? "" : tapField.getDefaultValue().toString();
-        if (StringUtils.isNotBlank(defaultValue)) {
-            if (defaultValue.contains("'")) {
-                defaultValue = StringUtils.replace(defaultValue, "'", "''");
+        if (EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
+            StringBuilder builder = new StringBuilder();
+            builder.append("DEFAULT").append(' ');
+            if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
+                builder.append(MysqlColumn.MysqlDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction()).append(' ');
+            } else if (tapField.getDefaultValue() instanceof Number) {
+                builder.append(tapField.getDefaultValue()).append(' ');
+            } else {
+                builder.append("'").append(tapField.getDefaultValue()).append("' ");
             }
-            if (tapField.getTapType() instanceof TapNumber) {
-                defaultValue = defaultValue.trim();
-            }
-            fieldSql += " DEFAULT '" + defaultValue + "'";
-
+            fieldSql += builder.toString();
         }
 
         // comment

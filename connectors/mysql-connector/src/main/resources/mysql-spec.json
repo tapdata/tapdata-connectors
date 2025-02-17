@@ -331,6 +331,67 @@
     "node": {
       "type": "object",
       "properties": {
+        "createAutoInc": {
+          "type": "boolean",
+          "title": "${createAutoInc}",
+          "default": false,
+          "x-index": 5,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${createAutoIncTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "autoIncJumpValue": {
+          "required": true,
+          "type": "string",
+          "title": "${autoIncJumpValue}",
+          "default": 1000000,
+          "x-index": 6,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".createAutoInc"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "applyDefault": {
+          "type": "boolean",
+          "title": "${applyDefault}",
+          "default": false,
+          "x-index": 7,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${applyDefaultTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "hashSplit": {
           "type": "boolean",
           "title": "${hashSplit}",
@@ -448,6 +509,11 @@
       "Address" : "Please enter the server address",
       "serverPort": "Server port",
       "prompt": "Add",
+      "createAutoInc": "Sync auto-increment column",
+      "createAutoIncTooltip": "After turning on, the MySQL target will synchronize the auto-increment column, but the step of the auto-increment key will only be affected by the global configuration auto_increment_increment, please configure it as needed",
+      "autoIncJumpValue": "Auto-increment key jump value",
+      "applyDefault": "Apply default value",
+      "applyDefaultTooltip": "When the switch is turned on, the default value will be applied to the target. If there are unadapted functions or expressions, it may cause an error",
       "hashSplit": "Hash split",
       "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the hash value, suitable for large table full-stage sharded synchronization",
       "maxSplit": "Maximum number of splits",
@@ -479,6 +545,11 @@
       "Address" : "服务器地址",
       "serverPort": "服务器端口",
       "prompt": "添加",
+      "createAutoInc": "同步自增列",
+      "createAutoIncTooltip": "开启后，MySQL目标会同步自增列，但自增键的步长只会受全局配置auto_increment_increment影响，请自行按需配置",
+      "autoIncJumpValue": "自增键跳跃值",
+      "applyDefault": "应用默认值",
+      "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错",
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "开关打开时，可以根据哈希值进行分片，适用于大表全量阶段分片同步",
       "maxSplit": "最大分片数",
@@ -510,6 +581,11 @@
       "Address" : "服務器地址",
       "serverPort": "端口",
       "prompt": "添加",
+      "createAutoInc": "同步自增列",
+      "createAutoIncTooltip": "開啓後，MySQL目標會同步自增列，但自增鍵的步長只會受全局配置auto_increment_increment影響，請自行按需配置",
+      "autoIncJumpValue": "自增鍵跳躍值",
+      "applyDefault": "應用默認值",
+      "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯",
       "hashSplit": "哈希分片",
       "hashSplitTooltip": "開關打開時，可以根據哈希值進行分片，適用於大表全量階段分片同步",
       "maxSplit": "最大分片數",

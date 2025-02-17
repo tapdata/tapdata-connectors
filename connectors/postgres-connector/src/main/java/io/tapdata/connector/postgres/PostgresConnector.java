@@ -81,9 +81,6 @@ public class PostgresConnector extends CommonDbConnector {
     private PostgresCdcRunner cdcRunner; //only when task start-pause this variable can be shared
     private Object slotName; //must be stored in stateMap
     protected String postgresVersion;
-    protected Map<String, DataMap> writtenTableMap = new ConcurrentHashMap<>();
-    protected static final String HAS_UNIQUE_INDEX = "HAS_UNIQUE_INDEX";
-    protected static final String HAS_AUTO_INCR = "HAS_AUTO_INCR";
     protected PostgresPartitionContext postgresPartitionContext;
 
     @Override

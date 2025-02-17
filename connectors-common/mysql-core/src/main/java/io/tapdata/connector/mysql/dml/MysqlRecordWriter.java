@@ -34,4 +34,8 @@ public class MysqlRecordWriter extends NormalRecordWriter {
         deleteRecorder = new MysqlWriteRecorder(connection, tapTable, jdbcContext.getConfig().getDatabase());
     }
 
+    protected String getCloseConstraintCheckSql() {
+        return "SET FOREIGN_KEY_CHECKS=0";
+    }
+
 }

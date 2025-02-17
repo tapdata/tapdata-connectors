@@ -48,7 +48,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
     //offset for Primary key sorting area reading
     private final static Long offsetSize = 1000000L;
     protected static final int BATCH_ADVANCE_READ_LIMIT = 1000;
-
+    protected Map<String, DataMap> writtenTableMap = new ConcurrentHashMap<>();
+    protected static final String HAS_UNIQUE_INDEX = "HAS_UNIQUE_INDEX";
+    protected static final String HAS_AUTO_INCR = "HAS_AUTO_INCR";
     //ddlHandlers which for ddl collection
     protected BiClassHandlers<TapFieldBaseEvent, TapConnectorContext, List<String>> fieldDDLHandlers;
     //ddlSqlMaker which for ddl execution

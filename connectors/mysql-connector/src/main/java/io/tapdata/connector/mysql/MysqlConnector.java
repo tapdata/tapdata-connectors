@@ -7,6 +7,7 @@ import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.ddl.type.DDLParserType;
+import io.tapdata.common.dml.NormalRecordWriter;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
@@ -67,6 +68,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * @author samuel
@@ -506,8 +508,16 @@ public class MysqlConnector extends CommonDbConnector {
     }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
-//        WriteListResult<TapRecordEvent> writeListResult = this.mysqlWriter.write(tapConnectorContext, tapTable, tapRecordEvents);
-//        consumer.accept(writeListResult);
+        List<String> autoIncFields = new ArrayList<>();
+        if (mysqlConfig.getCreateAutoInc()) {
+            if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
+                List<TapField> fields = tapTable.getNameFieldMap().values().stream().filter(TapField::getAutoInc).collect(Collectors.toList());
+                autoIncFields.addAll(fields.stream().map(TapField::getName).collect(Collectors.toList()));
+                writtenTableMap.get(tapTable.getId()).put(HAS_AUTO_INCR, autoIncFields);
+            } else {
+                autoIncFields.addAll(writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>()));
+            }
+        }
         String insertDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
             insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
@@ -516,6 +526,7 @@ public class MysqlConnector extends CommonDbConnector {
         if (updateDmlPolicy == null) {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
+        NormalRecordWriter mysqlRecordWriter;
         if (isTransaction) {
             String threadName = Thread.currentThread().getName();
             Connection connection;
@@ -525,19 +536,34 @@ public class MysqlConnector extends CommonDbConnector {
                 connection = mysqlJdbcContext.getConnection();
                 transactionConnectionMap.put(threadName, connection);
             }
-            new MysqlRecordWriter(mysqlJdbcContext, connection, tapTable)
+            mysqlRecordWriter = new MysqlRecordWriter(mysqlJdbcContext, connection, tapTable)
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(tapLogger)
-                    .write(tapRecordEvents, consumer, this::isAlive);
-        } else {
-            new MysqlRecordWriter(mysqlJdbcContext, tapTable)
-                    .setInsertPolicy(insertDmlPolicy)
-                    .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(tapLogger)
-                    .write(tapRecordEvents, consumer, this::isAlive);
-        }
+                    .setTapLogger(tapLogger);
 
+        } else {
+            mysqlRecordWriter = new MysqlRecordWriter(mysqlJdbcContext, tapTable)
+                    .setInsertPolicy(insertDmlPolicy)
+                    .setUpdatePolicy(updateDmlPolicy)
+                    .setTapLogger(tapLogger);
+        }
+        if (EmptyKit.isNotEmpty(tapTable.getConstraintList())) {
+            mysqlRecordWriter.closeConstraintCheck();
+        }
+        if (mysqlConfig.getCreateAutoInc() && EmptyKit.isNotEmpty(autoIncFields)
+                && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
+            mysqlRecordWriter.setAutoIncFields(autoIncFields);
+            mysqlRecordWriter.write(tapRecordEvents, consumer, this::isAlive);
+            if (EmptyKit.isNotEmpty(mysqlRecordWriter.getAutoIncMap())) {
+                List<String> alterSqls = new ArrayList<>();
+                mysqlRecordWriter.getAutoIncMap().forEach((k, v) -> {
+                    alterSqls.add("alter table " + getSchemaAndTable(tapTable.getId()) + " auto_increment " + (Long.parseLong(String.valueOf(v)) + mysqlConfig.getAutoIncJumpValue()));
+                });
+                jdbcContext.batchExecute(alterSqls);
+            }
+        } else {
+            mysqlRecordWriter.write(tapRecordEvents, consumer, this::isAlive);
+        }
     }
 
     protected Map<String, Object> filterTimeForMysql(
