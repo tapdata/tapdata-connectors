@@ -567,12 +567,7 @@ public class MysqlReader implements Closeable {
         Struct value = (Struct) record.value();
         Struct source = value.getStruct("source");
         Long eventTime = source.getInt64("ts_ms");
-        String table = Optional.of(record.topic().split("\\.")).map(arr -> {
-            if (arr.length > 0) {
-                return URLDecoder.decode(arr[arr.length - 1]);
-            }
-            return null;
-        }).orElse(source.getString("table"));
+        String table = source.getString("table");
         //双活情形下，需要过滤_tap_double_active记录的同事务数据
         if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
             if ("_tap_double_active".equals(table)) {
