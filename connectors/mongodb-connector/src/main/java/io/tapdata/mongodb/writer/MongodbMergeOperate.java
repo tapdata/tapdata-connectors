@@ -379,13 +379,19 @@ public class MongodbMergeOperate {
 	public static void upsertMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult) {
 		final String targetPath = currentProperty.getTargetPath();
 		final MergeBundle.EventOperation operation = mergeBundle.getOperation();
-		Map<String, Object> filterMap = buildFilterMap(operation, mergeBundle.getAfter(), mergeBundle.getBefore());
+		Map<String, Object> before = mergeBundle.getBefore();
+		Map<String, Object> after = mergeBundle.getAfter();
+		Map<String, Object> filterMap;
+		if (null != before) {
+			filterMap = mergeBeforeAndAfter(before, after);
+		} else {
+			filterMap = new HashMap<>(after);
+		}
 		final Document filter = filter(filterMap, currentProperty.getJoinKeys());
 		mergeResult.getFilter().putAll(filter);
 		switch (operation) {
 			case INSERT:
 			case UPDATE:
-				Map<String, Object> after = mergeBundle.getAfter();
 				Map<String, Object> removeFields = mergeBundle.getRemovefields();
 				Document setOperateDoc = new Document();
 				Document unsetOperateDoc = new Document();
