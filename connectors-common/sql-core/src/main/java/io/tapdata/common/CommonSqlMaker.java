@@ -111,12 +111,18 @@ public class CommonSqlMaker {
     protected void buildDefaultDefinition(StringBuilder builder, TapField tapField) {
         if (EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
             builder.append("DEFAULT").append(' ');
-            if (tapField.getDefaultValue() instanceof Number) {
+            if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
+                builder.append(buildDefaultFunction(tapField)).append(' ');
+            } else if (tapField.getDefaultValue() instanceof Number) {
                 builder.append(tapField.getDefaultValue()).append(' ');
             } else {
                 builder.append("'").append(tapField.getDefaultValue()).append("' ");
             }
         }
+    }
+
+    protected String buildDefaultFunction(TapField tapField) {
+        return "'" + tapField.getDefaultValue() + "' ";
     }
 
     protected void buildAutoIncDefinition(StringBuilder builder, TapField tapField) {

@@ -202,4 +202,17 @@ public class NormalRecordWriter {
     protected String getCloseConstraintCheckSql() {
         return null;
     }
+
+    public void closeIdentity() throws SQLException {
+        String sql = getIdentitySql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+    }
+
+    protected String getIdentitySql() {
+        return null;
+    }
 }

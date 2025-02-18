@@ -112,6 +112,12 @@ public class MysqlConnector extends CommonDbConnector {
         commonDbConfig = mysqlConfig;
         jdbcContext = mysqlJdbcContext;
         commonSqlMaker = new CommonSqlMaker('`');
+        if (Boolean.TRUE.equals(mysqlConfig.getCreateAutoInc())) {
+            commonSqlMaker.createAutoInc(true);
+        }
+        if (Boolean.TRUE.equals(mysqlConfig.getApplyDefault())) {
+            commonSqlMaker.applyDefault(true);
+        }
         tapLogger = tapConnectionContext.getLog();
         exceptionCollector = new MysqlExceptionCollector();
         ((MysqlExceptionCollector) exceptionCollector).setMysqlConfig(mysqlConfig);
@@ -269,6 +275,8 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportCreateIndex(this::createIndex);
         connectorFunctions.supportQueryIndexes(this::queryIndexes);
+        connectorFunctions.supportCreateConstraint(this::createConstraint);
+        connectorFunctions.supportQueryConstraints(this::queryConstraint);
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
