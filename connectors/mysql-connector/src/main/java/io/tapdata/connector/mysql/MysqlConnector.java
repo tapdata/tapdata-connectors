@@ -277,6 +277,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportQueryIndexes(this::queryIndexes);
         connectorFunctions.supportCreateConstraint(this::createConstraint);
         connectorFunctions.supportQueryConstraints(this::queryConstraint);
+        connectorFunctions.supportDropConstraint(this::dropConstraint);
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);

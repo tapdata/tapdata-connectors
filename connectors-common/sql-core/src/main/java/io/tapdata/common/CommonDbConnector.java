@@ -7,6 +7,7 @@ import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.entity.TapConstraintException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
+import io.tapdata.entity.event.ddl.constraint.TapDropConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.index.TapDeleteIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
@@ -890,6 +891,13 @@ public abstract class CommonDbConnector extends ConnectorBase {
         List<String> dropIndexesSql = new ArrayList<>();
         deleteIndexEvent.getIndexNames().forEach(idx -> dropIndexesSql.add("drop index " + getSchemaAndTable(table.getId()) + "." + escapeChar + idx + escapeChar));
         jdbcContext.batchExecute(dropIndexesSql);
+    }
+
+    protected void dropConstraint(TapConnectorContext connectorContext, TapTable table, TapDropConstraintEvent tapDropConstraintEvent) throws SQLException {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        List<String> dropConstraintsSql = new ArrayList<>();
+        tapDropConstraintEvent.getConstraintList().forEach(fk -> dropConstraintsSql.add("alter table " + getSchemaAndTable(table.getId()) + " drop constraint " + escapeChar + fk + escapeChar));
+        jdbcContext.batchExecute(dropConstraintsSql);
     }
 
     protected long countRawCommand(TapConnectorContext connectorContext, String command, TapTable tapTable) throws SQLException {
