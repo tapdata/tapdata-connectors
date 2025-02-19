@@ -85,7 +85,8 @@ public class PostgresColumn extends CommonColumn {
 
     public enum PostgresDefaultFunction {
         _CURRENT_TIMESTAMP("CURRENT_TIMESTAMP"),
-        _CURRENT_USER("CURRENT_USER");
+        _CURRENT_USER("CURRENT_USER"),
+        _GENERATE_UUID("gen_random_uuid()");
 
         private final String function;
         private static final Map<String, String> map = new HashMap<>();

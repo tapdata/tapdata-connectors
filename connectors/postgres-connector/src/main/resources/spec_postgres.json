@@ -390,7 +390,7 @@
           "type": "boolean",
           "title": "${applyDefault}",
           "default": false,
-          "x-index": 7,
+          "x-index": 8,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-decorator-props": {
