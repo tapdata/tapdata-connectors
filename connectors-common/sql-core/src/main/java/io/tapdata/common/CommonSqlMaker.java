@@ -33,6 +33,7 @@ public class CommonSqlMaker {
     public static final String COLLATE = "COLLATE";
     protected Boolean closeNotNull = false;
     protected Boolean createAutoInc = false;
+    protected long autoIncCacheValue = 1;
     protected Boolean applyDefault = false;
 
     public CommonSqlMaker() {
@@ -50,6 +51,11 @@ public class CommonSqlMaker {
 
     public <T extends CommonSqlMaker> T createAutoInc(Boolean createAutoInc) {
         this.createAutoInc = createAutoInc;
+        return (T) this;
+    }
+
+    public <T extends CommonSqlMaker> T autoIncCacheValue(long autoIncCacheValue) {
+        this.autoIncCacheValue = autoIncCacheValue;
         return (T) this;
     }
 
