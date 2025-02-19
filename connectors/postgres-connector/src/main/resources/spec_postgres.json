@@ -4,7 +4,7 @@
     "icon": "icons/postgres.png",
     "doc" : "${doc}",
     "id": "postgres",
-    "tags": ["Database", "ssl", "doubleActive"]
+    "tags": ["Database", "ssl", "doubleActive", "disableForeignKey"]
   },
   "configOptions": {
     "capabilities":[

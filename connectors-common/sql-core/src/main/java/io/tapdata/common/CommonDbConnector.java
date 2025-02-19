@@ -439,29 +439,37 @@ public abstract class CommonDbConnector extends ConnectorBase {
         }
     }
 
-    protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent) {
+    protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
         List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
         if (EmptyKit.isNotEmpty(constraintList)) {
+            List<String> constraintSqlList = new ArrayList<>();
             TapConstraintException exception = new TapConstraintException(tapTable.getId());
             constraintList.forEach(c -> {
                 String sql = getCreateConstraintSql(tapTable, c);
-                try {
-                    jdbcContext.execute(sql);
-                } catch (Exception e) {
-                    if (!exceptionCollector.violateConstraintName(e)) {
-                        exception.addException(c, sql, e);
-                    } else {
-                        String rename = c.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
-                        c.setName(rename);
-                        sql = getCreateConstraintSql(tapTable, c);
-                        try {
-                            jdbcContext.execute(sql);
-                        } catch (Exception e1) {
-                            exception.addException(c, sql, e1);
+                if (create) {
+                    try {
+                        jdbcContext.execute(sql);
+                    } catch (Exception e) {
+                        if (!exceptionCollector.violateConstraintName(e)) {
+                            exception.addException(c, sql, e);
+                        } else {
+                            String rename = c.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                            c.setName(rename);
+                            sql = getCreateConstraintSql(tapTable, c);
+                            try {
+                                jdbcContext.execute(sql);
+                            } catch (Exception e1) {
+                                exception.addException(c, sql, e1);
+                            }
                         }
                     }
+                } else {
+                    constraintSqlList.add(sql);
                 }
             });
+            if (!create) {
+                createConstraintEvent.setConstraintSqlList(constraintSqlList);
+            }
             if (EmptyKit.isNotEmpty(exception.getExceptions())) {
                 throw exception;
             }

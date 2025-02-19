@@ -4,7 +4,7 @@
     "icon": "icons/mysql.png",
     "id": "mysql",
     "doc": "${doc}",
-    "tags": ["Database", "ssl", "doubleActive"]
+    "tags": ["Database", "ssl", "doubleActive", "disableForeignKey"]
   },
   "configOptions": {
     "capabilities": [
