@@ -72,16 +72,23 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         StringBuilder builder = new StringBuilder();
         if (EmptyKit.isNotEmpty(record)) {
             record.forEach((fieldName, value) -> {
-                builder.append(escapeChar).append(fieldName).append(escapeChar).append(operator);
-                builder.append(buildValueString(value));
-                Collate collate = EmptyKit.isEmpty(collateList) ? null : collateList.stream()
-                        .filter(c -> c.getFieldName().equals(fieldName))
-                        .findFirst()
-                        .orElse(null);
-                if (null != collate) {
-                    builder.append(' ').append(buildCollate(collate.getCollateName()));
+                if (null != value) {
+                    builder.append(escapeChar).append(fieldName).append(escapeChar).append(operator);
+                    builder.append(buildValueString(value));
+                    Collate collate = EmptyKit.isEmpty(collateList) ? null : collateList.stream()
+                            .filter(c -> c.getFieldName().equals(fieldName))
+                            .findFirst()
+                            .orElse(null);
+                    if (null != collate) {
+                        builder.append(' ').append(buildCollate(collate.getCollateName()));
+                    }
+                    builder.append(' ').append(splitSymbol).append(' ');
+                } else {
+                    builder.append(escapeChar).append(fieldName).append(escapeChar).append(' ');
+                    builder.append("IS NULL");
+                    builder.append(' ').append(splitSymbol).append(' ');
                 }
-                builder.append(' ').append(splitSymbol).append(' ');
+
             });
             builder.delete(builder.length() - splitSymbol.length() - 1, builder.length());
         }

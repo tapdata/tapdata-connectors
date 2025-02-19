@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
  */
 public class CommonSqlMaker {
 
-    private char escapeChar = '"';
+    protected char escapeChar = '"';
     public static final String COLLATE = "COLLATE";
     protected Boolean closeNotNull = false;
     protected Boolean createAutoInc = false;
