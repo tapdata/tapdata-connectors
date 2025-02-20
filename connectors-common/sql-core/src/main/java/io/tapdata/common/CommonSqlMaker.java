@@ -90,7 +90,7 @@ public class CommonSqlMaker {
                 return "";
             }
             buildDataTypeDefinition(builder, tapField);
-            if (Boolean.TRUE.equals(applyDefault) && EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
+            if (Boolean.TRUE.equals(applyDefault) && EmptyKit.isNotNull(tapField.getDefaultValue())) {
                 buildDefaultDefinition(builder, tapField);
             }
             buildNullDefinition(builder, tapField);
@@ -115,7 +115,7 @@ public class CommonSqlMaker {
     }
 
     protected void buildDefaultDefinition(StringBuilder builder, TapField tapField) {
-        if (EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
+        if (EmptyKit.isNotNull(tapField.getDefaultValue())) {
             builder.append("DEFAULT").append(' ');
             if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
                 builder.append(buildDefaultFunction(tapField)).append(' ');

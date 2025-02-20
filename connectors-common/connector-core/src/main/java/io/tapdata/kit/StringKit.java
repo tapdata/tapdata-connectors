@@ -190,7 +190,7 @@ public class StringKit {
         if (EmptyKit.isBlank(str) || EmptyKit.isBlank(remove)) {
             return str;
         }
-        if (str.startsWith(remove) && str.endsWith(remove) && str.length() > 2 * remove.length()) {
+        if (str.startsWith(remove) && str.endsWith(remove) && str.length() >= 2 * remove.length()) {
             return str.substring(remove.length(), str.length() - remove.length());
         }
         if (EmptyKit.isNull(upperCase)) {
