@@ -13,11 +13,14 @@ import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
 import io.tapdata.connector.postgres.partition.TableType;
+import io.tapdata.entity.TapConstraintException;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.schema.TapConstraint;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
@@ -60,7 +63,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -820,5 +822,54 @@ public class PostgresConnector extends CommonDbConnector {
                 tapLogger.warn("Cluster index failed, table:{}, index:{}", tapTable.getId(), v.getName());
             }
         });
+    }
+
+    protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
+        List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
+        if (EmptyKit.isNotEmpty(constraintList)) {
+            List<String> constraintSqlList = new ArrayList<>();
+            TapConstraintException exception = new TapConstraintException(tapTable.getId());
+            constraintList.forEach(c -> {
+                String sql = getCreateConstraintSql(tapTable, c);
+                if (create) {
+                    try {
+                        jdbcContext.execute(sql);
+                    } catch (Exception e) {
+                        if (e instanceof SQLException && ((SQLException) e).getSQLState().equals("42804")) {
+                            TapTable referenceTable = connectorContext.getTableMap().get(c.getReferencesTableName());
+                            String finalSql = sql;
+                            c.getMappingFields().stream().filter(m -> Boolean.TRUE.equals(referenceTable.getNameFieldMap().get(m.getReferenceKey()).getAutoInc()) && referenceTable.getNameFieldMap().get(m.getReferenceKey()).getDataType().startsWith("numeric")).forEach(m -> {
+                                try {
+                                    jdbcContext.execute("alter table " + getSchemaAndTable(tapTable.getId()) + " alter column \"" + m.getForeignKey() + "\" type bigint");
+                                    jdbcContext.execute(finalSql);
+                                } catch (SQLException e1) {
+                                    exception.addException(c, "alter table alter column failed", e1);
+                                }
+                            });
+                        }
+                        if (!exceptionCollector.violateConstraintName(e)) {
+                            exception.addException(c, sql, e);
+                        } else {
+                            String rename = c.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                            c.setName(rename);
+                            sql = getCreateConstraintSql(tapTable, c);
+                            try {
+                                jdbcContext.execute(sql);
+                            } catch (Exception e1) {
+                                exception.addException(c, sql, e1);
+                            }
+                        }
+                    }
+                } else {
+                    constraintSqlList.add(sql);
+                }
+            });
+            if (!create) {
+                createConstraintEvent.setConstraintSqlList(constraintSqlList);
+            }
+            if (EmptyKit.isNotEmpty(exception.getExceptions())) {
+                throw exception;
+            }
+        }
     }
 }
