@@ -82,13 +82,11 @@ public class PostgresSqlMaker extends CommonSqlMaker {
                     if (null != collate) {
                         builder.append(' ').append(buildCollate(collate.getCollateName()));
                     }
-                    builder.append(' ').append(splitSymbol).append(' ');
                 } else {
                     builder.append(escapeChar).append(fieldName).append(escapeChar).append(' ');
                     builder.append("IS NULL");
-                    builder.append(' ').append(splitSymbol).append(' ');
                 }
-
+                builder.append(' ').append(splitSymbol).append(' ');
             });
             builder.delete(builder.length() - splitSymbol.length() - 1, builder.length());
         }

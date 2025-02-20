@@ -320,12 +320,11 @@ public class CommonSqlMaker {
                 if (null != value) {
                     builder.append(escapeChar).append(fieldName).append(escapeChar).append(operator);
                     builder.append(buildValueString(value));
-                    builder.append(' ').append(splitSymbol).append(' ');
                 } else {
                     builder.append(escapeChar).append(fieldName).append(escapeChar).append(' ');
                     builder.append("IS NULL");
-                    builder.append(' ').append(splitSymbol).append(' ');
                 }
+                builder.append(' ').append(splitSymbol).append(' ');
             });
             builder.delete(builder.length() - splitSymbol.length() - 1, builder.length());
         }
