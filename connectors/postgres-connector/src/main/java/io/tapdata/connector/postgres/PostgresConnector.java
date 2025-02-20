@@ -22,7 +22,6 @@ import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapConstraint;
 import io.tapdata.entity.schema.TapField;
-import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
@@ -380,8 +379,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     protected void openIdentity(TapTable tapTable) throws SQLException {
-        if (EmptyKit.isEmpty(tapTable.primaryKeys())
-                && (EmptyKit.isEmpty(tapTable.getIndexList()) || tapTable.getIndexList().stream().noneMatch(TapIndex::isUnique))) {
+        if (EmptyKit.isEmpty(tapTable.primaryKeys())) {
             jdbcContext.execute("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" REPLICA IDENTITY FULL");
         }
     }

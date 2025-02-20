@@ -47,7 +47,7 @@ public class PostgresRecordWriter extends NormalRecordWriter {
     }
 
     protected String getCloseConstraintCheckSql() {
-        return "SET CONSTRAINTS ALL DEFERRED";
+        return "SET session_replication_role = 'replica'";
     }
 
 }
