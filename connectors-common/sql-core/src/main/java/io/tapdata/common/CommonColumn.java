@@ -27,6 +27,7 @@ public class CommonColumn {
     protected Integer dataLength;
     protected Integer dataPrecision;
     protected Integer dataScale;
+    protected boolean isString = true;
 
     public CommonColumn() {
     }
@@ -65,7 +66,7 @@ public class CommonColumn {
         String tapDefaultFunction = null;
         if (EmptyKit.isNotNull(columnDefaultValue)) {
             tapDefaultFunction = parseDefaultFunction(columnDefaultValue);
-            if (columnDefaultValue.matches("-?\\d+(\\.\\d+)?")) {
+            if (!isString && columnDefaultValue.matches("-?\\d+(\\.\\d+)?")) {
                 defaultValueObj = new BigDecimal(columnDefaultValue);
             } else {
                 defaultValueObj = columnDefaultValue;
