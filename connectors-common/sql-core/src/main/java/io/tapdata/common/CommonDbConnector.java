@@ -896,7 +896,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     protected void dropConstraint(TapConnectorContext connectorContext, TapTable table, TapDropConstraintEvent tapDropConstraintEvent) throws SQLException {
         char escapeChar = commonDbConfig.getEscapeChar();
         List<String> dropConstraintsSql = new ArrayList<>();
-        tapDropConstraintEvent.getConstraintList().forEach(fk -> dropConstraintsSql.add("alter table " + getSchemaAndTable(table.getId()) + " drop constraint " + escapeChar + fk + escapeChar));
+        tapDropConstraintEvent.getConstraintList().forEach(fk -> dropConstraintsSql.add("alter table " + getSchemaAndTable(table.getId()) + " drop constraint " + escapeChar + fk.getName() + escapeChar));
         jdbcContext.batchExecute(dropConstraintsSql);
     }
 
