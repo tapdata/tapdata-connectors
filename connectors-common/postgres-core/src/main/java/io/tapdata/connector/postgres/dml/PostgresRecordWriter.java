@@ -7,6 +7,7 @@ import io.tapdata.entity.schema.TapTable;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
 
 public class PostgresRecordWriter extends NormalRecordWriter {
 
@@ -46,8 +47,12 @@ public class PostgresRecordWriter extends NormalRecordWriter {
         }
     }
 
-    protected String getCloseConstraintCheckSql() {
-        return "SET session_replication_role = 'replica'";
+    public void closeConstraintCheck() {
+        String sql = "SET session_replication_role = 'replica'";
+        try (Statement statement = connection.createStatement()) {
+            statement.execute(sql);
+        } catch (Exception ignored) {
+        }
     }
 
 }
