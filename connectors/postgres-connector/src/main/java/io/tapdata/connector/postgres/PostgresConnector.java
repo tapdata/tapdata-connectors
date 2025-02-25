@@ -811,6 +811,22 @@ public class PostgresConnector extends CommonDbConnector {
         return result;
     }
 
+    protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
+            jdbcContext.execute("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()) + " cascade");
+        } else {
+            tapLogger.warn("Table {} not exists, skip truncate", tapClearTableEvent.getTableId());
+        }
+    }
+
+    protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
+            jdbcContext.execute("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()) + " cascade");
+        } else {
+            tapLogger.warn("Table {} not exists, skip drop", tapDropTableEvent.getTableId());
+        }
+    }
+
     protected void createIndex(TapConnectorContext connectorContext, TapTable tapTable, TapCreateIndexEvent createIndexEvent) throws SQLException {
         super.createIndex(connectorContext, tapTable, createIndexEvent);
         createIndexEvent.getIndexList().stream().filter(v -> Boolean.TRUE.equals(v.getCluster())).forEach(v -> {
