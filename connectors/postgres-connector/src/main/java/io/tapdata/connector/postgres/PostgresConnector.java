@@ -851,27 +851,20 @@ public class PostgresConnector extends CommonDbConnector {
                     } catch (Exception e) {
                         if (e instanceof SQLException && ((SQLException) e).getSQLState().equals("42804")) {
                             TapTable referenceTable = connectorContext.getTableMap().get(c.getReferencesTableName());
-                            String finalSql = sql;
                             c.getMappingFields().stream().filter(m -> Boolean.TRUE.equals(referenceTable.getNameFieldMap().get(m.getReferenceKey()).getAutoInc()) && referenceTable.getNameFieldMap().get(m.getReferenceKey()).getDataType().startsWith("numeric")).forEach(m -> {
                                 try {
                                     jdbcContext.execute("alter table " + getSchemaAndTable(tapTable.getId()) + " alter column \"" + m.getForeignKey() + "\" type bigint");
-                                    jdbcContext.execute(finalSql);
                                 } catch (SQLException e1) {
                                     exception.addException(c, "alter table alter column failed", e1);
                                 }
                             });
-                        }
-                        if (!exceptionCollector.violateConstraintName(e)) {
-                            exception.addException(c, sql, e);
-                        } else {
-                            String rename = c.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
-                            c.setName(rename);
-                            sql = getCreateConstraintSql(tapTable, c);
                             try {
                                 jdbcContext.execute(sql);
                             } catch (Exception e1) {
                                 exception.addException(c, sql, e1);
                             }
+                        } else {
+                            exception.addException(c, sql, e);
                         }
                     }
                 } else {

@@ -51,7 +51,11 @@ public class PostgresRecordWriter extends NormalRecordWriter {
         String sql = "SET session_replication_role = 'replica'";
         try (Statement statement = connection.createStatement()) {
             statement.execute(sql);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            try {
+                connection.rollback();
+            } catch (SQLException ignored) {
+            }
         }
     }
 
