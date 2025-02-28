@@ -30,17 +30,17 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
 
     protected String getLargeInsertSql() {
         if (WritePolicyEnum.UPDATE_ON_EXISTS == insertPolicy) {
-            return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                    + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
+            return "INSERT INTO " + getSchemaAndTable() + " ("
+                    + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") VALUES "
                     + String.join(", ", largeSqlValues) + " ON DUPLICATE KEY UPDATE "
-                    + allColumn.stream().map(k -> escapeChar + k + escapeChar + "=values(" + escapeChar + k + escapeChar + ")").collect(Collectors.joining(", "));
+                    + allColumn.stream().map(k -> quoteAndEscape(k) + "=values(" + quoteAndEscape(k) + ")").collect(Collectors.joining(", "));
         } else if (WritePolicyEnum.IGNORE_ON_EXISTS == insertPolicy) {
-            return "INSERT IGNORE INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                    + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
+            return "INSERT IGNORE INTO " + getSchemaAndTable() + " ("
+                    + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") VALUES "
                     + String.join(", ", largeSqlValues);
         } else {
-            return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                    + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
+            return "INSERT INTO " + getSchemaAndTable() + " ("
+                    + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") VALUES "
                     + String.join(", ", largeSqlValues);
         }
     }
@@ -58,10 +58,10 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
     }
 
     protected String getUpsertSql() {
-        return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
+        return "INSERT INTO " + getSchemaAndTable() + " ("
+                + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") " +
                 "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ON DUPLICATE KEY UPDATE "
-                + allColumn.stream().map(k -> escapeChar + k + escapeChar + "=values(" + escapeChar + k + escapeChar + ")").collect(Collectors.joining(", "));
+                + allColumn.stream().map(k -> quoteAndEscape(k) + "=values(" + quoteAndEscape(k) + ")").collect(Collectors.joining(", "));
     }
 
     protected void insertIgnore(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
@@ -76,8 +76,8 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
     }
 
     protected String getInsertIgnoreSql() {
-        return "INSERT IGNORE INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
+        return "INSERT IGNORE INTO " + getSchemaAndTable() + " ("
+                + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") " +
                 "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ")";
     }
 
@@ -109,10 +109,10 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
     }
 
     protected String getInsertUpdateSql(Map<String, Object> after, Map<String, Object> before) {
-        return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
+        return "INSERT INTO " + getSchemaAndTable() + " ("
+                + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") " +
                 "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ON DUPLICATE KEY UPDATE "
-                + after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=values(" + escapeChar + k + escapeChar + ")").collect(Collectors.joining(", "));
+                + after.keySet().stream().map(k -> quoteAndEscape(k) + "=values(" + quoteAndEscape(k) + ")").collect(Collectors.joining(", "));
     }
 
     protected Object filterValue(Object value, String dataType) {

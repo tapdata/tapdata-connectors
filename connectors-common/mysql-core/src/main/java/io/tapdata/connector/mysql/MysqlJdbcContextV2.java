@@ -58,25 +58,25 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     @Override
     protected String queryAllTablesSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(MYSQL_ALL_TABLE, schema, tableSql);
+        return String.format(MYSQL_ALL_TABLE, StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllColumnsSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(MYSQL_ALL_COLUMN, schema, tableSql);
+        return String.format(MYSQL_ALL_COLUMN, StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllIndexesSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(MYSQL_ALL_INDEX, schema, tableSql);
+        return String.format(MYSQL_ALL_INDEX, StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND k.TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(MYSQL_ALL_FOREIGN_KEY, schema, tableSql);
+        return String.format(MYSQL_ALL_FOREIGN_KEY, StringKit.escape(schema, "'"), tableSql);
     }
 
     public DataMap getTableInfo(String tableName) {
@@ -85,7 +85,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         list.add("TABLE_ROWS");
         list.add("DATA_LENGTH");
         try {
-            query(String.format(GET_TABLE_INFO_SQL, getConfig().getDatabase(), tableName), resultSet -> {
+            query(String.format(GET_TABLE_INFO_SQL, StringKit.escape(getConfig().getDatabase(), "'"), tableName), resultSet -> {
                 while (resultSet.next()) {
                     dataMap.putAll(DbKit.getRowFromResultSet(resultSet, list));
                 }

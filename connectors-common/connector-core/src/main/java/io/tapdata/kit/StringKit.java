@@ -342,4 +342,17 @@ public class StringKit {
         if (null == str) return null;
         return ("_" + str).trim().substring(1);
     }
+
+    public static String escape(String name, String escapes) {
+        String res = name;
+        for (int i = 0; i < escapes.length(); i++) {
+            char escape = escapes.charAt(i);
+            res = escape(res, escape);
+        }
+        return res;
+    }
+
+    public static String escape(String name, char escape) {
+        return name.replace(escape + "", "" + escape + escape);
+    }
 }

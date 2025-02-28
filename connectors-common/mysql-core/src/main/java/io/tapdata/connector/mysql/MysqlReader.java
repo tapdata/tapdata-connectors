@@ -67,6 +67,8 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.LogManager;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static io.tapdata.connector.mysql.util.MysqlUtil.randomServerId;
@@ -303,11 +305,11 @@ public class MysqlReader implements Closeable {
 //            if (EmptyKit.isNotBlank(mysqlConfig.getTimezone())) {
 //                builder.with("database.serverTimezone", mysqlJdbcContext.queryTimeZone());
 //            }
-            List<String> dbTableNames = tables.stream().map(t -> mysqlConfig.getDatabase() + "." + t).collect(Collectors.toList());
+            List<String> dbTableNames = tables.stream().map(t -> escapeRegex(mysqlConfig.getDatabase()) + "." + escapeRegex(t)).collect(Collectors.toList());
             if (mysqlConfig.getDoubleActive()) {
-                dbTableNames.add(mysqlConfig.getDatabase() + "._tap_double_active");
+                dbTableNames.add(escapeRegex(mysqlConfig.getDatabase()) + "._tap_double_active");
             }
-            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, mysqlConfig.getDatabase());
+            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, escapeRegex(mysqlConfig.getDatabase()));
             builder.with(MySqlConnectorConfig.TABLE_INCLUDE_LIST, String.join(",", dbTableNames));
             builder.with(EmbeddedEngine.OFFSET_STORAGE, "io.tapdata.connector.mysql.PdkPersistenceOffsetBackingStore");
             if (StringUtils.isNotBlank(offsetStr)) {
@@ -567,12 +569,7 @@ public class MysqlReader implements Closeable {
         Struct value = (Struct) record.value();
         Struct source = value.getStruct("source");
         Long eventTime = source.getInt64("ts_ms");
-        String table = Optional.of(record.topic().split("\\.")).map(arr -> {
-            if (arr.length > 0) {
-                return URLDecoder.decode(arr[arr.length - 1]);
-            }
-            return null;
-        }).orElse(source.getString("table"));
+        String table = source.getString("table");
         //双活情形下，需要过滤_tap_double_active记录的同事务数据
         if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
             if ("_tap_double_active".equals(table)) {
@@ -942,5 +939,13 @@ public class MysqlReader implements Closeable {
         return dateTypeSet;
     }
 
+    private static final Pattern REGEX_SPECIAL_CHARS = Pattern.compile("[\\\\^$|*+?.()\\[\\]{}]");
 
+    public static String escapeRegex(String input) {
+        if (input == null || input.isEmpty()) {
+            return input;
+        }
+        Matcher matcher = REGEX_SPECIAL_CHARS.matcher(input);
+        return matcher.replaceAll("\\\\$0");
+    }
 }

@@ -112,6 +112,11 @@ public class PostgresExceptionCollector extends AbstractExceptionCollector imple
     }
 
     @Override
+    public boolean violateIndexName(Throwable cause) {
+        return cause instanceof SQLException && "42P07".equals(((SQLException) cause).getSQLState());
+    }
+
+    @Override
     public void collectCdcConfigInvalid(Throwable cause) {
         if (cause instanceof SQLException) {
             switch (((SQLException) cause).getSQLState()) {

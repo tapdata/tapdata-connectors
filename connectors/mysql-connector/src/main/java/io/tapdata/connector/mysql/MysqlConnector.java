@@ -712,10 +712,9 @@ public class MysqlConnector extends CommonDbConnector {
     @Override
     protected String getBatchReadSelectSql(TapTable tapTable) {
         if (tapTable.getNameFieldMap().size() > 50) {
-            return String.format("SELECT * FROM `%s`.`%s`", mysqlConfig.getDatabase(), tapTable.getId());
+            return String.format("SELECT * FROM %s", getSchemaAndTable(tapTable.getId()));
         } else {
-            String columns = String.join("`, `", tapTable.getNameFieldMap().keySet());
-            return String.format("SELECT `%s` FROM `%s`.`%s`", columns, mysqlConfig.getDatabase(), tapTable.getId());
+            return super.getBatchReadSelectSql(tapTable);
         }
     }
 

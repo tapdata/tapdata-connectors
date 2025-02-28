@@ -15,6 +15,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.Projection;
 import io.tapdata.pdk.apis.entity.QueryOperator;
@@ -72,7 +73,7 @@ public class MysqlMaker implements SqlMaker {
             tablePropertiesSql += " COMMENT='" + tapTable.getComment().replace("'", "''").replaceAll("\\\\", "\\\\\\\\") + "'";
         }
 
-        String sql = String.format(CREATE_TABLE_TEMPLATE, database, tapTable.getId(), fieldSql, tablePropertiesSql);
+        String sql = String.format(CREATE_TABLE_TEMPLATE, StringKit.escape(database, '`'), StringKit.escape(tapTable.getId(), '`'), fieldSql, tablePropertiesSql);
         return new String[]{sql};
     }
 
@@ -282,7 +283,7 @@ public class MysqlMaker implements SqlMaker {
 
     protected String createTableAppendField(TapField tapField) {
         String datatype = tapField.getDataType();
-        String fieldSql = "  `" + tapField.getName() + "`" + " " + datatype;
+        String fieldSql = "  `" + StringKit.escape(tapField.getName(), '`') + "`" + " " + datatype;
 
         // auto increment
         // mysql a table can only create one auto-increment column, and must be the primary key
@@ -340,7 +341,7 @@ public class MysqlMaker implements SqlMaker {
 
         // pk fields
         Collection<String> primaryKeys = tapTable.primaryKeys();
-        String pkFieldString = "`" + String.join("`,`", primaryKeys) + "`";
+        String pkFieldString = "`" + primaryKeys.stream().map(v -> StringKit.escape(v, '`')).collect(Collectors.joining("`,`")) + "`";
 
         pkSql += pkFieldString + ")";
         return pkSql;

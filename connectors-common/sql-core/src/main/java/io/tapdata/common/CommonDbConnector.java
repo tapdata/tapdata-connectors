@@ -18,6 +18,7 @@ import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.FilterResult;
@@ -423,17 +424,22 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 .collect(Collectors.toList());
         if (EmptyKit.isNotEmpty(indexList)) {
             indexList.stream().filter(i -> !i.isPrimary()).forEach(i -> {
+                String sql = getCreateIndexSql(tapTable, i);
                 try {
-                    jdbcContext.execute(getCreateIndexSql(tapTable, i));
+                    jdbcContext.execute(sql);
                 } catch (SQLException e) {
-                    String rename = i.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
-                    tapLogger.warn("Create index failed {}, rename {} to {} and retry ...", e.getMessage(), i.getName(), rename);
-                    i.setName(rename);
-                    String sql = getCreateIndexSql(tapTable, i);
-                    try {
-                        jdbcContext.execute(sql);
-                    } catch (SQLException e1) {
-                        tapLogger.warn("Create index failed again {}, please execute it manually [{}]", e1.getMessage(), sql);
+                    if (!exceptionCollector.violateIndexName(e)) {
+                        tapLogger.warn("Create index failed {}, please execute it manually [{}]", e.getMessage(), sql);
+                    } else {
+                        String rename = i.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                        tapLogger.warn("Create index failed {}, rename {} to {} and retry ...", e.getMessage(), i.getName(), rename);
+                        i.setName(rename);
+                        sql = getCreateIndexSql(tapTable, i);
+                        try {
+                            jdbcContext.execute(sql);
+                        } catch (SQLException e1) {
+                            tapLogger.warn("Create index failed again {}, please execute it manually [{}]", e1.getMessage(), sql);
+                        }
                     }
                 }
             });
@@ -583,9 +589,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         StringBuilder sb = new StringBuilder();
         char escapeChar = commonDbConfig.getEscapeChar();
         if (EmptyKit.isNotBlank(commonDbConfig.getSchema())) {
-            sb.append(escapeChar).append(commonDbConfig.getSchema()).append(escapeChar).append('.');
+            sb.append(escapeChar).append(StringKit.escape(commonDbConfig.getSchema(), escapeChar)).append(escapeChar).append('.');
         }
-        sb.append(escapeChar).append(tableId).append(escapeChar);
+        sb.append(escapeChar).append(StringKit.escape(tableId, escapeChar)).append(escapeChar);
         return sb.toString();
     }
 
@@ -620,7 +626,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         if (EmptyKit.isNotBlank(tapIndex.getName())) {
             sb.append(escapeChar).append(tapIndex.getName()).append(escapeChar);
         } else {
-            sb.append(escapeChar).append(DbKit.buildIndexName(tapTable.getId())).append(escapeChar);
+            String indexName = DbKit.buildIndexName(tapTable.getId());
+            tapIndex.setName(indexName);
+            sb.append(escapeChar).append(indexName).append(escapeChar);
         }
         sb.append(" on ").append(getSchemaAndTable(tapTable.getId())).append('(')
                 .append(tapIndex.getIndexFields().stream().map(f -> escapeChar + f.getName() + escapeChar + " " + (f.getFieldAsc() ? "asc" : "desc"))
@@ -730,7 +738,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected String getBatchReadSelectSql(TapTable tapTable) {
-        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + c + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
+        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + StringKit.escape(c, commonDbConfig.getEscapeChar()) + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
         return String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
     }
 
