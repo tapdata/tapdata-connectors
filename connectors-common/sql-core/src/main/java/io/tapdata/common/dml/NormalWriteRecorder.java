@@ -400,14 +400,12 @@ public abstract class NormalWriteRecorder {
         }
         Map<String, Object> lastBefore = new HashMap<>();
         uniqueCondition.stream().filter(before::containsKey).forEach(v -> lastBefore.put(v, before.get(v)));
-        if (EmptyKit.isNotEmpty(removedColumn)) {
-            removedColumn.forEach(lastBefore::remove);
-        }
         //Mongo为源端时，非_id为更新条件时，lastBefore为空，此时需要原始before直接删除
         if (EmptyKit.isEmpty(lastBefore)) {
-            justDelete(before, listResult);
-        } else {
-            justDelete(lastBefore, listResult);
+            lastBefore.putAll(before);
+        }
+        if (EmptyKit.isNotEmpty(removedColumn)) {
+            removedColumn.forEach(lastBefore::remove);
         }
         preparedStatement.addBatch();
     }
