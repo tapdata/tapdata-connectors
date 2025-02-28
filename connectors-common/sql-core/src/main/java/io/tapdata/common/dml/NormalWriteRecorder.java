@@ -35,6 +35,7 @@ public abstract class NormalWriteRecorder {
 
     protected final List<String> allColumn;
     protected List<String> updatedColumn;
+    protected List<String> removedColumn;
     protected final List<String> uniqueCondition;
     protected final Map<String, String> columnTypeMap;
     protected boolean hasPk = false;
@@ -88,6 +89,16 @@ public abstract class NormalWriteRecorder {
         if (largeSql) {
             largeSqlValues = new ArrayList<>();
         }
+    }
+
+    public void setRemovedColumn(List<String> removedColumn) {
+        this.removedColumn = removedColumn;
+        allColumn.removeAll(removedColumn);
+        updatedColumn.removeAll(removedColumn);
+        if (EmptyKit.isEmpty(updatedColumn)) {
+            updatedColumn.addAll(allColumn);
+        }
+        uniqueCondition.removeAll(removedColumn);
     }
 
     /**

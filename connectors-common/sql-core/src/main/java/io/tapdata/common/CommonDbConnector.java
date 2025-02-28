@@ -53,6 +53,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     protected Map<String, DataMap> writtenTableMap = new ConcurrentHashMap<>();
     protected static final String HAS_UNIQUE_INDEX = "HAS_UNIQUE_INDEX";
     protected static final String HAS_AUTO_INCR = "HAS_AUTO_INCR";
+    protected static final String HAS_REMOVED_COLUMN = "HAS_REMOVED_COLUMN";
     //ddlHandlers which for ddl collection
     protected BiClassHandlers<TapFieldBaseEvent, TapConnectorContext, List<String>> fieldDDLHandlers;
     //ddlSqlMaker which for ddl execution

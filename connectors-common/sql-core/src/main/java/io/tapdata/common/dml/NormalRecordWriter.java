@@ -176,6 +176,13 @@ public class NormalRecordWriter {
         return this;
     }
 
+    public NormalRecordWriter setRemovedColumn(List<String> removedColumn) {
+        insertRecorder.setRemovedColumn(removedColumn);
+        updateRecorder.setRemovedColumn(removedColumn);
+        deleteRecorder.setRemovedColumn(removedColumn);
+        return this;
+    }
+
     public void setAutoIncFields(List<String> autoIncFields) {
         this.autoIncFields = autoIncFields;
     }
