@@ -407,6 +407,7 @@ public abstract class NormalWriteRecorder {
         if (EmptyKit.isNotEmpty(removedColumn)) {
             removedColumn.forEach(lastBefore::remove);
         }
+        justDelete(lastBefore, listResult);
         preparedStatement.addBatch();
     }
 
