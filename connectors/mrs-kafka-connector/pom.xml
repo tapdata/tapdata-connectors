@@ -16,7 +16,7 @@
     <properties>
         <zookeeper.version>3.6.3-h0.cbu.mrs.321.r13</zookeeper.version>
         <kafka.version>2.8.1-h0.cbu.mrs.321.r13</kafka.version>
-        <tapdata.pdk.api.version>1.2.6-RELEASE</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.4.1-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
     <!--<dependencyManagement>-->
     <dependencies>
