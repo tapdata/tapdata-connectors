@@ -567,7 +567,7 @@ class MongodbMergeOperateTest {
 			MergeFilter mergeFilter = new MergeFilter(true);
 			MergeResult result = MongodbMergeOperate.updateIntoArrayUnsetMerge(mergeBundle, currentProperty, updateJoinKeys, mergeResult, parentProperties, mergeFilter, 1);
 			assertEquals("{\"id\": 1, \"src\": \"x\"}", result.getFilter().toJson());
-			assertEquals("{\"$pull\": {\"array\": {\"id\": 1, \"src\": \"x\", \"seq\": 1}}}", result.getUpdate().toJson());
+			assertEquals("{\"$set\": {\"array\": []}}", result.getUpdate().toJson());
 		}
 
 		@Test
