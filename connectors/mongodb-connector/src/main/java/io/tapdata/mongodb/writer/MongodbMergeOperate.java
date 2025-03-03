@@ -115,7 +115,8 @@ public class MongodbMergeOperate {
 				sharedJoinKeys,
 				null,
 				mergeFilter,
-				topLevel
+				topLevel,
+				1
 		);
 	}
 
@@ -130,7 +131,8 @@ public class MongodbMergeOperate {
 			Set<String> sharedJoinKeys,
 			MergeTableProperties parentProperties,
 			MergeFilter mergeFilter,
-			int topLevel
+			int topLevel,
+			int loopTime
 	) {
 		boolean unsetResultNull = null == unsetResult;
 		switch (properties.getMergeType()) {
@@ -149,7 +151,7 @@ public class MongodbMergeOperate {
 				mergeResult = updateMergeIfNeed(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
 				break;
 			case updateIntoArray:
-				unsetResult = updateIntoArrayUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, parentProperties, mergeFilter);
+				unsetResult = updateIntoArrayUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, parentProperties, mergeFilter, loopTime);
 				if (unsetResultNull && addUnsetMerge(mergeResults, unsetResult)) {
 					mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
 				}
@@ -161,8 +163,10 @@ public class MongodbMergeOperate {
 		}
 
 		boolean recursiveOnce = false;
+		int privateLoopTime = 0;
 		if (CollectionUtils.isNotEmpty(mergeLookupResults)) {
 			for (MergeLookupResult mergeLookupResult : mergeLookupResults) {
+				privateLoopTime++;
 				final Map<String, Object> data = mergeLookupResult.getData();
 				mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, data);
 				mergeBundle.setRecursive(true);
@@ -181,7 +185,8 @@ public class MongodbMergeOperate {
 						mergeLookupResult.getSharedJoinKeys(),
 						properties,
 						mergeFilter,
-						topLevel
+						topLevel,
+						privateLoopTime
 				);
 				recursiveOnce = true;
 			}
@@ -298,8 +303,11 @@ public class MongodbMergeOperate {
 	public static MergeResult updateIntoArrayUnsetMerge(
 			MergeBundle mergeBundle, MergeTableProperties currentProperty,
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult,
-			MergeTableProperties parentProperties, MergeFilter mergeFilter) {
+			MergeTableProperties parentProperties, MergeFilter mergeFilter, int loopTime) {
 		String id = currentProperty.getId();
+		if (loopTime != 1) {
+			return null;
+		}
 		if (null == mergeResult && (MapUtils.isEmpty(updateJoinKeys) || !updateJoinKeys.containsKey(id))) {
 			return mergeResult;
 		}
@@ -357,30 +365,12 @@ public class MongodbMergeOperate {
 			mergeResult.setOperation(MergeResult.Operation.UPDATE);
 		}
 		Document updateOpDoc;
-		if (mergeBundle.isDataExists()) {
-			Map<String, Object> data = mergeBeforeAndAfter(mergeBundle.getBefore(), mergeBundle.getAfter());
-			Map<String, Object> pullData = new HashMap<>();
-			for (String key : arrayKeys) {
-				Object value = MapUtil.getValueByKey(updateJoinKeyBefore, key);
-				if (null == value) {
-					value = MapUtil.getValueByKey(data, key);
-				}
-				pullData.put(key, value);
-			}
-			updateOpDoc = buildPullDocument(pullData, arrayKeys, array, targetPath);
-			if (mergeResult.getUpdate().containsKey("$pull")) {
-				mergeResult.getUpdate().get("$pull", Document.class).putAll(updateOpDoc);
+		if (StringUtils.isNotBlank(targetPath)) {
+			updateOpDoc = new Document(targetPath, new ArrayList<>());
+			if (mergeResult.getUpdate().containsKey("$set")) {
+				mergeResult.getUpdate().get("$set", Document.class).putAll(updateOpDoc);
 			} else {
-				mergeResult.getUpdate().put("$pull", updateOpDoc);
-			}
-		} else {
-			if (StringUtils.isNotBlank(targetPath)) {
-				updateOpDoc = new Document(targetPath, new ArrayList<>());
-				if (mergeResult.getUpdate().containsKey("$set")) {
-					mergeResult.getUpdate().get("$set", Document.class).putAll(updateOpDoc);
-				} else {
-					mergeResult.getUpdate().put("$set", updateOpDoc);
-				}
+				mergeResult.getUpdate().put("$set", updateOpDoc);
 			}
 		}
 		return mergeResult;
