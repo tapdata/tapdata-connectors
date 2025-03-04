@@ -5,6 +5,7 @@ import io.tapdata.connector.config.ConnectionClusterURI;
 import io.tapdata.connector.config.ConnectionDatasourceInstanceInfo;
 import io.tapdata.connector.config.ConnectionExtParams;
 import io.tapdata.kafka.config.IConnectionACL;
+import io.tapdata.kafka.config.IConnectionSecurity;
 import io.tapdata.kafka.constants.KafkaAcksType;
 import io.tapdata.kafka.constants.KafkaConcurrentReadMode;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
@@ -13,6 +14,7 @@ import io.tapdata.pdk.apis.context.TapConnectionContext;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.config.SaslConfigs;
 
 import java.util.Optional;
 import java.util.Properties;
@@ -26,6 +28,7 @@ import java.util.concurrent.TimeUnit;
  * @version v1.0 2024/8/27 14:36 Create
  */
 public class KafkaConfig extends BasicConfig implements
+    IConnectionSecurity,
     ConnectionClusterURI,
     ConnectionDatasourceInstanceInfo,
     IConnectionACL,
@@ -126,6 +129,50 @@ public class KafkaConfig extends BasicConfig implements
         props.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, getConnectionClusterURI());
         props.put(CommonClientConfigs.CLIENT_ID_CONFIG, getConnectionClientId(type));
         props.put(CommonClientConfigs.REQUEST_TIMEOUT_MS_CONFIG, (int) TimeUnit.SECONDS.toMillis(10L));
+
+        if (useSasl()) {
+            props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_PLAINTEXT");
+
+        }
+
+        Protocol securityProtocol = getSecurityProtocol();
+        props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, securityProtocol.name());
+        if (useSasl()) {
+            String model;
+            SaslMechanism mechanism = SaslMechanism.fromString(getSaslMechanism());
+            props.put(SaslConfigs.SASL_MECHANISM, mechanism.getValue());
+            switch (mechanism) {
+                case PLAIN:
+                    model = "org.apache.kafka.common.security.plain.PlainLoginModule";
+                    break;
+                case SCRAM_SHA_256:
+                case SCRAM_SHA_512:
+                    model = "org.apache.kafka.common.security.scram.ScramLoginModule";
+                    break;
+                case GSSAPI:
+                    // kerberos
+//                    model = "com.sun.security.auth.module.Krb5LoginModule";
+//                    sasl.jaas.config=com.sun.security.auth.module.Krb5LoginModule required \
+//                    useKeyTab=true \
+//                    storeKey=true \
+//                    keyTab="/path/to/kafka_client.keytab" \
+//                    principal="client/your.hostname@YOUR.REALM";
+                default:
+                    throw new IllegalArgumentException("Un-supported mechanism: " + mechanism.getValue());
+            }
+            props.put(SaslConfigs.SASL_JAAS_CONFIG, model +
+                " required" +
+                " username='" + getSaslUsername() +
+                "' password='" + getSaslPassword() + "';");
+        }
+        if (useSsl()) {
+//            ssl.truststore.location=/path/to/kafka.client.truststore.jks
+//            ssl.truststore.password=truststore_password
+//            ssl.keystore.location=/path/to/kafka.client.keystore.jks
+//            ssl.keystore.password=keystore_password
+//            ssl.key.password=key_password
+        }
+
         return props;
     }
 

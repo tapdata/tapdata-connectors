@@ -1,5 +1,6 @@
 package io.tapdata.mongodb;
 
+import com.alibaba.fastjson.JSONObject;
 import com.mongodb.*;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.*;
@@ -729,7 +730,12 @@ public class MongodbConnector extends ConnectorBase {
 		boolean isShardCollection = shardCollection instanceof Boolean && ((Boolean) shardCollection);
 		if (isShardCollection && null != table) {
 				isShardCollection = false;
-				TapIndexEx partitionIndex = table.getPartitionIndex();
+				TapIndexEx partitionIndex;
+				if(null != table.getTableAttr().get("partitionIndex")){
+					partitionIndex = JSONObject.parseObject((String)table.getTableAttr().get("partitionIndex"), TapIndexEx.class);
+				}else {
+					partitionIndex = table.getPartitionIndex();
+				}
 				if (null != partitionIndex) {
 					Boolean unique = Optional.ofNullable(partitionIndex.getUnique()).orElse(false);
 					List<TapIndexField> indexFields = partitionIndex.getIndexFields();

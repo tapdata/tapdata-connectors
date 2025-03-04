@@ -264,7 +264,7 @@ public class HighgoConnector extends CommonDbConnector {
 
     private void testReplicateIdentity(KVReadOnlyMap<TapTable> tableMap) {
         if ("pgoutput".equals(postgresConfig.getLogPluginName())) {
-            tapLogger.warn("The pgoutput plugin may cause before of data loss, if you need, please use another plugin instead, such as wal2json");
+            tapLogger.warn("The pgoutput plugin may cause data loss, if you need, please use another plugin instead, such as wal2json");
             return;
         }
         if (EmptyKit.isNull(tableMap)) {
