@@ -222,7 +222,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "\tINFORMATION_SCHEMA.TABLES\n" +
                     "WHERE\n" +
                     "\tTABLE_SCHEMA = '%s' %s\n" +
-                    "\tAND TABLE_TYPE = 'BASE TABLE'";
+                    "\tAND (TABLE_TYPE = 'BASE TABLE' OR TABLE_TYPE = 'SYSTEM VERSIONED')";
 
     private static final String MYSQL_ALL_COLUMN =
             "SELECT TABLE_NAME `tableName`,\n" +
