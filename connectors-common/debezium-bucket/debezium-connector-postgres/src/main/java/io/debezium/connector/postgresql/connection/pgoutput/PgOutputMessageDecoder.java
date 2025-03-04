@@ -5,6 +5,7 @@
  */
 package io.debezium.connector.postgresql.connection.pgoutput;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.sql.DatabaseMetaData;
@@ -250,8 +251,8 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
      */
     private void handleRelationMessage(ByteBuffer buffer, TypeRegistry typeRegistry) throws SQLException {
         int relationId = buffer.getInt();
-        String schemaName = readString(buffer);
-        String tableName = readString(buffer);
+        String schemaName = readStringV2(buffer);
+        String tableName = readStringV2(buffer);
         int replicaIdentityId = buffer.get();
         short columnCount = buffer.getShort();
 
@@ -276,7 +277,7 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
         Set<String> columnNames = new HashSet<>();
         for (short i = 0; i < columnCount; ++i) {
             byte flags = buffer.get();
-            String columnName = Strings.unquoteIdentifierPart(readString(buffer));
+            String columnName = Strings.unquoteIdentifierPart(readStringV2(buffer));
             int columnType = buffer.getInt();
             int attypmod = buffer.getInt();
 
@@ -379,7 +380,7 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
             List<Column> columns = resolveColumnsFromStreamTupleData(buffer, typeRegistry, table);
             processor.process(new PgOutputReplicationMessage(
                     Operation.INSERT,
-                    table.id().toDoubleQuotedString(),
+                    table.id(),
                     commitTimestamp,
                     transactionId,
                     null,
@@ -426,7 +427,7 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
             List<Column> columns = resolveColumnsFromStreamTupleData(buffer, typeRegistry, table);
             processor.process(new PgOutputReplicationMessage(
                     Operation.UPDATE,
-                    table.id().toDoubleQuotedString(),
+                    table.id(),
                     commitTimestamp,
                     transactionId,
                     oldColumns,
@@ -459,7 +460,7 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
             List<Column> columns = resolveColumnsFromStreamTupleData(buffer, typeRegistry, table);
             processor.process(new PgOutputReplicationMessage(
                     Operation.DELETE,
-                    table.id().toDoubleQuotedString(),
+                    table.id(),
                     commitTimestamp,
                     transactionId,
                     columns,
@@ -512,7 +513,7 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
             boolean lastTableInTruncate = (i + 1) == noOfResolvedTables;
             processor.process(new PgOutputTruncateReplicationMessage(
                     Operation.TRUNCATE,
-                    table.id().toDoubleQuotedString(),
+                    table.id(),
                     commitTimestamp,
                     transactionId,
                     lastTableInTruncate));
@@ -594,6 +595,15 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
             sb.append((char) b);
         }
         return sb.toString();
+    }
+
+    private static String readStringV2(ByteBuffer buffer) {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        byte b = 0;
+        while ((b = buffer.get()) != 0) {
+            buf.write(b);
+        }
+        return buf.toString();
     }
 
     /**

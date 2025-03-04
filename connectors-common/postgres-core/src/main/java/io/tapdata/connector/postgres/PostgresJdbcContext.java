@@ -71,26 +71,26 @@ public class PostgresJdbcContext extends JdbcContext {
     protected String queryAllTablesSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND t.table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
         if (Integer.parseInt(postgresVersion) < 100000) {
-            return String.format(PG_ALL_TABLE_LOWER_VERSION, getConfig().getDatabase(), schema, tableSql);
+            return String.format(PG_ALL_TABLE_LOWER_VERSION, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
         }
-        return String.format(PG_ALL_TABLE, getConfig().getDatabase(), schema, tableSql);
+        return String.format(PG_ALL_TABLE, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllColumnsSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(PG_ALL_COLUMN, schema, getConfig().getDatabase(), schema, tableSql);
+        return String.format(PG_ALL_COLUMN, StringKit.escape(schema, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllIndexesSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(PG_ALL_INDEX, getConfig().getDatabase(), schema, tableSql);
+        return String.format(PG_ALL_INDEX, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
-        return String.format(PG_ALL_FOREIGN_KEY, getConfig().getSchema(), EmptyKit.isEmpty(tableNames) ? "" : " and pc.relname in (" + StringKit.joinString(tableNames, "'", ",") + ")");
+        return String.format(PG_ALL_FOREIGN_KEY, StringKit.escape(getConfig().getSchema(), "'"), EmptyKit.isEmpty(tableNames) ? "" : " and pc.relname in (" + StringKit.joinString(tableNames, "'", ",") + ")");
     }
 
     public DataMap getTableInfo(String tableName) {
@@ -99,7 +99,7 @@ public class PostgresJdbcContext extends JdbcContext {
         list.add("size");
         list.add("rowcount");
         try {
-            query(String.format(TABLE_INFO_SQL, getConfig().getSchema(), tableName, getConfig().getDatabase(), getConfig().getSchema()), resultSet -> {
+            query(String.format(TABLE_INFO_SQL, StringKit.escape(getConfig().getSchema(), "'"), StringKit.escape(tableName, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(getConfig().getSchema(), "'")), resultSet -> {
                 while (resultSet.next()) {
                     dataMap.putAll(DbKit.getRowFromResultSet(resultSet, list));
                 }

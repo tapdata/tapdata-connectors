@@ -357,7 +357,7 @@ public class PostgresConnector extends CommonDbConnector {
         });
         postgresVersion = postgresJdbcContext.queryVersion();
         commonSqlMaker = new PostgresSqlMaker().closeNotNull(postgresConfig.getCloseNotNull()).autoIncCacheValue(postgresConfig.getAutoIncCacheValue());
-        if (Boolean.TRUE.equals(postgresConfig.getCreateAutoInc()) && postgresVersion.compareTo("100000") >= 0) {
+        if (Boolean.TRUE.equals(postgresConfig.getCreateAutoInc()) && Integer.parseInt(postgresVersion) > 100000) {
             commonSqlMaker.createAutoInc(true);
         }
         if (Boolean.TRUE.equals(postgresConfig.getApplyDefault())) {
@@ -403,7 +403,7 @@ public class PostgresConnector extends CommonDbConnector {
             boolean hasUniqueIndex = makeSureHasUnique(tapTable);
             writtenTableMap.put(tapTable.getId(), DataMap.create().kv(HAS_UNIQUE_INDEX, hasUniqueIndex));
         }
-        if (postgresConfig.getCreateAutoInc() && postgresVersion.compareTo("100000") >= 0) {
+        if (postgresConfig.getCreateAutoInc() && Integer.parseInt(postgresVersion) > 100000) {
             if (!writtenTableMap.get(tapTable.getId()).containsKey(HAS_AUTO_INCR)) {
                 List<String> autoIncFields = tapTable.getNameFieldMap().values().stream().filter(TapField::getAutoInc).map(TapField::getName).collect(Collectors.toList());
                 writtenTableMap.get(tapTable.getId()).put(HAS_AUTO_INCR, autoIncFields);
@@ -447,7 +447,7 @@ public class PostgresConnector extends CommonDbConnector {
         if (EmptyKit.isNotEmpty(tapTable.getConstraintList())) {
             postgresRecordWriter.closeConstraintCheck();
         }
-        if (postgresConfig.getCreateAutoInc() && postgresVersion.compareTo("100000") >= 0 && EmptyKit.isNotEmpty(autoIncFields)
+        if (postgresConfig.getCreateAutoInc() && Integer.parseInt(postgresVersion) > 100000 && EmptyKit.isNotEmpty(autoIncFields)
                 && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
             postgresRecordWriter.setAutoIncFields(autoIncFields);
             postgresRecordWriter.write(tapRecordEvents, writeListResultConsumer, this::isAlive);
@@ -571,7 +571,7 @@ public class PostgresConnector extends CommonDbConnector {
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
         if (canCdc) {
-            if ("pgoutput".equals(postgresConfig.getLogPluginName()) && postgresVersion.compareTo("100000") > 0) {
+            if ("pgoutput".equals(postgresConfig.getLogPluginName()) && Integer.parseInt(postgresVersion) > 100000) {
                 createPublicationIfNotExist();
             }
             testReplicateIdentity(connectorContext.getTableMap());
@@ -663,7 +663,7 @@ public class PostgresConnector extends CommonDbConnector {
                     break;
                 }
                 if ("data_directory".equals(resultSet.getString(1)) && EmptyKit.isNotEmpty(resultSet.getString(2))) {
-                    walDirectory.set(resultSet.getString(2) + (postgresVersion.compareTo("100000") >= 0 ? "/pg_wal/" : "/pg_xlog/"));
+                    walDirectory.set(resultSet.getString(2) + (Integer.parseInt(postgresVersion) > 100000 ? "/pg_wal/" : "/pg_xlog/"));
                 }
             }
         });

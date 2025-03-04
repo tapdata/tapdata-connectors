@@ -13,6 +13,7 @@ import io.debezium.connector.postgresql.PostgresType;
 import io.debezium.connector.postgresql.TypeRegistry;
 import io.debezium.connector.postgresql.connection.ReplicationMessage;
 import io.debezium.connector.postgresql.connection.ReplicationMessageColumnValueResolver;
+import io.debezium.relational.TableId;
 
 /**
  * @author Gunnar Morling
@@ -23,15 +24,15 @@ public class PgOutputReplicationMessage implements ReplicationMessage {
     private Operation op;
     private Instant commitTimestamp;
     private long transactionId;
-    private String table;
+    private TableId tableId;
     private List<Column> oldColumns;
     private List<Column> newColumns;
 
-    public PgOutputReplicationMessage(Operation op, String table, Instant commitTimestamp, long transactionId, List<Column> oldColumns, List<Column> newColumns) {
+    public PgOutputReplicationMessage(Operation op, TableId tableId, Instant commitTimestamp, long transactionId, List<Column> oldColumns, List<Column> newColumns) {
         this.op = op;
         this.commitTimestamp = commitTimestamp;
         this.transactionId = transactionId;
-        this.table = table;
+        this.tableId = tableId;
         this.oldColumns = oldColumns;
         this.newColumns = newColumns;
     }
@@ -53,7 +54,12 @@ public class PgOutputReplicationMessage implements ReplicationMessage {
 
     @Override
     public String getTable() {
-        return table;
+        return tableId.toDoubleQuotedString();
+    }
+
+    @Override
+    public TableId getTableId() {
+        return tableId;
     }
 
     @Override

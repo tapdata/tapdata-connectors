@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -354,5 +355,15 @@ public class StringKit {
 
     public static String escape(String name, char escape) {
         return name.replace(escape + "", "" + escape + escape);
+    }
+
+    private static final Pattern REGEX_SPECIAL_CHARS = Pattern.compile("[\\\\^$|*+?.,()\\[\\]{}]");
+
+    public static String escapeRegex(String input) {
+        if (input == null || input.isEmpty()) {
+            return input;
+        }
+        Matcher matcher = REGEX_SPECIAL_CHARS.matcher(input);
+        return matcher.replaceAll("\\\\$0");
     }
 }
