@@ -397,7 +397,7 @@ public class PostgresConnector extends CommonDbConnector {
         return options;
     }
 
-    private void beforeWriteRecord(TapTable tapTable) throws SQLException {
+    protected void beforeWriteRecord(TapTable tapTable) throws SQLException {
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             openIdentity(tapTable);
             boolean hasUniqueIndex = makeSureHasUnique(tapTable);

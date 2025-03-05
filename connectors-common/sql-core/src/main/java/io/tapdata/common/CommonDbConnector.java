@@ -541,6 +541,12 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return makeForeignKey(constraintList, tableName);
     }
 
+    protected void beforeWriteRecord(TapTable tapTable) throws SQLException {
+        if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
+            writtenTableMap.put(tapTable.getId(), DataMap.create());
+        }
+    }
+
     protected void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) throws SQLException {
         List<String> sqlList = fieldDDLHandlers.handle(tapFieldBaseEvent, tapConnectorContext);
         if (null == sqlList) {

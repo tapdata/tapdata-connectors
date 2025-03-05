@@ -10,9 +10,8 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.type.TapNumber;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.schema.value.DateTime;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
@@ -45,6 +44,8 @@ public class MysqlMaker implements SqlMaker {
     private static final String MYSQL_ADD_INDEX = "ALTER TABLE `%s`.`%s` ADD %s %s (%s)";
     private boolean hasAutoIncrement;
     protected static final int DEFAULT_CONSTRAINT_NAME_MAX_LENGTH = 30;
+    protected Boolean createAutoInc = false;
+    protected Boolean applyDefault = false;
 
     @Override
     public String[] createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent, String version) throws Throwable {
@@ -124,11 +125,11 @@ public class MysqlMaker implements SqlMaker {
         String database = connectionConfig.getString("database");
         String tableId = tapTable.getId();
         String sql;
-		Projection projection = tapAdvanceFilter.getProjection();
+        Projection projection = tapAdvanceFilter.getProjection();
         if (EmptyKit.isNull(projection) || (EmptyKit.isEmpty(projection.getIncludeFields()) && EmptyKit.isEmpty(projection.getExcludeFields()))) {
             sql = String.format(MysqlJdbcContext.SELECT_TABLE, database, tableId);
         } else if (EmptyKit.isNotEmpty(tapAdvanceFilter.getProjection().getIncludeFields())) {
-			sql = String.format(MysqlJdbcContext.SELECT_SOME_FROM_TABLE, String.join("`,`", tapAdvanceFilter.getProjection().getIncludeFields()), database, tableId);
+            sql = String.format(MysqlJdbcContext.SELECT_SOME_FROM_TABLE, String.join("`,`", tapAdvanceFilter.getProjection().getIncludeFields()), database, tableId);
         } else {
             sql = String.format(MysqlJdbcContext.SELECT_SOME_FROM_TABLE, tapTable.getNameFieldMap().keySet().stream()
                     .filter(tapField -> !tapAdvanceFilter.getProjection().getExcludeFields().contains(tapField)).collect(Collectors.joining("`,`")), database, tableId);
@@ -158,7 +159,7 @@ public class MysqlMaker implements SqlMaker {
                 String opStr = queryOperatorEnum.getOpStr();
                 if (value instanceof Number) {
                     whereList.add(String.format(MysqlJdbcContext.FIELD_TEMPLATE, key) + opStr + value);
-                }else if (value instanceof DateTime) {
+                } else if (value instanceof DateTime) {
                     whereList.add(String.format(MysqlJdbcContext.FIELD_TEMPLATE, key) + opStr + "'" + dateTimeToStr((DateTime) value, "yyyy-MM-dd HH:mm:ss") + "'");
                 } else {
                     whereList.add(String.format(MysqlJdbcContext.FIELD_TEMPLATE, key) + opStr + "'" + value + "'");
@@ -208,7 +209,7 @@ public class MysqlMaker implements SqlMaker {
         QueryOperator leftBoundary = tapPartitionFilter.getLeftBoundary();
         QueryOperator rightBoundary = tapPartitionFilter.getRightBoundary();
         List<QueryOperator> queryOperators = TapSimplify.list(leftBoundary, rightBoundary);
-        queryOperators.forEach(o->{
+        queryOperators.forEach(o -> {
             String queryOperatorSql = getQueryOperatorSql(o);
             if (StringUtils.isNotBlank(queryOperatorSql)) {
                 whereList.add(queryOperatorSql);
@@ -216,7 +217,7 @@ public class MysqlMaker implements SqlMaker {
         });
         DataMap match = tapPartitionFilter.getMatch();
         if (MapUtils.isNotEmpty(match)) {
-            match.forEach((k,v)->{
+            match.forEach((k, v) -> {
                 String valueStr = MysqlUtil.object2String(v);
                 whereList.add(String.format("`%s`<=>%s", k, valueStr));
             });
@@ -283,11 +284,14 @@ public class MysqlMaker implements SqlMaker {
 
     protected String createTableAppendField(TapField tapField) {
         String datatype = tapField.getDataType();
+        if (createAutoInc && Boolean.TRUE.equals(tapField.getAutoInc()) && tapField.getPrimaryKeyPos() == 1 && datatype.startsWith("decimal")) {
+            datatype = "bigint";
+        }
         String fieldSql = "  `" + StringKit.escape(tapField.getName(), '`') + "`" + " " + datatype;
 
         // auto increment
         // mysql a table can only create one auto-increment column, and must be the primary key
-        if (null != tapField.getAutoInc() && tapField.getAutoInc()) {
+        if (createAutoInc && null != tapField.getAutoInc() && tapField.getAutoInc()) {
             if (tapField.getPrimaryKeyPos() == 1) {
                 fieldSql += " AUTO_INCREMENT";
             } else {
@@ -303,15 +307,20 @@ public class MysqlMaker implements SqlMaker {
         }
 
         // default value
-        if (EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
+        if (applyDefault && EmptyKit.isNotNull(tapField.getDefaultValue())) {
             StringBuilder builder = new StringBuilder();
             builder.append("DEFAULT").append(' ');
             if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
-                builder.append(MysqlColumn.MysqlDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction()).append(' ');
+                String function = MysqlColumn.MysqlDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction();
+                if (function.endsWith("()")) {
+                    builder.append("(").append(function).append(") ");
+                } else {
+                    builder.append(function).append(' ');
+                }
             } else if (tapField.getDefaultValue() instanceof Number) {
                 builder.append(tapField.getDefaultValue()).append(' ');
             } else {
-                builder.append("'").append(tapField.getDefaultValue()).append("' ");
+                builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
             }
             fieldSql += builder.toString();
         }
@@ -356,6 +365,14 @@ public class MysqlMaker implements SqlMaker {
         }
         constraintName += RandomStringUtils.randomAlphabetic(4).toUpperCase();
         return constraintName;
+    }
+
+    public void setCreateAutoInc(Boolean createAutoInc) {
+        this.createAutoInc = createAutoInc;
+    }
+
+    public void setApplyDefault(Boolean applyDefault) {
+        this.applyDefault = applyDefault;
     }
 
     private enum QueryOperatorEnum {
