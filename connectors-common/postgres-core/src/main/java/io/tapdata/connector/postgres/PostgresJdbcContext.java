@@ -79,6 +79,9 @@ public class PostgresJdbcContext extends JdbcContext {
     @Override
     protected String queryAllColumnsSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
+        if (Integer.parseInt(postgresVersion) < 100000) {
+            return String.format(PG_ALL_COLUMN_LOWER_VERSION, StringKit.escape(schema, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
+        }
         return String.format(PG_ALL_COLUMN, StringKit.escape(schema, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
     }
 
@@ -164,6 +167,36 @@ public class PostgresJdbcContext extends JdbcContext {
                     "       (SELECT seqcache\n" +
                     "        FROM pg_sequence\n" +
                     "        WHERE seqrelid = pg_get_serial_sequence('\"'||col.table_schema||'\".\"'||col.table_name||'\"', col.column_name)::regclass) \"cacheValue\"," +
+                    "       (SELECT max(d.description)\n" +
+                    "        FROM pg_catalog.pg_class c,\n" +
+                    "             pg_description d\n" +
+                    "        WHERE c.relname = col.table_name\n" +
+                    "          AND d.objoid = c.oid\n" +
+                    "          AND d.objsubid = col.ordinal_position) AS \"columnComment\",\n" +
+                    "       (SELECT pg_catalog.format_type(a.atttypid, a.atttypmod)\n" +
+                    "        FROM pg_catalog.pg_attribute a\n" +
+                    "        WHERE a.attnum > 0\n" +
+                    "          AND a.attname = col.column_name\n" +
+                    "          AND NOT a.attisdropped\n" +
+                    "          AND a.attrelid =\n" +
+                    "              (SELECT max(cl.oid)\n" +
+                    "               FROM pg_catalog.pg_class cl\n" +
+                    "               WHERE cl.relname = col.table_name and cl.relnamespace=(select oid from pg_namespace where nspname='%s'))) AS \"dataType\"\n" +
+                    "FROM information_schema.columns col\n" +
+                    "WHERE col.table_catalog = '%s'\n" +
+                    "  AND col.table_schema = '%s' %s\n" +
+                    "ORDER BY col.table_name, col.ordinal_position";
+
+    protected final static String PG_ALL_COLUMN_LOWER_VERSION =
+            "SELECT\n" +
+                    "    col.table_name \"tableName\",\n" +
+                    "    col.column_name \"columnName\",\n" +
+                    "    col.data_type \"pureDataType\",\n" +
+                    "    col.column_default \"columnDefault\",\n" +
+                    "    col.is_nullable \"nullable\",\n" +
+                    "    col.is_identity \"autoInc\",\n" +
+                    "    col.identity_start AS \"seedValue\",\n" +
+                    "    col.identity_increment AS \"incrementValue\",\n" +
                     "       (SELECT max(d.description)\n" +
                     "        FROM pg_catalog.pg_class c,\n" +
                     "             pg_description d\n" +
