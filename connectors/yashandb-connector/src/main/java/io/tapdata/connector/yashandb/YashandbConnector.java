@@ -83,7 +83,7 @@ public class YashandbConnector extends CommonDbConnector {
         });
 
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "CLOB", tapMapValue -> {
-            if (tapMapValue != null && tapMapValue.getValue() != null) return toJson(tapMapValue.getValue());
+            if (tapMapValue != null && tapMapValue.getValue() != null && tapMapValue.getValue().getValue() != null) return toJson(tapMapValue.getValue().getValue());
             return "null";
         });
 

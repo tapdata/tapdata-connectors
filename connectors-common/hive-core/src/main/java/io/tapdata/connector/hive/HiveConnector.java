@@ -55,8 +55,8 @@ public class HiveConnector extends CommonDbConnector {
             return "null";
         });
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "string", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null)
-                return new String(Base64.encodeBase64(tapValue.getValue()));
+            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
+                return new String(Base64.encodeBase64(tapValue.getValue().getValue()));
             return null;
         });
         codecRegistry.registerFromTapValue(TapTimeValue.class, "string", tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss.SS"));

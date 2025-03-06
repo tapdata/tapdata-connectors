@@ -156,7 +156,7 @@ public class TDDBenchmarkTargetConnector extends ConnectorBase {
             return 0;
         });
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "text", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null)
+            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
                 return "binary";//toJson(tapValue.getValue());
             return "null";
         });
