@@ -136,8 +136,8 @@ public class DatabendConnector extends ConnectorBase {
 
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss.SS"));
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "String", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null)
-                return new String(Base64.encodeBase64(tapValue.getValue()));
+            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
+                return new String(Base64.encodeBase64(tapValue.getValue().getValue()));
             return null;
         });
 

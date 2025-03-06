@@ -496,7 +496,8 @@ public class MongodbConnector extends ConnectorBase {
 		});
 		codecRegistry.registerToTapValue(Binary.class, (value, tapType) -> {
 			Binary binary = (Binary) value;
-			return new TapBinaryValue(binary.getData());
+			ByteData byteData = new ByteData(binary.getType(), binary.getData());
+			return new TapBinaryValue(byteData);
 		});
 
 		codecRegistry.registerToTapValue(Code.class, (value, tapType) -> {
@@ -518,7 +519,9 @@ public class MongodbConnector extends ConnectorBase {
 		codecRegistry.registerFromTapValue(TapDateTimeValue.class, "DATE_TIME", tapDateTimeValue -> tapDateTimeValue.getValue().toDate());
 		codecRegistry.registerFromTapValue(TapDateValue.class, "DATE_TIME", tapDateValue -> tapDateValue.getValue().toDate());
 		codecRegistry.registerFromTapValue(TapYearValue.class, "STRING(4)", TapValue::getOriginValue);
-
+		codecRegistry.registerFromTapValue(TapBinaryValue.class,"BINARY",tapBinaryValue -> {
+			return new Binary(tapBinaryValue.getValue().getType(), tapBinaryValue.getValue().getValue());
+		});
 		//Handle ObjectId when the source is also mongodb, we convert ObjectId to String before enter incremental engine.
 		//We need check the TapStringValue, when will write to mongodb, if the originValue is ObjectId, then use originValue instead of the converted String value.
 		codecRegistry.registerFromTapValue(TapStringValue.class, tapValue -> {
