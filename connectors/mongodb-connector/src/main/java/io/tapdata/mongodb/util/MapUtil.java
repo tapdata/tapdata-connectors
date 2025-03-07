@@ -2,10 +2,10 @@ package io.tapdata.mongodb.util;
 
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongodbUtil;
-import jdk.nashorn.internal.ir.annotations.Ignore;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.bson.Document;
+import org.openjdk.nashorn.internal.ir.annotations.Ignore;
 
 import java.lang.reflect.Field;
 import java.util.*;
