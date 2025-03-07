@@ -27,9 +27,11 @@ import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TapFilter;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.SQLRecoverableException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -762,24 +764,35 @@ public abstract class CommonDbConnector extends ConnectorBase {
                         for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
                             String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
                             tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
-                            jdbcContext.query(splitSql, resultSet -> {
-                                List<TapEvent> tapEvents = list();
-                                //get all column names
-                                List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
-                                while (isAlive() && resultSet.next()) {
-                                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
-                                    processDataMap(dataMap, tapTable);
-                                    tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
-                                    if (tapEvents.size() == eventBatchSize) {
-                                        syncEventSubmit(tapEvents, eventsOffsetConsumer);
-                                        tapEvents = list();
+                            int retry = 20;
+                            while (retry-- > 0 && isAlive()) {
+                                try {
+                                    jdbcContext.query(splitSql, resultSet -> {
+                                        List<TapEvent> tapEvents = list();
+                                        //get all column names
+                                        List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+                                        while (isAlive() && resultSet.next()) {
+                                            DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                                            processDataMap(dataMap, tapTable);
+                                            tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
+                                            if (tapEvents.size() == eventBatchSize) {
+                                                syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                                tapEvents = list();
+                                            }
+                                        }
+                                        //last events those less than eventBatchSize
+                                        if (EmptyKit.isNotEmpty(tapEvents)) {
+                                            syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                        }
+                                    });
+                                    break;
+                                } catch (Exception e) {
+                                    if (retry == 0 || !(e instanceof SQLRecoverableException || e instanceof IOException)) {
+                                        throw e;
                                     }
+                                    tapLogger.warn("batchRead, splitSql[{}]: {} failed, retrying...", ii + 1, splitSql);
                                 }
-                                //last events those less than eventBatchSize
-                                if (EmptyKit.isNotEmpty(tapEvents)) {
-                                    syncEventSubmit(tapEvents, eventsOffsetConsumer);
-                                }
-                            });
+                            }
                         }
                     } catch (Exception e) {
                         throwable.set(e);
