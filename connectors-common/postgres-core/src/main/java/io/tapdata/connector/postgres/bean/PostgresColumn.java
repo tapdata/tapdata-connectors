@@ -70,13 +70,22 @@ public class PostgresColumn extends CommonColumn {
     }
 
     protected String getDefaultValue(String defaultValue) {
+        String res;
         if (EmptyKit.isNull(defaultValue) || defaultValue.startsWith("NULL::")) {
             return null;
         } else if (defaultValue.contains("::")) {
-            return defaultValue.substring(0, defaultValue.lastIndexOf("::"));
+            res = defaultValue.substring(0, defaultValue.lastIndexOf("::"));
         } else {
-            return defaultValue;
+            res = defaultValue;
         }
+        if (res.startsWith("\"")) {
+            res = StringKit.removeHeadTail(res, "\"", null);
+        } else if (res.startsWith("'")) {
+            res = StringKit.removeHeadTail(res, "'", null).replace("''", "'");
+        } else {
+            isString = false;
+        }
+        return res;
     }
 
     protected String parseDefaultFunction(String defaultValue) {

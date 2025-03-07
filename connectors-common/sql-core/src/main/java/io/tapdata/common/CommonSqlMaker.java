@@ -93,10 +93,10 @@ public class CommonSqlMaker {
             if (Boolean.TRUE.equals(applyDefault) && EmptyKit.isNotNull(tapField.getDefaultValue())) {
                 buildDefaultDefinition(builder, tapField);
             }
-            buildNullDefinition(builder, tapField);
             if (Boolean.TRUE.equals(createAutoInc) && Boolean.TRUE.equals(tapField.getAutoInc())) {
                 buildAutoIncDefinition(builder, tapField);
             }
+            buildNullDefinition(builder, tapField);
             if (needComment) {
                 buildCommentDefinition(builder, tapField);
             }
