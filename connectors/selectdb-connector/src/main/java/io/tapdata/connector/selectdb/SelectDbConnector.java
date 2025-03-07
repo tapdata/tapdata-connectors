@@ -144,7 +144,7 @@ public class SelectDbConnector extends CommonDbConnector {
             return 0;
         });
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "text", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null)
+            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
                 return toJson(tapValue.getValue());
             return "null";
         });

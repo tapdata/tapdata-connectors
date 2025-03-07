@@ -150,8 +150,8 @@ public class Hive1Connector extends ConnectorBase {
             return "null";
         });
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "STRING", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null)
-                return new String(Base64.encodeBase64(tapValue.getValue()));
+            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
+                return new String(Base64.encodeBase64(tapValue.getValue().getValue()));
             return null;
         });
         codecRegistry.registerFromTapValue(TapTimeValue.class, "STRING", tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss.SS"));

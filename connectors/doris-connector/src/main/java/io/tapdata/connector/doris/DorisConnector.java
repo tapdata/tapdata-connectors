@@ -136,8 +136,8 @@ public class DorisConnector extends CommonDbConnector {
             return 0;
         });
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "text", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null)
-                return toJson(tapValue.getValue());
+            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
+                return toJson(tapValue.getValue().getValue());
             return "null";
         });
 
