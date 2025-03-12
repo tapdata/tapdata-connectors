@@ -4,9 +4,11 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.type.TapNumber;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.Projection;
 import io.tapdata.pdk.apis.entity.QueryOperator;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
@@ -122,7 +124,11 @@ public class CommonSqlMaker {
             } else if (tapField.getDefaultValue() instanceof Number) {
                 builder.append(tapField.getDefaultValue()).append(' ');
             } else {
-                builder.append("'").append(tapField.getDefaultValue()).append("' ");
+                if (tapField.getTapType() instanceof TapNumber) {
+                    builder.append(Integer.valueOf(tapField.getDefaultValue().toString())).append(' ');
+                } else {
+                    builder.append("'").append(tapField.getDefaultValue()).append("' ");
+                }
             }
         }
     }
