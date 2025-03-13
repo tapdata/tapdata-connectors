@@ -10,7 +10,6 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.type.TapNumber;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
@@ -321,11 +320,7 @@ public class MysqlMaker implements SqlMaker {
             } else if (tapField.getDefaultValue() instanceof Number) {
                 builder.append(tapField.getDefaultValue()).append(' ');
             } else {
-                if (tapField.getTapType() instanceof TapNumber) {
-                    builder.append("'").append(Integer.valueOf(tapField.getDefaultValue().toString())).append("' ");
-                } else {
-                    builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
-                }
+                builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
             }
             fieldSql += " " + builder;
         }
