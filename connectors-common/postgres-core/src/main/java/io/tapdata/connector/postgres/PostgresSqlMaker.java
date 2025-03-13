@@ -4,6 +4,7 @@ import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.Collate;
 import io.tapdata.pdk.apis.entity.SortOn;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
@@ -36,11 +37,25 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         }
     }
 
-    protected String buildDefaultFunction(TapField tapField) {
-        return PostgresColumn.PostgresDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction();
+    protected void buildDefaultDefinition(StringBuilder builder, TapField tapField) {
+        if (EmptyKit.isNotNull(tapField.getDefaultValue())) {
+            builder.append("DEFAULT").append(' ');
+            if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
+                builder.append(PostgresColumn.PostgresDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction()).append(' ');
+            } else if (tapField.getDefaultValue() instanceof Number) {
+                builder.append(tapField.getDefaultValue()).append(' ');
+            } else if (EmptyKit.isNotBlank(tapField.getSequenceName())) {
+                builder.append("nextval('\"").append(StringKit.escape(schema, "'\"")).append("\".\"").append(StringKit.escape(tapField.getSequenceName(), "'\"")).append("\"') ");
+            } else {
+                builder.append("'").append(tapField.getDefaultValue()).append("' ");
+            }
+        }
     }
 
     protected void buildAutoIncDefinition(StringBuilder builder, TapField tapField) {
+        if (EmptyKit.isNotBlank(tapField.getSequenceName())) {
+            return;
+        }
         long startValue;
         if (EmptyKit.isNotNull(tapField.getAutoIncStartValue())) {
             startValue = tapField.getAutoIncStartValue();

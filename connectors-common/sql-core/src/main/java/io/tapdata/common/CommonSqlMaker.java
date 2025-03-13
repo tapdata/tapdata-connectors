@@ -35,6 +35,7 @@ public class CommonSqlMaker {
     protected Boolean createAutoInc = false;
     protected long autoIncCacheValue = 1;
     protected Boolean applyDefault = false;
+    protected String schema;
 
     public CommonSqlMaker() {
 
@@ -61,6 +62,11 @@ public class CommonSqlMaker {
 
     public <T extends CommonSqlMaker> T applyDefault(Boolean applyDefault) {
         this.applyDefault = applyDefault;
+        return (T) this;
+    }
+
+    public <T extends CommonSqlMaker> T schema(String schema) {
+        this.schema = schema;
         return (T) this;
     }
 
@@ -119,7 +125,7 @@ public class CommonSqlMaker {
             builder.append("DEFAULT").append(' ');
             if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
                 builder.append(buildDefaultFunction(tapField)).append(' ');
-            } else if (tapField.getDefaultValue() instanceof Number) {
+            } else if (tapField.getDefaultValue() instanceof Number || Boolean.TRUE.equals(tapField.getAutoInc())) {
                 builder.append(tapField.getDefaultValue()).append(' ');
             } else {
                 builder.append("'").append(tapField.getDefaultValue()).append("' ");

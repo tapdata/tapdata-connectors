@@ -28,6 +28,7 @@ public class CommonColumn {
     protected Integer dataPrecision;
     protected Integer dataScale;
     protected boolean isString = true;
+    protected String sequenceName;
 
     public CommonColumn() {
     }

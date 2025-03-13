@@ -164,9 +164,12 @@ public class PostgresJdbcContext extends JdbcContext {
                     "    col.is_identity \"autoInc\",\n" +
                     "    col.identity_start AS \"seedValue\",\n" +
                     "    col.identity_increment AS \"incrementValue\",\n" +
+                    "    seq.sequence_name AS \"sequenceName\",\n" +
+                    "    seq.start_value AS \"seedValue2\",\n" +
+                    "    seq.increment AS \"incrementValue2\",\n" +
                     "       (SELECT seqcache\n" +
                     "        FROM pg_sequence\n" +
-                    "        WHERE seqrelid = pg_get_serial_sequence('\"'||col.table_schema||'\".\"'||col.table_name||'\"', col.column_name)::regclass) \"cacheValue\"," +
+                    "        WHERE seqrelid = pg_get_serial_sequence('\"'||replace(col.table_schema, '\"', '\"\"')||'\".\"'||replace(col.table_name,'\"','\"\"')||'\"', col.column_name)::regclass) \"cacheValue\"," +
                     "       (SELECT max(d.description)\n" +
                     "        FROM pg_catalog.pg_class c,\n" +
                     "             pg_description d\n" +
@@ -183,6 +186,9 @@ public class PostgresJdbcContext extends JdbcContext {
                     "               FROM pg_catalog.pg_class cl\n" +
                     "               WHERE cl.relname = col.table_name and cl.relnamespace=(select oid from pg_namespace where nspname='%s'))) AS \"dataType\"\n" +
                     "FROM information_schema.columns col\n" +
+                    "LEFT JOIN information_schema.sequences seq\n" +
+                    "    ON (seq.sequence_catalog=col.table_catalog and sequence_schema=col.table_schema and col.column_default=\n" +
+                    "    'nextval('''||(case when sequence_schema='public' then '' else sequence_schema||'.' end)||sequence_name||'''::regclass)')\n" +
                     "WHERE col.table_catalog = '%s'\n" +
                     "  AND col.table_schema = '%s' %s\n" +
                     "ORDER BY col.table_name, col.ordinal_position";
@@ -194,9 +200,6 @@ public class PostgresJdbcContext extends JdbcContext {
                     "    col.data_type \"pureDataType\",\n" +
                     "    col.column_default \"columnDefault\",\n" +
                     "    col.is_nullable \"nullable\",\n" +
-                    "    col.is_identity \"autoInc\",\n" +
-                    "    col.identity_start AS \"seedValue\",\n" +
-                    "    col.identity_increment AS \"incrementValue\",\n" +
                     "       (SELECT max(d.description)\n" +
                     "        FROM pg_catalog.pg_class c,\n" +
                     "             pg_description d\n" +

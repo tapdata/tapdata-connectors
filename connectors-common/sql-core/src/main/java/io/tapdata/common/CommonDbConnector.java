@@ -176,7 +176,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             Object defaultValue = fieldMap.get(field).getDefaultValue();
             if (defaultValue instanceof String) {
                 String fieldDefault = (String) fieldMap.get(field).getDefaultValue();
-                if (EmptyKit.isNotEmpty(fieldDefault)) {
+                if (EmptyKit.isNotEmpty(fieldDefault) && !Boolean.TRUE.equals(fieldMap.get(field).getAutoInc())) {
                     if (fieldDefault.contains("'")) {
                         fieldDefault = fieldDefault.replaceAll("'", "''");
                         fieldMap.get(field).setDefaultValue(fieldDefault);
