@@ -7,6 +7,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.Projection;
 import io.tapdata.pdk.apis.entity.QueryOperator;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
@@ -111,7 +112,7 @@ public class CommonSqlMaker {
     }
 
     protected void buildDataTypeDefinition(StringBuilder builder, TapField tapField) {
-        builder.append(escapeChar).append(tapField.getName()).append(escapeChar).append(' ').append(tapField.getDataType()).append(' ');
+        builder.append(escapeChar).append(StringKit.escape(tapField.getName(), escapeChar)).append(escapeChar).append(' ').append(tapField.getDataType()).append(' ');
     }
 
     protected void buildNullDefinition(StringBuilder builder, TapField tapField) {

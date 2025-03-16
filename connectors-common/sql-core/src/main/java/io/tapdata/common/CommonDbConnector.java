@@ -611,7 +611,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         Collection<String> primaryKeys = tapTable.primaryKeys();
         if (EmptyKit.isNotEmpty(primaryKeys)) {
             sb.append(", primary key (").append(escapeChar)
-                    .append(String.join(escapeChar + "," + escapeChar, primaryKeys))
+                    .append(primaryKeys.stream().map(pk -> StringKit.escape(pk, escapeChar)).collect(Collectors.joining(escapeChar + "," + escapeChar)))
                     .append(escapeChar).append(')');
         }
         sb.append(')');
