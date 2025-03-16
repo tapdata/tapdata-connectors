@@ -72,6 +72,7 @@ public class DorisConnector extends CommonDbConnector {
         if (tapConnectionContext instanceof TapConnectorContext) {
             ddlSqlGenerator = new DorisDDLSqlGenerator();
         }
+        tapLogger = tapConnectionContext.getLog();
         commonDbConfig = dorisConfig;
         jdbcContext = dorisJdbcContext;
         commonSqlMaker = new DorisSqlMaker();

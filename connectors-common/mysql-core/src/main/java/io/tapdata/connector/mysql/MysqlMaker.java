@@ -322,7 +322,7 @@ public class MysqlMaker implements SqlMaker {
             } else {
                 builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
             }
-            fieldSql += builder.toString();
+            fieldSql += " " + builder;
         }
 
         // comment
