@@ -1,6 +1,5 @@
 package io.tapdata.common.util;
 
-import io.tapdata.encryptor.JarEncryptor;
 
 public class JarEncryptorMain {
     public static void main(String[] args) {
