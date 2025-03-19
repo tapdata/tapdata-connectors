@@ -98,40 +98,40 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
 
     protected String getInsertUpdateSql(boolean containsNull) {
         if (!containsNull) {
-            return "WITH upsert AS (UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " + updatedColumn.stream().map(k -> escapeChar + k + escapeChar + "=?")
-                    .collect(Collectors.joining(", ")) + " WHERE " + uniqueCondition.stream().map(k -> escapeChar + k + escapeChar + "=?")
-                    .collect(Collectors.joining(" AND ")) + " RETURNING *) INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                    + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") SELECT "
+            return "WITH upsert AS (UPDATE " + getSchemaAndTable() + " SET " + updatedColumn.stream().map(k -> quoteAndEscape(k) + "=?")
+                    .collect(Collectors.joining(", ")) + " WHERE " + uniqueCondition.stream().map(k -> quoteAndEscape(k) + "=?")
+                    .collect(Collectors.joining(" AND ")) + " RETURNING *) INSERT INTO " + getSchemaAndTable() + " ("
+                    + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") SELECT "
                     + StringKit.copyString("?", allColumn.size(), ",") + " WHERE NOT EXISTS (SELECT * FROM upsert)";
         } else {
-            return "WITH upsert AS (UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " + updatedColumn.stream().map(k -> escapeChar + k + escapeChar + "=?")
-                    .collect(Collectors.joining(", ")) + " WHERE " + uniqueCondition.stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
-                    .collect(Collectors.joining(" AND ")) + " RETURNING *) INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                    + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") SELECT "
+            return "WITH upsert AS (UPDATE " + getSchemaAndTable() + " SET " + updatedColumn.stream().map(k -> quoteAndEscape(k) + "=?")
+                    .collect(Collectors.joining(", ")) + " WHERE " + uniqueCondition.stream().map(k -> "(" + quoteAndEscape(k) + "=? OR (" + quoteAndEscape(k) + " IS NULL AND ?::text IS NULL))")
+                    .collect(Collectors.joining(" AND ")) + " RETURNING *) INSERT INTO " + getSchemaAndTable() + " ("
+                    + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") SELECT "
                     + StringKit.copyString("?", allColumn.size(), ",") + " WHERE NOT EXISTS (SELECT * FROM upsert)";
         }
     }
 
     protected String getUpdateSql(Map<String, Object> after, Map<String, Object> before, boolean containsNull) {
         if (!containsNull) {
-            return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
-                    after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
-                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+            return "UPDATE " + getSchemaAndTable() + " SET " +
+                    after.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(", ")) + " WHERE " +
+                    before.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(" AND "));
         } else {
-            return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
-                    after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
-                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
+            return "UPDATE " + getSchemaAndTable() + " SET " +
+                    after.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(", ")) + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + quoteAndEscape(k) + "=? OR (" + quoteAndEscape(k) + " IS NULL AND ?::text IS NULL))")
                             .collect(Collectors.joining(" AND "));
         }
     }
 
     protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
         if (!containsNull) {
-            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
-                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+            return "DELETE FROM " + getSchemaAndTable() + " WHERE " +
+                    before.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(" AND "));
         } else {
-            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
-                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
+            return "DELETE FROM " + getSchemaAndTable() + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + quoteAndEscape(k) + "=? OR (" + quoteAndEscape(k) + " IS NULL AND ?::text IS NULL))")
                             .collect(Collectors.joining(" AND "));
         }
     }
@@ -203,7 +203,7 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
 
     public void fileInput() throws SQLException {
         try (ByteBufInputStream byteBufInputStream = new ByteBufInputStream(buffer)) {
-            new CopyManager(connection.unwrap(BaseConnection.class)).copyIn("COPY " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " FROM STDIN DELIMITER ','", byteBufInputStream);
+            new CopyManager(connection.unwrap(BaseConnection.class)).copyIn("COPY " + getSchemaAndTable() + " FROM STDIN DELIMITER ','", byteBufInputStream);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -255,11 +255,11 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
     }
 
     protected String getUpsertSql() {
-        return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
+        return "INSERT INTO " + getSchemaAndTable() + " ("
+                + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") " +
                 "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ON CONFLICT("
-                + uniqueCondition.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", "))
-                + ") DO UPDATE SET " + updatedColumn.stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", "));
+                + uniqueCondition.stream().map(this::quoteAndEscape).collect(Collectors.joining(", "))
+                + ") DO UPDATE SET " + updatedColumn.stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(", "));
     }
 
     @Override
@@ -275,10 +275,10 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
     }
 
     protected String getInsertIgnoreSql() {
-        return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
+        return "INSERT INTO " + getSchemaAndTable() + " ("
+                + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") " +
                 "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ON CONFLICT("
-                + uniqueCondition.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", "))
+                + uniqueCondition.stream().map(this::quoteAndEscape).collect(Collectors.joining(", "))
                 + ") DO NOTHING ";
     }
 
@@ -360,15 +360,15 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
 
     protected String getOldInsertIgnoreSql(boolean containsNull) {
         if (!containsNull) {
-            return "INSERT INTO \"" + schema + "\".\"" + tapTable.getId() + "\" ("
-                    + allColumn.stream().map(k -> "\"" + k + "\"").collect(Collectors.joining(", ")) + ") SELECT "
-                    + StringKit.copyString("?", allColumn.size(), ",") + " WHERE NOT EXISTS (SELECT 1 FROM \"" + schema + "\".\"" + tapTable.getId()
-                    + "\"  WHERE " + uniqueCondition.stream().map(k -> "\"" + k + "\"=?").collect(Collectors.joining(" AND ")) + " )";
+            return "INSERT INTO " + getSchemaAndTable() + " ("
+                    + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") SELECT "
+                    + StringKit.copyString("?", allColumn.size(), ",") + " WHERE NOT EXISTS (SELECT 1 FROM " + getSchemaAndTable()
+                    + "  WHERE " + uniqueCondition.stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(" AND ")) + " )";
         } else {
-            return "INSERT INTO \"" + schema + "\".\"" + tapTable.getId() + "\" ("
-                    + allColumn.stream().map(k -> "\"" + k + "\"").collect(Collectors.joining(", ")) + ") SELECT "
-                    + StringKit.copyString("?", allColumn.size(), ",") + " WHERE NOT EXISTS (SELECT 1 FROM \"" + schema + "\".\"" + tapTable.getId()
-                    + "\"  WHERE " + uniqueCondition.stream().map(k -> "(\"" + k + "\"=? OR (\"" + k + "\" IS NULL AND ?::text IS NULL))").collect(Collectors.joining(" AND ")) + " )";
+            return "INSERT INTO " + getSchemaAndTable() + " ("
+                    + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") SELECT "
+                    + StringKit.copyString("?", allColumn.size(), ",") + " WHERE NOT EXISTS (SELECT 1 FROM " + getSchemaAndTable()
+                    + "  WHERE " + uniqueCondition.stream().map(k -> "(" + quoteAndEscape(k) + "=? OR (" + quoteAndEscape(k) + " IS NULL AND ?::text IS NULL))").collect(Collectors.joining(" AND ")) + " )";
         }
     }
 }

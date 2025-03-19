@@ -33,17 +33,22 @@ public class PostgresColumn extends CommonColumn {
         this.seedValue = dataMap.getString("seedValue");
         this.incrementValue = dataMap.getString("incrementValue");
         this.autoIncCacheValue = dataMap.getString("cacheValue");
+        this.sequenceName = dataMap.getString("sequenceName");
         this.remarks = dataMap.getString("columnComment");
-        //create table in target has no need to set default value
-//        this.columnDefaultValue = null;
         this.columnDefaultValue = getDefaultValue(dataMap.getString("columnDefault"));
+        if (EmptyKit.isNotNull(this.sequenceName)) {
+            this.autoInc = "YES";
+            this.seedValue = dataMap.getString("seedValue2");
+            this.incrementValue = dataMap.getString("incrementValue2");
+            this.columnDefaultValue = dataMap.getString("columnDefault");
+        }
     }
 
     @Override
     public TapField getTapField() {
         TapField field = new TapField(this.columnName, this.dataType).pureDataType(this.pureDataType)
                 .nullable(this.isNullable()).autoInc(isAutoInc())
-                .defaultValue(columnDefaultValue).comment(this.remarks);
+                .defaultValue(columnDefaultValue).comment(this.remarks).sequenceName(sequenceName);
         if (isAutoInc()) {
             if (EmptyKit.isNotNull(seedValue)) {
                 field.autoIncStartValue(Long.parseLong(seedValue));
@@ -70,13 +75,22 @@ public class PostgresColumn extends CommonColumn {
     }
 
     protected String getDefaultValue(String defaultValue) {
+        String res;
         if (EmptyKit.isNull(defaultValue) || defaultValue.startsWith("NULL::")) {
             return null;
         } else if (defaultValue.contains("::")) {
-            return defaultValue.substring(0, defaultValue.lastIndexOf("::"));
+            res = defaultValue.substring(0, defaultValue.lastIndexOf("::"));
         } else {
-            return defaultValue;
+            res = defaultValue;
         }
+        if (res.startsWith("\"")) {
+            res = StringKit.removeHeadTail(res, "\"", null);
+        } else if (res.startsWith("'")) {
+            res = StringKit.removeHeadTail(res, "'", null).replace("''", "'");
+        } else {
+            isString = false;
+        }
+        return res;
     }
 
     protected String parseDefaultFunction(String defaultValue) {

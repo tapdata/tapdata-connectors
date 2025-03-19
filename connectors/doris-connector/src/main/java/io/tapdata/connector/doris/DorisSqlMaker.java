@@ -30,8 +30,8 @@ public class DorisSqlMaker extends CommonSqlMaker {
             if (aggregate && Boolean.FALSE.equals(tapField.getPrimaryKey())) {
                 builder.append("REPLACE_IF_NOT_NULL ");
             }
-            buildDefaultDefinition(builder, tapField);
             buildNullDefinition(builder, tapField);
+            buildDefaultDefinition(builder, tapField);
             buildCommentDefinition(builder, tapField);
             return builder.toString();
         }).collect(Collectors.joining(", "));

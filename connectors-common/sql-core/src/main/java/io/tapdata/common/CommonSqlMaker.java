@@ -7,6 +7,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.Projection;
 import io.tapdata.pdk.apis.entity.QueryOperator;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
@@ -35,6 +36,7 @@ public class CommonSqlMaker {
     protected Boolean createAutoInc = false;
     protected long autoIncCacheValue = 1;
     protected Boolean applyDefault = false;
+    protected String schema;
 
     public CommonSqlMaker() {
 
@@ -61,6 +63,11 @@ public class CommonSqlMaker {
 
     public <T extends CommonSqlMaker> T applyDefault(Boolean applyDefault) {
         this.applyDefault = applyDefault;
+        return (T) this;
+    }
+
+    public <T extends CommonSqlMaker> T schema(String schema) {
+        this.schema = schema;
         return (T) this;
     }
 
@@ -93,10 +100,10 @@ public class CommonSqlMaker {
             if (Boolean.TRUE.equals(applyDefault) && EmptyKit.isNotNull(tapField.getDefaultValue())) {
                 buildDefaultDefinition(builder, tapField);
             }
-            buildNullDefinition(builder, tapField);
             if (Boolean.TRUE.equals(createAutoInc) && Boolean.TRUE.equals(tapField.getAutoInc())) {
                 buildAutoIncDefinition(builder, tapField);
             }
+            buildNullDefinition(builder, tapField);
             if (needComment) {
                 buildCommentDefinition(builder, tapField);
             }
@@ -105,7 +112,7 @@ public class CommonSqlMaker {
     }
 
     protected void buildDataTypeDefinition(StringBuilder builder, TapField tapField) {
-        builder.append(escapeChar).append(tapField.getName()).append(escapeChar).append(' ').append(tapField.getDataType()).append(' ');
+        builder.append(escapeChar).append(StringKit.escape(tapField.getName(), escapeChar)).append(escapeChar).append(' ').append(tapField.getDataType()).append(' ');
     }
 
     protected void buildNullDefinition(StringBuilder builder, TapField tapField) {
@@ -119,7 +126,7 @@ public class CommonSqlMaker {
             builder.append("DEFAULT").append(' ');
             if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
                 builder.append(buildDefaultFunction(tapField)).append(' ');
-            } else if (tapField.getDefaultValue() instanceof Number) {
+            } else if (tapField.getDefaultValue() instanceof Number || Boolean.TRUE.equals(tapField.getAutoInc())) {
                 builder.append(tapField.getDefaultValue()).append(' ');
             } else {
                 builder.append("'").append(tapField.getDefaultValue()).append("' ");
