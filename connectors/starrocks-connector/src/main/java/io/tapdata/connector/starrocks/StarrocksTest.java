@@ -1,7 +1,11 @@
 package io.tapdata.connector.starrocks;
 
+import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpUtil;
 import io.tapdata.common.CommonDbTest;
+
+import java.util.*;
+
 import io.tapdata.connector.starrocks.bean.StarrocksConfig;
 import io.tapdata.connector.starrocks.streamload.StarrocksStreamLoader;
 import io.tapdata.kit.EmptyKit;
@@ -19,9 +23,6 @@ import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.SQLSyntaxErrorException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -107,7 +108,7 @@ public class StarrocksTest extends CommonDbTest {
         return true;
     }
 
-    protected static final String TEST_Starrocks_CREATE_TABLE = "create table %s(col1 int not null, col2 int) unique key(col1) distributed by hash(col1) buckets 2 PROPERTIES(\"replication_num\"=\"%s\")";
+    protected static final String TEST_Starrocks_CREATE_TABLE = "create table %s(col1 int not null, col2 int) PRIMARY key(col1) distributed by hash(col1) buckets 2 PROPERTIES(\"replication_num\"=\"%s\")";
     protected static final String TEST_Starrocks_WRITE_RECORD = "insert into %s values(0,0)";
     protected static final String TEST_Starrocks_UPDATE_RECORD = "update %s set col2=1 where col1=0";
     protected static final String TEST_Starrocks_DELETE_RECORD = "delete from %s where col1=0";
@@ -115,13 +116,20 @@ public class StarrocksTest extends CommonDbTest {
     public Boolean testStreamLoadPrivilege() {
         try {
             boolean testResult = false;
+            String authStr = ((StarrocksConfig) commonDbConfig).getUser() + ":";
+            if (((StarrocksConfig) commonDbConfig).getPassword() != null) {
+                authStr += ((StarrocksConfig) commonDbConfig).getPassword();
+            }
+            String encodedAuth = Base64.getEncoder().encodeToString(authStr.getBytes());
+            String authHeader = "Basic " + encodedAuth;
             if (((StarrocksConfig) commonDbConfig).getUseHTTPS()) {
                 CloseableHttpClient client = io.tapdata.connector.starrocks.streamload.HttpUtil.generationHttpClient();
                 HttpGet httpGet = new HttpGet();
                 httpGet.setURI(new URI("https://" + ((StarrocksConfig) commonDbConfig).getStarrocksHttp()));
-                testResult=EntityUtils.toString(client.execute(httpGet).getEntity()).contains("Starrocks</title>");
+                httpGet.setHeader("Authorization", authHeader);
+                testResult = EntityUtils.toString(client.execute(httpGet).getEntity()).contains("starrocks");
             } else {
-                testResult = HttpUtil.get("http://" + ((StarrocksConfig) commonDbConfig).getStarrocksHttp()).contains("Starrocks</title>");
+                testResult = HttpRequest.get("http://" + ((StarrocksConfig) commonDbConfig).getStarrocksHttp()).header("Authorization", authHeader).execute().body().contains("starrocks");
             }
 
             if (testResult) {

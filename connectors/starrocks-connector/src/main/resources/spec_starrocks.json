@@ -43,14 +43,14 @@
           "x-component": "Switch",
           "x-index": 29
         },
-        "dorisHttp": {
+        "starrocksHttp": {
           "type": "string",
-          "title": "${dorisHttp}",
+          "title": "${starrocksHttp}",
           "x-decorator": "FormItem",
           "x-component": "Input",
           "required": true,
           "x-decorator-props": {
-            "tooltip": "${dorisHttpTip}"
+            "tooltip": "${starrocksHttp}"
           },
           "x-index": 30
         },
@@ -265,7 +265,7 @@
         "uniqueKeyType": {
           "type": "string",
           "title": "${uniqueKeyType}",
-          "default": "Unique",
+          "default": "Primary",
           "x-decorator": "FormItem",
           "x-decorator-props": {
             "tooltip": "${uniqueKeyTypeTip}"
@@ -273,6 +273,10 @@
           "x-component": "Select",
           "x-index": 1,
           "enum": [
+            {
+            "label": "Primary",
+            "value": "Primary"
+            },
             {
               "label": "Aggregate",
               "value": "Aggregate"
@@ -379,9 +383,7 @@
             "tooltip": "${tablePropertiesTip}"
           },
           "default": [
-            {"propKey": "replication_num", "propValue": "1"},
-            {"propKey": "enable_unique_key_merge_on_write", "propValue": "true"},
-            {"propKey": "store_row_column", "propValue": "true"}
+            {"propKey": "replication_num", "propValue": "1"}
           ],
           "x-component": "ArrayItems",
           "x-reactions": [
@@ -506,9 +508,9 @@
       "hostTip": "The address of the database, it can be an IP address or a domain name, for example: 192.168.1.200",
       "port": "Port",
       "portTip": "The port number of the database, the default port of Doris is 9030",
-      "dorisHttp": "http/https Address",
-      "dorisHttpTip": "The address of the Doris Http/Https interface, for example: 192.168.1.200:8030",
-      "catalog": "Doris Catalog",
+      "starrocksHttp": "http/https Address",
+      "starrocksHttpTip": "The address of the Starrocks Http/Https interface, for example: 192.168.1.200:8030",
+      "catalog": "Starrocks Catalog",
       "catalogTip": "The directory of Doris can be left blank for non clustered Doris or those that do not require narrowing down the data range, such as doris_cluster",
       "database": "DB Name",
       "databaseTip": "The name of the database, you can list all Doris databases with the \\\\\"show databases\\\\\" command, case sensitive",

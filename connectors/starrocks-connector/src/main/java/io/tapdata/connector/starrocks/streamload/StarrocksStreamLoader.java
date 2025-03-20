@@ -152,7 +152,6 @@ public class StarrocksStreamLoader {
             columns.add(Constants.Starrocks_DELETE_SIGN);
             HttpPutBuilder putBuilder = new HttpPutBuilder();
             InputStreamEntity entity = new InputStreamEntity(recordStream, recordStream.getContentLength());
-            entity.setContentEncoding("UTF-8");
             entity.setContentType("application/json");
             putBuilder.setUrl(loadUrl)
                     // 前端表单传出来的值和tdd json加载的值可能有差别，如前端传的pwd可能是null，tdd的是空字符串
