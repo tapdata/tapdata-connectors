@@ -42,6 +42,7 @@ public class NormalRecordWriter {
     protected Map<String, Object> autoIncMap = new HashMap<>();
     protected boolean largeSql = false;
     protected CommonDbConfig commonDbConfig;
+    protected boolean needCloseIdentity = false;
 
     public NormalRecordWriter(JdbcContext jdbcContext, TapTable tapTable) throws SQLException {
         this.commonDbConfig = jdbcContext.getConfig();
@@ -147,6 +148,9 @@ public class NormalRecordWriter {
             updateRecorder.releaseResource();
             deleteRecorder.releaseResource();
             if (!isTransaction) {
+                if (needCloseIdentity) {
+                    openIdentity();
+                }
                 connection.close();
             }
             writeListResultConsumer.accept(listResult
@@ -217,9 +221,23 @@ public class NormalRecordWriter {
                 statement.execute(sql);
             }
         }
+        needCloseIdentity = true;
     }
 
     protected String getIdentitySql() {
+        return null;
+    }
+
+    public void openIdentity() throws SQLException {
+        String sql = getOpenIdentitySql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+    }
+
+    protected String getOpenIdentitySql() {
         return null;
     }
 }
