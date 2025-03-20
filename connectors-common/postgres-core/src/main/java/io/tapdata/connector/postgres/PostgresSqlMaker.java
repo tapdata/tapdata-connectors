@@ -123,9 +123,21 @@ public class PostgresSqlMaker extends CommonSqlMaker {
                 if (null != collate) {
                     return getOrderByFieldClauseWithCollate(v, collate);
                 } else {
-                    return v.toString(String.valueOf(escapeChar));
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(escapeChar).append(v.getKey()).append(escapeChar).append(" ").append(v.getSort() == ASCENDING ? "ASC" : "DESC");
+                    sb.append(buildNullSortClause(v));
+                    return sb.toString();
                 }
             }).collect(Collectors.joining(", "))).append(' ');
+        }
+    }
+    private static String buildNullSortClause(SortOn v) {
+        if (v.getNullSort() == 1) {
+            return ' ' + "NULLS" + ' ' + "FIRST";
+        } else if (v.getNullSort() == 2) {
+            return ' ' + "NULLS" + ' ' + "LAST";
+        } else {
+            return "";
         }
     }
 
@@ -134,6 +146,7 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         sb.append(escapeChar).append(sortOn.getKey()).append(escapeChar);
         sb.append(' ').append(buildCollate(collate.getCollateName())).append(' ');
         sb.append((sortOn.getSort() == ASCENDING ? "ASC" : "DESC"));
+        sb.append(buildNullSortClause(sortOn));
         return sb.toString();
     }
 
