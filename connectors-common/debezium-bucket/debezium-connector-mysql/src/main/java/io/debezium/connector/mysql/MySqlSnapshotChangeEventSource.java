@@ -583,7 +583,7 @@ public class MySqlSnapshotChangeEventSource extends RelationalSnapshotChangeEven
     }
 
     private String quote(String dbOrTableName) {
-        return "`" + dbOrTableName + "`";
+        return "`" + dbOrTableName.replace("`", "``") + "`";
     }
 
     private String quote(TableId id) {

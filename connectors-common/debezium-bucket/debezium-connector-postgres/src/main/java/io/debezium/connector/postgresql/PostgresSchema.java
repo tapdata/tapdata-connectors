@@ -213,7 +213,7 @@ public class PostgresSchema extends RelationalDatabaseSchema {
         tableIdToToastableColumns.put(tableId, Collections.unmodifiableList(toastableColumns));
     }
 
-    protected static TableId parse(String table) {
+    public static TableId parse(String table) {
         TableId tableId = TableId.parse(table, false);
         if (tableId == null) {
             return null;

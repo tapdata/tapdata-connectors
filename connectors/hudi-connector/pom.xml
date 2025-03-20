@@ -12,7 +12,7 @@
     <artifactId>hudi-connector</artifactId>
 
     <properties>
-        <tapdata.pdk.api.version>1.4.1-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.4.4-SNAPSHOT</tapdata.pdk.api.version>
         <hive.core.version>1.0-SNAPSHOT</hive.core.version>
         <hadoop.version>3.1.1-hw-ei-312005</hadoop.version>
         <maven.compiler.source.version>8</maven.compiler.source.version>

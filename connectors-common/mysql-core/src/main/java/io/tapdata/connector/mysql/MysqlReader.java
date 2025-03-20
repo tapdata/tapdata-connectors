@@ -41,6 +41,7 @@ import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
@@ -54,7 +55,6 @@ import org.apache.kafka.connect.storage.OffsetUtils;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.sql.ResultSetMetaData;
 import java.time.*;
@@ -66,7 +66,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
-import java.util.logging.LogManager;
 import java.util.stream.Collectors;
 
 import static io.tapdata.connector.mysql.util.MysqlUtil.randomServerId;
@@ -298,16 +297,16 @@ public class MysqlReader implements Closeable {
 //					.with("converters", "time")
 //					.with("time.type", "io.tapdata.connector.mysql.converters.TimeConverter")
 //					.with("time.schema.name", "io.debezium.mysql.type.Time")
-                    .with("enable.time.adjuster",false)
+                    .with("enable.time.adjuster", false)
                     .with("snapshot.locking.mode", "none");
 //            if (EmptyKit.isNotBlank(mysqlConfig.getTimezone())) {
 //                builder.with("database.serverTimezone", mysqlJdbcContext.queryTimeZone());
 //            }
-            List<String> dbTableNames = tables.stream().map(t -> mysqlConfig.getDatabase() + "." + t).collect(Collectors.toList());
+            List<String> dbTableNames = tables.stream().map(t -> StringKit.escapeRegex(mysqlConfig.getDatabase()) + "." + StringKit.escapeRegex(t)).collect(Collectors.toList());
             if (mysqlConfig.getDoubleActive()) {
-                dbTableNames.add(mysqlConfig.getDatabase() + "._tap_double_active");
+                dbTableNames.add(StringKit.escapeRegex(mysqlConfig.getDatabase()) + "._tap_double_active");
             }
-            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, mysqlConfig.getDatabase());
+            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, StringKit.escapeRegex(mysqlConfig.getDatabase()));
             builder.with(MySqlConnectorConfig.TABLE_INCLUDE_LIST, String.join(",", dbTableNames));
             builder.with(EmbeddedEngine.OFFSET_STORAGE, "io.tapdata.connector.mysql.PdkPersistenceOffsetBackingStore");
             if (StringUtils.isNotBlank(offsetStr)) {
@@ -936,6 +935,5 @@ public class MysqlReader implements Closeable {
         });
         return dateTypeSet;
     }
-
 
 }

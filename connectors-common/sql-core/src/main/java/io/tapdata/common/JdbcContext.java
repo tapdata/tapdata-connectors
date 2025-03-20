@@ -241,6 +241,20 @@ public abstract class JdbcContext implements AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
+    public List<DataMap> queryAllForeignKeys(List<String> tableNames) throws SQLException {
+        List<DataMap> foreignKeyList = list();
+        try {
+            query(queryAllForeignKeysSql(getConfig().getSchema(), tableNames),
+                    resultSet -> foreignKeyList.addAll(DbKit.getDataFromResultSet(resultSet)));
+        } catch (UnsupportedOperationException ignore) {
+        }
+        return foreignKeyList;
+    }
+
+    protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
+        throw new UnsupportedOperationException();
+    }
+
     public Long queryTimestamp() throws SQLException {
         throw new UnsupportedOperationException();
     }

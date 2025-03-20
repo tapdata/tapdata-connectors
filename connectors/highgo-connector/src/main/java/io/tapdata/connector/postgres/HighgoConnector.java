@@ -340,8 +340,7 @@ public class HighgoConnector extends CommonDbConnector {
     }
 
     private void openIdentity(TapTable tapTable) throws SQLException {
-        if (EmptyKit.isEmpty(tapTable.primaryKeys())
-                && (EmptyKit.isEmpty(tapTable.getIndexList()) || tapTable.getIndexList().stream().noneMatch(TapIndex::isUnique))) {
+        if (EmptyKit.isEmpty(tapTable.primaryKeys())) {
             jdbcContext.execute("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" REPLICA IDENTITY FULL");
         }
     }

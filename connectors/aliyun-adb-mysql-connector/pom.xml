@@ -22,7 +22,7 @@
     </modules>
 
     <properties>
-        <tapdata.pdk.api.version>1.4.1-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.4.4-SNAPSHOT</tapdata.pdk.api.version>
         <java.version>8</java.version>
     </properties>
     <dependencies>

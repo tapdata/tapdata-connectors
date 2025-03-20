@@ -59,6 +59,7 @@ public class PostgresJdbcContext extends JdbcContext {
             return TimeZone.getTimeZone(ZoneId.of(decimalFormat.format(timeOffset.get()) + ":00"));
         }
     }
+
     @Override
     public Long queryTimestamp() throws SQLException {
         AtomicReference<Timestamp> currentTime = new AtomicReference<>();
@@ -70,21 +71,29 @@ public class PostgresJdbcContext extends JdbcContext {
     protected String queryAllTablesSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND t.table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
         if (Integer.parseInt(postgresVersion) < 100000) {
-            return String.format(PG_ALL_TABLE_LOWER_VERSION, getConfig().getDatabase(), schema, tableSql);
+            return String.format(PG_ALL_TABLE_LOWER_VERSION, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
         }
-        return String.format(PG_ALL_TABLE, getConfig().getDatabase(), schema, tableSql);
+        return String.format(PG_ALL_TABLE, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllColumnsSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(PG_ALL_COLUMN, schema, getConfig().getDatabase(), schema, tableSql);
+        if (Integer.parseInt(postgresVersion) < 100000) {
+            return String.format(PG_ALL_COLUMN_LOWER_VERSION, StringKit.escape(schema, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
+        }
+        return String.format(PG_ALL_COLUMN, StringKit.escape(schema, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllIndexesSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(PG_ALL_INDEX, getConfig().getDatabase(), schema, tableSql);
+        return String.format(PG_ALL_INDEX, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
+    }
+
+    @Override
+    protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
+        return String.format(PG_ALL_FOREIGN_KEY, StringKit.escape(getConfig().getSchema(), "'"), EmptyKit.isEmpty(tableNames) ? "" : " and pc.relname in (" + StringKit.joinString(tableNames, "'", ",") + ")");
     }
 
     public DataMap getTableInfo(String tableName) {
@@ -93,7 +102,7 @@ public class PostgresJdbcContext extends JdbcContext {
         list.add("size");
         list.add("rowcount");
         try {
-            query(String.format(TABLE_INFO_SQL, getConfig().getSchema(), tableName, getConfig().getDatabase(), getConfig().getSchema()), resultSet -> {
+            query(String.format(TABLE_INFO_SQL, StringKit.escape(getConfig().getSchema(), "'"), StringKit.escape(tableName, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(getConfig().getSchema(), "'")), resultSet -> {
                 while (resultSet.next()) {
                     dataMap.putAll(DbKit.getRowFromResultSet(resultSet, list));
                 }
@@ -152,6 +161,45 @@ public class PostgresJdbcContext extends JdbcContext {
                     "    col.data_type \"pureDataType\",\n" +
                     "    col.column_default \"columnDefault\",\n" +
                     "    col.is_nullable \"nullable\",\n" +
+                    "    col.is_identity \"autoInc\",\n" +
+                    "    col.identity_start AS \"seedValue\",\n" +
+                    "    col.identity_increment AS \"incrementValue\",\n" +
+                    "    seq.sequence_name AS \"sequenceName\",\n" +
+                    "    seq.start_value AS \"seedValue2\",\n" +
+                    "    seq.increment AS \"incrementValue2\",\n" +
+                    "       (SELECT seqcache\n" +
+                    "        FROM pg_sequence\n" +
+                    "        WHERE seqrelid = pg_get_serial_sequence('\"'||replace(col.table_schema, '\"', '\"\"')||'\".\"'||replace(col.table_name,'\"','\"\"')||'\"', col.column_name)::regclass) \"cacheValue\"," +
+                    "       (SELECT max(d.description)\n" +
+                    "        FROM pg_catalog.pg_class c,\n" +
+                    "             pg_description d\n" +
+                    "        WHERE c.relname = col.table_name\n" +
+                    "          AND d.objoid = c.oid\n" +
+                    "          AND d.objsubid = col.ordinal_position) AS \"columnComment\",\n" +
+                    "       (SELECT pg_catalog.format_type(a.atttypid, a.atttypmod)\n" +
+                    "        FROM pg_catalog.pg_attribute a\n" +
+                    "        WHERE a.attnum > 0\n" +
+                    "          AND a.attname = col.column_name\n" +
+                    "          AND NOT a.attisdropped\n" +
+                    "          AND a.attrelid =\n" +
+                    "              (SELECT max(cl.oid)\n" +
+                    "               FROM pg_catalog.pg_class cl\n" +
+                    "               WHERE cl.relname = col.table_name and cl.relnamespace=(select oid from pg_namespace where nspname='%s'))) AS \"dataType\"\n" +
+                    "FROM information_schema.columns col\n" +
+                    "LEFT JOIN information_schema.sequences seq\n" +
+                    "    ON (seq.sequence_catalog=col.table_catalog and sequence_schema=col.table_schema and col.column_default=\n" +
+                    "    'nextval('''||(case when sequence_schema='public' then '' else sequence_schema||'.' end)||sequence_name||'''::regclass)')\n" +
+                    "WHERE col.table_catalog = '%s'\n" +
+                    "  AND col.table_schema = '%s' %s\n" +
+                    "ORDER BY col.table_name, col.ordinal_position";
+
+    protected final static String PG_ALL_COLUMN_LOWER_VERSION =
+            "SELECT\n" +
+                    "    col.table_name \"tableName\",\n" +
+                    "    col.column_name \"columnName\",\n" +
+                    "    col.data_type \"pureDataType\",\n" +
+                    "    col.column_default \"columnDefault\",\n" +
+                    "    col.is_nullable \"nullable\",\n" +
                     "       (SELECT max(d.description)\n" +
                     "        FROM pg_catalog.pg_class c,\n" +
                     "             pg_description d\n" +
@@ -193,10 +241,33 @@ public class PostgresJdbcContext extends JdbcContext {
                     "  AND a.attnum = ANY(ix.indkey)\n" +
                     "  AND t.relkind IN ('r', 'p')\n" +
                     "  AND tt.table_name=t.relname\n" +
+                    "  AND tt.table_schema=(select nspname from pg_namespace where oid=t.relnamespace)\n" +
                     "  AND tt.table_catalog='%s'\n" +
                     "  AND tt.table_schema='%s' %s\n" +
                     "ORDER BY t.relname, i.relname, a.attnum";
 
+    protected final static String PG_ALL_FOREIGN_KEY = "select con.\"constraintName\",con.\"tableName\",con.\"referencesTableName\",con.\"onUpdate\",con.\"onDelete\",\n" +
+            "(select column_name from information_schema.columns where table_schema=con.nspname and table_name=con.\"tableName\" and ordinal_position=con.fk) fk,\n" +
+            "(select column_name from information_schema.columns where table_schema=con.nspname and table_name=con.\"referencesTableName\" and ordinal_position=con.rfk) rfk\n" +
+            "from\n" +
+            "(select c.conname \"constraintName\",pn.nspname,\n" +
+            "pc.relname \"tableName\",\n" +
+            "(select relname from pg_class where oid=c.confrelid) \"referencesTableName\",\n" +
+            "unnest(conkey) fk, unnest(confkey) rfk,\n" +
+            "(case c.confupdtype\n" +
+            "    when 'a' then 'NO_ACTION'\n" +
+            "    when 'n' then 'SET_NULL'\n" +
+            "    when 'r' then 'RESTRICT'\n" +
+            "    when 'c' then 'CASCADE' else 'SET_DEFAULT' end) \"onUpdate\",\n" +
+            "(case c.confdeltype\n" +
+            "    when 'a' then 'NO_ACTION'\n" +
+            "    when 'n' then 'SET_NULL'\n" +
+            "    when 'r' then 'RESTRICT'\n" +
+            "    when 'c' then 'CASCADE' else 'SET_DEFAULT' end) \"onDelete\"\n" +
+            "from pg_constraint c\n" +
+            "join pg_class pc on c.conrelid = pc.oid\n" +
+            "join pg_namespace pn on c.connamespace = pn.oid\n" +
+            "where c.contype='f' and pn.nspname='%s' %s) con";
 
     protected final static String TABLE_INFO_SQL = "SELECT\n" +
             " pg_total_relation_size('\"' || table_schema || '\".\"' || table_name || '\"') AS size,\n" +

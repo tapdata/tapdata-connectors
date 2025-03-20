@@ -15,7 +15,7 @@
     <packaging>jar</packaging>
 
     <properties>
-        <tapdata.pdk.api.version>1.4.2-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>1.4.4-SNAPSHOT</tapdata.pdk.api.version>
         <java.version>8</java.version>
         <postgres.driver.version>42.3.4</postgres.driver.version>
     </properties>

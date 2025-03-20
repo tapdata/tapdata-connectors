@@ -4,20 +4,21 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.ddl.DDLSqlGenerator;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
+import io.tapdata.entity.TapConstraintException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
+import io.tapdata.entity.event.ddl.constraint.TapDropConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.index.TapDeleteIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.entity.schema.TapField;
-import io.tapdata.entity.schema.TapIndex;
-import io.tapdata.entity.schema.TapIndexField;
-import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.*;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.FilterResult;
@@ -51,7 +52,10 @@ public abstract class CommonDbConnector extends ConnectorBase {
     //offset for Primary key sorting area reading
     private final static Long offsetSize = 1000000L;
     protected static final int BATCH_ADVANCE_READ_LIMIT = 1000;
-
+    protected Map<String, DataMap> writtenTableMap = new ConcurrentHashMap<>();
+    protected static final String HAS_UNIQUE_INDEX = "HAS_UNIQUE_INDEX";
+    protected static final String HAS_AUTO_INCR = "HAS_AUTO_INCR";
+    protected static final String HAS_REMOVED_COLUMN = "HAS_REMOVED_COLUMN";
     //ddlHandlers which for ddl collection
     protected BiClassHandlers<TapFieldBaseEvent, TapConnectorContext, List<String>> fieldDDLHandlers;
     //ddlSqlMaker which for ddl execution
@@ -84,7 +88,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
      * when your connector need to support partition table and main-curl table
      * you should impl this function to discover those tablies relations
      */
-    public List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
+    protected List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
         return tapTableList;
     }
 
@@ -94,6 +98,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         List<String> subTableNames = subList.stream().map(v -> v.getString("tableName")).collect(Collectors.toList());
         List<DataMap> columnList = jdbcContext.queryAllColumns(subTableNames);
         List<DataMap> indexList = jdbcContext.queryAllIndexes(subTableNames);
+        List<DataMap> fkList = jdbcContext.queryAllForeignKeys(subTableNames);
         subList.forEach(subTable -> {
             //2、table name/comment
             String table = subTable.getString("tableName");
@@ -119,6 +124,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                         tapTable.add(tapField);
                     });
             tapTable.setIndexList(tapIndexList);
+            tapTable.setConstraintList(makeForeignKey(fkList, table));
             tapTableList.add(tapTable);
         });
         syncSchemaSubmit(discoverPartitionInfo(tapTableList), consumer);
@@ -126,7 +132,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     //some datasource makePrimaryKeyAndIndex in not the same way, such as db2
     protected void makePrimaryKeyAndIndex(List<DataMap> indexList, String table, List<String> primaryKey, List<TapIndex> tapIndexList) {
-        Map<String, List<DataMap>> indexMap = indexList.stream().filter(idx -> table.equals(idx.getString("tableName")))
+        Map<String, List<DataMap>> indexMap = indexList.stream().filter(idx -> table.equals(idx.getString("tableName")) && EmptyKit.isNotBlank(idx.getString("indexName")))
                 .collect(Collectors.groupingBy(idx -> idx.getString("indexName"), LinkedHashMap::new, Collectors.toList()));
         indexMap.forEach((key, value) -> {
             if (value.stream().anyMatch(v -> ("1".equals(v.getString("isPk"))))) {
@@ -138,6 +144,12 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected TapField makeTapField(DataMap dataMap) {
         return new CommonColumn(dataMap).getTapField();
+    }
+
+    protected List<TapConstraint> makeForeignKey(List<DataMap> fkList, String table) {
+        List<TapConstraint> tapConstraints = new ArrayList<>();
+        fkList.stream().filter(v -> Objects.nonNull(v) && table.equals(v.getString("tableName"))).collect(Collectors.groupingBy(map -> map.getString("constraintName"))).forEach((constraintName, fk) -> tapConstraints.add(makeTapConstraint(constraintName, fk)));
+        return tapConstraints;
     }
 
     protected Map<String, Object> getSpecificAttr(DataMap dataMap) {
@@ -161,11 +173,14 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
         Map<String, TapField> fieldMap = tapTable.getNameFieldMap();
         for (String field : fieldMap.keySet()) {
-            String fieldDefault = (String) fieldMap.get(field).getDefaultValue();
-            if (EmptyKit.isNotEmpty(fieldDefault)) {
-                if (fieldDefault.contains("'")) {
-                    fieldDefault = fieldDefault.replaceAll("'", "''");
-                    fieldMap.get(field).setDefaultValue(fieldDefault);
+            Object defaultValue = fieldMap.get(field).getDefaultValue();
+            if (defaultValue instanceof String) {
+                String fieldDefault = (String) fieldMap.get(field).getDefaultValue();
+                if (EmptyKit.isNotEmpty(fieldDefault) && !Boolean.TRUE.equals(fieldMap.get(field).getAutoInc())) {
+                    if (fieldDefault.contains("'")) {
+                        fieldDefault = fieldDefault.replaceAll("'", "''");
+                        fieldMap.get(field).setDefaultValue(fieldDefault);
+                    }
                 }
             }
         }
@@ -412,20 +427,62 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 .collect(Collectors.toList());
         if (EmptyKit.isNotEmpty(indexList)) {
             indexList.stream().filter(i -> !i.isPrimary()).forEach(i -> {
+                String sql = getCreateIndexSql(tapTable, i);
                 try {
-                    jdbcContext.execute(getCreateIndexSql(tapTable, i));
+                    jdbcContext.execute(sql);
                 } catch (SQLException e) {
-                    String rename = i.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
-                    tapLogger.warn("Create index failed {}, rename {} to {} and retry ...", e.getMessage(), i.getName(), rename);
-                    i.setName(rename);
-                    String sql = getCreateIndexSql(tapTable, i);
-                    try {
-                        jdbcContext.execute(sql);
-                    } catch (SQLException e1) {
-                        tapLogger.warn("Create index failed again {}, please execute it manually [{}]", e1.getMessage(), sql);
+                    if (!exceptionCollector.violateIndexName(e)) {
+                        tapLogger.warn("Create index failed {}, please execute it manually [{}]", e.getMessage(), sql);
+                    } else {
+                        String rename = i.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                        tapLogger.warn("Create index failed {}, rename {} to {} and retry ...", e.getMessage(), i.getName(), rename);
+                        i.setName(rename);
+                        sql = getCreateIndexSql(tapTable, i);
+                        try {
+                            jdbcContext.execute(sql);
+                        } catch (SQLException e1) {
+                            tapLogger.warn("Create index failed again {}, please execute it manually [{}]", e1.getMessage(), sql);
+                        }
                     }
                 }
             });
+        }
+    }
+
+    protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
+        List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
+        if (EmptyKit.isNotEmpty(constraintList)) {
+            List<String> constraintSqlList = new ArrayList<>();
+            TapConstraintException exception = new TapConstraintException(tapTable.getId());
+            constraintList.forEach(c -> {
+                String sql = getCreateConstraintSql(tapTable, c);
+                if (create) {
+                    try {
+                        jdbcContext.execute(sql);
+                    } catch (Exception e) {
+                        if (!exceptionCollector.violateConstraintName(e)) {
+                            exception.addException(c, sql, e);
+                        } else {
+                            String rename = c.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                            c.setName(rename);
+                            sql = getCreateConstraintSql(tapTable, c);
+                            try {
+                                jdbcContext.execute(sql);
+                            } catch (Exception e1) {
+                                exception.addException(c, sql, e1);
+                            }
+                        }
+                    }
+                } else {
+                    constraintSqlList.add(sql);
+                }
+            });
+            if (!create) {
+                createConstraintEvent.setConstraintSqlList(constraintSqlList);
+            }
+            if (EmptyKit.isNotEmpty(exception.getExceptions())) {
+                throw exception;
+            }
         }
     }
 
@@ -457,6 +514,39 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 .collect(Collectors.groupingBy(idx -> idx.getString("indexName"), LinkedHashMap::new, Collectors.toList()));
         indexMap.forEach((key, value) -> tapIndexList.add(makeTapIndex(key, value)));
         return tapIndexList;
+    }
+
+    protected TapConstraint makeTapConstraint(String key, List<DataMap> value) {
+        TapConstraint tapConstraint = new TapConstraint(key, TapConstraint.ConstraintType.FOREIGN_KEY);
+        value.forEach(f -> {
+            tapConstraint.referencesTable(f.getString("referencesTableName"));
+            tapConstraint.add(new TapConstraintMapping()
+                    .foreignKey(f.getString("fk"))
+                    .referenceKey(f.getString("rfk")));
+            if (EmptyKit.isNotBlank(f.getString("onUpdate"))) {
+                tapConstraint.onUpdate(f.getString("onUpdate"));
+            }
+            if (EmptyKit.isNotBlank(f.getString("onDelete"))) {
+                tapConstraint.onDelete(f.getString("onDelete"));
+            }
+        });
+        return tapConstraint;
+    }
+
+    protected List<TapConstraint> discoverConstraint(String tableName) {
+        List<DataMap> constraintList;
+        try {
+            constraintList = jdbcContext.queryAllForeignKeys(Collections.singletonList(tableName));
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return makeForeignKey(constraintList, tableName);
+    }
+
+    protected void beforeWriteRecord(TapTable tapTable) throws SQLException {
+        if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
+            writtenTableMap.put(tapTable.getId(), DataMap.create());
+        }
     }
 
     protected void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) throws SQLException {
@@ -508,9 +598,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         StringBuilder sb = new StringBuilder();
         char escapeChar = commonDbConfig.getEscapeChar();
         if (EmptyKit.isNotBlank(commonDbConfig.getSchema())) {
-            sb.append(escapeChar).append(commonDbConfig.getSchema()).append(escapeChar).append('.');
+            sb.append(escapeChar).append(StringKit.escape(commonDbConfig.getSchema(), escapeChar)).append(escapeChar).append('.');
         }
-        sb.append(escapeChar).append(tableId).append(escapeChar);
+        sb.append(escapeChar).append(StringKit.escape(tableId, escapeChar)).append(escapeChar);
         return sb.toString();
     }
 
@@ -521,14 +611,18 @@ public abstract class CommonDbConnector extends ConnectorBase {
         Collection<String> primaryKeys = tapTable.primaryKeys();
         if (EmptyKit.isNotEmpty(primaryKeys)) {
             sb.append(", primary key (").append(escapeChar)
-                    .append(String.join(escapeChar + "," + escapeChar, primaryKeys))
+                    .append(primaryKeys.stream().map(pk -> StringKit.escape(pk, escapeChar)).collect(Collectors.joining(escapeChar + "," + escapeChar)))
                     .append(escapeChar).append(')');
         }
         sb.append(')');
         if (commentInField && EmptyKit.isNotBlank(tapTable.getComment())) {
-            sb.append(" comment='").append(tapTable.getComment().replaceAll("'", "''")).append("'");
+            commentOnTable(sb, tapTable);
         }
         return sb.toString();
+    }
+
+    protected void commentOnTable(StringBuilder sb, TapTable tapTable) {
+        sb.append(" comment='").append(tapTable.getComment().replaceAll("'", "''")).append("'");
     }
 
     protected String getCreateIndexSql(TapTable tapTable, TapIndex tapIndex) {
@@ -541,11 +635,33 @@ public abstract class CommonDbConnector extends ConnectorBase {
         if (EmptyKit.isNotBlank(tapIndex.getName())) {
             sb.append(escapeChar).append(tapIndex.getName()).append(escapeChar);
         } else {
-            sb.append(escapeChar).append(DbKit.buildIndexName(tapTable.getId())).append(escapeChar);
+            String indexName = DbKit.buildIndexName(tapTable.getId());
+            tapIndex.setName(indexName);
+            sb.append(escapeChar).append(indexName).append(escapeChar);
         }
         sb.append(" on ").append(getSchemaAndTable(tapTable.getId())).append('(')
                 .append(tapIndex.getIndexFields().stream().map(f -> escapeChar + f.getName() + escapeChar + " " + (f.getFieldAsc() ? "asc" : "desc"))
                         .collect(Collectors.joining(","))).append(')');
+        return sb.toString();
+    }
+
+    protected String getCreateConstraintSql(TapTable tapTable, TapConstraint tapConstraint) {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        StringBuilder sb = new StringBuilder("alter table ");
+        sb.append(getSchemaAndTable(tapTable.getId())).append(" add constraint ");
+        if (EmptyKit.isNotBlank(tapConstraint.getName())) {
+            sb.append(escapeChar).append(tapConstraint.getName()).append(escapeChar);
+        } else {
+            sb.append(escapeChar).append(DbKit.buildForeignKeyName(tapTable.getId())).append(escapeChar);
+        }
+        sb.append(" foreign key (").append(escapeChar).append(tapConstraint.getMappingFields().stream().map(TapConstraintMapping::getForeignKey).collect(Collectors.joining(escapeChar + "," + escapeChar))).append(escapeChar).append(") references ")
+                .append(getSchemaAndTable(tapConstraint.getReferencesTableName())).append('(').append(escapeChar).append(tapConstraint.getMappingFields().stream().map(TapConstraintMapping::getReferenceKey).collect(Collectors.joining(escapeChar + "," + escapeChar))).append(escapeChar).append(')');
+        if (EmptyKit.isNotNull(tapConstraint.getOnUpdate())) {
+            sb.append(" on update ").append(tapConstraint.getOnUpdate().toString().replaceAll("_", " "));
+        }
+        if (EmptyKit.isNotNull(tapConstraint.getOnDelete())) {
+            sb.append(" on delete ").append(tapConstraint.getOnDelete().toString().replaceAll("_", " "));
+        }
         return sb.toString();
     }
 
@@ -631,7 +747,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected String getBatchReadSelectSql(TapTable tapTable) {
-        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + c + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
+        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + StringKit.escape(c, commonDbConfig.getEscapeChar()) + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
         return String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
     }
 
@@ -794,11 +910,22 @@ public abstract class CommonDbConnector extends ConnectorBase {
         consumer.accept(discoverIndex(table.getId()));
     }
 
+    protected void queryConstraint(TapConnectorContext connectorContext, TapTable table, Consumer<List<TapConstraint>> consumer) throws Throwable {
+        consumer.accept(discoverConstraint(table.getId()));
+    }
+
     protected void dropIndexes(TapConnectorContext connectorContext, TapTable table, TapDeleteIndexEvent deleteIndexEvent) throws SQLException {
         char escapeChar = commonDbConfig.getEscapeChar();
         List<String> dropIndexesSql = new ArrayList<>();
         deleteIndexEvent.getIndexNames().forEach(idx -> dropIndexesSql.add("drop index " + getSchemaAndTable(table.getId()) + "." + escapeChar + idx + escapeChar));
         jdbcContext.batchExecute(dropIndexesSql);
+    }
+
+    protected void dropConstraint(TapConnectorContext connectorContext, TapTable table, TapDropConstraintEvent tapDropConstraintEvent) throws SQLException {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        List<String> dropConstraintsSql = new ArrayList<>();
+        tapDropConstraintEvent.getConstraintList().forEach(fk -> dropConstraintsSql.add("alter table " + getSchemaAndTable(table.getId()) + " drop constraint " + escapeChar + fk.getName() + escapeChar));
+        jdbcContext.batchExecute(dropConstraintsSql);
     }
 
     protected long countRawCommand(TapConnectorContext connectorContext, String command, TapTable tapTable) throws SQLException {

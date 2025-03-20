@@ -176,6 +176,13 @@ public class NormalRecordWriter {
         return this;
     }
 
+    public NormalRecordWriter setRemovedColumn(List<String> removedColumn) {
+        insertRecorder.setRemovedColumn(removedColumn);
+        updateRecorder.setRemovedColumn(removedColumn);
+        deleteRecorder.setRemovedColumn(removedColumn);
+        return this;
+    }
+
     public void setAutoIncFields(List<String> autoIncFields) {
         this.autoIncFields = autoIncFields;
     }
@@ -188,5 +195,31 @@ public class NormalRecordWriter {
         char escapeChar = commonDbConfig.getEscapeChar();
         return "update " + escapeChar + commonDbConfig.getSchema() + escapeChar + "." + escapeChar + "_tap_double_active" + escapeChar + " set " +
                 escapeChar + "c2" + escapeChar + " = '" + UUID.randomUUID() + "' where " + escapeChar + "c1" + escapeChar + " = '1'";
+    }
+
+    public void closeConstraintCheck() throws SQLException {
+        String sql = getCloseConstraintCheckSql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+    }
+
+    protected String getCloseConstraintCheckSql() {
+        return null;
+    }
+
+    public void closeIdentity() throws SQLException {
+        String sql = getIdentitySql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+    }
+
+    protected String getIdentitySql() {
+        return null;
     }
 }

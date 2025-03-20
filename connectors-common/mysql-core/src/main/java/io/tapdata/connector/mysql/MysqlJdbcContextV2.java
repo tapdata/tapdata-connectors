@@ -58,19 +58,25 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     @Override
     protected String queryAllTablesSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(MYSQL_ALL_TABLE, schema, tableSql);
+        return String.format(MYSQL_ALL_TABLE, StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllColumnsSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(MYSQL_ALL_COLUMN, schema, tableSql);
+        return String.format(MYSQL_ALL_COLUMN, StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllIndexesSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(MYSQL_ALL_INDEX, schema, tableSql);
+        return String.format(MYSQL_ALL_INDEX, StringKit.escape(schema, "'"), tableSql);
+    }
+
+    @Override
+    protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND k.TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
+        return String.format(MYSQL_ALL_FOREIGN_KEY, StringKit.escape(schema, "'"), tableSql);
     }
 
     public DataMap getTableInfo(String tableName) {
@@ -79,7 +85,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         list.add("TABLE_ROWS");
         list.add("DATA_LENGTH");
         try {
-            query(String.format(GET_TABLE_INFO_SQL, getConfig().getDatabase(), tableName), resultSet -> {
+            query(String.format(GET_TABLE_INFO_SQL, StringKit.escape(getConfig().getDatabase(), "'"), tableName), resultSet -> {
                 while (resultSet.next()) {
                     dataMap.putAll(DbKit.getRowFromResultSet(resultSet, list));
                 }
@@ -229,7 +235,9 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "       COLUMN_NAME `columnName`,\n" +
                     "       COLUMN_TYPE `dataType`,\n" +
                     "       IS_NULLABLE `nullable`,\n" +
-                    "       COLUMN_COMMENT `columnComment`\n" +
+                    "       COLUMN_COMMENT `columnComment`,\n" +
+                    "       COLUMN_DEFAULT `columnDefault`,\n" +
+                    "       IF(EXTRA = 'auto_increment', 1, 0) `autoInc`" +
                     "FROM INFORMATION_SCHEMA.COLUMNS\n" +
                     "WHERE TABLE_SCHEMA = '%s' %s\n" +
                     "ORDER BY ORDINAL_POSITION";
@@ -258,6 +266,24 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "ORDER BY\n" +
                     "\tINDEX_NAME,\n" +
                     "\tSEQ_IN_INDEX";
+
+    private final static String MYSQL_ALL_FOREIGN_KEY =
+            "SELECT\n" +
+            "    k.CONSTRAINT_NAME `constraintName`,\n" +
+            "    k.TABLE_NAME `tableName`,\n" +
+            "    k.REFERENCED_TABLE_NAME `referencesTableName`,\n" +
+            "    c.DELETE_RULE `onDelete`,\n" +
+            "    c.UPDATE_RULE `onUpdate`,\n" +
+            "    k.COLUMN_NAME `fk`,\n" +
+            "    k.REFERENCED_COLUMN_NAME `rfk`\n" +
+            "FROM\n" +
+            "    information_schema.KEY_COLUMN_USAGE k\n" +
+            "JOIN information_schema.REFERENTIAL_CONSTRAINTS c\n" +
+            "ON c.CONSTRAINT_SCHEMA=k.TABLE_SCHEMA\n" +
+            "AND c.CONSTRAINT_NAME=k.CONSTRAINT_NAME\n" +
+            "WHERE\n" +
+            "    k.REFERENCED_TABLE_NAME IS NOT NULL\n" +
+            "    AND k.CONSTRAINT_SCHEMA = '%s' %s";
 
     private final static String MYSQL_VERSION = "SELECT VERSION()";
     private final static String MYSQL_CURRENT_TIME = "SELECT NOW();";

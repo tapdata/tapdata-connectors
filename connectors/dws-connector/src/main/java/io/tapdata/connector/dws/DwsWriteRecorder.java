@@ -47,10 +47,11 @@ public class DwsWriteRecorder extends PostgresWriteRecorder {
         if (value == null) {
             return null;
         }
+        value = super.filterValue(value, dataType);
         if (value instanceof String && EmptyKit.isEmpty((String) value)) {
             return replaceBlank;
         }
-        return super.filterValue(value, dataType);
+        return value;
     }
 
 }

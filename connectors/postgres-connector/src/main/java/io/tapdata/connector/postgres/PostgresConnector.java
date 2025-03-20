@@ -13,16 +13,15 @@ import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
 import io.tapdata.connector.postgres.partition.TableType;
+import io.tapdata.entity.TapConstraintException;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
-import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
-import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
-import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
-import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
+import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.schema.TapConstraint;
 import io.tapdata.entity.schema.TapField;
-import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
@@ -48,6 +47,7 @@ import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapPartitionResult;
 import io.tapdata.pdk.apis.functions.connector.source.ConnectionConfigWithTables;
+import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.postgresql.geometric.*;
 import org.postgresql.jdbc.PgArray;
 import org.postgresql.jdbc.PgSQLXML;
@@ -62,7 +62,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -83,9 +82,6 @@ public class PostgresConnector extends CommonDbConnector {
     private PostgresCdcRunner cdcRunner; //only when task start-pause this variable can be shared
     private Object slotName; //must be stored in stateMap
     protected String postgresVersion;
-    protected Map<String, DataMap> writtenTableMap = new ConcurrentHashMap<>();
-    protected static final String HAS_UNIQUE_INDEX = "HAS_UNIQUE_INDEX";
-    protected static final String HAS_AUTO_INCR = "HAS_AUTO_INCR";
     protected PostgresPartitionContext postgresPartitionContext;
 
     @Override
@@ -105,7 +101,7 @@ public class PostgresConnector extends CommonDbConnector {
         try (
                 PostgresTest postgresTest = new PostgresTest(postgresConfig, consumer, connectionOptions)
                         .initContext()
-                        .withPostgresVersion();
+                        .withPostgresVersion()
         ) {
             postgresTest.testOneByOne();
             connectionOptions.setInstanceUniqueId(StringKit.md5(String.join("|"
@@ -128,12 +124,16 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportReleaseExternalFunction(this::onDestroy);
         // target
         connectorFunctions.supportWriteRecord(this::writeRecord);
+        connectorFunctions.supportAfterInitialSync(this::afterInitialSync);
         connectorFunctions.supportCreateTableV2(this::createTableV2);
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportCreateIndex(this::createIndex);
         connectorFunctions.supportQueryIndexes(this::queryIndexes);
         connectorFunctions.supportDeleteIndex(this::dropIndexes);
+        connectorFunctions.supportQueryConstraints(this::queryConstraint);
+        connectorFunctions.supportCreateConstraint(this::createConstraint);
+        connectorFunctions.supportDropConstraint(this::dropConstraint);
         // source
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
@@ -356,8 +356,8 @@ public class PostgresConnector extends CommonDbConnector {
             postgresConfig.load(tapConnectorContext.getNodeConfig());
         });
         postgresVersion = postgresJdbcContext.queryVersion();
-        commonSqlMaker = new PostgresSqlMaker().closeNotNull(postgresConfig.getCloseNotNull());
-        if (Boolean.TRUE.equals(postgresConfig.getCreateAutoInc()) && postgresVersion.compareTo("100000") >= 0) {
+        commonSqlMaker = new PostgresSqlMaker().schema(postgresConfig.getSchema()).closeNotNull(postgresConfig.getCloseNotNull()).autoIncCacheValue(postgresConfig.getAutoIncCacheValue());
+        if (Boolean.TRUE.equals(postgresConfig.getCreateAutoInc()) && Integer.parseInt(postgresVersion) > 100000) {
             commonSqlMaker.createAutoInc(true);
         }
         if (Boolean.TRUE.equals(postgresConfig.getApplyDefault())) {
@@ -380,8 +380,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     protected void openIdentity(TapTable tapTable) throws SQLException {
-        if (EmptyKit.isEmpty(tapTable.primaryKeys())
-                && (EmptyKit.isEmpty(tapTable.getIndexList()) || tapTable.getIndexList().stream().noneMatch(TapIndex::isUnique))) {
+        if (EmptyKit.isEmpty(tapTable.primaryKeys())) {
             jdbcContext.execute("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" REPLICA IDENTITY FULL");
         }
     }
@@ -390,26 +389,49 @@ public class PostgresConnector extends CommonDbConnector {
         return jdbcContext.queryAllIndexes(Collections.singletonList(tapTable.getId())).stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
     }
 
-    //write records as all events, prepared
-    protected void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws SQLException {
-        boolean hasUniqueIndex;
-        List<String> autoIncFields = new ArrayList<>();
+    protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
+        if (Boolean.TRUE.equals(postgresConfig.getCreateAutoInc()) && Integer.parseInt(postgresVersion) > 100000) {
+            createTableEvent.getTable().getNameFieldMap().entrySet().stream().filter(entry -> EmptyKit.isNotBlank(entry.getValue().getSequenceName())).forEach(entry -> {
+                StringBuilder sequenceSql = new StringBuilder("CREATE SEQUENCE IF NOT EXISTS " + getSchemaAndTable(entry.getValue().getSequenceName()));
+                if (EmptyKit.isNotNull(entry.getValue().getAutoIncStartValue())) {
+                    sequenceSql.append(" START ").append(entry.getValue().getAutoIncStartValue());
+                }
+                if (EmptyKit.isNotNull(entry.getValue().getAutoIncrementValue())) {
+                    sequenceSql.append(" INCREMENT ").append(entry.getValue().getAutoIncrementValue());
+                }
+                try {
+                    postgresJdbcContext.execute(sequenceSql.toString());
+                } catch (SQLException e) {
+                    tapLogger.warn("Failed to create sequence for table {} field {}", createTableEvent.getTable().getId(), entry.getKey(), e);
+                }
+            });
+        }
+        CreateTableOptions options = super.createTableV2(connectorContext, createTableEvent);
+        if (EmptyKit.isNotBlank(postgresConfig.getTableOwner())) {
+            jdbcContext.execute(String.format("alter table %s owner to %s", getSchemaAndTable(createTableEvent.getTableId()), postgresConfig.getTableOwner()));
+        }
+        return options;
+    }
+
+    protected void beforeWriteRecord(TapTable tapTable) throws SQLException {
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             openIdentity(tapTable);
-            hasUniqueIndex = makeSureHasUnique(tapTable);
+            boolean hasUniqueIndex = makeSureHasUnique(tapTable);
             writtenTableMap.put(tapTable.getId(), DataMap.create().kv(HAS_UNIQUE_INDEX, hasUniqueIndex));
-        } else {
-            hasUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_UNIQUE_INDEX, false);
         }
-        if (postgresConfig.getCreateAutoInc() && postgresVersion.compareTo("100000") >= 0) {
+        if (postgresConfig.getCreateAutoInc() && Integer.parseInt(postgresVersion) > 100000) {
             if (!writtenTableMap.get(tapTable.getId()).containsKey(HAS_AUTO_INCR)) {
-                List<TapField> fields = tapTable.getNameFieldMap().values().stream().filter(TapField::getAutoInc).collect(Collectors.toList());
-                autoIncFields.addAll(fields.stream().map(TapField::getName).collect(Collectors.toList()));
+                List<String> autoIncFields = tapTable.getNameFieldMap().values().stream().filter(TapField::getAutoInc).map(TapField::getName).collect(Collectors.toList());
                 writtenTableMap.get(tapTable.getId()).put(HAS_AUTO_INCR, autoIncFields);
-            } else {
-                autoIncFields.addAll(writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>()));
             }
         }
+    }
+
+    //write records as all events, prepared
+    protected void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws SQLException {
+        beforeWriteRecord(tapTable);
+        boolean hasUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_UNIQUE_INDEX, false);
+        List<String> autoIncFields = writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>());
         String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
             insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
@@ -438,20 +460,52 @@ public class PostgresConnector extends CommonDbConnector {
                     .setUpdatePolicy(updateDmlPolicy)
                     .setTapLogger(tapLogger);
         }
-        if (postgresConfig.getCreateAutoInc() && postgresVersion.compareTo("100000") >= 0 && EmptyKit.isNotEmpty(autoIncFields)
+        if (EmptyKit.isNotEmpty(tapTable.getConstraintList())) {
+            postgresRecordWriter.closeConstraintCheck();
+        }
+        if (postgresConfig.getCreateAutoInc() && Integer.parseInt(postgresVersion) > 100000 && EmptyKit.isNotEmpty(autoIncFields)
                 && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
             postgresRecordWriter.setAutoIncFields(autoIncFields);
             postgresRecordWriter.write(tapRecordEvents, writeListResultConsumer, this::isAlive);
             if (EmptyKit.isNotEmpty(postgresRecordWriter.getAutoIncMap())) {
                 List<String> alterSqls = new ArrayList<>();
                 postgresRecordWriter.getAutoIncMap().forEach((k, v) -> {
-                    alterSqls.add("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" ALTER COLUMN \"" + k + "\" SET GENERATED BY DEFAULT RESTART WITH " + (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue()));
+                    String sequenceName = tapTable.getNameFieldMap().get(k).getSequenceName();
+                    if (EmptyKit.isNotBlank(sequenceName)) {
+                        alterSqls.add("select setval('" + getSchemaAndTable(sequenceName) + "'," + (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue()) + ", false) ");
+                    } else {
+                        alterSqls.add("ALTER TABLE " + getSchemaAndTable(tapTable.getId()) + " ALTER COLUMN \"" + k + "\" SET GENERATED BY DEFAULT RESTART WITH " + (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue()));
+                    }
                 });
                 jdbcContext.batchExecute(alterSqls);
             }
         } else {
             postgresRecordWriter.write(tapRecordEvents, writeListResultConsumer, this::isAlive);
         }
+    }
+
+    protected void afterInitialSync(TapConnectorContext connectorContext, TapTable tapTable) throws Throwable {
+        beforeWriteRecord(tapTable);
+        List<String> autoIncFields = writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>());
+        autoIncFields.forEach(field -> {
+            try (
+                    Connection connection = jdbcContext.getConnection();
+                    Statement statement = connection.createStatement();
+                    ResultSet resultSet = statement.executeQuery("select max(" + field + ") from " + getSchemaAndTable(tapTable.getId()))
+            ) {
+                if (resultSet.next()) {
+                    String sequenceName = tapTable.getNameFieldMap().get(field).getSequenceName();
+                    if (EmptyKit.isNotBlank(sequenceName)) {
+                        statement.execute("select setval('" + getSchemaAndTable(sequenceName) + "'," + (resultSet.getLong(1) + postgresConfig.getAutoIncJumpValue()) + ", false) ");
+                    } else {
+                        statement.execute("ALTER TABLE " + getSchemaAndTable(tapTable.getId()) + " ALTER COLUMN \"" + field + "\" SET GENERATED BY DEFAULT RESTART WITH " + (resultSet.getLong(1) + postgresConfig.getAutoIncJumpValue()));
+                    }
+                    connection.commit();
+                }
+            } catch (SQLException e) {
+                tapLogger.warn("Failed to get auto increment value for table {} field {}", tapTable.getId(), field, e);
+            }
+        });
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
@@ -543,7 +597,7 @@ public class PostgresConnector extends CommonDbConnector {
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
         if (canCdc) {
-            if ("pgoutput".equals(postgresConfig.getLogPluginName()) && postgresVersion.compareTo("100000") > 0) {
+            if ("pgoutput".equals(postgresConfig.getLogPluginName()) && Integer.parseInt(postgresVersion) > 100000) {
                 createPublicationIfNotExist();
             }
             testReplicateIdentity(connectorContext.getTableMap());
@@ -635,7 +689,7 @@ public class PostgresConnector extends CommonDbConnector {
                     break;
                 }
                 if ("data_directory".equals(resultSet.getString(1)) && EmptyKit.isNotEmpty(resultSet.getString(2))) {
-                    walDirectory.set(resultSet.getString(2) + (postgresVersion.compareTo("100000") >= 0 ? "/pg_wal/" : "/pg_xlog/"));
+                    walDirectory.set(resultSet.getString(2) + (Integer.parseInt(postgresVersion) > 100000 ? "/pg_wal/" : "/pg_xlog/"));
                 }
             }
         });
@@ -802,6 +856,22 @@ public class PostgresConnector extends CommonDbConnector {
         return result;
     }
 
+    protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
+            jdbcContext.execute("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()) + " cascade");
+        } else {
+            tapLogger.warn("Table {} not exists, skip truncate", tapClearTableEvent.getTableId());
+        }
+    }
+
+    protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
+            jdbcContext.execute("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()) + " cascade");
+        } else {
+            tapLogger.warn("Table {} not exists, skip drop", tapDropTableEvent.getTableId());
+        }
+    }
+
     protected void createIndex(TapConnectorContext connectorContext, TapTable tapTable, TapCreateIndexEvent createIndexEvent) throws SQLException {
         super.createIndex(connectorContext, tapTable, createIndexEvent);
         createIndexEvent.getIndexList().stream().filter(v -> Boolean.TRUE.equals(v.getCluster())).forEach(v -> {
@@ -811,5 +881,47 @@ public class PostgresConnector extends CommonDbConnector {
                 tapLogger.warn("Cluster index failed, table:{}, index:{}", tapTable.getId(), v.getName());
             }
         });
+    }
+
+    protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
+        List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
+        if (EmptyKit.isNotEmpty(constraintList)) {
+            List<String> constraintSqlList = new ArrayList<>();
+            TapConstraintException exception = new TapConstraintException(tapTable.getId());
+            constraintList.forEach(c -> {
+                String sql = getCreateConstraintSql(tapTable, c);
+                if (create) {
+                    try {
+                        jdbcContext.execute(sql);
+                    } catch (Exception e) {
+                        if (e instanceof SQLException && ((SQLException) e).getSQLState().equals("42804")) {
+                            TapTable referenceTable = connectorContext.getTableMap().get(c.getReferencesTableName());
+                            c.getMappingFields().stream().filter(m -> Boolean.TRUE.equals(referenceTable.getNameFieldMap().get(m.getReferenceKey()).getAutoInc()) && referenceTable.getNameFieldMap().get(m.getReferenceKey()).getDataType().startsWith("numeric")).forEach(m -> {
+                                try {
+                                    jdbcContext.execute("alter table " + getSchemaAndTable(tapTable.getId()) + " alter column \"" + m.getForeignKey() + "\" type bigint");
+                                } catch (SQLException e1) {
+                                    exception.addException(c, "alter table alter column failed", e1);
+                                }
+                            });
+                            try {
+                                jdbcContext.execute(sql);
+                            } catch (Exception e1) {
+                                exception.addException(c, sql, e1);
+                            }
+                        } else {
+                            exception.addException(c, sql, e);
+                        }
+                    }
+                } else {
+                    constraintSqlList.add(sql);
+                }
+            });
+            if (!create) {
+                createConstraintEvent.setConstraintSqlList(constraintSqlList);
+            }
+            if (EmptyKit.isNotEmpty(exception.getExceptions())) {
+                throw exception;
+            }
+        }
     }
 }

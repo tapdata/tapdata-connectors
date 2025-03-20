@@ -5,6 +5,7 @@ import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.exception.testItem.TapTestCurrentTimeConsistentEx;
@@ -40,11 +41,12 @@ public class PostgresTest extends CommonDbTest {
     }
 
     public PostgresTest withPostgresVersion(String version) {
-        ((PostgresJdbcContext)jdbcContext).withPostgresVersion(version);
+        ((PostgresJdbcContext) jdbcContext).withPostgresVersion(version);
         return this;
     }
+
     public PostgresTest withPostgresVersion() throws SQLException {
-        ((PostgresJdbcContext)jdbcContext).withPostgresVersion(jdbcContext.queryVersion());
+        ((PostgresJdbcContext) jdbcContext).withPostgresVersion(jdbcContext.queryVersion());
         return this;
     }
 
@@ -57,8 +59,8 @@ public class PostgresTest extends CommonDbTest {
     public Boolean testReadPrivilege() {
         try {
             AtomicInteger tableSelectPrivileges = new AtomicInteger();
-            jdbcContext.queryWithNext(String.format(PG_TABLE_SELECT_NUM, commonDbConfig.getUser(),
-                    commonDbConfig.getDatabase(), commonDbConfig.getSchema()), resultSet -> tableSelectPrivileges.set(resultSet.getInt(1)));
+            jdbcContext.queryWithNext(String.format(PG_TABLE_SELECT_NUM, StringKit.escape(commonDbConfig.getUser(), "'"),
+                    StringKit.escape(commonDbConfig.getDatabase(), "'"), StringKit.escape(commonDbConfig.getSchema(), "'")), resultSet -> tableSelectPrivileges.set(resultSet.getInt(1)));
             if (tableSelectPrivileges.get() >= tableCount()) {
                 consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY, "All tables can be selected"));
             } else {
@@ -114,7 +116,7 @@ public class PostgresTest extends CommonDbTest {
 
     protected int tableCount() throws Throwable {
         AtomicInteger tableCount = new AtomicInteger();
-        jdbcContext.queryWithNext(PG_TABLE_NUM, resultSet -> tableCount.set(resultSet.getInt(1)));
+        jdbcContext.queryWithNext(String.format(PG_TABLE_NUM, StringKit.escape(commonDbConfig.getSchema(), "'")), resultSet -> tableCount.set(resultSet.getInt(1)));
         return tableCount.get();
     }
 
@@ -129,7 +131,7 @@ public class PostgresTest extends CommonDbTest {
     protected Boolean testWritePrivilege() {
         try {
             List<String> sqls = new ArrayList<>();
-            String schemaPrefix = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? ("\"" + commonDbConfig.getSchema() + "\".") : "";
+            String schemaPrefix = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? ("\"" + StringKit.escape(commonDbConfig.getSchema(), "\"") + "\".") : "";
             if (jdbcContext.queryAllTables(Arrays.asList(TEST_WRITE_TABLE, TEST_WRITE_TABLE.toUpperCase())).size() > 0) {
                 sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
             }
@@ -161,6 +163,7 @@ public class PostgresTest extends CommonDbTest {
         }
         return true;
     }
+
     @Override
     protected Boolean testDatasourceInstanceInfo() {
         buildDatasourceInstanceInfo(connectionOptions);

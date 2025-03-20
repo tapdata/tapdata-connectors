@@ -1,5 +1,6 @@
 package io.tapdata.mongodb.util;
 
+import com.alibaba.fastjson.JSONObject;
 import io.tapdata.entity.schema.TapIndexEx;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
@@ -61,6 +62,7 @@ public class MongoShardUtil {
                     indexEx.setPrimary(false);
                     indexEx.setName(UUID.randomUUID().toString());
                     indexEx.setCluster(false);
+                    map.put("partitionIndex", JSONObject.toJSONString(indexEx));
                     table.setPartitionIndex(indexEx);
                 }
             } else {

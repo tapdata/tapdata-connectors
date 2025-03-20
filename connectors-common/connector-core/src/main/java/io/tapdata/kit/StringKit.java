@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -190,7 +191,7 @@ public class StringKit {
         if (EmptyKit.isBlank(str) || EmptyKit.isBlank(remove)) {
             return str;
         }
-        if (str.startsWith(remove) && str.endsWith(remove) && str.length() > 2 * remove.length()) {
+        if (str.startsWith(remove) && str.endsWith(remove) && str.length() >= 2 * remove.length()) {
             return str.substring(remove.length(), str.length() - remove.length());
         }
         if (EmptyKit.isNull(upperCase)) {
@@ -341,5 +342,28 @@ public class StringKit {
     public static String trimTailBlank(Object str) {
         if (null == str) return null;
         return ("_" + str).trim().substring(1);
+    }
+
+    public static String escape(String name, String escapes) {
+        String res = name;
+        for (int i = 0; i < escapes.length(); i++) {
+            char escape = escapes.charAt(i);
+            res = escape(res, escape);
+        }
+        return res;
+    }
+
+    public static String escape(String name, char escape) {
+        return name.replace(escape + "", "" + escape + escape);
+    }
+
+    private static final Pattern REGEX_SPECIAL_CHARS = Pattern.compile("[\\\\^$|*+?.,()\\[\\]{}]");
+
+    public static String escapeRegex(String input) {
+        if (input == null || input.isEmpty()) {
+            return input;
+        }
+        Matcher matcher = REGEX_SPECIAL_CHARS.matcher(input);
+        return matcher.replaceAll("\\\\$0");
     }
 }

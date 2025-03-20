@@ -3,7 +3,9 @@ package io.tapdata.connector.postgres.cdc.config;
 import io.debezium.config.Configuration;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 
+import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -85,7 +87,7 @@ public class PostgresDebeziumConfig {
 //                .with("offset.storage.file.filename", "d:/cdc/offset/" + slotName + ".dat") //path must be changed with requirement
                 .with("offset.flush.interval.ms", 60000)
                 .with("name", slotName + "-postgres-connector")
-                .with("database.server.name", postgresConfig.getDatabase())
+                .with("database.server.name", URLEncoder.encode(postgresConfig.getDatabase()))
                 .with("database.hostname", postgresConfig.getHost())
                 .with("database.port", postgresConfig.getPort())
                 .with("database.user", postgresConfig.getUser())
@@ -113,7 +115,7 @@ public class PostgresDebeziumConfig {
                 .with("geometry.schema.name", "io.debezium.postgresql.type.Geometry")
                 .with("other.type", "io.tapdata.connector.postgres.converters.OtherConverter")
                 .with("other.schema.name", "io.debezium.postgresql.type.Other")
-                .with("heartbeat.interval.ms", 3000)
+//                .with("heartbeat.interval.ms", 3000)
                 .with("plugin.name", postgresConfig.getLogPluginName())
                 .with("max.queue.size", postgresConfig.getMaximumQueueSize())
                 .with("max.batch.size", postgresConfig.getMaximumQueueSize() / 8);
@@ -130,12 +132,12 @@ public class PostgresDebeziumConfig {
         }
         if (EmptyKit.isNotEmpty(observedTableList)) {
             //construct tableWhiteList with schema.table(,) as <public.Student,postgres.test>
-            String tableWhiteList = observedTableList.stream().map(v -> postgresConfig.getSchema() + "." + v).collect(Collectors.joining(", "));
+            String tableWhiteList = observedTableList.stream().map(v -> StringKit.escapeRegex(postgresConfig.getSchema()) + "." + StringKit.escapeRegex(v)).collect(Collectors.joining(", "));
             builder.with("table.whitelist", tableWhiteList);
         }
         if (EmptyKit.isNotEmpty(schemaTableMap)) {
             //construct tableWhiteList with schema.table(,) as <public.Student,postgres.test>
-            String tableWhiteList = schemaTableMap.entrySet().stream().map(v -> v.getValue().stream().map(l -> v.getKey() + "." + l).collect(Collectors.joining(", "))).collect(Collectors.joining(", "));
+            String tableWhiteList = schemaTableMap.entrySet().stream().map(v -> v.getValue().stream().map(l -> StringKit.escapeRegex(v.getKey()) + "." + StringKit.escapeRegex(l)).collect(Collectors.joining(", "))).collect(Collectors.joining(", "));
             builder.with("table.whitelist", tableWhiteList);
         }
         return builder.build();

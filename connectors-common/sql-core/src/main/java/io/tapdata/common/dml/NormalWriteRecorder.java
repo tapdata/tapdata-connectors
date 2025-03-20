@@ -35,6 +35,7 @@ public abstract class NormalWriteRecorder {
 
     protected final List<String> allColumn;
     protected List<String> updatedColumn;
+    protected List<String> removedColumn;
     protected final List<String> uniqueCondition;
     protected final Map<String, String> columnTypeMap;
     protected boolean hasPk = false;
@@ -88,6 +89,16 @@ public abstract class NormalWriteRecorder {
         if (largeSql) {
             largeSqlValues = new ArrayList<>();
         }
+    }
+
+    public void setRemovedColumn(List<String> removedColumn) {
+        this.removedColumn = removedColumn;
+        allColumn.removeAll(removedColumn);
+        updatedColumn.removeAll(removedColumn);
+        if (EmptyKit.isEmpty(updatedColumn)) {
+            updatedColumn.addAll(allColumn);
+        }
+        uniqueCondition.removeAll(removedColumn);
     }
 
     /**
@@ -279,11 +290,19 @@ public abstract class NormalWriteRecorder {
         throw new UnsupportedOperationException("largeInsert is not supported");
     }
 
+    protected String quoteAndEscape(String value) {
+        return escapeChar + StringKit.escape(value, escapeChar) + escapeChar;
+    }
+
+    protected String getSchemaAndTable() {
+        return quoteAndEscape(schema) + "." + quoteAndEscape(tapTable.getId());
+    }
+
     //直接插入
     protected void justInsert(Map<String, Object> after) throws SQLException {
         if (EmptyKit.isNull(preparedStatement)) {
-            String insertSql = "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                    + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
+            String insertSql = "INSERT INTO " + getSchemaAndTable() + " ("
+                    + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") " +
                     "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ";
             preparedStatement = connection.prepareStatement(insertSql);
         }
@@ -357,20 +376,20 @@ public abstract class NormalWriteRecorder {
     }
 
     protected String getLargeInsertSql() {
-        return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
+        return "INSERT INTO " + getSchemaAndTable() + " ("
+                + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") VALUES "
                 + String.join(", ", largeSqlValues);
     }
 
     protected String getUpdateSql(Map<String, Object> after, Map<String, Object> before, boolean containsNull) {
         if (!containsNull) {
-            return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
-                    after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
-                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+            return "UPDATE " + getSchemaAndTable() + " SET " +
+                    after.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(", ")) + " WHERE " +
+                    before.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(" AND "));
         } else {
-            return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
-                    after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
-                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ? IS NULL))")
+            return "UPDATE " + getSchemaAndTable() + " SET " +
+                    after.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(", ")) + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + quoteAndEscape(k) + "=? OR (" + quoteAndEscape(k) + " IS NULL AND ? IS NULL))")
                             .collect(Collectors.joining(" AND "));
         }
     }
@@ -383,10 +402,12 @@ public abstract class NormalWriteRecorder {
         uniqueCondition.stream().filter(before::containsKey).forEach(v -> lastBefore.put(v, before.get(v)));
         //Mongo为源端时，非_id为更新条件时，lastBefore为空，此时需要原始before直接删除
         if (EmptyKit.isEmpty(lastBefore)) {
-            justDelete(before, listResult);
-        } else {
-            justDelete(lastBefore, listResult);
+            lastBefore.putAll(before);
         }
+        if (EmptyKit.isNotEmpty(removedColumn)) {
+            removedColumn.forEach(lastBefore::remove);
+        }
+        justDelete(lastBefore, listResult);
         preparedStatement.addBatch();
     }
 
@@ -417,11 +438,11 @@ public abstract class NormalWriteRecorder {
 
     protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
         if (!containsNull) {
-            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
-                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+            return "DELETE FROM " + getSchemaAndTable() + " WHERE " +
+                    before.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(" AND "));
         } else {
-            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
-                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ? IS NULL))")
+            return "DELETE FROM " + getSchemaAndTable() + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + quoteAndEscape(k) + "=? OR (" + quoteAndEscape(k) + " IS NULL AND ? IS NULL))")
                             .collect(Collectors.joining(" AND "));
         }
     }

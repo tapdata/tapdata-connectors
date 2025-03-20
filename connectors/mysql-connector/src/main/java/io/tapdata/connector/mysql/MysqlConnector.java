@@ -7,6 +7,7 @@ import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.ddl.type.DDLParserType;
+import io.tapdata.common.dml.NormalRecordWriter;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
@@ -16,13 +17,15 @@ import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
+import io.tapdata.entity.TapConstraintException;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.codec.ToTapValueCodec;
-import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.schema.TapConstraint;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
@@ -68,6 +71,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * @author samuel
@@ -87,6 +91,9 @@ public class MysqlConnector extends CommonDbConnector {
     protected ZoneId zoneId;
     protected ZoneId dbZoneId;
     protected int zoneOffsetHour;
+    protected long autoIncrementValue = 1;
+    protected long autoIncCacheValue = 1;
+    protected long autoStartValue = 1;
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
@@ -108,6 +115,12 @@ public class MysqlConnector extends CommonDbConnector {
         commonDbConfig = mysqlConfig;
         jdbcContext = mysqlJdbcContext;
         commonSqlMaker = new CommonSqlMaker('`');
+        if (Boolean.TRUE.equals(mysqlConfig.getCreateAutoInc())) {
+            commonSqlMaker.createAutoInc(true);
+        }
+        if (Boolean.TRUE.equals(mysqlConfig.getApplyDefault())) {
+            commonSqlMaker.applyDefault(true);
+        }
         tapLogger = tapConnectionContext.getLog();
         exceptionCollector = new MysqlExceptionCollector();
         ((MysqlExceptionCollector) exceptionCollector).setMysqlConfig(mysqlConfig);
@@ -146,6 +159,33 @@ public class MysqlConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
         started.set(true);
+    }
+
+    @Override
+    public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws SQLException {
+        mysqlJdbcContext.normalQuery("SHOW VARIABLES LIKE 'auto_inc%'", rs -> {
+            while (rs.next()) {
+                String variableName = rs.getString("Variable_name");
+                if ("auto_increment_increment".equals(variableName)) {
+                    autoIncrementValue = rs.getLong("Value");
+                } else if ("auto_increment_offset".equals(variableName)) {
+                    autoStartValue = rs.getLong("Value");
+                }
+            }
+        });
+        mysqlJdbcContext.normalQuery("SHOW VARIABLES LIKE 'innodb_autoinc_lock_mode'", rs -> {
+            if (rs.next()) {
+                String value = rs.getString("Value");
+                if ("0".equals(value)) {
+                    autoIncCacheValue = 1;
+                } else if ("1".equals(value)) {
+                    autoIncCacheValue = 100;
+                } else {
+                    autoIncCacheValue = 1000;
+                }
+            }
+        });
+        super.discoverSchema(connectionContext, tables, tableSize, consumer);
     }
 
     @Override
@@ -236,8 +276,12 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
         connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
         connectorFunctions.supportWriteRecord(this::writeRecord);
+        connectorFunctions.supportAfterInitialSync(this::afterInitialSync);
         connectorFunctions.supportCreateIndex(this::createIndex);
         connectorFunctions.supportQueryIndexes(this::queryIndexes);
+        connectorFunctions.supportCreateConstraint(this::createConstraint);
+        connectorFunctions.supportQueryConstraints(this::queryConstraint);
+        connectorFunctions.supportDropConstraint(this::dropConstraint);
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
@@ -395,7 +439,11 @@ public class MysqlConnector extends CommonDbConnector {
     }
 
     protected TapField makeTapField(DataMap dataMap) {
-        return new MysqlColumn(dataMap).withVersion(version).getTapField();
+        return new MysqlColumn(dataMap).withVersion(version)
+                .withSeedValue(autoStartValue)
+                .withIncrementValue(autoIncrementValue)
+                .withAutoIncCacheValue(autoIncCacheValue)
+                .getTapField();
     }
 
     protected CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws SQLException {
@@ -412,7 +460,9 @@ public class MysqlConnector extends CommonDbConnector {
                 tapLogger.info("Table \"{}.{}\" exists, skip auto create table", database, tableId);
             } else {
                 String mysqlVersion = mysqlJdbcContext.queryVersion();
-                SqlMaker sqlMaker = new MysqlMaker();
+                MysqlMaker sqlMaker = new MysqlMaker();
+                sqlMaker.setCreateAutoInc(mysqlConfig.getCreateAutoInc());
+                sqlMaker.setApplyDefault(mysqlConfig.getApplyDefault());
                 if (null == tapCreateTableEvent.getTable()) {
                     tapLogger.warn("Create table event's tap table is null, will skip it: " + tapCreateTableEvent);
                     return createTableOptions;
@@ -472,9 +522,23 @@ public class MysqlConnector extends CommonDbConnector {
         return createTableOptions;
     }
 
+    protected void beforeWriteRecord(TapTable tapTable) throws SQLException {
+        super.beforeWriteRecord(tapTable);
+        List<String> autoIncFields = new ArrayList<>();
+        if (mysqlConfig.getCreateAutoInc()) {
+            if (!writtenTableMap.get(tapTable.getId()).containsKey(HAS_AUTO_INCR)) {
+                List<TapField> fields = tapTable.getNameFieldMap().values().stream().filter(TapField::getAutoInc).collect(Collectors.toList());
+                autoIncFields.addAll(fields.stream().map(TapField::getName).collect(Collectors.toList()));
+                writtenTableMap.get(tapTable.getId()).put(HAS_AUTO_INCR, autoIncFields);
+            } else {
+                autoIncFields.addAll(writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>()));
+            }
+        }
+    }
+
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
-//        WriteListResult<TapRecordEvent> writeListResult = this.mysqlWriter.write(tapConnectorContext, tapTable, tapRecordEvents);
-//        consumer.accept(writeListResult);
+        beforeWriteRecord(tapTable);
+        List<String> autoIncFields = writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>());
         String insertDmlPolicy = tapConnectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
             insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
@@ -483,7 +547,8 @@ public class MysqlConnector extends CommonDbConnector {
         if (updateDmlPolicy == null) {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
-        if(isTransaction){
+        NormalRecordWriter mysqlRecordWriter;
+        if (isTransaction) {
             String threadName = Thread.currentThread().getName();
             Connection connection;
             if (transactionConnectionMap.containsKey(threadName)) {
@@ -492,19 +557,53 @@ public class MysqlConnector extends CommonDbConnector {
                 connection = mysqlJdbcContext.getConnection();
                 transactionConnectionMap.put(threadName, connection);
             }
-            new MysqlRecordWriter(mysqlJdbcContext,connection, tapTable)
+            mysqlRecordWriter = new MysqlRecordWriter(mysqlJdbcContext, connection, tapTable)
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(tapLogger)
-                    .write(tapRecordEvents, consumer, this::isAlive);
-        }else{
-            new MysqlRecordWriter(mysqlJdbcContext, tapTable)
-                    .setInsertPolicy(insertDmlPolicy)
-                    .setUpdatePolicy(updateDmlPolicy)
-                    .setTapLogger(tapLogger)
-                    .write(tapRecordEvents, consumer, this::isAlive);
-        }
+                    .setTapLogger(tapLogger);
 
+        } else {
+            mysqlRecordWriter = new MysqlRecordWriter(mysqlJdbcContext, tapTable)
+                    .setInsertPolicy(insertDmlPolicy)
+                    .setUpdatePolicy(updateDmlPolicy)
+                    .setTapLogger(tapLogger);
+        }
+        if (EmptyKit.isNotEmpty(tapTable.getConstraintList())) {
+            mysqlRecordWriter.closeConstraintCheck();
+        }
+        if (mysqlConfig.getCreateAutoInc() && EmptyKit.isNotEmpty(autoIncFields)
+                && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
+            mysqlRecordWriter.setAutoIncFields(autoIncFields);
+            mysqlRecordWriter.write(tapRecordEvents, consumer, this::isAlive);
+            if (EmptyKit.isNotEmpty(mysqlRecordWriter.getAutoIncMap())) {
+                List<String> alterSqls = new ArrayList<>();
+                mysqlRecordWriter.getAutoIncMap().forEach((k, v) -> {
+                    alterSqls.add("alter table " + getSchemaAndTable(tapTable.getId()) + " auto_increment " + (Long.parseLong(String.valueOf(v)) + mysqlConfig.getAutoIncJumpValue()));
+                });
+                jdbcContext.batchExecute(alterSqls);
+            }
+        } else {
+            mysqlRecordWriter.write(tapRecordEvents, consumer, this::isAlive);
+        }
+    }
+
+    protected void afterInitialSync(TapConnectorContext connectorContext, TapTable tapTable) throws Throwable {
+        beforeWriteRecord(tapTable);
+        List<String> autoIncFields = writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>());
+        autoIncFields.forEach(field -> {
+            try (
+                    Connection connection = jdbcContext.getConnection();
+                    Statement statement = connection.createStatement();
+                    ResultSet resultSet = statement.executeQuery("select max(" + field + ") from " + getSchemaAndTable(tapTable.getId()))
+            ) {
+                if (resultSet.next()) {
+                    statement.execute("alter table " + getSchemaAndTable(tapTable.getId()) + " auto_increment " + (resultSet.getLong(1) + mysqlConfig.getAutoIncJumpValue()));
+                    connection.commit();
+                }
+            } catch (SQLException e) {
+                tapLogger.warn("Failed to get auto increment value for table {} field {}", tapTable.getId(), field, e);
+            }
+        });
     }
 
     protected Map<String, Object> filterTimeForMysql(
@@ -644,10 +743,9 @@ public class MysqlConnector extends CommonDbConnector {
     @Override
     protected String getBatchReadSelectSql(TapTable tapTable) {
         if (tapTable.getNameFieldMap().size() > 50) {
-            return String.format("SELECT * FROM `%s`.`%s`", mysqlConfig.getDatabase(), tapTable.getId());
+            return String.format("SELECT * FROM %s", getSchemaAndTable(tapTable.getId()));
         } else {
-            String columns = String.join("`, `", tapTable.getNameFieldMap().keySet());
-            return String.format("SELECT `%s` FROM `%s`.`%s`", columns, mysqlConfig.getDatabase(), tapTable.getId());
+            return super.getBatchReadSelectSql(tapTable);
         }
     }
 
@@ -824,6 +922,70 @@ public class MysqlConnector extends CommonDbConnector {
                 consumer.accept(TapHashResult.create().withHash(resultSet.getString(1)));
             }
         });
+    }
+
+    protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
+            List<String> sqls = new ArrayList<>();
+            sqls.add("SET FOREIGN_KEY_CHECKS=0");
+            sqls.add("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
+            jdbcContext.batchExecute(sqls);
+        } else {
+            tapLogger.warn("Table {} not exists, skip truncate", tapClearTableEvent.getTableId());
+        }
+    }
+
+    protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
+            List<String> sqls = new ArrayList<>();
+            sqls.add("SET FOREIGN_KEY_CHECKS=0");
+            sqls.add("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
+            jdbcContext.batchExecute(sqls);
+        } else {
+            tapLogger.warn("Table {} not exists, skip drop", tapDropTableEvent.getTableId());
+        }
+    }
+
+    protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
+        List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
+        if (EmptyKit.isNotEmpty(constraintList)) {
+            List<String> constraintSqlList = new ArrayList<>();
+            TapConstraintException exception = new TapConstraintException(tapTable.getId());
+            constraintList.forEach(c -> {
+                String sql = getCreateConstraintSql(tapTable, c);
+                if (create) {
+                    try {
+                        jdbcContext.execute(sql);
+                    } catch (Exception e) {
+                        if (e instanceof SQLException && ((SQLException) e).getErrorCode() == 3780) {
+                            TapTable referenceTable = connectorContext.getTableMap().get(c.getReferencesTableName());
+                            c.getMappingFields().stream().filter(m -> Boolean.TRUE.equals(referenceTable.getNameFieldMap().get(m.getReferenceKey()).getAutoInc()) && referenceTable.getNameFieldMap().get(m.getReferenceKey()).getDataType().startsWith("decimal")).forEach(m -> {
+                                try {
+                                    jdbcContext.execute("alter table " + getSchemaAndTable(tapTable.getId()) + " modify `" + m.getForeignKey() + "` bigint");
+                                } catch (SQLException e1) {
+                                    exception.addException(c, "alter table modify column failed", e1);
+                                }
+                            });
+                            try {
+                                jdbcContext.execute(sql);
+                            } catch (Exception e1) {
+                                exception.addException(c, sql, e1);
+                            }
+                        } else {
+                            exception.addException(c, sql, e);
+                        }
+                    }
+                } else {
+                    constraintSqlList.add(sql);
+                }
+            });
+            if (!create) {
+                createConstraintEvent.setConstraintSqlList(constraintSqlList);
+            }
+            if (EmptyKit.isNotEmpty(exception.getExceptions())) {
+                throw exception;
+            }
+        }
     }
 
 }

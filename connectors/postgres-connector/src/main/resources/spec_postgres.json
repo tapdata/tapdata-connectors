@@ -4,7 +4,7 @@
     "icon": "icons/postgres.png",
     "doc" : "${doc}",
     "id": "postgres",
-    "tags": ["Database", "ssl", "doubleActive"]
+    "tags": ["Database", "ssl", "doubleActive", "disableForeignKey"]
   },
   "configOptions": {
     "capabilities":[
@@ -15,6 +15,10 @@
       {
         "id": "dml_update_policy",
         "alternatives": ["ignore_on_nonexists", "insert_on_nonexists", "log_on_nonexists"]
+      },
+      {
+        "id": "dml_check_policy",
+        "alternatives": ["ignore_all_check", "default_check"]
       },
       {
         "id": "api_server_supported"
@@ -303,6 +307,26 @@
             }
           ]
         },
+        "tableOwner": {
+          "type": "string",
+          "title": "${tableOwner}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 3,
+          "x-decorator-props": {
+            "tooltip": "${tableOwnerTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "createAutoInc": {
           "type": "boolean",
           "title": "${createAutoInc}",
@@ -343,11 +367,30 @@
             }
           ]
         },
+        "autoIncCacheValue": {
+          "required": true,
+          "type": "string",
+          "title": "${autoIncCacheValue}",
+          "default": 100,
+          "x-index": 7,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".createAutoInc"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "applyDefault": {
           "type": "boolean",
           "title": "${applyDefault}",
           "default": false,
-          "x-index": 7,
+          "x-index": 8,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-decorator-props": {
@@ -516,9 +559,12 @@
       "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
       "closeNotNull": "Ignore NotNull",
       "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded",
+      "tableOwner": "Specify table owner",
+      "tableOwnerTooltip": "You can specify the table owner, if not specified, it defaults to the current user. If the permission is insufficient, use a user with sufficient permissions to execute: grant <specified owner> to <data synchronization user>",
       "createAutoInc": "Synchronize auto-increment columns",
       "createAutoIncTooltip": "Only PG 10 and above are supported. When the switch is turned on, the auto-increment attribute is synchronized when entering the incremental",
       "autoIncJumpValue": "Auto-increment key jump value",
+      "autoIncCacheValue": "Auto-increment key cache value",
       "applyDefault": "Apply default value",
       "applyDefaultTooltip": "When the switch is turned on, the default value is applied to the target. If there are unadapted functions or expressions, it may cause an error",
       "hashSplit": "Hash split",
@@ -551,9 +597,12 @@
       "timezoneTip": "指定时区，否则不做时区处理",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "开关打开时会将非空限制丢弃",
+      "tableOwner": "指定表所有者",
+      "tableOwnerTooltip": "可以指定表所有者，不指定则默认为当前用户，如果权限不足请使用足够权限的用户执行：grant <被指定owner> to <数据同步用户> ",
       "createAutoInc": "同步自增列",
       "createAutoIncTooltip": "仅支持PG10版本以上，开关打开时会在进入增量时同步自增属性",
       "autoIncJumpValue": "自增键跳跃值",
+      "autoIncCacheValue": "自增键缓存值",
       "applyDefault": "应用默认值",
       "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错",
       "hashSplit": "哈希分片",
@@ -586,9 +635,12 @@
       "timezoneTip": "指定時區，否則不做時區處理",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "開關打開時會將非空限制丟棄",
+      "tableOwner": "指定表所有者",
+      "tableOwnerTooltip": "可以指定表所有者，不指定則默認為當前用戶，如果權限不足請使用足夠權限的用戶執行：grant <被指定owner> to <數據同步用戶> ",
       "createAutoInc": "同步自增列",
       "createAutoIncTooltip": "僅支持PG10版本以上，開關打開時會在進入增量時同步自增屬性",
       "autoIncJumpValue": "自增鍵跳躍值",
+      "autoIncCacheValue": "自增鍵緩存值",
       "applyDefault": "應用默認值",
       "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯",
       "hashSplit": "哈希分片",
@@ -845,12 +897,10 @@
       "queryOnly": true
     },
     "xml": {
-      "to": "TapString",
-      "queryOnly": true
+      "to": "TapXml"
     },
     "json": {
-      "to": "TapString",
-      "queryOnly": true
+      "to": "TapJson"
     },
     "tsvector": {
       "to": "TapString",

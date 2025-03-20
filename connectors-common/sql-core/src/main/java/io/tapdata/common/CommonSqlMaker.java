@@ -7,6 +7,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.Projection;
 import io.tapdata.pdk.apis.entity.QueryOperator;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
@@ -29,11 +30,13 @@ import java.util.stream.Collectors;
  */
 public class CommonSqlMaker {
 
-    private char escapeChar = '"';
+    protected char escapeChar = '"';
     public static final String COLLATE = "COLLATE";
     protected Boolean closeNotNull = false;
     protected Boolean createAutoInc = false;
+    protected long autoIncCacheValue = 1;
     protected Boolean applyDefault = false;
+    protected String schema;
 
     public CommonSqlMaker() {
 
@@ -53,8 +56,18 @@ public class CommonSqlMaker {
         return (T) this;
     }
 
+    public <T extends CommonSqlMaker> T autoIncCacheValue(long autoIncCacheValue) {
+        this.autoIncCacheValue = autoIncCacheValue;
+        return (T) this;
+    }
+
     public <T extends CommonSqlMaker> T applyDefault(Boolean applyDefault) {
         this.applyDefault = applyDefault;
+        return (T) this;
+    }
+
+    public <T extends CommonSqlMaker> T schema(String schema) {
+        this.schema = schema;
         return (T) this;
     }
 
@@ -83,19 +96,23 @@ public class CommonSqlMaker {
             if (tapField.getDataType() == null) {
                 return "";
             }
-            builder.append(escapeChar).append(tapField.getName()).append(escapeChar).append(' ').append(tapField.getDataType()).append(' ');
-            if (Boolean.TRUE.equals(applyDefault) && EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
+            buildDataTypeDefinition(builder, tapField);
+            if (Boolean.TRUE.equals(applyDefault) && EmptyKit.isNotNull(tapField.getDefaultValue())) {
                 buildDefaultDefinition(builder, tapField);
             }
-            buildNullDefinition(builder, tapField);
             if (Boolean.TRUE.equals(createAutoInc) && Boolean.TRUE.equals(tapField.getAutoInc())) {
                 buildAutoIncDefinition(builder, tapField);
             }
+            buildNullDefinition(builder, tapField);
             if (needComment) {
                 buildCommentDefinition(builder, tapField);
             }
             return builder.toString();
         }).collect(Collectors.joining(", "));
+    }
+
+    protected void buildDataTypeDefinition(StringBuilder builder, TapField tapField) {
+        builder.append(escapeChar).append(StringKit.escape(tapField.getName(), escapeChar)).append(escapeChar).append(' ').append(tapField.getDataType()).append(' ');
     }
 
     protected void buildNullDefinition(StringBuilder builder, TapField tapField) {
@@ -105,14 +122,20 @@ public class CommonSqlMaker {
     }
 
     protected void buildDefaultDefinition(StringBuilder builder, TapField tapField) {
-        if (EmptyKit.isNotNull(tapField.getDefaultValue()) && !"".equals(tapField.getDefaultValue())) {
+        if (EmptyKit.isNotNull(tapField.getDefaultValue())) {
             builder.append("DEFAULT").append(' ');
-            if (tapField.getDefaultValue() instanceof Number) {
+            if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
+                builder.append(buildDefaultFunction(tapField)).append(' ');
+            } else if (tapField.getDefaultValue() instanceof Number || Boolean.TRUE.equals(tapField.getAutoInc())) {
                 builder.append(tapField.getDefaultValue()).append(' ');
             } else {
                 builder.append("'").append(tapField.getDefaultValue()).append("' ");
             }
         }
+    }
+
+    protected String buildDefaultFunction(TapField tapField) {
+        return "'" + tapField.getDefaultValue() + "' ";
     }
 
     protected void buildAutoIncDefinition(StringBuilder builder, TapField tapField) {
@@ -301,8 +324,13 @@ public class CommonSqlMaker {
         StringBuilder builder = new StringBuilder();
         if (EmptyKit.isNotEmpty(record)) {
             record.forEach((fieldName, value) -> {
-                builder.append(escapeChar).append(fieldName).append(escapeChar).append(operator);
-                builder.append(buildValueString(value));
+                if (null != value) {
+                    builder.append(escapeChar).append(fieldName).append(escapeChar).append(operator);
+                    builder.append(buildValueString(value));
+                } else {
+                    builder.append(escapeChar).append(fieldName).append(escapeChar).append(' ');
+                    builder.append("IS NULL");
+                }
                 builder.append(' ').append(splitSymbol).append(' ');
             });
             builder.delete(builder.length() - splitSymbol.length() - 1, builder.length());

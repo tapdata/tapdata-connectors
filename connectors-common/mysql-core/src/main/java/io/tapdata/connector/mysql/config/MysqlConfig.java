@@ -7,6 +7,7 @@ import io.tapdata.kit.EmptyKit;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.util.*;
 
 public class MysqlConfig extends CommonDbConfig {
@@ -72,7 +73,7 @@ public class MysqlConfig extends CommonDbConfig {
         if (additionalString.startsWith("?")) {
             additionalString = additionalString.substring(1);
         }
-        StringBuilder sbURL = new StringBuilder("jdbc:").append(getDbType()).append("://").append(getHost()).append(":").append(getPort()).append("/").append(getDatabase());
+        StringBuilder sbURL = new StringBuilder("jdbc:").append(getDbType()).append("://").append(getHost()).append(":").append(getPort()).append("/").append(URLEncoder.encode(getDatabase()));
 
         Map<String, String> properties = new HashMap<>();
         if (StringUtils.isNotBlank(additionalString)) {
