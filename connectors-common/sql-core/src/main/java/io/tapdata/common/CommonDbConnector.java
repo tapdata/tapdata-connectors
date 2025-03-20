@@ -450,6 +450,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
+        if (!Boolean.TRUE.equals(commonDbConfig.getApplyForeignKey())) {
+            return;
+        }
         List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
         if (EmptyKit.isNotEmpty(constraintList)) {
             List<String> constraintSqlList = new ArrayList<>();
