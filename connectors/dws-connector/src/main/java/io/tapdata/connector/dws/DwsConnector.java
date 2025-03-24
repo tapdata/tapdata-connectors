@@ -101,7 +101,7 @@ public class DwsConnector extends PostgresConnector {
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportGetTableNamesFunction(this::getTableNames);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> postgresJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> dwsJdbcContext.getConnection(), this::isAlive, c));
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
@@ -211,7 +211,7 @@ public class DwsConnector extends PostgresConnector {
     }
 
     protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
-        DataMap dataMap = postgresJdbcContext.getTableInfo(tableName);
+        DataMap dataMap = dwsJdbcContext.getTableInfo(tableName);
         TableInfo tableInfo = TableInfo.create();
         tableInfo.setNumOfRows(new BigDecimal(dataMap.getString("rowcount")).longValue());
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("size")));
@@ -286,7 +286,7 @@ public class DwsConnector extends PostgresConnector {
             if (transactionConnectionMap.containsKey(threadName)) {
                 connection = transactionConnectionMap.get(threadName);
             } else {
-                connection = postgresJdbcContext.getConnection();
+                connection = dwsJdbcContext.getConnection();
                 transactionConnectionMap.put(threadName, connection);
             }
             new DwsRecordWriter(dwsJdbcContext, connection, tapTable, hasUniqueIndex)
