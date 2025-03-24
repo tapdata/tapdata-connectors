@@ -196,6 +196,35 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         return serverId.get();
     }
 
+    public void streamQueryWithTimeout(String querySql, ResultSetConsumer resultSetConsumer, ArrayList<String> timeoutSqls) throws Exception {
+        TapLogger.debug(TAG, "Execute query with stream, sql: " + querySql);
+        try (
+                Connection connection = getConnection();
+                Statement statement = connection.createStatement();
+        ) {
+            if (statement instanceof HikariProxyStatement) {
+                StatementImpl statementImpl = statement.unwrap(StatementImpl.class);
+                if (null != statementImpl) {
+                    statementImpl.enableStreamingResults();
+                }
+            }
+            if (!timeoutSqls.isEmpty()) {
+                for (String sql : timeoutSqls) {
+                    statement.execute(sql);
+                }
+            }
+            try (
+                    ResultSet resultSet = statement.executeQuery(querySql)
+            ) {
+                if (null != resultSet) {
+                    resultSetConsumer.accept(resultSet);
+                }
+            }
+        } catch (SQLException e) {
+            throw new Exception("Execute steaming query failed, sql: " + querySql + ", code: " + e.getSQLState() + "(" + e.getErrorCode() + "), error: " + e.getMessage(), e);
+        }
+    }
+
     public void queryWithStream(String sql, ResultSetConsumer resultSetConsumer) throws Throwable {
         TapLogger.debug(TAG, "Execute query with stream, sql: " + sql);
         try (
