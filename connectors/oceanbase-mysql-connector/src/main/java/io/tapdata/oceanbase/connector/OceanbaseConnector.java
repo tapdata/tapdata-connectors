@@ -215,7 +215,7 @@ public class OceanbaseConnector extends MysqlConnector {
 
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
-        mysqlJdbcContext.query(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
+        mysqlJdbcContext.queryWithStream(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
     }
 
     protected Map<String, Object> filterTimeForMysql(
