@@ -120,13 +120,13 @@
           "required": true,
           "type": "string",
           "title": "${maxSplit}",
-          "default": 20,
+          "default": 16,
           "x-index": 12,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-component-props": {
             "min": 2,
-            "max": 10000
+            "max": 1000000
           },
           "x-reactions": [
             {
@@ -143,13 +143,13 @@
           "required": true,
           "type": "string",
           "title": "${batchReadThreadSize}",
-          "default": 4,
+          "default": 8,
           "x-index": 13,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-component-props": {
             "min": 1,
-            "max": 16
+            "max": 32
           },
           "x-reactions": [
             {
@@ -157,27 +157,6 @@
               "fulfill": {
                 "state": {
                   "display": "{{!$deps[0].length && $deps[1] ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ]
-        },
-        "maximumQueueSize": {
-          "type": "string",
-          "title": "${maximumQueueSize}",
-          "default": 800,
-          "x-index": 14,
-          "x-decorator": "FormItem",
-          "x-component": "InputNumber",
-          "x-decorator-props": {
-            "tooltip": "${maximumQueueSizeTip}"
-          },
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -403,7 +382,10 @@
       "rpcPort": "RPC Port",
       "logProxyPort": "Log Proxy Port",
       "timezone": "timezone",
-      "doc": "docs/oceanbase_mysql_en_US.md"
+      "doc": "docs/oceanbase_mysql_en_US.md",
+      "hashSplit": "Single Table Concurrent Read",
+      "maxSplit": "Max Split Count for Single Table",
+      "batchReadThreadSize": "Single Table Concurrent Read Thread Size"
     },
     "zh_CN": {
       "host": "地址",
@@ -416,7 +398,10 @@
       "rpcPort": "RPC端口",
       "logProxyPort": "日志代理端口",
       "timezone": "时区",
-      "doc": "docs/oceanbase_mysql_zh_CN.md"
+      "doc": "docs/oceanbase_mysql_zh_CN.md",
+      "hashSplit": "单表并发读",
+      "maxSplit": "单表最大分片数",
+      "batchReadThreadSize": "单表并发读线程数"
     },
     "zh_TW": {
       "host": "地址",
@@ -429,7 +414,10 @@
       "rpcPort": "RPC端口",
       "logProxyPort": "日誌代理端口",
       "timezone": "時區",
-      "doc": "docs/oceanbase_mysql_zh_TW.md"
+      "doc": "docs/oceanbase_mysql_zh_TW.md",
+      "hashSplit": "單表並發讀",
+      "maxSplit": "單表最大分片數",
+      "batchReadThreadSize": "單表並發讀線程數"
     }
   },
   "dataTypes": {

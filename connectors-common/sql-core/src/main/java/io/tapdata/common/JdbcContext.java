@@ -9,6 +9,7 @@ import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -92,6 +93,27 @@ public abstract class JdbcContext implements AutoCloseable {
             statement.setFetchSize(2000); //protected from OM
             try (
                     ResultSet resultSet = statement.executeQuery(sql)
+            ) {
+                if (EmptyKit.isNotNull(resultSet)) {
+                    resultSetConsumer.accept(resultSet);
+                }
+            }
+        }
+    }
+
+    public void streamQueryWithTimeout(String querySql, ResultSetConsumer resultSetConsumer, ArrayList<String> timeoutSqls) throws Exception {
+        try (
+                Connection connection = getConnection();
+                Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)
+        ) {
+            if (!timeoutSqls.isEmpty()) {
+                for (String sql : timeoutSqls) {
+                    statement.execute(sql);
+                }
+            }
+            statement.setFetchSize(Integer.MIN_VALUE);
+            try (
+                    ResultSet resultSet = statement.executeQuery(querySql)
             ) {
                 if (EmptyKit.isNotNull(resultSet)) {
                     resultSetConsumer.accept(resultSet);
