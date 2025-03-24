@@ -733,11 +733,9 @@ public class MongodbConnector extends ConnectorBase {
 		boolean isShardCollection = shardCollection instanceof Boolean && ((Boolean) shardCollection);
 		if (isShardCollection && null != table) {
 				isShardCollection = false;
-				TapIndexEx partitionIndex;
+				TapIndexEx partitionIndex = null;
 				if(null != table.getTableAttr().get("partitionIndex")){
 					partitionIndex = JSONObject.parseObject((String)table.getTableAttr().get("partitionIndex"), TapIndexEx.class);
-				}else {
-					partitionIndex = table.getPartitionIndex();
 				}
 				if (null != partitionIndex) {
 					Boolean unique = Optional.ofNullable(partitionIndex.getUnique()).orElse(false);
