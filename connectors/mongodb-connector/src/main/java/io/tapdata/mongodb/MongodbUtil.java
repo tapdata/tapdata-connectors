@@ -361,18 +361,22 @@ public class MongodbUtil {
 		return key;
 	}
 
-	private static boolean isMongoShards(MongoClient mongoClient) {
-		MongoCollection<Document> collection = mongoClient.getDatabase("config").getCollection("shards");
-		final MongoCursor<Document> cursor = collection.find().iterator();
-		if (cursor.hasNext()) {
-			return true;
+	private static boolean isMongoShards(String mongoUri) {
+		try (MongoClient mongoClient = MongoClients.create(mongoUri)) {
+			MongoCollection<Document> collection = mongoClient.getDatabase("config").getCollection("shards");
+			final MongoCursor<Document> cursor = collection.find().iterator();
+			if (cursor.hasNext()) {
+				return true;
+			}
+			return false;
+		} catch (Exception e) {
+			return false;
 		}
-		return false;
 	}
 
 	// 写一个方法, 接收 mongoUri, 如果参数里没有包含 replicaSet, 返回 mongoUri, 但是里面只有主节点的地址
 	private static String getPrimaryUri(String mongoUri) {
-		if (mongoUri.contains("replicaSet") || mongoUri.contains("mongodb+srv:")) {
+		if (mongoUri.contains("replicaSet") || mongoUri.contains("mongodb+srv:") || isMongoShards(mongoUri)) {
 			return mongoUri;
 		}
 
@@ -380,17 +384,12 @@ public class MongodbUtil {
 		ConnectionString connectionString = new ConnectionString(mongoUri);
 		Set<String> invalidHosts = new HashSet<>();
 		try {
-			AtomicBoolean isShards = new AtomicBoolean(false);
 			List<String> hosts = connectionString.getHosts();
 			if (EmptyKit.isNotEmpty(hosts)) {
 				hosts.forEach(host -> {
 					MongoClient client = null;
 					try {
 						client = MongoClients.create("mongodb://" + host);
-						if (isMongoShards(client)) {
-							isShards.set(true);
-							return;
-						}
 						MongoDatabase database = client.getDatabase("admin");
 						Document result = database.runCommand(new Document("isMaster", 1));
 						if (result.getBoolean("ismaster")) {
@@ -407,9 +406,6 @@ public class MongodbUtil {
 						}
 					}
 				});
-			}
-			if (isShards.get()) {
-				return mongoUri;
 			}
 		} catch (Exception ignored) {
 		}
