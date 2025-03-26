@@ -37,6 +37,7 @@ public class CommonSqlMaker {
     protected long autoIncCacheValue = 1;
     protected Boolean applyDefault = false;
     protected String schema;
+    protected String dbVersion;
 
     public CommonSqlMaker() {
 
@@ -68,6 +69,11 @@ public class CommonSqlMaker {
 
     public <T extends CommonSqlMaker> T schema(String schema) {
         this.schema = schema;
+        return (T) this;
+    }
+
+    public <T extends CommonSqlMaker> T dbVersion(String dbVersion) {
+        this.dbVersion = dbVersion;
         return (T) this;
     }
 
