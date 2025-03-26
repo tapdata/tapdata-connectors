@@ -38,6 +38,9 @@ public class PostgresSqlMaker extends CommonSqlMaker {
     }
 
     protected void buildDefaultDefinition(StringBuilder builder, TapField tapField) {
+        if (EmptyKit.isNotNull(dbVersion) && Integer.parseInt(dbVersion) < 100000 && EmptyKit.isNotBlank(tapField.getSequenceName())) {
+            return;
+        }
         if (EmptyKit.isNotNull(tapField.getDefaultValue())) {
             builder.append("DEFAULT").append(' ');
             if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
