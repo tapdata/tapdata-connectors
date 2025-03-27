@@ -971,7 +971,7 @@ public class MysqlConnector extends CommonDbConnector {
                             } catch (Exception e1) {
                                 exception.addException(c, sql, e1);
                             }
-                        } else if (e instanceof SQLException && ((SQLException) e).getErrorCode() == 1826) {
+                        } else if (e instanceof SQLException && (((SQLException) e).getErrorCode() == 1826 || ((SQLException) e).getErrorCode() == 1823)) {
                             String rename = c.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
                             c.setName(rename);
                             sql = getCreateConstraintSql(tapTable, c);
