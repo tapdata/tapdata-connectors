@@ -4,7 +4,6 @@ import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.mysql.MysqlConnector;
 import io.tapdata.connector.mysql.MysqlExceptionCollector;
-import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
 import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -19,6 +18,7 @@ import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.oceanbase.OceanbaseJdbcContext;
 import io.tapdata.oceanbase.OceanbaseTest;
 import io.tapdata.oceanbase.bean.OceanbaseConfig;
 import io.tapdata.oceanbase.cdc.OceanbaseReader;
@@ -163,7 +163,7 @@ public class OceanbaseConnector extends MysqlConnector {
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
         mysqlConfig = new OceanbaseConfig().load(tapConnectionContext.getConnectionConfig());
-        mysqlJdbcContext = new MysqlJdbcContextV2(mysqlConfig);
+        mysqlJdbcContext = new OceanbaseJdbcContext(mysqlConfig);
         commonDbConfig = mysqlConfig;
         jdbcContext = mysqlJdbcContext;
         tapLogger = tapConnectionContext.getLog();
