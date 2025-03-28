@@ -131,18 +131,21 @@ public class NormalRecordWriter {
                 connection.rollback();
             } catch (Exception ignore) {
             }
-            exceptionCollector.collectTerminateByServer(e);
-            exceptionCollector.collectViolateNull(null, e);
-            TapRecordEvent errorEvent = null;
-            if (EmptyKit.isNotNull(listResult.getErrorMap())) {
-                errorEvent = listResult.getErrorMap().keySet().stream().findFirst().orElse(null);
+            exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), null, null, e);
+            for (TapRecordEvent event : tapRecordEvents) {
+                try {
+                    write(Collections.singletonList(event), writeListResultConsumer, isAlive);
+                } catch (SQLException e1) {
+                    exceptionCollector.collectTerminateByServer(e1);
+                    exceptionCollector.collectViolateNull(null, e1);
+                    exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), null, null, e1);
+                    exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e1);
+                    exceptionCollector.collectWriteType(null, null, null, e1);
+                    exceptionCollector.collectWriteLength(null, null, null, e1);
+                    exceptionCollector.revealException(e1);
+                    throw new RuntimeException(String.format("Error occurred when retrying write record: %s", event), e1);
+                }
             }
-            exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), errorEvent, null, e);
-            exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
-            exceptionCollector.collectWriteType(null, null, errorEvent, e);
-            exceptionCollector.collectWriteLength(null, null, errorEvent, e);
-            exceptionCollector.revealException(e);
-            throw e;
         } finally {
             insertRecorder.releaseResource();
             updateRecorder.releaseResource();
