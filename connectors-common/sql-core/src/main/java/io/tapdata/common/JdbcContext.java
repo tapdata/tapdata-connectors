@@ -85,6 +85,49 @@ public abstract class JdbcContext implements AutoCloseable {
         }
     }
 
+    public void nextQueryWithTimeout(String sql, ResultSetConsumer resultSetConsumer, ArrayList<String> timeoutSqls) throws SQLException {
+        try (
+                Connection connection = getConnection();
+                Statement statement = connection.createStatement()
+        ) {
+            if (!timeoutSqls.isEmpty()) {
+                for (String timeoutSql : timeoutSqls) {
+                    statement.execute(timeoutSql);
+                }
+            }
+            statement.setFetchSize(2000); //protected from OM
+            try (
+                    ResultSet resultSet = statement.executeQuery(sql)
+            ) {
+                if (EmptyKit.isNotNull(resultSet)) {
+                    resultSet.next(); //move to first row
+                    resultSetConsumer.accept(resultSet);
+                }
+            }
+        }
+    }
+
+    public void queryWithTimeout(String sql, ResultSetConsumer resultSetConsumer, ArrayList<String> timeoutSqls) throws SQLException {
+        try (
+                Connection connection = getConnection();
+                Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)
+        ) {
+            if (!timeoutSqls.isEmpty()) {
+                for (String timeoutSql : timeoutSqls) {
+                    statement.execute(timeoutSql);
+                }
+            }
+            statement.setFetchSize(2000); //protected from OM
+            try (
+                    ResultSet resultSet = statement.executeQuery(sql)
+            ) {
+                if (EmptyKit.isNotNull(resultSet)) {
+                    resultSetConsumer.accept(resultSet);
+                }
+            }
+        }
+    }
+
     public void query(String sql, ResultSetConsumer resultSetConsumer) throws SQLException {
         try (
                 Connection connection = getConnection();
@@ -101,7 +144,7 @@ public abstract class JdbcContext implements AutoCloseable {
         }
     }
 
-    public void streamQueryWithTimeout(String querySql, ResultSetConsumer resultSetConsumer, ArrayList<String> timeoutSqls) throws Exception {
+    public void streamQueryWithTimeout(String querySql, ResultSetConsumer resultSetConsumer, ArrayList<String> timeoutSqls, Integer fetchSize) throws Exception {
         try (
                 Connection connection = getConnection();
                 Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)
@@ -111,7 +154,7 @@ public abstract class JdbcContext implements AutoCloseable {
                     statement.execute(sql);
                 }
             }
-            statement.setFetchSize(Integer.MIN_VALUE);
+            statement.setFetchSize(fetchSize);
             try (
                     ResultSet resultSet = statement.executeQuery(querySql)
             ) {
