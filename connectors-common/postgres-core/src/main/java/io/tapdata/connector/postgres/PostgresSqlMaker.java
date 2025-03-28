@@ -44,7 +44,12 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         if (EmptyKit.isNotNull(tapField.getDefaultValue())) {
             builder.append("DEFAULT").append(' ');
             if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
-                builder.append(PostgresColumn.PostgresDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction()).append(' ');
+                String function = PostgresColumn.PostgresDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction();
+                if (function.contains(".*")) {
+                    builder.append(tapField.getDefaultValue()).append(' ');
+                } else {
+                    builder.append(function).append(' ');
+                }
             } else if (tapField.getDefaultValue() instanceof Number) {
                 builder.append(tapField.getDefaultValue()).append(' ');
             } else if (EmptyKit.isNotBlank(tapField.getSequenceName())) {
