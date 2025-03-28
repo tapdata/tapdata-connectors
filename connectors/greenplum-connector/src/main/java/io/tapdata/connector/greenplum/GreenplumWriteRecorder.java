@@ -37,7 +37,7 @@ public class GreenplumWriteRecorder extends OldPostgresWriteRecorder {
             }
             try (ResultSet resultSet = queryStatement.executeQuery()) {
                 if (resultSet.next()) {
-                    justUpdate(after, DbKit.getBeforeForUpdate(after, new HashMap<>(), allColumn, uniqueCondition), listResult);
+                    justUpdate(DbKit.getAfterForUpdate(after, new HashMap<>(), allColumn, uniqueCondition), DbKit.getBeforeForUpdate(after, new HashMap<>(), allColumn, uniqueCondition), listResult);
                 } else {
                     justInsert(after);
                 }
