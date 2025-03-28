@@ -183,7 +183,7 @@ public class OceanbaseConnector extends MysqlConnector {
     @Override
     protected String getBatchReadSelectSql(TapTable tapTable) {
         String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + StringKit.escape(c, commonDbConfig.getEscapeChar()) + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
-        return String.format("SELECT /*+ PARALLEL(32) */ %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
+        return String.format("SELECT /*+ PARALLEL(8) */ %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
     }
 
     @Override
