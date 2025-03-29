@@ -427,9 +427,9 @@ public class MysqlReader implements Closeable {
             synchronized (MysqlReader.class) {
                 KVMap<Object> stateMap = tapConnectorContext.getStateMap();
                 Object mysqlSchemaHistory = stateMap.get(MYSQL_SCHEMA_HISTORY);
-                if (mysqlSchemaHistory instanceof String) {
+                if (mysqlSchemaHistory instanceof byte[]) {
                     try {
-                        mysqlSchemaHistory = StringCompressUtil.uncompress((String) mysqlSchemaHistory);
+                        mysqlSchemaHistory = StringCompressUtil.uncompress((byte[]) mysqlSchemaHistory);
                     } catch (IOException e) {
                         throw new CoreException("Uncompress Mysql schema history failed, message: {}, string: {}", e.getMessage(), (((String) mysqlSchemaHistory).length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : mysqlSchemaHistory), e);
                     }
@@ -451,11 +451,11 @@ public class MysqlReader implements Closeable {
             Thread.currentThread().setName("Save-Mysql-Schema-History-" + serverName);
             if (!schemaHistoryTransfer.isSave()) {
                 schemaHistoryTransfer.executeWithLock(n -> !isAlive.get(), () -> {
-                    String json = InstanceFactory.instance(JsonParser.class).toJson(schemaHistoryTransfer.getHistoryMap());
+                    Object json = InstanceFactory.instance(JsonParser.class).toJson(schemaHistoryTransfer.getHistoryMap());
                     try {
-                        json = StringCompressUtil.compress(json);
+                        json = StringCompressUtil.compress((String) json);
                     } catch (IOException e) {
-                        tapLogger.warn("Compress Mysql schema history failed, string: " + (json.length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : json) + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
+                        tapLogger.warn("Compress Mysql schema history failed, string: " + (((String) json).length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : json) + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
                         return;
                     }
                     tapConnectorContext.getStateMap().put(MYSQL_SCHEMA_HISTORY, json);

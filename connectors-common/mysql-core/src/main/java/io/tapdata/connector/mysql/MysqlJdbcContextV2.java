@@ -85,7 +85,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         list.add("TABLE_ROWS");
         list.add("DATA_LENGTH");
         try {
-            query(String.format(GET_TABLE_INFO_SQL, StringKit.escape(getConfig().getDatabase(), "'"), tableName), resultSet -> {
+            query(String.format(GET_TABLE_INFO_SQL, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(tableName, "'")), resultSet -> {
                 while (resultSet.next()) {
                     dataMap.putAll(DbKit.getRowFromResultSet(resultSet, list));
                 }
