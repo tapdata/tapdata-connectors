@@ -315,14 +315,14 @@ public class MysqlReaderTest {
             void testNormal() throws IOException {
                 try (MockedStatic<StringCompressUtil> scu = mockStatic(StringCompressUtil.class)) {
                     when(stateMap.get(MysqlReader.MYSQL_SCHEMA_HISTORY)).thenReturn("xxx");
-                    scu.when(() -> StringCompressUtil.uncompress(anyString())).thenReturn("{\"key\": [\"1\"]}");
+                    scu.when(() -> StringCompressUtil.uncompress(any())).thenReturn("{\"key\": [\"1\"]}");
                     Assertions.assertDoesNotThrow(() -> reader.initMysqlSchemaHistory(tapConnectorContext));
                 }
             }
             @Test
             void testNotString() {
                 try (MockedStatic<StringCompressUtil> scu = mockStatic(StringCompressUtil.class)) {
-                    scu.when(() -> StringCompressUtil.uncompress(anyString())).thenReturn("{\"key\": 1}");
+                    scu.when(() -> StringCompressUtil.uncompress(any())).thenReturn("{\"key\": 1}");
                     when(stateMap.get(MysqlReader.MYSQL_SCHEMA_HISTORY)).thenReturn(100);
                     Assertions.assertDoesNotThrow(() -> reader.initMysqlSchemaHistory(tapConnectorContext));
                 }
@@ -331,7 +331,7 @@ public class MysqlReaderTest {
             @Test
             void testException() {
                 try (MockedStatic<StringCompressUtil> scu = mockStatic(StringCompressUtil.class)) {
-                    scu.when(() -> StringCompressUtil.uncompress(anyString())).thenAnswer(a -> {
+                    scu.when(() -> StringCompressUtil.uncompress(any())).thenAnswer(a -> {
                         throw new IOException("");
                     });
                     when(stateMap.get(MysqlReader.MYSQL_SCHEMA_HISTORY)).thenReturn("123456789");
