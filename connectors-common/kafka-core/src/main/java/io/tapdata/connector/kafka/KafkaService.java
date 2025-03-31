@@ -394,7 +394,7 @@ public class KafkaService extends AbstractMqService {
                     break;
                 }
                 Map<String, Object> data;
-                Map<String, Map<String, Object>> allData = new HashMap();
+                Map<String, Object> allData = new HashMap<>();
                 MqOp mqOp = MqOp.INSERT;
                 if (event instanceof TapInsertRecordEvent) {
                     data = ((TapInsertRecordEvent) event).getAfter();
@@ -414,6 +414,9 @@ public class KafkaService extends AbstractMqService {
                 } else {
                     data = new HashMap<>();
                 }
+                if (EmptyKit.isNotBlank(((KafkaConfig) mqConfig).getTopicName())) {
+                    record.put("tableName", tapTable.getId());
+                }
                 byte[] kafkaMessageKey = getKafkaMessageKey(data, tapTable);
                 record.put("data", allData);
                 Map<String, Object> header = new HashMap();
@@ -422,44 +425,44 @@ public class KafkaService extends AbstractMqService {
                 String op = mqOp.getOp();
                 Collection<String> conditionKeys = tapTable.primaryKeys(true);
                 RecordHeaders recordHeaders = new RecordHeaders();
-                byte[] body = {};
                 Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, op, conditionKeys));
-                if (null == eventObj) {
-                    continue;
-                } else {
-                    Map<String, Object> res = (Map<String, Object>) eventObj;
-                    if (null == res.get("data")) {
-                        throw new RuntimeException("data cannot be null");
-                    } else {
-                        Object obj = res.get("data");
-                        if (obj instanceof Map) {
-                            Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
-                            if (map.containsKey("before") && map.get("before").isEmpty()) {
-                                map.remove("before");
-                            }
-                            if (map.containsKey("after") && map.get("after").isEmpty()) {
-                                map.remove("after");
-                            }
-                            res.put("data", map);
-                            body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
-                        } else {
-                            body = obj.toString().getBytes();
-                        }
-                    }
-                    if (res.containsKey("header")) {
-                        Object obj = res.get("header");
-                        if (obj instanceof Map) {
-                            Map<String, Object> head = (Map<String, Object>) res.get("header");
-                            for (String s : head.keySet()) {
-                                recordHeaders.add(s, head.get(s).toString().getBytes());
-                            }
-                        } else {
-                            throw new RuntimeException("header must be a collection type");
-                        }
-                    } else {
-                        recordHeaders.add("mqOp", mqOp.toString().getBytes());
-                    }
-                }
+                byte[] body = jsonParser.toJsonBytes(eventObj, JsonParser.ToJsonFeature.WriteMapNullValue);
+//                if (null == eventObj) {
+//                    continue;
+//                } else {
+//                    Map<String, Object> res = (Map<String, Object>) eventObj;
+//                    if (null == res.get("data")) {
+//                        throw new RuntimeException("data cannot be null");
+//                    } else {
+//                        Object obj = res.get("data");
+//                        if (obj instanceof Map) {
+//                            Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
+//                            if (map.containsKey("before") && map.get("before").isEmpty()) {
+//                                map.remove("before");
+//                            }
+//                            if (map.containsKey("after") && map.get("after").isEmpty()) {
+//                                map.remove("after");
+//                            }
+//                            res.put("data", map);
+//                            body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
+//                        } else {
+//                            body = obj.toString().getBytes();
+//                        }
+//                    }
+//                    if (res.containsKey("header")) {
+//                        Object obj = res.get("header");
+//                        if (obj instanceof Map) {
+//                            Map<String, Object> head = (Map<String, Object>) res.get("header");
+//                            for (String s : head.keySet()) {
+//                                recordHeaders.add(s, head.get(s).toString().getBytes());
+//                            }
+//                        } else {
+//                            throw new RuntimeException("header must be a collection type");
+//                        }
+//                    } else {
+//                        recordHeaders.add("mqOp", mqOp.toString().getBytes());
+//                    }
+//                }
                 MqOp finalMqOp = mqOp;
                 Callback callback = (metadata, exception) -> {
                     try {
