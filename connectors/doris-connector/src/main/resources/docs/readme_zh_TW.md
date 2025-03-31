@@ -7,14 +7,14 @@ Doris 1.x、Doris 2.x
 #### **3.1創建Doris帳號**
 ```
 //創建用戶
-create user 'username'@'localhost' identified with Doris_ native_ password by 'password'；
+create user 'username'@'localhost' identified with mysql_native_password by 'password'；
 //修改密碼
-alter user 'username'@'localhost' identified with Doris_ native_ password by 'password'；
+alter user 'username'@'localhost' identified with mysql_native_password by 'password'；
 ```
 #### **3.2給tapdata帳號授權**
 對於某個資料庫賦於select許可權
 ```
-GRANT SELECT，SHOW VIEW，CREATE ROUTINE，LOCK TABLES ON <DATABASE_ NAME>.< TABLE_ NAME> TO 'tapdata' IDENTIFIED BY 'password'；
+GRANT SELECT，SHOW VIEW，CREATE ROUTINE，LOCK TABLES ON <DATABASE_NAME>.< TABLE_NAME> TO 'tapdata' IDENTIFIED BY 'password'；
 ```
 對於全域的許可權
 ```
@@ -27,7 +27,7 @@ GRANT RELOAD，SHOW DATABASES，REPLICATION SLAVE，REPLICATION CLIENT ON *.* TO
 ### **4. 先決條件（作為目標）**
 對於某個資料庫賦於全部許可權
 ```
-GRANT ALL PRIVILEGES ON <DATABASE_ NAME>.< TABLE_ NAME> TO 'tapdata' IDENTIFIED BY 'password'；
+GRANT ALL PRIVILEGES ON <DATABASE_NAME>.< TABLE_NAME> TO 'tapdata' IDENTIFIED BY 'password'；
 ```
 對於全域的許可權
 ```

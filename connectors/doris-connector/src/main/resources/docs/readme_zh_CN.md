@@ -7,9 +7,9 @@ Doris 1.x、Doris 2.x
 #### **3.1 创建Doris账号**
 ```
 // 创建用户
-create user 'username'@'localhost' identified with Doris_native_password by 'password';
+create user 'username'@'localhost' identified with mysql_native_password by 'password';
 // 修改密码
-alter user 'username'@'localhost' identified with Doris_native_password by 'password';
+alter user 'username'@'localhost' identified with mysql_native_password by 'password';
 ```
 #### **3.2 给 tapdata 账号授权**
 对于某个数据库赋于select权限
