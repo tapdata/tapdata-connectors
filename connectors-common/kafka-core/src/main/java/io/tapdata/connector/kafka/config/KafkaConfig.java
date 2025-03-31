@@ -24,6 +24,7 @@ public class KafkaConfig extends MqConfig {
     private Integer partitionNum;
 
     private Integer replicasSize;
+    private String topicName;
     private String script;
 
     public Integer getPartitionNum() {
@@ -353,6 +354,14 @@ public class KafkaConfig extends MqConfig {
 
     public void setEnableScript(Boolean enableScript) {
         this.enableScript = enableScript;
+    }
+
+    public String getTopicName() {
+        return topicName;
+    }
+
+    public void setTopicName(String topicName) {
+        this.topicName = topicName;
     }
 
     public String getScript() {

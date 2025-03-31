@@ -303,6 +303,7 @@ public class KafkaService extends AbstractMqService {
         AtomicLong delete = new AtomicLong(0);
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
+        String topic = EmptyKit.isBlank(((KafkaConfig) mqConfig).getTopicName()) ? tapTable.getId() : ((KafkaConfig) mqConfig).getTopicName();
         try {
             for (TapRecordEvent event : tapRecordEvents) {
                 if (null != isAlive && !isAlive.get()) {
@@ -343,7 +344,7 @@ public class KafkaService extends AbstractMqService {
                         countDownLatch.countDown();
                     }
                 };
-                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapTable.getId(),
+                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(topic,
                         null, event.getTime(), getKafkaMessageKey(data, tapTable), body,
                         new RecordHeaders().add("mqOp", mqOp.getOp().getBytes()));
                 kafkaProducer.send(producerRecord, callback);
@@ -375,6 +376,7 @@ public class KafkaService extends AbstractMqService {
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
         ScriptEngine scriptEngine;
+        String topic = EmptyKit.isBlank(((KafkaConfig) mqConfig).getTopicName()) ? tapTable.getId() : ((KafkaConfig) mqConfig).getTopicName();
         String script = ((KafkaConfig) mqConfig).getScript();
         Map<String, Object> record = new HashMap<>();
         try {
@@ -479,7 +481,7 @@ public class KafkaService extends AbstractMqService {
                         countDownLatch.countDown();
                     }
                 };
-                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapTable.getId(),
+                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(topic,
                         null, event.getTime(), kafkaMessageKey, body,
                         recordHeaders);
                 kafkaProducer.send(producerRecord, callback);
@@ -655,7 +657,7 @@ public class KafkaService extends AbstractMqService {
     }
 
     @Override
-	public void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+    public void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         consuming.set(true);
         int maxDelay = 500;
         KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
@@ -663,7 +665,7 @@ public class KafkaService extends AbstractMqService {
         try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
             KafkaOffset streamOffset = KafkaOffsetUtils.setConsumerByOffset(kafkaConsumer, tableList, offset, consuming);
             try (BatchPusher<TapEvent> batchPusher = new BatchPusher<TapEvent>(
-                tapEvents -> eventsOffsetConsumer.accept(tapEvents, streamOffset.clone())
+                    tapEvents -> eventsOffsetConsumer.accept(tapEvents, streamOffset.clone())
             ).batchSize(eventBatchSize).maxDelay(maxDelay)) {
                 // 将初始化的 offset 推送到目标，让指定时间的增量任务下次启动时拿到 offset
                 Optional.of(new HeartbeatEvent()).ifPresent(event -> {
