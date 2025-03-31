@@ -10,6 +10,7 @@ import org.apache.commons.io.FileUtils;
 
 import java.io.File;
 import java.io.Serializable;
+import java.net.URLEncoder;
 import java.time.ZoneId;
 import java.util.Map;
 import java.util.Properties;
@@ -47,6 +48,7 @@ public class CommonDbConfig implements Serializable {
     private long autoIncJumpValue = 1000000L;
     private long autoIncCacheValue = 100;
     private Boolean applyDefault = false;
+    private Boolean applyForeignKey = false;
     private Integer writeThreadSize = 15;
     protected String timezone = "+00:00";
     protected ZoneId zoneId;
@@ -85,7 +87,7 @@ public class CommonDbConfig implements Serializable {
         if (EmptyKit.isNotEmpty(this.getExtParams()) && !this.getExtParams().startsWith("?") && !this.getExtParams().startsWith(":")) {
             this.setExtParams("?" + this.getExtParams());
         }
-        return String.format(this.getDatabaseUrlPattern(), this.getHost(), this.getPort(), this.getDatabase(), this.getExtParams());
+        return String.format(this.getDatabaseUrlPattern(), this.getHost(), this.getPort(), URLEncoder.encode(this.getDatabase()), this.getExtParams());
     }
 
     public CommonDbConfig load(String json) {
@@ -320,6 +322,14 @@ public class CommonDbConfig implements Serializable {
 
     public void setApplyDefault(Boolean applyDefault) {
         this.applyDefault = applyDefault;
+    }
+
+    public Boolean getApplyForeignKey() {
+        return applyForeignKey;
+    }
+
+    public void setApplyForeignKey(Boolean applyForeignKey) {
+        this.applyForeignKey = applyForeignKey;
     }
 
     public Integer getWriteThreadSize() {

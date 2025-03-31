@@ -87,7 +87,7 @@ public class PostgresDebeziumConfig {
 //                .with("offset.storage.file.filename", "d:/cdc/offset/" + slotName + ".dat") //path must be changed with requirement
                 .with("offset.flush.interval.ms", 60000)
                 .with("name", slotName + "-postgres-connector")
-                .with("database.server.name", URLEncoder.encode(postgresConfig.getDatabase()))
+                .with("database.server.name", URLEncoder.encode(postgresConfig.getDatabase()).replace("*", ""))
                 .with("database.hostname", postgresConfig.getHost())
                 .with("database.port", postgresConfig.getPort())
                 .with("database.user", postgresConfig.getUser())
