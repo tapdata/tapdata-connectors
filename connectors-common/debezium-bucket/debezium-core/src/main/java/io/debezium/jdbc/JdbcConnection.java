@@ -6,6 +6,7 @@
 package io.debezium.jdbc;
 
 import java.lang.reflect.InvocationTargetException;
+import java.net.URLEncoder;
 import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -293,8 +294,12 @@ public class JdbcConnection implements AutoCloseable {
                 }
 
                 if (value != null) {
-                    // And replace the variable ...
-                    url = url.replaceAll("\\$\\{" + name + "\\}", value);
+                    if ("dbname".equals(name)) {
+                        url = url.replaceAll("\\$\\{" + name + "\\}", URLEncoder.encode(value));
+                    } else {
+                        // And replace the variable ...
+                        url = url.replaceAll("\\$\\{" + name + "\\}", value);
+                    }
                 }
             }
         }

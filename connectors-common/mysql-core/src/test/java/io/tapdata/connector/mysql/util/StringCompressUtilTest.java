@@ -10,7 +10,7 @@ class StringCompressUtilTest {
     void compressJson() {
         String str = "{}";
         Assertions.assertDoesNotThrow(() -> {
-            String compress = StringCompressUtil.compress(str);
+            byte[] compress = StringCompressUtil.compress(str);
             String uncompress = StringCompressUtil.uncompress(compress);
             Assertions.assertEquals(str, uncompress);
         });
@@ -19,7 +19,7 @@ class StringCompressUtilTest {
     @Test
     void compressNull() {
         Assertions.assertDoesNotThrow(() -> {
-            String compress = StringCompressUtil.compress(null);
+            byte[] compress = StringCompressUtil.compress(null);
             String uncompress = StringCompressUtil.uncompress(compress);
             Assertions.assertNull(uncompress);
         });
@@ -29,7 +29,7 @@ class StringCompressUtilTest {
     void compressEmpty() {
         String str = "";
         Assertions.assertDoesNotThrow(() -> {
-            String compress = StringCompressUtil.compress(str);
+            byte[] compress = StringCompressUtil.compress(str);
             String uncompress = StringCompressUtil.uncompress(compress);
             Assertions.assertEquals(str, uncompress);
         });

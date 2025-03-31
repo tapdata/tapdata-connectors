@@ -10,6 +10,7 @@ import org.apache.commons.io.FileUtils;
 
 import java.io.File;
 import java.io.Serializable;
+import java.net.URLEncoder;
 import java.time.ZoneId;
 import java.util.Map;
 import java.util.Properties;
@@ -86,7 +87,7 @@ public class CommonDbConfig implements Serializable {
         if (EmptyKit.isNotEmpty(this.getExtParams()) && !this.getExtParams().startsWith("?") && !this.getExtParams().startsWith(":")) {
             this.setExtParams("?" + this.getExtParams());
         }
-        return String.format(this.getDatabaseUrlPattern(), this.getHost(), this.getPort(), this.getDatabase(), this.getExtParams());
+        return String.format(this.getDatabaseUrlPattern(), this.getHost(), this.getPort(), URLEncoder.encode(this.getDatabase()), this.getExtParams());
     }
 
     public CommonDbConfig load(String json) {

@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 public class PostgresJdbcContext extends JdbcContext {
 
@@ -69,7 +70,7 @@ public class PostgresJdbcContext extends JdbcContext {
 
     @Override
     protected String queryAllTablesSql(String schema, List<String> tableNames) {
-        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND t.table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND t.table_name IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')" : "";
         if (Integer.parseInt(postgresVersion) < 100000) {
             return String.format(PG_ALL_TABLE_LOWER_VERSION, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
         }
@@ -78,7 +79,7 @@ public class PostgresJdbcContext extends JdbcContext {
 
     @Override
     protected String queryAllColumnsSql(String schema, List<String> tableNames) {
-        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')" : "";
         if (Integer.parseInt(postgresVersion) < 100000) {
             return String.format(PG_ALL_COLUMN_LOWER_VERSION, StringKit.escape(schema, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
         }
@@ -87,13 +88,13 @@ public class PostgresJdbcContext extends JdbcContext {
 
     @Override
     protected String queryAllIndexesSql(String schema, List<String> tableNames) {
-        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')" : "";
         return String.format(PG_ALL_INDEX, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override
     protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
-        return String.format(PG_ALL_FOREIGN_KEY, StringKit.escape(getConfig().getSchema(), "'"), EmptyKit.isEmpty(tableNames) ? "" : " and pc.relname in (" + StringKit.joinString(tableNames, "'", ",") + ")");
+        return String.format(PG_ALL_FOREIGN_KEY, StringKit.escape(getConfig().getSchema(), "'"), EmptyKit.isEmpty(tableNames) ? "" : " and pc.relname in ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')");
     }
 
     public DataMap getTableInfo(String tableName) {

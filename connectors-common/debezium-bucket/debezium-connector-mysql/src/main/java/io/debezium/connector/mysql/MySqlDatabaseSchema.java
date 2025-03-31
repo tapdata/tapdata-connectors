@@ -89,7 +89,6 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
     /**
      * Create a schema component given the supplied {@link MySqlConnectorConfig MySQL connector configuration}.
      * The DDL statements passed to the schema are parsed and a logical model of the database schema is created.
-     *
      */
     public MySqlDatabaseSchema(MySqlConnectorConfig connectorConfig, MySqlValueConverters valueConverter, TopicSelector<TableId> topicSelector,
                                SchemaNameAdjuster schemaNameAdjuster, boolean tableIdCaseInsensitive) {
@@ -218,7 +217,7 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
             try {
                 String filteredSql = handleForUnparseableDDL(ddlStatements);
                 handleParse(filteredSql, databaseName);
-            }catch (ParsingException | MultipleParsingExceptions exception){
+            } catch (ParsingException | MultipleParsingExceptions exception) {
                 if (databaseHistory.skipUnparseableDdlStatements()) {
                     LOGGER.warn("Ignoring unparseable DDL statement '{}': {}", ddlStatements, exception);
                 }
@@ -257,14 +256,11 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
                             // For SET with multiple parameters
                             if (event instanceof TableCreatedEvent) {
                                 emitChangeEvent(offset, schemaChangeEvents, sanitizedDbName, event, tableId, SchemaChangeEventType.CREATE, snapshot);
-                            }
-                            else if (event instanceof TableAlteredEvent || event instanceof TableIndexCreatedEvent || event instanceof TableIndexDroppedEvent) {
+                            } else if (event instanceof TableAlteredEvent || event instanceof TableIndexCreatedEvent || event instanceof TableIndexDroppedEvent) {
                                 emitChangeEvent(offset, schemaChangeEvents, sanitizedDbName, event, tableId, SchemaChangeEventType.ALTER, snapshot);
-                            }
-                            else if (event instanceof TableDroppedEvent) {
+                            } else if (event instanceof TableDroppedEvent) {
                                 emitChangeEvent(offset, schemaChangeEvents, sanitizedDbName, event, tableId, SchemaChangeEventType.DROP, snapshot);
-                            }
-                            else if (event instanceof SetVariableEvent) {
+                            } else if (event instanceof SetVariableEvent) {
                                 // SET statement with multiple variable emits event for each variable. We want to emit only
                                 // one change event
                                 final SetVariableEvent varEvent = (SetVariableEvent) event;
@@ -298,7 +294,7 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
         this.ddlParser.parse(ddlStatements, tables());
     }
 
-    protected String handleForUnparseableDDL(String ddlStatements){
+    protected String handleForUnparseableDDL(String ddlStatements) {
         Pattern pattern = Pattern.compile("(?:,\n\\sGLOBAL\\s+INDEX|,\n\\sUNIQUE\\s+GLOBAL\\s+INDEX)[\\s\\S]*?PARTITIONS \\d+|[\\s\\S]DEFAULT\\s+[^(,\\s]+\\(\\)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
         Matcher matcher = pattern.matcher(ddlStatements);
         List<String> ignoreSql = new ArrayList<>();
@@ -306,7 +302,7 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
         while (matcher.find()) {
             ignoreSql.add(matcher.group());
         }
-        ignoreSql.forEach((sql)-> filteredSql.set(filteredSql.get().replace(sql,"")));
+        ignoreSql.forEach((sql) -> filteredSql.set(filteredSql.get().replace(sql, "")));
         return filteredSql.get();
     }
 
@@ -355,9 +351,9 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
      * Assign the given table number to the table with the specified {@link TableId table ID}.
      *
      * @param tableNumber the table number found in binlog events
-     * @param id the identifier for the corresponding table
+     * @param id          the identifier for the corresponding table
      * @return {@code true} if the assignment was successful, or {@code false} if the table is currently excluded in the
-     *         connector's configuration
+     * connector's configuration
      */
     public boolean assignTableNumber(long tableNumber, TableId id) {
         final TableSchema tableSchema = schemaFor(id);
@@ -413,5 +409,11 @@ public class MySqlDatabaseSchema extends HistorizedRelationalDatabaseSchema {
         Set<TableId> tableIds = tableIds();
         List<String> currentTableList = tableIds.stream().map(TableId::toString).collect(Collectors.toList());
         return tableIncludeList.stream().filter(t -> !currentTableList.contains(t)).collect(Collectors.toList());
+    }
+
+    public List<TableId> tableIdDiff() {
+        Set<TableId> tableIds = tableIds();
+        List<TableId> currentTableIdList = connectorConfig.getTableIdIncludeList();
+        return currentTableIdList.stream().filter(t -> !tableIds.contains(t)).collect(Collectors.toList());
     }
 }

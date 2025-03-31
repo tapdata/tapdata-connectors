@@ -11,6 +11,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -86,6 +87,35 @@ public class NormalRecordWriter {
                 }
             }
             //insert,update,delete events must consecutive, so execute the other two first
+            writePart(tapRecordEvents, listResult, isAlive);
+            //release resource
+
+        } catch (SQLException e) {
+            exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), null, null, e);
+            exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
+            exceptionCollector.collectWriteType(null, null, null, e);
+            exceptionCollector.collectWriteLength(null, null, null, e);
+            exceptionCollector.revealException(e);
+            throw e;
+        } finally {
+            insertRecorder.releaseResource();
+            updateRecorder.releaseResource();
+            deleteRecorder.releaseResource();
+            if (!isTransaction) {
+                if (needCloseIdentity) {
+                    openIdentity();
+                }
+                connection.close();
+            }
+            writeListResultConsumer.accept(listResult
+                    .insertedCount(insertRecorder.getAtomicLong().get())
+                    .modifiedCount(updateRecorder.getAtomicLong().get())
+                    .removedCount(deleteRecorder.getAtomicLong().get()));
+        }
+    }
+
+    protected void writePart(List<TapRecordEvent> tapRecordEvents, WriteListResult<TapRecordEvent> listResult, Supplier<Boolean> isAlive) {
+        try {
             for (TapRecordEvent recordEvent : tapRecordEvents) {
                 if (null != isAlive && !isAlive.get()) {
                     break;
@@ -124,39 +154,19 @@ public class NormalRecordWriter {
             if (!connection.getAutoCommit() && !isTransaction) {
                 connection.commit();
             }
-            //release resource
-
         } catch (SQLException e) {
             try {
                 connection.rollback();
             } catch (Exception ignore) {
             }
-            exceptionCollector.collectTerminateByServer(e);
-            exceptionCollector.collectViolateNull(null, e);
-            TapRecordEvent errorEvent = null;
-            if (EmptyKit.isNotNull(listResult.getErrorMap())) {
-                errorEvent = listResult.getErrorMap().keySet().stream().findFirst().orElse(null);
+            exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), null, null, e);
+            if (tapRecordEvents.size() == 1) {
+                throw new RuntimeException(String.format("Error occurred when retrying write record: %s", tapRecordEvents.get(0)), e);
+            } else {
+                int eachPieceSize = Math.max(tapRecordEvents.size() / 10, 1);
+                tapLogger.warn("writeRecord failed, dismantle them, size: {}", eachPieceSize);
+                DbKit.splitToPieces(tapRecordEvents, eachPieceSize).forEach(pieces -> writePart(pieces, listResult, isAlive));
             }
-            exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), errorEvent, null, e);
-            exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
-            exceptionCollector.collectWriteType(null, null, errorEvent, e);
-            exceptionCollector.collectWriteLength(null, null, errorEvent, e);
-            exceptionCollector.revealException(e);
-            throw e;
-        } finally {
-            insertRecorder.releaseResource();
-            updateRecorder.releaseResource();
-            deleteRecorder.releaseResource();
-            if (!isTransaction) {
-                if (needCloseIdentity) {
-                    openIdentity();
-                }
-                connection.close();
-            }
-            writeListResultConsumer.accept(listResult
-                    .insertedCount(insertRecorder.getAtomicLong().get())
-                    .modifiedCount(updateRecorder.getAtomicLong().get())
-                    .removedCount(deleteRecorder.getAtomicLong().get()));
         }
     }
 
