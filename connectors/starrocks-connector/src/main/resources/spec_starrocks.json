@@ -278,16 +278,16 @@
             "value": "Primary"
             },
             {
+              "label": "Duplicate",
+              "value": "Duplicate"
+            },
+            {
               "label": "Aggregate",
               "value": "Aggregate"
             },
             {
               "label": "Unique",
               "value": "Unique"
-            },
-            {
-              "label": "Duplicate",
-              "value": "Duplicate"
             }
           ],
           "x-reactions": [
@@ -383,7 +383,8 @@
             "tooltip": "${tablePropertiesTip}"
           },
           "default": [
-            {"propKey": "replication_num", "propValue": "1"}
+            {"propKey": "replication_num", "propValue": "3"},
+            {"propKey": "compression", "propValue": "LZ4"}
           ],
           "x-component": "ArrayItems",
           "x-reactions": [
