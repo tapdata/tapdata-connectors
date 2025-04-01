@@ -157,16 +157,6 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         }
     }
 
-    private static String buildNullSortClause(SortOn v) {
-        if (v.getNullSort() == 1) {
-            return ' ' + "NULLS" + ' ' + "FIRST";
-        } else if (v.getNullSort() == 2) {
-            return ' ' + "NULLS" + ' ' + "LAST";
-        } else {
-            return "";
-        }
-    }
-
     protected String getOrderByFieldClauseWithCollate(SortOn sortOn, Collate collate) {
         StringBuilder sb = new StringBuilder();
         sb.append(escapeChar).append(sortOn.getKey()).append(escapeChar);
