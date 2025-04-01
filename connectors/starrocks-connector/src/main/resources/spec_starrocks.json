@@ -1,0 +1,764 @@
+{
+  "properties": {
+    "name": "Starrocks",
+    "icon": "icons/starrocks.png",
+    "id": "starrocks",
+    "docs": "${docs}",
+    "tags": ["Database"]
+  },
+  "configOptions": {
+    "connection": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string",
+          "title": "${host}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_host",
+          "required": true,
+          "x-decorator-props": {
+            "tooltip": "${hostTip}"
+          },
+          "x-index": 10
+        },
+        "port": {
+          "type": "string",
+          "title": "${port}",
+          "default": 9030,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "database_port",
+          "required": true,
+          "x-decorator-props": {
+            "tooltip": "${portTip}"
+          },
+          "x-index": 20
+        },
+        "useHTTPS": {
+          "type": "boolean",
+          "title": "${useHTTPS}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-index": 29
+        },
+        "starrocksHttp": {
+          "type": "string",
+          "title": "${starrocksHttp}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "required": true,
+          "x-decorator-props": {
+            "tooltip": "${starrocksHttp}"
+          },
+          "x-index": 30
+        },
+        "database": {
+          "type": "string",
+          "title": "${database}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_name",
+          "required": true,
+          "x-decorator-props": {
+            "tooltip": "${databaseTip}"
+          },
+          "x-index": 40
+        },
+        "user": {
+          "type": "string",
+          "title": "${user}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_username",
+          "x-index": 50
+        },
+        "password": {
+          "type": "string",
+          "title": "${password}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "database_password",
+          "x-index": 60
+        },
+        "backendNum": {
+          "type": "string",
+          "title": "${backendNum}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "backend_Num",
+          "required": false,
+          "x-decorator-props": {
+            "tooltip": "${backendNumTip}"
+          },
+          "x-index": 61
+        },
+        "OPTIONAL_FIELDS": {
+          "type": "void",
+          "properties": {
+            "catalog": {
+              "type": "string",
+              "title": "${catalog}",
+              "x-decorator": "FormItem",
+              "x-component": "Input",
+              "apiServerKey": "catalog_name",
+              "x-decorator-props": {
+                "tooltip": "${catalogTip}"
+              },
+              "x-index": 35
+            },
+            "extParams": {
+              "type": "string",
+              "title": "${extParams}",
+              "x-decorator": "FormItem",
+              "x-component": "Input",
+              "apiServerKey": "extParams",
+              "x-decorator-props": {
+                "tooltip": "${extParamsTip}"
+              },
+              "x-index": 70
+            },
+
+            "timezone": {
+              "type": "string",
+              "title": "${timezone}",
+              "default": "",
+              "x-decorator": "FormItem",
+              "x-decorator-props": {
+                "feedbackLayout": "none"
+              },
+              "x-component": "Select",
+              "enum": [
+                {
+                  "label": "",
+                  "value": ""
+                },
+                {
+                  "label": "UTC -11",
+                  "value": "-11:00"
+                },
+                {
+                  "label": "UTC -10",
+                  "value": "-10:00"
+                },
+                {
+                  "label": "UTC -09",
+                  "value": "-09:00"
+                },
+                {
+                  "label": "UTC -08",
+                  "value": "-08:00"
+                },
+                {
+                  "label": "UTC -07",
+                  "value": "-07:00"
+                },
+                {
+                  "label": "UTC -06",
+                  "value": "-06:00"
+                },
+                {
+                  "label": "UTC -05",
+                  "value": "-05:00"
+                },
+                {
+                  "label": "UTC -04",
+                  "value": "-04:00"
+                },
+                {
+                  "label": "UTC -03",
+                  "value": "-03:00"
+                },
+                {
+                  "label": "UTC -02",
+                  "value": "-02:00"
+                },
+                {
+                  "label": "UTC -01",
+                  "value": "-01:00"
+                },
+                {
+                  "label": "UTC",
+                  "value": "+00:00"
+                },
+                {
+                  "label": "UTC +01",
+                  "value": "+01:00"
+                },
+                {
+                  "label": "UTC +02",
+                  "value": "+02:00"
+                },
+                {
+                  "label": "UTC +03",
+                  "value": "+03:00"
+                },
+                {
+                  "label": "UTC +04",
+                  "value": "+04:00"
+                },
+                {
+                  "label": "UTC +05",
+                  "value": "+05:00"
+                },
+                {
+                  "label": "UTC +06",
+                  "value": "+06:00"
+                },
+                {
+                  "label": "UTC +07",
+                  "value": "+07:00"
+                },
+                {
+                  "label": "UTC +08",
+                  "value": "+08:00"
+                },
+                {
+                  "label": "UTC +09",
+                  "value": "+09:00"
+                },
+                {
+                  "label": "UTC +10",
+                  "value": "+10:00"
+                },
+                {
+                  "label": "UTC +11",
+                  "value": "+11:00"
+                },
+                {
+                  "label": "UTC +12",
+                  "value": "+12:00"
+                },
+                {
+                  "label": "UTC +13",
+                  "value": "+13:00"
+                },
+                {
+                  "label": "UTC +14",
+                  "value": "+14:00"
+                }
+              ],
+              "x-index": 80
+            },
+            "timezoneTips": {
+              "type": "void",
+              "title": " ",
+              "x-decorator": "FormItem",
+              "x-decorator-props": {
+                "colon": false
+              },
+              "x-component": "Text",
+              "x-component-props": {
+                "icon": "info",
+                "content": "${timezoneTips}"
+              },
+              "x-index": 81
+            }
+          }
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "properties": {
+        "uniqueKeyType": {
+          "type": "string",
+          "title": "${uniqueKeyType}",
+          "default": "Primary",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${uniqueKeyTypeTip}"
+          },
+          "x-component": "Select",
+          "x-index": 1,
+          "enum": [
+            {
+            "label": "Primary",
+            "value": "Primary"
+            },
+            {
+              "label": "Duplicate",
+              "value": "Duplicate"
+            },
+            {
+              "label": "Aggregate",
+              "value": "Aggregate"
+            },
+            {
+              "label": "Unique",
+              "value": "Unique"
+            }
+          ],
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "duplicateKey": {
+          "title": "${duplicateKey}",
+          "type": "array",
+          "x-index": 2,
+          "required": true,
+          "default": null,
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${duplicateKeyTip}"
+          },
+          "x-component": "FieldSelect",
+          "x-component-props": {
+            "allowCreate": false,
+            "multiple": true,
+            "filterable": true
+          },
+          "x-reactions": [
+            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
+            {
+              "dependencies":["writeStrategy", ".uniqueKeyType", "type"],
+              "fulfill":{
+                "state":{
+                  "display": "{{$deps[0] === \"appendWrite\" && $deps[1] === \"Duplicate\" && $deps[2] !== 'database' ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "distributedKey": {
+          "title": "${distributedKey}",
+          "type": "array",
+          "x-index": 3,
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${distributedKeyTip}"
+          },
+          "x-component": "FieldSelect",
+          "x-component-props": {
+            "allowCreate": false,
+            "multiple": true,
+            "filterable": true
+          },
+          "x-reactions": [
+            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
+            {
+              "dependencies":["$inputs", "type"],
+              "fulfill":{
+                "state":{
+                  "display": "{{$deps[0].length > 0 && $deps[1] !== 'database' ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "bucket": {
+          "type": "string",
+          "title": "${bucket}",
+          "default": 2,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-index": 4,
+          "x-decorator-props": {
+            "min": 1,
+            "max": 100
+          },
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          }
+        },
+        "tableProperties": {
+          "type": "array",
+          "title": "${tableProperties}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${tablePropertiesTip}"
+          },
+          "default": [
+            {"propKey": "replication_num", "propValue": "3"},
+            {"propKey": "compression", "propValue": "LZ4"}
+          ],
+          "x-component": "ArrayItems",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            },
+            {
+              "dependencies": [".uniqueKeyType"],
+              "fulfill": {
+                "state": {
+                  "value":
+                  "{{{Aggregate: [{\"propKey\":\"replication_num\",\"propValue\":\"1\"}],Unique: [{\"propKey\":\"replication_num\",\"propValue\":\"1\"},{\"propKey\":\"enable_unique_key_merge_on_write\",\"propValue\":\"true\"},{\"propKey\":\"store_row_column\",\"propValue\":\"true\"}],Duplicate: [{\"propKey\":\"replication_num\",\"propValue\":\"1\"}]}[$deps[0]]}}"
+                }
+              }
+            }
+          ],
+          "x-index": 5,
+          "items": {
+            "type": "object",
+            "properties": {
+              "space": {
+                "type": "void",
+                "x-component": "Space",
+                "properties": {
+                  "propKey": {
+                    "type": "string",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${propKey}"
+                    },
+                    "x-index": 1
+                  },
+                  "propValue": {
+                    "type": "number",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${propValue}"
+                    },
+                    "x-index": 2
+                  },
+                  "remove": {
+                    "type": "void",
+                    "x-decorator": "FormItem",
+                    "x-component": "ArrayItems.Remove"
+                  }
+                }
+              }
+            }
+          },
+          "properties": {
+            "add": {
+              "type": "void",
+              "title": "${prompt}",
+              "x-component": "ArrayItems.Addition",
+              "x-component-props": {
+                "defaultValue": { "propKey": "", "propValue": "" }
+              }
+            }
+          }
+        },
+        "writeByteBufferCapacity": {
+          "required": true,
+          "type": "int",
+          "x-index": 6,
+          "title": "${writeByteBufferCapacity}",
+          "default": 10240,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          },
+          "apiServerKey": "node_writeByteBufferCapacity"
+        },
+        "writeFormat": {
+          "type": "string",
+          "title": "${writeFormat}",
+          "default": "json",
+          "x-index": 7,
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "feedbackLayout": "none"
+          },
+          "x-component": "Select",
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          },
+          "enum": [
+            {
+              "label": "Json",
+              "value": "json"
+            },
+            {
+              "label": "CSV",
+              "value": "csv"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "messages": {
+    "default": "en_US",
+    "en_US": {
+      "host": "DB Address",
+      "hostTip": "The address of the database, it can be an IP address or a domain name, for example: 192.168.1.200",
+      "port": "Port",
+      "portTip": "The port number of the database, the default port of Doris is 9030",
+      "starrocksHttp": "http/https Address",
+      "starrocksHttpTip": "The address of the Starrocks Http/Https interface, for example: 192.168.1.200:8030",
+      "catalog": "Starrocks Catalog",
+      "catalogTip": "The directory of Doris can be left blank for non clustered Doris or those that do not require narrowing down the data range, such as doris_cluster",
+      "database": "DB Name",
+      "databaseTip": "The name of the database, you can list all Doris databases with the \\\\\"show databases\\\\\" command, case sensitive",
+      "user": "User",
+      "password": "Password",
+      "extParams": "Other connection string parameters",
+      "extParamsTip": "Additional connection parameters in URI, you can write according to personalized scenarios",
+      "timezone": "Timezone for Datetime",
+      "timezoneTips": "Affect Type: DATE",
+      "writeByteBufferCapacity": "Write buffer capacity(KB)",
+      "writeFormat": "Write format",
+      "doc": "docs/readme_en_US.md",
+      "duplicateKey": "duplicateKey",
+      "distributedKey": "distributedKey",
+      "uniqueKeyType": "Key Type",
+      "uniqueKeyTypeTip": "In the key type, Unique means unique key, Duplicate means duplicate key, Aggregate means aggregate key",
+      "duplicateKeyTip": "Sort field, default to update condition field when selecting Duplicate key type, only enable this configuration when append write mode has no update condition",
+      "distributedKeyTip": "Partition field, used for partitioned tables, the selected field must contain key fields, not filled in by default according to key field partition",
+      "bucket": "Bucket",
+      "prompt": "Add",
+      "tableProperties": "Table Properties",
+      "tablePropertiesTip": "Table properties, for example: {replication_num: 3, storage_format: v2}",
+      "propKey": "Property Name",
+      "propValue": "Property Value",
+      "useHTTPS": "Enable HTTPS",
+      "backendNum": "The number of BE nodes",
+      "backendNumTip": "During Doris connection testing, a table is created and data is written to Doris for testing. It is necessary to obtain the number of BE nodes when building a table. If the table is not built according to the number of BE nodes, it may cause an error. admin permission is required to obtain the number of BE nodes. If you do not want to grant admin permission, please enter the number of BE manually to avoid errors in the table."
+    },
+    "zh_CN": {
+      "host": "数据库地址",
+      "hostTip": "数据库的地址，它可以是IP地址或者域名，例如：192.168.1.200",
+      "port": "端口",
+      "portTip": "数据库的端口号，Doris默认端口9030",
+      "dorisHttp": "http/https接口地址",
+      "dorisHttpTip": "Doris的http/https接口地址，例如：192.168.1.200:8030",
+      "catalog": "Doris目录",
+      "catalogTip": "Doris的目录，非集群Doris或不需要缩小数据范围的可以不填写，例如：doris_cluster",
+      "database": "数据库名称",
+      "databaseTip": "数据库名称，可以通过 show databases 命令列出Doris所有数据库，区分大小写",
+      "user": "账号",
+      "password": "密码",
+      "extParams": "其他连接串参数",
+      "extParamsTip": "URI额外的连接参数，可以根据个性化场景书写",
+      "timezone": "时间类型的时区",
+      "timezoneTips": "影响类型: DATE",
+      "writeByteBufferCapacity": "写入缓冲区容量(KB)",
+      "writeFormat": "写入格式",
+      "doc": "docs/readme_zh_CN.md",
+      "duplicateKey": "排序字段",
+      "distributedKey": "分区字段",
+      "uniqueKeyType": "键类型",
+      "uniqueKeyTypeTip": "键类型中Unique表示唯一键，Duplicate表示重复键，Aggregate表示聚合键",
+      "duplicateKeyTip": "排序字段，在选择Duplicate键类型时默认按更新条件字段，追加写入方式无更新条件时才启用该配置",
+      "distributedKeyTip": "分区字段，用于分区表，选取字段必须是键字段包含，不填默认按键字段分区",
+      "bucket": "分桶数",
+      "prompt": "添加",
+      "tableProperties": "表属性",
+      "tablePropertiesTip": "表属性，例如：{replication_num: 3, storage_format: v2}",
+      "propKey": "属性名",
+      "propValue": "属性值",
+      "useHTTPS": "开启HTTPS",
+      "backendNum": "BE节点的数量",
+      "backendNumTip": "Doris连接测试时，会在Doris建表并写入数据进行测试。在建表时需要获取BE节点数量，如果不根据BE数量去建表可能会导致报错。获取BE节点的数量需要admin 权限，如果不想授予admin权限，请手动输入BE数量，以免建表报错。"
+    },
+    "zh_TW": {
+      "host": "數據庫地址",
+      "hostTip": "數據庫的地址，它可以是IP地址或者域名，例如：192.168.1.200",
+      "port": "端口",
+      "portTip": "數據庫的端口號，Doris默認端口9030",
+      "dorisHttp": "http/https接口地址",
+      "dorisHttpTip": "Doris的http/https接口地址，例如：192.168.1.200:8030",
+      "catalog": "Doris目錄",
+      "catalogTip": "Doris的目錄，非集群Doris或不需要縮小數據範圍的可以不填寫，例如：doris_cluster",
+      "database": "数据库名称",
+      "databaseTip": "数据库名称，可以通过 show databases 命令列出Doris所有数据库，区分大小写",
+      "user": "账号",
+      "password": "密码",
+      "extParams": "其他连接串参数",
+      "extParamsTip": "URI額外的連接參數，可以根據個性化場景書寫",
+      "timezone": "时间类型的时区",
+      "timezoneTips": "影響類型: DATE",
+      "writeByteBufferCapacity": "寫入緩沖區容量(KB)",
+      "writeFormat": "寫入格式",
+      "doc": "docs/readme_zh_CN.md",
+      "duplicateKey": "排序字段",
+      "distributedKey": "分区字段",
+      "uniqueKeyType": "鍵類型",
+      "uniqueKeyTypeTip": "鍵類型中Unique表示唯一鍵，Duplicate表示重複鍵，Aggregate表示聚合鍵",
+      "duplicateKeyTip": "排序字段，在選擇Duplicate鍵類型時默認按更新條件字段，追加寫入方式無更新條件時才啟用該配置",
+      "distributedKeyTip": "分區字段，用於分區表，選取字段必須是鍵字段包含，不填默認按鍵字段分區",
+      "bucket": "分桶數",
+      "prompt": "添加",
+      "tableProperties": "表屬性",
+      "tablePropertiesTip": "表屬性，例如：{replication_num: 3, storage_format: v2}",
+      "propKey": "屬性名",
+      "propValue": "屬性值",
+      "useHTTPS": "開啓HTTPS",
+      "backendNum": "BE節點的數量",
+      "backendNumTip": "Doris連接測試時，會在Doris建表並寫入數據進行測試。在建表時需要獲取BE節點數量，如果不根據BE數量去建表可能會導致報錯。獲取BE節點的數量需要admin 權限，如果不想授予admin權限，請手動輸入BE數量，以免建表報錯。"
+    }
+  },
+  "dataTypes": {
+    "boolean": {
+      "bit": 8,
+      "to": "TapBoolean"
+    },
+    "tinyint[($zerofill)]": {
+      "to": "TapNumber",
+      "bit": 8,
+      "precision": 3,
+      "value": [
+        -128,
+        127
+      ]
+    },
+    "smallint[($zerofill)]": {
+      "to": "TapNumber",
+      "bit": 16,
+      "value": [
+        -32768,
+        32767
+      ],
+      "precision": 5
+    },
+    "int[($zerofill)]": {
+      "to": "TapNumber",
+      "bit": 32,
+      "precision": 10,
+      "value": [
+        -2147483648,
+        2147483647
+      ]
+    },
+    "bigint[($zerofill)]": {
+      "to": "TapNumber",
+      "bit": 64,
+      "precision": 19,
+      "value": [
+        -9223372036854775808,
+        9223372036854775807
+      ]
+    },
+    "largeint": {
+      "bit": 128,
+      "to": "TapNumber"
+    },
+    "float": {
+      "bit": 32,
+      "to": "TapNumber"
+    },
+    "double": {
+      "bit": 64,
+      "to": "TapNumber"
+    },
+    "decimal[($precision,$scale)]": {
+      "bit": 128,
+      "precision": [
+        1,
+        27
+      ],
+      "defaultPrecision": 10,
+      "scale": [
+        0,
+        9
+      ],
+      "defaultScale": 0,
+      "to": "TapNumber"
+    },
+    "decimalv3[($precision,$scale)]": {
+      "to": "TapNumber",
+      "precision": [
+        1,
+        65
+      ],
+      "scale": [
+        0,
+        30
+      ],
+      "defaultPrecision": 10,
+      "defaultScale": 0,
+      "unsigned": "unsigned",
+      "fixed": true,
+      "queryOnly": true
+    },
+    "date": {
+      "byte": 3,
+      "range": [
+        "1000-01-01",
+        "9999-12-31"
+      ],
+      "to": "TapDate"
+    },
+    "datev2": {
+      "byte": 3,
+      "range": [
+        "1000-01-01",
+        "9999-12-31"
+      ],
+      "to": "TapDate",
+      "queryOnly": true
+    },
+    "datetime": {
+      "byte": 8,
+      "range": [
+        "1000-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "to": "TapDateTime"
+    },
+    "datetimev2[($fraction)]": {
+      "to": "TapDateTime",
+      "range": [
+        "1000-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "defaultFraction": 0,
+      "queryOnly": true
+    },
+    "char[($byte)]": {
+      "byte": 255,
+      "to": "TapString",
+      "defaultByte": 1,
+      "fixed": true
+    },
+    "varchar[($byte)]": {
+      "byte": "65533",
+      "to": "TapString",
+      "defaultByte": 1
+    },
+    "string": {
+      "byte": "2147483643",
+      "to": "TapString"
+    },
+    "HLL": {
+      "byte": "16385",
+      "to": "TapNumber",
+      "queryOnly": true
+    },
+    "text": {
+      "to": "TapString",
+      "byte": "64k",
+      "pkEnablement": false
+    }
+  }
+}

@@ -176,7 +176,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             Object defaultValue = fieldMap.get(field).getDefaultValue();
             if (defaultValue instanceof String) {
                 String fieldDefault = (String) fieldMap.get(field).getDefaultValue();
-                if (EmptyKit.isNotEmpty(fieldDefault) && !Boolean.TRUE.equals(fieldMap.get(field).getAutoInc())) {
+                if (EmptyKit.isNotEmpty(fieldDefault) && !Boolean.TRUE.equals(fieldMap.get(field).getAutoInc()) && EmptyKit.isNull(fieldMap.get(field).getDefaultFunction())) {
                     if (fieldDefault.contains("'")) {
                         fieldDefault = fieldDefault.replaceAll("'", "''");
                         fieldMap.get(field).setDefaultValue(fieldDefault);
@@ -450,6 +450,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
+        if (!Boolean.TRUE.equals(commonDbConfig.getApplyForeignKey())) {
+            return;
+        }
         List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
         if (EmptyKit.isNotEmpty(constraintList)) {
             List<String> constraintSqlList = new ArrayList<>();
@@ -748,7 +751,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected String getBatchReadSelectSql(TapTable tapTable) {
         String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + StringKit.escape(c, commonDbConfig.getEscapeChar()) + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
-        return String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
+        return "SELECT " + columns + " FROM " + getSchemaAndTable(tapTable.getId());
     }
 
     protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {

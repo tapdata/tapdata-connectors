@@ -4,7 +4,6 @@ import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.mysql.MysqlConnector;
 import io.tapdata.connector.mysql.MysqlExceptionCollector;
-import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
 import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -18,7 +17,10 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
+import io.tapdata.oceanbase.OceanbaseJdbcContext;
 import io.tapdata.oceanbase.OceanbaseTest;
 import io.tapdata.oceanbase.bean.OceanbaseConfig;
 import io.tapdata.oceanbase.cdc.OceanbaseReader;
@@ -33,15 +35,18 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import org.apache.commons.lang3.StringUtils;
 
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
-import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.io.IOException;
+import java.sql.*;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * @author dayun
@@ -51,6 +56,7 @@ import java.util.function.Consumer;
 public class OceanbaseConnector extends MysqlConnector {
 
     private String connectionTimezone;
+    private ArrayList<String> prepareSqlBeforeQuery;
 
     /**
      * The method invocation life circle is below,
@@ -161,10 +167,37 @@ public class OceanbaseConnector extends MysqlConnector {
     }
 
     @Override
+    protected long batchCount(TapConnectorContext tapConnectorContext, TapTable tapTable) throws Throwable {
+        try {
+            AtomicLong count = new AtomicLong(0);
+            String sql = "select count(1) from " + getSchemaAndTable(tapTable.getId());
+            jdbcContext.nextQueryWithTimeout(sql, resultSet -> count.set(resultSet.getLong(1)), prepareSqlBeforeQuery);
+            return count.get();
+        } catch (SQLException e) {
+            exceptionCollector.collectReadPrivileges("batchCount", Collections.emptyList(), e);
+            throw e;
+        }
+    }
+
+
+    @Override
+    protected String getBatchReadSelectSql(TapTable tapTable) {
+        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + StringKit.escape(c, commonDbConfig.getEscapeChar()) + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
+        return String.format("SELECT /*+ PARALLEL(8) */ %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
+    }
+
+    @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
+        prepareSqlBeforeQuery = new ArrayList<>();
+        long queryTimeout = 86400L * 30 * 1000 * 1000;
+        prepareSqlBeforeQuery.add("SET @@ob_trx_timeout = " + queryTimeout);
+        prepareSqlBeforeQuery.add("SET @@ob_query_timeout = " + queryTimeout);
+
         mysqlConfig = new OceanbaseConfig().load(tapConnectionContext.getConnectionConfig());
-        mysqlJdbcContext = new MysqlJdbcContextV2(mysqlConfig);
+        mysqlConfig.load(tapConnectionContext.getNodeConfig());
+        mysqlJdbcContext = new OceanbaseJdbcContext(mysqlConfig);
         commonDbConfig = mysqlConfig;
+
         jdbcContext = mysqlJdbcContext;
         tapLogger = tapConnectionContext.getLog();
         commonSqlMaker = new CommonSqlMaker('`');
@@ -213,9 +246,176 @@ public class OceanbaseConnector extends MysqlConnector {
         oceanbaseReader.start(this::isAlive);
     }
 
+    private List<String> getTablePartitions(TapConnectorContext tapConnectorContext, TapTable tapTable) {
+        String sql = String.format("SELECT TABLE_NAME, PARTITION_NAME, PARTITION_ORDINAL_POSITION FROM INFORMATION_SCHEMA.PARTITIONS WHERE TABLE_NAME = '%s'", tapTable.getId());
+        List<String> partitions = new ArrayList<>();
+        try {
+            mysqlJdbcContext.queryWithTimeout(sql, resultSet -> {
+                while (resultSet.next()) {
+                    partitions.add(resultSet.getString(2));
+                }
+            }, prepareSqlBeforeQuery);
+        } catch (SQLException e) {
+            exceptionCollector.collectReadPrivileges("getTablePartitions", Collections.emptyList(), e);
+        }
+        return partitions;
+    }
+
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
-        mysqlJdbcContext.query(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer));
+        mysqlJdbcContext.streamQueryWithTimeout(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer), prepareSqlBeforeQuery, Integer.MIN_VALUE);
+    }
+
+    private void batchReadWorker(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Exception {
+        int retry = 20;
+        while (retry-- > 0 && isAlive()) {
+            try {
+                tapLogger.info("batchRead, sql: {}", sql);
+                mysqlJdbcContext.streamQueryWithTimeout(sql, resultSet -> {
+                    List<TapEvent> tapEvents = list();
+                    //get all column names
+                    List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+                    while (isAlive() && resultSet.next()) {
+                        DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                        processDataMap(dataMap, tapTable);
+                        tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
+                        if (tapEvents.size() == eventBatchSize) {
+                            syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                            tapEvents = list();
+                        }
+                    }
+                    //last events those less than eventBatchSize
+                    if (EmptyKit.isNotEmpty(tapEvents)) {
+                        syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                    }
+                }, prepareSqlBeforeQuery, Integer.MIN_VALUE);
+                break;
+            } catch (Exception e) {
+                if (retry == 0 || !(e instanceof SQLRecoverableException || e instanceof IOException)) {
+                    throw e;
+                }
+            } catch (Throwable e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    protected void batchReadWithPartition(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
+        ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
+        List<String> tablePartitions = getTablePartitions(tapConnectorContext, tapTable);
+        Integer threadSize = commonDbConfig.getBatchReadThreadSize();
+        if (threadSize > tablePartitions.size()) {
+            threadSize = tablePartitions.size();
+        }
+
+        // 计算每个线程应该处理的分区数
+        int partitionsPerThread = tablePartitions.size() / threadSize;
+        int remainingPartitions = tablePartitions.size() % threadSize;
+
+        try {
+            for (int i = 0; i < threadSize; i++) {
+                final int threadIndex = i;
+                // 计算每个线程的起始和结束索引
+                int startIndex = threadIndex * partitionsPerThread + Math.min(threadIndex, remainingPartitions);
+                int endIndex = startIndex + partitionsPerThread + (threadIndex < remainingPartitions ? 1 : 0);
+
+                // 提交任务给线程池
+                executorService.submit(() -> {
+                    try {
+                        // 获取当前线程要处理的分区子列表
+                        List<String> threadPartitions = tablePartitions.subList(startIndex, endIndex);
+
+                        // 打印线程信息和对应的分区
+                        System.out.println("Thread " + threadIndex + " processing partitions: " + threadPartitions);
+
+                        // 这里可以添加处理每个分区的具体逻辑
+                        for (String partition : threadPartitions) {
+                            String splitSql = sql + " partition(" + partition + ")";
+                            try {
+                                batchReadWorker(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer);
+                            } catch (Exception e) {
+                                throwable.set(e);
+                            }
+                            if (EmptyKit.isNotNull(throwable.get())) {
+                                exceptionCollector.collectTerminateByServer(throwable.get());
+                                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), throwable.get());
+                                exceptionCollector.revealException(throwable.get());
+                                try {
+                                    throw throwable.get();
+                                } catch (Throwable e) {
+                                    throw new RuntimeException(e);
+                                }
+                            }
+                        }
+                    } finally {
+                        countDownLatch.countDown();
+                    }
+                });
+            }
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            if (EmptyKit.isNotNull(throwable.get())) {
+                exceptionCollector.collectTerminateByServer(throwable.get());
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), throwable.get());
+                exceptionCollector.revealException(throwable.get());
+                throw throwable.get();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            executorService.shutdown();
+        }
+    }
+
+    protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        List<String> tablePartitions = getTablePartitions(tapConnectorContext, tapTable);
+        if (tablePartitions.size() >= 4) {
+            batchReadWithPartition(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
+            return;
+        }
+
+        String sql = getBatchReadSelectSql(tapTable);
+        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
+        ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
+        Integer threadSize = commonDbConfig.getBatchReadThreadSize();
+
+        try {
+            for (int i = 0; i < threadSize; i++) {
+                final int threadIndex = i;
+                executorService.submit(() -> {
+                    try {
+                        for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
+                            String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
+                            tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
+                            batchReadWorker(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer);
+                        }
+                    } catch (Exception e) {
+                        throwable.set(e);
+                    } finally {
+                        countDownLatch.countDown();
+                    }
+                });
+            }
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            if (EmptyKit.isNotNull(throwable.get())) {
+                exceptionCollector.collectTerminateByServer(throwable.get());
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), throwable.get());
+                exceptionCollector.revealException(throwable.get());
+                throw throwable.get();
+            }
+        } finally {
+            executorService.shutdown();
+        }
     }
 
     protected Map<String, Object> filterTimeForMysql(

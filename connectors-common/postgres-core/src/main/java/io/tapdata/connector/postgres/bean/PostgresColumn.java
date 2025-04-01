@@ -79,7 +79,11 @@ public class PostgresColumn extends CommonColumn {
         if (EmptyKit.isNull(defaultValue) || defaultValue.startsWith("NULL::")) {
             return null;
         } else if (defaultValue.contains("::")) {
-            res = defaultValue.substring(0, defaultValue.lastIndexOf("::"));
+            if (defaultValue.substring(defaultValue.indexOf("::") + 2).contains(")")) {
+                res = defaultValue;
+            } else {
+                res = defaultValue.substring(0, defaultValue.lastIndexOf("::"));
+            }
         } else {
             res = defaultValue;
         }
@@ -100,7 +104,8 @@ public class PostgresColumn extends CommonColumn {
     public enum PostgresDefaultFunction {
         _CURRENT_TIMESTAMP("CURRENT_TIMESTAMP"),
         _CURRENT_USER("CURRENT_USER"),
-        _GENERATE_UUID("gen_random_uuid()");
+        _GENERATE_UUID("gen_random_uuid()"),
+        _TIMEZONE("timezone\\(.*\\)");
 
         private final String function;
         private static final Map<String, String> map = new HashMap<>();
@@ -118,6 +123,11 @@ public class PostgresColumn extends CommonColumn {
         public static String parseFunction(String key) {
             if (map.containsKey(key)) {
                 return map.get(key);
+            }
+            for (Map.Entry<String, String> entry : map.entrySet()) {
+                if (key.matches(entry.getKey())) {
+                    return entry.getValue();
+                }
             }
             return null;
         }
