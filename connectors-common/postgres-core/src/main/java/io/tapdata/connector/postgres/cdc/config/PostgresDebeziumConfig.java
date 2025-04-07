@@ -115,7 +115,7 @@ public class PostgresDebeziumConfig {
                 .with("geometry.schema.name", "io.debezium.postgresql.type.Geometry")
                 .with("other.type", "io.tapdata.connector.postgres.converters.OtherConverter")
                 .with("other.schema.name", "io.debezium.postgresql.type.Other")
-//                .with("heartbeat.interval.ms", 3000)
+                .with("heartbeat.interval.ms", 3000)
                 .with("plugin.name", postgresConfig.getLogPluginName())
                 .with("max.queue.size", postgresConfig.getMaximumQueueSize())
                 .with("max.batch.size", postgresConfig.getMaximumQueueSize() / 8);
