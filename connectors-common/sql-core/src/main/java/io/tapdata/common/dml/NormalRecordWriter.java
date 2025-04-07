@@ -69,7 +69,7 @@ public class NormalRecordWriter {
         try {
             insertRecorder.setVersion(version);
             insertRecorder.setInsertPolicy(insertPolicy);
-            if (commonDbConfig.getEnableFileInput()) {
+            if (commonDbConfig.getEnableFileInput() && ConnectionOptions.DML_INSERT_POLICY_JUST_INSERT.equals(insertPolicy)) {
                 insertRecorder.enableFileInput(new PooledByteBufAllocator().directBuffer(commonDbConfig.getBufferCapacity().intValue()));
             }
             insertRecorder.setTapLogger(tapLogger);
