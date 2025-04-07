@@ -141,6 +141,7 @@ public class GreenplumConnector extends PostgresConnector {
     @Override
     public void onStart(TapConnectionContext connectorContext) {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectorContext.getConnectionConfig());
+        postgresConfig.load(connectorContext.getNodeConfig());
         postgresJdbcContext = new GreenplumJdbcContext(postgresConfig);
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;
