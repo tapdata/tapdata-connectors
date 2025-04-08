@@ -93,7 +93,7 @@ public class OceanbaseReader {
                             events.get().add(messageEvent.getEvent());
                             lastTimestamp = Long.parseLong(messageEvent.getMessage().getTimestamp());
                             if (events.get().size() >= recordSize) {
-                                consumer.accept(events.get(), Long.parseLong(messageEvent.getMessage().getTimestamp()));
+                                consumer.accept(events.get(), lastTimestamp);
                                 events.set(new ArrayList<>());
                             }
                         } else {
