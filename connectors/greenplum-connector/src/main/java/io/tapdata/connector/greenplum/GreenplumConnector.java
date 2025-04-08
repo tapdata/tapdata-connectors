@@ -147,6 +147,7 @@ public class GreenplumConnector extends PostgresConnector {
         jdbcContext = postgresJdbcContext;
         commonSqlMaker = new CommonSqlMaker();
         postgresVersion = postgresJdbcContext.queryVersion();
+        postgresJdbcContext.withPostgresVersion(postgresVersion);
         ddlSqlGenerator = new PostgresDDLSqlGenerator();
         tapLogger = connectorContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();
@@ -174,12 +175,12 @@ public class GreenplumConnector extends PostgresConnector {
     }
 
     @Override
-    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
+    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws SQLException {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                GreenplumTest greenplumTest = new GreenplumTest(postgresConfig, consumer, connectionOptions)
+                GreenplumTest greenplumTest = (GreenplumTest) new GreenplumTest(postgresConfig, consumer, connectionOptions).withPostgresVersion()
         ) {
             greenplumTest.testOneByOne();
             return connectionOptions;
