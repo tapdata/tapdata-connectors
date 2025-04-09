@@ -240,7 +240,7 @@ public class OceanbaseConnector extends MysqlConnector {
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws SQLException {
         if (EmptyKit.isNotNull(offsetStartTime)) {
-            return offsetStartTime;
+            return offsetStartTime / 1000L;
         }
         AtomicLong offset = new AtomicLong(0);
         mysqlJdbcContext.queryWithNext("select current_timestamp()", resultSet -> {
