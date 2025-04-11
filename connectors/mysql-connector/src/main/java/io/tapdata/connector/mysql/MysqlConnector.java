@@ -566,9 +566,7 @@ public class MysqlConnector extends CommonDbConnector {
                     .setUpdatePolicy(updateDmlPolicy)
                     .setTapLogger(tapLogger);
         }
-        if (EmptyKit.isNotEmpty(tapTable.getConstraintList())) {
-            mysqlRecordWriter.closeConstraintCheck();
-        }
+        mysqlRecordWriter.closeConstraintCheck();
         if (mysqlConfig.getCreateAutoInc() && EmptyKit.isNotEmpty(autoIncFields)
                 && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
             mysqlRecordWriter.setAutoIncFields(autoIncFields);
