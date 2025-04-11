@@ -165,7 +165,7 @@ public class StarrocksStreamLoader {
             if (CollectionUtils.isEmpty(primaryKeys)) {
                 putBuilder.enableAppend();
             } else {
-                if (StarrocksTableType.Unique.toString().equals(StarrocksConfig.getUniqueKeyType())) {
+                if (StarrocksTableType.Primary.toString().equals(StarrocksConfig.getUniqueKeyType()) || StarrocksTableType.Unique.toString().equals(StarrocksConfig.getUniqueKeyType())) {
                     putBuilder.enableDelete();
                     putBuilder.addPartialHeader();
                 } else {

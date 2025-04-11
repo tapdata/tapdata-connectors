@@ -303,6 +303,7 @@ public class KafkaService extends AbstractMqService {
         AtomicLong delete = new AtomicLong(0);
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
+        String topic = EmptyKit.isBlank(((KafkaConfig) mqConfig).getTopicName()) ? tapTable.getId() : ((KafkaConfig) mqConfig).getTopicName();
         try {
             for (TapRecordEvent event : tapRecordEvents) {
                 if (null != isAlive && !isAlive.get()) {
@@ -343,7 +344,7 @@ public class KafkaService extends AbstractMqService {
                         countDownLatch.countDown();
                     }
                 };
-                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapTable.getId(),
+                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(topic,
                         null, event.getTime(), getKafkaMessageKey(data, tapTable), body,
                         new RecordHeaders().add("mqOp", mqOp.getOp().getBytes()));
                 kafkaProducer.send(producerRecord, callback);
@@ -375,6 +376,7 @@ public class KafkaService extends AbstractMqService {
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
         ScriptEngine scriptEngine;
+        String topic = EmptyKit.isBlank(((KafkaConfig) mqConfig).getTopicName()) ? tapTable.getId() : ((KafkaConfig) mqConfig).getTopicName();
         String script = ((KafkaConfig) mqConfig).getScript();
         Map<String, Object> record = new HashMap();
         try {
@@ -392,7 +394,7 @@ public class KafkaService extends AbstractMqService {
                     break;
                 }
                 Map<String, Object> data;
-                Map<String, Map<String, Object>> allData = new HashMap();
+                Map<String, Object> allData = new HashMap<>();
                 MqOp mqOp = MqOp.INSERT;
                 if (event instanceof TapInsertRecordEvent) {
                     data = ((TapInsertRecordEvent) event).getAfter();
@@ -412,6 +414,9 @@ public class KafkaService extends AbstractMqService {
                 } else {
                     data = new HashMap<>();
                 }
+                if (EmptyKit.isNotBlank(((KafkaConfig) mqConfig).getTopicName())) {
+                    record.put("tableName", tapTable.getId());
+                }
                 byte[] kafkaMessageKey = getKafkaMessageKey(data, tapTable);
                 record.put("data", allData);
                 Map<String, Object> header = new HashMap();
@@ -420,44 +425,44 @@ public class KafkaService extends AbstractMqService {
                 String op = mqOp.getOp();
                 Collection<String> conditionKeys = tapTable.primaryKeys(true);
                 RecordHeaders recordHeaders = new RecordHeaders();
-                byte[] body = {};
                 Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, op, conditionKeys));
-                if (null == eventObj) {
-                    continue;
-                } else {
-                    Map<String, Object> res = (Map<String, Object>) eventObj;
-                    if (null == res.get("data")) {
-                        throw new RuntimeException("data cannot be null");
-                    } else {
-                        Object obj = res.get("data");
-                        if (obj instanceof Map) {
-                            Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
-                            if (map.containsKey("before") && map.get("before").isEmpty()) {
-                                map.remove("before");
-                            }
-                            if (map.containsKey("after") && map.get("after").isEmpty()) {
-                                map.remove("after");
-                            }
-                            res.put("data", map);
-                            body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
-                        } else {
-                            body = obj.toString().getBytes();
-                        }
-                    }
-                    if (res.containsKey("header")) {
-                        Object obj = res.get("header");
-                        if (obj instanceof Map) {
-                            Map<String, Object> head = (Map<String, Object>) res.get("header");
-                            for (String s : head.keySet()) {
-                                recordHeaders.add(s, head.get(s).toString().getBytes());
-                            }
-                        } else {
-                            throw new RuntimeException("header must be a collection type");
-                        }
-                    } else {
-                        recordHeaders.add("mqOp", mqOp.toString().getBytes());
-                    }
-                }
+                byte[] body = jsonParser.toJsonBytes(eventObj, JsonParser.ToJsonFeature.WriteMapNullValue);
+//                if (null == eventObj) {
+//                    continue;
+//                } else {
+//                    Map<String, Object> res = (Map<String, Object>) eventObj;
+//                    if (null == res.get("data")) {
+//                        throw new RuntimeException("data cannot be null");
+//                    } else {
+//                        Object obj = res.get("data");
+//                        if (obj instanceof Map) {
+//                            Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
+//                            if (map.containsKey("before") && map.get("before").isEmpty()) {
+//                                map.remove("before");
+//                            }
+//                            if (map.containsKey("after") && map.get("after").isEmpty()) {
+//                                map.remove("after");
+//                            }
+//                            res.put("data", map);
+//                            body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
+//                        } else {
+//                            body = obj.toString().getBytes();
+//                        }
+//                    }
+//                    if (res.containsKey("header")) {
+//                        Object obj = res.get("header");
+//                        if (obj instanceof Map) {
+//                            Map<String, Object> head = (Map<String, Object>) res.get("header");
+//                            for (String s : head.keySet()) {
+//                                recordHeaders.add(s, head.get(s).toString().getBytes());
+//                            }
+//                        } else {
+//                            throw new RuntimeException("header must be a collection type");
+//                        }
+//                    } else {
+//                        recordHeaders.add("mqOp", mqOp.toString().getBytes());
+//                    }
+//                }
                 MqOp finalMqOp = mqOp;
                 Callback callback = (metadata, exception) -> {
                     try {
@@ -479,7 +484,7 @@ public class KafkaService extends AbstractMqService {
                         countDownLatch.countDown();
                     }
                 };
-                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapTable.getId(),
+                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(topic,
                         null, event.getTime(), kafkaMessageKey, body,
                         recordHeaders);
                 kafkaProducer.send(producerRecord, callback);
@@ -628,7 +633,7 @@ public class KafkaService extends AbstractMqService {
     }
 
     @Override
-	public void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+    public void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         consuming.set(true);
         int maxDelay = 500;
         KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
@@ -636,7 +641,7 @@ public class KafkaService extends AbstractMqService {
         try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
             KafkaOffset streamOffset = KafkaOffsetUtils.setConsumerByOffset(kafkaConsumer, tableList, offset, consuming);
             try (BatchPusher<TapEvent> batchPusher = new BatchPusher<TapEvent>(
-                tapEvents -> eventsOffsetConsumer.accept(tapEvents, streamOffset.clone())
+                    tapEvents -> eventsOffsetConsumer.accept(tapEvents, streamOffset.clone())
             ).batchSize(eventBatchSize).maxDelay(maxDelay)) {
                 // 将初始化的 offset 推送到目标，让指定时间的增量任务下次启动时拿到 offset
                 Optional.of(new HeartbeatEvent()).ifPresent(event -> {

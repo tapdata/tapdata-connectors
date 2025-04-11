@@ -41,7 +41,7 @@ public class HttpPutBuilder {
     }
 
     public HttpPutBuilder addPartialHeader() {
-        header.put("partial_columns", "true");
+        header.put("partial_update", "true");
         return this;
     }
 

@@ -154,7 +154,12 @@ public class KafkaConnector extends ConnectorBase {
     }
 
     private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
-        String tableId = tapCreateTableEvent.getTableId();
+        String tableId;
+        if (EmptyKit.isBlank(kafkaConfig.getTopicName())) {
+            tableId = tapCreateTableEvent.getTableId();
+        } else {
+            tableId = kafkaConfig.getTopicName();
+        }
         CreateTableOptions createTableOptions = new CreateTableOptions();
 //        if (!this.isSchemaRegister) {
         Integer replicasSize = Optional.ofNullable(kafkaConfig.getReplicasSize()).orElse(1);
@@ -317,10 +322,10 @@ public class KafkaConnector extends ConnectorBase {
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
-	    if (null == offsetStartTime) {
-		    return System.currentTimeMillis();
-	    }
-	    return offsetStartTime;
+        if (null == offsetStartTime) {
+            return System.currentTimeMillis();
+        }
+        return offsetStartTime;
     }
 
     private void checkConnection(TapConnectionContext connectionContext, List<String> items, Consumer<ConnectionCheckItem> consumer) {

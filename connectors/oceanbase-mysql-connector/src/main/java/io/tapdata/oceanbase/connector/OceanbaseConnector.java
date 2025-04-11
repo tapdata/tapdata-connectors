@@ -132,9 +132,18 @@ public class OceanbaseConnector extends MysqlConnector {
             return "null";
         });
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
-        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime());
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
+            if (EmptyKit.isNotNull(tapDateTimeValue.getValue().getTimeZone())) {
+                tapDateTimeValue.getValue().setTimeZone(TimeZone.getTimeZone("UTC"));
+            } else {
+                tapDateTimeValue.getValue().setTimeZone(timeZone);
+            }
+            return tapDateTimeValue.getValue().isContainsIllegal() ? tapDateTimeValue.getValue().getIllegalDate() : formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS");
+        });
+        //date类型通过jdbc读取时，会自动转换为当前时区的时间，所以设置为当前时区
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().isContainsIllegal() ? tapDateValue.getValue().getIllegalDate() : tapDateValue.getValue().toInstant());
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
+        codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> mysqlJdbcContext.getConnection(), this::isAlive, c));
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
         //ddl
@@ -231,7 +240,7 @@ public class OceanbaseConnector extends MysqlConnector {
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws SQLException {
         if (EmptyKit.isNotNull(offsetStartTime)) {
-            return offsetStartTime;
+            return offsetStartTime / 1000L;
         }
         AtomicLong offset = new AtomicLong(0);
         mysqlJdbcContext.queryWithNext("select current_timestamp()", resultSet -> {
@@ -263,7 +272,7 @@ public class OceanbaseConnector extends MysqlConnector {
 
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
-        mysqlJdbcContext.streamQueryWithTimeout(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer), prepareSqlBeforeQuery, Integer.MAX_VALUE);
+        mysqlJdbcContext.streamQueryWithTimeout(sql, resultSetConsumer(tapTable, eventBatchSize, eventsOffsetConsumer), prepareSqlBeforeQuery, Integer.MIN_VALUE);
     }
 
     private void batchReadWorker(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Exception {

@@ -464,9 +464,7 @@ public class PostgresConnector extends CommonDbConnector {
                     .setUpdatePolicy(updateDmlPolicy)
                     .setTapLogger(tapLogger);
         }
-        if (EmptyKit.isNotEmpty(tapTable.getConstraintList())) {
-            postgresRecordWriter.closeConstraintCheck();
-        }
+        postgresRecordWriter.closeConstraintCheck();
         if (postgresConfig.getCreateAutoInc() && Integer.parseInt(postgresVersion) > 100000 && EmptyKit.isNotEmpty(autoIncFields)
                 && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
             postgresRecordWriter.setAutoIncFields(autoIncFields);
