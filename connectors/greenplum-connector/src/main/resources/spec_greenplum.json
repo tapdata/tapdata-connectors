@@ -274,7 +274,8 @@
       "user" : "user",
       "password" : "password",
       "logPluginName" : "logPluginName",
-      "timezone": "timezone"
+      "timezone": "timezone",
+      "enableFileInput": "Enable File Input"
     },
     "zh_CN": {
       "doc": "docs/greenplum_zh_CN.md",
@@ -286,7 +287,8 @@
       "user" : "账号",
       "password" : "密码",
       "logPluginName" : "日志插件",
-      "timezone": "时区"
+      "timezone": "时区",
+      "enableFileInput": "启用文件输入"
     },
     "zh_TW": {
       "doc": "docs/greenplum_zh_TW.md",
@@ -298,7 +300,8 @@
       "user" : "賬號",
       "password" : "密碼",
       "logPluginName" : "日誌插件",
-      "timezone": "時區"
+      "timezone": "時區",
+      "enableFileInput": "啟用文件輸入"
     }
   },
   "dataTypes": {
