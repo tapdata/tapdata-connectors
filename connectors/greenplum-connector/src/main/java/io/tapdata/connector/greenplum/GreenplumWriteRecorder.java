@@ -6,13 +6,13 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
+import org.postgresql.core.BaseConnection;
+import org.postgresql.jdbc.PgSQLXML;
+import org.postgresql.util.PGobject;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.HashMap;
-import java.util.Map;
+import java.sql.*;
+import java.time.LocalDateTime;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class GreenplumWriteRecorder extends OldPostgresWriteRecorder {
@@ -67,6 +67,64 @@ public class GreenplumWriteRecorder extends OldPostgresWriteRecorder {
                     uniqueCondition.stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ?::text IS NULL))")
                             .collect(Collectors.joining(" AND "));
         }
+    }
+
+    @Override
+    protected Object filterValue(Object value, String dataType) throws SQLException {
+        if (EmptyKit.isNull(value)) {
+            return null;
+        }
+        if ("uuid".equalsIgnoreCase(dataType)) {
+            return value instanceof UUID ? value : UUID.fromString(String.valueOf(value));
+        }
+        if (dataType.startsWith("bit")) {
+            PGobject pGobject = new PGobject();
+            pGobject.setType("bit");
+            if (value instanceof Boolean) {
+                pGobject.setValue((Boolean) value ? "1" : "0");
+            } else {
+                pGobject.setValue(String.valueOf(value));
+            }
+            return pGobject;
+        }
+        if (value instanceof List) {
+            return connection.createArrayOf(dataType, ((List) value).toArray());
+        }
+        switch (dataType) {
+            case "interval":
+            case "point":
+            case "line":
+            case "lseg":
+            case "box":
+            case "path":
+            case "polygon":
+            case "circle":
+            case "money":
+            case "cidr":
+            case "inet":
+            case "macaddr":
+            case "json":
+            case "geometry":
+            case "jsonb":
+                PGobject pGobject = new PGobject();
+                pGobject.setType(dataType);
+                pGobject.setValue(String.valueOf(value));
+                return pGobject;
+            case "xml":
+                return new PgSQLXML(connection.unwrap(BaseConnection.class), String.valueOf(value));
+        }
+        if (dataType.endsWith("with time zone") && value instanceof LocalDateTime) {
+            Timestamp timestamp = Timestamp.valueOf(((LocalDateTime) value));
+            timestamp.setTime(timestamp.getTime() + TimeZone.getDefault().getRawOffset());
+            return timestamp;
+        }
+        if (value instanceof String) {
+            return ((String) value).replace("\u0000", "").replace("\u008e", "");
+        }
+        if (value instanceof Boolean && dataType.contains("int")) {
+            return Boolean.TRUE.equals(value) ? 1 : 0;
+        }
+        return value;
     }
 
 }

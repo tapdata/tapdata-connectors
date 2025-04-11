@@ -87,7 +87,7 @@ public class PostgresExceptionCollector extends AbstractExceptionCollector imple
 
     @Override
     public void collectViolateUnique(String targetFieldName, Object data, Object constraint, Throwable cause) {
-        if (cause instanceof SQLException && "23505".equals(((SQLException) cause).getSQLState())) {
+        if (cause instanceof SQLException && "23505,22P04".contains(((SQLException) cause).getSQLState())) {
             Pattern pattern = Pattern.compile("ERROR: duplicate key value violates unique constraint \"(.*)\" ");
             Matcher matcher = pattern.matcher(ErrorKit.getLastCause(cause).getMessage());
             String constraintStr = null;

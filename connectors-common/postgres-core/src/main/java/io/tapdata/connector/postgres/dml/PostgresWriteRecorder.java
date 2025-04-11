@@ -215,7 +215,7 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
 
     private String parseObject(Object value) {
         if (value == null) {
-            return "null";
+            return "";
         }
         if (value instanceof String) {
             return ((String) value).replace("\n", "\\n").replace("\r", "\\r").replace(",", "\\,");
