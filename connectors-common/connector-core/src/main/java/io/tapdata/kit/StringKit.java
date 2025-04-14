@@ -1,11 +1,10 @@
 package io.tapdata.kit;
 
+import org.apache.commons.lang3.StringUtils;
+
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -31,12 +30,39 @@ public class StringKit {
         return sb.delete(sb.length() - combiner.length(), sb.length()).toString();
     }
 
-    //replace first
-    public static String replaceOnce(String text, String searchString, String replacement) {
+    //replace
+    public static String replace(String text, String searchString, String replacement) {
         if (EmptyKit.isEmpty(text)) {
             return "";
         }
-        return text.replace(searchString, replacement);
+        return StringUtils.replace(text, searchString, replacement);
+    }
+
+    public static String replaceMultiple(String input, Map<String, String> replacements) {
+        char[] chars = input.toCharArray();
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        while (i < chars.length) {
+            boolean matched = false;
+            // 遍历所有可能的替换目标（按最长优先排序）
+            for (Map.Entry<String, String> entry : replacements.entrySet()) {
+                String target = entry.getKey();
+                if (i + target.length() <= chars.length) {
+                    String current = new String(chars, i, target.length());
+                    if (current.equals(target)) {
+                        sb.append(entry.getValue());
+                        i += target.length();
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            if (!matched) {
+                sb.append(chars[i]);
+                i++;
+            }
+        }
+        return sb.toString();
     }
 
     /**
