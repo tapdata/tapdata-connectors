@@ -218,7 +218,7 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
             return "";
         }
         if (value instanceof String) {
-            return ((String) value).replace("\n", "\\n").replace("\r", "\\r").replace(",", "\\,");
+            return StringKit.replaceEscape((String) value, "\n\r,".toCharArray());
         }
         if (value instanceof byte[]) {
             throw new UnsupportedOperationException("binary type not supported in file input");

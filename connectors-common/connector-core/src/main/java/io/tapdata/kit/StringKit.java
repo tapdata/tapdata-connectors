@@ -1,5 +1,7 @@
 package io.tapdata.kit;
 
+import org.apache.commons.lang3.StringUtils;
+
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
@@ -30,12 +32,30 @@ public class StringKit {
         return sb.delete(sb.length() - combiner.length(), sb.length()).toString();
     }
 
-    //replace first
+    //replace
     public static String replaceOnce(String text, String searchString, String replacement) {
         if (EmptyKit.isEmpty(text)) {
             return "";
         }
-        return text.replace(searchString, replacement);
+        return StringUtils.replace(text, searchString, replacement);
+    }
+
+    public static String replaceEscape(String input, char[] replacements) {
+        char[] chars = input.toCharArray();
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        while (i < chars.length) {
+            char c = chars[i];
+            for (char replacement : replacements) {
+                if (c == replacement) {
+                    sb.append("\\");
+                    break;
+                }
+            }
+            sb.append(c);
+            i++;
+        }
+        return sb.toString();
     }
 
     /**
@@ -190,7 +210,7 @@ public class StringKit {
         if (EmptyKit.isBlank(str) || EmptyKit.isBlank(remove)) {
             return str;
         }
-        if (str.startsWith(remove) && str.endsWith(remove) && str.length() > 2 * remove.length()) {
+        if (str.startsWith(remove) && str.endsWith(remove) && str.length() >= 2 * remove.length()) {
             return str.substring(remove.length(), str.length() - remove.length());
         }
         if (EmptyKit.isNull(upperCase)) {
