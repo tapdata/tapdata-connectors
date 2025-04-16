@@ -119,6 +119,12 @@ public class NormalRecordWriter {
             //release resource
 
         } catch (SQLException e) {
+            try {
+                if (!connection.getAutoCommit() && !isTransaction) {
+                    connection.rollback();
+                }
+            } catch (SQLException ignore) {
+            }
             exceptionCollector.collectTerminateByServer(e);
             exceptionCollector.collectViolateNull(null, e);
             TapRecordEvent errorEvent = null;
