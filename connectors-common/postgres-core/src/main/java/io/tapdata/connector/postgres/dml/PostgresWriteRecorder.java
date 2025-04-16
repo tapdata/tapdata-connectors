@@ -215,10 +215,10 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
 
     private String parseObject(Object value) {
         if (value == null) {
-            return "null";
+            return "";
         }
         if (value instanceof String) {
-            return StringKit.replaceMultiple((String) value, replacements);
+            return StringKit.replaceEscape((String) value, "\n\r,".toCharArray());
         }
         if (value instanceof byte[]) {
             throw new UnsupportedOperationException("binary type not supported in file input");
@@ -228,12 +228,6 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         }
         return String.valueOf(value);
     }
-
-    private final static Map<String, String> replacements = new HashMap<String, String>() {{
-        put("\n", "\\n");
-        put("\r", "\\r");
-        put(",", "\\,");
-    }};
 
     protected void setPrepareStatement(int pos, Map<String, Object> data, String key) throws SQLException {
         String dataType = columnTypeMap.get(key);

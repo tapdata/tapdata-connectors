@@ -4,7 +4,10 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -38,29 +41,20 @@ public class StringKit {
         return StringUtils.replace(text, searchString, replacement);
     }
 
-    public static String replaceMultiple(String input, Map<String, String> replacements) {
+    public static String replaceEscape(String input, char[] replacements) {
         char[] chars = input.toCharArray();
         StringBuilder sb = new StringBuilder();
         int i = 0;
         while (i < chars.length) {
-            boolean matched = false;
-            // 遍历所有可能的替换目标（按最长优先排序）
-            for (Map.Entry<String, String> entry : replacements.entrySet()) {
-                String target = entry.getKey();
-                if (i + target.length() <= chars.length) {
-                    String current = new String(chars, i, target.length());
-                    if (current.equals(target)) {
-                        sb.append(entry.getValue());
-                        i += target.length();
-                        matched = true;
-                        break;
-                    }
+            char c = chars[i];
+            for (char replacement : replacements) {
+                if (c == replacement) {
+                    sb.append("\\");
+                    break;
                 }
             }
-            if (!matched) {
-                sb.append(chars[i]);
-                i++;
-            }
+            sb.append(c);
+            i++;
         }
         return sb.toString();
     }
