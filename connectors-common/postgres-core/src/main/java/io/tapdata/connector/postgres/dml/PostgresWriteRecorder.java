@@ -215,10 +215,10 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
 
     private String parseObject(Object value) {
         if (value == null) {
-            return "null";
+            return "";
         }
         if (value instanceof String) {
-            return ((String) value).replace("\n", "\\n").replace("\r", "\\r").replace(",", "\\,");
+            return StringKit.replaceEscape((String) value, "\n\r,".toCharArray());
         }
         if (value instanceof byte[]) {
             throw new UnsupportedOperationException("binary type not supported in file input");

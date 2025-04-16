@@ -513,7 +513,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
-        Map<String, List<DataMap>> indexMap = indexList.stream()
+        Map<String, List<DataMap>> indexMap = indexList.stream().filter(idx -> EmptyKit.isNotBlank(idx.getString("indexName")))
                 .collect(Collectors.groupingBy(idx -> idx.getString("indexName"), LinkedHashMap::new, Collectors.toList()));
         indexMap.forEach((key, value) -> tapIndexList.add(makeTapIndex(key, value)));
         return tapIndexList;

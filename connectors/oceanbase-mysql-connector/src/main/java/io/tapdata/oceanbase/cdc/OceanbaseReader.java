@@ -7,6 +7,8 @@ import com.oceanbase.clogproxy.client.listener.RecordListener;
 import com.oceanbase.oms.logmessage.DataMessage;
 import com.oceanbase.oms.logmessage.LogMessage;
 import io.netty.util.BooleanSupplier;
+import io.tapdata.common.concurrent.ConcurrentProcessor;
+import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.common.ddl.DDLFactory;
 import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
 import io.tapdata.common.ddl.type.DDLParserType;
@@ -31,12 +33,11 @@ import org.apache.commons.lang3.StringUtils;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static io.tapdata.base.ConnectorBase.list;
 
 public class OceanbaseReader {
 
@@ -71,97 +72,71 @@ public class OceanbaseReader {
         config.setTableWhiteList(oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + ".*");
         LogProxyClient client = new LogProxyClient(oceanbaseConfig.getHost(), oceanbaseConfig.getLogProxyPort(), config);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
-        AtomicReference<List<TapEvent>> eventList = new AtomicReference<>(new ArrayList<>());
-        AtomicInteger heartbeatCount = new AtomicInteger(0);
-        client.addListener(new RecordListener() {
-            @Override
-            public void notify(LogMessage message) {
+        try (
+                ConcurrentProcessor<LogMessage, MessageEvent> concurrentProcessor = TapExecutors.createSimple(8, 32, "OceanBaseReader-Processor")
+        ) {
+            Thread t = new Thread(() -> {
+                AtomicReference<List<TapEvent>> events = new AtomicReference<>(list());
+                int heartbeat = 0;
+                long lastTimestamp = 0L;
                 try {
-                    String op = message.getOpt().name();
-                    if (!tableList.contains(message.getTableName())) {
-                        switch (op) {
-                            case "INSERT":
-                            case "UPDATE":
-                            case "DELETE":
-                                return;
-                        }
-                    }
-                    Map<String, Object> after = DataMap.create();
-                    Map<String, Object> before = DataMap.create();
-                    analyzeMessage(message, after, before);
-                    switch (op) {
-                        case "INSERT":
-                            eventList.get().add(new TapInsertRecordEvent().init().table(message.getTableName()).after(after).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
-                            break;
-                        case "UPDATE":
-                            eventList.get().add(new TapUpdateRecordEvent().init().table(message.getTableName()).after(after).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
-                            break;
-                        case "DELETE":
-                            eventList.get().add(new TapDeleteRecordEvent().init().table(message.getTableName()).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
-                            break;
-                        case "HEARTBEAT":
-                            if (heartbeatCount.incrementAndGet() >= 10) {
-                                eventList.get().add(new HeartbeatEvent().init().referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
-                                heartbeatCount.set(0);
-                                consumer.accept(eventList.get(), Long.valueOf(message.getTimestamp()));
-                                eventList.set(new ArrayList<>());
-                            }
-                            break;
-                        case "DDL": {
-                            String ddlStr = message.getFieldList().get(0).getValue().toString();
-                            if (StringUtils.isNotBlank(ddlStr)) {
-                                try {
-                                    DDLFactory.ddlToTapDDLEvent(
-                                            ddlParserType,
-                                            ddlStr,
-                                            DDL_WRAPPER_CONFIG,
-                                            tableMap,
-                                            tapDDLEvent -> {
-                                                tapDDLEvent.setTime(System.currentTimeMillis());
-                                                tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
-                                                tapDDLEvent.setOriginDDL(ddlStr);
-                                                eventList.get().add(tapDDLEvent);
-                                            }, (ddl, wrapper) -> {
-                                                boolean unIgnoreTable = true;
-                                                if (wrapper instanceof MysqlDDLWrapper) {
-                                                    String tableName = ((MysqlDDLWrapper) wrapper).getTableName(ddl);
-                                                    unIgnoreTable = null == tableList || tableList.contains(tableName);
-                                                }
-                                                return unIgnoreTable;
-                                            }
-                                    );
-                                } catch (Throwable e) {
-                                    TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
-                                    tapDDLEvent.setTime(System.currentTimeMillis());
-                                    tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
-                                    tapDDLEvent.setOriginDDL(ddlStr);
-                                    eventList.get().add(tapDDLEvent);
+                    while (isAlive.get()) {
+                        MessageEvent messageEvent = concurrentProcessor.get(100, TimeUnit.MILLISECONDS);
+                        if (EmptyKit.isNotNull(messageEvent)) {
+                            if ("HEARTBEAT".equals(messageEvent.getMessage().getOpt().name())) {
+                                if (heartbeat++ > 3) {
+                                    consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(Long.parseLong(messageEvent.getMessage().getTimestamp()) * 1000)), Long.parseLong(messageEvent.getMessage().getTimestamp()));
+                                    heartbeat = 0;
                                 }
+                                continue;
                             }
-                            break;
+                            events.get().add(messageEvent.getEvent());
+                            lastTimestamp = Long.parseLong(messageEvent.getMessage().getTimestamp());
+                            if (events.get().size() >= recordSize) {
+                                consumer.accept(events.get(), lastTimestamp);
+                                events.set(new ArrayList<>());
+                            }
+                        } else {
+                            if (events.get().size() > 0) {
+                                consumer.accept(events.get(), lastTimestamp);
+                                events.set(new ArrayList<>());
+                            }
                         }
-                        default:
-                            break;
-                    }
-                    if (eventList.get().size() >= recordSize) {
-                        consumer.accept(eventList.get(), Long.valueOf(message.getTimestamp()));
-                        eventList.set(new ArrayList<>());
                     }
                 } catch (Exception e) {
                     throwable.set(e);
                 }
-            }
-
-            @Override
-            public void onException(LogProxyClientException e) {
-                if (e.needStop()) {
-                    client.stop();
+            });
+            t.setName("OceanBaseReader-Consumer");
+            t.start();
+            client.addListener(new RecordListener() {
+                @Override
+                public void notify(LogMessage message) {
+                    try {
+                        concurrentProcessor.runAsync(message, e -> {
+                            try {
+                                return emit(e);
+                            } catch (Exception er) {
+                                throwable.set(er);
+                                return null;
+                            }
+                        });
+                    } catch (Exception e) {
+                        throwable.set(e);
+                    }
                 }
-            }
-        });
-        client.start();
-        consumer.streamReadStarted();
-        client.join();
+
+                @Override
+                public void onException(LogProxyClientException e) {
+                    if (e.needStop()) {
+                        client.stop();
+                    }
+                }
+            });
+            client.start();
+            consumer.streamReadStarted();
+            client.join();
+        }
         consumer.streamReadEnded();
         if (EmptyKit.isNotNull(throwable.get())) {
             throw throwable.get();
@@ -169,6 +144,72 @@ public class OceanbaseReader {
         if (isAlive.get()) {
             throw new RuntimeException("Exception occurs in OceanBase Log Miner service");
         }
+    }
+
+    private MessageEvent emit(LogMessage message) {
+        String op = message.getOpt().name();
+        if (!tableList.contains(message.getTableName())) {
+            switch (op) {
+                case "INSERT":
+                case "UPDATE":
+                case "DELETE":
+                    return null;
+            }
+        }
+        AtomicReference<TapEvent> tapEvent = new AtomicReference<>();
+        Map<String, Object> after = DataMap.create();
+        Map<String, Object> before = DataMap.create();
+        analyzeMessage(message, after, before);
+        switch (op) {
+            case "INSERT":
+                tapEvent.set(new TapInsertRecordEvent().init().table(message.getTableName()).after(after).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                break;
+            case "UPDATE":
+                tapEvent.set(new TapUpdateRecordEvent().init().table(message.getTableName()).after(after).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                break;
+            case "DELETE":
+                tapEvent.set(new TapDeleteRecordEvent().init().table(message.getTableName()).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                break;
+            case "HEARTBEAT":
+                tapEvent.set(new HeartbeatEvent().init().referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                break;
+            case "DDL": {
+                String ddlStr = message.getFieldList().get(0).getValue().toString();
+                if (StringUtils.isNotBlank(ddlStr)) {
+                    try {
+                        DDLFactory.ddlToTapDDLEvent(
+                                ddlParserType,
+                                ddlStr,
+                                DDL_WRAPPER_CONFIG,
+                                tableMap,
+                                tapDDLEvent -> {
+                                    tapDDLEvent.setTime(System.currentTimeMillis());
+                                    tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
+                                    tapDDLEvent.setOriginDDL(ddlStr);
+                                    tapEvent.set(tapDDLEvent);
+                                }, (ddl, wrapper) -> {
+                                    boolean unIgnoreTable = true;
+                                    if (wrapper instanceof MysqlDDLWrapper) {
+                                        String tableName = ((MysqlDDLWrapper) wrapper).getTableName(ddl);
+                                        unIgnoreTable = null == tableList || tableList.contains(tableName);
+                                    }
+                                    return unIgnoreTable;
+                                }
+                        );
+                    } catch (Throwable e) {
+                        TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
+                        tapDDLEvent.setTime(System.currentTimeMillis());
+                        tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
+                        tapDDLEvent.setOriginDDL(ddlStr);
+                        tapEvent.set(tapDDLEvent);
+                    }
+                }
+                break;
+            }
+            default:
+                return null;
+        }
+        return new MessageEvent(tapEvent.get(), message);
     }
 
     private void analyzeMessage(LogMessage message, Map<String, Object> after, Map<String, Object> before) {
@@ -243,6 +284,24 @@ public class OceanbaseReader {
                 return field.getValue().getBytes();
             default:
                 return field.getValue().toString();
+        }
+    }
+
+    static class MessageEvent {
+        private final LogMessage message;
+        private final TapEvent event;
+
+        public MessageEvent(TapEvent event, LogMessage message) {
+            this.message = message;
+            this.event = event;
+        }
+
+        public LogMessage getMessage() {
+            return message;
+        }
+
+        public TapEvent getEvent() {
+            return event;
         }
     }
 }
