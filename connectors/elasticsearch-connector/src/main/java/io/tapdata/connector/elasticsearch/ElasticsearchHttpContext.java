@@ -5,6 +5,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
 import org.apache.http.ssl.SSLContextBuilder;
@@ -62,6 +63,9 @@ public class ElasticsearchHttpContext {
         if (elasticsearchConfig.isSslValidate()) {
             SSLContext sslContext = createSSLContext();
             clientBuilder.setSSLContext(sslContext);
+            if (!elasticsearchConfig.isValidateCA()) {
+                clientBuilder.setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE);
+            }
         }
         return clientBuilder;
     }
