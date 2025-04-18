@@ -102,9 +102,6 @@
           "x-index": 10,
           "x-decorator": "FormItem",
           "x-component": "Switch",
-          "x-decorator-props": {
-            "tooltip": "${hashSplitTooltip}"
-          },
           "x-reactions": [
             {
               "dependencies": ["$inputs"],
