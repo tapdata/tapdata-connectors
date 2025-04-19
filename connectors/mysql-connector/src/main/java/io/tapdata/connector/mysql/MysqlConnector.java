@@ -95,7 +95,7 @@ public class MysqlConnector extends CommonDbConnector {
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
-    public HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave;
+    public java.util.HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave;
 
 
     @Override
