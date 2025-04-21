@@ -307,20 +307,24 @@ public class MysqlMaker implements SqlMaker {
         }
 
         // default value
-        if (applyDefault && EmptyKit.isNotNull(tapField.getDefaultValue())) {
+        if (applyDefault) {
             StringBuilder builder = new StringBuilder();
-            builder.append("DEFAULT").append(' ');
-            if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
-                String function = MysqlColumn.MysqlDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction();
-                if (function.endsWith("()")) {
-                    builder.append("(").append(function).append(") ");
+            if (EmptyKit.isNotNull(tapField.getDefaultValue())) {
+                builder.append("DEFAULT").append(' ');
+                if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
+                    String function = MysqlColumn.MysqlDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction();
+                    if (function.endsWith("()")) {
+                        builder.append("(").append(function).append(") ");
+                    } else {
+                        builder.append(function).append(' ');
+                    }
+                } else if (tapField.getDefaultValue() instanceof Number) {
+                    builder.append(tapField.getDefaultValue()).append(' ');
                 } else {
-                    builder.append(function).append(' ');
+                    builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
                 }
-            } else if (tapField.getDefaultValue() instanceof Number) {
-                builder.append(tapField.getDefaultValue()).append(' ');
-            } else {
-                builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
+            } else if (Boolean.TRUE.equals(tapField.getNullable()) && "timestamp".equals(tapField.getDataType())) {
+                builder.append("DEFAULT NULL ");
             }
             fieldSql += " " + builder;
         }
