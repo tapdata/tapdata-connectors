@@ -47,6 +47,7 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
 import javax.script.Invocable;
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
+import javax.ws.rs.core.Application;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -380,8 +381,9 @@ public class KafkaService extends AbstractMqService {
         String script = ((KafkaConfig) mqConfig).getScript();
         Map<String, Object> record = new HashMap();
         try {
+            ClassLoader appClassLoader = ScriptOptions.class.getClassLoader();
             scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
-                    new ScriptOptions().engineName("graal.js"));
+                    new ScriptOptions().engineName("graal.js").classLoader(appClassLoader));
             String buildInMethod = initBuildInMethod();
             String scripts = script + System.lineSeparator() + buildInMethod;
             scriptEngine.eval(scripts);
