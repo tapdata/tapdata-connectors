@@ -7,7 +7,10 @@ import io.tapdata.connector.kafka.admin.Admin;
 import io.tapdata.connector.kafka.admin.DefaultAdmin;
 import io.tapdata.connector.kafka.config.*;
 import io.tapdata.connector.kafka.data.KafkaOffset;
-import io.tapdata.connector.kafka.util.*;
+import io.tapdata.connector.kafka.util.BatchPusher;
+import io.tapdata.connector.kafka.util.KafkaOffsetUtils;
+import io.tapdata.connector.kafka.util.Krb5Util;
+import io.tapdata.connector.kafka.util.ObjectUtils;
 import io.tapdata.constant.MqTestItem;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
@@ -22,6 +25,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.script.ScriptFactory;
 import io.tapdata.entity.script.ScriptOptions;
 import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.exception.StopException;
@@ -551,10 +555,18 @@ public class KafkaService extends AbstractMqService {
     }
 
     private byte[] getKafkaMessageKey(Map<String, Object> data, TapTable tapTable) {
-        if (EmptyKit.isEmpty(tapTable.primaryKeys(true))) {
-            return null;
+        if (EmptyKit.isNotBlank(((KafkaConfig) mqConfig).getTopicName())) {
+            DataMap dataMap = DataMap.create();
+            if (EmptyKit.isNotEmpty(tapTable.primaryKeys(true))) {
+                tapTable.primaryKeys(true).forEach(key -> dataMap.put(key, data.get(key)));
+            }
+            return jsonParser.toJsonBytes(dataMap);
         } else {
-            return jsonParser.toJsonBytes(tapTable.primaryKeys(true).stream().map(key -> String.valueOf(data.get(key))).collect(Collectors.joining("_")));
+            if (EmptyKit.isEmpty(tapTable.primaryKeys(true))) {
+                return null;
+            } else {
+                return jsonParser.toJsonBytes(tapTable.primaryKeys(true).stream().map(key -> String.valueOf(data.get(key))).collect(Collectors.joining("_")));
+            }
         }
     }
 

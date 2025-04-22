@@ -83,6 +83,9 @@ public class OceanbaseReader {
                     while (isAlive.get()) {
                         MessageEvent messageEvent = concurrentProcessor.get(100, TimeUnit.MILLISECONDS);
                         if (EmptyKit.isNotNull(messageEvent)) {
+                            if (EmptyKit.isNull(messageEvent.getEvent())) {
+                                continue;
+                            }
                             if ("HEARTBEAT".equals(messageEvent.getMessage().getOpt().name())) {
                                 if (heartbeat++ > 3) {
                                     consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(Long.parseLong(messageEvent.getMessage().getTimestamp()) * 1000)), Long.parseLong(messageEvent.getMessage().getTimestamp()));
