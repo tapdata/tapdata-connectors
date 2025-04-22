@@ -127,7 +127,8 @@ public class StarrocksConnector extends CommonDbConnector {
                 return toJson(tapValue.getValue());
             return "null";
         });
-        codecRegistry.registerFromTapValue(TapBooleanValue.class, "boolean", tapValue -> {
+
+        codecRegistry.registerFromTapValue(TapBooleanValue.class, "tinyint(1)", tapValue -> {
             if (tapValue != null) {
                 Boolean value = tapValue.getValue();
                 if (value != null && value) {
@@ -136,6 +137,7 @@ public class StarrocksConnector extends CommonDbConnector {
             }
             return 0;
         });
+
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "text", tapValue -> {
             if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
                 return toJson(tapValue.getValue().getValue());

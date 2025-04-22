@@ -73,7 +73,15 @@ public class JsonSerializer implements MessageSerializer {
 				if (null == value) {
 					linkedRecord.put(field, null);
 				} else {
-					linkedRecord.put(field, value.toString());
+					if (value instanceof Boolean) {
+						if ((Boolean)value) {
+							linkedRecord.put(field, 1);
+						} else {
+							linkedRecord.put(field, 0);
+						}
+					} else {
+						linkedRecord.put(field, value.toString());
+					}
 				}
 			}
 		}

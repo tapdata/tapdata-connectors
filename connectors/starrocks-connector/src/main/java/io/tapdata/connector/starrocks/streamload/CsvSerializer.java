@@ -57,7 +57,15 @@ public class CsvSerializer implements MessageSerializer {
                     if (value == null) {
                         value = Constants.NULL_VALUE;
                     }
-                    joiner.add(value.toString());
+                    if (value instanceof Boolean) {
+                        if ((Boolean) value) {
+                            joiner.add("1");
+                        } else {
+                            joiner.add("0");
+                        }
+                    } else {
+                        joiner.add(value.toString());
+                    }
                 }
             }
             joiner.add(delete ? "1" : "0");
