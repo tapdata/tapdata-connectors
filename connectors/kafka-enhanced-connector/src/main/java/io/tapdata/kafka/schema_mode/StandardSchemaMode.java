@@ -76,8 +76,8 @@ public class StandardSchemaMode extends AbsSchemaMode {
     }
 
     @Override
-    public ProducerRecord<Object, Object> fromTapEvent(TapTable table, TapEvent tapEvent) {
-        String topic = table.getId();
+    public List<ProducerRecord<Object, Object>> fromTapEvent(TapTable table, TapEvent tapEvent) {
+        String topic = KafkaUtils.pickTopic(kafkaService.getConfig(), "", "", table);
         Long ts = tapEvent.getTime();
 
         Map<String, Object> data;
@@ -97,7 +97,7 @@ public class StandardSchemaMode extends AbsSchemaMode {
         } else {
             throw new NotSupportedException(String.format("TapEvent type '%s'", tapEvent.getClass().getName()));
         }
-        return new ProducerRecord<>(topic, null, ts, createKafkaKey(data, table), tapEvent, headers);
+        return Arrays.asList(new ProducerRecord<>(topic, null, ts, createKafkaKey(data, table), tapEvent, headers));
     }
 
     @Override
@@ -121,13 +121,5 @@ public class StandardSchemaMode extends AbsSchemaMode {
         });
         consumer.accept(filterResults);
         throw new NotSupportedException(String.format("Advance filter '%s'", filter));
-    }
-
-    protected byte[] createKafkaKey(Map<String, Object> data, TapTable tapTable) {
-        Collection<String> keys = tapTable.primaryKeys(true);
-        if (EmptyKit.isEmpty(keys)) {
-            return null;
-        }
-        return keys.stream().map(key -> String.valueOf(data.get(key))).collect(Collectors.joining("_")).getBytes();
     }
 }
