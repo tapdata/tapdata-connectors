@@ -287,7 +287,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
             "    k.REFERENCED_TABLE_NAME IS NOT NULL\n" +
             "    AND k.CONSTRAINT_SCHEMA = '%s' %s";
 
-    private final static String MYSQL_VERSION = "SELECT VERSION()";
+    protected final static String MYSQL_VERSION = "SELECT VERSION()";
     private final static String MYSQL_CURRENT_TIME = "SELECT NOW();";
     private final static String MYSQL_TIMESTAMP = "SELECT REPLACE(unix_timestamp(NOW(3)),'.','') AS currentTimeMillis";
 

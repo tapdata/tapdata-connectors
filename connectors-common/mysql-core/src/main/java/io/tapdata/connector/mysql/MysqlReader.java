@@ -28,12 +28,14 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapDate;
 import io.tapdata.entity.schema.type.TapDateTime;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.entity.utils.TypeHolder;
@@ -83,19 +85,19 @@ public class MysqlReader implements Closeable {
     public static final String FIRST_TIME_KEY = "FIRST_TIME";
     private static final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("`");
     public static final long SAVE_DEBEZIUM_SCHEMA_HISTORY_INTERVAL_SEC = 2L;
-    private String serverName;
+    protected String serverName;
     private final Supplier<Boolean> isAlive;
-    private final MysqlJdbcContextV2 mysqlJdbcContext;
+    protected final MysqlJdbcContextV2 mysqlJdbcContext;
     private EmbeddedEngine embeddedEngine;
     private LinkedBlockingQueue<MysqlStreamEvent> eventQueue;
-    private StreamReadConsumer streamReadConsumer;
+    protected StreamReadConsumer streamReadConsumer;
     private ScheduledExecutorService mysqlSchemaHistoryMonitor;
     private KVReadOnlyMap<TapTable> tapTableMap;
     private DDLParserType ddlParserType = DDLParserType.MYSQL_CCJ_SQL_PARSER;
     private static final int MIN_BATCH_SIZE = 1000;
     private TimeZone timeZone;
     private TimeZone dbTimeZone;
-    private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
+    protected final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     private final ExceptionCollector exceptionCollector;
     private MysqlSchemaHistoryTransfer schemaHistoryTransfer;
     private String dropTransactionId = null;
@@ -216,6 +218,154 @@ public class MysqlReader implements Closeable {
             } else {
                 throw e;
             }
+        }
+    }
+
+    public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
+                           Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer, Map<String, Object> extraConfig) throws Throwable {
+        try {
+            batchSize = Math.max(batchSize, MIN_BATCH_SIZE);
+            initDebeziumServerName(tapConnectorContext);
+            this.tapTableMap = tapConnectorContext.getTableMap();
+            this.ddlParserType = ddlParserType;
+            String offsetStr = "";
+            JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
+            MysqlStreamOffset mysqlStreamOffset = null;
+            if (offset instanceof MysqlStreamOffset) {
+                mysqlStreamOffset = (MysqlStreamOffset) offset;
+            } else if (offset instanceof MysqlBinlogPosition) {
+                mysqlStreamOffset = binlogPosition2MysqlStreamOffset((MysqlBinlogPosition) offset, jsonParser);
+            } else if (offset instanceof Long) {
+                MysqlConfig jdbcConfig = new MysqlConfig().load(tapConnectorContext.getConnectionConfig());
+                try (MysqlBinlogPositionUtil ins = new MysqlBinlogPositionUtil(
+                        jdbcConfig.getHost(),
+                        jdbcConfig.getPort(),
+                        jdbcConfig.getUser(),
+                        jdbcConfig.getPassword())) {
+                    MysqlBinlogPosition mysqlBinlogPosition = ins.findByLessTimestamp((Long) offset, true);
+                    if (null == mysqlBinlogPosition) {
+                        throw new RuntimeException("Not found binlog of sync time: " + offset);
+                    }
+                    mysqlStreamOffset = binlogPosition2MysqlStreamOffset(mysqlBinlogPosition, jsonParser);
+                }
+            }
+            if (null != mysqlStreamOffset) {
+                offsetStr = jsonParser.toJson(mysqlStreamOffset);
+            }
+            TapLogger.info(TAG, "Starting mysql cdc, server name: " + serverName);
+            this.eventQueue = new LinkedBlockingQueue<>(10);
+            this.streamReadConsumer = consumer;
+            DataMap connectionConfig = tapConnectorContext.getConnectionConfig();
+            String database = connectionConfig.getString("database");
+            initMysqlSchemaHistory(tapConnectorContext);
+            this.mysqlSchemaHistoryMonitor = new ScheduledThreadPoolExecutor(1);
+            this.mysqlSchemaHistoryMonitor.scheduleAtFixedRate(() -> saveMysqlSchemaHistory(tapConnectorContext),
+                    SAVE_DEBEZIUM_SCHEMA_HISTORY_INTERVAL_SEC, SAVE_DEBEZIUM_SCHEMA_HISTORY_INTERVAL_SEC, TimeUnit.SECONDS);
+            Configuration.Builder builder = Configuration.create()
+                    .with("name", serverName)
+                    .with("connector.class", "io.debezium.connector.mysql.MySqlConnector")
+                    .with("database.hostname", connectionConfig.getString("host"))
+                    .with("database.port", Integer.parseInt(connectionConfig.getString("port")))
+                    .with("database.user", connectionConfig.getString("username"))
+                    .with("database.password", connectionConfig.getString("password"))
+                    .with("database.server.name", serverName)
+                    .with("threadName", "Debezium-Mysql-Connector-" + serverName)
+                    .with("database.history.skip.unparseable.ddl", true)
+                    .with("database.history.store.only.monitored.tables.ddl", true)
+                    .with("database.history.store.only.captured.tables.ddl", true)
+                    .with(MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE, MySqlConnectorConfig.SnapshotLockingMode.NONE)
+                    .with("max.queue.size", batchSize * 8)
+                    .with("max.batch.size", batchSize)
+                    .with(MySqlConnectorConfig.SERVER_ID, randomServerId())
+                    .with("time.precision.mode", "adaptive_time_microseconds")
+//					.with("converters", "time")
+//					.with("time.type", "io.tapdata.connector.mysql.converters.TimeConverter")
+//					.with("time.schema.name", "io.debezium.mysql.type.Time")
+                    .with("snapshot.locking.mode", "none");
+            if (extraConfig != null) {
+                for (Map.Entry<String, Object> entry : extraConfig.entrySet()) {
+                    builder.with(entry.getKey(), entry.getValue());
+                }
+            }
+            //if (EmptyKit.isNotBlank(connectionConfig.getString("timezone"))) {
+            //	builder.with("database.serverTimezone", TimeZone.getTimeZone(ZoneId.of(connectionConfig.getString("timezone"))).toZoneId());
+            //}
+            List<String> dbTableNames = tables.stream().map(t -> database + "." + t).collect(Collectors.toList());
+            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, database);
+            builder.with(MySqlConnectorConfig.TABLE_INCLUDE_LIST, String.join(",", dbTableNames));
+            builder.with(EmbeddedEngine.OFFSET_STORAGE, "io.tapdata.connector.mysql.PdkPersistenceOffsetBackingStore");
+            if (StringUtils.isNotBlank(offsetStr)) {
+                builder.with("pdk.offset.string", offsetStr);
+            }
+			/*
+				@todo At present, the schema loading logic will load the schema of all current tables each time it is started.
+				  When there is ddl in the historical data, it will cause a parsing error
+				@todo The main scenario is shared mining, which dynamically modifies the table include list.
+				 If the last cached model list is used, debezium will not load the newly added table model,
+				 resulting in a parsing error when reading:
+				    whose schema isn't known to this connector
+				@todo Best practice, need to change the debezium source code,
+				 add a configuration that supports partial update of some table schemas,
+				  and logic implementation
+			*/
+            builder.with("snapshot.mode", MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY_RECOVERY);
+            if (null != throwableAtomicReference.get()) {
+                String lastErrorMessage = throwableAtomicReference.get().getMessage();
+                if (StringUtils.isNotBlank(lastErrorMessage) && lastErrorMessage.contains("Could not find existing binlog information while attempting schema only recovery snapshot")) {
+                    builder.with("snapshot.mode", MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY);
+                }
+            }
+//			builder.with("database.history", "io.debezium.relational.history.MemoryDatabaseHistory");
+            builder.with("database.history", "io.tapdata.connector.mysql.StateMapHistoryBackingStore");
+
+            Configuration configuration = builder.build();
+            StringBuilder configStr = new StringBuilder("Starting binlog reader with config {\n");
+            configuration.withMaskedPasswords().asMap().forEach((k, v) -> configStr.append("  ")
+                    .append(k)
+                    .append(": ")
+                    .append(v)
+                    .append("\n"));
+            configStr.append("}");
+            TapLogger.info(TAG, configStr.toString());
+            embeddedEngine = (EmbeddedEngine) new EmbeddedEngine.BuilderImpl()
+                    .using(configuration)
+                    .notifying(this::sourceRecordConsumer)
+                    .using(new DebeziumEngine.ConnectorCallback() {
+                        @Override
+                        public void taskStarted() {
+                            streamReadConsumer.streamReadStarted();
+                        }
+                    })
+                    .using((result, message, throwable) -> {
+                        tapConnectorContext.configContext();
+                        if (result) {
+                            if (StringUtils.isNotBlank(message)) {
+                                TapLogger.info(TAG, "CDC engine stopped: " + message);
+                            } else {
+                                TapLogger.info(TAG, "CDC engine stopped");
+                            }
+                            throwableAtomicReference.set(null);
+                        } else {
+                            if (null != throwable) {
+                                if (StringUtils.isNotBlank(message)) {
+                                    handleFailed(new RuntimeException(message + "\n " + throwable.getMessage(), throwable));
+                                } else {
+                                    handleFailed(throwable);
+                                }
+                            } else {
+                                throwableAtomicReference.set(null);
+                            }
+                        }
+                        streamReadConsumer.streamReadEnded();
+                    })
+                    .build();
+            embeddedEngine.run();
+            if (null != throwableAtomicReference.get()) {
+                throw throwableAtomicReference.get();
+            }
+        } finally {
+            Optional.ofNullable(mysqlSchemaHistoryMonitor).ifPresent(ExecutorService::shutdownNow);
+            TapLogger.info(TAG, "Mysql binlog reader stopped");
         }
     }
 
@@ -403,7 +553,7 @@ public class MysqlReader implements Closeable {
         throwableAtomicReference.set(new RuntimeException(throwable));
     }
 
-    private MysqlStreamOffset binlogPosition2MysqlStreamOffset(MysqlBinlogPosition offset, JsonParser jsonParser) throws Throwable {
+    protected MysqlStreamOffset binlogPosition2MysqlStreamOffset(MysqlBinlogPosition offset, JsonParser jsonParser) throws Throwable {
         String serverId = mysqlJdbcContext.getServerId();
         Map<String, Object> partitionMap = new HashMap<>();
         partitionMap.put("server", serverName);
@@ -467,7 +617,7 @@ public class MysqlReader implements Closeable {
         }
     }
 
-    private void initDebeziumServerName(TapConnectorContext tapConnectorContext) {
+    protected void initDebeziumServerName(TapConnectorContext tapConnectorContext) {
         this.serverName = UUID.randomUUID().toString().toLowerCase();
         KVMap<Object> stateMap = tapConnectorContext.getStateMap();
         Object serverNameFromStateMap = stateMap.get(SERVER_NAME_KEY);
@@ -529,7 +679,7 @@ public class MysqlReader implements Closeable {
         }
     }
 
-    private void sourceRecordConsumer(SourceRecord record) {
+    protected void sourceRecordConsumer(SourceRecord record) {
         if (null != throwableAtomicReference.get()) {
             throw new RuntimeException(throwableAtomicReference.get());
         }
@@ -847,7 +997,7 @@ public class MysqlReader implements Closeable {
         return offset.get("file") + "_" + offset.get("pos") + "_" + offset.get("row") + "_" + offset.get("event");
     }
 
-    private MysqlStreamOffset getMysqlStreamOffset(SourceRecord record) {
+    protected MysqlStreamOffset getMysqlStreamOffset(SourceRecord record) {
         MysqlStreamOffset mysqlStreamOffset = new MysqlStreamOffset();
         Map<String, Object> partition = (Map<String, Object>) record.sourcePartition();
         Map<String, Object> offset = (Map<String, Object>) record.sourceOffset();
@@ -934,6 +1084,10 @@ public class MysqlReader implements Closeable {
             }
         });
         return dateTypeSet;
+    }
+
+    public MysqlJdbcContextV2 mysqlJdbcContextV2() {
+        return mysqlJdbcContext;
     }
 
 }
