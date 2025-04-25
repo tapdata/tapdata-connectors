@@ -136,7 +136,7 @@ public class MysqlSchemaLoader {
         String sql = String.format(SELECT_COLUMNS, database, inTableName);
         List<DataMap> columnList = TapSimplify.list();
         try {
-            mysqlJdbcContext.query(sql, resultSet -> {
+            mysqlJdbcContext.normalQuery(sql, resultSet -> {
                 List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
                 while (resultSet.next()) {
                     columnList.add(DbKit.getRowFromResultSet(resultSet, columnNames));
@@ -155,7 +155,7 @@ public class MysqlSchemaLoader {
         String inTableName = new StringJoiner(tableNames).add("IN ('").add("')").toString();
         String sql = String.format(SELECT_ALL_INDEX_SQL, database, inTableName);
         try {
-            mysqlJdbcContext.query(sql, resultSet -> {
+            mysqlJdbcContext.normalQuery(sql, resultSet -> {
                 List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
                 while (resultSet.next()) {
                     indexList.add(DbKit.getRowFromResultSet(resultSet, columnNames));
@@ -197,7 +197,7 @@ public class MysqlSchemaLoader {
 
         List<DataMap> tableList = TapSimplify.list();
         try {
-            mysqlJdbcContext.query(sql, resultSet -> tableList.addAll(DbKit.getDataFromResultSet(resultSet)));
+            mysqlJdbcContext.normalQuery(sql, resultSet -> tableList.addAll(DbKit.getDataFromResultSet(resultSet)));
         } catch (Throwable e) {
             TapLogger.error(TAG, "Execute queryAllTables failed, error: " + e.getMessage(), e);
         }
@@ -210,7 +210,7 @@ public class MysqlSchemaLoader {
         String sql = String.format(SELECT_TABLES, database);
         List<String> list = new ArrayList<>();
         try {
-            mysqlJdbcContext.query(sql, rs -> {
+            mysqlJdbcContext.normalQuery(sql, rs -> {
                 while (rs.next()) {
                     list.add(rs.getString("TABLE_NAME"));
                     if (list.size() >= batchSize) {

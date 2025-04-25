@@ -47,7 +47,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     public TimeZone queryTimeZone() throws SQLException {
         AtomicReference<Long> timeOffset = new AtomicReference<>();
-        queryWithNext(MYSQL_TIMEZONE, resultSet -> timeOffset.set(resultSet.getLong(1)));
+        normalQuery(MYSQL_TIMEZONE, resultSet -> timeOffset.set(resultSet.getLong(1)));
         DecimalFormat decimalFormat = new DecimalFormat("00");
         if (timeOffset.get() >= 0) {
             return TimeZone.getTimeZone(ZoneId.of("+" + decimalFormat.format(timeOffset.get()) + ":00"));
@@ -289,10 +289,10 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     protected final static String MYSQL_VERSION = "SELECT VERSION()";
     private final static String MYSQL_CURRENT_TIME = "SELECT NOW();";
-    private final static String MYSQL_TIMESTAMP = "SELECT REPLACE(unix_timestamp(NOW(3)),'.','') AS currentTimeMillis";
+    protected final static String MYSQL_TIMESTAMP = "SELECT REPLACE(unix_timestamp(NOW(3)),'.','') AS currentTimeMillis";
 
     public final static String MYSQL_TIMEZONE = "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()) as timeoffset";
 
-    private static final String GET_TABLE_INFO_SQL = "SELECT TABLE_ROWS,DATA_LENGTH  FROM information_schema.tables WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='%s'";
+    protected static final String GET_TABLE_INFO_SQL = "SELECT TABLE_ROWS,DATA_LENGTH  FROM information_schema.tables WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='%s'";
 
 }
