@@ -2,6 +2,7 @@ package io.tapdata.connector.postgres.dml;
 
 import io.netty.buffer.ByteBufInputStream;
 import io.tapdata.common.dml.NormalWriteRecorder;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapTable;
@@ -196,7 +197,7 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
 
     public void addAndCheckCommit(TapRecordEvent recordEvent, WriteListResult<TapRecordEvent> listResult) {
         batchCacheSize++;
-        if (updatePolicy == LOG_ON_NONEXISTS && recordEvent instanceof TapUpdateRecordEvent) {
+        if (updatePolicy == LOG_ON_NONEXISTS && recordEvent instanceof TapUpdateRecordEvent || deletePolicy == LOG_ON_NONEXISTS && recordEvent instanceof TapDeleteRecordEvent) {
             batchCache.add(recordEvent);
         }
     }

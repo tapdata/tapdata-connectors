@@ -1,6 +1,7 @@
 package io.tapdata.common.dml;
 
 import io.netty.buffer.ByteBuf;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
@@ -45,6 +46,7 @@ public abstract class NormalWriteRecorder {
     protected Boolean fileInput = false;
     protected ByteBuf buffer;
     protected WritePolicyEnum updatePolicy;
+    protected WritePolicyEnum deletePolicy;
     protected char escapeChar = '"';
 
     protected String preparedStatementKey;
@@ -136,7 +138,17 @@ public abstract class NormalWriteRecorder {
                     while (iterator.hasNext()) {
                         TapRecordEvent event = iterator.next();
                         if (0 >= writeResults[index++]) {
-                            tapLogger.info("update record ignored: {}", event);
+                            tapLogger.warn("update record ignored: {}", event);
+                        }
+                    }
+                }
+                if (LOG_ON_NONEXISTS == deletePolicy) {
+                    Iterator<TapRecordEvent> iterator = batchCache.iterator();
+                    int index = 0;
+                    while (iterator.hasNext()) {
+                        TapRecordEvent event = iterator.next();
+                        if (0 >= writeResults[index++]) {
+                            tapLogger.warn("delete record ignored: {}", event);
                         }
                     }
                 }
@@ -155,7 +167,7 @@ public abstract class NormalWriteRecorder {
     //commit when cacheSize >= 1000
     public void addAndCheckCommit(TapRecordEvent recordEvent, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         batchCacheSize++;
-        if (updatePolicy == LOG_ON_NONEXISTS && recordEvent instanceof TapUpdateRecordEvent) {
+        if (updatePolicy == LOG_ON_NONEXISTS && recordEvent instanceof TapUpdateRecordEvent || deletePolicy == LOG_ON_NONEXISTS && recordEvent instanceof TapDeleteRecordEvent) {
             batchCache.add(recordEvent);
         }
         if (batchCacheSize >= 1000) {
@@ -187,6 +199,10 @@ public abstract class NormalWriteRecorder {
 
     public void setUpdatePolicy(String updatePolicy) {
         this.updatePolicy = WritePolicyEnum.valueOf(updatePolicy.toUpperCase());
+    }
+
+    public void setDeletePolicy(String deletePolicy) {
+        this.deletePolicy = WritePolicyEnum.valueOf(deletePolicy.toUpperCase());
     }
 
     public void setTapLogger(Log tapLogger) {

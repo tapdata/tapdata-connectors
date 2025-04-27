@@ -444,6 +444,10 @@ public class PostgresConnector extends CommonDbConnector {
         if (updateDmlPolicy == null) {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
+        String deleteDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_DELETE_POLICY);
+        if (deleteDmlPolicy == null) {
+            deleteDmlPolicy = ConnectionOptions.DML_DELETE_POLICY_IGNORE_ON_NON_EXISTS;
+        }
         NormalRecordWriter postgresRecordWriter;
         if (isTransaction) {
             String threadName = Thread.currentThread().getName();
@@ -457,11 +461,13 @@ public class PostgresConnector extends CommonDbConnector {
             postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
+                    .setDeletePolicy(deleteDmlPolicy)
                     .setTapLogger(tapLogger);
         } else {
             postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
+                    .setDeletePolicy(deleteDmlPolicy)
                     .setTapLogger(tapLogger);
         }
         postgresRecordWriter.closeConstraintCheck();
