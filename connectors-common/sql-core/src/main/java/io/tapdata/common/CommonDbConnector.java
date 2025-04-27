@@ -446,7 +446,18 @@ public abstract class CommonDbConnector extends ConnectorBase {
                     }
                 }
             });
+            List<String> afterUniqueAutoIncrementSql =getAfterUniqueAutoIncrementFields(tapTable, indexList);
+            if(EmptyKit.isNotEmpty(afterUniqueAutoIncrementSql)){
+                afterUniqueAutoIncrementSql.forEach(sql -> {
+                    try {
+                        jdbcContext.execute(sql);
+                    } catch (SQLException e) {
+                        tapLogger.warn("Failed to update auto-increment column {}, please execute it manually [{}]", e.getMessage(), sql);
+                    }
+                });
+            }
         }
+
     }
 
     protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
@@ -964,4 +975,8 @@ public abstract class CommonDbConnector extends ConnectorBase {
         });
         return count.get();
     }
+    protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable,List<TapIndex> indexList) {
+        return new ArrayList<>();
+    }
+
 }
