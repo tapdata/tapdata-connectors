@@ -321,7 +321,11 @@ public class MysqlMaker implements SqlMaker {
                 } else if (tapField.getDefaultValue() instanceof Number) {
                     builder.append(tapField.getDefaultValue()).append(' ');
                 } else {
-                    builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
+                    if (datatype.equals("json")) {
+                        builder.append("(").append(tapField.getDefaultValue().toString().replace("\\", "")).append(") ");
+                    } else {
+                        builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
+                    }
                 }
             } else if (Boolean.TRUE.equals(tapField.getNullable()) && "timestamp".equals(tapField.getDataType())) {
                 builder.append("DEFAULT NULL ");
