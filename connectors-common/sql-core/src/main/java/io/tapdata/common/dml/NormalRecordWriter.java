@@ -32,6 +32,7 @@ public class NormalRecordWriter {
     protected NormalWriteRecorder updateRecorder;
     protected String updatePolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
     protected NormalWriteRecorder deleteRecorder;
+    protected String deletePolicy = ConnectionOptions.DML_DELETE_POLICY_IGNORE_ON_NON_EXISTS;
     protected String version;
     protected Connection connection;
     protected final TapTable tapTable;
@@ -79,6 +80,7 @@ public class NormalRecordWriter {
             updateRecorder.setUpdatePolicy(updatePolicy);
             updateRecorder.setTapLogger(tapLogger);
             deleteRecorder.setVersion(version);
+            deleteRecorder.setDeletePolicy(deletePolicy);
             deleteRecorder.setTapLogger(tapLogger);
             //doubleActive
             if (Boolean.TRUE.equals(commonDbConfig.getDoubleActive())) {
@@ -182,6 +184,11 @@ public class NormalRecordWriter {
 
     public NormalRecordWriter setUpdatePolicy(String updatePolicy) {
         this.updatePolicy = updatePolicy;
+        return this;
+    }
+
+    public NormalRecordWriter setDeletePolicy(String deletePolicy) {
+        this.deletePolicy = deletePolicy;
         return this;
     }
 
