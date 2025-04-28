@@ -33,7 +33,7 @@ public class DorisSqlMaker extends CommonSqlMaker {
                 builder.append("REPLACE_IF_NOT_NULL ");
             }
             buildNullDefinition(builder, tapField);
-            if (applyDefault) {
+            if (Boolean.TRUE.equals(applyDefault)) {
                 buildDefaultDefinition(builder, tapField);
             }
             buildCommentDefinition(builder, tapField);
