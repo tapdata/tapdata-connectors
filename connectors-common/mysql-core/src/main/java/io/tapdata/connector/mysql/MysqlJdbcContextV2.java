@@ -253,8 +253,8 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "\tTABLE_NAME `tableName`,\n" +
                     "\tINDEX_NAME `indexName`,\n" +
                     "\t(CASE\n" +
-                    "\t\tWHEN `COLLATION` = 'A' THEN 1\n" +
-                    "\t\tELSE 0\n" +
+                    "\t\tWHEN COLLATION = 'D' THEN 0\n" +
+                    "\t\tELSE 1\n" +
                     "\tEND) `isAsc`,\n" +
                     "\t(CASE\n" +
                     "\t\tWHEN NON_UNIQUE = 0 THEN 1\n" +
