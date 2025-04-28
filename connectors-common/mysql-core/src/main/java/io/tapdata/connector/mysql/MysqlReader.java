@@ -255,8 +255,11 @@ public class MysqlReader implements Closeable {
             TapLogger.info(TAG, "Starting mysql cdc, server name: " + serverName);
             this.eventQueue = new LinkedBlockingQueue<>(10);
             this.streamReadConsumer = consumer;
-            DataMap connectionConfig = tapConnectorContext.getConnectionConfig();
-            String database = connectionConfig.getString("database");
+            LockManager.mysqlSchemaHistoryTransferManager.computeIfAbsent(serverName, key -> {
+                this.schemaHistoryTransfer = new MysqlSchemaHistoryTransfer();
+                return this.schemaHistoryTransfer;
+            });
+            String database = mysqlConfig.getDatabase();
             initMysqlSchemaHistory(tapConnectorContext);
             this.mysqlSchemaHistoryMonitor = new ScheduledThreadPoolExecutor(1);
             this.mysqlSchemaHistoryMonitor.scheduleAtFixedRate(() -> saveMysqlSchemaHistory(tapConnectorContext),
@@ -264,10 +267,10 @@ public class MysqlReader implements Closeable {
             Configuration.Builder builder = Configuration.create()
                     .with("name", serverName)
                     .with("connector.class", "io.debezium.connector.mysql.MySqlConnector")
-                    .with("database.hostname", connectionConfig.getString("host"))
-                    .with("database.port", Integer.parseInt(connectionConfig.getString("port")))
-                    .with("database.user", connectionConfig.getString("username"))
-                    .with("database.password", connectionConfig.getString("password"))
+                    .with("database.hostname", mysqlConfig.getHost())
+                    .with("database.port", mysqlConfig.getPort())
+                    .with("database.user", mysqlConfig.getUser())
+                    .with("database.password", mysqlConfig.getPassword())
                     .with("database.server.name", serverName)
                     .with("threadName", "Debezium-Mysql-Connector-" + serverName)
                     .with("database.history.skip.unparseable.ddl", true)

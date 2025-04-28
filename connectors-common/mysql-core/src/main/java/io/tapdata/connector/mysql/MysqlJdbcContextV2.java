@@ -47,7 +47,11 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     public TimeZone queryTimeZone() throws SQLException {
         AtomicReference<Long> timeOffset = new AtomicReference<>();
-        normalQuery(MYSQL_TIMEZONE, resultSet -> timeOffset.set(resultSet.getLong(1)));
+        normalQuery(MYSQL_TIMEZONE, resultSet -> {
+            if (resultSet.next()) {
+                timeOffset.set(resultSet.getLong(1));
+            }
+        });
         DecimalFormat decimalFormat = new DecimalFormat("00");
         if (timeOffset.get() >= 0) {
             return TimeZone.getTimeZone(ZoneId.of("+" + decimalFormat.format(timeOffset.get()) + ":00"));
@@ -180,6 +184,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         queryWithNext(MYSQL_CURRENT_TIME, resultSet -> currentTime.set(resultSet.getTimestamp(1)));
         return currentTime.get();
     }
+
     @Override
     public Long queryTimestamp() throws SQLException {
         AtomicReference<Long> currentTime = new AtomicReference<>();
@@ -248,7 +253,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "\tTABLE_NAME `tableName`,\n" +
                     "\tINDEX_NAME `indexName`,\n" +
                     "\t(CASE\n" +
-                    "\t\tWHEN COLLATION = 'A' THEN 1\n" +
+                    "\t\tWHEN `COLLATION` = 'A' THEN 1\n" +
                     "\t\tELSE 0\n" +
                     "\tEND) `isAsc`,\n" +
                     "\t(CASE\n" +
@@ -271,21 +276,21 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     private final static String MYSQL_ALL_FOREIGN_KEY =
             "SELECT\n" +
-            "    k.CONSTRAINT_NAME `constraintName`,\n" +
-            "    k.TABLE_NAME `tableName`,\n" +
-            "    k.REFERENCED_TABLE_NAME `referencesTableName`,\n" +
-            "    c.DELETE_RULE `onDelete`,\n" +
-            "    c.UPDATE_RULE `onUpdate`,\n" +
-            "    k.COLUMN_NAME `fk`,\n" +
-            "    k.REFERENCED_COLUMN_NAME `rfk`\n" +
-            "FROM\n" +
-            "    information_schema.KEY_COLUMN_USAGE k\n" +
-            "JOIN information_schema.REFERENTIAL_CONSTRAINTS c\n" +
-            "ON c.CONSTRAINT_SCHEMA=k.TABLE_SCHEMA\n" +
-            "AND c.CONSTRAINT_NAME=k.CONSTRAINT_NAME\n" +
-            "WHERE\n" +
-            "    k.REFERENCED_TABLE_NAME IS NOT NULL\n" +
-            "    AND k.CONSTRAINT_SCHEMA = '%s' %s";
+                    "    k.CONSTRAINT_NAME `constraintName`,\n" +
+                    "    k.TABLE_NAME `tableName`,\n" +
+                    "    k.REFERENCED_TABLE_NAME `referencesTableName`,\n" +
+                    "    c.DELETE_RULE `onDelete`,\n" +
+                    "    c.UPDATE_RULE `onUpdate`,\n" +
+                    "    k.COLUMN_NAME `fk`,\n" +
+                    "    k.REFERENCED_COLUMN_NAME `rfk`\n" +
+                    "FROM\n" +
+                    "    information_schema.KEY_COLUMN_USAGE k\n" +
+                    "JOIN information_schema.REFERENTIAL_CONSTRAINTS c\n" +
+                    "ON c.CONSTRAINT_SCHEMA=k.TABLE_SCHEMA\n" +
+                    "AND c.CONSTRAINT_NAME=k.CONSTRAINT_NAME\n" +
+                    "WHERE\n" +
+                    "    k.REFERENCED_TABLE_NAME IS NOT NULL\n" +
+                    "    AND k.CONSTRAINT_SCHEMA = '%s' %s";
 
     protected final static String MYSQL_VERSION = "SELECT VERSION()";
     private final static String MYSQL_CURRENT_TIME = "SELECT NOW();";
