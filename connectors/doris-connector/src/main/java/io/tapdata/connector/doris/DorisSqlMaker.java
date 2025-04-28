@@ -1,9 +1,11 @@
 package io.tapdata.connector.doris;
 
 import io.tapdata.common.CommonSqlMaker;
+import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -31,9 +33,35 @@ public class DorisSqlMaker extends CommonSqlMaker {
                 builder.append("REPLACE_IF_NOT_NULL ");
             }
             buildNullDefinition(builder, tapField);
-            buildDefaultDefinition(builder, tapField);
+            if (applyDefault) {
+                buildDefaultDefinition(builder, tapField);
+            }
             buildCommentDefinition(builder, tapField);
             return builder.toString();
         }).collect(Collectors.joining(", "));
+    }
+
+    protected void buildDefaultDefinition(StringBuilder builder, TapField tapField) {
+        if (EmptyKit.isNotNull(tapField.getDefaultValue())) {
+            builder.append("DEFAULT").append(' ');
+            if (EmptyKit.isNotNull(tapField.getDefaultFunction())) {
+                String function = MysqlColumn.MysqlDefaultFunction.valueOf(tapField.getDefaultFunction().toString()).getFunction();
+                if (function.endsWith("()")) {
+                    builder.append("(").append(function).append(") ");
+                } else {
+                    builder.append(function).append(' ');
+                }
+            } else if (tapField.getDefaultValue() instanceof Number) {
+                builder.append(tapField.getDefaultValue()).append(' ');
+            } else {
+                if (tapField.getDataType().equals("json")) {
+                    builder.append("(").append(tapField.getDefaultValue().toString().replace("\\", "")).append(") ");
+                } else {
+                    builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
+                }
+            }
+        } else if (Boolean.TRUE.equals(tapField.getNullable()) && "timestamp".equals(tapField.getDataType())) {
+            builder.append("DEFAULT NULL ");
+        }
     }
 }
