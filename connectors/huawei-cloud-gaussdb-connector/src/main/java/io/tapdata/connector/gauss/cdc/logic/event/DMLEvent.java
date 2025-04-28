@@ -7,6 +7,7 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.StringKit;
 
+import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -20,50 +21,63 @@ public abstract class DMLEvent implements Event<TapEvent> {
 
     private int offsetHour = 0;
 
+
     @Override
     public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, Map<String, Map<String, String>> dataTypeMap) {
+        return analyze(logEvent, dataTypeMap, null);
+    }
+
+    @Override
+    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, Map<String, Map<String, String>> dataTypeMap, String charset) {
         CollectEntity instance = CollectEntity.instance();
         byte[] bOrA = null;
         int bOrACount = 2;
         byte[] hasNextTag = null;
         byte[] schema = LogicUtil.read(logEvent, 2, 32);
         byte[] table = LogicUtil.read(logEvent, 2, 32);
-        instance.withSchema(new String(schema))
-                .withTable(new String(table));
-        while (logEvent.hasRemaining()) {
-            bOrA = LogicUtil.read(logEvent, 1);
-            String bOrAChar = new String(bOrA);
-            boolean doBreak = false;
-            Map<String, Object> kvMap = new HashMap<>();
-            Map<String, Integer> kTypeMap = new HashMap<>();
-            switch (bOrAChar.toUpperCase()) {
-                case "N":
-                case "O":
-                    collectAttr(logEvent, kvMap, kTypeMap, dataTypeMap, new String(table));
-                    if (bOrACount > 1) {
-                        bOrACount--;
-                    } else {
+        try {
+            if (null == charset) {
+                charset = "UTF-8";
+            }
+            instance.withSchema(new String(schema, charset))
+                    .withTable(new String(table, charset));
+            while (logEvent.hasRemaining()) {
+                bOrA = LogicUtil.read(logEvent, 1);
+                String bOrAChar = new String(bOrA, charset);
+                boolean doBreak = false;
+                Map<String, Object> kvMap = new HashMap<>();
+                Map<String, Integer> kTypeMap = new HashMap<>();
+                switch (bOrAChar.toUpperCase()) {
+                    case "N":
+                    case "O":
+                        collectAttr(logEvent, kvMap, kTypeMap, dataTypeMap, new String(table, charset));
+                        if (bOrACount > 1) {
+                            bOrACount--;
+                        } else {
+                            doBreak = true;
+                        }
+                        break;
+                    case "P":
+                        hasNextTag = bOrA;
                         doBreak = true;
-                    }
-                    break;
-                case "P":
-                    hasNextTag = bOrA;
-                    doBreak = true;
-                    break;
-                default:
-                    doBreak = true;
-                    break;
+                        break;
+                    default:
+                        doBreak = true;
+                        break;
+                }
+                if ("n".equalsIgnoreCase(bOrAChar)) {
+                    instance.withAfter(kvMap).withFieldType(kTypeMap);
+                } else if ("o".equalsIgnoreCase(bOrAChar)) {
+                    instance.withBefore(kvMap);
+                }
+                if (doBreak) break;
             }
-            if ("n".equalsIgnoreCase(bOrAChar)) {
-                instance.withAfter(kvMap).withFieldType(kTypeMap);
-            } else if ("o".equalsIgnoreCase(bOrAChar)) {
-                instance.withBefore(kvMap);
+            hasNextTag = null == hasNextTag ? LogicUtil.read(logEvent, 1) : hasNextTag;
+            if ("P".equalsIgnoreCase(new String(hasNextTag, charset))) {
+                //break;
             }
-            if (doBreak) break;
-        }
-        hasNextTag = null == hasNextTag ? LogicUtil.read(logEvent, 1) : hasNextTag;
-        if ("P".equalsIgnoreCase(new String(hasNextTag))) {
-            //break;
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException(e);
         }
 
         return collect(instance);
