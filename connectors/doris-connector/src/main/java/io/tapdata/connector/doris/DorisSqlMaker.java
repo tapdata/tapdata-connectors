@@ -54,7 +54,7 @@ public class DorisSqlMaker extends CommonSqlMaker {
             } else if (tapField.getDefaultValue() instanceof Number) {
                 builder.append(tapField.getDefaultValue()).append(' ');
             } else {
-                if (tapField.getDataType().equals("json")) {
+                if ("json".equals(tapField.getDataType()) || "longtext".equals(tapField.getDataType())) {
                     builder.append("(").append(tapField.getDefaultValue().toString().replace("\\", "")).append(") ");
                 } else {
                     builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
