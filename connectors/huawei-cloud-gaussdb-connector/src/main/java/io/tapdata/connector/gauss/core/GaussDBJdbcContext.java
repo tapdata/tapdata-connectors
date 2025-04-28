@@ -6,6 +6,7 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class GaussDBJdbcContext extends PostgresJdbcContext {
     protected final static String GAUSS_ALL_COLUMN =
@@ -49,4 +50,15 @@ public class GaussDBJdbcContext extends PostgresJdbcContext {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
         return String.format(GAUSS_ALL_COLUMN, schema, getConfig().getDatabase(), schema, tableSql);
     }
+
+    public String queryDatabaseCharset() {
+        AtomicReference<String> charset = new AtomicReference<>("");
+        try {
+            queryWithNext(String.format(SELECT_DATABASE_CHARSET, getConfig().getDatabase()), resultSet -> charset.set(resultSet.getString(1)));
+        } catch (Throwable e) {
+            throw new RuntimeException(e);
+        }
+        return charset.get();
+    }
+    public static final String SELECT_DATABASE_CHARSET = "select pg_encoding_to_char(pg_database.encoding) from pg_database where datname = '%s';";
 }

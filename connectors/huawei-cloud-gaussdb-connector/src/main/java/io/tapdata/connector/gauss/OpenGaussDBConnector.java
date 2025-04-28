@@ -246,6 +246,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             slotName = tapConnectorContext.getStateMap().get(CdcConstant.GAUSS_DB_SLOT_TAG);
             gaussDBConfig.load(tapConnectorContext.getNodeConfig());
         });
+        gaussDBConfig.setCharset(gaussJdbcContext.queryDatabaseCharset());
         commonSqlMaker = GaussDBSqlMaker.instance().closeNotNull(gaussDBConfig.getCloseNotNull());
         gaussDBVersion = gaussJdbcContext.queryVersion();
         gaussJdbcContext.withPostgresVersion(gaussDBVersion);

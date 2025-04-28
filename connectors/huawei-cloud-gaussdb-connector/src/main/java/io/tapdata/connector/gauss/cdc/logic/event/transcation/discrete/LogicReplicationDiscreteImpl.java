@@ -59,6 +59,11 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
 
     @Override
     public void emit(ByteBuffer logEvent, Log log) {
+        emit(logEvent, log, null);
+    }
+
+    @Override
+    public void emit(ByteBuffer logEvent, Log log, String charset) {
         if (null == logEvent) return;
         List<TapEvent> eventList = new ArrayList<>();
         try {
@@ -69,7 +74,7 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
                 byte[] lsn = LogicUtil.read(logEvent, CdcConstant.BYTES_COUNT_LSN);
                 byte[] type = LogicUtil.read(logEvent, CdcConstant.BYTES_COUNT_EVENT_TYPE);
                 String transactionType = new String(type);
-                Event.EventEntity<TapEvent> eventEntity = redirect(logEvent, transactionType.toUpperCase());
+                Event.EventEntity<TapEvent> eventEntity = redirect(logEvent, transactionType.toUpperCase(), charset);
                 if (null == eventEntity) continue;
                 TapEvent event = eventEntity.event();
                 if (null == event) continue;
@@ -107,7 +112,7 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
         throw new UnsupportedOperationException();
     }
 
-    protected Event.EventEntity<TapEvent> redirect(ByteBuffer logEvent, String type) {
+    protected Event.EventEntity<TapEvent> redirect(ByteBuffer logEvent, String type, String charset) {
         if (null == logEvent) {
             return null;
         }
@@ -123,15 +128,15 @@ public class LogicReplicationDiscreteImpl extends EventFactory<ByteBuffer> {
                 offset.withTransactionTimestamp(event.timestamp());
                 break;
             case CdcConstant.INSERT_TAG:
-                event = InsertEvent.instance().offsetHour(offsetHour).analyze(logEvent, dataTypeMap);
+                event = InsertEvent.instance().offsetHour(offsetHour).analyze(logEvent, dataTypeMap, charset);
                 advanceTransactionOffset();
                 break;
             case CdcConstant.UPDATE_TAG:
-                event = UpdateEvent.instance().offsetHour(offsetHour).analyze(logEvent, dataTypeMap);
+                event = UpdateEvent.instance().offsetHour(offsetHour).analyze(logEvent, dataTypeMap, charset);
                 advanceTransactionOffset();
                 break;
             case CdcConstant.DELETE_TAG:
-                event = DeleteEvent.instance().offsetHour(offsetHour).analyze(logEvent, dataTypeMap);
+                event = DeleteEvent.instance().offsetHour(offsetHour).analyze(logEvent, dataTypeMap, charset);
                 advanceTransactionOffset();
                 break;
             case CdcConstant.COMMIT_TAG:
