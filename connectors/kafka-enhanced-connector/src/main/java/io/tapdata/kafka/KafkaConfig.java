@@ -58,6 +58,11 @@ public class KafkaConfig extends BasicConfig implements
         return KafkaSchemaMode.fromString(schemaMode);
     }
 
+    public KafkaSchemaMode getNodeSchemaMode() {
+        String schemaMode = nodeConfigGet("schemaMode", KafkaSchemaMode.STANDARD.name());
+        return KafkaSchemaMode.fromString(schemaMode);
+    }
+
     public KafkaSerialization getConnectionKeySerialization() {
         String keySerializer = connectionConfigGet("keySerialization", KafkaSerialization.BINARY.getType());
         return KafkaSerialization.fromString(keySerializer);
@@ -208,7 +213,7 @@ public class KafkaConfig extends BasicConfig implements
     public Properties buildProducerConfig() {
         String type = "Producer";
         Properties props = buildProperties(type);
-        getConnectionSchemaMode().setSerializer(this, props);
+        getNodeSchemaMode().setSerializer(this, props);
 
         KafkaAcksType ackType = getConnectionAcksType();
         switch (ackType) {
