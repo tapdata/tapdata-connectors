@@ -495,6 +495,27 @@
               "value": "csv"
             }
           ]
+        },
+        "applyDefault": {
+          "type": "boolean",
+          "title": "${applyDefault}",
+          "default": false,
+          "x-index": 8,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${applyDefaultTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -519,6 +540,8 @@
       "timezone": "Timezone for Datetime",
       "timezoneTips": "Affect Type: DATE",
       "writeByteBufferCapacity": "Write buffer capacity(KB)",
+      "applyDefault": "Apply default value",
+      "applyDefaultTooltip": "When the switch is turned on, the default value will be applied to the target. If there are unadapted functions or expressions, it may cause an error",
       "writeFormat": "Write format",
       "doc": "docs/readme_en_US.md",
       "duplicateKey": "duplicateKey",
@@ -555,6 +578,8 @@
       "timezone": "时间类型的时区",
       "timezoneTips": "影响类型: DATE",
       "writeByteBufferCapacity": "写入缓冲区容量(KB)",
+      "applyDefault": "应用默认值",
+      "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错",
       "writeFormat": "写入格式",
       "doc": "docs/readme_zh_CN.md",
       "duplicateKey": "排序字段",
@@ -591,6 +616,8 @@
       "timezone": "时间类型的时区",
       "timezoneTips": "影響類型: DATE",
       "writeByteBufferCapacity": "寫入緩沖區容量(KB)",
+      "applyDefault": "應用默認值",
+      "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯",
       "writeFormat": "寫入格式",
       "doc": "docs/readme_zh_CN.md",
       "duplicateKey": "排序字段",
