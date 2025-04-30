@@ -536,6 +536,32 @@
               }
             }
           }
+        },
+        "combinePushTopic": {
+          "required": true,
+          "type": "string",
+          "title": "${combinePushTopic}",
+          "default": "{table_name}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${combinePushTopicTip}"
+          },
+          "x-index": 2
+        },
+        "schemaMode": {
+          "type": "string",
+          "title": "${schemaMode}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "default": "TAP_STANDARD",
+          "enum": [
+            {"label": "${schemaModeTapStandard}", "value": "TAP_STANDARD"},
+            {"label": "${schemaModeOriginal}", "value": "ORIGINAL"},
+            {"label": "${schemaModeCanal}", "value": "CANAL"},
+            {"label": "${schemaModeDebezium}", "value": "DEBEZIUM"},
+            {"label": "${schemaModeFlinkCDC}", "value": "FLINK_CDC"}
+          ]
         }
       }
     }
@@ -552,6 +578,9 @@
       "schemaMode": "Structural mode",
       "schemaModeTapStandard": "Standard structure",
       "schemaModeOriginal": "Original structure",
+      "schemaModeCanal": "Canal",
+      "schemaModeDebezium": "Debezium",
+      "schemaModeFlinkCDC": "Flink CDC",
       "serialization": "Serializer",
       "keySerialization": "Key serializer",
       "valueSerialization": "Value serializer",
@@ -593,7 +622,9 @@
       "extParamsTypeAll": "All",
       "extParamsTypeAdmin": "Management configuration",
       "extParamsTypeConsumer": "Consumer configuration",
-      "extParamsTypeProducer": "Production configuration"
+      "extParamsTypeProducer": "Production configuration",
+      "combinePushTopic": "Combine Push Topic",
+      "combinePushTopicTip": "Control the topic of kafka data push, supports the following wildcard characters, dynamic styling\n - {db_name}: Source database name\n - {schema_name}: Source schema name\n - {table_name}: Table name"
     },
     "zh_CN": {
       "doc": "docs/kafka_enhanced_zh_CN.md",
@@ -605,6 +636,9 @@
       "schemaMode": "结构模式",
       "schemaModeTapStandard": "标准结构",
       "schemaModeOriginal": "原生结构",
+      "schemaModeCanal": "Canal",
+      "schemaModeDebezium": "Debezium",
+      "schemaModeFlinkCDC": "Flink CDC",
       "serialization": "序列器",
       "keySerialization": "键序列器",
       "valueSerialization": "值序列器",
@@ -646,7 +680,9 @@
       "extParamsTypeAll": "全部",
       "extParamsTypeAdmin": "管理配置",
       "extParamsTypeConsumer": "消费配置",
-      "extParamsTypeProducer": "生产配置"
+      "extParamsTypeProducer": "生产配置",
+      "combinePushTopic": "推送Topic",
+      "combinePushTopicTip": "控制kafka数据推送的topic，支持以下通配符，动态拼接\n - {db_name}: 源端库名\n - {schema_name}: 源端模式名称\n - {table_name}: 表名"
     },
     "zh_TW": {
       "doc": "docs/kafka_enhanced_zh_TW.md",
@@ -658,6 +694,9 @@
       "schemaMode": "結構模式",
       "schemaModeTapStandard": "標準結構",
       "schemaModeOriginal": "原生結構",
+      "schemaModeCanal": "Canal",
+      "schemaModeDebezium": "Debezium",
+      "schemaModeFlinkCDC": "Flink CDC",
       "serialization": "序列器",
       "keySerialization": "鍵序列器",
       "valueSerialization": "值序列器",
@@ -699,7 +738,9 @@
       "extParamsTypeAll": "全部",
       "extParamsTypeAdmin": "管理設定",
       "extParamsTypeConsumer": "消費配置",
-      "extParamsTypeProducer": "生產配置"
+      "extParamsTypeProducer": "生產配置",
+      "combinePushTopic": "推送Topic",
+      "combinePushTopicTip": "控制kafka數據推送的topic，支持以下通配符，動態拼接\n - {db_name}: 源端庫名\n - {schema_name}: 源端模式名稱\n - {table_name}: 表名"
     }
   },
   "dataTypes": {

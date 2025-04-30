@@ -1,6 +1,8 @@
 package io.tapdata.kafka.constants;
 
 import io.tapdata.kafka.KafkaConfig;
+import io.tapdata.kafka.serialization.JsonDeserializer;
+import io.tapdata.kafka.serialization.JsonSerializer;
 import io.tapdata.kafka.serialization.StandardDeserializer;
 import io.tapdata.kafka.serialization.StandardSerializer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -43,6 +45,45 @@ public enum KafkaSchemaMode {
             props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, kafkaConfig.getConnectionValueSerialization().getDeserializer());
         }
     },
+    CANAL() {
+        @Override
+        public void setSerializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class.getName());
+        }
+
+        @Override
+        public void setDeserializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class.getName());
+        }
+    },
+    DEBEZIUM() {
+        @Override
+        public void setSerializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class.getName());
+        }
+
+        @Override
+        public void setDeserializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class.getName());
+        }
+    },
+    FLINK_CDC() {
+        @Override
+        public void setSerializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class.getName());
+        }
+
+        @Override
+        public void setDeserializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class.getName());
+        }
+    }
     ;
 
     public abstract void setSerializer(KafkaConfig kafkaConfig, Properties props);
