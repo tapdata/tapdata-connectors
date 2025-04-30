@@ -77,7 +77,7 @@ public class StandardSchemaMode extends AbsSchemaMode {
 
     @Override
     public List<ProducerRecord<Object, Object>> fromTapEvent(TapTable table, TapEvent tapEvent) {
-        String topic = KafkaUtils.pickTopic(kafkaService.getConfig(), "", "", table);
+        String topic = topic(table, tapEvent);
         Long ts = tapEvent.getTime();
 
         Map<String, Object> data;
