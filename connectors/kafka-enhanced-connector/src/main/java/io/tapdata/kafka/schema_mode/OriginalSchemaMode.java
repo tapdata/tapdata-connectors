@@ -68,10 +68,10 @@ public class OriginalSchemaMode extends AbsSchemaMode {
     public List<ProducerRecord<Object, Object>> fromTapEvent(TapTable table, TapEvent tapEvent) {
         if (tapEvent instanceof TapInsertRecordEvent) {
             TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) tapEvent;
-            String topic = KafkaUtils.pickTopic(kafkaService.getConfig(), "", "", table);
+            String topic = topic(table, tapEvent);
             Map<String, Object> afterMap = insertRecordEvent.getAfter();
             Object key = afterMap.get(FIELD_KEY);
-            Object value = afterMap.get(FIELD_VALUE);
+            Object value = afterMap.containsKey(FIELD_KEY) ? afterMap.get(FIELD_VALUE) : afterMap;
             Integer partition = (Integer) afterMap.get(FIELD_PARTITION);
             Long ts = Optional.ofNullable(afterMap.get(FIELD_TIMESTAMP)).map(o -> {
                 if (o instanceof String) {

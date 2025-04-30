@@ -8,8 +8,7 @@ import io.tapdata.kafka.utils.KafkaUtils;
 import io.tapdata.kafka.utils.StandardEventUtils;
 import org.apache.kafka.common.serialization.Serializer;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 /**
  * TapData 标准事件序列器
@@ -25,9 +24,9 @@ public class StandardSerializer implements Serializer<TapEvent> {
         StandardEventUtils.setTs(map, data.getTime());
         if (data instanceof TapBaseEvent) {
             TapBaseEvent recordEvent = (TapBaseEvent) data;
-            StandardEventUtils.setOpTs(map, recordEvent.getReferenceTime());
+            StandardEventUtils.setOpTs(map, null != recordEvent.getReferenceTime() ? recordEvent.getReferenceTime() : System.currentTimeMillis());
             StandardEventUtils.setTable(map, recordEvent.getTableId());
-            StandardEventUtils.setNamespaces(map, recordEvent.getNamespaces());
+            StandardEventUtils.setNamespaces(map, getNamespaces(recordEvent));
         } else {
             StandardEventUtils.setTable(map, topic);
         }
@@ -74,5 +73,28 @@ public class StandardSerializer implements Serializer<TapEvent> {
     private void toUnknownMap(Map<String, Object> map, TapEvent recordEvent) {
         StandardEventUtils.setOp(map, EventOperation.DML_UNKNOWN);
         StandardEventUtils.setData(map, recordEvent);
+    }
+
+    private List<String> getNamespaces(TapBaseEvent tapBaseEvent) {
+        if (null == tapBaseEvent) {
+            return null;
+        }
+        List<String> namespaces = tapBaseEvent.getNamespaces();
+        if (null != namespaces) {
+            return namespaces;
+        }
+        List<String> ns = new ArrayList<>();
+        String database = tapBaseEvent.getDatabase();
+        if (null != database) {
+            ns.add(database);
+        }
+        String schema = tapBaseEvent.getSchema();
+        if (null != schema) {
+            ns.add(schema);
+        }
+        if (!ns.isEmpty()) {
+            return ns;
+        }
+        return null;
     }
 }
