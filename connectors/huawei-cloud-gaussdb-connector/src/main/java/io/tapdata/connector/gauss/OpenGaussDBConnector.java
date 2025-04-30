@@ -51,6 +51,7 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 
+import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.time.Instant;
@@ -246,6 +247,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
             slotName = tapConnectorContext.getStateMap().get(CdcConstant.GAUSS_DB_SLOT_TAG);
             gaussDBConfig.load(tapConnectorContext.getNodeConfig());
         });
+        gaussDBConfig.setCharset(gaussJdbcContext.queryDatabaseCharset());
         commonSqlMaker = GaussDBSqlMaker.instance().closeNotNull(gaussDBConfig.getCloseNotNull());
         gaussDBVersion = gaussJdbcContext.queryVersion();
         gaussJdbcContext.withPostgresVersion(gaussDBVersion);
@@ -572,7 +574,12 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                     byte[] bytes = (byte[]) value;
                     if (bytes.length == 0) return new TapStringValue("");
                     byte type = tapType.getType();
-                    String dataValue = new String(bytes);
+                    String dataValue = null;
+                    try {
+                        dataValue = new String(bytes, gaussDBConfig.getCharset());
+                    } catch (UnsupportedEncodingException e) {
+                        throw new RuntimeException(e);
+                    }
                     switch (type) {
                         case TapType.TYPE_DATETIME:
                             TapDateTime tapDateTime = (TapDateTime) tapType;
