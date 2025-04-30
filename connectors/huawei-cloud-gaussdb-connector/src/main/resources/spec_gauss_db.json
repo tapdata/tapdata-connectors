@@ -305,7 +305,7 @@
       "to": "TapString",
       "byte": "10m",
       "defaultByte": 1,
-      "byteRatio": 1,
+      "byteRatio": 3,
       "fixed": true
     },
     "character varying[($byte)]": {
