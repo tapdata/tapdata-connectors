@@ -320,7 +320,11 @@ public class MysqlMaker implements SqlMaker {
             } else if (tapField.getDefaultValue() instanceof Number) {
                 builder.append(tapField.getDefaultValue()).append(' ');
             } else {
-                builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
+                if ("json".equals(datatype) || "longtext".equals(datatype)) {
+                    builder.append("(").append(tapField.getDefaultValue().toString().replace("\\", "")).append(") ");
+                } else {
+                    builder.append("'").append(StringKit.escape(tapField.getDefaultValue().toString(), "'")).append("' ");
+                }
             }
             fieldSql += " " + builder;
         }
