@@ -59,7 +59,7 @@ public class KafkaConfig extends BasicConfig implements
     }
 
     public KafkaSchemaMode getNodeSchemaMode() {
-        String schemaMode = nodeConfigGet("schemaMode", KafkaSchemaMode.STANDARD.name());
+        String schemaMode = nodeConfigGet("schemaMode", connectionConfigGet("schemaMode", KafkaSchemaMode.STANDARD.name()));
         return KafkaSchemaMode.fromString(schemaMode);
     }
 

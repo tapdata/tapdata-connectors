@@ -85,11 +85,9 @@ public class StandardSerializer implements Serializer<TapEvent> {
         }
         List<String> ns = new ArrayList<>();
         String database = tapBaseEvent.getDatabase();
-        if (null != database) {
-            ns.add(database);
-        }
         String schema = tapBaseEvent.getSchema();
-        if (null != schema) {
+        if (null != database && null != schema ) {
+            ns.add(database);
             ns.add(schema);
         }
         if (!ns.isEmpty()) {
