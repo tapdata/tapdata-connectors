@@ -1,7 +1,6 @@
 package io.tapdata.connector.mysql;
 
 import com.google.common.collect.Lists;
-import io.tapdata.connector.tencent.db.mysql.MysqlJdbcContext;
 import io.tapdata.entity.conversion.TableFieldTypesGenerator;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.mapping.DefaultExpressionMatchingMap;
@@ -33,19 +32,19 @@ public class MysqlSchemaLoader {
     private static final String TAG = MysqlSchemaLoader.class.getSimpleName();
     private static final String SELECT_TABLES = "SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '%s' AND TABLE_TYPE='BASE TABLE'";
     private static final String TABLE_NAME_IN = " AND TABLE_NAME IN(%s)";
-    private static final String SELECT_COLUMNS = "SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME %s";
+    protected static final String SELECT_COLUMNS = "SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '%s' AND TABLE_NAME %s";
     private final static String SELECT_ALL_INDEX_SQL = "select TABLE_NAME,INDEX_NAME,INDEX_TYPE,COLLATION,NON_UNIQUE,COLUMN_NAME,SEQ_IN_INDEX\n" +
             "from INFORMATION_SCHEMA.STATISTICS\n" +
             "where TABLE_SCHEMA = '%s'\n" +
             "and TABLE_NAME %s order by INDEX_NAME,SEQ_IN_INDEX";
 
 
-    private TapConnectionContext tapConnectionContext;
-    private MysqlJdbcContext mysqlJdbcContext;
+    protected TapConnectionContext tapConnectionContext;
+    protected MysqlJdbcContextV2 mysqlJdbcContext;
 
-    public MysqlSchemaLoader(MysqlJdbcContext mysqlJdbcContext) {
+    public MysqlSchemaLoader(MysqlJdbcContextV2 mysqlJdbcContext, TapConnectionContext tapConnectionContext) {
         this.mysqlJdbcContext = mysqlJdbcContext;
-        this.tapConnectionContext = mysqlJdbcContext.getTapConnectionContext();
+        this.tapConnectionContext = tapConnectionContext;
     }
 
     public void discoverSchema(List<String> filterTable, Consumer<List<TapTable>> consumer, int tableSize) throws Throwable {
@@ -55,7 +54,7 @@ public class MysqlSchemaLoader {
 
         DataMap connectionConfig = tapConnectionContext.getConnectionConfig();
         String database = connectionConfig.getString("database");
-        List<DataMap> allTables =queryAllTables(database, filterTable);
+        List<DataMap> allTables = queryAllTables(database, filterTable);
         if (CollectionUtils.isEmpty(allTables)) {
             consumer.accept(null);
             return;
@@ -137,7 +136,7 @@ public class MysqlSchemaLoader {
         String sql = String.format(SELECT_COLUMNS, database, inTableName);
         List<DataMap> columnList = TapSimplify.list();
         try {
-            mysqlJdbcContext.query(sql, resultSet -> {
+            mysqlJdbcContext.normalQuery(sql, resultSet -> {
                 List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
                 while (resultSet.next()) {
                     columnList.add(DbKit.getRowFromResultSet(resultSet, columnNames));
@@ -156,7 +155,7 @@ public class MysqlSchemaLoader {
         String inTableName = new StringJoiner(tableNames).add("IN ('").add("')").toString();
         String sql = String.format(SELECT_ALL_INDEX_SQL, database, inTableName);
         try {
-            mysqlJdbcContext.query(sql, resultSet -> {
+            mysqlJdbcContext.normalQuery(sql, resultSet -> {
                 List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
                 while (resultSet.next()) {
                     indexList.add(DbKit.getRowFromResultSet(resultSet, columnNames));
@@ -183,12 +182,12 @@ public class MysqlSchemaLoader {
     private TapIndex makeTapIndex(String key, List<DataMap> value) {
         TapIndex index = index(key);
         value.forEach(v -> index.indexField(indexField(v.getString("COLUMN_NAME")).fieldAsc("A".equals(v.getString("COLLATION")))));
-        index.setUnique(value.stream().anyMatch(v ->  "0".equals(v.getString("NON_UNIQUE"))));
+        index.setUnique(value.stream().anyMatch(v -> "0".equals(v.getString("NON_UNIQUE"))));
         index.setPrimary(value.stream().anyMatch(v -> "PRIMARY".equals(v.getString("INDEX_NAME"))));
         return index;
     }
 
-    private  List<DataMap>  queryAllTables(String database, List<String> filterTable) {
+    private List<DataMap> queryAllTables(String database, List<String> filterTable) {
         String sql = String.format(SELECT_TABLES, database);
         if (CollectionUtils.isNotEmpty(filterTable)) {
             filterTable = filterTable.stream().map(t -> "'" + t + "'").collect(Collectors.toList());
@@ -198,7 +197,7 @@ public class MysqlSchemaLoader {
 
         List<DataMap> tableList = TapSimplify.list();
         try {
-            mysqlJdbcContext.query(sql, resultSet -> tableList.addAll(DbKit.getDataFromResultSet(resultSet)));
+            mysqlJdbcContext.normalQuery(sql, resultSet -> tableList.addAll(DbKit.getDataFromResultSet(resultSet)));
         } catch (Throwable e) {
             TapLogger.error(TAG, "Execute queryAllTables failed, error: " + e.getMessage(), e);
         }
@@ -211,7 +210,7 @@ public class MysqlSchemaLoader {
         String sql = String.format(SELECT_TABLES, database);
         List<String> list = new ArrayList<>();
         try {
-            mysqlJdbcContext.query(sql, rs -> {
+            mysqlJdbcContext.normalQuery(sql, rs -> {
                 while (rs.next()) {
                     list.add(rs.getString("TABLE_NAME"));
                     if (list.size() >= batchSize) {

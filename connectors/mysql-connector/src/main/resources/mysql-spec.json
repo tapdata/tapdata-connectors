@@ -958,14 +958,12 @@
     "enum($enums)": {
       "name": "enum",
       "to": "TapString",
-      "queryOnly": true,
-      "byte": 16383
+      "queryOnly": true
     },
     "set($sets)": {
       "name": "set",
       "to": "TapString",
-      "queryOnly": true,
-      "byte": 16383
+      "queryOnly": true
     },
     "point": {
       "to": "TapBinary",

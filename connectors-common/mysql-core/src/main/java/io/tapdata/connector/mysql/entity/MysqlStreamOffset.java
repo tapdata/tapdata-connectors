@@ -11,8 +11,8 @@ import java.util.Map;
 public class MysqlStreamOffset implements Serializable {
 
 	private static final long serialVersionUID = 7107575040120294790L;
-	private String name;
-	private Map<String, String> offset;
+	protected String name;
+	protected Map<String, String> offset;
 
 	public String getName() {
 		return name;
