@@ -77,13 +77,19 @@ public class OceanbaseReader {
             @Override
             public void notify(LogMessage message) {
                 try {
+                    String op = message.getOpt().name();
                     if (!tableList.contains(message.getTableName())) {
-                        return;
+                        switch (op) {
+                            case "INSERT":
+                            case "UPDATE":
+                            case "DELETE":
+                                return;
+                        }
                     }
                     Map<String, Object> after = DataMap.create();
                     Map<String, Object> before = DataMap.create();
                     analyzeMessage(message, after, before);
-                    switch (message.getOpt().name()) {
+                    switch (op) {
                         case "INSERT":
                             eventList.get().add(new TapInsertRecordEvent().init().table(message.getTableName()).after(after).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
                             break;
