@@ -812,7 +812,7 @@ public class MysqlConnector extends CommonDbConnector {
         });
     }
 
-    private Set<String> dateFields(TapTable tapTable) {
+    protected Set<String> dateFields(TapTable tapTable) {
         Set<String> dateTypeSet = new HashSet<>();
         tapTable.getNameFieldMap().forEach((n, v) -> {
             switch (v.getTapType().getType()) {
