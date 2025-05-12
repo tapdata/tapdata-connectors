@@ -76,7 +76,7 @@ public class KafkaService implements IKafkaService {
             thread.setName(String.format("%s-executor-%s", KafkaEnhancedConnector.PDK_ID, thread.getId()));
             return thread;
         });
-        this.schemaModeService = AbsSchemaMode.create(config.getNodeSchemaMode(), this);
+        this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
     }
 
     @Override
