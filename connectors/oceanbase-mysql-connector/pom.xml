@@ -87,6 +87,12 @@
             </exclusions>
         </dependency>
         <dependency>
+            <groupId>io.tapdata</groupId>
+            <artifactId>tapdata-common</artifactId>
+            <version>0.2.23-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
         </dependency>
