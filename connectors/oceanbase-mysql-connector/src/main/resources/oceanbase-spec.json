@@ -225,14 +225,24 @@
           "apiServerKey": "extParams",
           "x-index": 7
         },
-        "rpcPort": {
+        "rootServerList": {
+          "required": true,
           "type": "string",
-          "title": "${rpcPort}",
-          "default": 2882,
+          "title": "${rootServerList}",
           "x-decorator": "FormItem",
-          "x-component": "InputNumber",
-          "apiServerKey": "rpc_port",
-          "x-index": 8,
+          "x-component": "Input",
+          "apiServerKey": "rootServerList",
+          "x-decorator-props": {
+            "tooltip": "${rootServerListTooltip}"
+          },
+          "x-index": 8
+        },
+        "logProxyHost": {
+          "type": "string",
+          "title": "${logProxyHost}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 9,
           "required": true
         },
         "logProxyPort": {
@@ -242,7 +252,7 @@
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "apiServerKey": "proxy_port",
-          "x-index": 9,
+          "x-index": 10,
           "required": true
         },
         "timezone": {
@@ -251,7 +261,7 @@
           "default": "",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "x-index": 10,
+          "x-index": 11,
           "enum": [
             {
               "label": "",
@@ -376,7 +386,9 @@
       "user": "user",
       "password": "password",
       "extParams": "Connection Parameter String",
-      "rpcPort": "RPC Port",
+      "rootServerList": "OceanBase Root Server List",
+      "rootServerListTooltip": "format demo: 192.168.1.100:2882:2881,192.168.1.101:2882:2881,192.168.1.102:2882:2881",
+      "logProxyHost": "Log Proxy Host",
       "logProxyPort": "Log Proxy Port",
       "timezone": "timezone",
       "doc": "docs/oceanbase_mysql_en_US.md",
@@ -392,7 +404,9 @@
       "user": "账号",
       "password": "密码",
       "extParams": "连接参数",
-      "rpcPort": "RPC端口",
+      "rootServerList": "OceanBase多节点列表",
+      "rootServerListTooltip": "格式案例：192.168.1.100:2882:2881,192.168.1.101:2882:2881,192.168.1.102:2882:2881",
+      "logProxyHost": "日志代理地址",
       "logProxyPort": "日志代理端口",
       "timezone": "时区",
       "doc": "docs/oceanbase_mysql_zh_CN.md",
@@ -408,7 +422,9 @@
       "user": "賬號",
       "password": "密碼",
       "extParams": "連接參數",
-      "rpcPort": "RPC端口",
+      "rootServerList": "OceanBase多节点列表",
+      "rootServerListTooltip": "格式案例：192.168.1.100:2882:2881,192.168.1.101:2882:2881,192.168.1.102:2882:2881",
+      "logProxyHost": "日誌代理地址",
       "logProxyPort": "日誌代理端口",
       "timezone": "時區",
       "doc": "docs/oceanbase_mysql_zh_TW.md",

@@ -1,7 +1,6 @@
 package io.tapdata.oceanbase.bean;
 
 import io.tapdata.connector.mysql.config.MysqlConfig;
-import org.apache.commons.lang3.StringUtils;
 
 import java.io.Serializable;
 import java.util.Map;
@@ -10,7 +9,8 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private String tenant;
-    private int rpcPort;
+    private String rootServerList;
+    private String logProxyHost;
     private int logProxyPort;
 
     //customize
@@ -35,12 +35,20 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
         this.tenant = tenant;
     }
 
-    public int getRpcPort() {
-        return rpcPort;
+    public String getRootServerList() {
+        return rootServerList;
     }
 
-    public void setRpcPort(int rpcPort) {
-        this.rpcPort = rpcPort;
+    public void setRootServerList(String rootServerList) {
+        this.rootServerList = rootServerList;
+    }
+
+    public String getLogProxyHost() {
+        return logProxyHost;
+    }
+
+    public void setLogProxyHost(String logProxyHost) {
+        this.logProxyHost = logProxyHost;
     }
 
     public int getLogProxyPort() {
