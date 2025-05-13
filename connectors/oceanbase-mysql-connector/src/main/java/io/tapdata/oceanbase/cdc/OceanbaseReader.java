@@ -64,12 +64,12 @@ public class OceanbaseReader {
 
     public void start(BooleanSupplier isAlive) throws Throwable {
         ObReaderConfig config = new ObReaderConfig();
-        config.setRsList(oceanbaseConfig.getHost() + ":" + oceanbaseConfig.getRpcPort() + ":" + oceanbaseConfig.getPort());
+        config.setRsList(oceanbaseConfig.getRootServerList());
         config.setUsername(oceanbaseConfig.getUser());
         config.setPassword(oceanbaseConfig.getPassword());
         config.setStartTimestamp((Long) offsetState);
         config.setTableWhiteList(oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + ".*");
-        LogProxyClient client = new LogProxyClient(oceanbaseConfig.getHost(), oceanbaseConfig.getLogProxyPort(), config);
+        LogProxyClient client = new LogProxyClient(oceanbaseConfig.getLogProxyHost(), oceanbaseConfig.getLogProxyPort(), config);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         AtomicReference<List<TapEvent>> eventList = new AtomicReference<>(new ArrayList<>());
         AtomicInteger heartbeatCount = new AtomicInteger(0);
