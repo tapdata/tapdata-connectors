@@ -793,7 +793,7 @@ public class MysqlConnector extends CommonDbConnector {
     protected void queryByAdvanceFilterWithOffset(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
         String sql = commonSqlMaker.buildSelectClause(table, filter, false) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilter(filter);
         int batchSize = null != filter.getBatchSize() && filter.getBatchSize().compareTo(0) > 0 ? filter.getBatchSize() : BATCH_ADVANCE_READ_LIMIT;
-        jdbcContext.query(sql, resultSet -> {
+        mysqlJdbcContext.queryWithStream(sql, resultSet -> {
             FilterResults filterResults = new FilterResults();
             //get all column names
             Set<String> dateTypeSet = dateFields(table);
