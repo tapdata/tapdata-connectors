@@ -10,6 +10,7 @@ import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
+import io.tapdata.connector.postgres.error.PostgresErrorCode;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
 import io.tapdata.connector.postgres.partition.TableType;
@@ -30,6 +31,7 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
@@ -269,7 +271,12 @@ public class PostgresConnector extends CommonDbConnector {
     private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
         if (EmptyKit.isNull(slotName)) {
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
-            postgresJdbcContext.execute("SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')");
+            String sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
+            try {
+                postgresJdbcContext.execute(sql);
+            } catch (SQLException e) {
+                throw new TapCodeException(PostgresErrorCode.SELECT_PUBLICATION_FAILED, "Select publication failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+            }
             tapLogger.info("new logical replication slot created, slotName:{}", slotName);
             connectorContext.getStateMap().put("tapdata_pg_slot", slotName);
         } else if (needCheck) {
@@ -713,7 +720,12 @@ public class PostgresConnector extends CommonDbConnector {
             }
         });
         if (needCreate.get()) {
-            postgresJdbcContext.execute(String.format("CREATE PUBLICATION %s FOR ALL TABLES %s", publicationName, postgresConfig.getPartitionRoot() ? "WITH (publish_via_partition_root = true)" : ""));
+            String sql = String.format("CREATE PUBLICATION %s FOR ALL TABLES %s", publicationName, postgresConfig.getPartitionRoot() ? "WITH (publish_via_partition_root = true)" : "");
+            try {
+                postgresJdbcContext.execute(sql);
+            } catch (SQLException e) {
+                throw new TapCodeException(PostgresErrorCode.CREATE_PUBLICATION_FAILED, "create publication for all tables failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+            }
         }
     }
 
