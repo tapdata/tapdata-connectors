@@ -11,6 +11,7 @@ import io.tapdata.kafka.constants.KafkaConcurrentReadMode;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.constants.KafkaSerialization;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -56,6 +57,11 @@ public class KafkaConfig extends BasicConfig implements
     public KafkaSchemaMode getConnectionSchemaMode() {
         String schemaMode = connectionConfigGet("schemaMode", KafkaSchemaMode.STANDARD.name());
         return KafkaSchemaMode.fromString(schemaMode);
+    }
+
+    public KafkaSchemaMode getNodeSchemaMode() {
+        String schemaMode = nodeConfigGet("schemaMode", null);
+        return StringUtils.isEmpty(schemaMode) ? null : KafkaSchemaMode.fromString(schemaMode);
     }
 
     public KafkaSerialization getConnectionKeySerialization() {
@@ -208,7 +214,7 @@ public class KafkaConfig extends BasicConfig implements
     public Properties buildProducerConfig() {
         String type = "Producer";
         Properties props = buildProperties(type);
-        getConnectionSchemaMode().setSerializer(this, props);
+        getNodeSchemaMode().setSerializer(this, props);
 
         KafkaAcksType ackType = getConnectionAcksType();
         switch (ackType) {

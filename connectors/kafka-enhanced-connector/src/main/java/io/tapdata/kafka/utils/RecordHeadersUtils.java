@@ -76,7 +76,9 @@ public interface RecordHeadersUtils {
 
     static Headers fromList(List<TapEntry<String, byte[]>> list) {
         Headers headers = new RecordHeaders();
-        list.forEach(header -> headers.add(header.getKey(), header.getValue()));
-        return headers;
+        if (null != list) {
+            list.forEach(header -> headers.add(header.getKey(), header.getValue()));
+        }
+		return headers;
     }
 }

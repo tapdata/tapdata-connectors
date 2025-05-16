@@ -6,11 +6,24 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class GreenplumJdbcContext extends PostgresJdbcContext {
 
     public GreenplumJdbcContext(PostgresConfig config) {
         super(config);
+    }
+
+    @Override
+    protected String queryAllTablesSql(String schema, List<String> tableNames) {
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND t.table_name IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')" : "";
+        return String.format(PG_ALL_TABLE_LOWER_VERSION, StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
+    }
+
+    @Override
+    protected String queryAllColumnsSql(String schema, List<String> tableNames) {
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND table_name IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')" : "";
+        return String.format(PG_ALL_COLUMN_LOWER_VERSION, StringKit.escape(schema, "'"), StringKit.escape(getConfig().getDatabase(), "'"), StringKit.escape(schema, "'"), tableSql);
     }
 
     @Override

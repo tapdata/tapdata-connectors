@@ -15,8 +15,8 @@
 
     <properties>
         <java.version>8</java.version>
-        <postgres.driver.version>42.3.4</postgres.driver.version>
-        <tapdata.pdk.api.version>1.4.5-SNAPSHOT</tapdata.pdk.api.version>
+        <postgres.driver.version>42.7.5</postgres.driver.version>
+        <tapdata.pdk.api.version>2.0.0-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
 
     <dependencies>
@@ -57,45 +57,57 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-assembly-plugin</artifactId>
+                <artifactId>maven-shade-plugin</artifactId>
                 <version>3.1.1</version>
 
                 <configuration>
                     <finalName>${connector.file.name}</finalName>
-                    <descriptorRefs>
-                        <descriptorRef>jar-with-dependencies</descriptorRef>
-                    </descriptorRefs>
-                    <archive>
-                        <manifestEntries>
-                            <Implementation-Title>${project.artifactId}</Implementation-Title>
-                            <Implementation-Version>${project.version}</Implementation-Version>
-                            <Implementation-Vendor>${project.groupId}</Implementation-Vendor>
+                    <transformers>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
+                        <transformer
+                                implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                            <manifestEntries>
+                                <Implementation-Title>${project.artifactId}</Implementation-Title>
+                                <Implementation-Version>${project.version}</Implementation-Version>
+                                <Implementation-Vendor>${project.groupId}</Implementation-Vendor>
 
-                            <Build-OS>${os.name} ${os.version}</Build-OS>
-                            <Build-Java>Java ${java.version}</Build-Java>
-                            <PDK-Runner-Version>${tapdata.pdk.runner.version}</PDK-Runner-Version>
-                            <PDK-API-Version>${tapdata.pdk.api.version}</PDK-API-Version>
-                            <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
-                            <Version>${project.version}</Version>
-                            <Authentication>GA</Authentication>
-                            <PayMode>${pay.mode}</PayMode>
-                            <Git-Build-Time>${git.build.time}</Git-Build-Time>
-                            <Git-Branch>${git.branch}</Git-Branch>
-                            <Git-Commit-Id>${git.commit.id}</Git-Commit-Id>
-                            <Git-Build-User-Name>${git.build.user.name}</Git-Build-User-Name>
-                            <Git-Build-User-Email>${git.build.user.email}</Git-Build-User-Email>
-                        </manifestEntries>
-                    </archive>
-                    <appendAssemblyId>false</appendAssemblyId>
+                                <Build-OS>${os.name} ${os.version}</Build-OS>
+                                <Build-Java>Java ${java.version}</Build-Java>
+                                <PDK-Runner-Version>${tapdata.pdk.runner.version}</PDK-Runner-Version>
+                                <PDK-API-Version>${tapdata.pdk.api.version}</PDK-API-Version>
+                                <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
+                                <Version>${project.version}</Version>
+                                <Authentication>GA</Authentication>
+                                <PayMode>${pay.mode}</PayMode>
+                                <Git-Build-Time>${git.build.time}</Git-Build-Time>
+                                <Git-Branch>${git.branch}</Git-Branch>
+                                <Git-Commit-Id>${git.commit.id}</Git-Commit-Id>
+                                <Git-Build-User-Name>${git.build.user.name}</Git-Build-User-Name>
+                                <Git-Build-User-Email>${git.build.user.email}</Git-Build-User-Email>
+                            </manifestEntries>
+                        </transformer>
+                    </transformers>
                 </configuration>
 
                 <executions>
                     <execution>
-                        <id>make-assembly</id>
                         <phase>package</phase>
                         <goals>
-                            <goal>single</goal>
+                            <goal>shade</goal>
                         </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>**:**</artifact>
+                                    <excludes>
+                                        <exclude>**/org/apache/log4j/**</exclude>
+                                        <exclude>**/org/apache/logging/log4j/**</exclude>
+                                        <exclude>**/org/slf4j/**</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
                     </execution>
                 </executions>
 
@@ -120,6 +132,26 @@
                     <injectAllReactorProjects>true</injectAllReactorProjects>
                     <dotGitDirectory>${project.basedir}/../../.git</dotGitDirectory>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>encrypt-jar</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>io.tapdata.common.util.JarEncryptorMain</mainClass>
+                            <arguments>
+                                <argument>${basedir}/target/${connector.file.name}.jar</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <artifactId>maven-resources-plugin</artifactId>

@@ -315,7 +315,7 @@ public class MongodbUtil {
 						String pass = new String(password);
 						pass = URLEncoder.encode(pass, "UTF-8");
 
-						mongodbUri = StringKit.replaceOnce(mongodbUri, pass + "@", "******@");
+						mongodbUri = StringKit.replace(mongodbUri, pass + "@", "******@");
 					}
 				}
 

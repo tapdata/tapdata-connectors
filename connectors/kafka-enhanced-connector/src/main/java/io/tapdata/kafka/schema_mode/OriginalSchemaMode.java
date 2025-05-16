@@ -65,13 +65,13 @@ public class OriginalSchemaMode extends AbsSchemaMode {
     }
 
     @Override
-    public ProducerRecord<Object, Object> fromTapEvent(TapTable table, TapEvent tapEvent) {
+    public List<ProducerRecord<Object, Object>> fromTapEvent(TapTable table, TapEvent tapEvent) {
         if (tapEvent instanceof TapInsertRecordEvent) {
             TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) tapEvent;
-            String topic = table.getId();
+            String topic = topic(table, tapEvent);
             Map<String, Object> afterMap = insertRecordEvent.getAfter();
             Object key = afterMap.get(FIELD_KEY);
-            Object value = afterMap.get(FIELD_VALUE);
+            Object value = afterMap.containsKey(FIELD_KEY) ? afterMap.get(FIELD_VALUE) : afterMap;
             Integer partition = (Integer) afterMap.get(FIELD_PARTITION);
             Long ts = Optional.ofNullable(afterMap.get(FIELD_TIMESTAMP)).map(o -> {
                 if (o instanceof String) {
@@ -83,7 +83,7 @@ public class OriginalSchemaMode extends AbsSchemaMode {
             }).map(DateTime::toLong).orElse(null);
             List<TapEntry<String, byte[]>> headerList = (List<TapEntry<String, byte[]>>) afterMap.get(FIELD_HEADERS);
             Headers headers = RecordHeadersUtils.fromList(headerList);
-            return new ProducerRecord<>(topic, partition, ts, key, value, headers);
+            return Arrays.asList(new ProducerRecord<>(topic, partition, ts, key, value, headers));
         } else {
             throw new NotSupportedException("TapEvent type '" + tapEvent.getClass().getName() + "'");
         }

@@ -187,4 +187,8 @@ public class GreenplumConnector extends PostgresConnector {
         }
     }
 
+    public List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
+        return tapTableList;
+    }
+
 }

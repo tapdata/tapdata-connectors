@@ -1,5 +1,6 @@
 package io.tapdata.kafka.service;
 
+import io.tapdata.connector.error.KafkaErrorCodes;
 import io.tapdata.connector.utils.AsyncBatchPusher;
 import io.tapdata.connector.utils.ErrorHelper;
 import io.tapdata.connector.utils.ConcurrentUtils;
@@ -13,11 +14,13 @@ import io.tapdata.entity.mapping.TapEntry;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.exception.TapPdkConfigEx;
 import io.tapdata.exception.TapPdkTerminateByServerEx;
 import io.tapdata.exception.TapRuntimeException;
 import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
 import io.tapdata.kafka.*;
+import io.tapdata.kafka.constants.ProducerRecordWrapper;
 import io.tapdata.kafka.data.KafkaOffset;
 import io.tapdata.kafka.data.KafkaTopicOffset;
 import io.tapdata.kafka.utils.KafkaBatchReadOffsetUtils;
@@ -73,7 +76,7 @@ public class KafkaService implements IKafkaService {
             thread.setName(String.format("%s-executor-%s", KafkaEnhancedConnector.PDK_ID, thread.getId()));
             return thread;
         });
-        this.schemaModeService = AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
+        this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
     }
 
     @Override
@@ -336,15 +339,25 @@ public class KafkaService implements IKafkaService {
         AtomicLong delete = new AtomicLong(0);
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
 
-        CountDownLatch latch = new CountDownLatch(recordEvents.size());
-        for (final TapRecordEvent recordEvent : recordEvents) {
-            if (stopping.get()) return;
+        List<ProducerRecordWrapper> producerRecords = new ArrayList<>();
+        for (TapRecordEvent recordEvent : recordEvents) {
+            List<ProducerRecord<Object, Object>> fromTapEvents = schemaModeService.fromTapEvent(table, recordEvent);
+            if (null != fromTapEvents && !fromTapEvents.isEmpty()) {
+                for (ProducerRecord<Object, Object> fromTapEvent : fromTapEvents) {
+                    producerRecords.add(new ProducerRecordWrapper(recordEvent, fromTapEvent));
+                }
+            }
+        }
 
-            ProducerRecord<Object, Object> producerRecord = schemaModeService.fromTapEvent(table, recordEvent);
-            getProducer().send(producerRecord, (metadata, exception) -> {
+        CountDownLatch latch = new CountDownLatch(producerRecords.size());
+        AtomicReference<RuntimeException> sendEx = new AtomicReference<>();
+        for (ProducerRecordWrapper producerRecord : producerRecords) {
+            getProducer().send(producerRecord.getProducerRecord(), (metadata, exception) -> {
                 try {
+                    TapRecordEvent recordEvent = producerRecord.getRecordEvent();
                     if (exception != null) {
                         listResult.addError(recordEvent, exception);
+                        sendEx.set(new TapCodeException(KafkaErrorCodes.INVALID_TOPIC, exception.getMessage(), exception).dynamicDescriptionParameters(producerRecord.getProducerRecord().topic()));
                     }
 
                     if (recordEvent instanceof TapInsertRecordEvent) {
@@ -367,6 +380,9 @@ public class KafkaService implements IKafkaService {
                     break;
                 }
             }
+            if (null != sendEx.get()) {
+                throw sendEx.get();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } finally {
@@ -376,17 +392,17 @@ public class KafkaService implements IKafkaService {
 
     @Override
     public CreateTableOptions createTable(TapCreateTableEvent tapCreateTableEvent) {
-        String tableId = tapCreateTableEvent.getTableId();
         CreateTableOptions createTableOptions = new CreateTableOptions();
         short replicasSize = config.getNodeReplicasSize();
         int partitionNum = config.getNodePartitionSize();
+        String topic = KafkaUtils.pickTopic(config, tapCreateTableEvent.getDatabase(), tapCreateTableEvent.getSchema(), tapCreateTableEvent.getTable());
         try {
             Set<String> existTopics = getAdminService().listTopics();
-            if (!existTopics.contains(tableId)) {
+            if (!existTopics.contains(topic)) {
                 createTableOptions.setTableExists(false);
-                getAdminService().createTopic(Collections.singleton(tableId), partitionNum, replicasSize);
+                getAdminService().createTopic(Collections.singleton(topic), partitionNum, replicasSize);
             } else {
-                List<TopicPartitionInfo> topicPartitionInfos = getAdminService().getTopicPartitionInfo(tableId);
+                List<TopicPartitionInfo> topicPartitionInfos = getAdminService().getTopicPartitionInfo(topic);
                 int existTopicPartition = topicPartitionInfos.size();
                 int existReplicasSize = topicPartitionInfos.get(0).replicas().size();
                 if (existReplicasSize != replicasSize) {
@@ -397,28 +413,28 @@ public class KafkaService implements IKafkaService {
                 } else if (partitionNum == existTopicPartition) {
                     logger.info("The number of partitions set is equal to the number of partitions of the existing table");
                 } else {
-                    getAdminService().increaseTopicPartitions(tapCreateTableEvent.getTableId(), partitionNum);
+                    getAdminService().increaseTopicPartitions(topic, partitionNum);
                 }
                 createTableOptions.setTableExists(true);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            throw new RuntimeException("Create topic " + tableId + " failed, error: " + e.getMessage(), e);
+            throw new RuntimeException("Create topic " + topic + " failed, error: " + e.getMessage(), e);
         }
         return createTableOptions;
     }
 
     @Override
     public void deleteTable(TapDropTableEvent tapDropTableEvent) {
-        String tableId = tapDropTableEvent.getTableId();
+        String topic = KafkaUtils.pickTopic(config, tapDropTableEvent.getDatabase(), tapDropTableEvent.getSchema(), tapDropTableEvent.getTableId());
         try {
-            logger.info("Deleting topic '{}'...", tableId);
-            getAdminService().dropTopics(Collections.singleton(tableId));
+            logger.info("Deleting topic '{}'...", topic);
+            getAdminService().dropTopics(Collections.singleton(topic));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            throw new RuntimeException("Delete topic " + tableId + " failed, error: " + e.getMessage(), e);
+            throw new RuntimeException("Delete topic " + topic + " failed, error: " + e.getMessage(), e);
         }
     }
 

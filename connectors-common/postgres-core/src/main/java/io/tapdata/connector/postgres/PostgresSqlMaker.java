@@ -147,7 +147,6 @@ public class PostgresSqlMaker extends CommonSqlMaker {
             }).collect(Collectors.joining(", "))).append(' ');
         }
     }
-
     private static String buildNullSortClause(SortOn v) {
         if (v.getNullSort() == 1) {
             return ' ' + "NULLS" + ' ' + "FIRST";
