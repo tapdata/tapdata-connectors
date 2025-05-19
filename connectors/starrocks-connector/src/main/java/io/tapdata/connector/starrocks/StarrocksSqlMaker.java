@@ -31,7 +31,9 @@ public class StarrocksSqlMaker extends CommonSqlMaker {
                 builder.append("REPLACE_IF_NOT_NULL ");
             }
             buildNullDefinition(builder, tapField);
-            buildDefaultDefinition(builder, tapField);
+            if (Boolean.TRUE.equals(applyDefault)) {
+                buildDefaultDefinition(builder, tapField);
+            }
             buildCommentDefinition(builder, tapField);
             return builder.toString();
         }).collect(Collectors.joining(", "));
