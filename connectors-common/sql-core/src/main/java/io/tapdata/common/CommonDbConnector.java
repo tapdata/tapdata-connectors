@@ -446,8 +446,8 @@ public abstract class CommonDbConnector extends ConnectorBase {
                     }
                 }
             });
-            List<String> afterUniqueAutoIncrementSql =getAfterUniqueAutoIncrementFields(tapTable, indexList);
-            if(EmptyKit.isNotEmpty(afterUniqueAutoIncrementSql)){
+            List<String> afterUniqueAutoIncrementSql = getAfterUniqueAutoIncrementFields(tapTable, indexList);
+            if (EmptyKit.isNotEmpty(afterUniqueAutoIncrementSql)) {
                 afterUniqueAutoIncrementSql.forEach(sql -> {
                     try {
                         jdbcContext.execute(sql);
@@ -649,7 +649,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         if (EmptyKit.isNotBlank(tapIndex.getName())) {
             sb.append(escapeChar).append(tapIndex.getName()).append(escapeChar);
         } else {
-            String indexName = DbKit.buildIndexName(tapTable.getId());
+            String indexName = DbKit.buildIndexName(tapTable.getId(), tapIndex, 32);
             tapIndex.setName(indexName);
             sb.append(escapeChar).append(indexName).append(escapeChar);
         }
@@ -666,7 +666,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         if (EmptyKit.isNotBlank(tapConstraint.getName())) {
             sb.append(escapeChar).append(tapConstraint.getName()).append(escapeChar);
         } else {
-            sb.append(escapeChar).append(DbKit.buildForeignKeyName(tapTable.getId())).append(escapeChar);
+            sb.append(escapeChar).append(DbKit.buildForeignKeyName(tapTable.getId(), tapConstraint, 32)).append(escapeChar);
         }
         sb.append(" foreign key (").append(escapeChar).append(tapConstraint.getMappingFields().stream().map(TapConstraintMapping::getForeignKey).collect(Collectors.joining(escapeChar + "," + escapeChar))).append(escapeChar).append(") references ")
                 .append(getSchemaAndTable(tapConstraint.getReferencesTableName())).append('(').append(escapeChar).append(tapConstraint.getMappingFields().stream().map(TapConstraintMapping::getReferenceKey).collect(Collectors.joining(escapeChar + "," + escapeChar))).append(escapeChar).append(')');
@@ -975,7 +975,8 @@ public abstract class CommonDbConnector extends ConnectorBase {
         });
         return count.get();
     }
-    protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable,List<TapIndex> indexList) {
+
+    protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
         return new ArrayList<>();
     }
 

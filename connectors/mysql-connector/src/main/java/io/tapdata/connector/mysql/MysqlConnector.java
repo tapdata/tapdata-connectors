@@ -1020,7 +1020,7 @@ public class MysqlConnector extends CommonDbConnector {
         if (EmptyKit.isNotBlank(tapIndex.getName())) {
             sb.append(escapeChar).append(tapIndex.getName()).append(escapeChar);
         } else {
-            String indexName = DbKit.buildIndexName(tapTable.getId());
+            String indexName = DbKit.buildIndexName(tapTable.getId(), tapIndex, 64);
             tapIndex.setName(indexName);
             sb.append(escapeChar).append(indexName).append(escapeChar);
         }
@@ -1030,18 +1030,18 @@ public class MysqlConnector extends CommonDbConnector {
         return sb.toString();
     }
 
-    protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable,List<TapIndex> indexList) {
-        if(!mysqlConfig.getCreateAutoInc())return new ArrayList<>();
+    protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
+        if (!mysqlConfig.getCreateAutoInc()) return new ArrayList<>();
         String sql = "ALTER TABLE `%s` MODIFY COLUMN `%s` %s AUTO_INCREMENT";
         List<String> uniqueFields = new ArrayList<>();
         List<String> uniqueAutoIncrementFields = new ArrayList<>();
         indexList.forEach(index -> {
-            if(index.isUnique()){
+            if (index.isUnique()) {
                 uniqueFields.addAll(index.getIndexFields().stream().map(TapIndexField::getName).collect(Collectors.toList()));
             }
         });
         tapTable.getNameFieldMap().values().forEach(f -> {
-            if(f.getAutoInc() && !f.getPrimaryKey() && uniqueFields.contains(f.getName())){
+            if (f.getAutoInc() && !f.getPrimaryKey() && uniqueFields.contains(f.getName())) {
                 uniqueAutoIncrementFields.add(f.getName());
             }
         });

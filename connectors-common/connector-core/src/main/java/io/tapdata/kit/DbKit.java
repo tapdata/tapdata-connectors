@@ -1,6 +1,8 @@
 package io.tapdata.kit;
 
 import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.schema.TapConstraint;
+import io.tapdata.entity.schema.TapConstraintMapping;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.simplify.TapSimplify;
@@ -152,7 +154,7 @@ public class DbKit {
         if (!exists.isUnique() && created.isUnique()) {
             return false;
         }
-        return exists.getIndexFields().stream().map(TapIndexField::getName).collect(Collectors.toList())
+        return exists.getIndexFields().stream().map(TapIndexField::getName).toList()
                 .equals(created.getIndexFields().stream().map(TapIndexField::getName).collect(Collectors.toList()));
     }
 
@@ -160,8 +162,24 @@ public class DbKit {
         return "IDX_" + table.substring(Math.max(table.length() - 10, 0)) + UUID.randomUUID().toString().replaceAll("-", "").substring(20);
     }
 
+    public static String buildIndexName(String table, TapIndex index, int maxLength) {
+        String indexName = table + "_" + index.getIndexFields().stream().map(TapIndexField::getName).collect(Collectors.joining("_"));
+        if (indexName.length() + 4 <= maxLength) {
+            return "IDX_" + indexName;
+        }
+        return "IDX_" + indexName.substring(0, maxLength - 12) + UUID.randomUUID().toString().replaceAll("-", "").substring(24);
+    }
+
     public static String buildForeignKeyName(String table) {
         return "FK_" + table.substring(Math.max(table.length() - 10, 0)) + UUID.randomUUID().toString().replaceAll("-", "").substring(20);
+    }
+
+    public static String buildForeignKeyName(String table, TapConstraint constraint, int maxLength) {
+        String foreignKeyName = table + "_" + constraint.getMappingFields().stream().map(TapConstraintMapping::getForeignKey).collect(Collectors.joining("_"));
+        if (foreignKeyName.length() + 3 <= maxLength) {
+            return "FK_" + foreignKeyName;
+        }
+        return "FK_" + foreignKeyName.substring(0, maxLength - 11) + UUID.randomUUID().toString().replaceAll("-", "").substring(24);
     }
 
     public static <T> List<List<T>> splitToPieces(List<T> data, int eachPieceSize) {
