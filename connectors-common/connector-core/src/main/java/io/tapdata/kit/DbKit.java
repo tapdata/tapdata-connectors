@@ -163,6 +163,9 @@ public class DbKit {
     }
 
     public static String buildIndexName(String table, TapIndex index, int maxLength) {
+        if (EmptyKit.isNotBlank(index.getName()) && index.getName().length() <= maxLength) {
+            return index.getName();
+        }
         String indexName = table + "_" + index.getIndexFields().stream().map(TapIndexField::getName).collect(Collectors.joining("_"));
         if (indexName.length() + 4 <= maxLength) {
             return "IDX_" + indexName;

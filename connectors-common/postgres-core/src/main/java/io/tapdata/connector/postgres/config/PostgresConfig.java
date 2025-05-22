@@ -32,6 +32,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     public PostgresConfig() {
         setDbType("postgresql");
         setJdbcDriver("org.postgresql.Driver");
+        setMaxIndexNameLength(63);
     }
 
     @Override
