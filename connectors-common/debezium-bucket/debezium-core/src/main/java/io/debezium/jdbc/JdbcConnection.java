@@ -306,7 +306,7 @@ public class JdbcConnection implements AutoCloseable {
         return url;
     }
 
-    private final Configuration config;
+    protected final Configuration config;
     private final ConnectionFactory factory;
     private final Operations initialOps;
     private volatile Connection conn;
@@ -1227,7 +1227,7 @@ public class JdbcConnection implements AutoCloseable {
         }
     }
 
-    private Map<TableId, List<Column>> getColumnsDetails(String databaseCatalog, String schemaNamePattern,
+    protected Map<TableId, List<Column>> getColumnsDetails(String databaseCatalog, String schemaNamePattern,
                                                          String tableName, TableFilter tableFilter, ColumnNameFilter columnFilter, DatabaseMetaData metadata,
                                                          final Set<TableId> viewIds)
             throws SQLException {

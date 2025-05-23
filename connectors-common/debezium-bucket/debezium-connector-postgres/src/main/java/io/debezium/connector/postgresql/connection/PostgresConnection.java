@@ -12,10 +12,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
+import io.debezium.relational.*;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.postgresql.core.BaseConnection;
 import org.postgresql.replication.LogSequenceNumber;
@@ -32,10 +32,6 @@ import io.debezium.connector.postgresql.TypeRegistry;
 import io.debezium.connector.postgresql.spi.SlotState;
 import io.debezium.jdbc.JdbcConfiguration;
 import io.debezium.jdbc.JdbcConnection;
-import io.debezium.relational.Column;
-import io.debezium.relational.ColumnEditor;
-import io.debezium.relational.TableId;
-import io.debezium.relational.Tables;
 import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
 
@@ -508,5 +504,71 @@ public class PostgresConnection extends JdbcConnection {
     public TypeRegistry getTypeRegistry() {
         Objects.requireNonNull(typeRegistry, "Connection does not provide type registry");
         return typeRegistry;
+    }
+
+    public void readSchema(Tables tables, String databaseCatalog, String schemaNamePattern,
+                           Tables.TableFilter tableFilter, Tables.ColumnNameFilter columnFilter, boolean removeTablesNotFoundInJdbc)
+            throws SQLException {
+        // Before we make any changes, get the copy of the set of table IDs ...
+        Set<TableId> tableIdsBefore = new HashSet<>(tables.tableIds());
+
+        // Read the metadata for the table columns ...
+        DatabaseMetaData metadata = connection().getMetaData();
+
+        // Find regular and materialized views as they cannot be snapshotted
+        final Set<TableId> viewIds = new HashSet<>();
+        final Set<TableId> tableIds = new HashSet<>();
+
+        int totalTables = 0;
+        try (final ResultSet rs = metadata.getTables(databaseCatalog, schemaNamePattern, null,
+                new String[]{ "VIEW", "MATERIALIZED VIEW", "TABLE" })) {
+            while (rs.next()) {
+                final String schemaName = rs.getString(2);
+                final String tableName = rs.getString(3);
+                final String tableType = rs.getString(4);
+                if ("TABLE".equals(tableType)) {
+                    totalTables++;
+                    TableId tableId = new TableId(null, schemaName, tableName);
+                    if (tableFilter == null || tableFilter.isIncluded(tableId)) {
+                        tableIds.add(tableId);
+                    }
+                }
+                else {
+                    TableId tableId = new TableId(null, schemaName, tableName);
+                    viewIds.add(tableId);
+                }
+            }
+        }
+
+        Map<TableId, List<Column>> columnsByTable = new HashMap<>();
+
+        if (totalTables == tableIds.size() || config.getBoolean(RelationalDatabaseConnectorConfig.SNAPSHOT_FULL_COLUMN_SCAN_FORCE)) {
+            columnsByTable = getColumnsDetails(databaseCatalog, schemaNamePattern, null, tableFilter, columnFilter, metadata, viewIds);
+        }
+        else {
+            for (TableId includeTable : tableIds) {
+                Map<TableId, List<Column>> cols = getColumnsDetails(databaseCatalog, schemaNamePattern, includeTable.table(), tableFilter,
+                        columnFilter, metadata, viewIds);
+                columnsByTable.putAll(cols);
+            }
+        }
+
+        // Read the metadata for the primary keys ...
+        for (Map.Entry<TableId, List<Column>> tableEntry : columnsByTable.entrySet()) {
+            // First get the primary key information, which must be done for *each* table ...
+            List<String> pkColumnNames = readPrimaryKeyOrUniqueIndexNames(metadata, tableEntry.getKey());
+
+            // Then define the table ...
+            List<Column> columns = tableEntry.getValue();
+            Collections.sort(columns);
+            String defaultCharsetName = null; // JDBC does not expose character sets
+            tables.overwriteTable(tableEntry.getKey(), columns, pkColumnNames, defaultCharsetName);
+        }
+
+        if (removeTablesNotFoundInJdbc) {
+            // Remove any definitions for tables that were not found in the database metadata ...
+            tableIdsBefore.removeAll(columnsByTable.keySet());
+            tableIdsBefore.forEach(tables::removeTable);
+        }
     }
 }
