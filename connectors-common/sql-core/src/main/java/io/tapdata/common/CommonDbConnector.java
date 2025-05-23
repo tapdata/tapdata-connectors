@@ -434,7 +434,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                     if (!exceptionCollector.violateIndexName(e)) {
                         tapLogger.warn("Create index failed {}, please execute it manually [{}]", e.getMessage(), sql);
                     } else {
-                        String rename = i.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                        String rename = i.getName().substring(0, i.getName().length() - 5) + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
                         tapLogger.warn("Create index failed {}, rename {} to {} and retry ...", e.getMessage(), i.getName(), rename);
                         i.setName(rename);
                         sql = getCreateIndexSql(tapTable, i);
