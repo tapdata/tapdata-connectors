@@ -22,8 +22,7 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 
 import java.nio.ByteBuffer;
-import java.sql.DriverManager;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -109,7 +108,7 @@ public class GaussDBRunner extends DebeziumCdcRunner {
             while (null != supplier && supplier.get()) {
                 ByteBuffer byteBuffer = stream.readPending();
                 if (verifyByteBuffer(byteBuffer)) {
-                    eventFactory.emit(byteBuffer, log);
+                    eventFactory.emit(byteBuffer, log, gaussDBConfig.getCharset());
                     cdcInitTime = flushLsn(cdcInitTime);
 
                     HeartbeatEvent event = new HeartbeatEvent();

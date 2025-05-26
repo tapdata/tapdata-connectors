@@ -793,7 +793,7 @@ public class MysqlConnector extends CommonDbConnector {
     protected void queryByAdvanceFilterWithOffset(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
         String sql = commonSqlMaker.buildSelectClause(table, filter, false) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilter(filter);
         int batchSize = null != filter.getBatchSize() && filter.getBatchSize().compareTo(0) > 0 ? filter.getBatchSize() : BATCH_ADVANCE_READ_LIMIT;
-        jdbcContext.query(sql, resultSet -> {
+        mysqlJdbcContext.queryWithStream(sql, resultSet -> {
             FilterResults filterResults = new FilterResults();
             //get all column names
             Set<String> dateTypeSet = dateFields(table);
@@ -1028,6 +1028,25 @@ public class MysqlConnector extends CommonDbConnector {
                 .append(tapIndex.getIndexFields().stream().map(f -> escapeChar + f.getName() + escapeChar + (EmptyKit.isNotNull(f.getSubPosition()) ? "(" + f.getSubPosition() + ")" : " ") + (f.getFieldAsc() ? "asc" : "desc"))
                         .collect(Collectors.joining(","))).append(')');
         return sb.toString();
+    }
+
+    protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
+        if (!mysqlConfig.getCreateAutoInc()) return new ArrayList<>();
+        String sql = "ALTER TABLE `%s` MODIFY COLUMN `%s` %s AUTO_INCREMENT";
+        List<String> uniqueFields = new ArrayList<>();
+        List<String> uniqueAutoIncrementFields = new ArrayList<>();
+        indexList.forEach(index -> {
+            if (index.isUnique()) {
+                uniqueFields.addAll(index.getIndexFields().stream().map(TapIndexField::getName).collect(Collectors.toList()));
+            }
+        });
+        tapTable.getNameFieldMap().values().forEach(f -> {
+            if (f.getAutoInc() && !f.getPrimaryKey() && uniqueFields.contains(f.getName())) {
+                uniqueAutoIncrementFields.add(f.getName());
+            }
+        });
+
+        return uniqueAutoIncrementFields.stream().map(f -> String.format(sql, tapTable.getId(), f, tapTable.getNameFieldMap().get(f).getDataType())).collect(Collectors.toList());
     }
 
 }

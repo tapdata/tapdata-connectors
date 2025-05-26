@@ -76,6 +76,7 @@ public class DorisConnector extends CommonDbConnector {
         commonDbConfig = dorisConfig;
         jdbcContext = dorisJdbcContext;
         commonSqlMaker = new DorisSqlMaker();
+        commonSqlMaker.applyDefault(commonDbConfig.getApplyDefault());
         exceptionCollector = new DorisExceptionCollector();
         fieldDDLHandlers = new BiClassHandlers<>();
         fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);

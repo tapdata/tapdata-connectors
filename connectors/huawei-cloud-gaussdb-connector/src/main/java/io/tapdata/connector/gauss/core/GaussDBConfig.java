@@ -7,6 +7,15 @@ public class GaussDBConfig extends PostgresConfig {
     protected static final String JDBC_DRIVER = "com.huawei.opengauss.jdbc.Driver";
     private int haPort;
     private String haHost;
+    private String charset;
+
+    public String getCharset() {
+        return charset;
+    }
+
+    public void setCharset(String charset) {
+        this.charset = charset;
+    }
 
     public GaussDBConfig() {
         setDbType(DB_TYPE);
