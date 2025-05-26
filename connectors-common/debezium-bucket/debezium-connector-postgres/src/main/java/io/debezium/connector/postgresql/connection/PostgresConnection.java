@@ -571,4 +571,31 @@ public class PostgresConnection extends JdbcConnection {
             tableIdsBefore.forEach(tables::removeTable);
         }
     }
+
+    protected Map<TableId, List<Column>> getColumnsDetails(String databaseCatalog, String schemaNamePattern,
+                                                           String tableName, Tables.TableFilter tableFilter, Tables.ColumnNameFilter columnFilter, DatabaseMetaData metadata,
+                                                           final Set<TableId> viewIds)
+            throws SQLException {
+        Map<TableId, List<Column>> columnsByTable = new HashMap<>();
+        try (ResultSet columnMetadata = metadata.getColumns(databaseCatalog, schemaNamePattern, tableName, null)) {
+            while (columnMetadata.next()) {
+                String schemaName = columnMetadata.getString(2);
+                String metaTableName = columnMetadata.getString(3);
+                TableId tableId = new TableId(null, schemaName, metaTableName);
+
+                // exclude views and non-captured tables
+                if (viewIds.contains(tableId) ||
+                        (tableFilter != null && !tableFilter.isIncluded(tableId))) {
+                    continue;
+                }
+
+                // add all included columns
+                readTableColumn(columnMetadata, tableId, columnFilter).ifPresent(column -> {
+                    columnsByTable.computeIfAbsent(tableId, t -> new ArrayList<>())
+                            .add(column.create());
+                });
+            }
+        }
+        return columnsByTable;
+    }
 }
