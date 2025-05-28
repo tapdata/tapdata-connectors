@@ -3,18 +3,15 @@ package io.tapdata.connector.doris;
 import cn.hutool.http.HttpUtil;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.doris.bean.DorisConfig;
-import io.tapdata.connector.doris.streamload.DorisStreamLoader;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.entity.TestItem;
-import io.tapdata.pdk.apis.exception.testItem.TapTestConnectionEx;
-import io.tapdata.pdk.apis.exception.testItem.TapTestUnknownEx;
-import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
-import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
+import io.tapdata.pdk.apis.exception.testItem.*;
+import io.tapdata.util.NetUtil;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 
+import java.io.IOException;
 import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -71,6 +68,14 @@ public class DorisTest extends CommonDbTest {
                 jdbcContext.normalQuery("show backends", resultSet -> {
                     while (resultSet.next()) {
                         beCount.incrementAndGet();
+                        String beHost = (resultSet.getString("Host"));
+                        Integer httpPort = (resultSet.getInt("HttpPort"));
+                        if (null == beHost || null == httpPort) continue;
+                        try {
+                            NetUtil.validateHostPortWithSocket(beHost, httpPort);
+                        } catch (IOException e) {
+                            throw new TapTestHostPortEx(e, beHost, String.valueOf(httpPort));
+                        }
                     }
                 });
             } catch (SQLSyntaxErrorException e) {
@@ -82,6 +87,9 @@ public class DorisTest extends CommonDbTest {
                         beCount.set(1);
                     }
                 }
+            } catch (TapTestHostPortEx e) {
+                consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, "Validate BE nodes failed: " + e.getMessage()));
+                return false;
             }
 
             List<String> sqls = new ArrayList<>();
