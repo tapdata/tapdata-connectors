@@ -89,6 +89,14 @@ public class OssFileStorage implements TapFileStorage {
     }
 
     @Override
+    public InputStream readFile(String path) throws Exception {
+        if (!isFileExist(path)) {
+            return null;
+        }
+        return ossClient.getObject(ossConfig.getBucket(), path).getObjectContent();
+    }
+
+    @Override
     public boolean isFileExist(String path) {
         try {
             ossClient.doesObjectExist(ossConfig.getBucket(), path);
