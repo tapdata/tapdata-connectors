@@ -67,7 +67,6 @@ public class DorisTest extends CommonDbTest {
             try {
                 jdbcContext.normalQuery("show backends", resultSet -> {
                     while (resultSet.next()) {
-                        beCount.incrementAndGet();
                         Boolean alive = (resultSet.getBoolean("Alive"));
                         String beHost = (resultSet.getString("Host"));
                         Integer httpPort = (resultSet.getInt("HttpPort"));
@@ -75,11 +74,13 @@ public class DorisTest extends CommonDbTest {
                         try {
                             if (alive) {
                                 NetUtil.validateHostPortWithSocket(beHost, httpPort);
-                                return;
                             }
                         } catch (IOException e) {
-                            throw new TapTestHostPortEx(e, beHost, String.valueOf(httpPort));
+                            if (beCount.get() < 1) {
+                                throw new TapTestHostPortEx(e, beHost, String.valueOf(httpPort));
+                            }
                         }
+                        beCount.incrementAndGet();
                     }
                 });
             } catch (SQLSyntaxErrorException e) {
