@@ -19,7 +19,9 @@ import java.sql.SQLSyntaxErrorException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static io.tapdata.base.ConnectorBase.testItem;
@@ -64,18 +66,30 @@ public class DorisTest extends CommonDbTest {
     protected Boolean testWritePrivilege() {
         try {
             AtomicInteger beCount = new AtomicInteger(0);
+            AtomicReference<String> invalidBeHost = new AtomicReference<>();
+            AtomicReference<Integer> invalidHttpPort = new AtomicReference<>();
+            AtomicReference<IOException> throwable = new AtomicReference<>();
             try {
                 jdbcContext.normalQuery("show backends", resultSet -> {
+                    boolean hasValidNode = false;
                     while (resultSet.next()) {
                         beCount.incrementAndGet();
                         String beHost = (resultSet.getString("Host"));
                         Integer httpPort = (resultSet.getInt("HttpPort"));
                         if (null == beHost || null == httpPort) continue;
                         try {
-                            NetUtil.validateHostPortWithSocket(beHost, httpPort);
+                            if (!hasValidNode) {
+                                NetUtil.validateHostPortWithSocket(beHost, httpPort);
+                                hasValidNode = true;
+                            }
                         } catch (IOException e) {
-                            throw new TapTestHostPortEx(e, beHost, String.valueOf(httpPort));
+                            invalidBeHost.set(beHost);
+                            invalidHttpPort.set(httpPort);
+                            throwable.set(e);
                         }
+                    }
+                    if (!hasValidNode && null != throwable.get()) {
+                        throw new TapTestHostPortEx(throwable.get(), invalidBeHost.get(), String.valueOf(invalidHttpPort.get()));
                     }
                 });
             } catch (SQLSyntaxErrorException e) {
