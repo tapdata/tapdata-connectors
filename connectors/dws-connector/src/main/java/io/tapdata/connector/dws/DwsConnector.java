@@ -228,7 +228,7 @@ public class DwsConnector extends PostgresConnector {
         if (EmptyKit.isNotBlank(tapIndex.getName())) {
             sb.append(escapeChar).append(tapIndex.getName()).append(escapeChar);
         } else {
-            sb.append(escapeChar).append(DbKit.buildIndexName(tapTable.getId())).append(escapeChar);
+            sb.append(escapeChar).append(DbKit.buildIndexName(tapTable.getId(), tapIndex, 63)).append(escapeChar);
         }
         sb.append(" on ").append(getSchemaAndTable(tapTable.getId())).append('(')
                 .append(tapIndex.getIndexFields().stream().map(f -> escapeChar + f.getName() + escapeChar)
