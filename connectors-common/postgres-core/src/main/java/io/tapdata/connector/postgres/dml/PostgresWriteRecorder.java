@@ -257,10 +257,15 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
 
     @Override
     public String getUpsertSql(Map<String, Object> after) throws SQLException {
-        upsert(after,null);
-        String sql = preparedStatement.toString().split("wrapping")[1];
-        preparedStatement.clearParameters();
-        return sql;
+        try{
+            upsert(after,null);
+            String sql = preparedStatement.toString().split("wrapping")[1];
+            preparedStatement.clearParameters();
+            return sql;
+        }finally {
+            connection.close();
+        }
+
     }
 
     protected String getUpsertSql() {
