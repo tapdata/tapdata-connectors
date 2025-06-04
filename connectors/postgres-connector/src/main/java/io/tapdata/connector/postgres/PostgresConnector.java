@@ -10,6 +10,7 @@ import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
+import io.tapdata.connector.postgres.dml.PostgresWriteRecorder;
 import io.tapdata.connector.postgres.error.PostgresErrorCode;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
@@ -17,9 +18,11 @@ import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.TapConstraintException;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapConstraint;
 import io.tapdata.entity.schema.TapField;
@@ -240,6 +243,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
         connectorFunctions.supportQueryPartitionTablesByParentName(this::discoverPartitionInfoByParentName);
         connectorFunctions.supportStreamReadMultiConnectionFunction(this::streamReadMultiConnection);
+        connectorFunctions.supportExportEventSqlFunction(this::exportEventSql);
 
     }
 
@@ -943,5 +947,13 @@ public class PostgresConnector extends CommonDbConnector {
                 throw exception;
             }
         }
+    }
+
+    public String exportEventSql(TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
+        if(tapEvent instanceof TapInsertRecordEvent){
+            PostgresWriteRecorder postgresWriter =  new PostgresWriteRecorder(postgresJdbcContext.getConnection(), table, jdbcContext.getConfig().getSchema());
+            return postgresWriter.getUpsertSql(((TapInsertRecordEvent)tapEvent).getAfter());
+        }
+        return null;
     }
 }

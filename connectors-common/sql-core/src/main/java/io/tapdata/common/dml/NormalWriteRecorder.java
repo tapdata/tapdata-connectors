@@ -297,6 +297,10 @@ public abstract class NormalWriteRecorder {
         throw new UnsupportedOperationException("upsert is not supported");
     }
 
+    public String getUpsertSql(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("upsert is not supported");
+    }
+
     //插入唯一键冲突时忽略
     protected void insertIgnore(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         throw new UnsupportedOperationException("insertIgnore is not supported");
@@ -511,5 +515,16 @@ public abstract class NormalWriteRecorder {
             return "'" + obj + "'";
         }
         return result;
+    }
+
+    protected String byteArrayToHexString(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02X", b));
+        }
+        return "0x"+ sb;
     }
 }

@@ -255,6 +255,14 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         }
     }
 
+    @Override
+    public String getUpsertSql(Map<String, Object> after) throws SQLException {
+        upsert(after,null);
+        String sql = preparedStatement.toString().split("wrapping")[1];
+        preparedStatement.clearParameters();
+        return sql;
+    }
+
     protected String getUpsertSql() {
         return "INSERT INTO " + getSchemaAndTable() + " ("
                 + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") " +
