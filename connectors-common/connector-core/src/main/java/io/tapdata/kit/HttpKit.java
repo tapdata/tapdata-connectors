@@ -1,6 +1,10 @@
 package io.tapdata.kit;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -95,5 +99,53 @@ public final class HttpKit {
     // URL编码工具方法
     private static String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    public static String sendHttp09Request(String host, int port, String data) throws IOException {
+
+        try (Socket socket = new Socket(host, port)) {
+            socket.setSoTimeout(10000); // 10秒超时
+
+            // 使用OutputStream直接发送，避免PrintWriter的自动换行问题
+            OutputStream out = socket.getOutputStream();
+            InputStream in = socket.getInputStream();
+
+            // 构建HTTP/0.9请求
+            // 注意：真正的HTTP/0.9格式非常简单，可能不需要所有头部
+            String request = "POST /\r\n" +
+                    "Content-Type: application/json\r\n" +
+                    "Content-Length: " + data.length() + "\r\n" +
+                    "\r\n" +
+                    data;
+
+            // 发送请求
+            out.write(request.getBytes(StandardCharsets.UTF_8));
+            out.flush();
+
+            // 读取响应
+            ByteArrayOutputStream responseBuffer = new ByteArrayOutputStream();
+            byte[] buffer = new byte[1024];
+            int bytesRead;
+
+            // 设置一个简单的超时机制
+            long startTime = System.currentTimeMillis();
+            while (System.currentTimeMillis() - startTime < 5000) { // 5秒超时
+                if (in.available() > 0) {
+                    bytesRead = in.read(buffer);
+                    if (bytesRead > 0) {
+                        responseBuffer.write(buffer, 0, bytesRead);
+                    }
+                } else {
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+
+            return responseBuffer.toString(StandardCharsets.UTF_8);
+        }
     }
 }

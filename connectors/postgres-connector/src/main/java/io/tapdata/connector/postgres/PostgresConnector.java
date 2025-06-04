@@ -6,6 +6,7 @@ import io.tapdata.common.dml.NormalRecordWriter;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
 import io.tapdata.connector.postgres.cdc.WalLogMinerV2;
+import io.tapdata.connector.postgres.cdc.WalPgtoMiner;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
@@ -57,8 +58,8 @@ import org.postgresql.util.PGInterval;
 import org.postgresql.util.PGobject;
 
 import java.math.BigDecimal;
-import java.sql.Date;
 import java.sql.*;
+import java.sql.Date;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -525,12 +526,20 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            new WalLogMinerV2(postgresJdbcContext, tapLogger)
-                    .watch(tableList, nodeContext.getTableMap())
-                    .withWalLogDirectory(getWalDirectory())
-                    .offset(offsetState)
-                    .registerConsumer(consumer, recordSize)
-                    .startMiner(this::isAlive);
+            if(EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
+                new WalPgtoMiner(postgresJdbcContext, tapLogger)
+                        .watch(tableList, nodeContext.getTableMap())
+                        .offset(offsetState)
+                        .registerConsumer(consumer, recordSize)
+                        .startMiner(this::isAlive);
+            } else {
+                new WalLogMinerV2(postgresJdbcContext, tapLogger)
+                        .watch(tableList, nodeContext.getTableMap())
+                        .withWalLogDirectory(getWalDirectory())
+                        .offset(offsetState)
+                        .registerConsumer(consumer, recordSize)
+                        .startMiner(this::isAlive);
+            }
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
@@ -602,6 +611,9 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
+            if (EmptyKit.isNotBlank(postgresConfig.getPgtoHost())) {
+                return new PostgresOffset();
+            }
             String timestamp = timestampToWalLsnV2(offsetStartTime);
             tapLogger.info("timestampToStreamOffset start at {}", timestamp);
             return timestamp;
