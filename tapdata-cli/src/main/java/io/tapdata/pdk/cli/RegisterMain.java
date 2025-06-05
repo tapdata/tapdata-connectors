@@ -72,6 +72,7 @@ public class RegisterMain {
         DWS(BETA),
         ELASTICSEARCH(BETA),
         EXCEL(BETA, TAG_FILE),
+        FILE_STREAM(ALPHA, TAG_FILE),
         GITHUBCRM(BETA),
         GREENPLUM(ALPHA),
         HAZELCAST(ALPHA),

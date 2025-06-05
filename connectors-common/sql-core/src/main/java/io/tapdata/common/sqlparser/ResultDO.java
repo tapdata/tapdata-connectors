@@ -26,8 +26,20 @@ public class ResultDO {
         this.schema = schema;
     }
 
+    public String getTableName() {
+        return tableName;
+    }
+
     public void setTableName(String tableName) {
         this.tableName = tableName;
+    }
+
+    public Operate getOp() {
+        return op;
+    }
+
+    public void setOp(Operate op) {
+        this.op = op;
     }
 
     public Map<String, Object> getData() {
