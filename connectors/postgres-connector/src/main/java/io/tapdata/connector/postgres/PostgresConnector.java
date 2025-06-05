@@ -158,6 +158,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
         connectorFunctions.supportCountRawCommandFunction(this::countRawCommand);
         connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
+        connectorFunctions.supportGetStreamOffsetFunction(this::getStreamOffsetFromString);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null) return toJson(tapRawValue.getValue());
@@ -341,6 +342,16 @@ public class PostgresConnector extends CommonDbConnector {
         }
         if (EmptyKit.isNotEmpty(primaryNotDefaultOrFull)) {
             tapLogger.warn("The following tables have a primary key, but the identity is not full or default, which may cause before of data loss: {}", String.join(",", primaryNotDefaultOrFull));
+        }
+    }
+
+    private Object getStreamOffsetFromString(TapConnectorContext connectorContext, String offset) {
+        try {
+            PostgresOffset postgresOffset = new PostgresOffset();
+            postgresOffset.setSourceOffset(offset);
+            return postgresOffset;
+        } catch (Exception e) {
+            throw new RuntimeException("Oracle use scn as offset, invalid scn: " + offset, e);
         }
     }
 
