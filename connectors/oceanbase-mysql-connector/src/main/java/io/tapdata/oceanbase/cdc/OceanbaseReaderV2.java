@@ -286,13 +286,19 @@ public class OceanbaseReaderV2 {
                 } else {
                     return "1".equals(valueString);
                 }
+            case "tinytext":
+            case "text":
+            case "mediumtext":
+            case "longtext":
+                return new String(Base64.getDecoder().decode(valueString));
             case "binary":
             case "varbinary":
+                return value.getValueBytes().toByteArray();
             case "tinyblob":
             case "blob":
             case "mediumblob":
             case "longblob":
-                return valueString.getBytes();
+                return Base64.getDecoder().decode(valueString);
             default:
                 return valueString;
         }
