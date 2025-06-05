@@ -14,7 +14,7 @@ import java.util.function.Predicate;
  * @create 2022-05-25 16:10
  **/
 public class MysqlSchemaHistoryTransfer {
-	private   Map<String, Set<String>> historyMap = new ConcurrentHashMap<>();
+	private Map<String, Set<String>> historyMap = new ConcurrentHashMap<>();
 	private AtomicBoolean saved = new AtomicBoolean(false);
 	private ReentrantLock lock = new ReentrantLock(true);
 

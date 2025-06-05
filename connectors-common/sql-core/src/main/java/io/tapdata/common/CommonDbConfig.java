@@ -65,6 +65,8 @@ public class CommonDbConfig implements Serializable {
     private String sslKeyPassword;
     protected String sslRandomPath;
 
+    private int maxIndexNameLength = 30;
+
     //pattern for jdbc-url
     public String getDatabaseUrlPattern() {
         // last %s reserved for extend params
@@ -434,5 +436,13 @@ public class CommonDbConfig implements Serializable {
 
     public void setSslRandomPath(String sslRandomPath) {
         this.sslRandomPath = sslRandomPath;
+    }
+
+    public int getMaxIndexNameLength() {
+        return maxIndexNameLength;
+    }
+
+    public void setMaxIndexNameLength(int maxIndexNameLength) {
+        this.maxIndexNameLength = maxIndexNameLength;
     }
 }

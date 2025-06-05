@@ -434,7 +434,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                     if (!exceptionCollector.violateIndexName(e)) {
                         tapLogger.warn("Create index failed {}, please execute it manually [{}]", e.getMessage(), sql);
                     } else {
-                        String rename = i.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                        String rename = i.getName().substring(0, i.getName().length() - 5) + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
                         tapLogger.warn("Create index failed {}, rename {} to {} and retry ...", e.getMessage(), i.getName(), rename);
                         i.setName(rename);
                         sql = getCreateIndexSql(tapTable, i);
@@ -446,7 +446,18 @@ public abstract class CommonDbConnector extends ConnectorBase {
                     }
                 }
             });
+            List<String> afterUniqueAutoIncrementSql = getAfterUniqueAutoIncrementFields(tapTable, indexList);
+            if (EmptyKit.isNotEmpty(afterUniqueAutoIncrementSql)) {
+                afterUniqueAutoIncrementSql.forEach(sql -> {
+                    try {
+                        jdbcContext.execute(sql);
+                    } catch (SQLException e) {
+                        tapLogger.warn("Failed to update auto-increment column {}, please execute it manually [{}]", e.getMessage(), sql);
+                    }
+                });
+            }
         }
+
     }
 
     protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
@@ -635,13 +646,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
             sb.append("unique ");
         }
         sb.append("index ");
-        if (EmptyKit.isNotBlank(tapIndex.getName())) {
-            sb.append(escapeChar).append(tapIndex.getName()).append(escapeChar);
-        } else {
-            String indexName = DbKit.buildIndexName(tapTable.getId());
-            tapIndex.setName(indexName);
-            sb.append(escapeChar).append(indexName).append(escapeChar);
-        }
+        String indexName = DbKit.buildIndexName(tapTable.getId(), tapIndex, commonDbConfig.getMaxIndexNameLength());
+        tapIndex.setName(indexName);
+        sb.append(escapeChar).append(indexName).append(escapeChar);
         sb.append(" on ").append(getSchemaAndTable(tapTable.getId())).append('(')
                 .append(tapIndex.getIndexFields().stream().map(f -> escapeChar + f.getName() + escapeChar + " " + (f.getFieldAsc() ? "asc" : "desc"))
                         .collect(Collectors.joining(","))).append(')');
@@ -655,7 +662,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         if (EmptyKit.isNotBlank(tapConstraint.getName())) {
             sb.append(escapeChar).append(tapConstraint.getName()).append(escapeChar);
         } else {
-            sb.append(escapeChar).append(DbKit.buildForeignKeyName(tapTable.getId())).append(escapeChar);
+            sb.append(escapeChar).append(DbKit.buildForeignKeyName(tapTable.getId(), tapConstraint, 32)).append(escapeChar);
         }
         sb.append(" foreign key (").append(escapeChar).append(tapConstraint.getMappingFields().stream().map(TapConstraintMapping::getForeignKey).collect(Collectors.joining(escapeChar + "," + escapeChar))).append(escapeChar).append(") references ")
                 .append(getSchemaAndTable(tapConstraint.getReferencesTableName())).append('(').append(escapeChar).append(tapConstraint.getMappingFields().stream().map(TapConstraintMapping::getReferenceKey).collect(Collectors.joining(escapeChar + "," + escapeChar))).append(escapeChar).append(')');
@@ -964,4 +971,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         });
         return count.get();
     }
+
+    protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
+        return new ArrayList<>();
+    }
+
 }

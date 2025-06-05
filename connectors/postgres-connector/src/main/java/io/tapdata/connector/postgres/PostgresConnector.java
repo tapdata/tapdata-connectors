@@ -10,15 +10,19 @@ import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
+import io.tapdata.connector.postgres.dml.PostgresWriteRecorder;
+import io.tapdata.connector.postgres.error.PostgresErrorCode;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
 import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.TapConstraintException;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapConstraint;
 import io.tapdata.entity.schema.TapField;
@@ -30,6 +34,7 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
@@ -238,6 +243,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
         connectorFunctions.supportQueryPartitionTablesByParentName(this::discoverPartitionInfoByParentName);
         connectorFunctions.supportStreamReadMultiConnectionFunction(this::streamReadMultiConnection);
+        connectorFunctions.supportExportEventSqlFunction(this::exportEventSql);
 
     }
 
@@ -269,7 +275,12 @@ public class PostgresConnector extends CommonDbConnector {
     private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
         if (EmptyKit.isNull(slotName)) {
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
-            postgresJdbcContext.execute("SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')");
+            String sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
+            try {
+                postgresJdbcContext.execute(sql);
+            } catch (SQLException e) {
+                throw new TapCodeException(PostgresErrorCode.SELECT_PUBLICATION_FAILED, "Select publication failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+            }
             tapLogger.info("new logical replication slot created, slotName:{}", slotName);
             connectorContext.getStateMap().put("tapdata_pg_slot", slotName);
         } else if (needCheck) {
@@ -444,6 +455,10 @@ public class PostgresConnector extends CommonDbConnector {
         if (updateDmlPolicy == null) {
             updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
         }
+        String deleteDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_DELETE_POLICY);
+        if (deleteDmlPolicy == null) {
+            deleteDmlPolicy = ConnectionOptions.DML_DELETE_POLICY_IGNORE_ON_NON_EXISTS;
+        }
         NormalRecordWriter postgresRecordWriter;
         if (isTransaction) {
             String threadName = Thread.currentThread().getName();
@@ -457,11 +472,13 @@ public class PostgresConnector extends CommonDbConnector {
             postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
+                    .setDeletePolicy(deleteDmlPolicy)
                     .setTapLogger(tapLogger);
         } else {
             postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
+                    .setDeletePolicy(deleteDmlPolicy)
                     .setTapLogger(tapLogger);
         }
         postgresRecordWriter.closeConstraintCheck();
@@ -707,7 +724,12 @@ public class PostgresConnector extends CommonDbConnector {
             }
         });
         if (needCreate.get()) {
-            postgresJdbcContext.execute(String.format("CREATE PUBLICATION %s FOR ALL TABLES %s", publicationName, postgresConfig.getPartitionRoot() ? "WITH (publish_via_partition_root = true)" : ""));
+            String sql = String.format("CREATE PUBLICATION %s FOR ALL TABLES %s", publicationName, postgresConfig.getPartitionRoot() ? "WITH (publish_via_partition_root = true)" : "");
+            try {
+                postgresJdbcContext.execute(sql);
+            } catch (SQLException e) {
+                throw new TapCodeException(PostgresErrorCode.CREATE_PUBLICATION_FAILED, "create publication for all tables failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+            }
         }
     }
 
@@ -925,5 +947,13 @@ public class PostgresConnector extends CommonDbConnector {
                 throw exception;
             }
         }
+    }
+
+    public String exportEventSql(TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
+        if(tapEvent instanceof TapInsertRecordEvent){
+            PostgresWriteRecorder postgresWriter =  new PostgresWriteRecorder(postgresJdbcContext.getConnection(), table, jdbcContext.getConfig().getSchema());
+            return postgresWriter.getUpsertSql(((TapInsertRecordEvent)tapEvent).getAfter());
+        }
+        return null;
     }
 }

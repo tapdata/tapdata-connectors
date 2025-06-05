@@ -65,12 +65,12 @@ public class OceanbaseReader {
 
     public void start(BooleanSupplier isAlive) throws Throwable {
         ObReaderConfig config = new ObReaderConfig();
-        config.setRsList(oceanbaseConfig.getHost() + ":" + oceanbaseConfig.getRpcPort() + ":" + oceanbaseConfig.getPort());
+        config.setRsList(oceanbaseConfig.getRootServerList());
         config.setUsername(oceanbaseConfig.getUser());
         config.setPassword(oceanbaseConfig.getPassword());
         config.setStartTimestamp((Long) offsetState);
         config.setTableWhiteList(oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + ".*");
-        LogProxyClient client = new LogProxyClient(oceanbaseConfig.getHost(), oceanbaseConfig.getLogProxyPort(), config);
+        LogProxyClient client = new LogProxyClient(oceanbaseConfig.getLogProxyHost(), oceanbaseConfig.getLogProxyPort(), config);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         try (
                 ConcurrentProcessor<LogMessage, MessageEvent> concurrentProcessor = TapExecutors.createSimple(8, 32, "OceanBaseReader-Processor")
@@ -93,7 +93,7 @@ public class OceanbaseReader {
                                 }
                                 continue;
                             }
-                            events.get().add(messageEvent.getEvent());
+                            events.get().addAll(messageEvent.getEvent());
                             lastTimestamp = Long.parseLong(messageEvent.getMessage().getTimestamp());
                             if (events.get().size() >= recordSize) {
                                 consumer.accept(events.get(), lastTimestamp);
@@ -159,22 +159,22 @@ public class OceanbaseReader {
                     return null;
             }
         }
-        AtomicReference<TapEvent> tapEvent = new AtomicReference<>();
+        List<TapEvent> tapEvents = new ArrayList<>();
         Map<String, Object> after = DataMap.create();
         Map<String, Object> before = DataMap.create();
         analyzeMessage(message, after, before);
         switch (op) {
             case "INSERT":
-                tapEvent.set(new TapInsertRecordEvent().init().table(message.getTableName()).after(after).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                tapEvents.add(new TapInsertRecordEvent().init().table(message.getTableName()).after(after).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
                 break;
             case "UPDATE":
-                tapEvent.set(new TapUpdateRecordEvent().init().table(message.getTableName()).after(after).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                tapEvents.add(new TapUpdateRecordEvent().init().table(message.getTableName()).after(after).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
                 break;
             case "DELETE":
-                tapEvent.set(new TapDeleteRecordEvent().init().table(message.getTableName()).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                tapEvents.add(new TapDeleteRecordEvent().init().table(message.getTableName()).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
                 break;
             case "HEARTBEAT":
-                tapEvent.set(new HeartbeatEvent().init().referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                tapEvents.add(new HeartbeatEvent().init().referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
                 break;
             case "DDL": {
                 String ddlStr = message.getFieldList().get(0).getValue().toString();
@@ -189,7 +189,7 @@ public class OceanbaseReader {
                                     tapDDLEvent.setTime(System.currentTimeMillis());
                                     tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
                                     tapDDLEvent.setOriginDDL(ddlStr);
-                                    tapEvent.set(tapDDLEvent);
+                                    tapEvents.add(tapDDLEvent);
                                 }, (ddl, wrapper) -> {
                                     boolean unIgnoreTable = true;
                                     if (wrapper instanceof MysqlDDLWrapper) {
@@ -204,7 +204,7 @@ public class OceanbaseReader {
                         tapDDLEvent.setTime(System.currentTimeMillis());
                         tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
                         tapDDLEvent.setOriginDDL(ddlStr);
-                        tapEvent.set(tapDDLEvent);
+                        tapEvents.add(tapDDLEvent);
                     }
                 }
                 break;
@@ -212,7 +212,7 @@ public class OceanbaseReader {
             default:
                 return null;
         }
-        return new MessageEvent(tapEvent.get(), message);
+        return new MessageEvent(tapEvents, message);
     }
 
     private void analyzeMessage(LogMessage message, Map<String, Object> after, Map<String, Object> before) {
@@ -292,9 +292,9 @@ public class OceanbaseReader {
 
     static class MessageEvent {
         private final LogMessage message;
-        private final TapEvent event;
+        private final List<TapEvent> event;
 
-        public MessageEvent(TapEvent event, LogMessage message) {
+        public MessageEvent(List<TapEvent> event, LogMessage message) {
             this.message = message;
             this.event = event;
         }
@@ -303,7 +303,7 @@ public class OceanbaseReader {
             return message;
         }
 
-        public TapEvent getEvent() {
+        public List<TapEvent> getEvent() {
             return event;
         }
     }

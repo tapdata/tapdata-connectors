@@ -14,8 +14,11 @@ import io.tapdata.entity.mapping.TapEntry;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapDate;
 import io.tapdata.entity.schema.value.*;
+import io.tapdata.kafka.KafkaConfig;
 import io.tapdata.kafka.serialization.json.*;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.util.JsonSchemaParser;
+import org.apache.commons.lang3.StringUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -126,5 +129,30 @@ public class KafkaUtils {
     public static DateTime parseDateTime(String dateStr) {
         LocalDateTime localDateTime = LocalDateTime.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS"));
         return new DateTime(localDateTime);
+    }
+
+    public static String pickTopic(KafkaConfig kafkaConfig, String databaseName, String schemaName, TapTable table) {
+        return pickTopic(kafkaConfig, databaseName, schemaName, table.getId());
+    }
+
+    public static String pickTopic(KafkaConfig kafkaConfig, String databaseName, String schemaName, String tableId) {
+        TapConnectionContext tapConnectionContext = kafkaConfig.tapConnectionContext();
+        String combinePushTopic = tapConnectionContext.getNodeConfig().getString("combinePushTopic");
+        if (StringUtils.isBlank(combinePushTopic)) {
+            return tableId;
+        }
+        String topic = combinePushTopic;
+        if (StringUtils.isNotBlank(databaseName)) {
+            topic = topic.replace("{db_name}", databaseName);
+        } else {
+            topic = topic.replace("{db_name}", "");
+        }
+        if (StringUtils.isNotBlank(schemaName)) {
+            topic = topic.replace("{schema_name}", schemaName);
+        } else {
+            topic = topic.replace("{schema_name}", "");
+        }
+        topic = topic.replace("{table_name}", tableId);
+        return topic;
     }
 }

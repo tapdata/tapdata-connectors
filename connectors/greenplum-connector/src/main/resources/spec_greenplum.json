@@ -3,7 +3,8 @@
     "name": "GreenPlum",
     "icon": "icons/greenplum.png",
     "doc" : "${doc}",
-    "id": "greenplum"
+    "id": "greenplum",
+    "tags": ["Database"]
   },
   "configOptions": {
     "capabilities":[

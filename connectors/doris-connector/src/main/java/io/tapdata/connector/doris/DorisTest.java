@@ -3,18 +3,15 @@ package io.tapdata.connector.doris;
 import cn.hutool.http.HttpUtil;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.doris.bean.DorisConfig;
-import io.tapdata.connector.doris.streamload.DorisStreamLoader;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.entity.TestItem;
-import io.tapdata.pdk.apis.exception.testItem.TapTestConnectionEx;
-import io.tapdata.pdk.apis.exception.testItem.TapTestUnknownEx;
-import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
-import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
+import io.tapdata.pdk.apis.exception.testItem.*;
+import io.tapdata.util.NetUtil;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 
+import java.io.IOException;
 import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -22,7 +19,9 @@ import java.sql.SQLSyntaxErrorException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static io.tapdata.base.ConnectorBase.testItem;
@@ -67,10 +66,30 @@ public class DorisTest extends CommonDbTest {
     protected Boolean testWritePrivilege() {
         try {
             AtomicInteger beCount = new AtomicInteger(0);
+            AtomicReference<String> invalidBeHost = new AtomicReference<>();
+            AtomicReference<Integer> invalidHttpPort = new AtomicReference<>();
+            AtomicReference<IOException> throwable = new AtomicReference<>();
             try {
                 jdbcContext.normalQuery("show backends", resultSet -> {
+                    boolean hasValidNode = false;
                     while (resultSet.next()) {
                         beCount.incrementAndGet();
+                        String beHost = (resultSet.getString("Host"));
+                        Integer httpPort = (resultSet.getInt("HttpPort"));
+                        if (null == beHost || null == httpPort) continue;
+                        try {
+                            if (!hasValidNode) {
+                                NetUtil.validateHostPortWithSocket(beHost, httpPort);
+                                hasValidNode = true;
+                            }
+                        } catch (IOException e) {
+                            invalidBeHost.set(beHost);
+                            invalidHttpPort.set(httpPort);
+                            throwable.set(e);
+                        }
+                    }
+                    if (!hasValidNode && null != throwable.get()) {
+                        throw new TapTestHostPortEx(throwable.get(), invalidBeHost.get(), String.valueOf(invalidHttpPort.get()));
                     }
                 });
             } catch (SQLSyntaxErrorException e) {
@@ -82,6 +101,9 @@ public class DorisTest extends CommonDbTest {
                         beCount.set(1);
                     }
                 }
+            } catch (TapTestHostPortEx e) {
+                consumer.accept(new TestItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, "Validate BE nodes failed: " + e.getMessage()));
+                return false;
             }
 
             List<String> sqls = new ArrayList<>();

@@ -16,6 +16,7 @@ public class MysqlConfig extends CommonDbConfig {
         setDbType("mysql");
         setEscapeChar('`');
         setJdbcDriver("com.mysql.cj.jdbc.Driver");
+        setMaxIndexNameLength(64);
     }
 
     private static final Map<String, String> DEFAULT_PROPERTIES = new HashMap<String, String>() {{
