@@ -10,8 +10,10 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
 
     private String tenant;
     private String rootServerList;
-    private String logProxyHost;
-    private int logProxyPort;
+    private String cdcUser;
+    private String cdcPassword;
+    private String rawLogServerHost;
+    private int rawLogServerPort;
 
     //customize
     public OceanbaseConfig() {
@@ -43,19 +45,36 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
         this.rootServerList = rootServerList;
     }
 
-    public String getLogProxyHost() {
-        return logProxyHost;
+    public String getCdcUser() {
+        return cdcUser;
     }
 
-    public void setLogProxyHost(String logProxyHost) {
-        this.logProxyHost = logProxyHost;
+    public void setCdcUser(String cdcUser) {
+        this.cdcUser = cdcUser;
     }
 
-    public int getLogProxyPort() {
-        return logProxyPort;
+    public String getCdcPassword() {
+        return cdcPassword;
     }
 
-    public void setLogProxyPort(int logProxyPort) {
-        this.logProxyPort = logProxyPort;
+    public void setCdcPassword(String cdcPassword) {
+        this.cdcPassword = cdcPassword;
     }
+
+    public String getRawLogServerHost() {
+        return rawLogServerHost;
+    }
+
+    public void setRawLogServerHost(String rawLogServerHost) {
+        this.rawLogServerHost = rawLogServerHost;
+    }
+
+    public int getRawLogServerPort() {
+        return rawLogServerPort;
+    }
+
+    public void setRawLogServerPort(int rawLogServerPort) {
+        this.rawLogServerPort = rawLogServerPort;
+    }
+
 }

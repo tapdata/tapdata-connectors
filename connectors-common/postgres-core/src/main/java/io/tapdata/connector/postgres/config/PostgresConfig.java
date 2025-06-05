@@ -27,6 +27,8 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private Integer maximumQueueSize = 8000;
     private List<String> distributedKey = new ArrayList<>();
     private Boolean isPartition = false;
+    private String pgtoHost;
+    private int pgtoPort;
 
     //customize
     public PostgresConfig() {
@@ -131,5 +133,21 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setIsPartition(Boolean isPartition) {
         this.isPartition = isPartition;
+    }
+
+    public String getPgtoHost() {
+        return pgtoHost;
+    }
+
+    public void setPgtoHost(String pgtoHost) {
+        this.pgtoHost = pgtoHost;
+    }
+
+    public int getPgtoPort() {
+        return pgtoPort;
+    }
+
+    public void setPgtoPort(int pgtoPort) {
+        this.pgtoPort = pgtoPort;
     }
 }

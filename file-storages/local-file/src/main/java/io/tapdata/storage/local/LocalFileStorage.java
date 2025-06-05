@@ -56,6 +56,14 @@ public class LocalFileStorage implements TapFileStorage {
     }
 
     @Override
+    public InputStream readFile(String path) throws Exception {
+        if (!isFileExist(path)) {
+            return null;
+        }
+        return Files.newInputStream(Paths.get(path));
+    }
+
+    @Override
     public boolean isFileExist(String path) {
         File file = new File(path);
         return file.exists() && file.isFile();

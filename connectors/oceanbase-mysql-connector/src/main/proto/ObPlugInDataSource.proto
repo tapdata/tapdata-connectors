@@ -1,0 +1,87 @@
+// protoc -I. --cpp_out ../pb --grpc_out ../pb --plugin=protoc-gen-grpc=/usr/local/bin/grpc_cpp_plugin ObPlugInDataSource.proto
+
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "io.tapdata.data.ob";//java 区分
+option java_outer_classname = "ProtoObReadLog";
+option objc_class_prefix = "PD";
+
+package tapdata;
+
+service ObReadLogServer
+{   
+    rpc StartReadLog(ReadLogRequest) returns (stream ReadLogResponse) {}//拉取日志数据
+    rpc StopReadLog(StopReadLogRequest) returns (ControlResponse){}
+}
+
+message StopReadLogRequest
+{
+    string task_id = 1;//日志任务ID
+}
+
+message ControlResponse
+{
+    int64 code = 1;//状态码
+    string msg = 2;//携带错误信息
+}
+
+message ReaderSource
+{
+    string cluster_user = 1;
+    string cluster_password = 2;
+    string rootserver_list = 3;
+    string tb_white_list = 4;
+}
+
+message ReadLogRequest
+{
+    string task_id = 1;//日志任务ID
+    int64 stime = 2;//从 Januray 1 1970起UTC秒数，当stime大于0时，比stime小的日志将会被过滤
+    ReaderSource source = 3;//数据库源读取（连接）配置
+    string config_file = 4;//如果没指定source，则需要指定配置文件路径。
+}
+
+enum ReadLogOp
+{
+    UNKNOWN = 0;
+    ROLLBACK  = 1; //没有回滚日志
+    COMMIT = 2; //commit
+    INSERT = 3; //c
+    UPDATE = 4; //u
+    DELETE = 5; //d
+    DDL = 6;
+    HEARTBEAT = 7;
+}
+
+message ReadLogPayload
+{
+    string dbname = 1;
+    string tbname = 2;
+    ReadLogOp op = 3;
+    repeated Value before = 4;//update
+    repeated Value after = 5;
+    string ddl = 6;
+    int64 transaction_time = 7;//从 Januray 1 1970起UTC秒数, 只有op为commit才有
+}
+
+message Value 
+{
+    string column_name = 1;//列的名字
+    oneof datum //列的值
+    {
+        int64 value_int = 2;
+        float value_float = 3;
+        double value_double = 4;
+        string value_string = 5;
+        bytes value_bytes = 6;
+        bool is_null = 7;
+    }
+}
+
+message ReadLogResponse
+{
+    int64 code = 1;//状态码
+    string msg = 2;//携带错误信息
+    ReadLogPayload payload = 3;//日志分析后的负荷（code不为OK时为空）
+}
