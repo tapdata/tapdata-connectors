@@ -23,7 +23,7 @@ import io.tapdata.kit.StringKit;
 import io.tapdata.oceanbase.OceanbaseJdbcContext;
 import io.tapdata.oceanbase.OceanbaseTest;
 import io.tapdata.oceanbase.bean.OceanbaseConfig;
-import io.tapdata.oceanbase.cdc.OceanbaseReader;
+import io.tapdata.oceanbase.cdc.OceanbaseReaderV2;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -206,7 +206,13 @@ public class OceanbaseConnector extends MysqlConnector {
         mysqlConfig.load(tapConnectionContext.getNodeConfig());
         mysqlJdbcContext = new OceanbaseJdbcContext(mysqlConfig);
         commonDbConfig = mysqlConfig;
-
+        isConnectorStarted(tapConnectionContext, connectorContext -> {
+            firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
+        });
         jdbcContext = mysqlJdbcContext;
         tapLogger = tapConnectionContext.getLog();
         commonSqlMaker = new CommonSqlMaker('`');
@@ -250,7 +256,7 @@ public class OceanbaseConnector extends MysqlConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        OceanbaseReader oceanbaseReader = new OceanbaseReader((OceanbaseConfig) mysqlConfig);
+        OceanbaseReaderV2 oceanbaseReader = new OceanbaseReaderV2((OceanbaseConfig) mysqlConfig, firstConnectorId);
         oceanbaseReader.init(tableList, nodeContext.getTableMap(), offsetState, recordSize, consumer);
         oceanbaseReader.start(this::isAlive);
     }
