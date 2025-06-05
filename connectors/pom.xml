@@ -69,6 +69,7 @@
 		<module>mock-target-connector</module>
 		<module>vastbase-connector</module>
 		<module>highgo-connector</module>
+		<module>file-stream-connector</module>
 	</modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
