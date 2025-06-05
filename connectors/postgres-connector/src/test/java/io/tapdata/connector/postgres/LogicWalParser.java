@@ -22,7 +22,7 @@ import java.util.logging.Logger;
  */
 public class LogicWalParser {
 
-    private static final Logger LOGGER = Logger.getLogger(RawWALParser.class.getName());
+    private static final Logger LOGGER = Logger.getLogger(LogicWalParser.class.getName());
     private static final String SLOT_NAME = "tapdata_cdc_test_slot";
     private static final String PREFERRED_PLUGIN = "wal2json"; // 首选插件
     private static final String FALLBACK_PLUGIN = "test_decoding"; // 备用插件
@@ -32,7 +32,7 @@ public class LogicWalParser {
     private String actualPlugin = PREFERRED_PLUGIN; // 实际使用的插件
 
     public static void main(String[] args) {
-        RawWALParser parser = new RawWALParser();
+        LogicWalParser parser = new LogicWalParser();
 
         // 添加优雅关闭钩子
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
