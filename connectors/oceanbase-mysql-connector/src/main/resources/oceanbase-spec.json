@@ -102,9 +102,6 @@
           "x-index": 10,
           "x-decorator": "FormItem",
           "x-component": "Switch",
-          "x-decorator-props": {
-            "tooltip": "${hashSplitTooltip}"
-          },
           "x-reactions": [
             {
               "dependencies": ["$inputs"],
@@ -228,25 +225,54 @@
           "apiServerKey": "extParams",
           "x-index": 7
         },
-        "rpcPort": {
+        "rootServerList": {
+          "required": true,
           "type": "string",
-          "title": "${rpcPort}",
-          "default": 2882,
+          "title": "${rootServerList}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "rootServerList",
+          "x-decorator-props": {
+            "tooltip": "${rootServerListTooltip}"
+          },
+          "x-index": 8
+        },
+        "rawLogServerHost": {
+          "required": true,
+          "type": "string",
+          "title": "${rawLogServerHost}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "rawLogServerHost",
+          "x-index": 9
+        },
+        "rawLogServerPort": {
+          "required": true,
+          "type": "string",
+          "default": 50051,
+          "title": "${rawLogServerPort}",
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
-          "apiServerKey": "rpc_port",
-          "x-index": 8,
+          "apiServerKey": "rawLogServerPort",
+          "x-index": 10
+        },
+        "cdcUser": {
+          "type": "string",
+          "title": "${cdcUser}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "cdcUser",
+          "default": "root@sys",
+          "x-index": 11,
           "required": true
         },
-        "logProxyPort": {
+        "cdcPassword": {
           "type": "string",
-          "title": "${logProxyPort}",
-          "default": 2983,
+          "title": "${cdcPassword}",
           "x-decorator": "FormItem",
-          "x-component": "InputNumber",
-          "apiServerKey": "proxy_port",
-          "x-index": 9,
-          "required": true
+          "x-component": "Password",
+          "apiServerKey": "cdcPassword",
+          "x-index": 12
         },
         "timezone": {
           "type": "string",
@@ -254,7 +280,7 @@
           "default": "",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "x-index": 10,
+          "x-index": 13,
           "enum": [
             {
               "label": "",
@@ -379,8 +405,12 @@
       "user": "user",
       "password": "password",
       "extParams": "Connection Parameter String",
-      "rpcPort": "RPC Port",
-      "logProxyPort": "Log Proxy Port",
+      "rootServerList": "OceanBase Root Server List",
+      "rootServerListTooltip": "format demo: 192.168.1.100:2882:2881,192.168.1.101:2882:2881,192.168.1.102:2882:2881",
+      "rawLogServerHost": "Raw Log Server Host",
+      "rawLogServerPort": "Raw Log Server Port",
+      "cdcUser": "CDC User",
+      "cdcPassword": "CDC Password",
       "timezone": "timezone",
       "doc": "docs/oceanbase_mysql_en_US.md",
       "hashSplit": "Single Table Concurrent Read",
@@ -395,8 +425,12 @@
       "user": "账号",
       "password": "密码",
       "extParams": "连接参数",
-      "rpcPort": "RPC端口",
-      "logProxyPort": "日志代理端口",
+      "rootServerList": "OceanBase多节点列表",
+      "rootServerListTooltip": "格式案例：192.168.1.100:2882:2881,192.168.1.101:2882:2881,192.168.1.102:2882:2881",
+      "rawLogServerHost": "日志服务器地址",
+      "rawLogServerPort": "日志服务器端口",
+      "cdcUser": "CDC账号",
+      "cdcPassword": "CDC密码",
       "timezone": "时区",
       "doc": "docs/oceanbase_mysql_zh_CN.md",
       "hashSplit": "单表并发读",
@@ -411,8 +445,12 @@
       "user": "賬號",
       "password": "密碼",
       "extParams": "連接參數",
-      "rpcPort": "RPC端口",
-      "logProxyPort": "日誌代理端口",
+      "rootServerList": "OceanBase多节点列表",
+      "rootServerListTooltip": "格式案例：192.168.1.100:2882:2881,192.168.1.101:2882:2881,192.168.1.102:2882:2881",
+      "rawLogServerHost": "日誌服務器地址",
+      "rawLogServerPort": "日誌服務器端口",
+      "cdcUser": "CDC賬號",
+      "cdcPassword": "CDC密碼",
       "timezone": "時區",
       "doc": "docs/oceanbase_mysql_zh_TW.md",
       "hashSplit": "單表並發讀",
@@ -716,14 +754,12 @@
     "enum($enums)": {
       "name": "enum",
       "to": "TapString",
-      "queryOnly": true,
-      "byte": 16383
+      "queryOnly": true
     },
     "set($sets)": {
       "name": "set",
       "to": "TapString",
-      "queryOnly": true,
-      "byte": 16383
+      "queryOnly": true
     },
     "point": {
       "to": "TapBinary",

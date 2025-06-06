@@ -259,7 +259,8 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "\t\tWHEN INDEX_NAME = 'PRIMARY' THEN 1\n" +
                     "\t\tELSE 0\n" +
                     "\tEND) `isPk`,\n" +
-                    "\tCOLUMN_NAME `columnName`\n" +
+                    "\tCOLUMN_NAME `columnName`,\n" +
+                    "\tSUB_PART `subPosition`\n" +
                     "FROM\n" +
                     "\tINFORMATION_SCHEMA.STATISTICS\n" +
                     "WHERE\n" +
