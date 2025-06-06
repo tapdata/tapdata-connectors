@@ -41,7 +41,7 @@ public class PostgresCDCSQLParser extends CDCSQLParser {
             default:
                 break;
         }
-        throw sr.ex("SQL must start with 'INSERT' or 'DELETE' or 'UPDATE'");
+        return null;
     }
 
     protected ResultDO updateBuild(SQLReader sr) {

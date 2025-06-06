@@ -124,6 +124,15 @@ public class SmbFileStorage implements TapFileStorage {
     }
 
     @Override
+    public InputStream readFile(String path) throws Exception {
+        if (!isFileExist(path)) {
+            return null;
+        }
+        return share.openFile(path, EnumSet.of(AccessMask.GENERIC_READ), null,
+                SMB2ShareAccess.ALL, SMB2CreateDisposition.FILE_OPEN, null).getInputStream();
+    }
+
+    @Override
     public boolean isFileExist(String path) {
         if (null != share) {
             return share.fileExists(path);

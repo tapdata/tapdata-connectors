@@ -70,7 +70,7 @@ public class OceanbaseReader {
         config.setPassword(oceanbaseConfig.getPassword());
         config.setStartTimestamp((Long) offsetState);
         config.setTableWhiteList(oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + ".*");
-        LogProxyClient client = new LogProxyClient(oceanbaseConfig.getLogProxyHost(), oceanbaseConfig.getLogProxyPort(), config);
+        LogProxyClient client = new LogProxyClient(oceanbaseConfig.getRawLogServerHost(), oceanbaseConfig.getRawLogServerPort(), config);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         try (
                 ConcurrentProcessor<LogMessage, MessageEvent> concurrentProcessor = TapExecutors.createSimple(8, 32, "OceanBaseReader-Processor")

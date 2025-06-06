@@ -40,7 +40,7 @@ public abstract class AbstractWalLogMiner {
     protected boolean filterSchema;
     private Map<String, String> dataTypeMap;
     protected final AtomicReference<Throwable> threadException = new AtomicReference<>();
-    private final PostgresCDCSQLParser sqlParser = new PostgresCDCSQLParser();
+    protected final PostgresCDCSQLParser sqlParser = new PostgresCDCSQLParser();
     protected final PostgresConfig postgresConfig;
     protected boolean withSchema;
     protected Map<String, List<String>> schemaTableMap;
