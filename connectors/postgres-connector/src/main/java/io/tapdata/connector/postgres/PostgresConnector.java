@@ -963,7 +963,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     public String exportEventSql(TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
         if(tapEvent instanceof TapInsertRecordEvent){
-            PostgresWriteRecorder postgresWriter =  new PostgresWriteRecorder(postgresJdbcContext.getConnection(), table, jdbcContext.getConfig().getSchema());
+            PostgresWriteRecorder postgresWriter =  new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
             return postgresWriter.getUpsertSql(((TapInsertRecordEvent)tapEvent).getAfter());
         }
         return null;
