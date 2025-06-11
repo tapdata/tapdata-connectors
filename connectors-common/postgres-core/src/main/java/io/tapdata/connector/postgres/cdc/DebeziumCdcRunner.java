@@ -40,6 +40,7 @@ public abstract class DebeziumCdcRunner implements CdcRunner {
      */
     @Override
     public void startCdcRunner() {
+        System.setProperty("debezium.embedded.shutdown.pause.before.interrupt.ms", "3000");
         if (EmptyKit.isNotNull(engine)) {
             engine.run();
         }
