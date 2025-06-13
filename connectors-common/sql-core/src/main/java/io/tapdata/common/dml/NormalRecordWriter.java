@@ -162,6 +162,9 @@ public class NormalRecordWriter {
             } catch (Exception ignore) {
             }
             exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), null, null, e);
+            exceptionCollector.collectWriteType(null, null, null, e);
+            exceptionCollector.collectWriteLength(null, null, null, e);
+            exceptionCollector.revealException(e);
             if (tapRecordEvents.size() == 1) {
                 throw new RuntimeException(String.format("Error occurred when retrying write record: %s", tapRecordEvents.get(0)), e);
             } else {
