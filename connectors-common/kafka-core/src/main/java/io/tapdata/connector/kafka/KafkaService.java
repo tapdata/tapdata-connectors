@@ -426,43 +426,43 @@ public class KafkaService extends AbstractMqService {
                 Collection<String> conditionKeys = tapTable.primaryKeys(true);
                 RecordHeaders recordHeaders = new RecordHeaders();
                 Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, op, conditionKeys));
-                byte[] body = jsonParser.toJsonBytes(eventObj, JsonParser.ToJsonFeature.WriteMapNullValue);
-//                if (null == eventObj) {
-//                    continue;
-//                } else {
-//                    Map<String, Object> res = (Map<String, Object>) eventObj;
-//                    if (null == res.get("data")) {
-//                        throw new RuntimeException("data cannot be null");
-//                    } else {
-//                        Object obj = res.get("data");
-//                        if (obj instanceof Map) {
-//                            Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
-//                            if (map.containsKey("before") && map.get("before").isEmpty()) {
-//                                map.remove("before");
-//                            }
-//                            if (map.containsKey("after") && map.get("after").isEmpty()) {
-//                                map.remove("after");
-//                            }
-//                            res.put("data", map);
-//                            body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
-//                        } else {
-//                            body = obj.toString().getBytes();
-//                        }
-//                    }
-//                    if (res.containsKey("header")) {
-//                        Object obj = res.get("header");
-//                        if (obj instanceof Map) {
-//                            Map<String, Object> head = (Map<String, Object>) res.get("header");
-//                            for (String s : head.keySet()) {
-//                                recordHeaders.add(s, head.get(s).toString().getBytes());
-//                            }
-//                        } else {
-//                            throw new RuntimeException("header must be a collection type");
-//                        }
-//                    } else {
-//                        recordHeaders.add("mqOp", mqOp.toString().getBytes());
-//                    }
-//                }
+                byte[] body = {};
+                if (null == eventObj) {
+                    continue;
+                } else {
+                    Map<String, Object> res = (Map<String, Object>) eventObj;
+                    if (null == res.get("data")) {
+                        throw new RuntimeException("data cannot be null");
+                    } else {
+                        Object obj = res.get("data");
+                        if (obj instanceof Map) {
+                            Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
+                            if (map.containsKey("before") && map.get("before").isEmpty()) {
+                                map.remove("before");
+                            }
+                            if (map.containsKey("after") && map.get("after").isEmpty()) {
+                                map.remove("after");
+                            }
+                            res.put("data", map);
+                            body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
+                        } else {
+                            body = obj.toString().getBytes();
+                        }
+                    }
+                    if (res.containsKey("header")) {
+                        Object obj = res.get("header");
+                        if (obj instanceof Map) {
+                            Map<String, Object> head = (Map<String, Object>) res.get("header");
+                            for (String s : head.keySet()) {
+                                recordHeaders.add(s, head.get(s).toString().getBytes());
+                            }
+                        } else {
+                            throw new RuntimeException("header must be a collection type");
+                        }
+                    } else {
+                        recordHeaders.add("mqOp", mqOp.toString().getBytes());
+                    }
+                }
                 MqOp finalMqOp = mqOp;
                 Callback callback = (metadata, exception) -> {
                     try {
