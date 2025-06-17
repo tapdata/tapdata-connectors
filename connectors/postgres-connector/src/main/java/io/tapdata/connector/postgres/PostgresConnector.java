@@ -377,6 +377,9 @@ public class PostgresConnector extends CommonDbConnector {
         isConnectorStarted(connectionContext, tapConnectorContext -> {
             slotName = tapConnectorContext.getStateMap().get("tapdata_pg_slot");
             postgresConfig.load(tapConnectorContext.getNodeConfig());
+            if (EmptyKit.isNull(slotName)) {
+                slotName = postgresConfig.getCustomSlotName();
+            }
         });
         postgresVersion = postgresJdbcContext.queryVersion();
         commonSqlMaker = new PostgresSqlMaker()

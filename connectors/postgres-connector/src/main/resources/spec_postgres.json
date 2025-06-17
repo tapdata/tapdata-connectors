@@ -572,6 +572,26 @@
               }
             }
           ]
+        },
+        "customSlotName": {
+          "type": "string",
+          "title": "${customSlotName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 18,
+          "x-decorator-props": {
+            "tooltip": "${customSlotNameTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -614,7 +634,9 @@
       "partitionRootTooltip": "Only postgres-v13 and above and log plugin pgoutput are supported. When the switch is turned on, the partition table CDC event only perceives the root table, and when the switch is turned off, only perceives each sub-table",
       "maximumQueueSize": "Maximum queue size",
       "maximumQueueSizeTip": "The queue size for reading incremental data in PostgreSQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting",
-      "enableFileInput": "Enable file input"
+      "enableFileInput": "Enable file input",
+      "customSlotName": "Specifies the logical replication slot name",
+      "customSlotNameTip": "You can manually specify a logical replication slot that is created in advance in the database, and if the logical replication slot does not exist, the delta may not work"
     },
     "zh_CN": {
       "doc": "docs/postgres_zh_CN.md",
@@ -652,7 +674,9 @@
       "partitionRootTooltip": "仅postgres-v13以上且日志插件pgoutput时才支持，开关打开时，分区表CDC事件仅感知根表，关闭时，仅感知各子表",
       "maximumQueueSize": "最大队列大小",
       "maximumQueueSizeTip": "PostgreSQL读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置",
-      "enableFileInput": "启用文件输入"
+      "enableFileInput": "启用文件输入",
+      "customSlotName": "指定逻辑复制槽名字",
+      "customSlotNameTip": "可以手动指定在数据库提前创建好的逻辑复制槽，如果逻辑复制槽不存在，则可能会导致增量不工作"
     },
     "zh_TW": {
       "doc": "docs/postgres_zh_TW.md",
@@ -690,7 +714,9 @@
       "partitionRootTooltip": "僅postgres-v13以上且日誌插件pgoutput時才支持，開關打開時，分區表CDC事件僅感知根表，關閉時，僅感知各子表",
       "maximumQueueSize": "最大隊列大小",
       "maximumQueueSizeTip": "PostgreSQL讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置",
-      "enableFileInput": "啟用文件輸入"
+      "enableFileInput": "啟用文件輸入",
+      "customSlotName": "指定邏輯複製槽名字",
+      "customSlotNameTip": "可以手動指定在數據庫提前創建好的邏輯複製槽，如果邏輯複製槽不存在，則可能會導致增量不工作"
     }
   },
   "dataTypes": {

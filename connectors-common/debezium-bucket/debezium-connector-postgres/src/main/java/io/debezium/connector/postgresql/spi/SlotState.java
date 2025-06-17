@@ -52,4 +52,14 @@ public class SlotState {
     public boolean slotIsActive() {
         return active;
     }
+
+    @Override
+    public String toString() {
+        return "SlotState{" +
+                "latestFlushedLsn=" + latestFlushedLsn +
+                ", restartLsn=" + restartLsn +
+                ", catalogXmin=" + catalogXmin +
+                ", active=" + active +
+                '}';
+    }
 }

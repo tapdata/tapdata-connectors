@@ -29,6 +29,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private Boolean isPartition = false;
     private String pgtoHost;
     private int pgtoPort;
+    private String customSlotName;
 
     //customize
     public PostgresConfig() {
@@ -137,6 +138,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public String getPgtoHost() {
         return pgtoHost;
+    }
+
+    public String getCustomSlotName() {
+        return customSlotName;
+    }
+
+    public void setCustomSlotName(String customSlotName) {
+        this.customSlotName = customSlotName;
     }
 
     public void setPgtoHost(String pgtoHost) {
