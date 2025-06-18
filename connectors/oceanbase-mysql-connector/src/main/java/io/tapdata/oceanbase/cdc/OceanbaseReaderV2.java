@@ -114,6 +114,13 @@ public class OceanbaseReaderV2 {
                                     heartbeat = 0;
                                 }
                                 continue;
+                            } else if (messageEvent.getPayload().getOpValue() == 6) {
+                                events.get().addAll(messageEvent.getEvent());
+                                consumer.accept(events.get(), messageEvent.getPayload().getTransactionTime());
+                                events.set(new ArrayList<>());
+                                generateDataTypeMap(tableMap);
+                                ddlStop.set(false);
+                                continue;
                             }
                             events.get().addAll(messageEvent.getEvent());
                             lastTimestamp = messageEvent.getPayload().getTransactionTime();
@@ -201,15 +208,12 @@ public class OceanbaseReaderV2 {
                                 }
                                 return unIgnoreTable;
                             });
-                    generateDataTypeMap(tableMap);
                 } catch (Throwable e) {
                     TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
                     tapDDLEvent.setTime(System.currentTimeMillis());
                     tapDDLEvent.setReferenceTime(lastTransactionTime.get() * 1000);
                     tapDDLEvent.setOriginDDL(payload.getDdl());
                     tapEvents.add(tapDDLEvent);
-                } finally {
-                    ddlStop.set(false);
                 }
                 break;
             case 7:
