@@ -158,6 +158,11 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     if (event == null) {
                         continue;
                     }
+                    RawBsonDocument fullDocument = event.getFullDocument();
+                    RawBsonDocument fullDocumentBeforeChange = event.getFullDocumentBeforeChange();
+                    if (null != fullDocumentBeforeChange && null != fullDocument && fullDocumentBeforeChange.get("CLAIM_ID").equals(fullDocument.get("CLAIM_ID"))) {
+                        System.out.println("ttt before = " + fullDocumentBeforeChange + ", after = " + fullDocument);
+                    }
                     concurrentProcessor.runAsync(event, e -> {
                         try {
                             return emit(e);
@@ -300,13 +305,15 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         }
                         if (MapUtils.isNotEmpty(fullDocument)) {
                             after.putAll(fullDocument);
-                        } else if (null != updateDescription) {
+                        } else {
                             Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
                             after.putAll(decodeDocument);
+                        }
+                        if (null != updateDescription) {
                             if (null != updateDescription.getUpdatedFields()) {
-                                decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
-                                for (String key : decodeDocument.keySet()) {
-                                    after.put(key, decodeDocument.get(key));
+                                Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
+                                if(MapUtils.isNotEmpty(decodeDocument)){
+                                    after.putAll(decodeDocument);
                                 }
                             }
                         }
