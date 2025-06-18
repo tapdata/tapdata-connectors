@@ -25,6 +25,7 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
     public OceanbaseConfig load(Map<String, Object> map) {
         OceanbaseConfig config = (OceanbaseConfig) super.load(map);
         properties.put("rewriteBatchedStatements", "true");
+        properties.put("tinyInt1isBit", Boolean.FALSE.toString());
         setSchema(getDatabase());
         return config;
     }

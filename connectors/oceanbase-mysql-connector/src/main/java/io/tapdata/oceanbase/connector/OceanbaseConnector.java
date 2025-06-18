@@ -117,7 +117,7 @@ public class OceanbaseConnector extends MysqlConnector {
                 return toJson(tapValue.getValue());
             return "null";
         });
-        codecRegistry.registerFromTapValue(TapBooleanValue.class, "boolean", tapValue -> {
+        codecRegistry.registerFromTapValue(TapBooleanValue.class, "bit(1)", tapValue -> {
             if (tapValue != null) {
                 Boolean value = tapValue.getValue();
                 if (value != null && value) {

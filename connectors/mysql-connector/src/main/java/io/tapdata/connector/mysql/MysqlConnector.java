@@ -244,7 +244,7 @@ public class MysqlConnector extends CommonDbConnector {
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
         codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
 
-        codecRegistry.registerFromTapValue(TapBooleanValue.class, "tinyint(1)", TapValue::getValue);
+        codecRegistry.registerFromTapValue(TapBooleanValue.class, "bit(1)", TapValue::getValue);
 
         codecRegistry.registerToTapValue(TapIllegalDate.class, new ToTapValueCodec<TapValue<?, ?>>() {
             @Override
