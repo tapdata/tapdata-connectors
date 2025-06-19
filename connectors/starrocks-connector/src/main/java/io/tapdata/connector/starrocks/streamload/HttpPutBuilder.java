@@ -60,6 +60,7 @@ public class HttpPutBuilder {
             case json:
                 header.put("strip_outer_array", "true");
                 header.put("fuzzy_parse", "true");
+                header.put("ignore_json_size", "true");
                 break;
         }
         return this;
