@@ -250,7 +250,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 fullDocumentBeforeChange = codec.decode(readerBefore, decoderContext);
             }
         }
-        if(null == event.getFullDocument()){
+        if (null == event.getFullDocument()) {
             if (operationType == OperationType.DELETE) {
                 DataMap before = new DataMap();
                 if (event.getDocumentKey() != null) {
@@ -277,7 +277,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     TapLogger.warn(TAG, "Document key is null, failed to delete. {}", event);
                 }
             }
-        }else{
+        } else {
             ByteBuffer byteBuffer = event.getFullDocument().getByteBuffer().asNIO();
 
             try (
@@ -304,13 +304,14 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                             Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
                             after.putAll(decodeDocument);
                         }
-                        if (null != updateDescription) {
-                            if (null != updateDescription.getUpdatedFields()) {
-                                Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
-                                if(MapUtils.isNotEmpty(decodeDocument)){
-                                    after.putAll(decodeDocument);
+                        if (null != updateDescription && null != updateDescription.getUpdatedFields()) {
+                            Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
+                            decodeDocument.forEach((k, v) -> {
+                                if (k.contains(".")) {
+                                    return;
                                 }
-                            }
+                                after.put(k, v);
+                            });
                         }
 
                         TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
@@ -343,7 +344,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));
                     }
                 }
-        }
+            }
 
         }
         return offsetEvent;
