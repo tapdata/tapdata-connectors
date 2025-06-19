@@ -126,11 +126,6 @@ public class OceanbaseConnector extends MysqlConnector {
             }
             return 0;
         });
-        codecRegistry.registerFromTapValue(TapBinaryValue.class, "text", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
-                return toJson(tapValue.getValue().getValue());
-            return "null";
-        });
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
             if (EmptyKit.isNotNull(tapDateTimeValue.getValue().getTimeZone())) {
