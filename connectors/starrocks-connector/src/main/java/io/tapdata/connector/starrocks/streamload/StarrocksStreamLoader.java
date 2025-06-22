@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -71,6 +72,11 @@ public class StarrocksStreamLoader {
     private long lastLogTime;
     private static final long LOG_INTERVAL_MS = 30 * 1000; // 30秒
 
+    // 线程安全和定时刷新
+    private final Object writeLock = new Object();
+    private ScheduledExecutorService flushScheduler;
+    private ScheduledFuture<?> flushTask;
+
     public StarrocksStreamLoader(StarrocksJdbcContext StarrocksJdbcContext, CloseableHttpClient httpClient) {
         this.StarrocksConfig = (StarrocksConfig) StarrocksJdbcContext.getConfig();
         this.httpClient = httpClient;
@@ -95,6 +101,9 @@ public class StarrocksStreamLoader {
 
         // 初始化文件缓存
         initializeCacheFile();
+
+        // 初始化定时刷新
+        initializeFlushScheduler();
     }
 
     private void initMessageSerializer() {
@@ -136,12 +145,62 @@ public class StarrocksStreamLoader {
         }
     }
 
+    /**
+     * 初始化定时刷新调度器
+     */
+    private void initializeFlushScheduler() {
+        flushScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "StarRocks-Flush-Scheduler-" + Thread.currentThread().getId());
+            t.setDaemon(true);
+            return t;
+        });
+
+        // 启动定时检查任务，每10秒检查一次是否需要刷新
+        flushTask = flushScheduler.scheduleWithFixedDelay(() -> {
+            try {
+                checkAndFlushIfNeeded();
+            } catch (Exception e) {
+                TapLogger.warn(TAG, "Error in scheduled flush check: {}", e.getMessage());
+            }
+        }, 10, 10, TimeUnit.SECONDS);
+
+        TapLogger.debug(TAG, "Initialized flush scheduler with 10-second interval");
+    }
+
+    /**
+     * 检查并在需要时执行刷新
+     */
+    private void checkAndFlushIfNeeded() {
+        synchronized (writeLock) {
+            if (lastEventFlag.get() == 0) {
+                return; // 没有数据需要刷新
+            }
+
+            long currentTime = System.currentTimeMillis();
+            long timeSinceLastFlush = currentTime - lastFlushTime;
+            long flushTimeoutMs = StarrocksConfig.getFlushTimeoutSeconds() * 1000L;
+
+            if (timeSinceLastFlush >= flushTimeoutMs) {
+                try {
+                    TapLogger.info(TAG, "Scheduled flush triggered by timeout: waiting_time={} ms, " +
+                        "timeout_threshold={} ms, accumulated_size={}",
+                        timeSinceLastFlush, flushTimeoutMs, formatBytes(currentBatchSize));
+
+                    flush(tapTable);
+                } catch (Exception e) {
+                    TapLogger.error(TAG, "Failed to execute scheduled flush: {}", e.getMessage());
+                }
+            }
+        }
+    }
+
     public void writeRecord(final List<TapRecordEvent> tapRecordEvents, final TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
-        try {
-            TapLogger.debug(TAG, "Batch events length is: {}", tapRecordEvents.size());
-            WriteListResult<TapRecordEvent> listResult = writeListResult();
-            this.tapTable = table;
-            boolean isAgg = StarrocksTableType.Aggregate.toString().equals(StarrocksConfig.getUniqueKeyType());
+        synchronized (writeLock) {
+            try {
+                TapLogger.debug(TAG, "Batch events length is: {}", tapRecordEvents.size());
+                WriteListResult<TapRecordEvent> listResult = writeListResult();
+                this.tapTable = table;
+                boolean isAgg = StarrocksTableType.Aggregate.toString().equals(StarrocksConfig.getUniqueKeyType());
 
             long batchStartSize = currentBatchSize;
             int processedEvents = 0;
@@ -197,10 +256,11 @@ public class StarrocksStreamLoader {
                 lastLogTime = currentTime;
                 flush(table, listResult);
             }
-            writeListResultConsumer.accept(listResult);
-        } catch (Throwable e) {
-            recordStream.init();
-            throw e;
+                writeListResultConsumer.accept(listResult);
+            } catch (Throwable e) {
+                recordStream.init();
+                throw e;
+            }
         }
     }
 
@@ -462,9 +522,39 @@ public class StarrocksStreamLoader {
         }
     }
 
+    /**
+     * 在停止时刷新剩余数据
+     */
+    public void flushOnStop() throws StarrocksRetryableException {
+        synchronized (writeLock) {
+            if (lastEventFlag.get() > 0 && tapTable != null) {
+                TapLogger.info(TAG, "Flushing remaining data on stop: accumulated_size={}",
+                    formatBytes(currentBatchSize));
+                flush(tapTable);
+            }
+        }
+    }
+
     public void shutdown() {
         try {
 //            this.stopLoad();
+
+            // 停止定时刷新调度器
+            if (flushTask != null) {
+                flushTask.cancel(false);
+            }
+            if (flushScheduler != null) {
+                flushScheduler.shutdown();
+                try {
+                    if (!flushScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                        flushScheduler.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    flushScheduler.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+            }
+
             this.httpClient.close();
 
             // 清理缓存文件
