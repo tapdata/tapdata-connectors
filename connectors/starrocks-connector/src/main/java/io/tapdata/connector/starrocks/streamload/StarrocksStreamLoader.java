@@ -183,10 +183,17 @@ public class StarrocksStreamLoader {
             if (timeSinceLastFlush >= flushTimeoutMs) {
                 try {
                     TapLogger.info(TAG, "Scheduled flush triggered by timeout: waiting_time={} ms, " +
-                        "timeout_threshold={} ms, accumulated_size={}",
-                        timeSinceLastFlush, flushTimeoutMs, formatBytes(currentBatchSize));
+                        "timeout_threshold={} ms, accumulated_size={}, {}",
+                        timeSinceLastFlush, flushTimeoutMs, formatBytes(currentBatchSize),
+                        metrics.getCachedInfo());
 
-                    flush(tapTable);
+                    // 执行刷新并处理 metrics
+                    RespContent respContent = flush(tapTable);
+                    if (respContent != null) {
+                        // 清理缓存的 metrics，因为数据已成功刷新
+                        metrics.clearCache();
+                        TapLogger.debug(TAG, "Cleared cached metrics after scheduled flush");
+                    }
                 } catch (Exception e) {
                     TapLogger.error(TAG, "Failed to execute scheduled flush: {}", e.getMessage());
                 }
@@ -495,6 +502,11 @@ public class StarrocksStreamLoader {
             if (null != listResult) {
                 metrics.writeIntoResultList(listResult);
                 metrics.clear();
+                // 成功刷新后清理缓存的 metrics
+                metrics.clearCache();
+            } else {
+                // 即使没有 listResult，也要清理缓存的 metrics
+                metrics.clearCache();
             }
             return respContent;
         } catch (StarrocksRetryableException e) {
@@ -528,9 +540,15 @@ public class StarrocksStreamLoader {
     public void flushOnStop() throws StarrocksRetryableException {
         synchronized (writeLock) {
             if (lastEventFlag.get() > 0 && tapTable != null) {
-                TapLogger.info(TAG, "Flushing remaining data on stop: accumulated_size={}",
-                    formatBytes(currentBatchSize));
-                flush(tapTable);
+                TapLogger.info(TAG, "Flushing remaining data on stop: accumulated_size={}, {}",
+                    formatBytes(currentBatchSize), metrics.getCachedInfo());
+
+                RespContent respContent = flush(tapTable);
+                if (respContent != null) {
+                    // 清理缓存的 metrics，因为数据已成功刷新
+                    metrics.clearCache();
+                    TapLogger.info(TAG, "Cleared cached metrics after stop flush");
+                }
             }
         }
     }
@@ -614,9 +632,23 @@ public class StarrocksStreamLoader {
 
         TapLogger.info(TAG, "Status: events_in_batch={}, batch_data_size={}, " +
             "accumulated_buffer_size={}, flush_size_config={} MB, " +
-            "flush_timeout_config={} seconds, waiting_time={} ms",
+            "flush_timeout_config={} seconds, waiting_time={} ms, {}",
             processedEvents, formatBytes(batchDataSize), formatBytes(currentBatchSize),
-            flushSizeMB, flushTimeoutSeconds, waitTime);
+            flushSizeMB, flushTimeoutSeconds, waitTime, metrics.getCachedInfo());
+    }
+
+    /**
+     * 获取当前缓存的 metrics 信息
+     */
+    public String getCachedMetricsInfo() {
+        return metrics.getCachedInfo();
+    }
+
+    /**
+     * 获取当前缓存的 metrics 总数
+     */
+    public long getCachedMetricsTotal() {
+        return metrics.getCachedTotal();
     }
 
     /**
@@ -819,16 +851,24 @@ public class StarrocksStreamLoader {
         private long update = 0L;
         private long delete = 0L;
 
+        // 缓存的 metrics，用于未刷新时的累积
+        private long cachedInsert = 0L;
+        private long cachedUpdate = 0L;
+        private long cachedDelete = 0L;
+
         public Metrics() {
         }
 
         public void increase(TapRecordEvent tapRecordEvent) {
             if (tapRecordEvent instanceof TapInsertRecordEvent) {
                 insert++;
+                cachedInsert++;
             } else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
                 update++;
+                cachedUpdate++;
             } else if (tapRecordEvent instanceof TapDeleteRecordEvent) {
                 delete++;
+                cachedDelete++;
             }
         }
 
@@ -838,10 +878,43 @@ public class StarrocksStreamLoader {
             delete = 0L;
         }
 
+        /**
+         * 清理缓存的 metrics（在成功刷新后调用）
+         */
+        public void clearCache() {
+            cachedInsert = 0L;
+            cachedUpdate = 0L;
+            cachedDelete = 0L;
+        }
+
+        /**
+         * 获取当前缓存的 metrics 总数
+         */
+        public long getCachedTotal() {
+            return cachedInsert + cachedUpdate + cachedDelete;
+        }
+
+        /**
+         * 获取缓存的详细信息
+         */
+        public String getCachedInfo() {
+            return String.format("cached[insert=%d, update=%d, delete=%d, total=%d]",
+                cachedInsert, cachedUpdate, cachedDelete, getCachedTotal());
+        }
+
         public void writeIntoResultList(WriteListResult<TapRecordEvent> listResult) {
             listResult.incrementInserted(insert);
             listResult.incrementModified(update);
             listResult.incrementRemove(delete);
+        }
+
+        /**
+         * 创建一个包含当前 metrics 的 WriteListResult
+         */
+        public WriteListResult<TapRecordEvent> createResultList() {
+            WriteListResult<TapRecordEvent> result = new WriteListResult<>();
+            writeIntoResultList(result);
+            return result;
         }
     }
 }
