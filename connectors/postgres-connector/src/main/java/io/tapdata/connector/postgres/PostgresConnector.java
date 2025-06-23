@@ -402,7 +402,11 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     protected boolean makeSureHasUnique(TapTable tapTable) throws SQLException {
-        return jdbcContext.queryAllIndexes(Collections.singletonList(tapTable.getId())).stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
+        return findIndexes(tapTable).stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
+    }
+
+    protected List<DataMap> findIndexes(TapTable tapTable) throws SQLException {
+        return jdbcContext.queryAllIndexes(Collections.singletonList(tapTable.getId()));
     }
 
     protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
@@ -432,8 +436,11 @@ public class PostgresConnector extends CommonDbConnector {
     protected void beforeWriteRecord(TapTable tapTable) throws SQLException {
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             openIdentity(tapTable);
-            boolean hasUniqueIndex = makeSureHasUnique(tapTable);
+            List<DataMap> indexes = findIndexes(tapTable);
+            boolean hasUniqueIndex = indexes.stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
+            boolean hasMultiUniqueIndex = indexes.stream().filter(v -> "1".equals(v.getString("isUnique"))).count() > 1;
             writtenTableMap.put(tapTable.getId(), DataMap.create().kv(HAS_UNIQUE_INDEX, hasUniqueIndex));
+            writtenTableMap.get(tapTable.getId()).put(HAS_MULTI_UNIQUE_INDEX, hasMultiUniqueIndex);
         }
         if (postgresConfig.getCreateAutoInc() && Integer.parseInt(postgresVersion) > 100000) {
             if (!writtenTableMap.get(tapTable.getId()).containsKey(HAS_AUTO_INCR)) {
@@ -447,6 +454,7 @@ public class PostgresConnector extends CommonDbConnector {
     protected void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws SQLException {
         beforeWriteRecord(tapTable);
         boolean hasUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_UNIQUE_INDEX, false);
+        boolean hasMultiUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_MULTI_UNIQUE_INDEX, false);
         List<String> autoIncFields = writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>());
         String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
@@ -470,13 +478,13 @@ public class PostgresConnector extends CommonDbConnector {
                 connection = postgresJdbcContext.getConnection();
                 transactionConnectionMap.put(threadName, connection);
             }
-            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
+            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, (hasUniqueIndex && !hasMultiUniqueIndex) ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
                     .setDeletePolicy(deleteDmlPolicy)
                     .setTapLogger(tapLogger);
         } else {
-            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
+            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, tapTable, (hasUniqueIndex && !hasMultiUniqueIndex) ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
                     .setDeletePolicy(deleteDmlPolicy)
@@ -530,7 +538,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            if(EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
+            if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
                 new WalPgtoMiner(postgresJdbcContext, tapLogger)
                         .watch(tableList, nodeContext.getTableMap())
                         .offset(offsetState)
@@ -962,9 +970,9 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     public String exportEventSql(TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
-        if(tapEvent instanceof TapInsertRecordEvent){
-            PostgresWriteRecorder postgresWriter =  new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
-            return postgresWriter.getUpsertSql(((TapInsertRecordEvent)tapEvent).getAfter());
+        if (tapEvent instanceof TapInsertRecordEvent) {
+            PostgresWriteRecorder postgresWriter = new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
+            return postgresWriter.getUpsertSql(((TapInsertRecordEvent) tapEvent).getAfter());
         }
         return null;
     }

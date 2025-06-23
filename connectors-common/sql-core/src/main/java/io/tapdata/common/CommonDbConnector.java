@@ -54,6 +54,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     protected static final int BATCH_ADVANCE_READ_LIMIT = 1000;
     protected Map<String, DataMap> writtenTableMap = new ConcurrentHashMap<>();
     protected static final String HAS_UNIQUE_INDEX = "HAS_UNIQUE_INDEX";
+    protected static final String HAS_MULTI_UNIQUE_INDEX = "HAS_MULTI_UNIQUE_INDEX";
     protected static final String HAS_AUTO_INCR = "HAS_AUTO_INCR";
     protected static final String HAS_REMOVED_COLUMN = "HAS_REMOVED_COLUMN";
     //ddlHandlers which for ddl collection
