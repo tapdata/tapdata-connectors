@@ -139,7 +139,7 @@ public class MongodbMergeOperate {
 			case updateOrInsert:
 				upsertMerge(mergeBundle, properties, mergeResult);
 				if (!mergeFilter.isAppend() && mergeFilter.getFilters().isEmpty()) {
-					mergeFilter.addFilter(mergeResult.getFilter());
+					mergeFilter.addFilter(filter(mergeBundle.getAfter(), properties.getJoinKeys()));
 				}
 				break;
 			case updateWrite:
