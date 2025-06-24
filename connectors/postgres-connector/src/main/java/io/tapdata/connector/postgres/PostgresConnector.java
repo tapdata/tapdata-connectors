@@ -364,6 +364,11 @@ public class PostgresConnector extends CommonDbConnector {
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;
         isConnectorStarted(connectionContext, tapConnectorContext -> {
+            firstConnectorId = (String) tapConnectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                tapConnectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
             slotName = tapConnectorContext.getStateMap().get("tapdata_pg_slot");
             postgresConfig.load(tapConnectorContext.getNodeConfig());
         });
@@ -539,7 +544,7 @@ public class PostgresConnector extends CommonDbConnector {
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
-                new WalPgtoMiner(postgresJdbcContext, tapLogger)
+                new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
                         .watch(tableList, nodeContext.getTableMap())
                         .offset(offsetState)
                         .registerConsumer(consumer, recordSize)

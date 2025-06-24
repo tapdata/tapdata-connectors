@@ -27,8 +27,8 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private Integer maximumQueueSize = 8000;
     private List<String> distributedKey = new ArrayList<>();
     private Boolean isPartition = false;
-    private String pgtoHost;
-    private int pgtoPort;
+    private String pgtoHost = "127.0.0.1";
+    private int pgtoPort = 9876;
 
     //customize
     public PostgresConfig() {
