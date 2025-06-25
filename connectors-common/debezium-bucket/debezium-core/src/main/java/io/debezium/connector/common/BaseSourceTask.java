@@ -271,6 +271,11 @@ public abstract class BaseSourceTask extends SourceTask {
         }
     }
 
+    public void commit(Map offset) throws InterruptedException {
+        this.lastOffset = offset;
+        commit();
+    }
+
     @Override
     public void commit() throws InterruptedException {
         boolean locked = stateLock.tryLock();

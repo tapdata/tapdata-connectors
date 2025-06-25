@@ -328,6 +328,7 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
                 }
                 // tell the server the point up to which we've processed data, so it can be free to recycle WAL segments
                 replicationStream.flushLsn(lsn);
+                System.out.println("offset === flush {" + lsn.asLong());
             } else {
                 LOGGER.debug("Streaming has already stopped, ignoring commit callback...");
             }

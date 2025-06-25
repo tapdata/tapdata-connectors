@@ -22,8 +22,6 @@ public class PostgresOffsetBackingStore extends MemoryOffsetBackingStore {
     public void configure(WorkerConfig config) {
         super.configure(config);
         this.config = config;
-        String slotName = (String) config.originals().get("slot.name");
-        this.postgresOffset = PostgresOffsetStorage.postgresOffsetMap.get(slotName);
     }
 
     public synchronized void start() {
