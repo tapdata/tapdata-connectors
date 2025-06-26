@@ -875,18 +875,24 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Map<String, Object> filterTimeForPG(ResultSet resultSet, Map<String, String> typeAndName, List<String> allColumn) {
         DataMap dataMap = DataMap.create();
+        int columnIndex = 1;
         for (String colName : allColumn) {
             String dataType = typeAndName.get(colName);
             try {
                 if (null == dataType) {
                     dataMap.put(colName, resultSet.getObject(colName));
-                } else if (dataType.endsWith("without time zone")) {
+                } else if (dataType.endsWith("without time zone") && "timestamp".equals(resultSet.getMetaData().getColumnTypeName(columnIndex))) {
                     String tiemstampString = resultSet.getString(colName);
-                    LocalDateTime localDateTime = LocalDateTime.parse(tiemstampString.replace(" ", "T"));
-                    dataMap.put(colName, localDateTime);
+                    if (StringUtils.isNotEmpty(tiemstampString)) {
+                        LocalDateTime localDateTime = LocalDateTime.parse(tiemstampString.replace(" ", "T"));
+                        dataMap.put(colName, localDateTime);
+                    } else {
+                        dataMap.put(colName, null);
+                    }
                 } else {
                     dataMap.put(colName, processData(resultSet.getObject(colName), dataType));
                 }
+                columnIndex++;
             } catch (Exception e) {
                 throw new CoreException("Read column value failed, column name: {}, type: {}, data: {}, error: {}", colName, dataMap, dataMap, e.getMessage());
             }
