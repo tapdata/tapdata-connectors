@@ -98,6 +98,7 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
         JSONObject jsonObject = TapSimplify.fromJson(json, JSONObject.class);
         String sql = jsonObject.getString("sql");
         ResultDO resultDO = sqlParser.from(sql, false);
+        ResultDO resultDOBefore = null;
         if (EmptyKit.isNull(resultDO)) {
             return null;
         }
@@ -110,6 +111,7 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
                 break;
             case UPDATE:
                 op = "2";
+                resultDOBefore = sqlParser.from(sql, true);
                 break;
             case DELETE:
                 op = "3";
@@ -124,6 +126,12 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
             parseKeyAndValue(tableName, entry);
         }
         redo.setRedoRecord(resultDO.getData());
+        if (EmptyKit.isNotNull(resultDOBefore)) {
+            for (Map.Entry<String, Object> entry : resultDOBefore.getData().entrySet()) {
+                parseKeyAndValue(tableName, entry);
+            }
+            redo.setUndoRecord(resultDOBefore.getData());
+        }
         redo.setNameSpace(schema);
         redo.setTableName(tableName);
         redo.setTimestamp(System.currentTimeMillis());
