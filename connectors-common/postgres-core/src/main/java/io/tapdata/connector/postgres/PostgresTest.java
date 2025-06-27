@@ -12,6 +12,7 @@ import io.tapdata.pdk.apis.exception.testItem.TapTestCurrentTimeConsistentEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestReadPrivilegeEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestStreamReadEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
+import io.tapdata.util.NetUtil;
 import org.postgresql.Driver;
 
 import java.sql.Connection;
@@ -76,7 +77,11 @@ public class PostgresTest extends CommonDbTest {
 
     public Boolean testStreamRead() {
         if ("walminer".equals(((PostgresConfig) commonDbConfig).getLogPluginName())) {
-            return testWalMiner();
+            if (EmptyKit.isBlank(((PostgresConfig) commonDbConfig).getPgtoHost())) {
+                return testWalMiner();
+            } else {
+                return testWalMinerPgto();
+            }
         }
         Properties properties = new Properties();
         properties.put("user", commonDbConfig.getUser());
@@ -107,6 +112,16 @@ public class PostgresTest extends CommonDbTest {
                     consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY, "Cdc can work normally"));
                 }
             });
+            return true;
+        } catch (Throwable e) {
+            consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestStreamReadEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
+            return null;
+        }
+    }
+
+    public Boolean testWalMinerPgto() {
+        try {
+            NetUtil.validateHostPortWithSocket(((PostgresConfig) commonDbConfig).getPgtoHost(), ((PostgresConfig) commonDbConfig).getPgtoPort());
             return true;
         } catch (Throwable e) {
             consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestStreamReadEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
