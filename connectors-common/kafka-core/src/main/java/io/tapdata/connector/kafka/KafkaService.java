@@ -303,6 +303,7 @@ public class KafkaService extends AbstractMqService {
         AtomicLong delete = new AtomicLong(0);
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
+        String topic = EmptyKit.isBlank(((KafkaConfig) mqConfig).getTopicName()) ? tapTable.getId() : ((KafkaConfig) mqConfig).getTopicName();
         try {
             for (TapRecordEvent event : tapRecordEvents) {
                 if (null != isAlive && !isAlive.get()) {
@@ -343,7 +344,7 @@ public class KafkaService extends AbstractMqService {
                         countDownLatch.countDown();
                     }
                 };
-                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapTable.getId(),
+                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(topic,
                         null, event.getTime(), getKafkaMessageKey(data, tapTable), body,
                         new RecordHeaders().add("mqOp", mqOp.getOp().getBytes()));
                 kafkaProducer.send(producerRecord, callback);
@@ -375,8 +376,9 @@ public class KafkaService extends AbstractMqService {
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
         ScriptEngine scriptEngine;
+        String topic = EmptyKit.isBlank(((KafkaConfig) mqConfig).getTopicName()) ? tapTable.getId() : ((KafkaConfig) mqConfig).getTopicName();
         String script = ((KafkaConfig) mqConfig).getScript();
-        Map<String, Object> record = new HashMap();
+        Map<String, Object> record = new HashMap<>();
         try {
             scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
                     new ScriptOptions().engineName("graal.js"));
@@ -392,7 +394,7 @@ public class KafkaService extends AbstractMqService {
                     break;
                 }
                 Map<String, Object> data;
-                Map<String, Map<String, Object>> allData = new HashMap();
+                Map<String, Object> allData = new HashMap<>();
                 MqOp mqOp = MqOp.INSERT;
                 if (event instanceof TapInsertRecordEvent) {
                     data = ((TapInsertRecordEvent) event).getAfter();
@@ -412,16 +414,19 @@ public class KafkaService extends AbstractMqService {
                 } else {
                     data = new HashMap<>();
                 }
+                if (EmptyKit.isNotBlank(((KafkaConfig) mqConfig).getTopicName())) {
+                    record.put("tableName", tapTable.getId());
+                }
                 byte[] kafkaMessageKey = getKafkaMessageKey(data, tapTable);
                 record.put("data", allData);
-                Map<String, Object> header = new HashMap();
+                Map<String, Object> header = new HashMap<>();
                 header.put("mqOp", mqOp.getOp());
                 record.put("header", header);
                 String op = mqOp.getOp();
                 Collection<String> conditionKeys = tapTable.primaryKeys(true);
                 RecordHeaders recordHeaders = new RecordHeaders();
-                byte[] body = {};
                 Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, op, conditionKeys));
+                byte[] body = {};
                 if (null == eventObj) {
                     continue;
                 } else {
@@ -479,7 +484,7 @@ public class KafkaService extends AbstractMqService {
                         countDownLatch.countDown();
                     }
                 };
-                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapTable.getId(),
+                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(topic,
                         null, event.getTime(), kafkaMessageKey, body,
                         recordHeaders);
                 kafkaProducer.send(producerRecord, callback);
@@ -530,7 +535,34 @@ public class KafkaService extends AbstractMqService {
     @Override
     public void produce(TapFieldBaseEvent tapFieldBaseEvent) {
         AtomicReference<Throwable> reference = new AtomicReference<>();
-        byte[] body = jsonParser.toJsonBytes(tapFieldBaseEvent);
+        String tableId = tapFieldBaseEvent.getTableId();
+        ScriptEngine scriptEngine;
+        String script = ((KafkaConfig) mqConfig).getScript();
+        Map<String, Object> record = new HashMap<>();
+        record.put("data", tapFieldBaseEvent.getOriginDDL());
+        record.put("tableName", tableId);
+        byte[] body;
+        if (((KafkaConfig) mqConfig).getEnableScript()) {
+            try {
+                scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
+                        new ScriptOptions().engineName("graal.js"));
+                String buildInMethod = initBuildInMethod();
+                String scripts = script + System.lineSeparator() + buildInMethod;
+                scriptEngine.eval(scripts);
+            } catch (Exception e) {
+                throw new CoreException("Engine initialization failed!");
+            }
+            Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, MqOp.DDL.getOp(), Collections.emptyList()));
+            if (eventObj instanceof Map) {
+                body = jsonParser.toJsonBytes(eventObj);
+            } else if (eventObj == null) {
+                return;
+            } else {
+                body = eventObj.toString().getBytes();
+            }
+        } else {
+            body = tapFieldBaseEvent.getOriginDDL().toString().getBytes();
+        }
         ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapFieldBaseEvent.getTableId(),
                 null, tapFieldBaseEvent.getTime(), null, body,
                 new RecordHeaders()
@@ -628,7 +660,7 @@ public class KafkaService extends AbstractMqService {
     }
 
     @Override
-	public void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+    public void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         consuming.set(true);
         int maxDelay = 500;
         KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
@@ -636,7 +668,7 @@ public class KafkaService extends AbstractMqService {
         try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
             KafkaOffset streamOffset = KafkaOffsetUtils.setConsumerByOffset(kafkaConsumer, tableList, offset, consuming);
             try (BatchPusher<TapEvent> batchPusher = new BatchPusher<TapEvent>(
-                tapEvents -> eventsOffsetConsumer.accept(tapEvents, streamOffset.clone())
+                    tapEvents -> eventsOffsetConsumer.accept(tapEvents, streamOffset.clone())
             ).batchSize(eventBatchSize).maxDelay(maxDelay)) {
                 // 将初始化的 offset 推送到目标，让指定时间的增量任务下次启动时拿到 offset
                 Optional.of(new HeartbeatEvent()).ifPresent(event -> {
