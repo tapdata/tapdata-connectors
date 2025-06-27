@@ -373,6 +373,7 @@ public class MysqlReader implements Closeable {
         MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         try {
             initDebeziumServerName(tapConnectorContext);
+            System.setProperty("debezium.embedded.shutdown.pause.before.interrupt.ms", "3000");
             this.tapTableMap = tapConnectorContext.getTableMap();
             this.tapConnectorContext = tapConnectorContext;
             this.ddlParserType = ddlParserType;

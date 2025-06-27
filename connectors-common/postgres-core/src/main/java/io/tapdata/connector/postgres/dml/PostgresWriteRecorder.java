@@ -255,6 +255,45 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         }
     }
 
+    @Override
+    public String getUpsertSql(Map<String, Object> after) throws SQLException {
+        String sql = getUpsertSql();
+        for (String key : allColumn) {
+            sql = sql.replaceFirst("\\?", formatValueForSql(after.get(key), columnTypeMap.get(key)));
+        }
+        for (String key : updatedColumn) {
+            sql = sql.replaceFirst("\\?", formatValueForSql(after.get(key), columnTypeMap.get(key)));
+        }
+        return sql;
+    }
+
+    private String formatValueForSql(Object value, String dataType) {
+        if (dataType.startsWith("bit")) {
+            if (value instanceof Boolean) {
+                value = ((Boolean) value) ? "1" : "0";
+            }else{
+                value = String.valueOf(value);
+            }
+        }
+        if(value instanceof byte[]){
+            return "'\\\\x" + StringKit.convertToHexString((byte[]) value) + "'";
+        }
+
+        if (dataType.endsWith("with time zone") && value instanceof LocalDateTime) {
+            Timestamp timestamp = Timestamp.valueOf(((LocalDateTime) value));
+            timestamp.setTime(timestamp.getTime() + TimeZone.getDefault().getRawOffset());
+            value = timestamp;
+        }
+        if (value instanceof Boolean && dataType.contains("int")) {
+            value = Boolean.TRUE.equals(value) ? 1 : 0;
+        }
+        if (value instanceof Boolean && dataType.contains("boolean")) {
+            value = Boolean.TRUE.equals(value) ? "true" : "false";
+        }
+        return object2String(value);
+    }
+
+
     protected String getUpsertSql() {
         return "INSERT INTO " + getSchemaAndTable() + " ("
                 + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") " +

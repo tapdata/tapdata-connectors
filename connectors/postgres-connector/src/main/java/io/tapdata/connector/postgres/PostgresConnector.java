@@ -11,6 +11,7 @@ import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
 import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
+import io.tapdata.connector.postgres.dml.PostgresWriteRecorder;
 import io.tapdata.connector.postgres.error.PostgresErrorCode;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.connector.postgres.partition.PostgresPartitionContext;
@@ -18,9 +19,11 @@ import io.tapdata.connector.postgres.partition.TableType;
 import io.tapdata.entity.TapConstraintException;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
+import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapConstraint;
 import io.tapdata.entity.schema.TapField;
@@ -241,6 +244,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
         connectorFunctions.supportQueryPartitionTablesByParentName(this::discoverPartitionInfoByParentName);
         connectorFunctions.supportStreamReadMultiConnectionFunction(this::streamReadMultiConnection);
+        connectorFunctions.supportExportEventSqlFunction(this::exportEventSql);
 
     }
 
@@ -360,6 +364,11 @@ public class PostgresConnector extends CommonDbConnector {
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;
         isConnectorStarted(connectionContext, tapConnectorContext -> {
+            firstConnectorId = (String) tapConnectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                tapConnectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
             slotName = tapConnectorContext.getStateMap().get("tapdata_pg_slot");
             postgresConfig.load(tapConnectorContext.getNodeConfig());
         });
@@ -398,7 +407,11 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     protected boolean makeSureHasUnique(TapTable tapTable) throws SQLException {
-        return jdbcContext.queryAllIndexes(Collections.singletonList(tapTable.getId())).stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
+        return findIndexes(tapTable).stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
+    }
+
+    protected List<DataMap> findIndexes(TapTable tapTable) throws SQLException {
+        return jdbcContext.queryAllIndexes(Collections.singletonList(tapTable.getId()));
     }
 
     protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
@@ -428,8 +441,11 @@ public class PostgresConnector extends CommonDbConnector {
     protected void beforeWriteRecord(TapTable tapTable) throws SQLException {
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             openIdentity(tapTable);
-            boolean hasUniqueIndex = makeSureHasUnique(tapTable);
+            List<DataMap> indexes = findIndexes(tapTable);
+            boolean hasUniqueIndex = indexes.stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
+            boolean hasMultiUniqueIndex = indexes.stream().filter(v -> "1".equals(v.getString("isUnique"))).count() > 1;
             writtenTableMap.put(tapTable.getId(), DataMap.create().kv(HAS_UNIQUE_INDEX, hasUniqueIndex));
+            writtenTableMap.get(tapTable.getId()).put(HAS_MULTI_UNIQUE_INDEX, hasMultiUniqueIndex);
         }
         if (postgresConfig.getCreateAutoInc() && Integer.parseInt(postgresVersion) > 100000) {
             if (!writtenTableMap.get(tapTable.getId()).containsKey(HAS_AUTO_INCR)) {
@@ -443,6 +459,7 @@ public class PostgresConnector extends CommonDbConnector {
     protected void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws SQLException {
         beforeWriteRecord(tapTable);
         boolean hasUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_UNIQUE_INDEX, false);
+        boolean hasMultiUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_MULTI_UNIQUE_INDEX, false);
         List<String> autoIncFields = writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>());
         String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
         if (insertDmlPolicy == null) {
@@ -466,13 +483,13 @@ public class PostgresConnector extends CommonDbConnector {
                 connection = postgresJdbcContext.getConnection();
                 transactionConnectionMap.put(threadName, connection);
             }
-            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, hasUniqueIndex ? postgresVersion : "90500")
+            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, connection, tapTable, (hasUniqueIndex && !hasMultiUniqueIndex) ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
                     .setDeletePolicy(deleteDmlPolicy)
                     .setTapLogger(tapLogger);
         } else {
-            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, tapTable, hasUniqueIndex ? postgresVersion : "90500")
+            postgresRecordWriter = new PostgresRecordWriter(postgresJdbcContext, tapTable, (hasUniqueIndex && !hasMultiUniqueIndex) ? postgresVersion : "90500")
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
                     .setDeletePolicy(deleteDmlPolicy)
@@ -526,8 +543,8 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            if(EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
-                new WalPgtoMiner(postgresJdbcContext, tapLogger)
+            if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
+                new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
                         .watch(tableList, nodeContext.getTableMap())
                         .offset(offsetState)
                         .registerConsumer(consumer, recordSize)
@@ -955,5 +972,13 @@ public class PostgresConnector extends CommonDbConnector {
                 throw exception;
             }
         }
+    }
+
+    public String exportEventSql(TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
+        if (tapEvent instanceof TapInsertRecordEvent) {
+            PostgresWriteRecorder postgresWriter = new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
+            return postgresWriter.getUpsertSql(((TapInsertRecordEvent) tapEvent).getAfter());
+        }
+        return null;
     }
 }

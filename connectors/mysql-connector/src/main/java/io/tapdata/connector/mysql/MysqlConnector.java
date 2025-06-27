@@ -95,7 +95,7 @@ public class MysqlConnector extends CommonDbConnector {
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
-    public HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave;
+    public java.util.HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave;
 
 
     @Override
@@ -244,7 +244,7 @@ public class MysqlConnector extends CommonDbConnector {
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
         codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
 
-        codecRegistry.registerFromTapValue(TapBooleanValue.class, "tinyint(1)", TapValue::getValue);
+        codecRegistry.registerFromTapValue(TapBooleanValue.class, "bit(1)", TapValue::getValue);
 
         codecRegistry.registerToTapValue(TapIllegalDate.class, new ToTapValueCodec<TapValue<?, ?>>() {
             @Override

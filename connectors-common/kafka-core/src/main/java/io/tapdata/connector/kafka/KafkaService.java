@@ -382,7 +382,7 @@ public class KafkaService extends AbstractMqService {
         ScriptEngine scriptEngine;
         String topic = EmptyKit.isBlank(((KafkaConfig) mqConfig).getTopicName()) ? tapTable.getId() : ((KafkaConfig) mqConfig).getTopicName();
         String script = ((KafkaConfig) mqConfig).getScript();
-        Map<String, Object> record = new HashMap();
+        Map<String, Object> record = new HashMap<>();
         try {
             scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
                     new ScriptOptions().engineName("graal.js"));
@@ -423,50 +423,50 @@ public class KafkaService extends AbstractMqService {
                 }
                 byte[] kafkaMessageKey = getKafkaMessageKey(data, tapTable);
                 record.put("data", allData);
-                Map<String, Object> header = new HashMap();
+                Map<String, Object> header = new HashMap<>();
                 header.put("mqOp", mqOp.getOp());
                 record.put("header", header);
                 String op = mqOp.getOp();
                 Collection<String> conditionKeys = tapTable.primaryKeys(true);
                 RecordHeaders recordHeaders = new RecordHeaders();
                 Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, op, conditionKeys));
-                byte[] body = jsonParser.toJsonBytes(eventObj, JsonParser.ToJsonFeature.WriteMapNullValue);
-//                if (null == eventObj) {
-//                    continue;
-//                } else {
-//                    Map<String, Object> res = (Map<String, Object>) eventObj;
-//                    if (null == res.get("data")) {
-//                        throw new RuntimeException("data cannot be null");
-//                    } else {
-//                        Object obj = res.get("data");
-//                        if (obj instanceof Map) {
-//                            Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
-//                            if (map.containsKey("before") && map.get("before").isEmpty()) {
-//                                map.remove("before");
-//                            }
-//                            if (map.containsKey("after") && map.get("after").isEmpty()) {
-//                                map.remove("after");
-//                            }
-//                            res.put("data", map);
-//                            body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
-//                        } else {
-//                            body = obj.toString().getBytes();
-//                        }
-//                    }
-//                    if (res.containsKey("header")) {
-//                        Object obj = res.get("header");
-//                        if (obj instanceof Map) {
-//                            Map<String, Object> head = (Map<String, Object>) res.get("header");
-//                            for (String s : head.keySet()) {
-//                                recordHeaders.add(s, head.get(s).toString().getBytes());
-//                            }
-//                        } else {
-//                            throw new RuntimeException("header must be a collection type");
-//                        }
-//                    } else {
-//                        recordHeaders.add("mqOp", mqOp.toString().getBytes());
-//                    }
-//                }
+                byte[] body = {};
+                if (null == eventObj) {
+                    continue;
+                } else {
+                    Map<String, Object> res = (Map<String, Object>) eventObj;
+                    if (null == res.get("data")) {
+                        throw new RuntimeException("data cannot be null");
+                    } else {
+                        Object obj = res.get("data");
+                        if (obj instanceof Map) {
+                            Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
+                            if (map.containsKey("before") && map.get("before").isEmpty()) {
+                                map.remove("before");
+                            }
+                            if (map.containsKey("after") && map.get("after").isEmpty()) {
+                                map.remove("after");
+                            }
+                            res.put("data", map);
+                            body = jsonParser.toJsonBytes(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
+                        } else {
+                            body = obj.toString().getBytes();
+                        }
+                    }
+                    if (res.containsKey("header")) {
+                        Object obj = res.get("header");
+                        if (obj instanceof Map) {
+                            Map<String, Object> head = (Map<String, Object>) res.get("header");
+                            for (String s : head.keySet()) {
+                                recordHeaders.add(s, head.get(s).toString().getBytes());
+                            }
+                        } else {
+                            throw new RuntimeException("header must be a collection type");
+                        }
+                    } else {
+                        recordHeaders.add("mqOp", mqOp.toString().getBytes());
+                    }
+                }
                 MqOp finalMqOp = mqOp;
                 Callback callback = (metadata, exception) -> {
                     try {
@@ -539,7 +539,34 @@ public class KafkaService extends AbstractMqService {
     @Override
     public void produce(TapFieldBaseEvent tapFieldBaseEvent) {
         AtomicReference<Throwable> reference = new AtomicReference<>();
-        byte[] body = jsonParser.toJsonBytes(tapFieldBaseEvent);
+        String tableId = tapFieldBaseEvent.getTableId();
+        ScriptEngine scriptEngine;
+        String script = ((KafkaConfig) mqConfig).getScript();
+        Map<String, Object> record = new HashMap<>();
+        record.put("data", tapFieldBaseEvent.getOriginDDL());
+        record.put("tableName", tableId);
+        byte[] body;
+        if (((KafkaConfig) mqConfig).getEnableScript()) {
+            try {
+                scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
+                        new ScriptOptions().engineName("graal.js"));
+                String buildInMethod = initBuildInMethod();
+                String scripts = script + System.lineSeparator() + buildInMethod;
+                scriptEngine.eval(scripts);
+            } catch (Exception e) {
+                throw new CoreException("Engine initialization failed!");
+            }
+            Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, MqOp.DDL.getOp(), Collections.emptyList()));
+            if (eventObj instanceof Map) {
+                body = jsonParser.toJsonBytes(eventObj);
+            } else if (eventObj == null) {
+                return;
+            } else {
+                body = eventObj.toString().getBytes();
+            }
+        } else {
+            body = tapFieldBaseEvent.getOriginDDL().toString().getBytes();
+        }
         ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapFieldBaseEvent.getTableId(),
                 null, tapFieldBaseEvent.getTime(), null, body,
                 new RecordHeaders()

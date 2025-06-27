@@ -262,7 +262,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         sql.append(TapTableWriter.sqlQuota(".", clickhouseConfig.getDatabase(), tapTable.getId()));
         sql.append("(").append(commonSqlMaker.buildColumnDefinition(tapTable, true));
         if (clickhouseConfig.getMixFastWrite()) {
-            sql.append(",is_deleted UInt8 DEFAULT 0, delete_time DateTime DEFAULT now()");
+            sql.append(",is_deleted UInt8 DEFAULT 0, version DateTime DEFAULT now(), delete_time DateTime DEFAULT now()");
         } else {
             sql.setLength(sql.length() - 1);
         }
@@ -271,6 +271,9 @@ public class ClickhouseConnector extends CommonDbConnector {
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
         if (EmptyKit.isNotEmpty(primaryKeys)) {
             sql.append(") ENGINE = ReplacingMergeTree");
+            if (clickhouseConfig.getMixFastWrite()) {
+                sql.append("(`version`)");
+            }
             sql.append(" PRIMARY KEY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
         } else {
             sql.append(") ENGINE = MergeTree");

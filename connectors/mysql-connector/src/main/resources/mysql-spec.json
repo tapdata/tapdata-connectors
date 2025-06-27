@@ -671,10 +671,6 @@
       "bit": 64,
       "queryOnly": true
     },
-    "tinyint(1)": {
-      "to": "TapBoolean",
-      "bit": 1
-    },
     "tinyint[($zerofill)]": {
       "to": "TapNumber",
       "bit": 8,
