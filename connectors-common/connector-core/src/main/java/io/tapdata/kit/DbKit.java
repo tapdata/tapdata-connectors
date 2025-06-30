@@ -80,6 +80,10 @@ public class DbKit {
         ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
         for (int i = 1; i <= resultSetMetaData.getColumnCount(); i++) {
             String[] columnNameArr = resultSetMetaData.getColumnLabel(i).split("\\.");
+            if (columnNameArr.length == 1) {
+                columnNames.add(resultSetMetaData.getColumnLabel(i));
+                continue;
+            }
             String substring = columnNameArr[columnNameArr.length - 1];
             columnNames.add(substring);
         }
