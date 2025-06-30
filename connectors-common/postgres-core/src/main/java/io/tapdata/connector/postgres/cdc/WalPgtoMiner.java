@@ -197,7 +197,11 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
                         braceCount--;
                         // 当所有大括号都闭合时
                         if (braceCount == 0) {
-                            jsonObjects.add(jsonBuilder.toString());
+                            String candidate = jsonBuilder.toString();
+                            // 简单验证是否可能是JSON：必须包含引号
+                            if (isLikelyJson(candidate)) {
+                                jsonObjects.add(candidate);
+                            }
                             insideJson = false;
                             insideString = false; // 重置字符串状态
                         }
@@ -212,5 +216,28 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
         }
 
         return jsonObjects;
+    }
+
+    /**
+     * 简单验证字符串是否可能是JSON对象
+     * 基本规则：必须包含引号（表示有字符串键或值）
+     */
+    private boolean isLikelyJson(String candidate) {
+        if (candidate == null || candidate.length() < 2) {
+            return false;
+        }
+
+        // 必须以{开头，}结尾
+        if (!candidate.startsWith("{") || !candidate.endsWith("}")) {
+            return false;
+        }
+
+        // 空对象是有效的JSON
+        if (candidate.equals("{}")) {
+            return true;
+        }
+
+        // 必须包含引号（JSON的键必须是字符串）
+        return candidate.contains("\"");
     }
 }
