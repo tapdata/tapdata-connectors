@@ -1,10 +1,13 @@
 package io.tapdata.connector.postgres.cdc;
 
+import io.tapdata.connector.postgres.PostgresJdbcContext;
+import io.tapdata.entity.logger.TapLog;
 import org.junit.jupiter.api.Test;
 import java.lang.reflect.Method;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
 /**
  * WalPgtoMiner的测试类
@@ -14,7 +17,7 @@ public class WalPgtoMinerTest {
 
     @Test
     public void testExtractJsonObjectsWithInnerBraces() throws Exception {
-        WalPgtoMiner miner = new WalPgtoMiner();
+        WalPgtoMiner miner = new WalPgtoMiner(mock(PostgresJdbcContext.class), "test", new TapLog());
         
         // 使用反射调用私有方法
         Method method = WalPgtoMiner.class.getDeclaredMethod("extractJsonObjects", String.class);
@@ -70,7 +73,7 @@ public class WalPgtoMinerTest {
     
     @Test
     public void testComplexJsonScenarios() throws Exception {
-        WalPgtoMiner miner = new WalPgtoMiner();
+        WalPgtoMiner miner = new WalPgtoMiner(mock(PostgresJdbcContext.class), "test", new TapLog());
         Method method = WalPgtoMiner.class.getDeclaredMethod("extractJsonObjects", String.class);
         method.setAccessible(true);
         
@@ -102,7 +105,7 @@ public class WalPgtoMinerTest {
     
     @Test
     public void testEdgeCases() throws Exception {
-        WalPgtoMiner miner = new WalPgtoMiner();
+        WalPgtoMiner miner = new WalPgtoMiner(mock(PostgresJdbcContext.class), "test", new TapLog());
         Method method = WalPgtoMiner.class.getDeclaredMethod("extractJsonObjects", String.class);
         method.setAccessible(true);
         
