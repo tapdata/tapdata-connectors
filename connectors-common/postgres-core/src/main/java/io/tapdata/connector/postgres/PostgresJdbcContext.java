@@ -121,7 +121,7 @@ public class PostgresJdbcContext extends JdbcContext {
             "FROM information_schema.tables t WHERE t.table_type='BASE TABLE' and t.table_catalog='%s' AND t.table_schema='%s' %s ORDER BY t.table_name";
 
     protected final static String PG_ALL_TABLE =
-            "SELECT\n" +
+            "SELECT DISTINCT ON (t.table_name)\n" +
                     "    t.table_name AS \"tableName\",\n" +
                     "    (SELECT\n" +
                     "         COALESCE(\n" +
@@ -148,12 +148,12 @@ public class PostgresJdbcContext extends JdbcContext {
                     "  AND t.table_catalog = '%s'\n" +
                     "  AND t.table_schema = '%s'\n %s " +
                     "ORDER BY\n" +
+                    "    t.table_name\n" +
                     "    CASE\n" +
                     "        WHEN EXISTS (SELECT 1 FROM pg_partitioned_table pt WHERE pt.partrelid = c.oid) \n" +
                     "            THEN c.oid\n" +
                     "            ELSE i.inhparent\n" +
-                    "        END,\n" +
-                    "    t.table_name";
+                    "        END";
 
     protected final static String PG_ALL_COLUMN =
             "SELECT\n" +
