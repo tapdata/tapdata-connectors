@@ -148,7 +148,7 @@ public class PostgresJdbcContext extends JdbcContext {
                     "  AND t.table_catalog = '%s'\n" +
                     "  AND t.table_schema = '%s'\n %s " +
                     "ORDER BY\n" +
-                    "    t.table_name\n" +
+                    "    t.table_name,\n" +
                     "    CASE\n" +
                     "        WHEN EXISTS (SELECT 1 FROM pg_partitioned_table pt WHERE pt.partrelid = c.oid) \n" +
                     "            THEN c.oid\n" +
