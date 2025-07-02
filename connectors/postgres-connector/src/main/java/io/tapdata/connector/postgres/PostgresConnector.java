@@ -44,33 +44,37 @@ import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import io.tapdata.pdk.apis.entity.ConnectionOptions;
-import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
-import io.tapdata.pdk.apis.entity.TestItem;
-import io.tapdata.pdk.apis.entity.WriteListResult;
+import io.tapdata.pdk.apis.entity.*;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapPartitionResult;
 import io.tapdata.pdk.apis.functions.connector.source.ConnectionConfigWithTables;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
+import org.apache.commons.lang3.StringUtils;
 import org.postgresql.geometric.*;
 import org.postgresql.jdbc.PgArray;
 import org.postgresql.jdbc.PgSQLXML;
 import org.postgresql.util.PGInterval;
 import org.postgresql.util.PGobject;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.sql.Date;
 import java.text.SimpleDateFormat;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -158,6 +162,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
         connectorFunctions.supportCountRawCommandFunction(this::countRawCommand);
         connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
+        connectorFunctions.supportGetStreamOffsetFunction(this::getStreamOffsetFromString);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null) return toJson(tapRawValue.getValue());
@@ -344,6 +349,16 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
+    private Object getStreamOffsetFromString(TapConnectorContext connectorContext, String offset) {
+        try {
+            PostgresOffset postgresOffset = new PostgresOffset();
+            postgresOffset.setSourceOffset(offset);
+            return postgresOffset;
+        } catch (Exception e) {
+            throw new RuntimeException("Oracle use scn as offset, invalid scn: " + offset, e);
+        }
+    }
+
     @Override
     public void onStop(TapConnectionContext connectionContext) {
         ErrorKit.ignoreAnyError(() -> {
@@ -371,6 +386,9 @@ public class PostgresConnector extends CommonDbConnector {
             }
             slotName = tapConnectorContext.getStateMap().get("tapdata_pg_slot");
             postgresConfig.load(tapConnectorContext.getNodeConfig());
+            if (EmptyKit.isNull(slotName) && StringUtils.isNotBlank(postgresConfig.getCustomSlotName())) {
+                slotName = postgresConfig.getCustomSlotName();
+            }
         });
         postgresVersion = postgresJdbcContext.queryVersion();
         commonSqlMaker = new PostgresSqlMaker()
@@ -829,6 +847,184 @@ public class PostgresConnector extends CommonDbConnector {
             }
         });
     }
+
+    @Override
+    protected void queryByAdvanceFilterWithOffset(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
+        String sql = commonSqlMaker.buildSelectClause(table, filter, false) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilter(filter);
+        jdbcContext.query(sql, resultSet -> {
+            FilterResults filterResults = new FilterResults();
+            try {
+                Map<String, String> typeAndName = new HashMap<>();
+                table.getNameFieldMap().forEach((key, value) -> {
+                    typeAndName.put(key, value.getDataType());
+                });
+                List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
+                while (resultSet.next()) {
+                    filterResults.add(filterTimeForPG(resultSet,typeAndName,allColumn));
+                    if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
+                        consumer.accept(filterResults);
+                        filterResults = new FilterResults();
+                    }
+                }
+            } catch (SQLException e) {
+                exceptionCollector.collectTerminateByServer(e);
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+                exceptionCollector.revealException(e);
+                throw e;
+            }
+            if (EmptyKit.isNotEmpty(filterResults.getResults())) {
+                consumer.accept(filterResults);
+            }
+        });
+    }
+
+    private Map<String, Object> filterTimeForPG(ResultSet resultSet, Map<String, String> typeAndName, List<String> allColumn) {
+        DataMap dataMap = DataMap.create();
+        int columnIndex = 1;
+        for (String colName : allColumn) {
+            String dataType = typeAndName.get(colName);
+            try {
+                if (null == dataType) {
+                    dataMap.put(colName, resultSet.getObject(colName));
+                } else if (dataType.endsWith("without time zone") && "timestamp".equals(resultSet.getMetaData().getColumnTypeName(columnIndex))) {
+                    String tiemstampString = resultSet.getString(colName);
+                    if (StringUtils.isNotEmpty(tiemstampString)) {
+                        LocalDateTime localDateTime = LocalDateTime.parse(tiemstampString.replace(" ", "T"));
+                        dataMap.put(colName, localDateTime);
+                    } else {
+                        dataMap.put(colName, null);
+                    }
+                } else {
+                    dataMap.put(colName, processData(resultSet.getObject(colName), dataType));
+                }
+                columnIndex++;
+            } catch (Exception e) {
+                throw new CoreException("Read column value failed, column name: {}, type: {}, data: {}, error: {}", colName, dataMap, dataMap, e.getMessage());
+            }
+        }
+        return dataMap;
+    }
+
+
+
+    protected Object processData(Object value, String dataType) {
+        if (!postgresConfig.getOldVersionTimezone()) {
+            if (value instanceof Timestamp) {
+                if (dataType.endsWith("with time zone")) {
+                    value = ((Timestamp) value).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour());
+                } else {
+                    value = (((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
+                }
+            } else if (value instanceof Date) {
+                value = (Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
+            } else if (value instanceof Time) {
+                if (dataType.endsWith("with time zone")) {
+                    value = (Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
+                } else {
+                    value = (Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneOffset.UTC));
+                }
+            }
+        }
+        return value;
+    }
+    protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
+        ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
+        try {
+            for (int i = 0; i < commonDbConfig.getBatchReadThreadSize(); i++) {
+                final int threadIndex = i;
+                executorService.submit(() -> {
+                    try {
+                        for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
+                            String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
+                            tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
+                            int retry = 20;
+                            while (retry-- > 0 && isAlive()) {
+                                try {
+                                    jdbcContext.query(splitSql, resultSet -> {
+                                        List<TapEvent> tapEvents = list();
+                                        //get all column names
+                                        List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+                                        Map<String, String> typeAndName = new HashMap<>();
+                                        tapTable.getNameFieldMap().forEach((key, value) -> {
+                                            typeAndName.put(key, value.getDataType());
+                                        });
+                                        while (isAlive() && resultSet.next()) {
+                                            tapEvents.add(insertRecordEvent(filterTimeForPG(resultSet,typeAndName,columnNames), tapTable.getId()));
+                                            if (tapEvents.size() == eventBatchSize) {
+                                                syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                                tapEvents = list();
+                                            }
+                                        }
+                                        //last events those less than eventBatchSize
+                                        if (EmptyKit.isNotEmpty(tapEvents)) {
+                                            syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                        }
+                                    });
+                                    break;
+                                } catch (Exception e) {
+                                    if (retry == 0 || !(e instanceof SQLRecoverableException || e instanceof IOException)) {
+                                        throw e;
+                                    }
+                                    tapLogger.warn("batchRead, splitSql[{}]: {} failed, retrying...", ii + 1, splitSql);
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        throwable.set(e);
+                    } finally {
+                        countDownLatch.countDown();
+                    }
+                });
+            }
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            if (EmptyKit.isNotNull(throwable.get())) {
+                exceptionCollector.collectTerminateByServer(throwable.get());
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), throwable.get());
+                exceptionCollector.revealException(throwable.get());
+                throw throwable.get();
+            }
+        } finally {
+            executorService.shutdown();
+        }
+    }
+    protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        jdbcContext.query(sql, resultSet -> {
+            List<TapEvent> tapEvents = list();
+            //get all column names
+            List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+            Map<String, String> typeAndName = new HashMap<>();
+            tapTable.getNameFieldMap().forEach((key, value) -> {
+                typeAndName.put(key, value.getDataType());
+            });
+            try {
+                while (isAlive() && resultSet.next()) {
+                    tapEvents.add(insertRecordEvent(filterTimeForPG(resultSet,typeAndName,columnNames), tapTable.getId()));
+                    if (tapEvents.size() == eventBatchSize) {
+                        eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
+                        tapEvents = list();
+                    }
+                }
+            } catch (SQLException e) {
+                exceptionCollector.collectTerminateByServer(e);
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+                exceptionCollector.revealException(e);
+                throw e;
+            }
+            //last events those less than eventBatchSize
+            if (EmptyKit.isNotEmpty(tapEvents)) {
+                eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
+            }
+        });
+    }
+
 
     @Override
     protected void processDataMap(DataMap dataMap, TapTable tapTable) {

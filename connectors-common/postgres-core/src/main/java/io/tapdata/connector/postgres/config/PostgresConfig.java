@@ -27,6 +27,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private Integer maximumQueueSize = 8000;
     private List<String> distributedKey = new ArrayList<>();
     private Boolean isPartition = false;
+    private String customSlotName;
     private String pgtoHost = "127.0.0.1";
     private int pgtoPort = 9876;
 
@@ -137,6 +138,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public String getPgtoHost() {
         return pgtoHost;
+    }
+
+    public String getCustomSlotName() {
+        return customSlotName;
+    }
+
+    public void setCustomSlotName(String customSlotName) {
+        this.customSlotName = customSlotName;
     }
 
     public void setPgtoHost(String pgtoHost) {
