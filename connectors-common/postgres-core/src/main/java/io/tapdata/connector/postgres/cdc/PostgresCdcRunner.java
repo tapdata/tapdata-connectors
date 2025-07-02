@@ -138,7 +138,6 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         } else {
             this.postgresOffset = (PostgresOffset) offsetState;
         }
-        PostgresOffsetStorage.postgresOffsetMap.put(runnerName, postgresOffset);
         return this;
     }
 
@@ -198,9 +197,14 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         super.consumeRecords(sourceRecords, committer);
         List<TapEvent> eventList = TapSimplify.list();
         Map<String, ?> offset = null;
+        boolean first = true;
         for (SourceRecord sr : sourceRecords) {
             try {
                 offset = sr.sourceOffset();
+                if (first) {
+                    System.out.println("consume offset === " + offset);
+                }
+                first = false;
                 // PG use micros to indicate the time but in pdk api we use millis
                 Long referenceTime = (Long) offset.get("ts_usec") / 1000;
                 Struct struct = ((Struct) sr.value());
@@ -209,7 +213,6 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 }
                 if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
                     eventList.add(new HeartbeatEvent().init().referenceTime(((Struct) sr.value()).getInt64("ts_ms")));
-                    committer.markProcessed(sr);
                     continue;
                 } else if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
                     continue;
@@ -263,24 +266,18 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                     }
                 }
                 eventList.add(event);
-                committer.markProcessed(sr);
                 if (eventList.size() >= recordSize) {
                     postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
                     consumer.accept(eventList, postgresOffset);
-                    PostgresOffsetStorage.postgresOffsetMap.put(runnerName, postgresOffset);
-                    committer.markBatchFinished();
                     eventList = TapSimplify.list();
                 }
             } catch (StopConnectorException | StopEngineException ex) {
-                committer.markProcessed(sr);
                 throw ex;
             }
         }
         if (EmptyKit.isNotEmpty(eventList)) {
             postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
             consumer.accept(eventList, postgresOffset);
-            PostgresOffsetStorage.postgresOffsetMap.put(runnerName, postgresOffset);
-            committer.markBatchFinished();
         }
     }
 
