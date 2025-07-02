@@ -15,6 +15,7 @@ import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
+import io.tapdata.utils.ErrorCodeUtils;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -91,10 +92,7 @@ public class NormalRecordWriter {
             //release resource
 
         } catch (SQLException e) {
-            exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), null, null, e);
-            exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
-            exceptionCollector.collectWriteType(null, null, null, e);
-            exceptionCollector.collectWriteLength(null, null, null, e);
+            errorHandler(e, null);
             exceptionCollector.revealException(e);
             throw e;
         } finally {
@@ -159,8 +157,8 @@ public class NormalRecordWriter {
                 connection.rollback();
             } catch (Exception ignore) {
             }
-            exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), null, null, e);
             if (tapRecordEvents.size() == 1) {
+                errorHandler(e, tapRecordEvents.get(0));
                 throw new RuntimeException(String.format("Error occurred when retrying write record: %s", tapRecordEvents.get(0)), e);
             } else {
                 int eachPieceSize = Math.max(tapRecordEvents.size() / 10, 1);
@@ -168,6 +166,16 @@ public class NormalRecordWriter {
                 DbKit.splitToPieces(tapRecordEvents, eachPieceSize).forEach(pieces -> writePart(pieces, listResult, isAlive));
             }
         }
+    }
+
+    private void errorHandler(SQLException e, Object data) {
+        if (null != data) {
+            data = ErrorCodeUtils.truncateData(data);
+        }
+        exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), data, null, e);
+        exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
+        exceptionCollector.collectWriteType(null, null, data, e);
+        exceptionCollector.collectWriteLength(null, null, data, e);
     }
 
     public NormalRecordWriter setVersion(String version) {

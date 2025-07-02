@@ -147,6 +147,7 @@ public abstract class NormalWriteRecorder {
         } catch (SQLException e) {
 //            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
 //            listResult.addErrors(map);
+            batchCacheSize = 0;
             throw e;
         }
         atomicLong.addAndGet(succeed);
