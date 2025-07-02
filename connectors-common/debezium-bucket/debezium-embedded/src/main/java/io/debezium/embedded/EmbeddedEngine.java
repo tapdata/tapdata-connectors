@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import io.debezium.connector.common.BaseSourceTask;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigDef.Importance;
 import org.apache.kafka.common.config.ConfigDef.Type;
@@ -1023,6 +1024,18 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
         catch (TimeoutException e) {
             LOGGER.error("Timed out waiting to flush {} offsets to storage", this);
             offsetWriter.cancelFlush();
+        }
+    }
+
+    public void flushOffset(Map<String, ?> offset) {
+        try {
+            if (task instanceof BaseSourceTask) {
+                System.out.printf("=== will flush");
+                ((BaseSourceTask) task).commit(offset);
+            }
+        }
+        catch (InterruptedException e) {
+            LOGGER.warn("Flush of {} offsets interrupted", this);
         }
     }
 

@@ -1,5 +1,7 @@
 package io.tapdata.connector.postgres;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.dml.NormalRecordWriter;
@@ -144,6 +146,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportQueryConstraints(this::queryConstraint);
         connectorFunctions.supportCreateConstraint(this::createConstraint);
         connectorFunctions.supportDropConstraint(this::dropConstraint);
+        connectorFunctions.supportFlushOffsetFunction(this::flushOffset);
         // source
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
@@ -560,6 +563,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+        System.out.println("stream read offset === " + ((PostgresOffset) offsetState).getSourceOffset());
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
                 new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
@@ -589,6 +593,25 @@ public class PostgresConnector extends CommonDbConnector {
                     exceptionCollector.revealException(throwable);
                 }
                 throw throwable;
+            }
+        }
+    }
+
+    private void flushOffset(TapConnectorContext connectorContext, Object offset) {
+        if (EmptyKit.isNotNull(cdcRunner)) {
+            if (offset instanceof PostgresOffset) {
+                String sourceOffset = ((PostgresOffset) offset).getSourceOffset();
+                if (sourceOffset == null) {
+                    return;
+                }
+                ObjectMapper objectMapper = new ObjectMapper();
+                try {
+                    Map<String, Object> lastOffset = objectMapper.readValue(sourceOffset, Map.class);
+                    cdcRunner.flushOffset(lastOffset);
+                    System.out.printf("=== flush over");
+                } catch (JsonProcessingException e) {
+                    throw new RuntimeException(e);
+                }
             }
         }
     }
