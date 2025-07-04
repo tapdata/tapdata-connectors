@@ -267,6 +267,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 }
                 eventList.add(event);
                 if (eventList.size() >= recordSize) {
+                    PostgresOffset postgresOffset = new PostgresOffset();
                     postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
                     consumer.accept(eventList, postgresOffset);
                     eventList = TapSimplify.list();
@@ -276,6 +277,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             }
         }
         if (EmptyKit.isNotEmpty(eventList)) {
+            PostgresOffset postgresOffset = new PostgresOffset();
             postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
             consumer.accept(eventList, postgresOffset);
         }
