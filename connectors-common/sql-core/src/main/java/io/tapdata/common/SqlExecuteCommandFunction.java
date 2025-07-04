@@ -1,6 +1,6 @@
 package io.tapdata.common;
 
-import io.tapdata.pdk.apis.context.TapConnectionContext;
+import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ExecuteResult;
 import io.tapdata.pdk.apis.entity.TapExecuteCommand;
 import io.tapdata.pdk.apis.functions.TapSupplier;
@@ -21,16 +21,16 @@ public class SqlExecuteCommandFunction {
 		this.sqlExecutor = sqlExecutor;
 	}
 
-	public void executeSqlCommand(TapConnectionContext tapConnectionContext, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Consumer<ExecuteResult> executeResultConsumer) {
+	public void executeSqlCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Consumer<ExecuteResult> executeResultConsumer) {
 		executeCommand(sqlExecutor, tapExecuteCommand, connectionSupplier, executeResultConsumer);
 	}
 
-	public void executeSqlCommand(TapConnectionContext tapConnectionContext, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Supplier<Boolean> aliveSupplier, Consumer<ExecuteResult> executeResultConsumer) {
+	public void executeSqlCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Supplier<Boolean> aliveSupplier, Consumer<ExecuteResult> executeResultConsumer) {
 		executeCommand(sqlExecutor, tapExecuteCommand, connectionSupplier, aliveSupplier, executeResultConsumer);
 	}
 
 	@Deprecated
-  public static void executeCommand(TapConnectionContext tapConnectionContext, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Consumer<ExecuteResult> executeResultConsumer) {
+  public static void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Consumer<ExecuteResult> executeResultConsumer) {
 		executeCommand(defaultSqlExecutor, tapExecuteCommand, connectionSupplier, executeResultConsumer);
 	}
 
@@ -60,7 +60,7 @@ public class SqlExecuteCommandFunction {
 	}
 
 	@Deprecated
-  public static void executeCommand(TapConnectionContext tapConnectionContext, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Supplier<Boolean> aliveSupplier, Consumer<ExecuteResult> executeResultConsumer) {
+  public static void executeCommand(TapConnectorContext tapConnectorContext, TapExecuteCommand tapExecuteCommand, TapSupplier<Connection> connectionSupplier, Supplier<Boolean> aliveSupplier, Consumer<ExecuteResult> executeResultConsumer) {
 		executeCommand(defaultSqlExecutor, tapExecuteCommand, connectionSupplier, aliveSupplier, executeResultConsumer);
 	}
 
