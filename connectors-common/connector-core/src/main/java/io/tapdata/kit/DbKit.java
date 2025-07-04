@@ -1,6 +1,5 @@
 package io.tapdata.kit;
 
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapConstraint;
 import io.tapdata.entity.schema.TapConstraintMapping;
 import io.tapdata.entity.schema.TapIndex;
@@ -15,8 +14,6 @@ import java.io.Reader;
 import java.sql.*;
 import java.util.*;
 import java.util.stream.Collectors;
-
-import static io.tapdata.entity.simplify.TapSimplify.toJson;
 
 /**
  * tools for ResultSet
@@ -54,17 +51,14 @@ public class DbKit {
     public static DataMap getRowFromResultSet(ResultSet resultSet, Collection<String> columnNames) throws SQLException {
         DataMap map = DataMap.create();
         if (EmptyKit.isNotNull(resultSet) && resultSet.getRow() > 0) {
-            String errorCol = null;
             int index = 1;
             for (String col : columnNames) {
                 try {
-                    map.put(col, resultSet.getObject(index++));
+                    map.put(col, resultSet.getObject(index));
                 } catch (Exception e) {
-                    errorCol = col;
+                    map.put(col, resultSet.getString(index));
                 }
-            }
-            if (EmptyKit.isNotNull(errorCol)) {
-                TapLogger.warn("JDBC ERROR", "row: {}, skip {}", toJson(map), errorCol);
+                index++;
             }
         }
         return map;
