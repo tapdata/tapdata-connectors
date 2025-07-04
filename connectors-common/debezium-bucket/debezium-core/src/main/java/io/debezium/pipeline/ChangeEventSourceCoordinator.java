@@ -49,7 +49,7 @@ public class ChangeEventSourceCoordinator {
     /**
      * Waiting period for the polling loop to finish. Will be applied twice, once gracefully, once forcefully.
      */
-    public static final Duration SHUTDOWN_WAIT_TIMEOUT = Duration.ofSeconds(90);
+    public static final Duration SHUTDOWN_WAIT_TIMEOUT = Duration.ofSeconds(5);
 
     private final OffsetContext previousOffset;
     private final ErrorHandler errorHandler;
@@ -179,6 +179,10 @@ public class ChangeEventSourceCoordinator {
                 executor.shutdownNow();
                 executor.awaitTermination(SHUTDOWN_WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            executor.shutdownNow();
+            LOGGER.warn("Interrupted while stopping coordinator", e);
         }
         finally {
             snapshotMetrics.unregister(LOGGER);
