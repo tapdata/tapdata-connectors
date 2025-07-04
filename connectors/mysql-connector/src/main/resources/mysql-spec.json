@@ -667,7 +667,7 @@
       "queryOnly": true
     },
     "bit[($bit)]": {
-      "to": "TapNumber",
+      "to": "TapBinary",
       "bit": 64,
       "queryOnly": true
     },
