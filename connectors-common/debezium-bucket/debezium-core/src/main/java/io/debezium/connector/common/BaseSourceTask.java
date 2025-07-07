@@ -175,7 +175,7 @@ public abstract class BaseSourceTask extends SourceTask {
         recordCounter += batchSize;
         if (batchSize > 0) {
             SourceRecord lastRecord = records.get(batchSize - 1);
-//            lastOffset = lastRecord.sourceOffset();
+            lastOffset = lastRecord.sourceOffset();
             if (pollOutputDelay.hasElapsed()) {
                 // We want to record the status ...
                 final Instant currentTime = clock.currentTime();
