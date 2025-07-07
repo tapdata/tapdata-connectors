@@ -563,7 +563,6 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        System.out.println("stream read offset === " + ((PostgresOffset) offsetState).getSourceOffset());
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
                 new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
@@ -608,7 +607,6 @@ public class PostgresConnector extends CommonDbConnector {
                 try {
                     Map<String, Object> lastOffset = objectMapper.readValue(sourceOffset, Map.class);
                     cdcRunner.flushOffset(lastOffset);
-                    System.out.printf("=== flush over");
                 } catch (JsonProcessingException e) {
                     throw new RuntimeException(e);
                 }
