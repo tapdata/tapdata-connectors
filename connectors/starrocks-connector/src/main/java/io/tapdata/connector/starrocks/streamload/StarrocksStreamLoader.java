@@ -225,7 +225,7 @@ public class StarrocksStreamLoader {
 
                     // 先刷新当前缓冲的数据
                     if (lastEventFlag.get() != 0) {
-                        flush(table, listResult);
+                        flush(table);
                     }
 
                     // 等待到下一分钟
@@ -238,14 +238,22 @@ public class StarrocksStreamLoader {
                 }
 
                 if (needFlush(tapRecordEvent, bytes.length, isAgg)) {
-                    flush(table, listResult);
+                    flush(table);
                 }
                 if (lastEventFlag.get() == 0) {
                     startLoad(tapRecordEvent);
                 }
                 writeToCacheFile(bytes);
                 currentBatchSize += bytes.length;
-                metrics.increase(tapRecordEvent);
+
+                // 直接统计到listResult
+                if (tapRecordEvent instanceof TapInsertRecordEvent) {
+                    listResult.incrementInserted(1);
+                } else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
+                    listResult.incrementModified(1);
+                } else if (tapRecordEvent instanceof TapDeleteRecordEvent) {
+                    listResult.incrementRemove(1);
+                }
                 processedEvents++;
             }
 
@@ -261,7 +269,7 @@ public class StarrocksStreamLoader {
                 // 刷新时也打印一次状态
                 logCurrentStatus(processedEvents, batchDataSize, currentTime);
                 lastLogTime = currentTime;
-                flush(table, listResult);
+                flush(table);
             }
                 writeListResultConsumer.accept(listResult);
             } catch (Throwable e) {
@@ -462,10 +470,6 @@ public class StarrocksStreamLoader {
     }
 
     public RespContent flush(TapTable table) throws StarrocksRetryableException {
-        return flush(table, null);
-    }
-
-    public RespContent flush(TapTable table, WriteListResult<TapRecordEvent> listResult) throws StarrocksRetryableException {
         // the stream is not started yet, no response to get
         if (lastEventFlag.get() == 0) {
             return null;
@@ -499,15 +503,7 @@ public class StarrocksStreamLoader {
                 "flush_duration={} ms, response={}",
                 formatBytes(flushDataSize), waitTime, flushDuration, respContent);
 
-            if (null != listResult) {
-                metrics.writeIntoResultList(listResult);
-                metrics.clear();
-                // 成功刷新后清理缓存的 metrics
-                metrics.clearCache();
-            } else {
-                // 即使没有 listResult，也要清理缓存的 metrics
-                metrics.clearCache();
-            }
+            metrics.clearCache();
             return respContent;
         } catch (StarrocksRetryableException e) {
             long flushEndTime = System.currentTimeMillis();
