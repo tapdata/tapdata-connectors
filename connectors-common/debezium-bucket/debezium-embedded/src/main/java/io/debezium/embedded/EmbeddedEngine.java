@@ -1030,7 +1030,6 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
     public void flushOffset(Map<String, ?> offset) {
         try {
             if (task instanceof BaseSourceTask) {
-                System.out.printf("=== will flush");
                 ((BaseSourceTask) task).commit(offset);
             }
         }

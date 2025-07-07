@@ -197,14 +197,9 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         super.consumeRecords(sourceRecords, committer);
         List<TapEvent> eventList = TapSimplify.list();
         Map<String, ?> offset = null;
-        boolean first = true;
         for (SourceRecord sr : sourceRecords) {
             try {
                 offset = sr.sourceOffset();
-                if (first) {
-                    System.out.println("consume offset === " + offset);
-                }
-                first = false;
                 // PG use micros to indicate the time but in pdk api we use millis
                 Long referenceTime = (Long) offset.get("ts_usec") / 1000;
                 Struct struct = ((Struct) sr.value());
