@@ -978,4 +978,8 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return new ArrayList<>();
     }
 
+    protected void executeCommandV2(TapConnectionContext connectionContext, String command, Consumer<List<DataMap>> consumer) throws Throwable {
+        jdbcContext.query(command, resultSet -> consumer.accept(DbKit.getDataFromResultSet(resultSet)));
+    }
+
 }
