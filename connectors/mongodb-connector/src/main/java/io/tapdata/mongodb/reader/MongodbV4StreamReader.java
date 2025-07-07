@@ -372,11 +372,25 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             for (String tableName : tableList) {
                 try {
                     openChangeStream(tableName);
+                    TapLogger.debug(TAG, "Successfully enabled changeStreamPreAndPostImages for collection: {}", tableName);
                 } catch (MongoException e) {
                     if (e.getCode() == 26) {
+                        // Collection doesn't exist, create it and try again
                         mongoDatabase.createCollection(tableName);
                         openChangeStream(tableName);
+                        TapLogger.debug(TAG, "Created collection and enabled changeStreamPreAndPostImages for: {}", tableName);
                         return;
+                    } else if (e.getCode() == 13) {
+                        // Authorization error - check if preImage is already enabled
+                        TapLogger.debug(TAG, "No permission to enable changeStreamPreAndPostImages for collection: {}, checking if already enabled", tableName);
+                        if (isPreImageAlreadyEnabled(tableName)) {
+                            TapLogger.info(TAG, "Collection {} already has changeStreamPreAndPostImages enabled, skipping", tableName);
+                            continue;
+                        } else {
+                            TapLogger.warn(TAG, "Collection {} does not have changeStreamPreAndPostImages enabled and no permission to enable it. " +
+                                    "Please manually enable preImage for this collection or grant collMod permission to the user.", tableName);
+                            continue;
+                        }
                     }
                     throw new MongoException(tableName + " failed to enable changeStreamPreAndPostImages", e);
                 }
@@ -389,6 +403,42 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         bsonDocument.put("collMod", new BsonString(tableName));
         bsonDocument.put("changeStreamPreAndPostImages", new BsonDocument("enabled", new BsonBoolean(true)));
         mongoDatabase.runCommand(bsonDocument);
+    }
+
+    /**
+     * Check if changeStreamPreAndPostImages is already enabled for the collection
+     * @param tableName the collection name to check
+     * @return true if preImage is enabled, false otherwise
+     */
+    private boolean isPreImageAlreadyEnabled(String tableName) {
+        try {
+            BsonDocument listCollectionsCommand = new BsonDocument();
+            listCollectionsCommand.put("listCollections", new BsonInt32(1));
+            listCollectionsCommand.put("filter", new BsonDocument("name", new BsonString(tableName)));
+
+            Document result = mongoDatabase.runCommand(listCollectionsCommand);
+            Document cursor = result.get("cursor", Document.class);
+
+            if (cursor != null) {
+                @SuppressWarnings("unchecked")
+                List<Document> firstBatch = (List<Document>) cursor.get("firstBatch");
+                if (firstBatch != null && !firstBatch.isEmpty()) {
+                    Document collectionInfo = firstBatch.get(0);
+                    Document options = collectionInfo.get("options", Document.class);
+                    if (options != null) {
+                        Document changeStreamPreAndPostImages = options.get("changeStreamPreAndPostImages", Document.class);
+                        if (changeStreamPreAndPostImages != null) {
+                            Boolean enabled = changeStreamPreAndPostImages.getBoolean("enabled");
+                            return Boolean.TRUE.equals(enabled);
+                        }
+                    }
+                }
+            }
+            return false;
+        } catch (MongoException e) {
+            TapLogger.warn(TAG, "Failed to check preImage status for collection {}: {}. Assuming not enabled.", tableName, e.getMessage());
+            return false;
+        }
     }
 
 }
