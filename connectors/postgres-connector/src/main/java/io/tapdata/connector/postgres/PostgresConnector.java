@@ -162,6 +162,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportGetTableNamesFunction(this::getTableNames);
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> postgresJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandV2Function(this::executeCommandV2);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
         connectorFunctions.supportCountRawCommandFunction(this::countRawCommand);
         connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
@@ -881,7 +882,7 @@ public class PostgresConnector extends CommonDbConnector {
                 });
                 List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
                 while (resultSet.next()) {
-                    filterResults.add(filterTimeForPG(resultSet,typeAndName,allColumn));
+                    filterResults.add(filterTimeForPG(resultSet, typeAndName, allColumn));
                     if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
                         consumer.accept(filterResults);
                         filterResults = new FilterResults();
@@ -927,7 +928,6 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
 
-
     protected Object processData(Object value, String dataType) {
         if (!postgresConfig.getOldVersionTimezone()) {
             if (value instanceof Timestamp) {
@@ -948,6 +948,7 @@ public class PostgresConnector extends CommonDbConnector {
         }
         return value;
     }
+
     protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
@@ -973,7 +974,7 @@ public class PostgresConnector extends CommonDbConnector {
                                             typeAndName.put(key, value.getDataType());
                                         });
                                         while (isAlive() && resultSet.next()) {
-                                            tapEvents.add(insertRecordEvent(filterTimeForPG(resultSet,typeAndName,columnNames), tapTable.getId()));
+                                            tapEvents.add(insertRecordEvent(filterTimeForPG(resultSet, typeAndName, columnNames), tapTable.getId()));
                                             if (tapEvents.size() == eventBatchSize) {
                                                 syncEventSubmit(tapEvents, eventsOffsetConsumer);
                                                 tapEvents = list();
@@ -1015,6 +1016,7 @@ public class PostgresConnector extends CommonDbConnector {
             executorService.shutdown();
         }
     }
+
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
         String sql = getBatchReadSelectSql(tapTable);
         jdbcContext.query(sql, resultSet -> {
@@ -1027,7 +1029,7 @@ public class PostgresConnector extends CommonDbConnector {
             });
             try {
                 while (isAlive() && resultSet.next()) {
-                    tapEvents.add(insertRecordEvent(filterTimeForPG(resultSet,typeAndName,columnNames), tapTable.getId()));
+                    tapEvents.add(insertRecordEvent(filterTimeForPG(resultSet, typeAndName, columnNames), tapTable.getId()));
                     if (tapEvents.size() == eventBatchSize) {
                         eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
                         tapEvents = list();
@@ -1197,5 +1199,12 @@ public class PostgresConnector extends CommonDbConnector {
             return postgresWriter.getUpsertSql(((TapInsertRecordEvent) tapEvent).getAfter());
         }
         return null;
+    }
+
+    protected void clearIdleSlot() throws SQLException {
+        postgresJdbcContext.query("select pg_drop_replication_slot(a.slot_name)\n" +
+                "from (\n" +
+                "select * from pg_replication_slots where active='false' and slot_name like 'tapdata_cdc_%') a", resultSet -> {
+        });
     }
 }

@@ -37,6 +37,21 @@
         "id": "source_support_partition"
       }
     ],
+    "monitorAPI": {
+      "walLogSize": {
+        "title": "${walLogSize}",
+        "type": "string",
+        "sqlType": "query",
+        "sql": "SELECT round(sum(size)/1024/1024) FROM pg_ls_waldir()"
+      },
+      "clearIdleSlot": {
+        "type": "button",
+        "className": "DataSourceExecuteService",
+        "method": "execute",
+        "args": ["{{connectionId}}", "method", "io.tapdata.connector.postgres.PostgresConnector#clearIdleSlot"],
+        "title": "${clearIdleSlot}"
+      }
+    },
     "connection": {
       "type": "object",
       "properties": {
@@ -639,7 +654,9 @@
       "maximumQueueSizeTip": "The queue size for reading incremental data in PostgreSQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting",
       "enableFileInput": "Enable file input",
       "customSlotName": "Specifies the logical replication slot name",
-      "customSlotNameTip": "You can manually specify a logical replication slot that is created in advance in the database, and if the logical replication slot does not exist, the delta may not work"
+      "customSlotNameTip": "You can manually specify a logical replication slot that is created in advance in the database, and if the logical replication slot does not exist, the delta may not work",
+      "walLogSize": "Wal log total size(MB)",
+      "clearIdleSlot": "Clear idle replication slot"
     },
     "zh_CN": {
       "doc": "docs/postgres_zh_CN.md",
@@ -681,7 +698,9 @@
       "maximumQueueSizeTip": "PostgreSQL读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置",
       "enableFileInput": "启用文件输入",
       "customSlotName": "指定逻辑复制槽名字",
-      "customSlotNameTip": "可以手动指定在数据库提前创建好的逻辑复制槽，如果逻辑复制槽不存在，则可能会导致增量不工作"
+      "customSlotNameTip": "可以手动指定在数据库提前创建好的逻辑复制槽，如果逻辑复制槽不存在，则可能会导致增量不工作",
+      "walLogSize": "Wal日志总大小(MB)",
+      "clearIdleSlot": "清理空闲复制槽"
     },
     "zh_TW": {
       "doc": "docs/postgres_zh_TW.md",
@@ -723,7 +742,9 @@
       "maximumQueueSizeTip": "PostgreSQL讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置",
       "enableFileInput": "啟用文件輸入",
       "customSlotName": "指定邏輯複製槽名字",
-      "customSlotNameTip": "可以手動指定在數據庫提前創建好的邏輯複製槽，如果邏輯複製槽不存在，則可能會導致增量不工作"
+      "customSlotNameTip": "可以手動指定在數據庫提前創建好的邏輯複製槽，如果邏輯複製槽不存在，則可能會導致增量不工作",
+      "walLogSize": "Wal日誌總大小(MB)",
+      "clearIdleSlot": "清理空閒複製槽"
     }
   },
   "dataTypes": {
