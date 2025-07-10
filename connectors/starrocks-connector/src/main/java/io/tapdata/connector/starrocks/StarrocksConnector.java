@@ -344,6 +344,13 @@ public class StarrocksConnector extends CommonDbConnector {
         ErrorKit.ignoreAnyError(() -> {
             for (StarrocksStreamLoader StarrocksStreamLoader : StarrocksStreamLoaderMap.values()) {
                 if (EmptyKit.isNotNull(StarrocksStreamLoader)) {
+                    // 在停止前先刷新剩余数据
+                    try {
+                        StarrocksStreamLoader.flushOnStop();
+                        tapLogger.info("StarrocksConnector", "Flushed remaining data before stopping StarrocksStreamLoader");
+                    } catch (Exception e) {
+                        tapLogger.warn("StarrocksConnector", "Failed to flush data before stopping: {}", e.getMessage());
+                    }
                     StarrocksStreamLoader.shutdown();
                 }
             }
