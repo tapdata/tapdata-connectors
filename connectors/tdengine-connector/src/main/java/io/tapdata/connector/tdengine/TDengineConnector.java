@@ -1,6 +1,7 @@
 package io.tapdata.connector.tdengine;
 
 import com.google.common.collect.Lists;
+import com.taosdata.jdbc.tmq.ConsumerRecords;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.connector.tdengine.bean.TDengineColumn;
@@ -9,6 +10,7 @@ import io.tapdata.connector.tdengine.config.TDengineConfig;
 import io.tapdata.connector.tdengine.ddl.TDengineDDLSqlGenerator;
 import io.tapdata.connector.tdengine.subscribe.TDengineSubscribe;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
@@ -20,6 +22,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -32,9 +35,18 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.lang3.StringUtils;
 
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -44,6 +56,9 @@ public class TDengineConnector extends CommonDbConnector {
     private TDengineConfig tdengineConfig;
     private TDengineJdbcContext tdengineJdbcContext;
     private String connectionTimezone;
+    private String tdengineVersion;
+    private AtomicBoolean streamReadStarted = new AtomicBoolean(false);
+    private ConsumerRecords<Map<String, Object>> firstRecords;
 
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Exception {
@@ -54,6 +69,7 @@ public class TDengineConnector extends CommonDbConnector {
         if ("Database Timezone".equals(this.connectionTimezone) || StringUtils.isBlank(this.connectionTimezone)) {
             this.connectionTimezone = tdengineJdbcContext.timezone();
         }
+        this.tdengineVersion = tdengineJdbcContext.queryVersion();
         commonDbConfig = tdengineConfig;
         jdbcContext = tdengineJdbcContext;
         commonSqlMaker = new CommonSqlMaker(tdengineConfig.getEscapeChar());
@@ -71,6 +87,7 @@ public class TDengineConnector extends CommonDbConnector {
 
     @Override
     public void onStop(TapConnectionContext connectionContext) {
+        streamReadStarted.set(false);
         EmptyKit.closeQuietly(tdengineJdbcContext);
     }
 
@@ -163,20 +180,35 @@ public class TDengineConnector extends CommonDbConnector {
         }
         String timestamp = getTimestampColumn(tapTable);
         String sql = "CREATE " + (tdengineConfig.getSupportSuperTable() ? "S" : "") + "TABLE IF NOT EXISTS `"
-                + tdengineConfig.getDatabase() + "`.`" + tapTable.getId() + "` (" +
-                TDengineSqlMaker.buildColumnDefinition(tapTable, timestamp, tdengineConfig.getSupportSuperTable() ? tdengineConfig.getSuperTableTags() : Collections.emptyList());
-        sql += ")";
+                + tdengineConfig.getDatabase() + "`.`" + tapTable.getId() + "` (";
         if (tdengineConfig.getSupportSuperTable()) {
-            sql += " TAGS (" + tdengineConfig.getSuperTableTags().stream().map(v -> {
-                StringBuilder builder = new StringBuilder();
-                TapField tapField = tapTable.getNameFieldMap().get(v);
-                //ignore those which has no dataType
-                if (tapField.getDataType() == null) {
-                    return "";
+            List<String> tags;
+            if (EmptyKit.isEmpty(tdengineConfig.getSuperTableTags())) {
+                if (EmptyKit.isNull(tapTable.getTableAttr().get("tags"))) {
+                    tags = null;
+                } else {
+                    tags = (List<String>) tapTable.getTableAttr().get("tags");
                 }
-                builder.append('`').append(tapField.getName()).append("` ").append(tapField.getDataType()).append(' ');
-                return builder.toString();
-            }).collect(Collectors.joining(", ")) + ")";
+            } else {
+                tags = tdengineConfig.getSuperTableTags();
+            }
+            sql += TDengineSqlMaker.buildColumnDefinition(tapTable, timestamp, tags);
+            sql += ")";
+            if (EmptyKit.isNotEmpty(tags)) {
+                sql += " TAGS (" + tags.stream().map(v -> {
+                    StringBuilder builder = new StringBuilder();
+                    TapField tapField = tapTable.getNameFieldMap().get(v);
+                    //ignore those which has no dataType
+                    if (tapField.getDataType() == null) {
+                        return "";
+                    }
+                    builder.append('`').append(tapField.getName()).append("` ").append(tapField.getDataType()).append(' ');
+                    return builder.toString();
+                }).collect(Collectors.joining(", ")) + ")";
+            }
+        } else {
+            sql += TDengineSqlMaker.buildColumnDefinition(tapTable, timestamp, Collections.emptyList());
+            sql += ")";
         }
         try {
             List<String> sqls = TapSimplify.list();
@@ -202,8 +234,10 @@ public class TDengineConnector extends CommonDbConnector {
 
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
         String tableId = tapDropTableEvent.getTableId();
-        String sql = String.format("DROP " + (tdengineConfig.getSupportSuperTable() ? "S" : "") + "TABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId);
-        tdengineJdbcContext.execute(sql);
+        List<String> dropSqls = new ArrayList<>();
+        dropSqls.add(String.format("DROP TABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId));
+        dropSqls.add(String.format("DROP STABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId));
+        tdengineJdbcContext.batchExecute(dropSqls);
     }
 
     private void writeRecord(TapConnectorContext tapConnectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> consumer) throws Throwable {
@@ -223,15 +257,18 @@ public class TDengineConnector extends CommonDbConnector {
             new TDengineRecordWriter(tdengineJdbcContext, tapTable, timestamp)
                     .setInsertPolicy(insertDmlPolicy)
                     .setUpdatePolicy(updateDmlPolicy)
-                    .write(tapRecordEvents, consumer);
+                    .write(tapRecordEvents, consumer, this::isAlive);
         }
     }
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
+        streamReadStarted.set(true);
+        TapSimplify.sleep(2000);
         createTopic(tables, false);
-        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog());
+        TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog(), tdengineVersion);
         tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
-        tDengineSubscribe.subscribe(this::isAlive);
+        tDengineSubscribe.setFirstRecords(firstRecords);
+        tDengineSubscribe.subscribe(this::isAlive, false, streamReadStarted);
     }
 
     private Object timestampToStreamOffset(TapConnectorContext tapConnectorContext, Long startTime) throws Throwable {
@@ -245,6 +282,12 @@ public class TDengineConnector extends CommonDbConnector {
         }
         createTopic(tables, true);
         tapConnectorContext.getStateMap().put("tap_topic", tables);
+        new Thread(() -> {
+            TDengineSubscribe tDengineSubscribe = new TDengineSubscribe(tdengineJdbcContext, tapConnectorContext.getLog(), tdengineVersion);
+            tDengineSubscribe.init(tables, tapConnectorContext.getTableMap(), null, 1, null);
+            tDengineSubscribe.subscribe(this::isAlive, true, streamReadStarted);
+            firstRecords = tDengineSubscribe.getFirstRecords();
+        }).start();
         return new TDengineOffset();
     }
 
@@ -256,9 +299,9 @@ public class TDengineConnector extends CommonDbConnector {
         for (String tableName : tables) {
             String topic = "tap_topic_" + tableName;
             if (canReplace) {
-                createSqls.add(String.format("drop topic if exists %s", topic));
+                createSqls.add(String.format("drop topic if exists `%s`", topic));
             }
-            createSqls.add(String.format("create topic if not exists %s as select * from %s", topic, tableName));
+            createSqls.add(String.format("create topic if not exists `%s` as select * from `%s`", topic, tableName));
         }
         tdengineJdbcContext.batchExecute(createSqls);
     }
@@ -270,7 +313,7 @@ public class TDengineConnector extends CommonDbConnector {
         }
         for (String tableName : tables) {
             String topic = "tap_topic_" + tableName;
-            dropSqls.add(String.format("drop topic if exists %s", topic));
+            dropSqls.add(String.format("drop topic if exists `%s`", topic));
         }
         tdengineJdbcContext.batchExecute(dropSqls);
     }
@@ -294,6 +337,7 @@ public class TDengineConnector extends CommonDbConnector {
             List<TapTable> tapTableList = TapSimplify.list();
             List<String> subTableNames = subList.stream().map(v -> v.getString("table_name")).collect(Collectors.toList());
             List<DataMap> columnList = tdengineJdbcContext.queryAllColumns(subTableNames);
+            Map<String, List<String>> tagsMap = tdengineJdbcContext.queryAllTags(subTableNames);
             //make up tapTable
             subList.forEach(subTable -> {
                 //1、table name/comment
@@ -326,6 +370,9 @@ public class TDengineConnector extends CommonDbConnector {
                             tapTable.add(tapField);
                         });
                 tapTable.setIndexList(tapIndexList);
+                if (tagsMap.containsKey(table)) {
+                    tapTable.setTableAttr(TapSimplify.map(TapSimplify.entry("tags", tagsMap.get(table))));
+                }
                 tapTableList.add(tapTable);
             });
             consumer.accept(tapTableList);
@@ -346,11 +393,115 @@ public class TDengineConnector extends CommonDbConnector {
         }
     }
 
-    @Override
-    public int tableCount(TapConnectionContext connectionContext) throws SQLException {
-        AtomicInteger tableCount = new AtomicInteger();
-        tdengineJdbcContext.queryWithNext(String.format("SELECT COUNT(1) FROM information_schema.ins_tables where db_name = '%s'", tdengineConfig.getDatabase()), resultSet -> tableCount.set(resultSet.getInt(1)));
-        return tableCount.get();
+    protected void batchReadRestful(String sql, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, Timestamp min, Timestamp max) throws Throwable {
+        long offset = 0;
+        while (isAlive()) {
+            String querySql;
+            if (eventBatchSize > 0) {
+                querySql = sql + " limit " + eventBatchSize + " offset " + offset;
+            } else {
+                querySql = sql;
+            }
+            List<TapEvent> tapEvents = list();
+            List<String> columnNames = list();
+            if (EmptyKit.isNull(min) && EmptyKit.isNull(max)) {
+                jdbcContext.query(querySql, resultSet -> allOverResultSet(resultSet, columnNames, tapTable, tapEvents));
+            } else {
+                jdbcContext.prepareQuery(querySql, Arrays.asList(min, max), resultSet -> allOverResultSet(resultSet, columnNames, tapTable, tapEvents));
+            }
+            syncEventSubmit(tapEvents, eventsOffsetConsumer);
+            if (eventBatchSize == 0 || eventBatchSize > 0 && tapEvents.size() < eventBatchSize) {
+                break;
+            }
+            offset += eventBatchSize;
+        }
+    }
+
+    private void allOverResultSet(ResultSet resultSet, List<String> columnNames, TapTable tapTable, List<TapEvent> tapEvents) throws SQLException {
+        if (EmptyKit.isEmpty(columnNames)) {
+            columnNames.addAll(DbKit.getColumnsFromResultSet(resultSet));
+        }
+        while (isAlive() && resultSet.next()) {
+            DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+            processDataMap(dataMap, tapTable);
+            tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
+        }
+    }
+
+    protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        try {
+            batchReadRestful(sql, tapTable, eventBatchSize, eventsOffsetConsumer, null, null);
+        } catch (SQLException e) {
+            exceptionCollector.collectTerminateByServer(e);
+            exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+            exceptionCollector.revealException(e);
+            throw e;
+        }
+    }
+
+    protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String sql = getBatchReadSelectSql(tapTable);
+        String timestampColumn = tapTable.primaryKeys().stream().findFirst().orElseThrow(() -> new RuntimeException("no primary key"));
+        AtomicLong maxTimestamp = new AtomicLong();
+        AtomicLong minTimestamp = new AtomicLong();
+        jdbcContext.normalQuery(String.format("select `%s` from %s order by `%s` desc limit 1", timestampColumn, getSchemaAndTable(tapTable.getId()), timestampColumn), resultSet -> {
+            if (resultSet.next()) {
+                maxTimestamp.set(resultSet.getTimestamp(1).getTime());
+            }
+        });
+        jdbcContext.normalQuery(String.format("select `%s` from %s order by `%s` limit 1", timestampColumn, getSchemaAndTable(tapTable.getId()), timestampColumn), resultSet -> {
+            if (resultSet.next()) {
+                minTimestamp.set(resultSet.getTimestamp(1).getTime());
+            }
+        });
+        Timestamp[] splitTimestamps = new Timestamp[commonDbConfig.getMaxSplit()];
+        for (int i = 0; i < splitTimestamps.length - 1; i++) {
+            splitTimestamps[i] = new Timestamp(minTimestamp.get() + (maxTimestamp.get() - minTimestamp.get()) / commonDbConfig.getMaxSplit() * i);
+        }
+        splitTimestamps[commonDbConfig.getMaxSplit() - 1] = new Timestamp(maxTimestamp.get());
+        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
+        ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
+        AtomicInteger concurrentIndex = new AtomicInteger(-1);
+        try {
+            for (int i = 0; i < commonDbConfig.getBatchReadThreadSize(); i++) {
+                executorService.submit(() -> {
+                    try {
+                        while (isAlive()) {
+                            int index = concurrentIndex.incrementAndGet();
+                            String splitSql;
+                            if (index >= commonDbConfig.getMaxSplit() - 1) {
+                                break;
+                            } else if (index == commonDbConfig.getMaxSplit() - 2) {
+                                splitSql = sql + String.format(" WHERE `%s` >= ? AND `%s` <= ?", timestampColumn, timestampColumn);
+                            } else {
+                                splitSql = sql + String.format(" WHERE `%s` >= ? AND `%s` < ?", timestampColumn, timestampColumn);
+                            }
+                            tapLogger.info("batchRead, splitSql[{}], from {} to {}", splitSql, splitTimestamps[index], splitTimestamps[index + 1]);
+                            batchReadRestful(splitSql, tapTable, eventBatchSize, eventsOffsetConsumer, splitTimestamps[index], splitTimestamps[index + 1]);
+                        }
+                    } catch (Throwable e) {
+                        throwable.set(e);
+                    } finally {
+                        countDownLatch.countDown();
+                    }
+                });
+            }
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            if (EmptyKit.isNotNull(throwable.get())) {
+                exceptionCollector.collectTerminateByServer(throwable.get());
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), throwable.get());
+                exceptionCollector.revealException(throwable.get());
+                throw throwable.get();
+            }
+        } finally {
+            executorService.shutdown();
+        }
     }
 
 }

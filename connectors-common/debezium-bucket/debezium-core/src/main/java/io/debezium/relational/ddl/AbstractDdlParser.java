@@ -274,7 +274,12 @@ public abstract class AbstractDdlParser implements DdlParser {
      * @return string without quotes
      */
     public static String withoutQuotes(String possiblyQuoted) {
-        return isQuoted(possiblyQuoted) ? possiblyQuoted.substring(1, possiblyQuoted.length() - 1) : possiblyQuoted;
+        if (isQuoted(possiblyQuoted)) {
+            String quote = possiblyQuoted.substring(0, 1);
+            return possiblyQuoted.substring(1, possiblyQuoted.length() - 1).replace(quote + quote, quote);
+        } else {
+            return possiblyQuoted;
+        }
     }
 
     /**

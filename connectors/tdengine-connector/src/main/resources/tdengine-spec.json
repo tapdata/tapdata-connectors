@@ -4,7 +4,6 @@
     "icon": "icons/tdengine.png",
     "id": "tdengine",
     "doc": "${doc}",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
@@ -132,7 +131,7 @@
           "x-index": 11,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {
@@ -254,10 +253,10 @@
           "x-component": "Switch",
           "x-reactions": [
             {
-              "dependencies": ["$inputs", "type"],
+              "dependencies": ["$inputs"],
               "fulfill": {
                 "state": {
-                  "display": "{{$deps[0].length > 0 && $deps[1] !== 'database' ? \"visible\":\"hidden\"}}"
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -274,15 +273,16 @@
             "multiple": true,
             "filterable": true
           },
+          "required": true,
           "x-decorator-props": {
             "tooltip": "${superTableTagsTooltip}"
           },
           "x-reactions": ["{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
             {
-              "dependencies": [".supportSuperTable"],
+              "dependencies": [".supportSuperTable", "type"],
               "fulfill": {
                 "state": {
-                  "visible": "{{$deps[0] === true}}"
+                  "visible": "{{$deps[0] === true && $deps[1] !== 'database'}}"
                 }
               }
             }
@@ -300,10 +300,10 @@
           },
           "x-reactions": [
             {
-              "dependencies": [".supportSuperTable"],
+              "dependencies": [".supportSuperTable", "type"],
               "fulfill": {
                 "state": {
-                  "visible": "{{$deps[0] === true}}"
+                  "visible": "{{$deps[0] === true && $deps[1] !== 'database'}}"
                 }
               }
             }
@@ -339,6 +339,73 @@
               }
             }
           ]
+        },
+        "hashSplit": {
+          "type": "boolean",
+          "title": "${hashSplit}",
+          "default": false,
+          "x-index": 10,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${hashSplitTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "maxSplit": {
+          "required": true,
+          "type": "string",
+          "title": "${maxSplit}",
+          "default": 20,
+          "x-index": 11,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 2,
+            "max": 10000
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".hashSplit"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "batchReadThreadSize": {
+          "required": true,
+          "type": "string",
+          "title": "${batchReadThreadSize}",
+          "default": 4,
+          "x-index": 12,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 1,
+            "max": 16
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".hashSplit"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -366,7 +433,11 @@
       "subTableNameTypeTooltip": "When writing data, sub-tables will be automatically generated according to the content of different TAGS data. Currently, automatic Hash and custom are supported",
       "subTableSuffix": "Sub Table Name Custom Format",
       "subTableSuffixTooltip": "The format of the sub table name, for example: \\${superTableName}_\\${column1Name}_\\${column2Name}",
-      "doc": "docs/tdengine_en_US.md"
+      "doc": "docs/tdengine_en_US.md",
+      "hashSplit": "Time Split",
+      "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the timestamp, suitable for large table full stage sharding synchronization",
+      "maxSplit": "Maximum number of splits",
+      "batchReadThreadSize": "Batch read thread size"
     },
     "zh_CN": {
       "host": "地址",
@@ -389,7 +460,11 @@
       "subTableNameTypeTooltip": "写入数据时会按不同的TAGS数据内容，自动化生成子表，目前支持自动Hash和自定义",
       "subTableSuffix": "子表名自定义格式",
       "subTableSuffixTooltip": "子表名的格式，例如：\\${superTableName}_\\${column1Name}_\\${column2Name}",
-      "doc": "docs/tdengine_zh_CN.md"
+      "doc": "docs/tdengine_zh_CN.md",
+      "hashSplit": "时间分片",
+      "hashSplitTooltip": "开关打开时，可以根据时间戳进行分片，适用于大表全量阶段分片同步",
+      "maxSplit": "最大分片数",
+      "batchReadThreadSize": "批量读取线程数"
     },
     "zh_TW": {
       "host": "地址",
@@ -412,38 +487,35 @@
       "subTableNameTypeTooltip": "寫入數據時會按不同的TAGS數據內容，自動化生成子表，目前支持自動Hash和自定義",
       "subTableSuffix": "子表名自定義格式",
       "subTableSuffixTooltip": "子表名的格式，例如：\\${superTableName}_\\${column1Name}_\\${column2Name}",
-      "doc": "docs/tdengine_zh_TW.md"
+      "doc": "docs/tdengine_zh_TW.md",
+      "hashSplit": "時間分片",
+      "hashSplitTooltip": "開關打開時，可以根據時間戳進行分片，適用於大表全量階段分片同步",
+      "maxSplit": "最大分片數",
+      "batchReadThreadSize": "批量讀取線程數"
     }
   },
   "dataTypes": {
-    "bool": {
+    "BOOL": {
       "to": "TapBoolean",
       "bit": 1,
       "priority": 1,
       "fixed": true
     },
-    "varchar($byte)": {
-      "name": "varchar",
+    "VARCHAR($byte)": {
       "to": "TapString",
       "byte": 16374,
       "defaultByte": 1,
       "byteRatio": 4
     },
-    "nchar($byte)": {
-      "name": "nchar",
+    "NCHAR($byte)": {
       "to": "TapString",
       "byte": 4000,
       "defaultByte": 1,
       "byteRatio": 4,
-      "queryOnly": true
+      "queryOnly": true,
+      "fixed": true
     },
-    "binary($byte)": {
-      "to": "TapBinary",
-      "byte": 16374,
-      "defaultByte": 1,
-      "preferByte": 1000
-    },
-    "tinyint": {
+    "TINYINT": {
       "to": "TapNumber",
       "bit": 8,
       "precision": 3,
@@ -452,7 +524,7 @@
         127
       ]
     },
-    "tinyint unsigned": {
+    "TINYINT UNSIGNED": {
       "to": "TapNumber",
       "bit": 8,
       "precision": 3,
@@ -460,9 +532,10 @@
         0,
         255
       ],
-      "unsigned": "unsigned"
+      "unsigned": "unsigned",
+      "queryOnly": true
     },
-    "smallint": {
+    "SMALLINT": {
       "to": "TapNumber",
       "bit": 16,
       "value": [
@@ -471,7 +544,7 @@
       ],
       "precision": 5
     },
-    "smallint unsigned": {
+    "SMALLINT UNSIGNED": {
       "to": "TapNumber",
       "bit": 16,
       "precision": 5,
@@ -479,9 +552,10 @@
         0,
         65535
       ],
-      "unsigned": "unsigned"
+      "unsigned": "unsigned",
+      "queryOnly": true
     },
-    "int": {
+    "INT": {
       "to": "TapNumber",
       "bit": 32,
       "precision": 10,
@@ -490,16 +564,17 @@
         2147483647
       ]
     },
-    "int unsigned": {
+    "INT UNSIGNED": {
       "to": "TapNumber",
       "bit": 32,
       "precision": 10,
       "value": [
         0,
         4294967295
-      ]
+      ],
+      "queryOnly": true
     },
-    "bigint": {
+    "BIGINT": {
       "to": "TapNumber",
       "bit": 64,
       "precision": 19,
@@ -508,16 +583,17 @@
         9223372036854775807
       ]
     },
-    "bigint unsigned": {
+    "BIGINT UNSIGNED": {
       "to": "TapNumber",
       "bit": 64,
       "precision": 20,
       "value": [
         0,
         18446744073709551615
-      ]
+      ],
+      "queryOnly": true
     },
-    "float": {
+    "FLOAT": {
       "to": "TapNumber",
       "precision": [
         1,
@@ -529,7 +605,7 @@
       ],
       "fixed": false
     },
-    "double": {
+    "DOUBLE": {
       "to": "TapNumber",
       "precision": [
         1,
@@ -543,7 +619,7 @@
       ],
       "fixed": false
     },
-    "timestamp": {
+    "TIMESTAMP": {
       "to": "TapDateTime",
       "range": [
         "1970-01-01 00:00:01",

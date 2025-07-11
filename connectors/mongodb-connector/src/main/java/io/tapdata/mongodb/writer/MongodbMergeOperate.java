@@ -33,11 +33,11 @@ public class MongodbMergeOperate {
 
 	protected static final String UNSET_KEY = "$unset";
 
-	public static List<WriteModel<Document>> merge(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, TapRecordEvent tapRecordEvent, Collection<String> allColumn, Collection<String> pks) {
+	public static List<WriteModel<Document>> merge(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, TapRecordEvent tapRecordEvent) {
 		List<WriteModel<Document>> writeModels;
 		try {
 			writeModels = new ArrayList<>();
-			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent, allColumn, pks);
+			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent);
 			final Map<String, Object> info = tapRecordEvent.getInfo();
 			if (tapRecordEvent instanceof TapInsertRecordEvent) {
 				inserted.incrementAndGet();
@@ -67,7 +67,8 @@ public class MongodbMergeOperate {
 						mergeLookupResults,
 						updateJoinKeys,
 						sharedJoinKeys,
-						mergeFilter
+						mergeFilter,
+						level
 				);
 
 				if (CollectionUtils.isNotEmpty(mergeResults)) {
@@ -100,7 +101,8 @@ public class MongodbMergeOperate {
 			List<MergeLookupResult> mergeLookupResults,
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
 			Set<String> sharedJoinKeys,
-			MergeFilter mergeFilter
+			MergeFilter mergeFilter,
+			int topLevel
 	) {
 		recursiveMerge(
 				mergeBundle,
@@ -112,7 +114,9 @@ public class MongodbMergeOperate {
 				updateJoinKeys,
 				sharedJoinKeys,
 				null,
-				mergeFilter
+				mergeFilter,
+				topLevel,
+				1
 		);
 	}
 
@@ -126,18 +130,20 @@ public class MongodbMergeOperate {
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
 			Set<String> sharedJoinKeys,
 			MergeTableProperties parentProperties,
-			MergeFilter mergeFilter
+			MergeFilter mergeFilter,
+			int topLevel,
+			int loopTime
 	) {
 		boolean unsetResultNull = null == unsetResult;
 		switch (properties.getMergeType()) {
 			case updateOrInsert:
 				upsertMerge(mergeBundle, properties, mergeResult);
 				if (!mergeFilter.isAppend() && mergeFilter.getFilters().isEmpty()) {
-					mergeFilter.addFilter(mergeResult.getFilter());
+					mergeFilter.addFilter(filter(mergeBundle.getAfter(), properties.getJoinKeys()));
 				}
 				break;
 			case updateWrite:
-				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys);
+				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys, mergeFilter, topLevel);
 				if (unsetResultNull) {
 					addUnsetMerge(mergeResults, unsetResult);
 				}
@@ -145,7 +151,7 @@ public class MongodbMergeOperate {
 				mergeResult = updateMergeIfNeed(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
 				break;
 			case updateIntoArray:
-				unsetResult = updateIntoArrayUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, parentProperties);
+				unsetResult = updateIntoArrayUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, parentProperties, mergeFilter, loopTime);
 				if (unsetResultNull && addUnsetMerge(mergeResults, unsetResult)) {
 					mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
 				}
@@ -157,8 +163,10 @@ public class MongodbMergeOperate {
 		}
 
 		boolean recursiveOnce = false;
+		int privateLoopTime = 0;
 		if (CollectionUtils.isNotEmpty(mergeLookupResults)) {
 			for (MergeLookupResult mergeLookupResult : mergeLookupResults) {
+				privateLoopTime++;
 				final Map<String, Object> data = mergeLookupResult.getData();
 				mergeBundle = new MergeBundle(MergeBundle.EventOperation.INSERT, null, data);
 				mergeBundle.setRecursive(true);
@@ -176,7 +184,9 @@ public class MongodbMergeOperate {
 						updateJoinKeys,
 						mergeLookupResult.getSharedJoinKeys(),
 						properties,
-						mergeFilter
+						mergeFilter,
+						topLevel,
+						privateLoopTime
 				);
 				recursiveOnce = true;
 			}
@@ -228,7 +238,10 @@ public class MongodbMergeOperate {
 		return mergeResult;
 	}
 
-	private static MergeResult updateWriteUnsetMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult, Set<String> sharedJoinKeys) {
+	private static MergeResult updateWriteUnsetMerge(
+			MergeBundle mergeBundle, MergeTableProperties currentProperty,
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
+			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter, int topLevel) {
 		if (null == currentProperty) {
 			return mergeResult;
 		}
@@ -249,11 +262,12 @@ public class MongodbMergeOperate {
 		if (null == mergeResult) {
 			firstMergeResult = true;
 			MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
+			Map<String, Object> updateJoinKeyAfter = updateJoinKey.getAfter();
 			Map<String, Object> updateJoinKeyBefore = updateJoinKey.getBefore();
 			List<Map<String, String>> joinKeys = currentProperty.getJoinKeys();
 			Document filter;
 			mergeResult = new MergeResult();
-			filter = filter(updateJoinKeyBefore, joinKeys);
+			filter = unsetFilter(updateJoinKeyBefore, updateJoinKeyAfter, joinKeys, topLevel);
 			if (null != updateJoinKey.getParentBefore()) {
 				filter.putAll(updateJoinKey.getParentBefore());
 			}
@@ -270,6 +284,7 @@ public class MongodbMergeOperate {
 			}
 			mergeResult.getFilter().putAll(filter);
 		}
+		appendAllParentMergeFilters(mergeResult, mergeFilter);
 
 		if (null == mergeResult.getOperation()) {
 			mergeResult.setOperation(MergeResult.Operation.UPDATE);
@@ -285,8 +300,14 @@ public class MongodbMergeOperate {
 		return mergeResult;
 	}
 
-	private static MergeResult updateIntoArrayUnsetMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult, MergeTableProperties parentProperties) {
+	public static MergeResult updateIntoArrayUnsetMerge(
+			MergeBundle mergeBundle, MergeTableProperties currentProperty,
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys, MergeResult mergeResult,
+			MergeTableProperties parentProperties, MergeFilter mergeFilter, int loopTime) {
 		String id = currentProperty.getId();
+		if (loopTime != 1) {
+			return null;
+		}
 		if (null == mergeResult && (MapUtils.isEmpty(updateJoinKeys) || !updateJoinKeys.containsKey(id))) {
 			return mergeResult;
 		}
@@ -297,7 +318,7 @@ public class MongodbMergeOperate {
 			mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
 			String targetPath = currentProperty.getTargetPath();
 			if (StringUtils.isNotBlank(targetPath)) {
-				Document update = mergeResult.getUpdate();
+				Document update = null == mergeResult ? new Document() : mergeResult.getUpdate();
 				Document unsetDoc = new Document(targetPath, true);
 				if (update.containsKey(UNSET_KEY)) {
 					update.get(UNSET_KEY, Document.class).putAll(unsetDoc);
@@ -338,27 +359,18 @@ public class MongodbMergeOperate {
 			}
 			mergeResult.getFilter().putAll(filter);
 		}
+		appendAllParentMergeFilters(mergeResult, mergeFilter);
 
 		if (mergeResult.getOperation() == null) {
 			mergeResult.setOperation(MergeResult.Operation.UPDATE);
 		}
-
 		Document updateOpDoc;
-		if (mergeBundle.isDataExists()) {
-			updateOpDoc = buildPullDocument(MapUtils.isNotEmpty(mergeBundle.getBefore()) ? mergeBundle.getBefore() : mergeBundle.getAfter(), arrayKeys, array, targetPath);
-			if (mergeResult.getUpdate().containsKey("$pull")) {
-				mergeResult.getUpdate().get("$pull", Document.class).putAll(updateOpDoc);
+		if (StringUtils.isNotBlank(targetPath)) {
+			updateOpDoc = new Document(targetPath, new ArrayList<>());
+			if (mergeResult.getUpdate().containsKey("$set")) {
+				mergeResult.getUpdate().get("$set", Document.class).putAll(updateOpDoc);
 			} else {
-				mergeResult.getUpdate().put("$pull", updateOpDoc);
-			}
-		} else {
-			if (StringUtils.isNotBlank(targetPath)) {
-				updateOpDoc = new Document(targetPath, true);
-				if (mergeResult.getUpdate().containsKey("$unset")) {
-					mergeResult.getUpdate().get("$unset", Document.class).putAll(updateOpDoc);
-				} else {
-					mergeResult.getUpdate().put("$unset", updateOpDoc);
-				}
+				mergeResult.getUpdate().put("$set", updateOpDoc);
 			}
 		}
 		return mergeResult;
@@ -367,13 +379,19 @@ public class MongodbMergeOperate {
 	public static void upsertMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult) {
 		final String targetPath = currentProperty.getTargetPath();
 		final MergeBundle.EventOperation operation = mergeBundle.getOperation();
-		Map<String, Object> filterMap = buildFilterMap(operation, mergeBundle.getAfter(), mergeBundle.getBefore());
+		Map<String, Object> before = mergeBundle.getBefore();
+		Map<String, Object> after = mergeBundle.getAfter();
+		Map<String, Object> filterMap;
+		if (null != before) {
+			filterMap = mergeBeforeAndAfter(before, after);
+		} else {
+			filterMap = new HashMap<>(after);
+		}
 		final Document filter = filter(filterMap, currentProperty.getJoinKeys());
 		mergeResult.getFilter().putAll(filter);
 		switch (operation) {
 			case INSERT:
 			case UPDATE:
-				Map<String, Object> after = mergeBundle.getAfter();
 				Map<String, Object> removeFields = mergeBundle.getRemovefields();
 				Document setOperateDoc = new Document();
 				Document unsetOperateDoc = new Document();
@@ -420,9 +438,7 @@ public class MongodbMergeOperate {
 				} else {
 					update.put("$set", setOperateDocFiltered);
 				}
-				if (operation == MergeBundle.EventOperation.INSERT) {
-					mergeResult.getUpdateOptions().upsert(true);
-				}
+				mergeResult.getUpdateOptions().upsert(true);
 				if (mergeResult.getOperation() == null) {
 					mergeResult.setOperation(MergeResult.Operation.UPDATE);
 				}
@@ -441,6 +457,7 @@ public class MongodbMergeOperate {
 		final MergeBundle.EventOperation operation = mergeBundle.getOperation();
 		Map<String, Object> before = mergeBundle.getBefore();
 		Map<String, Object> after = mergeBundle.getAfter();
+		removeIdIfNeed(after, currentProperty);
 		Map<String, Object> filterMap = buildFilterMap(operation, after, before);
 		Document filter = filter(
 				filterMap,
@@ -467,7 +484,7 @@ public class MongodbMergeOperate {
 		}
 		appendAllParentMergeFilters(mergeResult, mergeFilter);
 
-		Map<String, Object> value = MapUtils.isNotEmpty(mergeBundle.getAfter()) ? mergeBundle.getAfter() : mergeBundle.getBefore();
+		Map<String, Object> value = MapUtils.isNotEmpty(after) ? after : before;
 		Map<String, Object> removeFields = mergeBundle.getRemovefields();
 
 		String updatePatch = targetPath;
@@ -707,11 +724,14 @@ public class MongodbMergeOperate {
 		return filterMap;
 	}
 
-	private static Document buildUnsetDocument(Set<String> sharedJoinKeys, Map<String, Object> data, String targetPath, boolean isArray, boolean firstMergeResult) {
+	protected static Document buildUnsetDocument(Set<String> sharedJoinKeys, Map<String, Object> data, String targetPath, boolean isArray, boolean firstMergeResult) {
 		Document unsetDoc = new Document();
 		if (isArray) {
 			if (firstMergeResult && StringUtils.isNotBlank(targetPath)) {
 				data.keySet().forEach(key -> {
+					if (haveDot(key)) {
+						return;
+					}
 					if (sharedJoinKeys.contains(String.join(".", targetPath, key))) {
 						return;
 					}
@@ -720,15 +740,25 @@ public class MongodbMergeOperate {
 			}
 		} else {
 			data.keySet().forEach(key -> {
-				if (EmptyKit.isNotEmpty(targetPath)) {
-					unsetDoc.append(String.join(".", targetPath, key), true);
-				} else {
-					unsetDoc.append(key, true);
+				if (haveDot(key)) {
+					return;
 				}
+				String unsetKey = key;
+				if (EmptyKit.isNotEmpty(targetPath)) {
+					unsetKey = String.join(".", targetPath, key);
+				}
+				unsetDoc.append(unsetKey, true);
 			});
 			unsetDoc.keySet().removeIf(key -> isShareJoinKey(sharedJoinKeys, key));
 		}
 		return unsetDoc;
+	}
+
+	private static boolean haveDot(String str) {
+		if (StringUtils.isBlank(str)) {
+			return false;
+		}
+		return str.contains(".");
 	}
 
 	private static Document buildPullDocument(Map<String, Object> data, List<String> arrayKeys, boolean array, String targetPath) {
@@ -748,11 +778,11 @@ public class MongodbMergeOperate {
 		return updateOpDoc;
 	}
 
-	private static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent, Collection<String> allColumn, Collection<String> pks) {
+	protected static MergeBundle mergeBundle(TapRecordEvent tapRecordEvent) {
 		Map<String, Object> before = null;
 		Map<String, Object> after = null;
-		MergeBundle.EventOperation eventOperation = null;
-		Map<String, Object> removefields = null;
+		MergeBundle.EventOperation eventOperation;
+		Map<String, Object> removeFieldsMap = removeFieldsWrapper(tapRecordEvent);
 		if (tapRecordEvent instanceof TapInsertRecordEvent) {
 			after = ((TapInsertRecordEvent) tapRecordEvent).getAfter();
 			eventOperation = MergeBundle.EventOperation.INSERT;
@@ -760,25 +790,48 @@ public class MongodbMergeOperate {
 			before = ((TapUpdateRecordEvent) tapRecordEvent).getBefore();
 			after = ((TapUpdateRecordEvent) tapRecordEvent).getAfter();
 			eventOperation = MergeBundle.EventOperation.UPDATE;
-			List<String> removedFields = ((TapUpdateRecordEvent) tapRecordEvent).getRemovedFields();
-			if (removedFields != null && removedFields.size() > 0) {
-				removefields = new HashMap<>();
-				for (String removeField : removedFields) {
-					removefields.put(removeField, true);
-				}
-			}
 		} else {
 			before = ((TapDeleteRecordEvent) tapRecordEvent).getBefore();
 			eventOperation = MergeBundle.EventOperation.DELETE;
 		}
 
-		return new MergeBundle(eventOperation, before, after, removefields);
+		return new MergeBundle(eventOperation, before, after, removeFieldsMap);
+	}
+
+	private static Map<String, Object> removeFieldsWrapper(TapRecordEvent tapRecordEvent) {
+		List<String> removedFields = null;
+		Map<String, Object> removefieldsMap = new HashMap<>();
+		if (tapRecordEvent instanceof TapInsertRecordEvent) {
+			removedFields = ((TapInsertRecordEvent) tapRecordEvent).getRemovedFields();
+		} else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
+			removedFields = ((TapUpdateRecordEvent) tapRecordEvent).getRemovedFields();
+		}
+		if (null == removedFields) {
+			return new HashMap<>();
+		}
+		removedFields.forEach(removeField -> removefieldsMap.put(removeField, true));
+		return removefieldsMap;
 	}
 
 	private static Document filter(Map<String, Object> data, List<Map<String, String>> joinKeys) {
 		Document document = new Document();
 		for (Map<String, String> joinKey : joinKeys) {
 			document.put(joinKey.get("target"), MapUtil.getValueByKey(data, joinKey.get("source")));
+		}
+		return document;
+	}
+
+	protected static Document unsetFilter(Map<String, Object> before, Map<String, Object> after, List<Map<String, String>> joinKeys, int topLevel) {
+		Document document = new Document();
+		for (Map<String, String> joinKey : joinKeys) {
+			String key = joinKey.get("target");
+			Object value;
+			if (topLevel == 1) {
+				value = MapUtil.getValueByKey(after, key);
+			} else {
+				value = MapUtil.getValueByKey(before, key);
+			}
+			document.put(key, value);
 		}
 		return document;
 	}
@@ -837,11 +890,14 @@ public class MongodbMergeOperate {
 		if (null == parentFilters) {
 			return;
 		}
+		Document filter = mergeResult.getFilter();
 		for (Map.Entry<String, Object> entry : parentFilters.entrySet()) {
 			if (MergeFilterManager.test(entry)) {
 				continue;
 			}
-			mergeResult.getFilter().put(entry.getKey(), entry.getValue());
+			if (!filter.containsKey(entry.getKey())) {
+				filter.put(entry.getKey(), entry.getValue());
+			}
 		}
 	}
 
@@ -868,5 +924,43 @@ public class MongodbMergeOperate {
 			}
 		}
 		return setDoc;
+	}
+
+	protected static void removeIdIfNeed(Map<String, Object> data, MergeTableProperties mergeTableProperties) {
+		if (MapUtils.isEmpty(data) || null == mergeTableProperties) {
+			return;
+		}
+		MergeTableProperties.MergeType mergeType = mergeTableProperties.getMergeType();
+		if (mergeType != MergeTableProperties.MergeType.updateWrite) {
+			return;
+		}
+		String targetPath = mergeTableProperties.getTargetPath();
+		if (StringUtils.isNotBlank(targetPath)) {
+			return;
+		}
+		List<Map<String, String>> joinKeys = mergeTableProperties.getJoinKeys();
+		for (Map<String, String> joinKey : joinKeys) {
+			if (joinKey.containsValue("_id")) {
+				return;
+			}
+		}
+		data.remove("_id");
+	}
+
+	public static Map<String, Object> mergeBeforeAndAfter(Map<String, Object> before, Map<String, Object> after) {
+		Map<String, Object> result = new HashMap<>();
+		if (null != before) {
+			result.putAll(before);
+			if (null != after) {
+				after.forEach((k, v) -> {
+					if (!result.containsKey(k)) {
+						result.put(k, v);
+					}
+				});
+			}
+		} else {
+			result.putAll(after);
+		}
+		return result;
 	}
 }

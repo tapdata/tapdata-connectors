@@ -16,6 +16,7 @@ import io.tapdata.connector.tidb.config.TidbConfig;
 import io.tapdata.connector.tidb.ddl.TidbDDLSqlGenerator;
 import io.tapdata.connector.tidb.dml.TidbReader;
 import io.tapdata.connector.tidb.dml.TidbRecordWriter;
+import io.tapdata.connector.tidb.exception.TidbExceptionCollector;
 import io.tapdata.connector.tidb.util.HttpUtil;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
@@ -27,14 +28,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.value.TapArrayValue;
-import io.tapdata.entity.schema.value.TapBooleanValue;
-import io.tapdata.entity.schema.value.TapDateTimeValue;
-import io.tapdata.entity.schema.value.TapDateValue;
-import io.tapdata.entity.schema.value.TapMapValue;
-import io.tapdata.entity.schema.value.TapTimeValue;
-import io.tapdata.entity.schema.value.TapValue;
-import io.tapdata.entity.schema.value.TapYearValue;
+import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
@@ -44,11 +38,7 @@ import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import io.tapdata.pdk.apis.entity.ConnectionOptions;
-import io.tapdata.pdk.apis.entity.FilterResults;
-import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
-import io.tapdata.pdk.apis.entity.TestItem;
-import io.tapdata.pdk.apis.entity.WriteListResult;
+import io.tapdata.pdk.apis.entity.*;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
@@ -57,15 +47,15 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.sql.Date;
 import java.sql.SQLException;
+import java.sql.Time;
 import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.StringJoiner;
-import java.util.TimeZone;
-import java.util.UUID;
+import java.time.ZoneOffset;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -76,6 +66,7 @@ public class TidbConnector extends CommonDbConnector {
     private TidbConfig tidbConfig;
     private TidbJdbcContext tidbJdbcContext;
     private TimeZone timezone;
+    private TimeZone dbTimezone;
     private TidbReader tidbReader;
     AtomicReference<Throwable> throwableCatch = new AtomicReference<>();
 
@@ -83,14 +74,14 @@ public class TidbConnector extends CommonDbConnector {
 
     protected void initTimeZone() throws SQLException {
         if (EmptyKit.isBlank(tidbConfig.getTimezone())) {
-            timezone = tidbJdbcContext.queryTimeZone();
-        } else {
-            timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
+            tidbConfig.setTimezone("+00:00");
         }
+        timezone = TimeZone.getTimeZone(ZoneId.of(tidbConfig.getTimezone()));
+        dbTimezone = tidbJdbcContext.queryTimeZone();
     }
 
     @Override
-    public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
+    public void onStart(TapConnectionContext tapConnectionContext) throws SQLException {
         this.tidbConfig = new TidbConfig().load(tapConnectionContext.getConnectionConfig());
         tidbJdbcContext = new TidbJdbcContext(tidbConfig);
         commonDbConfig = tidbConfig;
@@ -98,7 +89,7 @@ public class TidbConnector extends CommonDbConnector {
         initTimeZone();
         tapLogger = tapConnectionContext.getLog();
         started.set(true);
-
+        exceptionCollector = new TidbExceptionCollector();
         commonSqlMaker = new CommonSqlMaker('`');
         tidbReader = new TidbReader(tidbJdbcContext);
         ddlSqlGenerator = new TidbDDLSqlGenerator();
@@ -141,42 +132,24 @@ public class TidbConnector extends CommonDbConnector {
 
         // source functions
         connectorFunctions.supportBatchCount(this::batchCount);
-        connectorFunctions.supportBatchRead(this::batchReadV3);
+        connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
         connectorFunctions.supportStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
 
+        // codecs
+        codecRegistry.registerFromTapValue(TapMapValue.class, "longtext", tapValue -> toJson(tapValue.getValue()));
+        codecRegistry.registerFromTapValue(TapArrayValue.class, "longtext", tapValue -> toJson(tapValue.getValue()));
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
             if (tapDateTimeValue.getValue() != null && tapDateTimeValue.getValue().getTimeZone() == null) {
                 tapDateTimeValue.getValue().setTimeZone(timezone);
             }
             return formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS");
         });
-        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> {
-            if (tapDateValue.getValue() != null && tapDateValue.getValue().getTimeZone() == null) {
-                tapDateValue.getValue().setTimeZone(timezone);
-            }
-            return formatTapDateTime(tapDateValue.getValue(), "yyyy-MM-dd");
-        });
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().isContainsIllegal() ? tapDateValue.getValue().getIllegalDate() : tapDateValue.getValue().toInstant());
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
-        codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> {
-            if (tapYearValue.getValue() != null && tapYearValue.getValue().getTimeZone() == null) {
-                tapYearValue.getValue().setTimeZone(timezone);
-            }
-            return formatTapDateTime(tapYearValue.getValue(), "yyyy");
-        });
-        codecRegistry.registerFromTapValue(TapBooleanValue.class, "tinyint(1)", TapValue::getValue);
-
-        codecRegistry.registerFromTapValue(TapMapValue.class, "longtext", tapMapValue -> {
-            if (tapMapValue != null && tapMapValue.getValue() != null) return toJson(tapMapValue.getValue());
-            return "null";
-        });
-        codecRegistry.registerFromTapValue(TapArrayValue.class, "longtext", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) return toJson(tapValue.getValue());
-            return "null";
-        });
-
+        codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
     }
 
     protected void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
@@ -185,6 +158,7 @@ public class TidbConnector extends CommonDbConnector {
         nodeContext.getLog().info("Source timezone: {}", timezone.toZoneId().toString());
         ProcessHandler.ProcessInfo info = new ProcessHandler.ProcessInfo()
                 .withZone(timezone)
+                .withDbZone(dbTimezone)
                 .withCdcServer(cdcServer)
                 .withFeedId(feedId)
                 .withAlive(this::isAlive)
@@ -322,6 +296,7 @@ public class TidbConnector extends CommonDbConnector {
         new TidbRecordWriter(tidbJdbcContext, tapTable)
                 .setInsertPolicy(insertDmlPolicy)
                 .setUpdatePolicy(updateDmlPolicy)
+                .setTapLogger(tapLogger)
                 .write(tapRecordEvents, consumer, this::isAlive);
     }
 
@@ -343,6 +318,7 @@ public class TidbConnector extends CommonDbConnector {
         filterResults.setFilter(tapAdvanceFilter);
         try {
             tidbReader.readWithFilter(tapConnectorContext, tapTable, tapAdvanceFilter, n -> !isAlive(), data -> {
+                processDataMap(data, tapTable);
                 filterResults.add(data);
                 if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
                     consumer.accept(filterResults);
@@ -376,8 +352,35 @@ public class TidbConnector extends CommonDbConnector {
     protected void processDataMap(DataMap dataMap, TapTable tapTable) throws RuntimeException {
         for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
             Object value = entry.getValue();
-            if (value instanceof Timestamp && null != timezone) {
-                entry.setValue(((Timestamp) value).toLocalDateTime().atZone(timezone.toZoneId()));
+            TapField field = tapTable.getNameFieldMap().get(entry.getKey());
+            String dataType = field.getDataType();
+            if (dataType == null) {
+                continue;
+            }
+            boolean isTimestamp = dataType.startsWith("timestamp") || dataType.startsWith("TIMESTAMP");
+            if (value instanceof LocalDateTime) {
+                if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                    continue;
+                }
+                if (isTimestamp) {
+                    entry.setValue(((LocalDateTime) value).atZone(ZoneOffset.UTC));
+                } else {
+                    entry.setValue(((LocalDateTime) value).minusHours(tidbConfig.getZoneOffsetHour()));
+                }
+            }  else if (value instanceof java.sql.Date) {
+                if (dataType.startsWith("year")) {
+                    entry.setValue(((Date) value).toLocalDate().getYear());
+                } else {
+                    entry.setValue(((Date) value).toLocalDate().atStartOfDay());
+                }
+            } else if (value instanceof Timestamp) {
+                if (isTimestamp) {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
+                } else {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
+                }
+            } else if (value instanceof Time) {
+                entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
             }
         }
     }

@@ -4,8 +4,7 @@
     "icon": "icons/dummy.png",
     "doc" : "${doc}",
     "id": "dummy",
-    "authentication": "Beta",
-    "tags": ["schema-free","Database"]
+    "tags": ["Database"]
   },
   "configOptions": {
     "pdkExpansion": [],

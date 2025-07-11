@@ -4,7 +4,9 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.dummy.constants.RecordOperators;
 import io.tapdata.dummy.constants.SyncStage;
 import io.tapdata.dummy.po.DummyOffset;
+import io.tapdata.dummy.utils.FieldTypeCode;
 import io.tapdata.dummy.utils.TapEventBuilder;
+import io.tapdata.dummy.utils.TypeMappingUtils;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
@@ -23,8 +25,8 @@ import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
+import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 
-import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
@@ -157,8 +159,9 @@ public class DummyConnector extends ConnectorBase {
             // generate insert record event
             TapInsertRecordEvent tapInsertRecordEvent;
             Long initialTotals = config.getInitialTotals();
+            List<FieldTypeCode> fieldCodes = TypeMappingUtils.toFieldCodes(table.getNameFieldMap());
             for (int dataIndex = 0; dataIndex < initialTotals && isAlive(); dataIndex++) {
-                tapInsertRecordEvent = builder.generateInsertRecordEvent(table);
+                tapInsertRecordEvent = builder.generateInsertRecordEvent(table, fieldCodes);
                 batchConsumer.accept(tapInsertRecordEvent);
             }
         }
@@ -192,6 +195,7 @@ public class DummyConnector extends ConnectorBase {
         Set<RecordOperators> operators = config.getIncrementalTypes();
 
         TapTable table;
+        Map<String, List<FieldTypeCode>> tableNameFieldTypeCodeMap = new Object2ObjectLinkedOpenHashMap<>();
         Map<String, Object> insertAfter;
         TapInsertRecordEvent insertRecordEvent;
         builder.reset(offsetState, SyncStage.Incremental);
@@ -204,9 +208,11 @@ public class DummyConnector extends ConnectorBase {
                     if (null == table) {
                         throw new RuntimeException(String.format("Not found table schema: %s", tableName));
                     }
+                    TapTable finalTable = table;
+                    List<FieldTypeCode> fieldTypeCodes = tableNameFieldTypeCodeMap.computeIfAbsent(tableName, k -> TypeMappingUtils.toFieldCodes(finalTable.getNameFieldMap()));
 
                     if (operators.contains(RecordOperators.Insert)) {
-                        insertRecordEvent = builder.generateInsertRecordEvent(table);
+                        insertRecordEvent = builder.generateInsertRecordEvent(table, fieldTypeCodes);
                         insertAfter = new HashMap<>(insertRecordEvent.getAfter());
                         if (!rate.addReturn()) return;
                         batchConsumer.accept(insertRecordEvent);
@@ -215,11 +221,11 @@ public class DummyConnector extends ConnectorBase {
                     }
                     if (operators.contains(RecordOperators.Update)) {
                         if (!rate.addReturn()) return;
-                        batchConsumer.accept(builder.generateUpdateRecordEvent(table, insertAfter));
+                        batchConsumer.accept(builder.generateUpdateRecordEvent(table, insertAfter, fieldTypeCodes));
                     }
                     if (operators.contains(RecordOperators.Delete)) {
                         if (!rate.addReturn()) return;
-                        batchConsumer.accept(builder.generateDeleteRecordEvent(table, insertAfter));
+                        batchConsumer.accept(builder.generateDeleteRecordEvent(table, insertAfter, fieldTypeCodes));
                     }
                 }
             }
@@ -247,7 +253,7 @@ public class DummyConnector extends ConnectorBase {
             for (TapRecordEvent e : recordEvents) {
                 if (!(isAlive() && writeRate.addReturn())) return;
 
-                delayCalculation.log(e.getTime());
+//                delayCalculation.log(e.getTime());
 
                 if (e instanceof TapInsertRecordEvent) {
                     insert.addAndGet(1);

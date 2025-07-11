@@ -7,7 +7,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 
 import java.nio.ByteBuffer;
 
-public class DeleteEvent implements DMLEvent {
+public class DeleteEvent extends DMLEvent {
     private DeleteEvent() {
 
     }

@@ -12,31 +12,34 @@ import java.util.zip.GZIPOutputStream;
  * @create 2022-05-25 17:41
  **/
 public class StringCompressUtil {
-	private static final String DEFAULT_CODE = "ISO-8859-1";
+    private StringCompressUtil() {
+    }
 
-	public static String compress(String str) throws IOException {
-		if (str == null || str.length() == 0) {
-			return str;
-		}
-		ByteArrayOutputStream out = new ByteArrayOutputStream();
-		GZIPOutputStream gzip = new GZIPOutputStream(out);
-		gzip.write(str.getBytes());
-		gzip.close();
-		return out.toString(DEFAULT_CODE);
-	}
+    public static byte[] compress(String str) throws IOException {
+        if (str == null || str.length() == 0) {
+            return null;
+        }
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            try (GZIPOutputStream gzip = new GZIPOutputStream(out)) {
+                gzip.write(str.getBytes());
+            }
+            return out.toByteArray();
+        }
+    }
 
-	public static String uncompress(String str) throws IOException {
-		if (str == null || str.length() == 0) {
-			return str;
-		}
-		ByteArrayOutputStream out = new ByteArrayOutputStream();
-		ByteArrayInputStream in = new ByteArrayInputStream(str.getBytes(DEFAULT_CODE));
-		GZIPInputStream gunzip = new GZIPInputStream(in);
-		byte[] buffer = new byte[256];
-		int n;
-		while ((n = gunzip.read(buffer)) >= 0) {
-			out.write(buffer, 0, n);
-		}
-		return out.toString(DEFAULT_CODE);
-	}
+    public static String uncompress(byte[] bytes) throws IOException {
+        if (bytes == null || bytes.length == 0) {
+            return null;
+        }
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream();
+             ByteArrayInputStream in = new ByteArrayInputStream(bytes);
+             GZIPInputStream gunzip = new GZIPInputStream(in)) {
+            byte[] buffer = new byte[256];
+            int n;
+            while ((n = gunzip.read(buffer)) >= 0) {
+                out.write(buffer, 0, n);
+            }
+            return out.toString();
+        }
+    }
 }

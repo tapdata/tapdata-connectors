@@ -25,7 +25,7 @@ public class TimeConverter extends BaseTapdataConverter {
     }
 
     @Override
-    Object convert(Object data) {
+    Object convert(Object data, RelationalColumn field) {
         //for pg<=9.4
         if (data instanceof String) {
             double microsecond = 0;

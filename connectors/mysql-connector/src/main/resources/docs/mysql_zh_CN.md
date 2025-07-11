@@ -3,6 +3,7 @@
 请遵循以下说明以确保在 Tapdata 中成功添加和使用MySQL数据库。
 ### **2. 支持版本**
 MySQL 5.0, 5.1, 5.5, 5.6, 5.7, 8.x
+- 说明：如果使用MySQL中间件连接（包括但不限于ProxySQL），需要在高级设置的连接参数中加上 `useCursorFetch=false` 属性
 ### **3. 先决条件（作为源）**
 #### **3.1 开启 Binlog**
 - 必须开启 MySQL 的 binlog ，Tapdata 才能正常完成同步工作。

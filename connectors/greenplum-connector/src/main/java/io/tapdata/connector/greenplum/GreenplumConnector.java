@@ -16,6 +16,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.kit.DbKit;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -31,6 +32,7 @@ import org.postgresql.util.PGobject;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -73,7 +75,16 @@ public class GreenplumConnector extends PostgresConnector {
             return "null";
         });
         codecRegistry.registerFromTapValue(TapArrayValue.class, "text", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null) return toJson(tapValue.getValue());
+            if (tapValue != null && tapValue.getValue() != null) {
+                if (tapValue.getOriginType().endsWith(" array")) {
+                    if (tapValue.getOriginValue() instanceof PgArray) {
+                        return tapValue.getOriginValue();
+                    } else {
+                        return tapValue.getValue();
+                    }
+                }
+                return toJson(tapValue.getValue());
+            }
             return "null";
         });
 
@@ -115,21 +126,37 @@ public class GreenplumConnector extends PostgresConnector {
             return new TapStringValue(interval);
         });
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
-        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTime());
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> {
+            if (postgresConfig.getOldVersionTimezone()) {
+                return tapTimeValue.getValue().toTime();
+            } else if (EmptyKit.isNotNull(tapTimeValue.getValue().getTimeZone())) {
+                return tapTimeValue.getValue().toInstant().atZone(ZoneId.systemDefault()).toLocalTime();
+            } else {
+                return tapTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalTime();
+            }
+        });
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
+            if (postgresConfig.getOldVersionTimezone() || EmptyKit.isNotNull(tapDateTimeValue.getValue().getTimeZone())) {
+                return tapDateTimeValue.getValue().toTimestamp();
+            } else {
+                return tapDateTimeValue.getValue().toInstant().atZone(postgresConfig.getZoneId()).toLocalDateTime();
+            }
+        });
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
-        codecRegistry.registerFromTapValue(TapYearValue.class, "character(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
+        codecRegistry.registerFromTapValue(TapYearValue.class, "character(4)", TapValue::getOriginValue);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
     }
 
     @Override
     public void onStart(TapConnectionContext connectorContext) {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectorContext.getConnectionConfig());
+        postgresConfig.load(connectorContext.getNodeConfig());
         postgresJdbcContext = new GreenplumJdbcContext(postgresConfig);
         commonDbConfig = postgresConfig;
         jdbcContext = postgresJdbcContext;
         commonSqlMaker = new CommonSqlMaker();
         postgresVersion = postgresJdbcContext.queryVersion();
+        postgresJdbcContext.withPostgresVersion(postgresVersion);
         ddlSqlGenerator = new PostgresDDLSqlGenerator();
         tapLogger = connectorContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();
@@ -152,20 +179,25 @@ public class GreenplumConnector extends PostgresConnector {
         new GreenplumRecordWriter(postgresJdbcContext, tapTable)
                 .setInsertPolicy(insertDmlPolicy)
                 .setUpdatePolicy(updateDmlPolicy)
-                .write(tapRecordEvents, writeListResultConsumer);
+                .setTapLogger(tapLogger)
+                .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
     }
 
     @Override
-    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
+    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws SQLException {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                GreenplumTest greenplumTest = new GreenplumTest(postgresConfig, consumer)
+                GreenplumTest greenplumTest = (GreenplumTest) new GreenplumTest(postgresConfig, consumer, connectionOptions).withPostgresVersion()
         ) {
             greenplumTest.testOneByOne();
             return connectionOptions;
         }
+    }
+
+    public List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
+        return tapTableList;
     }
 
 }

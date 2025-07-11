@@ -4,8 +4,7 @@
     "icon": "icons/mysql.png",
     "id": "mysql",
     "doc": "${doc}",
-    "authentication": "Alpha",
-    "tags": ["Database", "ssl", "doubleActive"]
+    "tags": ["Database", "ssl", "doubleActive", "disableForeignKey"]
   },
   "configOptions": {
     "capabilities": [
@@ -32,6 +31,12 @@
       },
       {
         "id": "illegal_date_acceptable"
+      },
+      {
+        "id": "batch_read_hash_split"
+      },
+      {
+        "id": "source_support_exactly_once"
       }
     ],
     "supportDDL": {
@@ -210,7 +215,7 @@
               "x-index": 70,
               "enum": [
                 {
-                  "label": "Database Timezone",
+                  "label": "",
                   "value": ""
                 },
                 {
@@ -322,6 +327,160 @@
           }
         }
       }
+    },
+    "node": {
+      "type": "object",
+      "properties": {
+        "createAutoInc": {
+          "type": "boolean",
+          "title": "${createAutoInc}",
+          "default": false,
+          "x-index": 5,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${createAutoIncTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "autoIncJumpValue": {
+          "required": true,
+          "type": "string",
+          "title": "${autoIncJumpValue}",
+          "default": 1000000,
+          "x-index": 6,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".createAutoInc"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "applyDefault": {
+          "type": "boolean",
+          "title": "${applyDefault}",
+          "default": false,
+          "x-index": 7,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${applyDefaultTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "hashSplit": {
+          "type": "boolean",
+          "title": "${hashSplit}",
+          "default": false,
+          "x-index": 10,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${hashSplitTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "maxSplit": {
+          "required": true,
+          "type": "string",
+          "title": "${maxSplit}",
+          "default": 20,
+          "x-index": 12,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 2,
+            "max": 10000
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".hashSplit"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "batchReadThreadSize": {
+          "required": true,
+          "type": "string",
+          "title": "${batchReadThreadSize}",
+          "default": 4,
+          "x-index": 13,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 1,
+            "max": 16
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".hashSplit"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "maximumQueueSize": {
+          "type": "string",
+          "title": "${maximumQueueSize}",
+          "default": 800,
+          "x-index": 14,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${maximumQueueSizeTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        }
+      }
     }
   },
   "messages": {
@@ -338,7 +497,7 @@
       "addtionalString": "Connection Parameter String",
       "extParamsTip": "Additional connection parameters in URI, you can write according to personalized scenarios",
       "timezone": "timezone",
-      "timezoneTip": "Specify the time zone, otherwise the database time zone will be used by default",
+      "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
       "doc": "docs/mysql_en_US.md",
       "syncIndex": "Sync Index",
       "syncIndexTip": "Enabling this capability will automatically synchronize the source index to the target. This action may impact the target database, so please enable it with caution.",
@@ -349,7 +508,18 @@
       "master-slaveAddressTip" : "The address port group that the master-slave architecture needs to fill in, the address port of the master database needs to be filled in the first line, for example: 192.168.1.200:3306, 192.168.1.201:3307",
       "Address" : "Please enter the server address",
       "serverPort": "Server port",
-      "prompt": "Add"
+      "prompt": "Add",
+      "createAutoInc": "Sync auto-increment column",
+      "createAutoIncTooltip": "After turning on, the MySQL target will synchronize the auto-increment column, but the step of the auto-increment key will only be affected by the global configuration auto_increment_increment, please configure it as needed",
+      "autoIncJumpValue": "Auto-increment key jump value",
+      "applyDefault": "Apply default value",
+      "applyDefaultTooltip": "When the switch is turned on, the default value will be applied to the target. If there are unadapted functions or expressions, it may cause an error",
+      "hashSplit": "Hash split",
+      "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the hash value, suitable for large table full-stage sharded synchronization",
+      "maxSplit": "Maximum number of splits",
+      "batchReadThreadSize": "Batch read thread size",
+      "maximumQueueSize": "Maximum queue size",
+      "maximumQueueSizeTip": "The queue size for reading incremental data in MySQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting."
     },
     "zh_CN": {
       "host": "地址",
@@ -363,7 +533,7 @@
       "addtionalString": "连接参数",
       "extParamsTip": "URI额外的连接参数，可以根据个性化场景书写",
       "timezone": "时区",
-      "timezoneTip": "指定时区，否则默认使用数据库时区",
+      "timezoneTip": "指定时区，否则不做时区处理",
       "doc": "docs/mysql_zh_CN.md",
       "syncIndex": "同步索引",
       "syncIndexTip": "开启该能力后，会自动将源的索引同步到目标，该行为可能会对目标数据库造成影响，请谨慎开启",
@@ -374,7 +544,18 @@
       "master-slaveAddressTip" : "主从架构需要填写的地址端口组，主库的地址端口需填写在第一行，例如：192.168.1.200:3306, 192.168.1.201:3306",
       "Address" : "服务器地址",
       "serverPort": "服务器端口",
-      "prompt": "添加"
+      "prompt": "添加",
+      "createAutoInc": "同步自增列",
+      "createAutoIncTooltip": "开启后，MySQL目标会同步自增列，但自增键的步长只会受全局配置auto_increment_increment影响，请自行按需配置",
+      "autoIncJumpValue": "自增键跳跃值",
+      "applyDefault": "应用默认值",
+      "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错",
+      "hashSplit": "哈希分片",
+      "hashSplitTooltip": "开关打开时，可以根据哈希值进行分片，适用于大表全量阶段分片同步",
+      "maxSplit": "最大分片数",
+      "batchReadThreadSize": "批量读取线程数",
+      "maximumQueueSize": "最大队列大小",
+      "maximumQueueSizeTip": "MySql读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置。"
     },
     "zh_TW": {
       "host": "地址",
@@ -388,7 +569,7 @@
       "addtionalString": "連接參數",
       "extParamsTip": "URI額外的連接參數，可以根據個性化場景書寫",
       "timezone": "時區",
-      "timezoneTip": "指定時區，否則默認使用數據庫時區",
+      "timezoneTip": "指定時區，否則不做時區處理",
       "doc": "docs/mysql_zh_TW.md",
       "syncIndex": "同步索引",
       "syncIndexTip": "開啓該能力後，會自動將源的索引同步到目標，該行為可能會對目標數據庫造成影響，請謹慎開啓",
@@ -399,7 +580,18 @@
       "master-slaveAddressTip" : "主從架構需要填寫的地址端口組，主庫的地址端口需填寫在第壹行，例如：192.168.1.200:3306, 192.168.1.201:3306",
       "Address" : "服務器地址",
       "serverPort": "端口",
-      "prompt": "添加"
+      "prompt": "添加",
+      "createAutoInc": "同步自增列",
+      "createAutoIncTooltip": "開啓後，MySQL目標會同步自增列，但自增鍵的步長只會受全局配置auto_increment_increment影響，請自行按需配置",
+      "autoIncJumpValue": "自增鍵跳躍值",
+      "applyDefault": "應用默認值",
+      "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯",
+      "hashSplit": "哈希分片",
+      "hashSplitTooltip": "開關打開時，可以根據哈希值進行分片，適用於大表全量階段分片同步",
+      "maxSplit": "最大分片數",
+      "batchReadThreadSize": "批量讀取線程數",
+      "maximumQueueSize": "最大隊列大小",
+      "maximumQueueSizeTip": "MySql 讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置。"
     }
   },
   "dataTypes": {
@@ -438,7 +630,7 @@
       "pkEnablement": false
     },
     "json": {
-      "to": "TapMap",
+      "to": "TapJson",
       "byte": "4g",
       "pkEnablement": false
     },
@@ -475,13 +667,9 @@
       "queryOnly": true
     },
     "bit[($bit)]": {
-      "to": "TapNumber",
+      "to": "TapBinary",
       "bit": 64,
       "queryOnly": true
-    },
-    "tinyint(1)": {
-      "to": "TapBoolean",
-      "bit": 1
     },
     "tinyint[($zerofill)]": {
       "to": "TapNumber",
@@ -502,7 +690,7 @@
       ],
       "unsigned": "unsigned"
     },
-    "tinyint($zerofill) [unsigned] [zerofill]": {
+    "tinyint[($zerofill)] unsigned zerofill": {
       "to": "TapNumber",
       "bit": 8,
       "precision": 3,
@@ -531,6 +719,16 @@
       ],
       "unsigned": "unsigned"
     },
+    "smallint[($zerofill)] unsigned zerofill": {
+      "to": "TapNumber",
+      "bit": 16,
+      "precision": 5,
+      "value": [
+        0,
+        65535
+      ],
+      "unsigned": "unsigned"
+    },
     "mediumint[($zerofill)]": {
       "to": "TapNumber",
       "bit": 24,
@@ -541,6 +739,16 @@
       ]
     },
     "mediumint[($zerofill)] unsigned": {
+      "to": "TapNumber",
+      "bit": 24,
+      "precision": 8,
+      "value": [
+        0,
+        16777215
+      ],
+      "unsigned": "unsigned"
+    },
+    "mediumint[($zerofill)] unsigned zerofill": {
       "to": "TapNumber",
       "bit": 24,
       "precision": 8,
@@ -568,6 +776,16 @@
         4294967295
       ]
     },
+    "int[($zerofill)] unsigned zerofill": {
+      "to": "TapNumber",
+      "bit": 32,
+      "precision": 10,
+      "value": [
+        0,
+        4294967295
+      ],
+      "unsigned": "unsigned"
+    },
     "bigint[($zerofill)]": {
       "to": "TapNumber",
       "bit": 64,
@@ -585,6 +803,16 @@
         0,
         18446744073709551615
       ]
+    },
+    "bigint[($zerofill)] unsigned zerofill": {
+      "to": "TapNumber",
+      "bit": 64,
+      "precision": 20,
+      "value": [
+        0,
+        18446744073709551615
+      ],
+      "unsigned": "unsigned"
     },
     "decimal[($precision,$scale)][unsigned]": {
       "to": "TapNumber",
@@ -726,14 +954,12 @@
     "enum($enums)": {
       "name": "enum",
       "to": "TapString",
-      "queryOnly": true,
-      "byte": 16383
+      "queryOnly": true
     },
     "set($sets)": {
       "name": "set",
       "to": "TapString",
-      "queryOnly": true,
-      "byte": 16383
+      "queryOnly": true
     },
     "point": {
       "to": "TapBinary",

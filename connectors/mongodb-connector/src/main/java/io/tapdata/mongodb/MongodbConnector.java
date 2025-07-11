@@ -1,5 +1,6 @@
 package io.tapdata.mongodb;
 
+import com.alibaba.fastjson.JSONObject;
 import com.mongodb.*;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.client.*;
@@ -26,9 +27,9 @@ import io.tapdata.entity.utils.ParagraphFormatter;
 import io.tapdata.exception.TapPdkTerminateByServerEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.batch.MongoBatchReader;
-import io.tapdata.mongodb.entity.ReadParam;
-import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.entity.MongoCdcOffset;
+import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.mongodb.entity.ReadParam;
 import io.tapdata.mongodb.reader.MongodbOpLogStreamV3Reader;
 import io.tapdata.mongodb.reader.MongodbStreamReader;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
@@ -43,6 +44,7 @@ import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
 import io.tapdata.pdk.apis.exception.NotSupportedException;
+import io.tapdata.pdk.apis.exception.TapTestItemException;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
@@ -96,8 +98,8 @@ public class MongodbConnector extends ConnectorBase {
 	private MongodbStreamReader mongodbStreamReader;
 	private MongodbStreamReader opLogStreamReader;
 	private ConcurrentHashMap<String,Set<String>> shardKeyMap = new ConcurrentHashMap<>();
+	private final Map<String, MongodbWriter> writerMap = new ConcurrentHashMap<>();
 
-	private volatile MongodbWriter mongodbWriter;
 	protected Map<String, Integer> stringTypeValueMap;
 
 	private final MongodbExecuteCommandFunction mongodbExecuteCommandFunction = new MongodbExecuteCommandFunction();
@@ -115,6 +117,20 @@ public class MongodbConnector extends ConnectorBase {
 		MongoCollection<Document> collection = null;
 		try {
 			collection = mongoDatabase.getCollection(table);
+		}catch (Exception e){
+			exceptionCollector.collectTerminateByServer(e);
+			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
+			exceptionCollector.collectReadPrivileges(e);
+			exceptionCollector.collectWritePrivileges(e);
+			throw e;
+		}
+		return collection;
+	}
+
+	protected MongoCollection<RawBsonDocument> getMongoRawCollection(String table) {
+		MongoCollection<RawBsonDocument> collection = null;
+		try {
+			collection = mongoDatabase.getCollection(table, RawBsonDocument.class);
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),e);
@@ -196,14 +212,39 @@ public class MongodbConnector extends ConnectorBase {
 						}
 
 						collection.listIndexes().forEach((index) -> {
-							;
+							Object keyObj = index.get("key");
+							if (!(keyObj instanceof Document)) {
+								return;
+							}
+							Document keys = (Document) keyObj;
+
 							TapIndex tapIndex = new TapIndex();
 							// TODO: TapIndex struct not enough to represent index, so we encode index info in name
 							tapIndex.setName("__t__" + ((Document) index).toJson());
 
-							// add a empty tapIndexField
-							TapIndexField tapIndexField = new TapIndexField();
-							tapIndex.indexField(tapIndexField);
+							AtomicBoolean haveOid = new AtomicBoolean();
+							AtomicInteger keyCounter = new AtomicInteger();
+							keys.forEach((k, v) -> {
+								TapIndexField tapIndexField = new TapIndexField().name(k);
+								if (v instanceof Integer) {
+									tapIndexField.fieldAsc(v.equals(1));
+								} else {
+									tapIndexField.fieldAsc(true);
+								}
+								tapIndex.indexField(tapIndexField);
+								if (k.equals("_id")) {
+									haveOid.set(true);
+								}
+								keyCounter.incrementAndGet();
+							});
+							if (Boolean.TRUE.equals(index.get(UNIQUE_KEY))) {
+								tapIndex.unique(true);
+							} else {
+								tapIndex.unique(false);
+							}
+							if (haveOid.get() && keyCounter.get() == 1) {
+								tapIndex.unique(true);
+							}
 							TapLogger.info(TAG, "MongodbConnector discoverSchema table: {} index {}", name, ((Document) index).toJson());
 							table.add(tapIndex);
 						});
@@ -376,12 +417,15 @@ public class MongodbConnector extends ConnectorBase {
 				connectionOptions.capability(Capability.create(ConnectionOptions.CAPABILITY_SOURCE_INCREMENTAL_UPDATE_EVENT_HAVE_BEFORE));
 			}
 		} catch (Throwable throwable) {
-			exceptionCollector.collectTerminateByServer(throwable);
-			exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),throwable);
-			exceptionCollector.collectReadPrivileges(throwable);
-			exceptionCollector.collectWritePrivileges(throwable);
-			TapLogger.error(TAG, throwable.getMessage());
-			consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Failed, " + throwable.getMessage()));
+            try {
+                exceptionCollector.collectTerminateByServer(throwable);
+                exceptionCollector.collectUserPwdInvalid(mongoConfig.getUri(),throwable);
+                exceptionCollector.collectReadPrivileges(throwable);
+                exceptionCollector.collectWritePrivileges(throwable);
+                consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Failed, " + throwable.getMessage()));
+            } catch (Exception e) {
+                consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestItemException(e), TestItem.RESULT_FAILED));
+            }
 		} finally {
 			onStop(connectionContext);
 		}
@@ -452,7 +496,8 @@ public class MongodbConnector extends ConnectorBase {
 		});
 		codecRegistry.registerToTapValue(Binary.class, (value, tapType) -> {
 			Binary binary = (Binary) value;
-			return new TapBinaryValue(binary.getData());
+			ByteData byteData = new ByteData(binary.getType(), binary.getData());
+			return new TapBinaryValue(byteData);
 		});
 
 		codecRegistry.registerToTapValue(Code.class, (value, tapType) -> {
@@ -473,8 +518,10 @@ public class MongodbConnector extends ConnectorBase {
 		codecRegistry.registerFromTapValue(TapTimeValue.class, "DATE_TIME", tapTimeValue -> tapTimeValue.getValue().toDate());
 		codecRegistry.registerFromTapValue(TapDateTimeValue.class, "DATE_TIME", tapDateTimeValue -> tapDateTimeValue.getValue().toDate());
 		codecRegistry.registerFromTapValue(TapDateValue.class, "DATE_TIME", tapDateValue -> tapDateValue.getValue().toDate());
-		codecRegistry.registerFromTapValue(TapYearValue.class, "STRING(4)", tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
-
+		codecRegistry.registerFromTapValue(TapYearValue.class, "STRING(4)", TapValue::getOriginValue);
+		codecRegistry.registerFromTapValue(TapBinaryValue.class,"BINARY",tapBinaryValue -> {
+			return new Binary(tapBinaryValue.getValue().getType(), tapBinaryValue.getValue().getValue());
+		});
 		//Handle ObjectId when the source is also mongodb, we convert ObjectId to String before enter incremental engine.
 		//We need check the TapStringValue, when will write to mongodb, if the originValue is ObjectId, then use originValue instead of the converted String value.
 		codecRegistry.registerFromTapValue(TapStringValue.class, tapValue -> {
@@ -573,7 +620,7 @@ public class MongodbConnector extends ConnectorBase {
 		}
 		CommonDbConfig mongodbConfig = new MongodbConfig().load(connectionConfig);
 		String database = mongodbConfig.getDatabase();
-		if (null == database || "".equals(database.trim())) {
+		if (null == database || database.trim().isEmpty()) {
 			throw new CoreException("The value of database name in connection config can not be empty");
 		}
 		DataMap nodeConfig = tapConnectorContext.getNodeConfig();
@@ -582,11 +629,10 @@ public class MongodbConnector extends ConnectorBase {
 		if (CollectionUtils.isNotEmpty(pks) && (pks.size() > 1 || !"_id".equals(pks.iterator().next()))) {
 			List<TapIndex> tapIndices = new ArrayList<>();
 			TapIndex tapIndex = new TapIndex();
-			Iterator<String> iterator = pks.iterator();
-			while (iterator.hasNext()) {
-				String pk = iterator.next();
+			for (String pk : pks) {
 				tapIndex.indexField(new TapIndexField().name(pk).fieldAsc(true));
 			}
+			tapIndex.setUnique(true);
 			tapIndices.add(tapIndex);
 			TapCreateIndexEvent tapCreateIndexEvent = new TapCreateIndexEvent().indexList(tapIndices);
 			createIndex(tapConnectorContext, table, tapCreateIndexEvent);
@@ -687,7 +733,10 @@ public class MongodbConnector extends ConnectorBase {
 		boolean isShardCollection = shardCollection instanceof Boolean && ((Boolean) shardCollection);
 		if (isShardCollection && null != table) {
 				isShardCollection = false;
-				TapIndexEx partitionIndex = table.getPartitionIndex();
+				TapIndexEx partitionIndex = null;
+				if(null != table.getTableAttr().get("partitionIndex")){
+					partitionIndex = JSONObject.parseObject((String)table.getTableAttr().get("partitionIndex"), TapIndexEx.class);
+				}
 				if (null != partitionIndex) {
 					Boolean unique = Optional.ofNullable(partitionIndex.getUnique()).orElse(false);
 					List<TapIndexField> indexFields = partitionIndex.getIndexFields();
@@ -1197,13 +1246,8 @@ public class MongodbConnector extends ConnectorBase {
 			throw new RuntimeException("load mongo config failed from connection config");
 		}
 		if (mongoClient == null) {
-			try {
-				mongoClient = MongodbUtil.createMongoClient(mongoConfig);
-				mongoDatabase = mongoClient.getDatabase(mongoConfig.getDatabase());
-			} catch (Throwable e) {
-				exceptionCollector.collectTerminateByServer(e);
-				throw new RuntimeException(String.format("create mongodb connection failed %s", e.getMessage()), e);
-			}
+			mongoClient = MongodbUtil.createMongoClient(mongoConfig);
+			mongoDatabase = mongoClient.getDatabase(mongoConfig.getDatabase());
 		}
 		mongodbExecuteCommandFunction.setLog(connectionContext.getLog());
 	}
@@ -1265,25 +1309,23 @@ public class MongodbConnector extends ConnectorBase {
 	 */
 	private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
 		putShardKey(table.getId());
+		String threadName = Thread.currentThread().getName();
+		MongodbWriter mongodbWriter = writerMap.get(threadName);
+		if (EmptyKit.isNull(mongodbWriter)) {
+			mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
+			writerMap.put(threadName, mongodbWriter);
+		}
 		try {
-			if (mongodbWriter == null) {
-				synchronized (this) {
-					if (mongodbWriter == null) {
-						mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
-						ConnectorCapabilities connectorCapabilities = connectorContext.getConnectorCapabilities();
-						if (null != connectorCapabilities) {
-							mongoConfig.setInsertDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY) ?
-									ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS : connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY));
-							mongoConfig.setUpdateDmlPolicy(null == connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY) ?
-									ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS : connectorCapabilities.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY));
-						} else {
-							mongoConfig.setInsertDmlPolicy(ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS);
-							mongoConfig.setUpdateDmlPolicy(ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS);
-						}
-					}
-				}
+			String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
+			if (insertDmlPolicy == null) {
+				insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
 			}
-			if ("log_on_nonexists".equals(mongoConfig.getUpdateDmlPolicy())) {
+			String updateDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
+			if (updateDmlPolicy == null) {
+				updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
+			}
+			mongodbWriter.dmlPolicy(insertDmlPolicy, updateDmlPolicy);
+			if ("log_on_nonexists".equals(updateDmlPolicy)) {
 				List<TapRecordEvent> noUpdateRecordEvents = new ArrayList<>();
 				for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
 					if (tapRecordEvent instanceof TapUpdateRecordEvent) {
@@ -1310,7 +1352,7 @@ public class MongodbConnector extends ConnectorBase {
 		}
 	}
 
-	private void queryByAdvanceFilter(TapConnectorContext connectorContext, TapAdvanceFilter tapAdvanceFilter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
+	protected void queryByAdvanceFilter(TapConnectorContext connectorContext, TapAdvanceFilter tapAdvanceFilter, TapTable table, Consumer<FilterResults> consumer, boolean noCursorTimeout) throws Throwable {
 		MongoCollection<Document> collection = getMongoCollection(table.getId());
 		List<Bson> bsonList = new ArrayList<>();
 		DataMap match = tapAdvanceFilter.getMatch();
@@ -1409,8 +1451,10 @@ public class MongodbConnector extends ConnectorBase {
 		if (batchSize == null) {
 			batchSize = 1000;
 		}
-		iterable.batchSize(batchSize);
-		iterable.noCursorTimeout(true);
+        iterable.batchSize(batchSize);
+        if (noCursorTimeout) {
+            iterable.noCursorTimeout(true);
+        }
 		try (final MongoCursor<Document> mongoCursor = iterable.iterator()) {
 			while (mongoCursor.hasNext()) {
 				filterResults.add(mongoCursor.next());
@@ -1423,6 +1467,10 @@ public class MongodbConnector extends ConnectorBase {
 		if (filterResults.resultSize() > 0)
 			consumer.accept(filterResults);
 	}
+
+    protected void queryByAdvanceFilter(TapConnectorContext connectorContext, TapAdvanceFilter tapAdvanceFilter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
+        queryByAdvanceFilter(connectorContext, tapAdvanceFilter, table, consumer, true);
+    }
 
 	/**
 	 * The method invocation life circle is below,
@@ -1508,8 +1556,9 @@ public class MongodbConnector extends ConnectorBase {
 				.withMongodbConfig(mongoConfig)
 				.withBatchOffset(batchOffset)
 				.withMongodbExceptionCollector(exceptionCollector)
-				.withMongoCollection(this::getMongoCollection)
-				.withErrorHandler(e -> errorHandle(e, connectorContext));
+				.withMongoRawCollection(this::getMongoRawCollection)
+				.withErrorHandler(e -> errorHandle(e, connectorContext))
+				.withMongoClient(mongoClient);
 		MongoBatchReader.of(param).batchReadCollection(param);
 	}
 
@@ -1673,10 +1722,6 @@ public class MongodbConnector extends ConnectorBase {
 			mongoClient = null;
 		}
 
-		if (mongodbWriter != null) {
-			mongodbWriter.onDestroy();
-			mongodbWriter = null;
-		}
 		closeOpLogThreadSource();
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
@@ -1707,14 +1752,16 @@ public class MongodbConnector extends ConnectorBase {
 	}
 
 	protected TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) throws Throwable {
-		TableInfo tableInfo = new TableInfo();
+		TableInfo tableInfo;
 		try {
 			String database = mongoConfig.getDatabase();
 			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
 			Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
 			tableInfo = TableInfo.create();
-			tableInfo.setNumOfRows(Long.valueOf(collStats.getInteger("count")));
-			tableInfo.setStorageSize(Long.valueOf(collStats.getInteger("size")));
+			BigDecimal numOfRows = new BigDecimal(String.valueOf(collStats.get("count")));
+			tableInfo.setNumOfRows(numOfRows.longValue());
+			BigDecimal storageSize = new BigDecimal(String.valueOf(collStats.get("size")));
+			tableInfo.setStorageSize(storageSize.longValue());
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);

@@ -1,27 +1,30 @@
 package io.tapdata.connector.gauss.cdc.logic.event.other;
 
 import io.tapdata.connector.gauss.cdc.logic.event.Event;
-import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.connector.gauss.cdc.logic.param.EventParam;
+import io.tapdata.connector.gauss.util.LogicUtil;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
 
 import java.nio.ByteBuffer;
+import java.util.Map;
 
 public class HeartBeatEvent implements Event<TapEvent> {
     private HeartBeatEvent() {
 
     }
+
     public static HeartBeatEvent instance() {
         return new HeartBeatEvent();
     }
+
     @Override
     public EventEntity<TapEvent> process(ByteBuffer logEvent, EventParam processParam) {
         return null;
     }
 
     @Override
-    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, AnalyzeParam param) {
+    public Event.EventEntity<TapEvent> analyze(ByteBuffer logEvent, Map<String, Map<String, String>> dataTypeMap) {
         HeartbeatEvent event = new HeartbeatEvent();
         byte[] lsn1 = LogicUtil.read(logEvent, 8); //int64, 发送心跳逻辑日志时读取的WAL日志结束位置
         byte[] lsn2 = LogicUtil.read(logEvent, 8); //int64, 发送心跳逻辑日志时已经落盘的WAL日志的位置

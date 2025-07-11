@@ -28,6 +28,7 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ExecuteResult;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TapExecuteCommand;
+import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.junit.jupiter.api.*;
@@ -777,6 +778,25 @@ class MongodbConnectorTest {
             when(mongoClient.getDatabase("test")).thenThrow(RuntimeException.class);
             doCallRealMethod().when(mongodbConnector).getTableInfo(tapConnectorContext,tableName);
             assertThrows(RuntimeException.class, ()->mongodbConnector.getTableInfo(tapConnectorContext,tableName));
+        }
+
+        @Test
+        void testGetTableInfoSizeOverInteger() throws Throwable {
+
+            when(mongoConfig.getDatabase()).thenReturn("test");
+            MongoDatabase mongoDatabase = mock(MongoDatabase.class);
+            when(mongoClient.getDatabase("test")).thenReturn(mongoDatabase);
+            Document collStats = new Document();
+            Integer count = 26888601;
+            Double size = 366907867698976.0;
+            collStats.put("count",count);
+            collStats.put("size",size);
+            when(mongoDatabase.runCommand(new Document("collStats", tableName))).thenReturn(collStats);
+            doCallRealMethod().when(mongodbConnector).getTableInfo(tapConnectorContext,tableName);
+            TableInfo actualData = mongodbConnector.getTableInfo(tapConnectorContext, tableName);
+            Assertions.assertTrue(actualData.getNumOfRows().longValue() == count);
+            Assertions.assertTrue(actualData.getStorageSize().longValue() == size);
+
         }
     }
 

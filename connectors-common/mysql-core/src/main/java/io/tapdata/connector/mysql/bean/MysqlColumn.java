@@ -5,6 +5,9 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 
+import java.util.HashMap;
+import java.util.Map;
+
 
 /**
  * @author jarad
@@ -12,23 +15,50 @@ import io.tapdata.kit.EmptyKit;
 public class MysqlColumn extends CommonColumn {
 
     private String version;
+    private Long seedValue;
+    private Long incrementValue;
+    private Long autoIncCacheValue;
 
     public MysqlColumn(DataMap dataMap) {
         this.columnName = dataMap.getString("columnName");
         this.dataType = dataMap.getString("dataType");
         this.nullable = dataMap.getString("nullable");
         this.remarks = dataMap.getString("columnComment");
-        this.columnDefaultValue = null;
+        this.columnDefaultValue = dataMap.getString("columnDefault");
+        this.autoInc = dataMap.getString("autoInc");
     }
 
     @Override
     public TapField getTapField() {
-        return new TapField(this.columnName, this.dataType).nullable(this.isNullable()).
-                defaultValue(columnDefaultValue).comment(this.remarks);
+        TapField field = new TapField(this.columnName, this.dataType)
+                .nullable(this.isNullable()).autoInc(isAutoInc())
+                .defaultValue(columnDefaultValue).comment(this.remarks);
+        if (isAutoInc()) {
+            field.autoIncStartValue(seedValue)
+                    .autoIncrementValue(incrementValue)
+                    .autoIncCacheValue(autoIncCacheValue);
+        }
+        generateDefaultValue(field);
+        return field;
     }
 
     public MysqlColumn withVersion(String version) {
         this.version = version;
+        return this;
+    }
+
+    public MysqlColumn withSeedValue(Long seedValue) {
+        this.seedValue = seedValue;
+        return this;
+    }
+
+    public MysqlColumn withIncrementValue(Long incrementValue) {
+        this.incrementValue = incrementValue;
+        return this;
+    }
+
+    public MysqlColumn withAutoIncCacheValue(Long autoIncCacheValue) {
+        this.autoIncCacheValue = autoIncCacheValue;
         return this;
     }
 
@@ -38,6 +68,39 @@ public class MysqlColumn extends CommonColumn {
             return true;
         }
         return "YES".equals(this.nullable);
+    }
+
+    protected String parseDefaultFunction(String defaultValue) {
+        return MysqlDefaultFunction.parseFunction(columnDefaultValue);
+    }
+
+    public enum MysqlDefaultFunction {
+        _CURRENT_TIMESTAMP("CURRENT_TIMESTAMP"),
+        _GENERATE_UUID("uuid()");
+
+        private final String function;
+        private static final Map<String, String> map = new HashMap<>();
+
+        static {
+            for (MysqlDefaultFunction value : MysqlDefaultFunction.values()) {
+                map.put(value.function, value.name());
+            }
+        }
+
+        MysqlDefaultFunction(String function) {
+            this.function = function;
+        }
+
+        public static String parseFunction(String key) {
+            if (map.containsKey(key)) {
+                return map.get(key);
+            }
+            return null;
+        }
+
+        public String getFunction() {
+            return function;
+        }
     }
 
 }

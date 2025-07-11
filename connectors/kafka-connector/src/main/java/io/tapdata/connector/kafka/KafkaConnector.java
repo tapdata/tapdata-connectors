@@ -17,7 +17,6 @@ import io.tapdata.entity.schema.value.TapDateTimeValue;
 import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -87,7 +86,8 @@ public class KafkaConnector extends ConnectorBase {
             properties.put("basic.auth.user.info", kafkaConfig.getAuthUserName() + ":" + kafkaConfig.getAuthPassword());
         }
         if (EmptyKit.isNotEmpty(this.kafkaConfig.getMqUsername()) && EmptyKit.isNotEmpty(this.kafkaConfig.getMqPassword())) {
-            properties.put("security.protocol", "SASL_PLAINTEXT");
+            String securityProtocol = "SASL_SSL".equals(kafkaConfig.getSecurityProtocol()) ? "SASL_SSL" : "SASL_PLAINTEXT";
+            properties.put("security.protocol", securityProtocol);
             String saslMechanism;
             String model;
             switch (kafkaConfig.getKafkaSaslMechanism().toUpperCase()) {
@@ -154,7 +154,12 @@ public class KafkaConnector extends ConnectorBase {
     }
 
     private CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
-        String tableId = tapCreateTableEvent.getTableId();
+        String tableId;
+        if (EmptyKit.isBlank(kafkaConfig.getTopicName())) {
+            tableId = tapCreateTableEvent.getTableId();
+        } else {
+            tableId = kafkaConfig.getTopicName();
+        }
         CreateTableOptions createTableOptions = new CreateTableOptions();
 //        if (!this.isSchemaRegister) {
         Integer replicasSize = Optional.ofNullable(kafkaConfig.getReplicasSize()).orElse(1);
@@ -247,7 +252,7 @@ public class KafkaConnector extends ConnectorBase {
             onStart(connectionContext);
             CommonDbConfig config = new CommonDbConfig();
             config.set__connectionType(kafkaConfig.get__connectionType());
-            KafkaTest kafkaTest = new KafkaTest(kafkaConfig, consumer, this.kafkaService, config, isSchemaRegister, kafkaSRService);
+            KafkaTest kafkaTest = new KafkaTest(kafkaConfig, consumer, this.kafkaService, config, isSchemaRegister, kafkaSRService, connectionOptions);
             kafkaTest.testOneByOne();
         } catch (Throwable throwable) {
             TapLogger.error(TAG, throwable.getMessage());
@@ -307,7 +312,7 @@ public class KafkaConnector extends ConnectorBase {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
         try {
-            kafkaService.streamConsume(tableList, recordSize, consumer);
+            kafkaService.streamConsume(tableList, offsetState, recordSize, consumer);
         } catch (Throwable e) {
             kafkaExceptionCollector.collectTerminateByServer(e);
             kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);
@@ -317,7 +322,10 @@ public class KafkaConnector extends ConnectorBase {
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
-        return TapSimplify.list();
+        if (null == offsetStartTime) {
+            return System.currentTimeMillis();
+        }
+        return offsetStartTime;
     }
 
     private void checkConnection(TapConnectionContext connectionContext, List<String> items, Consumer<ConnectionCheckItem> consumer) {

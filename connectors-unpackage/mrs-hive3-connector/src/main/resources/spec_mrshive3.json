@@ -4,7 +4,6 @@
     "icon": "icons/mrshive3.png",
     "id": "mrs-hive3",
     "doc": "${doc}",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
@@ -135,7 +134,7 @@
           "x-index": 11,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {

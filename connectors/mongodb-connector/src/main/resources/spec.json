@@ -3,9 +3,8 @@
 		"name": "MongoDB",
 		"icon": "icons/mongodb.png",
 		"doc" : "${doc}",
-		"tags" : ["schema-free","Database"],
-		"id": "mongodb",
-		"authentication": "Alpha"
+		"tags" : ["schema-free","Database","doubleActive"],
+		"id": "mongodb"
 	},
 	"configOptions": {
 		"capabilities": [
@@ -17,7 +16,7 @@
 			},
 			{
 				"id": "dml_insert_policy",
-				"alternatives": ["update_on_exists", "ignore_on_exists"]
+				"alternatives": ["update_on_exists", "ignore_on_exists", "just_insert"]
 			},
 			{
 				"id": "dml_update_policy",
@@ -197,7 +196,8 @@
 										}
 									}
 								}
-							]
+							],
+							"apiServerKey": "ssl"
 						},
 						"ssl_tips1": {
 							"type": "void",
@@ -232,14 +232,16 @@
 							"x-component": "TextFileReader",
 							"fileNameField": "sslKeyFile",
 							"required": true,
-							"x-index": 90
+							"x-index": 90,
+							"apiServerKey": "sslKey"
 						},
 						"sslPass": {
 							"type": "string",
 							"title": "${dataForm_form_sslPass}",
 							"x-decorator": "FormItem",
 							"x-component": "Password",
-							"x-index": 100
+							"x-index": 100,
+							"apiServerKey": "sslPass"
 						},
 						"sslValidate": {
 							"type": "boolean",
@@ -257,7 +259,8 @@
 									}
 								}
 							],
-							"x-index": 110
+							"x-index": 110,
+							"apiServerKey": "sslValidate"
 						},
 						"sslCA": {
 							"type": "string",
@@ -266,7 +269,8 @@
 							"x-component": "TextFileReader",
 							"fileNameField": "sslCAFile",
 							"required": true,
-							"x-index": 120
+							"x-index": 120,
+							"apiServerKey": "sslCA"
 						},
 						"mongodbLoadSchemaSampleSize": {
 							"title": "${load_schema_sample_size}",
@@ -393,14 +397,14 @@
 						"layout": "horizontal",
 						"tooltip": "${preImageTips}"
 					},
-					"default": false,
 					"x-reactions": {
 						"dependencies": [
 							"$outputs"
 						],
 						"fulfill": {
 							"state": {
-								"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0}}"
+								"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0}}",
+								"value": "{{$self.visible && $self.value === undefined ? true : $self.value}}"
 							}
 						}
 					},
@@ -451,6 +455,43 @@
 						}
 					},
 					"x-index": 80
+				},
+				"writeConcern": {
+					"type": "string",
+					"title": "${writeConcern}",
+					"default": "w1",
+					"x-decorator": "FormItem",
+					"x-component": "Select",
+					"x-decorator-props": {
+						"tooltip": "${writeConcernTip}"
+					},
+					"x-index": 70,
+					"enum": [
+						{
+							"label": "w1",
+							"value": "w1"
+						},
+						{
+							"label": "Acknowledged",
+							"value": "acknowledged"
+						},
+						{
+							"label": "w2",
+							"value": "w2"
+						},
+						{
+							"label": "w3",
+							"value": "w3"
+						},
+						{
+							"label": "Unacknowledged",
+							"value": "unacknowledged"
+						},
+						{
+							"label": "Majority",
+							"value": "majority"
+						}
+					]
 				}
       }
     }
@@ -495,7 +536,9 @@
 		"timeSeriesCollection" : "Synchronize Time Series Collections",
 		"timeSeriesCollectionTip": "When the source table is a TimeSeries collection, it is synchronized to a TimeSeries collection. Only the source table is supported from MongoDB to MongoDB, and the version is MongoDB5.0 or above.",
 		"preImage": "Document Preimages",
-		"preImageTips": "Enable the preimage function:\\n1. Only MongoDB6.0 and above support enabling it;\\n2. Confirm that the collection has enabled changeStreamPreAndPostImages;\\n3. Confirm the expiration time of the preimage"
+		"preImageTips": "Enable the preimage function:\\n1. Only MongoDB6.0 and above support enabling it;\\n2. Confirm that the collection has enabled changeStreamPreAndPostImages;\\n3. Confirm the expiration time of the preimage",
+		"writeConcern": "Write Concern",
+		"writeConcernTip": "Write concern describes the level of acknowledgment requested from MongoDB for write operations to a standalone mongod, replica sets, or sharded clusters. In sharded clusters, mongos instances will pass the write concern on to the shards"
     },
     "zh_CN": {
 	  "load_schema_sample_size": "Mongodb加载模型采样记录数(行)",
@@ -535,7 +578,9 @@
 		"preImage": "文档原像",
 		"preImageTips": "启用原像功能：\n1. 只有MongoDB6.0及以上才支持开启；\n2.确认集合已开启changeStreamPreAndPostImages；\n3.确认原像的过期时间",
 		"timeSeriesCollection": "时间序列集合属性",
-		"timeSeriesCollectionTip": "源表为TimeSeries集合时同步为TimeSeries集合，仅支持源表为MongoDB到MongoDB，且版本为MongoDB5.0以上"
+		"timeSeriesCollectionTip": "源表为TimeSeries集合时同步为TimeSeries集合，仅支持源表为MongoDB到MongoDB，且版本为MongoDB5.0以上",
+		"writeConcern": "写入确认",
+		"writeConcernTip": "描述了MongoDB请求对独立mongodb或副本集或分片群集进行写操作的确认级别。在分片群集中，mongos实例会将写关注事项传递给分片"
 		},
 		"zh_TW": {
 			"load_schema_sample_size": "Mongodb加載模型採樣記錄數（行）",
@@ -575,8 +620,9 @@
 			"preImage": "文檔原像",
 			"preImageTips": "啟用原像功能：\n1. 只有MongoDB6.0以上才支援開啟；\n2.確認集合已開啟changeStreamPreAndPostImages；\n3.確認原像的過期時間",
 			"timeSeriesCollection": "時間序列集合屬性",
-			"timeSeriesCollectionTip": "源表為TimeSeries集合時同步為TimeSeries集合，僅支持源表為MongoDB到MongoDB，且版本為MongoDB5.0以上"
-
+			"timeSeriesCollectionTip": "源表為TimeSeries集合時同步為TimeSeries集合，僅支持源表為MongoDB到MongoDB，且版本為MongoDB5.0以上",
+			"writeConcern": "寫入確認",
+			"writeConcernTip": "描述了MongoDB請求對獨立mongodb或副本集或分片群集進行寫操作的確認級別。在分片群集中，mongos實例會將寫關註事項傳遞給分片"
 		}
 	},
 	"dataTypes": {

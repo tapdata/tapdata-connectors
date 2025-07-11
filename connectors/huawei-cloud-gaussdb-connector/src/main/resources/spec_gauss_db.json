@@ -4,7 +4,6 @@
     "icon": "icons/gauss.png",
     "doc": "${doc}",
     "id": "huawei-gauss-db",
-    "authentication": "Beta",
     "tags": ["Database", "ssl"]
   },
   "configOptions": {
@@ -127,7 +126,7 @@
           "x-index": 100,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {
@@ -302,51 +301,19 @@
     }
   },
   "dataTypes": {
-    "char[($byte)]": {
+    "character[($byte)]": {
       "to": "TapString",
       "byte": "10m",
       "defaultByte": 1,
       "byteRatio": 1,
       "fixed": true
     },
-    "character[($byte)]": {
-      "to": "TapString",
-      "byte": "10m",
-      "defaultByte": 1,
-      "byteRatio": 1,
-      "fixed": true,
-      "queryOnly": true
-    },
-    "nchar[($byte)]": {
-      "to": "TapString",
-      "byte": "10m",
-      "defaultByte": 1,
-      "byteRatio": 1,
-      "fixed": false,
-      "queryOnly": true
-    },
-    "varchar($byte)": {
+    "character varying[($byte)]": {
       "to": "TapString",
       "byte": "10m",
       "defaultByte": 1,
       "byteRatio": 3,
       "fixed": false
-    },
-    "character varying($byte)": {
-      "to": "TapString",
-      "byte": "10m",
-      "defaultByte": 1,
-      "byteRatio": 3,
-      "fixed": false,
-      "queryOnly": true
-    },
-    "varchar2($byte)": {
-      "to": "TapString",
-      "byte": "10m",
-      "defaultByte": 1,
-      "byteRatio": 1,
-      "fixed": false,
-      "queryOnly": true
     },
     "nvarchar2($byte)": {
       "to": "TapString",
@@ -378,7 +345,7 @@
       "queryOnly": true
     },
     "raw": {
-      "to": "TapBinary",
+      "to": "TapString",
       "byte": 1073733621
     },
     "bytea": {
@@ -405,33 +372,6 @@
       "to": "TapBinary",
       "byte": 1073741771,
       "queryOnly": true
-    },
-    "smallserial": {
-      "to": "TapNumber",
-      "bit": 8,
-      "precision": 2,
-      "value": [
-        -32768,
-        32767
-      ]
-    },
-    "serial": {
-      "to": "TapNumber",
-      "bit": 14,
-      "precision": 4,
-      "value": [
-        -2147483648,
-        2147483647
-      ]
-    },
-    "bigserial": {
-      "to": "TapNumber",
-      "bit": 32,
-      "precision": 8,
-      "value": [
-        -9223372036854775808,
-        9223372036854775807
-      ]
     },
     "tinyint": {
       "to": "TapNumber",
@@ -461,16 +401,6 @@
         2147483647
       ]
     },
-    "binary_integer": {
-      "to": "TapNumber",
-      "bit": 32,
-      "precision": 10,
-      "value": [
-        -2147483648,
-        2147483647
-      ],
-      "queryOnly": true
-    },
     "bigint": {
       "to": "TapNumber",
       "bit": 64,
@@ -480,45 +410,9 @@
         9223372036854775807
       ]
     },
-    "int16": {
-      "to": "TapNumber",
-      "bit": 128,
-      "precision": 39,
-      "value": [
-        -170141183460469231731687303715884105728,
-        170141183460469231731687303715884105727
-      ]
-    },
     "numeric[($precision,$scale)]": {
       "to": "TapNumber",
-      "precision": [
-        1,
-        1000
-      ],
-      "scale": [
-        0,
-        1000
-      ],
-      "defaultPrecision": 147445,
-      "defaultScale": 16383
-    },
-    "decimal[($precision,$scale)]": {
-      "to": "TapNumber",
-      "precision": [
-        1,
-        1000
-      ],
-      "scale": [
-        0,
-        1000
-      ],
-      "defaultPrecision": 147445,
-      "defaultScale": 16383,
       "fixed": true,
-      "queryOnly": true
-    },
-    "number[($precision,$scale)]": {
-      "to": "TapNumber",
       "precision": [
         1,
         1000
@@ -527,141 +421,30 @@
         0,
         1000
       ],
-      "defaultPrecision": 147445,
-      "defaultScale": 16383,
-      "fixed": true,
-      "queryOnly": true
-    },
-    "largeserial": {
-      "to": "TapNumber",
-      "bit": 32,
-      "precision": 147445,
-      "scale": 16383
+      "preferPrecision": 20,
+      "preferScale": 8
     },
     "real": {
       "to": "TapNumber",
-      "name": "REAL",
-      "precision": [
-        1,
-        30
-      ],
-      "scale": [
-        0,
-        30
-      ],
-      "value": [
-        "-3.402E+38",
-        "3.402E+38"
-      ],
+      "bit": 4,
+      "defaultPrecision": 24,
+      "defaultScale": 8,
       "fixed": false
     },
-    "float4": {
-      "to": "TapNumber",
-      "name": "FLOAT4",
+    "double precision": {
+      "priority": 2,
       "precision": [
         1,
-        30
+        17
       ],
+      "preferPrecision": 11,
+      "preferScale": 4,
       "scale": [
         0,
-        30
+        17
       ],
-      "value": [
-        "-3.402E+38",
-        "3.402E+38"
-      ],
-      "fixed": false
-    },
-    "double": {
-      "to": "TapNumber",
-      "name": "DOUBLE",
-      "precision": [
-        1,
-        30
-      ],
-      "scale": [
-        0,
-        30
-      ],
-      "value": [
-        "-1.79E+308",
-        "1.79E+308"
-      ],
-      "fixed": false
-    },
-    "precision": {
-      "to": "TapNumber",
-      "name": "PRECISION",
-      "precision": [
-        1,
-        30
-      ],
-      "scale": [
-        0,
-        30
-      ],
-      "value": [
-        "-1.79E+308",
-        "1.79E+308"
-      ],
-      "fixed": false
-    },
-    "float8": {
-      "to": "TapNumber",
-      "name": "FLOAT8",
-      "precision": [
-        1,
-        30
-      ],
-      "scale": [
-        0,
-        30
-      ],
-      "value": [
-        "-1.79E+308",
-        "1.79E+308"
-      ],
-      "fixed": false
-    },
-    "binary_double": {
-      "to": "TapNumber",
-      "name": "BINARY_DOUBLE",
-      "precision": [
-        1,
-        30
-      ],
-      "scale": [
-        0,
-        30
-      ],
-      "value": [
-        "-1.79E+308",
-        "1.79E+308"
-      ],
-      "fixed": false
-    },
-    "float[($precision)]": {
-      "to": "TapNumber",
-      "precision": [
-        1,
-        53
-      ],
-      "fixed": false
-    },
-    "dec[($precision,$scale)]": {
-      "to": "TapNumber",
-      "precision": [
-        1,
-        1000
-      ],
-      "scale": [
-        0,
-        1000
-      ],
-      "defaultPrecision": 147445,
-      "defaultScale": 16383,
       "fixed": false,
-      "queryOnly": true
+      "to": "TapNumber"
     },
     "money": {
       "to": "TapNumber",
@@ -684,41 +467,35 @@
         null
       ]
     },
-    "date": {
-      "to": "TapDate",
-      "range": [
-        "1000-01-01",
-        "9999-12-31"
-      ],
-      "pattern": "yyyy-MM-dd"
-    },
-    "TIME [($fraction)] [WITHOUT TIME ZONE]": {
+    "time[($fraction)] without time zone": {
       "to": "TapTime",
       "byte": 8,
       "fraction": [
         0,
         6
       ],
-      "defaultFraction": 0,
+      "defaultFraction": 6,
       "range": [
         "-838:59:59",
         "838:59:59"
       ],
-      "pattern": "HH:mm:ss"
+      "pattern": "HH:mm:ss",
+      "withTimeZone": false
     },
-    "TIME [($fraction)] [WITH TIME ZONE]": {
+    "time[($fraction)] with time zone": {
       "to": "TapTime",
       "byte": 16,
       "fraction": [
         0,
         6
       ],
-      "defaultFraction": 0,
+      "defaultFraction": 6,
       "range": [
         "-838:59:59",
         "838:59:59"
       ],
-      "pattern": "HH:mm:ss"
+      "pattern": "HH:mm:ss",
+      "withTimeZone": true
     },
     "INTERVAL DAY ($l) TO SECOND ($fraction)": {
       "to": "TapDateTime",
@@ -749,7 +526,7 @@
       "defaultFraction": 0,
       "queryOnly": true
     },
-    "SMALLDATETIME": {
+    "smalldatetime": {
       "to": "TapDateTime",
       "byte": 8,
       "range": [
@@ -761,24 +538,7 @@
       "withTimeZone": false,
       "queryOnly": true
     },
-    "TIMESTAMP[($fraction)]": {
-      "to": "TapDateTime",
-      "byte": 8,
-      "range": [
-        "1970-01-01 00:00:01",
-        "2038-01-19 03:14:07"
-      ],
-      "pattern": "yyyy-MM-dd HH:mm:ss",
-      "fraction": [
-        0,
-        6
-      ],
-      "defaultFraction": 6,
-      "withTimeZone": false,
-      "queryOnly": true,
-      "fixed": false
-    },
-    "TIMESTAMP[($fraction)] WITHOUT TIME ZONE": {
+    "timestamp[($fraction)] without time zone": {
       "to": "TapDateTime",
       "byte": 8,
       "range": [
@@ -794,7 +554,7 @@
       "withTimeZone": false,
       "fixed": false
     },
-    "TIMESTAMP[($fraction)] WITH TIME ZONE": {
+    "timestamp[($fraction)] with time zone": {
       "to": "TapDateTime",
       "byte": 8,
       "range": [
@@ -810,46 +570,39 @@
       "withTimeZone": true,
       "fixed": false
     },
-    "enum($enums)": {
-      "name": "enum",
-      "to": "TapString",
-      "queryOnly": true,
-      "byte": 16383
-    },
-    "set($sets)": {
-      "name": "set",
-      "to": "TapString",
-      "queryOnly": true,
-      "byte": 16383
-    },
     "point": {
       "to": "TapString",
-      "byte": "1m",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "line": {
+      "to": "TapString",
+      "preferByte": 255,
       "queryOnly": true
     },
     "lseg": {
       "to": "TapString",
-      "byte": "1m",
+      "preferByte": 255,
       "queryOnly": true
     },
     "box": {
       "to": "TapString",
-      "byte": "1m",
+      "preferByte": 255,
       "queryOnly": true
     },
     "path": {
       "to": "TapString",
-      "byte": "1m",
+      "preferByte": 255,
       "queryOnly": true
     },
     "polygon": {
       "to": "TapString",
-      "byte": "1m",
+      "preferByte": 255,
       "queryOnly": true
     },
     "circle": {
       "to": "TapString",
-      "byte": "1m",
+      "preferByte": 255,
       "queryOnly": true
     },
     "tsvector": {
@@ -862,32 +615,38 @@
     },
     "cidr": {
       "to": "TapString",
-      "byte": 7,
+      "preferByte": 255,
       "queryOnly": true
     },
     "inet": {
       "to": "TapString",
-      "byte": 7,
+      "preferByte": 255,
       "queryOnly": true
     },
     "macaddr": {
       "to": "TapString",
-      "byte": 6,
+      "preferByte": 255,
       "queryOnly": true
     },
-    "bit($fraction)": {
-      "to": "TapBinary",
-      "fraction": [
-        0,9223372036854775807
-      ],
-      "queryOnly": true
+    "bit(1)": {
+      "to": "TapBoolean",
+      "fixed": true,
+      "bit": 1
     },
-    "bit varying($fraction)": {
-      "to": "TapBinary",
-      "fraction": [
-        0,9223372036854775807
-      ],
-      "queryOnly": true
+    "bit[($byte)]": {
+      "byte": 64,
+      "defaultByte": 1,
+      "priority": 3,
+      "fixed": true,
+      "queryOnly": true,
+      "to": "TapBinary"
+    },
+    "bit varying[($byte)]": {
+      "byte": 64,
+      "defaultByte": 64,
+      "priority": 1,
+      "queryOnly": true,
+      "to": "TapBinary"
     },
     "uuid": {
       "to": "TapString",
@@ -921,29 +680,16 @@
       "queryOnly": true
     },
     "hash16": {
-      "to": "TapNumber",
-      "bit": 64,
-      "precision": 10,
-      "value": [
-        0,
-        18446744073709551615
-      ],
+      "to": "TapString",
+      "byte": 16,
       "queryOnly": true
     },
     "hash32": {
-      "to": "TapArray",
-      "bit": 128,
-      "queryOnly": true
-    },
-    "set": {
-      "to": "TapArray",
+      "to": "TapString",
+      "byte": 32,
       "queryOnly": true
     },
     "aclitem": {
-      "to": "TapString",
-      "queryOnly": true
-    },
-    "aclitem[]": {
       "to": "TapString",
       "queryOnly": true
     }

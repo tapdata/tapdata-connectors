@@ -1,7 +1,6 @@
 package io.tapdata.oceanbase.bean;
 
 import io.tapdata.connector.mysql.config.MysqlConfig;
-import org.apache.commons.lang3.StringUtils;
 
 import java.io.Serializable;
 import java.util.Map;
@@ -10,8 +9,11 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private String tenant;
-    private int rpcPort;
-    private int logProxyPort;
+    private String rootServerList;
+    private String cdcUser;
+    private String cdcPassword;
+    private String rawLogServerHost;
+    private int rawLogServerPort;
 
     //customize
     public OceanbaseConfig() {
@@ -23,6 +25,7 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
     public OceanbaseConfig load(Map<String, Object> map) {
         OceanbaseConfig config = (OceanbaseConfig) super.load(map);
         properties.put("rewriteBatchedStatements", "true");
+        properties.put("tinyInt1isBit", Boolean.FALSE.toString());
         setSchema(getDatabase());
         return config;
     }
@@ -35,19 +38,44 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
         this.tenant = tenant;
     }
 
-    public int getRpcPort() {
-        return rpcPort;
+    public String getRootServerList() {
+        return rootServerList;
     }
 
-    public void setRpcPort(int rpcPort) {
-        this.rpcPort = rpcPort;
+    public void setRootServerList(String rootServerList) {
+        this.rootServerList = rootServerList;
     }
 
-    public int getLogProxyPort() {
-        return logProxyPort;
+    public String getCdcUser() {
+        return cdcUser;
     }
 
-    public void setLogProxyPort(int logProxyPort) {
-        this.logProxyPort = logProxyPort;
+    public void setCdcUser(String cdcUser) {
+        this.cdcUser = cdcUser;
     }
+
+    public String getCdcPassword() {
+        return cdcPassword;
+    }
+
+    public void setCdcPassword(String cdcPassword) {
+        this.cdcPassword = cdcPassword;
+    }
+
+    public String getRawLogServerHost() {
+        return rawLogServerHost;
+    }
+
+    public void setRawLogServerHost(String rawLogServerHost) {
+        this.rawLogServerHost = rawLogServerHost;
+    }
+
+    public int getRawLogServerPort() {
+        return rawLogServerPort;
+    }
+
+    public void setRawLogServerPort(int rawLogServerPort) {
+        this.rawLogServerPort = rawLogServerPort;
+    }
+
 }

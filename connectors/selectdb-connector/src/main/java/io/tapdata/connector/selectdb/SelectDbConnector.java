@@ -2,6 +2,7 @@ package io.tapdata.connector.selectdb;
 
 import com.google.common.collect.Lists;
 import io.tapdata.common.CommonDbConnector;
+import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.ddl.DDLSqlMaker;
 import io.tapdata.connector.selectdb.bean.SelectDbColumn;
 import io.tapdata.connector.selectdb.config.SelectDbConfig;
@@ -78,7 +79,7 @@ public class SelectDbConnector extends CommonDbConnector {
         this.selectDbVersion = selectDbJdbcContext.queryVersion();
         this.selectDbStreamLoader = new SelectDbStreamLoader(new HttpUtil().getHttpClient(), selectDbConfig)
                 .selectDbJdbcContext(selectDbJdbcContext);
-        commonSqlMaker = new SelectDbSqlMaker('`').closeNotNull(selectDbConfig.getCloseNotNull());
+        commonSqlMaker = new CommonSqlMaker('`').closeNotNull(selectDbConfig.getCloseNotNull());
         ddlSqlMaker = new SelectDbDDLSqlMaker();
         fieldDDLHandlers = new BiClassHandlers<>();
         fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
@@ -143,7 +144,7 @@ public class SelectDbConnector extends CommonDbConnector {
             return 0;
         });
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "text", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null)
+            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
                 return toJson(tapValue.getValue());
             return "null";
         });

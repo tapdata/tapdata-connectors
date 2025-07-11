@@ -31,13 +31,6 @@ public class MysqlJdbcOneByOneWriter extends MysqlJdbcWriter {
 
     private static final String TAG = MysqlJdbcOneByOneWriter.class.getSimpleName();
 
-    /**
-     * Use {@link MysqlSqlBatchWriter}
-     *
-     * @param mysqlJdbcContext
-     * @throws Throwable
-     */
-    @Deprecated
     private MysqlJdbcOneByOneWriter(MysqlJdbcContextV2 mysqlJdbcContext, Supplier<Boolean> isAlive) throws Throwable {
         super(mysqlJdbcContext, isAlive);
     }

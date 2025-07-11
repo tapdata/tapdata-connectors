@@ -108,8 +108,8 @@ public class HudiConnector extends HiveConnector {
                      .registerFromTapValue(TapMapValue.class, "string", this::registerString)
                      .registerFromTapValue(TapArrayValue.class, "string", this::registerString)
                      .registerFromTapValue(TapBinaryValue.class, "string", tapValue -> {
-                         if (tapValue != null && tapValue.getValue() != null)
-                            return new String(Base64.encodeBase64(tapValue.getValue()));
+                         if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
+                             return new String(Base64.encodeBase64(tapValue.getValue().getValue()));
                          return null;
                      }).registerFromTapValue(TapDateTimeValue.class, "timestamp", tapValue -> {
                          if (tapValue != null && tapValue.getValue() != null) {

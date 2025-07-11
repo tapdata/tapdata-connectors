@@ -8,6 +8,8 @@ import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.TapTestItemException;
+import io.tapdata.pdk.apis.exception.testItem.TapTestHostPortEx;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
 import io.tapdata.util.JsonSchemaParser;
 import io.tapdata.util.NetUtil;
@@ -45,7 +47,8 @@ public abstract class AbstractMqService implements MqService {
                 NetUtil.validateHostPortWithSocket(mqConfig.getMqHost(), mqConfig.getMqPort());
                 return testItem(MqTestItem.HOST_PORT.getContent(), TestItem.RESULT_SUCCESSFULLY);
             } catch (IOException e) {
-                return testItem(MqTestItem.HOST_PORT.getContent(), TestItem.RESULT_FAILED, e.getMessage());
+                return new TestItem(MqTestItem.HOST_PORT.getContent(), new TapTestHostPortEx(e, mqConfig.getMqHost(), String.valueOf(mqConfig.getMqPort())),
+                        TestItem.RESULT_FAILED);
             }
         } else {
             String[] hostAndPort = mqConfig.getNameSrvAddr().split(",");

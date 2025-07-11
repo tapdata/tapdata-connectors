@@ -42,6 +42,7 @@ public abstract class RelationalDatabaseSchema implements DatabaseSchema<TableId
     private final String schemaPrefix;
     private final SchemasByTableId schemasByTableId;
     private final Tables tables;
+    private Integer lowerCaseTableNames = 0;
 
     protected RelationalDatabaseSchema(RelationalDatabaseConnectorConfig config, TopicSelector<TableId> topicSelector,
                                        TableFilter tableFilter, ColumnNameFilter columnFilter, TableSchemaBuilder schemaBuilder,
@@ -129,8 +130,14 @@ public abstract class RelationalDatabaseSchema implements DatabaseSchema<TableId
      */
     protected void buildAndRegisterSchema(Table table) {
         if (tableFilter.isIncluded(table.id())) {
-            TableSchema schema = schemaBuilder.create(schemaPrefix, getEnvelopeSchemaName(table), table, columnFilter, columnMappers, customKeysMapper);
-            schemasByTableId.put(table.id(), schema);
+            if (2 == lowerCaseTableNames) {
+                Table newTable = table.edit().tableId(table.id().toCatalogLowercase()).create();
+                TableSchema schema = schemaBuilder.create(schemaPrefix, getEnvelopeSchemaName(newTable), newTable, columnFilter, columnMappers, customKeysMapper);
+                schemasByTableId.put(newTable.id(), schema);
+            } else {
+                TableSchema schema = schemaBuilder.create(schemaPrefix, getEnvelopeSchemaName(table), table, columnFilter, columnMappers, customKeysMapper);
+                schemasByTableId.put(table.id(), schema);
+            }
         }
     }
 
@@ -208,5 +215,9 @@ public abstract class RelationalDatabaseSchema implements DatabaseSchema<TableId
 
     public List<String> tableDiff() {
         return new ArrayList<>();
+    }
+
+    public void setLowerCaseTableNames(Integer lowerCaseTableNames) {
+        this.lowerCaseTableNames = lowerCaseTableNames;
     }
 }

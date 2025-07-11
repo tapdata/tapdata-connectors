@@ -1,6 +1,7 @@
 package io.tapdata.kit;
 
-import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.schema.TapConstraint;
+import io.tapdata.entity.schema.TapConstraintMapping;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.simplify.TapSimplify;
@@ -13,8 +14,6 @@ import java.io.Reader;
 import java.sql.*;
 import java.util.*;
 import java.util.stream.Collectors;
-
-import static io.tapdata.entity.simplify.TapSimplify.toJson;
 
 /**
  * tools for ResultSet
@@ -52,17 +51,14 @@ public class DbKit {
     public static DataMap getRowFromResultSet(ResultSet resultSet, Collection<String> columnNames) throws SQLException {
         DataMap map = DataMap.create();
         if (EmptyKit.isNotNull(resultSet) && resultSet.getRow() > 0) {
-            String errorCol = null;
             int index = 1;
             for (String col : columnNames) {
                 try {
-                    map.put(col, resultSet.getObject(index++));
+                    map.put(col, resultSet.getObject(index));
                 } catch (Exception e) {
-                    errorCol = col;
+                    map.put(col, resultSet.getString(index));
                 }
-            }
-            if (EmptyKit.isNotNull(errorCol)) {
-                TapLogger.warn("JDBC ERROR", "row: {}, skip {}", toJson(map), errorCol);
+                index++;
             }
         }
         return map;
@@ -80,6 +76,10 @@ public class DbKit {
         ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
         for (int i = 1; i <= resultSetMetaData.getColumnCount(); i++) {
             String[] columnNameArr = resultSetMetaData.getColumnLabel(i).split("\\.");
+            if (columnNameArr.length == 1) {
+                columnNames.add(resultSetMetaData.getColumnLabel(i));
+                continue;
+            }
             String substring = columnNameArr[columnNameArr.length - 1];
             columnNames.add(substring);
         }
@@ -152,12 +152,35 @@ public class DbKit {
         if (!exists.isUnique() && created.isUnique()) {
             return false;
         }
-        return exists.getIndexFields().stream().map(TapIndexField::getName).collect(Collectors.toList())
+        return exists.getIndexFields().stream().map(TapIndexField::getName).toList()
                 .equals(created.getIndexFields().stream().map(TapIndexField::getName).collect(Collectors.toList()));
     }
 
     public static String buildIndexName(String table) {
-        return "TAPIDX_" + table.substring(Math.max(table.length() - 10, 0)) + UUID.randomUUID().toString().replaceAll("-", "").substring(20);
+        return "IDX_" + table.substring(Math.max(table.length() - 10, 0)) + UUID.randomUUID().toString().replaceAll("-", "").substring(20);
+    }
+
+    public static String buildIndexName(String table, TapIndex index, int maxLength) {
+        if (EmptyKit.isNotBlank(index.getName()) && index.getName().length() <= maxLength) {
+            return index.getName();
+        }
+        String indexName = table + "_" + index.getIndexFields().stream().map(TapIndexField::getName).collect(Collectors.joining("_"));
+        if (indexName.length() + 4 <= maxLength) {
+            return "IDX_" + indexName;
+        }
+        return "IDX_" + indexName.substring(0, maxLength - 12) + UUID.randomUUID().toString().replaceAll("-", "").substring(24);
+    }
+
+    public static String buildForeignKeyName(String table) {
+        return "FK_" + table.substring(Math.max(table.length() - 10, 0)) + UUID.randomUUID().toString().replaceAll("-", "").substring(20);
+    }
+
+    public static String buildForeignKeyName(String table, TapConstraint constraint, int maxLength) {
+        String foreignKeyName = table + "_" + constraint.getMappingFields().stream().map(TapConstraintMapping::getForeignKey).collect(Collectors.joining("_"));
+        if (foreignKeyName.length() + 3 <= maxLength) {
+            return "FK_" + foreignKeyName;
+        }
+        return "FK_" + foreignKeyName.substring(0, maxLength - 11) + UUID.randomUUID().toString().replaceAll("-", "").substring(24);
     }
 
     public static <T> List<List<T>> splitToPieces(List<T> data, int eachPieceSize) {
@@ -192,7 +215,23 @@ public class DbKit {
         }
         Map<String, Object> lastAfter = new HashMap<>();
         for (Map.Entry<String, Object> entry : after.entrySet()) {
-            if (EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(lastBefore.get(entry.getKey()))) {
+            if (EmptyKit.isNull(entry.getValue()) && lastBefore.containsKey(entry.getKey()) && EmptyKit.isNull(lastBefore.get(entry.getKey())) ||
+                    EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(lastBefore.get(entry.getKey())) || !allColumn.contains(entry.getKey())) {
+                continue;
+            }
+            lastAfter.put(entry.getKey(), entry.getValue());
+        }
+        return lastAfter;
+    }
+
+    public static Map<String, Object> getAfterForUpdateMongo(Map<String, Object> after, Map<String, Object> before, Collection<String> allColumn, Collection<String> uniqueCondition) {
+        Map<String, Object> lastBefore = getBeforeForUpdate(after, before, allColumn, uniqueCondition);
+        if (EmptyKit.isNotEmpty(before)) {
+            lastBefore.putAll(before);
+        }
+        Map<String, Object> lastAfter = new HashMap<>();
+        for (Map.Entry<String, Object> entry : after.entrySet()) {
+            if (EmptyKit.isNull(entry.getValue()) && lastBefore.containsKey(entry.getKey()) && EmptyKit.isNull(lastBefore.get(entry.getKey())) || EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(lastBefore.get(entry.getKey()))) {
                 continue;
             }
             lastAfter.put(entry.getKey(), entry.getValue());

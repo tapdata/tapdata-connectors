@@ -113,7 +113,7 @@ public class MySqlSnapshotChangeEventSource extends RelationalSnapshotChangeEven
 
     @Override
     protected boolean shouldCompleteMissingSchemaTable() {
-        List<String> tableDiff = databaseSchema.tableDiff();
+        List<TableId> tableDiff = databaseSchema.tableIdDiff();
         if (null == tableDiff || tableDiff.isEmpty()) {
             return false;
         }
@@ -124,8 +124,9 @@ public class MySqlSnapshotChangeEventSource extends RelationalSnapshotChangeEven
     @Override
     protected void completeMissingSchemaTable(ChangeEventSourceContext context, SnapshotContext snapshotContext, OffsetContext previousOffset) throws Exception {
         RelationalSnapshotContext relationalSnapshotContext = (RelationalSnapshotContext) snapshotContext;
-        List<String> tableDiff = databaseSchema.tableDiff();
-        List<TableId> tableIds = tableDiff.stream().map(TableId::parse).collect(Collectors.toList());
+//        List<String> tableDiff = databaseSchema.tableDiff();
+//        List<TableId> tableIds = tableDiff.stream().map(TableId::parse).collect(Collectors.toList());
+        List<TableId> tableIds = databaseSchema.tableIdDiff();
         lockTablesForSchemaSnapshot(context, relationalSnapshotContext);
         connectionCreated(relationalSnapshotContext);
         if (null != previousOffset) {
@@ -583,7 +584,7 @@ public class MySqlSnapshotChangeEventSource extends RelationalSnapshotChangeEven
     }
 
     private String quote(String dbOrTableName) {
-        return "`" + dbOrTableName + "`";
+        return "`" + dbOrTableName.replace("`", "``") + "`";
     }
 
     private String quote(TableId id) {

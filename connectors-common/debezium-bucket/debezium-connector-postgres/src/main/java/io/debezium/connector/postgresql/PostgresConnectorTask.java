@@ -13,6 +13,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import io.debezium.jdbc.JdbcConnection;
+import io.tapdata.entity.logger.TapLogger;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.RetriableException;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -58,6 +60,7 @@ public class PostgresConnectorTask extends BaseSourceTask {
     private volatile PostgresConnection jdbcConnection;
     private volatile PostgresConnection heartbeatConnection;
     private volatile PostgresSchema schema;
+    private static final String TAG = PostgresConnectorTask.class.getSimpleName();
 
     @Override
     public ChangeEventSourceCoordinator start(Configuration config) {
@@ -97,6 +100,7 @@ public class PostgresConnectorTask extends BaseSourceTask {
                     LOGGER.info(jdbcConnection.serverInfo().toString());
                 }
                 slotInfo = jdbcConnection.getReplicationSlotState(connectorConfig.slotName(), connectorConfig.plugin().getPostgresPluginName());
+                TapLogger.info(TAG,"after getReplicationSlotState slotInfo:{} ",slotInfo);
             }
             catch (SQLException e) {
                 LOGGER.warn("unable to load info of replication slot, Debezium will try to create the slot");
@@ -110,6 +114,7 @@ public class PostgresConnectorTask extends BaseSourceTask {
             else {
                 LOGGER.info("Found previous offset {}", previousOffset);
                 snapshotter.init(connectorConfig, previousOffset.asOffsetState(), slotInfo);
+                TapLogger.info(TAG,"after snapshotter init slotInfo: {} ",slotInfo);
             }
 
             ReplicationConnection replicationConnection = null;

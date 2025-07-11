@@ -7,6 +7,7 @@ import io.tapdata.kit.EmptyKit;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.util.*;
 
 public class MysqlConfig extends CommonDbConfig {
@@ -15,6 +16,7 @@ public class MysqlConfig extends CommonDbConfig {
         setDbType("mysql");
         setEscapeChar('`');
         setJdbcDriver("com.mysql.cj.jdbc.Driver");
+        setMaxIndexNameLength(64);
     }
 
     private static final Map<String, String> DEFAULT_PROPERTIES = new HashMap<String, String>() {{
@@ -42,7 +44,7 @@ public class MysqlConfig extends CommonDbConfig {
             deploymentMode = DeployModeEnum.STANDALONE.getMode();
             config.setDeploymentMode(deploymentMode);
         }
-        if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
+        if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
             ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress = config.getMasterSlaveAddress();
             if (EmptyKit.isEmpty(masterSlaveAddress)) {
                 throw new RuntimeException("host cannot be empty");
@@ -72,7 +74,7 @@ public class MysqlConfig extends CommonDbConfig {
         if (additionalString.startsWith("?")) {
             additionalString = additionalString.substring(1);
         }
-        StringBuilder sbURL = new StringBuilder("jdbc:").append(getDbType()).append("://").append(getHost()).append(":").append(getPort()).append("/").append(getDatabase());
+        StringBuilder sbURL = new StringBuilder("jdbc:").append(getDbType()).append("://").append(getHost()).append(":").append(getPort()).append("/").append(URLEncoder.encode(getDatabase()));
 
         Map<String, String> properties = new HashMap<>();
         if (StringUtils.isNotBlank(additionalString)) {
@@ -91,10 +93,12 @@ public class MysqlConfig extends CommonDbConfig {
             properties.put(defaultKey, DEFAULT_PROPERTIES.get(defaultKey));
         }
 
-        if (StringUtils.isNotBlank(timezone) && !timezone.startsWith("GMT")) {
-            timezone = "GMT" + timezone;
-            String serverTimezone = timezone.replace("+", "%2B").replace(":00", "");
-            properties.put("serverTimezone", serverTimezone);
+        if (getOldVersionTimezone()) {
+            if (StringUtils.isNotBlank(timezone) && !timezone.startsWith("GMT")) {
+                timezone = "GMT" + timezone;
+                String serverTimezone = timezone.replace("+", "%2B").replace(":00", "");
+                properties.put("serverTimezone", serverTimezone);
+            }
         }
         StringBuilder propertiesString = new StringBuilder();
         properties.forEach((k, v) -> propertiesString.append("&").append(k).append("=").append(v));
@@ -153,19 +157,11 @@ public class MysqlConfig extends CommonDbConfig {
         }
     }
 
-    protected String timezone;
     private String deploymentMode;
     private ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress;
     private ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress;
     private LinkedHashMap<String, Integer> masterNode;
-
-    public String getTimezone() {
-        return timezone;
-    }
-
-    public void setTimezone(String timezone) {
-        this.timezone = timezone;
-    }
+    private Integer maximumQueueSize = 800;
 
     public String getDeploymentMode() {
         return deploymentMode;
@@ -198,4 +194,13 @@ public class MysqlConfig extends CommonDbConfig {
     public void setMasterNode(LinkedHashMap<String, Integer> masterNode) {
         this.masterNode = masterNode;
     }
+
+    public Integer getMaximumQueueSize() {
+        return maximumQueueSize;
+    }
+
+    public void setMaximumQueueSize(Integer maximumQueueSize) {
+        this.maximumQueueSize = maximumQueueSize;
+    }
+
 }

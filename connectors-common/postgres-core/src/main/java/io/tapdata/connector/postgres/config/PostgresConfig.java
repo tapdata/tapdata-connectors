@@ -6,7 +6,9 @@ import io.tapdata.kit.EmptyKit;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -19,11 +21,21 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     private String logPluginName = "pgoutput"; //default log plugin for postgres, pay attention to lower version
     private Boolean closeNotNull = false;
+    private String tableOwner = "";
+    private String replaceBlank = "";
+    private Boolean partitionRoot = false;
+    private Integer maximumQueueSize = 8000;
+    private List<String> distributedKey = new ArrayList<>();
+    private Boolean isPartition = false;
+    private String customSlotName;
+    private String pgtoHost = "127.0.0.1";
+    private int pgtoPort = 9876;
 
     //customize
     public PostgresConfig() {
         setDbType("postgresql");
         setJdbcDriver("org.postgresql.Driver");
+        setMaxIndexNameLength(63);
     }
 
     @Override
@@ -74,5 +86,77 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setCloseNotNull(Boolean closeNotNull) {
         this.closeNotNull = closeNotNull;
+    }
+
+    public String getTableOwner() {
+        return tableOwner;
+    }
+
+    public void setTableOwner(String tableOwner) {
+        this.tableOwner = tableOwner;
+    }
+
+    public String getReplaceBlank() {
+        return replaceBlank;
+    }
+
+    public void setReplaceBlank(String replaceBlank) {
+        this.replaceBlank = replaceBlank;
+    }
+
+    public Boolean getPartitionRoot() {
+        return partitionRoot;
+    }
+
+    public void setPartitionRoot(Boolean partitionRoot) {
+        this.partitionRoot = partitionRoot;
+    }
+
+    public Integer getMaximumQueueSize() {
+        return maximumQueueSize;
+    }
+
+    public void setMaximumQueueSize(Integer maximumQueueSize) {
+        this.maximumQueueSize = maximumQueueSize;
+    }
+
+    public List<String> getDistributedKey() {
+        return distributedKey;
+    }
+
+    public void setDistributedKey(List<String> distributedKey) {
+        this.distributedKey = distributedKey;
+    }
+
+    public Boolean getIsPartition() {
+        return isPartition;
+    }
+
+    public void setIsPartition(Boolean isPartition) {
+        this.isPartition = isPartition;
+    }
+
+    public String getPgtoHost() {
+        return pgtoHost;
+    }
+
+    public String getCustomSlotName() {
+        return customSlotName;
+    }
+
+    public void setCustomSlotName(String customSlotName) {
+        this.customSlotName = customSlotName;
+    }
+
+    public void setPgtoHost(String pgtoHost) {
+        this.pgtoHost = pgtoHost;
+    }
+
+    public int getPgtoPort() {
+        return pgtoPort;
+    }
+
+    public void setPgtoPort(int pgtoPort) {
+        this.pgtoPort = pgtoPort;
     }
 }

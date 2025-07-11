@@ -4,11 +4,13 @@ import java.util.TimeZone;
 
 public class DateConvert implements Convert {
     TimeZone timezone;
+
     public DateConvert(TimeZone timezone) {
         this.timezone = timezone;
     }
+
     @Override
     public Object convert(Object fromValue) {
-        return covertToDateTime(fromValue, 0, "yyyy-MM-dd", timezone);
+        return covertToDate(fromValue, 0, "yyyy-MM-dd", timezone);
     }
 }

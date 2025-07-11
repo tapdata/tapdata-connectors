@@ -28,6 +28,7 @@ import java.io.StringWriter;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -179,7 +180,7 @@ public abstract class ConnectorBase implements TapConnector {
     }
 
     public static TestItem testItem(String item, int resultCode) {
-        return testItem(item, resultCode, null);
+        return new TestItem(item, resultCode, null);
     }
 
     public static TestItem testItem(String item, int resultCode, String information) {
@@ -227,7 +228,7 @@ public abstract class ConnectorBase implements TapConnector {
     }
 
     public static String formatTapDateTime(DateTime dateTime, String pattern) {
-        if(null == dateTime) throw new IllegalArgumentException("Date time value cannot be null");
+        if (null == dateTime) throw new IllegalArgumentException("Date time value cannot be null");
         if (StringUtils.isBlank(pattern)) {
             throw new IllegalArgumentException("Format pattern cannot be blank");
         }
@@ -235,6 +236,21 @@ public abstract class ConnectorBase implements TapConnector {
             DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(pattern);
             final ZoneId zoneId = dateTime.getTimeZone() != null ? dateTime.getTimeZone().toZoneId() : ZoneId.of("GMT");
             LocalDateTime localDateTime = LocalDateTime.ofInstant(dateTime.toInstant(), zoneId);
+            return dateTimeFormatter.format(localDateTime);
+        } catch (Exception e) {
+            throw new DatetimeFormatException(dateTime, pattern, e);
+        }
+    }
+
+    //timezone will not affect the real date time value
+    public static String formatTapDateTimeV2(DateTime dateTime, String pattern) {
+        if (null == dateTime) throw new IllegalArgumentException("Date time value cannot be null");
+        if (StringUtils.isBlank(pattern)) {
+            throw new IllegalArgumentException("Format pattern cannot be blank");
+        }
+        try {
+            DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(pattern);
+            LocalDateTime localDateTime = LocalDateTime.ofInstant(dateTime.toInstant(), ZoneOffset.UTC);
             return dateTimeFormatter.format(localDateTime);
         } catch (Exception e) {
             throw new DatetimeFormatException(dateTime, pattern, e);
@@ -257,6 +273,7 @@ public abstract class ConnectorBase implements TapConnector {
 
     private final AtomicBoolean isAlive = new AtomicBoolean(false);
     private final AtomicBoolean isDestroyed = new AtomicBoolean(false);
+    private final AtomicBoolean isLight = new AtomicBoolean(false);
 
     public boolean isAlive() {
         return isAlive.get() && !Thread.currentThread().isInterrupted();
@@ -269,7 +286,19 @@ public abstract class ConnectorBase implements TapConnector {
         }
     }
 
+    @Override
+    public void lightInit(TapConnectionContext connectionContext) throws Throwable {
+        if (isAlive.compareAndSet(false, true)) {
+            onLightStart(connectionContext);
+            isLight.set(true);
+        }
+    }
+
     public abstract void onStart(TapConnectionContext connectionContext) throws Throwable;
+
+    public void onLightStart(TapConnectionContext connectionContext) throws Throwable {
+        onStart(connectionContext);
+    }
 
 //    public abstract void onDestroy(TapConnectionContext connectionContext) throws Throwable;
 
@@ -376,8 +405,12 @@ public abstract class ConnectorBase implements TapConnector {
         return retryOptions;
     }
 
+    protected CopyOnWriteArraySet<List<DataMap>> splitTableForMultiDiscoverSchema(List<DataMap> tables, int tableSize) {
+        return new CopyOnWriteArraySet<>(DbKit.splitToPieces(tables, tableSize));
+    }
+
     protected void multiThreadDiscoverSchema(List<DataMap> tables, int tableSize, Consumer<List<TapTable>> consumer) {
-        CopyOnWriteArraySet<List<DataMap>> tableLists = new CopyOnWriteArraySet<>(DbKit.splitToPieces(tables, tableSize));
+        CopyOnWriteArraySet<List<DataMap>> tableLists = splitTableForMultiDiscoverSchema(tables, tableSize);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         CountDownLatch countDownLatch = new CountDownLatch(5);
         ExecutorService executorService = Executors.newFixedThreadPool(5);
@@ -424,6 +457,12 @@ public abstract class ConnectorBase implements TapConnector {
 
     protected synchronized void syncSchemaSubmit(List<TapTable> tapTables, Consumer<List<TapTable>> consumer) {
         consumer.accept(tapTables);
+    }
+
+    protected void throwNonSupportWhenLightInit() {
+        if (isLight.get()) {
+            throw new UnsupportedOperationException("This feature is not available with light init, please use full init");
+        }
     }
 
 }

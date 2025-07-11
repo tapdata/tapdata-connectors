@@ -4,7 +4,6 @@
     "icon": "icons/rocketmq.png",
     "doc": "${doc}",
     "id": "rocketmq",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
@@ -74,15 +73,77 @@
           "required": true,
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "apiServerKey": "producer_group"
+          "apiServerKey": "producer_group",
+          "x-index": 10,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "produceTags": {
+          "type": "string",
+          "title": "${produceTags}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 12,
+          "x-decorator-props": {
+            "tooltip": "${produceTagsTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         },
         "consumerGroup": {
           "type": "string",
           "title": "${consumerGroup}",
           "required": true,
+          "x-index": 14,
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "apiServerKey": "consumer_group"
+          "apiServerKey": "consumer_group",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "consumeExpression": {
+          "type": "string",
+          "title": "${consumeExpression}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 16,
+          "x-decorator-props": {
+            "tooltip": "${consumeExpressionTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -98,7 +159,11 @@
       "consumerGroup": "Consumer Group",
       "mqUsername": "Account",
       "mqPassword": "Password",
-      "useTLS": "Use TLS/SSL Connection"
+      "useTLS": "Use TLS/SSL Connection",
+      "produceTags": "Producer Tags",
+      "consumeExpression": "Consumer Expression",
+      "produceTagsTooltip": "Producer tags, separated by spaces",
+      "consumeExpressionTooltip": "Consumer expression, used to filter Tags messages, consume all when empty, example: TagA||TagB"
     },
     "zh_CN": {
       "doc": "docs/rocketmq_zh_CN.md",
@@ -109,7 +174,11 @@
       "consumerGroup": "消费者组",
       "mqUsername": "账号",
       "mqPassword": "密码",
-      "useTLS": "使用 TLS/SSL 连接"
+      "useTLS": "使用 TLS/SSL 连接",
+      "produceTags": "生产者标签",
+      "consumeExpression": "消费者表达式",
+      "produceTagsTooltip": "生产者标签，多个标签用空格分隔",
+      "consumeExpressionTooltip": "消费者表达式，用于过滤Tags消息，为空时消费所有，示例：TagA||TagB"
     },
     "zh_TW": {
       "doc": "docs/rocketmq_zh_TW.md",
@@ -120,7 +189,11 @@
       "consumerGroup": "消費者組",
       "mqUsername": "賬號",
       "mqPassword": "密碼",
-      "useTLS": "使用 TLS/SSL 連接"
+      "useTLS": "使用 TLS/SSL 連接",
+      "produceTags": "生產者標籤",
+      "consumeExpression": "消費者表達式",
+      "produceTagsTooltip": "生產者標籤，多個標籤用空格分隔",
+      "consumeExpressionTooltip": "消費者表達式，用於過濾Tags消息，為空時消費所有，示例：TagA||TagB"
     }
   },
   "dataTypes": {

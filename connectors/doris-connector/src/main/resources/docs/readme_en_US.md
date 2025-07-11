@@ -7,14 +7,14 @@ Doris 1.x、Doris 2.x
 #### **3.1 Create Doris account**
 ```
 //Create user
-create user 'username'@'localhost' identified with Doris_ native_ password by 'password';
+create user 'username'@'localhost' identified with mysql_native_password by 'password';
 //Change password
-alter user 'username'@'localhost' identified with Doris_ native_ password by 'password';
+alter user 'username'@'localhost' identified with mysql_native_password by 'password';
 ```
 #### **3.2 Authorization of tapdata account**
 Assign select permission to a database
 ```
-GRANT SELECT, SHOW VIEW, CREATE ROUTINE, LOCK TABLES ON <DATABASE_ NAME>.< TABLE_ NAME> TO 'tapdata' IDENTIFIED BY 'password';
+GRANT SELECT, SHOW VIEW, CREATE ROUTINE, LOCK TABLES ON <DATABASE_NAME>.< TABLE_NAME> TO 'tapdata' IDENTIFIED BY 'password';
 ```
 Permissions for global
 ```
@@ -27,7 +27,7 @@ When synchronizing from Doris to other heterogeneous databases, if the source Do
 ###  **4.  Prerequisites (as targets)**
 Assign all permissions to a database
 ```
-GRANT ALL PRIVILEGES ON <DATABASE_ NAME>.< TABLE_ NAME> TO 'tapdata' IDENTIFIED BY 'password';
+GRANT ALL PRIVILEGES ON <DATABASE_NAME>.< TABLE_NAME> TO 'tapdata' IDENTIFIED BY 'password';
 ```
 Permissions for global
 ```

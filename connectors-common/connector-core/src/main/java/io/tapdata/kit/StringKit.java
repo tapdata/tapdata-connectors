@@ -1,11 +1,14 @@
 package io.tapdata.kit;
 
+import org.apache.commons.lang3.StringUtils;
+
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -30,12 +33,30 @@ public class StringKit {
         return sb.delete(sb.length() - combiner.length(), sb.length()).toString();
     }
 
-    //replace first
-    public static String replaceOnce(String text, String searchString, String replacement) {
+    //replace
+    public static String replace(String text, String searchString, String replacement) {
         if (EmptyKit.isEmpty(text)) {
             return "";
         }
-        return text.replace(searchString, replacement);
+        return StringUtils.replace(text, searchString, replacement);
+    }
+
+    public static String replaceEscape(String input, char[] replacements) {
+        char[] chars = input.toCharArray();
+        StringBuilder sb = new StringBuilder();
+        int i = 0;
+        while (i < chars.length) {
+            char c = chars[i];
+            for (char replacement : replacements) {
+                if (c == replacement) {
+                    sb.append("\\");
+                    break;
+                }
+            }
+            sb.append(c);
+            i++;
+        }
+        return sb.toString();
     }
 
     /**
@@ -50,7 +71,7 @@ public class StringKit {
         if (EmptyKit.isEmpty(list)) {
             return "";
         }
-        return list.stream().map(s -> around + s + around).collect(Collectors.joining(splitter));
+        return list.stream().map(s -> around + s.replace(around, around + around) + around).collect(Collectors.joining(splitter));
     }
 
     public static int compareVersion(String version1, String version2) {
@@ -190,7 +211,7 @@ public class StringKit {
         if (EmptyKit.isBlank(str) || EmptyKit.isBlank(remove)) {
             return str;
         }
-        if (str.startsWith(remove) && str.endsWith(remove) && str.length() > 2 * remove.length()) {
+        if (str.startsWith(remove) && str.endsWith(remove) && str.length() >= 2 * remove.length()) {
             return str.substring(remove.length(), str.length() - remove.length());
         }
         if (EmptyKit.isNull(upperCase)) {
@@ -318,5 +339,51 @@ public class StringKit {
             converted[i * 2 + 1] = HEX_CHARS[b & 0x0F];
         }
         return String.valueOf(converted);
+    }
+
+    //正则表达式去除括号及括号内的内容
+    public static String removeParentheses(String str) {
+        return str.replaceAll("\\(.*?\\)", "");
+    }
+
+    public static byte[] toByteArray(String hex) {
+        String hexString = hex.replace(" ", "");
+        final byte[] byteArray = new byte[hexString.length() / 2];
+        int k = 0;
+        for (int i = 0; i < byteArray.length; i++) {
+            byte high = (byte) (Character.digit(hexString.charAt(k), 16) & 0xff);
+            byte low = (byte) (Character.digit(hexString.charAt(k + 1), 16) & 0xff);
+            byteArray[i] = (byte) (high << 4 | low);
+            k += 2;
+        }
+        return byteArray;
+    }
+
+    public static String trimTailBlank(Object str) {
+        if (null == str) return null;
+        return ("_" + str).trim().substring(1);
+    }
+
+    public static String escape(String name, String escapes) {
+        String res = name;
+        for (int i = 0; i < escapes.length(); i++) {
+            char escape = escapes.charAt(i);
+            res = escape(res, escape);
+        }
+        return res;
+    }
+
+    public static String escape(String name, char escape) {
+        return name.replace(escape + "", "" + escape + escape);
+    }
+
+    private static final Pattern REGEX_SPECIAL_CHARS = Pattern.compile("[\\\\^$|*+?.,()\\[\\]{}]");
+
+    public static String escapeRegex(String input) {
+        if (input == null || input.isEmpty()) {
+            return input;
+        }
+        Matcher matcher = REGEX_SPECIAL_CHARS.matcher(input);
+        return matcher.replaceAll("\\\\$0");
     }
 }

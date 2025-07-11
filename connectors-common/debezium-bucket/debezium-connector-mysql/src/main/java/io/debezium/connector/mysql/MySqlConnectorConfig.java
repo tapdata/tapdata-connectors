@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigDef.Importance;
@@ -113,7 +114,7 @@ public class MySqlConnectorConfig extends HistorizedRelationalDatabaseConnectorC
         /**
          * Determine if the supplied value is one of the predefined options.
          *
-         * @param value the configuration property value; may not be null
+         * @param value        the configuration property value; may not be null
          * @param defaultValue the default value; may be null
          * @return the matching option, or null if no match is found and the non-null default is invalid
          */
@@ -254,7 +255,7 @@ public class MySqlConnectorConfig extends HistorizedRelationalDatabaseConnectorC
         /**
          * Determine if the supplied value is one of the predefined options.
          *
-         * @param value the configuration property value; may not be null
+         * @param value        the configuration property value; may not be null
          * @param defaultValue the default value; may be null
          * @return the matching option, or null if no match is found and the non-null default is invalid
          */
@@ -311,7 +312,7 @@ public class MySqlConnectorConfig extends HistorizedRelationalDatabaseConnectorC
         /**
          * Determine if the supplied value is one of the predefined options.
          *
-         * @param value the configuration property value; may not be null
+         * @param value        the configuration property value; may not be null
          * @param defaultValue the default value; may be null
          * @return the matching option, or null if no match is found and the non-null default is invalid
          */
@@ -381,10 +382,10 @@ public class MySqlConnectorConfig extends HistorizedRelationalDatabaseConnectorC
         }
 
         /**
-        * Determine which flavour of MySQL locking to use.
-        *
-        * @return the correct SQL to obtain a global lock for the current mode
-        */
+         * Determine which flavour of MySQL locking to use.
+         *
+         * @return the correct SQL to obtain a global lock for the current mode
+         */
         public String getLockStatement() {
             if (value.equals(MINIMAL_PERCONA.value)) {
                 return "LOCK TABLES FOR BACKUP";
@@ -416,7 +417,7 @@ public class MySqlConnectorConfig extends HistorizedRelationalDatabaseConnectorC
         /**
          * Determine if the supplied value is one of the predefined options.
          *
-         * @param value the configuration property value; may not be null
+         * @param value        the configuration property value; may not be null
          * @param defaultValue the default value; may be null
          * @return the matching option, or null if no match is found and the non-null default is invalid
          */
@@ -492,7 +493,7 @@ public class MySqlConnectorConfig extends HistorizedRelationalDatabaseConnectorC
         /**
          * Determine if the supplied value is one of the predefined options.
          *
-         * @param value the configuration property value; may not be null
+         * @param value        the configuration property value; may not be null
          * @param defaultValue the default value; may be null
          * @return the matching option, or null if no match is found and the non-null default is invalid
          */
@@ -554,7 +555,7 @@ public class MySqlConnectorConfig extends HistorizedRelationalDatabaseConnectorC
         /**
          * Determine if the supplied value is one of the predefined options.
          *
-         * @param value the configuration property value; may not be null
+         * @param value        the configuration property value; may not be null
          * @param defaultValue the default value; may be null
          * @return the matching option, or null if no match is found and the non-null default is invalid
          */
@@ -1085,13 +1086,13 @@ public class MySqlConnectorConfig extends HistorizedRelationalDatabaseConnectorC
      * Validate the new snapshot.locking.mode configuration, which replaces snapshot.minimal.locking.
      *
      * If minimal.locking is explicitly defined and locking.mode is NOT explicitly defined:
-     *   - coerce minimal.locking into the new snap.locking.mode property.
+     * - coerce minimal.locking into the new snap.locking.mode property.
      *
      * If minimal.locking is NOT explicitly defined and locking.mode IS explicitly defined:
-     *   - use new locking.mode property.
+     * - use new locking.mode property.
      *
      * If BOTH minimal.locking and locking.mode ARE defined:
-     *   - Throw a validation error.
+     * - Throw a validation error.
      */
     private static int validateSnapshotLockingMode(Configuration config, Field field, ValidationOutput problems) {
         // Determine which configurations are explicitly defined
@@ -1296,5 +1297,51 @@ public class MySqlConnectorConfig extends HistorizedRelationalDatabaseConnectorC
         String tableIncludeListStr = config.getString(TABLE_INCLUDE_LIST);
         tableIncludeListStr = null == tableIncludeListStr ? "" : tableIncludeListStr;
         return Arrays.asList(tableIncludeListStr.split(","));
+    }
+
+    public List<TableId> getTableIdIncludeList() {
+        String tableIncludeListStr = config.getString(TABLE_INCLUDE_LIST);
+        tableIncludeListStr = null == tableIncludeListStr ? "" : tableIncludeListStr;
+        List<String> tableIncludeList = Arrays.asList(tableIncludeListStr.split("(?<!\\\\),"));
+        return tableIncludeList.stream().map(this::parseTableId).collect(Collectors.toList());
+    }
+
+    private TableId parseTableId(String tableIdStr) {
+        String[] parts = tableIdStr.split("(?<!\\\\)\\.");
+        if (parts.length != 2) {
+            throw new IllegalArgumentException("Invalid table id: " + tableIdStr);
+        }
+        return new TableId(unescapeRegex(parts[0]), null, unescapeRegex(parts[1]));
+    }
+
+    private static final String REGEX_SPECIAL_CHARS = "\\\\^$|*+?.,()[]{}";
+
+    private static String unescapeRegex(String input) {
+        if (input == null || input.isEmpty()) {
+            return input;
+        }
+        StringBuilder sb = new StringBuilder();
+        boolean escape = false;
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (escape) {
+                // 检查字符是否为被转义的特殊字符或反斜杠
+                if (REGEX_SPECIAL_CHARS.indexOf(c) != -1) {
+                    sb.append(c); // 去掉反斜杠，保留字符
+                } else {
+                    sb.append('\\').append(c); // 非特殊字符，保留反斜杠
+                }
+                escape = false;
+            } else if (c == '\\') {
+                escape = true; // 遇到反斜杠，标记转义状态
+            } else {
+                sb.append(c); // 普通字符直接追加
+            }
+        }
+        // 处理末尾未闭合的反斜杠
+        if (escape) {
+            sb.append('\\');
+        }
+        return sb.toString();
     }
 }

@@ -3,6 +3,7 @@ package io.tapdata.mongodb;
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoCredential;
+import com.mongodb.WriteConcern;
 import com.mongodb.client.*;
 import com.mongodb.connection.ConnectionPoolSettings;
 import io.tapdata.entity.logger.TapLogger;
@@ -13,6 +14,7 @@ import io.tapdata.kit.StringKit;
 import io.tapdata.mongodb.codecs.TapdataBigDecimalCodec;
 import io.tapdata.mongodb.codecs.TapdataBigIntegerCodec;
 import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.mongodb.reader.StreamWithOpLogCollection;
 import io.tapdata.mongodb.util.SSLUtil;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import org.apache.commons.collections4.CollectionUtils;
@@ -32,6 +34,7 @@ import java.security.SecureRandom;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -50,6 +53,7 @@ public class MongodbUtil {
 	private final static String BUILDINFO = "buildinfo";
 	private final static String VERSION = "version";
 	private final static String COLL_STATS = "collStats";
+	private final static String SERVER_STATUS = "serverStatus";
 
 	public static int getVersion(MongoClient mongoClient, String database) {
 		int versionNum = 0;
@@ -66,6 +70,13 @@ public class MongodbUtil {
 		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
 		Document buildinfo = mongoDatabase.runCommand(new BsonDocument(BUILDINFO, new BsonString("")));
 		return buildinfo.get(VERSION).toString();
+	}
+
+	public static Long getServerTime(MongoClient mongoClient, String database) {
+		MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
+		Document document = mongoDatabase.runCommand(new BsonDocument(SERVER_STATUS, new BsonInt32(1)));
+		Date date = (Date) document.get("localTime");
+		return date.getTime();
 	}
 
 	public static Map<String, Object> getCollectionStatus(MongoClient mongoClient, String database, String collectionName) {
@@ -172,7 +183,7 @@ public class MongodbUtil {
 		});
 
 		// 如果表里没有 _id, 则生成一个
-		if (idExist.get() == false) {
+		if (idExist.get() == false && !StreamWithOpLogCollection.OP_LOG_FULL_NAME.equals(collection.getNamespace().getFullName())) {
 			ObjectId objectId = new ObjectId();
 			BsonObjectId bsonObjectId = new BsonObjectId(objectId);
 			BsonDocument bsonDocument = new BsonDocument("_id", bsonObjectId);
@@ -304,7 +315,7 @@ public class MongodbUtil {
 						String pass = new String(password);
 						pass = URLEncoder.encode(pass, "UTF-8");
 
-						mongodbUri = StringKit.replaceOnce(mongodbUri, pass + "@", "******@");
+						mongodbUri = StringKit.replace(mongodbUri, pass + "@", "******@");
 					}
 				}
 
@@ -350,14 +361,28 @@ public class MongodbUtil {
 		return key;
 	}
 
+	private static boolean isMongoShards(String mongoUri) {
+		try (MongoClient mongoClient = MongoClients.create(mongoUri)) {
+			MongoCollection<Document> collection = mongoClient.getDatabase("config").getCollection("shards");
+			final MongoCursor<Document> cursor = collection.find().iterator();
+			if (cursor.hasNext()) {
+				return true;
+			}
+			return false;
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
 	// 写一个方法, 接收 mongoUri, 如果参数里没有包含 replicaSet, 返回 mongoUri, 但是里面只有主节点的地址
 	private static String getPrimaryUri(String mongoUri) {
-		if (mongoUri.contains("replicaSet") || mongoUri.contains("mongodb+srv:")) {
+		if (mongoUri.contains("replicaSet") || mongoUri.contains("mongodb+srv:") || isMongoShards(mongoUri)) {
 			return mongoUri;
 		}
 
 		AtomicReference<String> primaryHost = new AtomicReference<>();
 		ConnectionString connectionString = new ConnectionString(mongoUri);
+		Set<String> invalidHosts = new HashSet<>();
 		try {
 			List<String> hosts = connectionString.getHosts();
 			if (EmptyKit.isNotEmpty(hosts)) {
@@ -370,6 +395,8 @@ public class MongodbUtil {
 						if (result.getBoolean("ismaster")) {
 							primaryHost.set(host);
 						}
+					} catch (Exception e) {
+						invalidHosts.add(host);
 					} finally {
 						if (client != null) {
 							try {
@@ -378,13 +405,16 @@ public class MongodbUtil {
 							}
 						}
 					}
-					});
-				}
-			} catch (Exception ignored) {
+				});
+			}
+		} catch (Exception ignored) {
 		}
 		// 如果 primaryHost 为空, 给第一个地址, 等报错后续继续选择
 		if (primaryHost.get() == null) {
-			primaryHost.set(connectionString.getHosts().get(0));
+			List<String> validHosts = connectionString.getHosts().stream().filter(t -> !invalidHosts.contains(t)).collect(Collectors.toList());
+			if (validHosts.size() > 0) {
+				primaryHost.set(validHosts.get(0));
+			}
 		}
 
 		if (primaryHost.get() != null) {
@@ -404,7 +434,9 @@ public class MongodbUtil {
 					new TapdataBigDecimalCodec(),
 					new TapdataBigIntegerCodec()
 			), defaultCodecRegistry);
-			final MongoClientSettings.Builder builder = MongoClientSettings.builder().codecRegistry(codecRegistry);
+			final MongoClientSettings.Builder builder = MongoClientSettings.builder()
+					.codecRegistry(codecRegistry)
+					.writeConcern(WriteConcern.valueOf(mongodbConfig.getWriteConcern()));
 			String mongodbUri = mongodbConfig.getUri();
 			if (null == mongodbUri || "".equals(mongodbUri)) {
 				throw new RuntimeException("Create MongoDB client failed, error: uri is blank");
@@ -622,4 +654,19 @@ public class MongodbUtil {
 			dataMap.put(key, defaultValue);
 		}
 	}
+
+    public static Object convertValue(Object o) {
+        if (null == o) return null;
+        if (ObjectId.class.getName().equals(o.getClass().getName()) && !(o instanceof ObjectId)) {
+            return new ObjectId(o.toString());
+        } else if (o instanceof Map) {
+            ((Map<?, Object>) o).entrySet().forEach(en -> en.setValue(convertValue(en.getValue())));
+        } else if (o instanceof List) {
+            List<Object> list = (List<Object>) o;
+            for (int i = 0; i < list.size(); i++) {
+                list.set(i, convertValue(list.get(i)));
+            }
+        }
+        return o;
+    }
 }

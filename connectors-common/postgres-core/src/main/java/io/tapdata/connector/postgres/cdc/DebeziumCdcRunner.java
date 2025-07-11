@@ -8,6 +8,7 @@ import org.apache.kafka.connect.source.SourceRecord;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Abstract runner for change data capture
@@ -31,7 +32,7 @@ public abstract class DebeziumCdcRunner implements CdcRunner {
     /**
      * records caught by cdc can only be consumed in this method
      */
-    public void consumeRecords(List<SourceRecord> sourceRecords, DebeziumEngine.RecordCommitter<SourceRecord> committer) {
+    public void consumeRecords(List<SourceRecord> sourceRecords, DebeziumEngine.RecordCommitter<SourceRecord> committer) throws InterruptedException {
 
     }
 
@@ -40,8 +41,15 @@ public abstract class DebeziumCdcRunner implements CdcRunner {
      */
     @Override
     public void startCdcRunner() {
+        System.setProperty("debezium.embedded.shutdown.pause.before.interrupt.ms", "3000");
         if (EmptyKit.isNotNull(engine)) {
             engine.run();
+        }
+    }
+
+    public void flushOffset(Map<String, ?> offset) {
+        if (EmptyKit.isNotNull(engine)) {
+            engine.flushOffset(offset);
         }
     }
 

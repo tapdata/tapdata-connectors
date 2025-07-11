@@ -7,6 +7,8 @@ import com.oceanbase.clogproxy.client.listener.RecordListener;
 import com.oceanbase.oms.logmessage.DataMessage;
 import com.oceanbase.oms.logmessage.LogMessage;
 import io.netty.util.BooleanSupplier;
+import io.tapdata.common.concurrent.ConcurrentProcessor;
+import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.common.ddl.DDLFactory;
 import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
 import io.tapdata.common.ddl.type.DDLParserType;
@@ -29,13 +31,13 @@ import io.tapdata.util.DateUtil;
 import org.apache.commons.lang3.StringUtils;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
+
+import static io.tapdata.base.ConnectorBase.list;
 
 public class OceanbaseReader {
 
@@ -63,95 +65,81 @@ public class OceanbaseReader {
 
     public void start(BooleanSupplier isAlive) throws Throwable {
         ObReaderConfig config = new ObReaderConfig();
-        config.setRsList(oceanbaseConfig.getHost() + ":" + oceanbaseConfig.getRpcPort() + ":" + oceanbaseConfig.getPort());
+        config.setRsList(oceanbaseConfig.getRootServerList());
         config.setUsername(oceanbaseConfig.getUser());
         config.setPassword(oceanbaseConfig.getPassword());
         config.setStartTimestamp((Long) offsetState);
-        config.setTableWhiteList(tableList.stream().map(table -> oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + "." + table).collect(Collectors.joining("|")));
-        LogProxyClient client = new LogProxyClient(oceanbaseConfig.getHost(), oceanbaseConfig.getLogProxyPort(), config);
+        config.setTableWhiteList(oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + ".*");
+        LogProxyClient client = new LogProxyClient(oceanbaseConfig.getRawLogServerHost(), oceanbaseConfig.getRawLogServerPort(), config);
         AtomicReference<Throwable> throwable = new AtomicReference<>();
-        AtomicReference<List<TapEvent>> eventList = new AtomicReference<>(new ArrayList<>());
-        AtomicInteger heartbeatCount = new AtomicInteger(0);
-        client.addListener(new RecordListener() {
-            @Override
-            public void notify(LogMessage message) {
+        try (
+                ConcurrentProcessor<LogMessage, MessageEvent> concurrentProcessor = TapExecutors.createSimple(8, 32, "OceanBaseReader-Processor")
+        ) {
+            Thread t = new Thread(() -> {
+                AtomicReference<List<TapEvent>> events = new AtomicReference<>(list());
+                int heartbeat = 0;
+                long lastTimestamp = 0L;
                 try {
-                    Map<String, Object> after = DataMap.create();
-                    Map<String, Object> before = DataMap.create();
-                    analyzeMessage(message, after, before);
-                    switch (message.getOpt().name()) {
-                        case "INSERT":
-                            eventList.get().add(new TapInsertRecordEvent().init().table(message.getTableName()).after(after).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
-                            break;
-                        case "UPDATE":
-                            eventList.get().add(new TapUpdateRecordEvent().init().table(message.getTableName()).after(after).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
-                            break;
-                        case "DELETE":
-                            eventList.get().add(new TapDeleteRecordEvent().init().table(message.getTableName()).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
-                            break;
-                        case "HEARTBEAT":
-                            if (heartbeatCount.incrementAndGet() >= 10) {
-                                eventList.get().add(new HeartbeatEvent().init().referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
-                                heartbeatCount.set(0);
-                                consumer.accept(eventList.get(), Long.valueOf(message.getTimestamp()));
-                                eventList.set(new ArrayList<>());
+                    while (isAlive.get()) {
+                        MessageEvent messageEvent = concurrentProcessor.get(100, TimeUnit.MILLISECONDS);
+                        if (EmptyKit.isNotNull(messageEvent)) {
+                            if (EmptyKit.isNull(messageEvent.getEvent())) {
+                                continue;
                             }
-                            break;
-                        case "DDL": {
-                            String ddlStr = message.getFieldList().get(0).getValue().toString();
-                            if (StringUtils.isNotBlank(ddlStr)) {
-                                try {
-                                    DDLFactory.ddlToTapDDLEvent(
-                                            ddlParserType,
-                                            ddlStr,
-                                            DDL_WRAPPER_CONFIG,
-                                            tableMap,
-                                            tapDDLEvent -> {
-                                                tapDDLEvent.setTime(System.currentTimeMillis());
-                                                tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
-                                                tapDDLEvent.setOriginDDL(ddlStr);
-                                                eventList.get().add(tapDDLEvent);
-                                            }, (ddl, wrapper) -> {
-                                                boolean unIgnoreTable = true;
-                                                if (wrapper instanceof MysqlDDLWrapper) {
-                                                    String tableName = ((MysqlDDLWrapper) wrapper).getTableName(ddl);
-                                                    unIgnoreTable = null == tableList || tableList.contains(tableName);
-                                                }
-                                                return unIgnoreTable;
-                                            }
-                                    );
-                                } catch (Throwable e) {
-                                    TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
-                                    tapDDLEvent.setTime(System.currentTimeMillis());
-                                    tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
-                                    tapDDLEvent.setOriginDDL(ddlStr);
-                                    eventList.get().add(tapDDLEvent);
+                            if ("HEARTBEAT".equals(messageEvent.getMessage().getOpt().name())) {
+                                if (heartbeat++ > 3) {
+                                    consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(Long.parseLong(messageEvent.getMessage().getTimestamp()) * 1000)), Long.parseLong(messageEvent.getMessage().getTimestamp()));
+                                    heartbeat = 0;
                                 }
+                                continue;
                             }
-                            break;
+                            events.get().addAll(messageEvent.getEvent());
+                            lastTimestamp = Long.parseLong(messageEvent.getMessage().getTimestamp());
+                            if (events.get().size() >= recordSize) {
+                                consumer.accept(events.get(), lastTimestamp);
+                                events.set(new ArrayList<>());
+                            }
+                        } else {
+                            if (events.get().size() > 0) {
+                                consumer.accept(events.get(), lastTimestamp);
+                                events.set(new ArrayList<>());
+                            }
                         }
-                        default:
-                            break;
-                    }
-                    if (eventList.get().size() >= recordSize) {
-                        consumer.accept(eventList.get(), Long.valueOf(message.getTimestamp()));
-                        eventList.set(new ArrayList<>());
                     }
                 } catch (Exception e) {
                     throwable.set(e);
                 }
-            }
-
-            @Override
-            public void onException(LogProxyClientException e) {
-                if (e.needStop()) {
-                    client.stop();
+            });
+            t.setName("OceanBaseReader-Consumer");
+            t.start();
+            client.addListener(new RecordListener() {
+                @Override
+                public void notify(LogMessage message) {
+                    try {
+                        concurrentProcessor.runAsync(message, e -> {
+                            try {
+                                return emit(e);
+                            } catch (Exception er) {
+                                throwable.set(er);
+                                return null;
+                            }
+                        });
+                    } catch (Exception e) {
+                        throwable.set(e);
+                    }
                 }
-            }
-        });
-        client.start();
-        consumer.streamReadStarted();
-        client.join();
+
+                @Override
+                public void onException(LogProxyClientException e) {
+                    if (e.needStop()) {
+                        client.stop();
+                    }
+                }
+            });
+            client.start();
+            consumer.streamReadStarted();
+            client.join();
+        }
         consumer.streamReadEnded();
         if (EmptyKit.isNotNull(throwable.get())) {
             throw throwable.get();
@@ -159,6 +147,72 @@ public class OceanbaseReader {
         if (isAlive.get()) {
             throw new RuntimeException("Exception occurs in OceanBase Log Miner service");
         }
+    }
+
+    private MessageEvent emit(LogMessage message) {
+        String op = message.getOpt().name();
+        if (!tableList.contains(message.getTableName())) {
+            switch (op) {
+                case "INSERT":
+                case "UPDATE":
+                case "DELETE":
+                    return null;
+            }
+        }
+        List<TapEvent> tapEvents = new ArrayList<>();
+        Map<String, Object> after = DataMap.create();
+        Map<String, Object> before = DataMap.create();
+        analyzeMessage(message, after, before);
+        switch (op) {
+            case "INSERT":
+                tapEvents.add(new TapInsertRecordEvent().init().table(message.getTableName()).after(after).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                break;
+            case "UPDATE":
+                tapEvents.add(new TapUpdateRecordEvent().init().table(message.getTableName()).after(after).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                break;
+            case "DELETE":
+                tapEvents.add(new TapDeleteRecordEvent().init().table(message.getTableName()).before(before).referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                break;
+            case "HEARTBEAT":
+                tapEvents.add(new HeartbeatEvent().init().referenceTime(Long.parseLong(message.getTimestamp()) * 1000));
+                break;
+            case "DDL": {
+                String ddlStr = message.getFieldList().get(0).getValue().toString();
+                if (StringUtils.isNotBlank(ddlStr)) {
+                    try {
+                        DDLFactory.ddlToTapDDLEvent(
+                                ddlParserType,
+                                ddlStr,
+                                DDL_WRAPPER_CONFIG,
+                                tableMap,
+                                tapDDLEvent -> {
+                                    tapDDLEvent.setTime(System.currentTimeMillis());
+                                    tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
+                                    tapDDLEvent.setOriginDDL(ddlStr);
+                                    tapEvents.add(tapDDLEvent);
+                                }, (ddl, wrapper) -> {
+                                    boolean unIgnoreTable = true;
+                                    if (wrapper instanceof MysqlDDLWrapper) {
+                                        String tableName = ((MysqlDDLWrapper) wrapper).getTableName(ddl);
+                                        unIgnoreTable = null == tableList || tableList.contains(tableName);
+                                    }
+                                    return unIgnoreTable;
+                                }
+                        );
+                    } catch (Throwable e) {
+                        TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
+                        tapDDLEvent.setTime(System.currentTimeMillis());
+                        tapDDLEvent.setReferenceTime(Long.parseLong(message.getTimestamp()) * 1000);
+                        tapDDLEvent.setOriginDDL(ddlStr);
+                        tapEvents.add(tapDDLEvent);
+                    }
+                }
+                break;
+            }
+            default:
+                return null;
+        }
+        return new MessageEvent(tapEvents, message);
     }
 
     private void analyzeMessage(LogMessage message, Map<String, Object> after, Map<String, Object> before) {
@@ -201,15 +255,25 @@ public class OceanbaseReader {
             case "DOUBLE":
             case "FLOAT":
                 return new BigDecimal(field.getValue().toString());
-            case "DATETIME":
-            case "DATE":
-            case "TIMESTAMP":
+            case "DATETIME": {
                 String dataFormat = dataFormatMap.get(table + "." + field.getFieldname());
                 if (EmptyKit.isNull(dataFormat)) {
                     dataFormat = DateUtil.determineDateFormat(field.getValue().toString());
                     dataFormatMap.put(table + "." + field.getFieldname(), dataFormat);
                 }
-                return DateUtil.parseInstant(field.getValue().toString(), dataFormat);
+                return DateUtil.parseInstantWithHour(field.getValue().toString(), dataFormat, oceanbaseConfig.getZoneOffsetHour());
+            }
+            case "DATE": {
+                return LocalDate.parse(field.getValue().toString()).atStartOfDay();
+            }
+            case "TIMESTAMP": {
+                String dataFormat = dataFormatMap.get(table + "." + field.getFieldname());
+                if (EmptyKit.isNull(dataFormat)) {
+                    dataFormat = DateUtil.determineDateFormat(field.getValue().toString());
+                    dataFormatMap.put(table + "." + field.getFieldname(), dataFormat);
+                }
+                return DateUtil.parseInstantWithZone(field.getValue().toString(), dataFormat, ZoneOffset.UTC);
+            }
             case "YEAR":
                 return Integer.parseInt(field.getValue().toString());
             case "BIT":
@@ -223,6 +287,24 @@ public class OceanbaseReader {
                 return field.getValue().getBytes();
             default:
                 return field.getValue().toString();
+        }
+    }
+
+    static class MessageEvent {
+        private final LogMessage message;
+        private final List<TapEvent> event;
+
+        public MessageEvent(List<TapEvent> event, LogMessage message) {
+            this.message = message;
+            this.event = event;
+        }
+
+        public LogMessage getMessage() {
+            return message;
+        }
+
+        public List<TapEvent> getEvent() {
+            return event;
         }
     }
 }

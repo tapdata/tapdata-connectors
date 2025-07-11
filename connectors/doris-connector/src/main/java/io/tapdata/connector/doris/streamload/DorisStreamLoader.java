@@ -16,14 +16,13 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
-import java.net.URI;
+import java.net.URLEncoder;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -141,7 +140,7 @@ public class DorisStreamLoader {
         DorisConfig.WriteFormat writeFormat = dorisConfig.getWriteFormatEnum();
         try {
             final String loadUrl = buildLoadUrl(dorisConfig.getDorisHttp(), dorisConfig.getDatabase(), table.getId());
-            final String prefix = buildPrefix(table.getId());
+            final String prefix = buildPrefix(URLEncoder.encode(table.getId()).replace("%", ""));
 
             String label = prefix + "-" + UUID.randomUUID();
             List<String> columns = new ArrayList<>();
@@ -154,6 +153,8 @@ public class DorisStreamLoader {
             columns.add(Constants.DORIS_DELETE_SIGN);
             HttpPutBuilder putBuilder = new HttpPutBuilder();
             InputStreamEntity entity = new InputStreamEntity(recordStream, recordStream.getContentLength());
+            entity.setContentEncoding("UTF-8");
+            entity.setContentType("application/json");
             putBuilder.setUrl(loadUrl)
                     // 前端表单传出来的值和tdd json加载的值可能有差别，如前端传的pwd可能是null，tdd的是空字符串
                     .baseAuth(dorisConfig.getUser(), dorisConfig.getPassword())
@@ -175,7 +176,9 @@ public class DorisStreamLoader {
             }
             HttpPut httpPut = putBuilder.build();
             TapLogger.debug(TAG, "Call stream load http api, url: {}, headers: {}", loadUrl, putBuilder.header);
-            return handlePreCommitResponse(httpClient.execute(httpPut));
+            try (CloseableHttpResponse execute = httpClient.execute(httpPut)) {
+                return handlePreCommitResponse(execute);
+            }
         } catch (DorisRetryableException e) {
             throw e;
         } catch (Exception e) {

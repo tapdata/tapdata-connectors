@@ -9,6 +9,7 @@ import java.util.Properties;
 public class ClickhouseConfig extends CommonDbConfig implements Serializable {
 
     private Integer mergeMinutes = 60;
+    private Boolean mixFastWrite = false;
 
     public ClickhouseConfig() {
         setDbType("clickhouse");
@@ -32,6 +33,14 @@ public class ClickhouseConfig extends CommonDbConfig implements Serializable {
 
     public void setMergeMinutes(Integer mergeMinutes) {
         this.mergeMinutes = mergeMinutes;
+    }
+
+    public Boolean getMixFastWrite() {
+        return mixFastWrite;
+    }
+
+    public void setMixFastWrite(Boolean mixFastWrite) {
+        this.mixFastWrite = mixFastWrite;
     }
 
 }

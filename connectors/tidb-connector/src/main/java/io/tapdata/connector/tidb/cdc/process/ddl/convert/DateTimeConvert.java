@@ -1,5 +1,6 @@
 package io.tapdata.connector.tidb.cdc.process.ddl.convert;
 
+import java.time.LocalDateTime;
 import java.util.TimeZone;
 
 public class DateTimeConvert implements Convert {
@@ -13,6 +14,10 @@ public class DateTimeConvert implements Convert {
 
     @Override
     public Object convert(Object fromValue) {
-        return covertToDateTime(fromValue, precision, "yyyy-MM-dd hh:mm:ss%s", timezone);
+        Object datetime = covertToDateTime(fromValue, precision, "yyyy-MM-dd HH:mm:ss", timezone);
+        if (datetime instanceof LocalDateTime) {
+            return ((LocalDateTime)datetime).minusHours(timezone.getRawOffset() / 1000 / 60 / 60);
+        }
+        return datetime;
     }
 }

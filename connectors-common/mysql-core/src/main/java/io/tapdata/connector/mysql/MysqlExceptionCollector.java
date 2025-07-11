@@ -6,6 +6,7 @@ import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
+import io.tapdata.connector.mysql.error.MysqlErrorCode;
 import io.tapdata.exception.*;
 import io.tapdata.kit.ErrorKit;
 
@@ -29,12 +30,12 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
     @Override
     public void collectTerminateByServer(Throwable cause) {
         if (cause instanceof SQLException && "08003".equals(((SQLException) cause).getSQLState())) {
-            throw new TapPdkTerminateByServerEx(pdkId, ErrorKit.getLastCause(cause));
+            throw new TapPdkTerminateByServerEx(getPdkId(), ErrorKit.getLastCause(cause));
         }
         String deploymentMode = mysqlConfig.getDeploymentMode();
         if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE){
             if (cause instanceof SQLException && "Connection is closed".equals(cause.getMessage()) || cause instanceof EOFException && cause.getMessage().startsWith("Failed to read")){
-                throw new TapPdkRetryableEx(String.format("mysql master node:%s is down, try to switch other node if it become master node, previous available node: %s", mysqlConfig.getMasterNode(), mysqlConfig.getAvailableMasterSlaveAddress()), pdkId, cause);
+                throw new TapPdkRetryableEx(String.format("mysql master node:%s is down, try to switch other node if it become master node, previous available node: %s", mysqlConfig.getMasterNode(), mysqlConfig.getAvailableMasterSlaveAddress()), getPdkId(), cause);
             }
         }
     }
@@ -42,31 +43,34 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
     @Override
     public void collectUserPwdInvalid(String username, Throwable cause) {
         if (cause instanceof SQLException && "28000".equals(((SQLException) cause).getSQLState())) {
-            throw new TapPdkUserPwdInvalidEx(pdkId, username, ErrorKit.getLastCause(cause));
+            throw new TapPdkUserPwdInvalidEx(getPdkId(), username, ErrorKit.getLastCause(cause));
         }
     }
 
     @Override
     public void collectOffsetInvalid(Object offset, Throwable cause) {
         if (cause instanceof ServerException && "HY000".equals(((ServerException) cause).getSqlState())) {
-            throw new TapPdkOffsetOutOfLogEx(pdkId, offset, ErrorKit.getLastCause(cause));
+            throw new TapPdkOffsetOutOfLogEx(getPdkId(), offset, ErrorKit.getLastCause(cause));
         }
         if (cause instanceof GTIDException) {
-            throw new TapPdkOffsetOutOfLogEx(pdkId, offset, ErrorKit.getLastCause(cause));
+            throw new TapPdkOffsetOutOfLogEx(getPdkId(), offset, ErrorKit.getLastCause(cause));
         }
     }
 
     @Override
     public void collectReadPrivileges(Object operation, List<String> privileges, Throwable cause) {
         if (cause instanceof SQLException && "42000".equals(((SQLException) cause).getSQLState())) {
-            throw new TapPdkReadMissingPrivilegesEx(pdkId, operation, privileges, ErrorKit.getLastCause(cause));
+            throw new TapPdkReadMissingPrivilegesEx(getPdkId(), operation, privileges, ErrorKit.getLastCause(cause));
         }
     }
 
     @Override
     public void collectWritePrivileges(Object operation, List<String> privileges, Throwable cause) {
         if (cause instanceof SQLException && "42000".equals(((SQLException) cause).getSQLState())) {
-            throw new TapPdkWriteMissingPrivilegesEx(pdkId, operation, privileges, ErrorKit.getLastCause(cause));
+            if(((SQLException) cause).getErrorCode() == 1118) {
+                throw new TapCodeException(MysqlErrorCode.EXCEEDS_65535_LIMIT, "The length of the row exceeds the limit of 65535 bytes.").dynamicDescriptionParameters(operation);
+            }
+            throw new TapPdkWriteMissingPrivilegesEx(getPdkId(), operation, privileges, ErrorKit.getLastCause(cause));
         }
     }
 
@@ -82,7 +86,7 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
                     if (matcher.find()) {
                         fieldName = matcher.group(3);
                     }
-                    throw new TapPdkWriteTypeEx(pdkId, fieldName, null, data, ErrorKit.getLastCause(cause));
+                    throw new TapPdkWriteTypeEx(getPdkId(), fieldName, null, data, ErrorKit.getLastCause(cause));
                 }
                 case 1265: {
                     Pattern pattern = Pattern.compile("Data truncated for column '(.*)' at row ");
@@ -91,7 +95,7 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
                     if (matcher.find()) {
                         fieldName = matcher.group(1);
                     }
-                    throw new TapPdkWriteTypeEx(pdkId, fieldName, null, data, ErrorKit.getLastCause(cause));
+                    throw new TapPdkWriteTypeEx(getPdkId(), fieldName, null, data, ErrorKit.getLastCause(cause));
                 }
             }
         }
@@ -107,7 +111,7 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
             if (matcher.find()) {
                 fieldName = matcher.group(1);
             }
-            throw new TapPdkWriteLengthEx(pdkId, fieldName, null, data, ErrorKit.getLastCause(cause));
+            throw new TapPdkWriteLengthEx(getPdkId(), fieldName, null, data, ErrorKit.getLastCause(cause));
         }
         //number length
         if (cause instanceof SQLException && ((SQLException) cause).getErrorCode() == 1264) {
@@ -117,7 +121,7 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
             if (matcher.find()) {
                 fieldName = matcher.group(1);
             }
-            throw new TapPdkWriteLengthEx(pdkId, fieldName, null, data, ErrorKit.getLastCause(cause));
+            throw new TapPdkWriteLengthEx(getPdkId(), fieldName, null, data, ErrorKit.getLastCause(cause));
         }
 
     }
@@ -131,7 +135,7 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
             if (matcher.find()) {
                 constraintStr = matcher.group(2);
             }
-            throw new TapPdkViolateUniqueEx(pdkId, targetFieldName, data, constraintStr, ErrorKit.getLastCause(cause));
+            throw new TapPdkViolateUniqueEx(getPdkId(), targetFieldName, data, constraintStr, ErrorKit.getLastCause(cause));
         }
     }
 
@@ -144,8 +148,14 @@ public class MysqlExceptionCollector extends AbstractExceptionCollector implemen
             if (matcher.find()) {
                 fieldName = matcher.group(1);
             }
-            throw new TapPdkViolateNullableEx(pdkId, fieldName, ErrorKit.getLastCause(cause));
+            throw new TapPdkViolateNullableEx(getPdkId(), fieldName, ErrorKit.getLastCause(cause));
         }
+    }
+
+
+    public void collectCdcConfigInvalid(String solutionSuggestions,Throwable cause){
+        throw new TapDbCdcConfigInvalidEx(getPdkId(), solutionSuggestions, ErrorKit.getLastCause(cause));
+
     }
 
     @Override

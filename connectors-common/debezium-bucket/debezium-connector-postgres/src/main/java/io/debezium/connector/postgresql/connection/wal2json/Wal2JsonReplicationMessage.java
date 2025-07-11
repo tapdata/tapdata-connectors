@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 
+import io.debezium.relational.TableId;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.slf4j.Logger;
@@ -80,6 +81,11 @@ class Wal2JsonReplicationMessage implements ReplicationMessage {
     @Override
     public String getTable() {
         return "\"" + rawMessage.getString("schema") + "\".\"" + rawMessage.getString("table") + "\"";
+    }
+
+    @Override
+    public TableId getTableId() {
+        return new TableId(null, rawMessage.getString("schema"), rawMessage.getString("table"));
     }
 
     @Override

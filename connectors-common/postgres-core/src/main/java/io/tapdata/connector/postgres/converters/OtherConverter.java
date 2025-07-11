@@ -9,7 +9,7 @@ import java.util.Properties;
 
 public class OtherConverter extends BaseTapdataConverter {
 
-    private final List<String> otherTypes = Arrays.asList("bit", "varbit", "tsvector", "tsquery", "regproc", "regprocedure", "regoper", "regoperator", "regclass", "regtype", "regconfig", "regdictionary", "pg_lsn");
+    private final List<String> otherTypes = Arrays.asList("bit", "varbit", "tsvector", "tsquery", "regproc", "regprocedure", "regoper", "regoperator", "regclass", "regtype", "regconfig", "regdictionary", "pg_lsn", "jsonb");
 
     @Override
     SchemaBuilder initSchemaBuilder(Properties props) {
@@ -27,7 +27,7 @@ public class OtherConverter extends BaseTapdataConverter {
     }
 
     @Override
-    Object convert(Object data) {
+    Object convert(Object data, RelationalColumn field) {
         return data.toString();
     }
 }

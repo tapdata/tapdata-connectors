@@ -12,6 +12,8 @@ import java.time.OffsetDateTime;
 import java.time.OffsetTime;
 import java.util.List;
 
+import io.debezium.connector.postgresql.PostgresSchema;
+import io.debezium.relational.TableId;
 import org.postgresql.geometric.PGbox;
 import org.postgresql.geometric.PGcircle;
 import org.postgresql.geometric.PGline;
@@ -155,6 +157,10 @@ public interface ReplicationMessage {
      * @return Table changed
      */
     public String getTable();
+
+    default TableId getTableId() {
+        return PostgresSchema.parse(getTable());
+    }
 
     /**
      * @return Set of original values of table columns, null for INSERT

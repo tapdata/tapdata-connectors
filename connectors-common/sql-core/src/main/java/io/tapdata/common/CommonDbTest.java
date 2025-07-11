@@ -3,9 +3,16 @@ package io.tapdata.common;
 import io.tapdata.constant.ConnectionTypeEnum;
 import io.tapdata.constant.DbTestItem;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestConnectionEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestHostPortEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
 import io.tapdata.util.NetUtil;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.sql.Connection;
@@ -26,7 +33,7 @@ public class CommonDbTest implements AutoCloseable {
     protected final String uuid = UUID.randomUUID().toString();
     protected static final String TEST_HOST_PORT_MESSAGE = "connected to %s:%s succeed!";
     protected static final String TEST_CONNECTION_LOGIN = "login succeed!";
-    protected static final String TEST_WRITE_TABLE = "tapdata___test";
+    protected static final String TEST_WRITE_TABLE = "tap___test";
 
     public CommonDbTest() {
 
@@ -45,7 +52,9 @@ public class CommonDbTest implements AutoCloseable {
         if (!ConnectionTypeEnum.TARGET.getType().equals(commonDbConfig.get__connectionType())) {
             testFunctionMap.put("testReadPrivilege", this::testReadPrivilege);
             testFunctionMap.put("testStreamRead", this::testStreamRead);
+            testFunctionMap.put(TestItem.ITEM_TIME_DETECTION, this::testTimeDifference);
         }
+        testFunctionMap.put(TestItem.ITEM_DATASOURCE_INSTANCE_INFO, this::testDatasourceInstanceInfo);
     }
 
     public Boolean testOneByOne() {
@@ -66,7 +75,7 @@ public class CommonDbTest implements AutoCloseable {
                     String.format(TEST_HOST_PORT_MESSAGE, commonDbConfig.getHost(), commonDbConfig.getPort())));
             return true;
         } catch (IOException e) {
-            consumer.accept(testItem(DbTestItem.HOST_PORT.getContent(), TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(DbTestItem.HOST_PORT.getContent(), new TapTestHostPortEx(e, commonDbConfig.getHost(), String.valueOf(commonDbConfig.getPort())), TestItem.RESULT_FAILED));
             return false;
         }
     }
@@ -79,7 +88,7 @@ public class CommonDbTest implements AutoCloseable {
             consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY, TEST_CONNECTION_LOGIN));
             return true;
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_CONNECTION, new TapTestConnectionEx(e), TestItem.RESULT_FAILED));
             return false;
         }
     }
@@ -101,7 +110,7 @@ public class CommonDbTest implements AutoCloseable {
                 consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_SUCCESSFULLY, versionMsg));
             }
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_VERSION, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -137,7 +146,7 @@ public class CommonDbTest implements AutoCloseable {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }
@@ -156,6 +165,40 @@ public class CommonDbTest implements AutoCloseable {
 
     public Boolean testStreamRead() {
         return true;
+    }
+
+    public Boolean testTimeDifference(){
+        return true;
+    }
+
+    public Long getTimeDifference(Long time) {
+        long timeDifference = Math.abs(time - System.currentTimeMillis());
+        if (timeDifference > 1000) {
+            consumer.accept(testItem(TestItem.ITEM_TIME_DETECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
+                    "Time difference between engine and data source is "+ timeDifference + "ms," + "Please manually calibrate the time of the engine and data source."));
+            return timeDifference;
+        }
+        return 0L;
+    }
+    protected Boolean testDatasourceInstanceInfo() {
+        return true;
+    }
+    protected void buildDatasourceInstanceInfo(ConnectionOptions connectionOptions) {
+        if (StringUtils.isNotBlank(datasourceInstanceId())) {
+            Map<String, String> datasourceInstanceInfo = new HashMap<>();
+            datasourceInstanceInfo.put("tag", datasourceInstanceTag());
+            datasourceInstanceInfo.put("id", datasourceInstanceId());
+            connectionOptions.setDatasourceInstanceInfo(datasourceInstanceInfo);
+            consumer.accept(testItem(TestItem.ITEM_DATASOURCE_INSTANCE_INFO, TestItem.RESULT_SUCCESSFULLY, datasourceInstanceTag()));
+        }
+    }
+    public String datasourceInstanceTag() {
+        return String.join(":"
+                , commonDbConfig.getHost()
+                , String.valueOf(commonDbConfig.getPort()));
+    }
+    public String datasourceInstanceId() {
+        return StringKit.md5(datasourceInstanceTag());
     }
 
     //healthCheck-ping

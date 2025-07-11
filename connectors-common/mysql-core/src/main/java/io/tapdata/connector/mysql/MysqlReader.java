@@ -2,9 +2,9 @@ package io.tapdata.connector.mysql;
 
 import io.debezium.config.Configuration;
 import io.debezium.connector.mysql.MySqlConnectorConfig;
-import io.debezium.type.TapIllegalDate;
 import io.debezium.embedded.EmbeddedEngine;
 import io.debezium.engine.DebeziumEngine;
+import io.debezium.type.TapIllegalDate;
 import io.tapdata.common.ddl.DDLFactory;
 import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
 import io.tapdata.common.ddl.type.DDLParserType;
@@ -19,6 +19,7 @@ import io.tapdata.connector.mysql.entity.MysqlStreamOffset;
 import io.tapdata.connector.mysql.util.MysqlBinlogPositionUtil;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.mysql.util.StringCompressUtil;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.ddl.TapDDLUnknownEvent;
@@ -27,6 +28,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapDate;
@@ -40,6 +42,7 @@ import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
@@ -53,13 +56,9 @@ import org.apache.kafka.connect.storage.OffsetUtils;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.sql.ResultSetMetaData;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZonedDateTime;
+import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -81,26 +80,30 @@ public class MysqlReader implements Closeable {
     private static final String TAG = MysqlReader.class.getSimpleName();
     public static final String SERVER_NAME_KEY = "SERVER_NAME";
     public static final String MYSQL_SCHEMA_HISTORY = "MYSQL_SCHEMA_HISTORY";
-    private static final String SOURCE_RECORD_DDL_KEY = "ddl";
+    protected static final String SOURCE_RECORD_DDL_KEY = "ddl";
     public static final String FIRST_TIME_KEY = "FIRST_TIME";
-    private static final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("`");
+    protected static final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("`");
     public static final long SAVE_DEBEZIUM_SCHEMA_HISTORY_INTERVAL_SEC = 2L;
-    private String serverName;
+    protected String serverName;
     private final Supplier<Boolean> isAlive;
-    private final MysqlJdbcContextV2 mysqlJdbcContext;
+    protected final MysqlJdbcContextV2 mysqlJdbcContext;
     private EmbeddedEngine embeddedEngine;
+    protected StreamReadConsumer streamReadConsumer;
     private LinkedBlockingQueue<MysqlStreamEvent> eventQueue;
-    private StreamReadConsumer streamReadConsumer;
     private ScheduledExecutorService mysqlSchemaHistoryMonitor;
-    private KVReadOnlyMap<TapTable> tapTableMap;
-    private DDLParserType ddlParserType = DDLParserType.MYSQL_CCJ_SQL_PARSER;
+    protected KVReadOnlyMap<TapTable> tapTableMap;
+    protected DDLParserType ddlParserType = DDLParserType.MYSQL_CCJ_SQL_PARSER;
     private static final int MIN_BATCH_SIZE = 1000;
-    private TimeZone DB_TIME_ZONE;
-    private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
+    private TimeZone timeZone;
+    private TimeZone dbTimeZone;
+    protected final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     private final ExceptionCollector exceptionCollector;
+    private MysqlSchemaHistoryTransfer schemaHistoryTransfer;
     private String dropTransactionId = null;
     private final MysqlConfig mysqlConfig;
     protected Log tapLogger;
+    private long diff = 0;
+    private TapConnectorContext tapConnectorContext;
 
     public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, Supplier<Boolean> isAlive) {
         this.mysqlJdbcContext = mysqlJdbcContext;
@@ -108,8 +111,19 @@ public class MysqlReader implements Closeable {
         this.isAlive = isAlive;
         this.tapLogger = tapLogger;
         this.exceptionCollector = new MysqlExceptionCollector();
+        LocalDateTime dt = LocalDateTime.now();
+        ZonedDateTime fromZonedDateTime;
         try {
-            this.DB_TIME_ZONE = mysqlJdbcContext.queryTimeZone();
+            this.dbTimeZone = mysqlJdbcContext.queryTimeZone();
+            if (mysqlConfig.getOldVersionTimezone()) {
+                this.timeZone = dbTimeZone;
+                fromZonedDateTime = dt.atZone(TimeZone.getDefault().toZoneId());
+            } else {
+                this.timeZone = TimeZone.getTimeZone("GMT" + mysqlConfig.getTimezone());
+                fromZonedDateTime = dt.atZone(mysqlConfig.getZoneId());
+            }
+            ZonedDateTime toZonedDateTime = dt.atZone(TimeZone.getTimeZone("GMT").toZoneId());
+            diff = Duration.between(toZonedDateTime, fromZonedDateTime).toMillis();
         } catch (Exception ignore) {
 
         }
@@ -207,11 +221,161 @@ public class MysqlReader implements Closeable {
     }
 
     public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
+                           Object offset, int batchSize, DDLParserType ddlParserType, LinkedBlockingQueue<MysqlStreamEvent> eventQueue, Map<String, Object> extraConfig) throws Throwable {
+        try {
+            batchSize = Math.max(batchSize, MIN_BATCH_SIZE);
+            initDebeziumServerName(tapConnectorContext);
+            this.tapTableMap = tapConnectorContext.getTableMap();
+            this.ddlParserType = ddlParserType;
+            String offsetStr = "";
+            JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
+            MysqlStreamOffset mysqlStreamOffset = null;
+            if (offset instanceof MysqlStreamOffset) {
+                mysqlStreamOffset = (MysqlStreamOffset) offset;
+            } else if (offset instanceof MysqlBinlogPosition) {
+                mysqlStreamOffset = binlogPosition2MysqlStreamOffset((MysqlBinlogPosition) offset, jsonParser);
+            } else if (offset instanceof Long) {
+                MysqlConfig jdbcConfig = new MysqlConfig().load(tapConnectorContext.getConnectionConfig());
+                try (MysqlBinlogPositionUtil ins = new MysqlBinlogPositionUtil(
+                        jdbcConfig.getHost(),
+                        jdbcConfig.getPort(),
+                        jdbcConfig.getUser(),
+                        jdbcConfig.getPassword())) {
+                    MysqlBinlogPosition mysqlBinlogPosition = ins.findByLessTimestamp((Long) offset, true);
+                    if (null == mysqlBinlogPosition) {
+                        throw new RuntimeException("Not found binlog of sync time: " + offset);
+                    }
+                    mysqlStreamOffset = binlogPosition2MysqlStreamOffset(mysqlBinlogPosition, jsonParser);
+                }
+            }
+            if (null != mysqlStreamOffset) {
+                offsetStr = jsonParser.toJson(mysqlStreamOffset);
+            }
+            TapLogger.info(TAG, "Starting mysql cdc, server name: " + serverName);
+            this.eventQueue = eventQueue;
+            LockManager.mysqlSchemaHistoryTransferManager.computeIfAbsent(serverName, key -> {
+                this.schemaHistoryTransfer = new MysqlSchemaHistoryTransfer();
+                return this.schemaHistoryTransfer;
+            });
+            String database = mysqlConfig.getDatabase();
+            initMysqlSchemaHistory(tapConnectorContext);
+            this.mysqlSchemaHistoryMonitor = new ScheduledThreadPoolExecutor(1);
+            this.mysqlSchemaHistoryMonitor.scheduleAtFixedRate(() -> saveMysqlSchemaHistory(tapConnectorContext),
+                    SAVE_DEBEZIUM_SCHEMA_HISTORY_INTERVAL_SEC, SAVE_DEBEZIUM_SCHEMA_HISTORY_INTERVAL_SEC, TimeUnit.SECONDS);
+            Configuration.Builder builder = Configuration.create()
+                    .with("name", serverName)
+                    .with("connector.class", "io.debezium.connector.mysql.MySqlConnector")
+                    .with("database.hostname", mysqlConfig.getHost())
+                    .with("database.port", mysqlConfig.getPort())
+                    .with("database.user", mysqlConfig.getUser())
+                    .with("database.password", mysqlConfig.getPassword())
+                    .with("database.server.name", serverName)
+                    .with("threadName", "Debezium-Mysql-Connector-" + serverName)
+                    .with("database.history.skip.unparseable.ddl", true)
+                    .with("database.history.store.only.monitored.tables.ddl", true)
+                    .with("database.history.store.only.captured.tables.ddl", true)
+                    .with(MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE, MySqlConnectorConfig.SnapshotLockingMode.NONE)
+                    .with("max.queue.size", batchSize * 8)
+                    .with("max.batch.size", batchSize)
+                    .with(MySqlConnectorConfig.SERVER_ID, randomServerId())
+                    .with("time.precision.mode", "adaptive_time_microseconds")
+//					.with("converters", "time")
+//					.with("time.type", "io.tapdata.connector.mysql.converters.TimeConverter")
+//					.with("time.schema.name", "io.debezium.mysql.type.Time")
+                    .with("snapshot.locking.mode", "none");
+            if (extraConfig != null) {
+                for (Map.Entry<String, Object> entry : extraConfig.entrySet()) {
+                    builder.with(entry.getKey(), entry.getValue());
+                }
+            }
+            //if (EmptyKit.isNotBlank(connectionConfig.getString("timezone"))) {
+            //	builder.with("database.serverTimezone", TimeZone.getTimeZone(ZoneId.of(connectionConfig.getString("timezone"))).toZoneId());
+            //}
+            List<String> dbTableNames = tables.stream().map(t -> database + "." + t).collect(Collectors.toList());
+            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, database);
+            builder.with(MySqlConnectorConfig.TABLE_INCLUDE_LIST, String.join(",", dbTableNames));
+            builder.with(EmbeddedEngine.OFFSET_STORAGE, "io.tapdata.connector.mysql.PdkPersistenceOffsetBackingStore");
+            if (StringUtils.isNotBlank(offsetStr)) {
+                builder.with("pdk.offset.string", offsetStr);
+            }
+			/*
+				@todo At present, the schema loading logic will load the schema of all current tables each time it is started.
+				  When there is ddl in the historical data, it will cause a parsing error
+				@todo The main scenario is shared mining, which dynamically modifies the table include list.
+				 If the last cached model list is used, debezium will not load the newly added table model,
+				 resulting in a parsing error when reading:
+				    whose schema isn't known to this connector
+				@todo Best practice, need to change the debezium source code,
+				 add a configuration that supports partial update of some table schemas,
+				  and logic implementation
+			*/
+            builder.with("snapshot.mode", MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY_RECOVERY);
+            if (null != throwableAtomicReference.get()) {
+                String lastErrorMessage = throwableAtomicReference.get().getMessage();
+                if (StringUtils.isNotBlank(lastErrorMessage) && lastErrorMessage.contains("Could not find existing binlog information while attempting schema only recovery snapshot")) {
+                    builder.with("snapshot.mode", MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY);
+                }
+            }
+//			builder.with("database.history", "io.debezium.relational.history.MemoryDatabaseHistory");
+            builder.with("database.history", "io.tapdata.connector.mysql.StateMapHistoryBackingStore");
+
+            Configuration configuration = builder.build();
+            StringBuilder configStr = new StringBuilder("Starting binlog reader with config {\n");
+            configuration.withMaskedPasswords().asMap().forEach((k, v) -> configStr.append("  ")
+                    .append(k)
+                    .append(": ")
+                    .append(v)
+                    .append("\n"));
+            configStr.append("}");
+            TapLogger.info(TAG, configStr.toString());
+            embeddedEngine = (EmbeddedEngine) new EmbeddedEngine.BuilderImpl()
+                    .using(configuration)
+                    .notifying(this::sourceRecordConsumer)
+                    .using(new DebeziumEngine.ConnectorCallback() {
+                        @Override
+                        public void taskStarted() {
+                        }
+                    })
+                    .using((result, message, throwable) -> {
+                        tapConnectorContext.configContext();
+                        if (result) {
+                            if (StringUtils.isNotBlank(message)) {
+                                TapLogger.info(TAG, "CDC engine stopped: " + message);
+                            } else {
+                                TapLogger.info(TAG, "CDC engine stopped");
+                            }
+                            throwableAtomicReference.set(null);
+                        } else {
+                            if (null != throwable) {
+                                if (StringUtils.isNotBlank(message)) {
+                                    handleFailed(new RuntimeException(message + "\n " + throwable.getMessage(), throwable));
+                                } else {
+                                    handleFailed(throwable);
+                                }
+                            } else {
+                                throwableAtomicReference.set(null);
+                            }
+                        }
+                    })
+                    .build();
+            embeddedEngine.run();
+            if (null != throwableAtomicReference.get()) {
+                throw throwableAtomicReference.get();
+            }
+        } finally {
+            Optional.ofNullable(mysqlSchemaHistoryMonitor).ifPresent(ExecutorService::shutdownNow);
+            TapLogger.info(TAG, "Mysql binlog reader stopped");
+        }
+    }
+
+    public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
                            Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) throws Throwable {
         MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         try {
             initDebeziumServerName(tapConnectorContext);
+            System.setProperty("debezium.embedded.shutdown.pause.before.interrupt.ms", "3000");
             this.tapTableMap = tapConnectorContext.getTableMap();
+            this.tapConnectorContext = tapConnectorContext;
             this.ddlParserType = ddlParserType;
             String offsetStr = "";
             JsonParser jsonParser = InstanceFactory.instance(JsonParser.class);
@@ -250,8 +414,11 @@ public class MysqlReader implements Closeable {
                 offsetStr = jsonParser.toJson(mysqlStreamOffset);
             }
             tapLogger.info("Starting mysql cdc, server name: " + serverName);
-            this.eventQueue = new LinkedBlockingQueue<>(10);
             this.streamReadConsumer = consumer;
+            LockManager.mysqlSchemaHistoryTransferManager.computeIfAbsent(serverName, key -> {
+                this.schemaHistoryTransfer = new MysqlSchemaHistoryTransfer();
+                return this.schemaHistoryTransfer;
+            });
             initMysqlSchemaHistory(tapConnectorContext);
             this.mysqlSchemaHistoryMonitor = new ScheduledThreadPoolExecutor(1);
             this.mysqlSchemaHistoryMonitor.scheduleAtFixedRate(() -> saveMysqlSchemaHistory(tapConnectorContext),
@@ -269,22 +436,26 @@ public class MysqlReader implements Closeable {
                     .with("database.history.store.only.monitored.tables.ddl", true)
                     .with("database.history.store.only.captured.tables.ddl", true)
                     .with(MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE, MySqlConnectorConfig.SnapshotLockingMode.NONE)
-                    .with("max.queue.size", Math.max(batchSize, 100) * 8)
-                    .with("max.batch.size", Math.max(batchSize, 100))
+                    .with("max.queue.size", mysqlConfig.getMaximumQueueSize())
+                    .with("max.batch.size", mysqlConfig.getMaximumQueueSize() / 8)
                     .with(MySqlConnectorConfig.SERVER_ID, randomServerId())
+                    .with("converters", "geometry")
+                    .with("geometry.type", "io.tapdata.connector.mysql.GeometryConverter")
+                    .with("geometry.schema.name", "io.debezium.mysql.type.Geometry")
                     .with("time.precision.mode", "adaptive_time_microseconds")
 //					.with("converters", "time")
 //					.with("time.type", "io.tapdata.connector.mysql.converters.TimeConverter")
 //					.with("time.schema.name", "io.debezium.mysql.type.Time")
+                    .with("enable.time.adjuster", false)
                     .with("snapshot.locking.mode", "none");
 //            if (EmptyKit.isNotBlank(mysqlConfig.getTimezone())) {
 //                builder.with("database.serverTimezone", mysqlJdbcContext.queryTimeZone());
 //            }
-            List<String> dbTableNames = tables.stream().map(t -> mysqlConfig.getDatabase() + "." + t).collect(Collectors.toList());
+            List<String> dbTableNames = tables.stream().map(t -> StringKit.escapeRegex(mysqlConfig.getDatabase()) + "." + StringKit.escapeRegex(t)).collect(Collectors.toList());
             if (mysqlConfig.getDoubleActive()) {
-                dbTableNames.add(mysqlConfig.getDatabase() + "._tap_double_active");
+                dbTableNames.add(StringKit.escapeRegex(mysqlConfig.getDatabase()) + "._tap_double_active");
             }
-            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, mysqlConfig.getDatabase());
+            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, StringKit.escapeRegex(mysqlConfig.getDatabase()));
             builder.with(MySqlConnectorConfig.TABLE_INCLUDE_LIST, String.join(",", dbTableNames));
             builder.with(EmbeddedEngine.OFFSET_STORAGE, "io.tapdata.connector.mysql.PdkPersistenceOffsetBackingStore");
             if (StringUtils.isNotBlank(offsetStr)) {
@@ -307,7 +478,18 @@ public class MysqlReader implements Closeable {
             }
 //			builder.with("database.history", "io.debezium.relational.history.MemoryDatabaseHistory");
             builder.with("database.history", "io.tapdata.connector.mysql.StateMapHistoryBackingStore");
-
+            //开启ssl
+            if (mysqlConfig.getUseSSL()) {
+                builder.with("database.useSSL", "true");
+                builder.with("database.requireSSL", "true");
+                if ("true".equals(mysqlConfig.getProperties().getProperty("verifyServerCertificate"))) {
+                    builder.with("database.ssl.mode", "required");
+                    builder.with("database.database.ssl.keystore", mysqlConfig.getProperties().getProperty("clientCertificateKeyStoreUrl").replace("file:", ""));
+                    builder.with("database.database.ssl.keystore.password", mysqlConfig.getProperties().getProperty("clientCertificateKeyStorePassword"));
+                    builder.with("database.database.ssl.truststore", mysqlConfig.getProperties().getProperty("trustCertificateKeyStoreUrl").replace("file:", ""));
+                    builder.with("database.database.ssl.truststore.password", mysqlConfig.getProperties().getProperty("trustCertificateKeyStorePassword"));
+                }
+            }
             Configuration configuration = builder.build();
             StringBuilder configStr = new StringBuilder("Starting binlog reader with config {\n");
             configuration.withMaskedPasswords().asMap().forEach((k, v) -> configStr.append("  ")
@@ -370,7 +552,7 @@ public class MysqlReader implements Closeable {
         throwableAtomicReference.set(new RuntimeException(throwable));
     }
 
-    private MysqlStreamOffset binlogPosition2MysqlStreamOffset(MysqlBinlogPosition offset, JsonParser jsonParser) throws Throwable {
+    protected MysqlStreamOffset binlogPosition2MysqlStreamOffset(MysqlBinlogPosition offset, JsonParser jsonParser) throws Throwable {
         String serverId = mysqlJdbcContext.getServerId();
         Map<String, Object> partitionMap = new HashMap<>();
         partitionMap.put("server", serverName);
@@ -386,41 +568,55 @@ public class MysqlReader implements Closeable {
         return mysqlStreamOffset;
     }
 
-    private void initMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
-        KVMap<Object> stateMap = tapConnectorContext.getStateMap();
-        Object mysqlSchemaHistory = stateMap.get(MYSQL_SCHEMA_HISTORY);
-        if (mysqlSchemaHistory instanceof String) {
-            try {
-                mysqlSchemaHistory = StringCompressUtil.uncompress((String) mysqlSchemaHistory);
-            } catch (IOException e) {
-                throw new RuntimeException("Uncompress Mysql schema history failed, string: " + mysqlSchemaHistory, e);
-            }
-            mysqlSchemaHistory = InstanceFactory.instance(JsonParser.class).fromJson((String) mysqlSchemaHistory,
-                    new TypeHolder<Map<String, LinkedHashSet<String>>>() {
-                    });
-            MysqlSchemaHistoryTransfer.historyMap.putAll((Map) mysqlSchemaHistory);
-        }
-    }
-
-    private void saveMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
-        tapConnectorContext.configContext();
-        Thread.currentThread().setName("Save-Mysql-Schema-History-" + serverName);
-        if (!MysqlSchemaHistoryTransfer.isSave()) {
-            MysqlSchemaHistoryTransfer.executeWithLock(n -> !isAlive.get(), () -> {
-                String json = InstanceFactory.instance(JsonParser.class).toJson(MysqlSchemaHistoryTransfer.historyMap);
-                try {
-                    json = StringCompressUtil.compress(json);
-                } catch (IOException e) {
-                    tapLogger.warn("Compress Mysql schema history failed, string: " + json + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
-                    return;
+    protected void initMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
+        // block init cdc schema by a lock, because mysqlSchemaHistory(string) may too long,
+        //   memory size may over 1G and cause engine OOM when start tasks sync
+        tapLogger.debug("Mysql init/save cdc schema lock, {}", System.currentTimeMillis());
+        try {
+            synchronized (MysqlReader.class) {
+                KVMap<Object> stateMap = tapConnectorContext.getStateMap();
+                Object mysqlSchemaHistory = stateMap.get(MYSQL_SCHEMA_HISTORY);
+                if (mysqlSchemaHistory instanceof byte[]) {
+                    try {
+                        mysqlSchemaHistory = StringCompressUtil.uncompress((byte[]) mysqlSchemaHistory);
+                    } catch (IOException e) {
+                        throw new CoreException("Uncompress Mysql schema history failed, message: {}, string: {}", e.getMessage(), (((String) mysqlSchemaHistory).length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : mysqlSchemaHistory), e);
+                    }
+                    mysqlSchemaHistory = InstanceFactory.instance(JsonParser.class).fromJson((String) mysqlSchemaHistory,
+                            new TypeHolder<Map<String, LinkedHashSet<String>>>() {
+                            });
+                    LockManager.getSchemaHistoryTransfer(serverName).getHistoryMap().putAll((Map) mysqlSchemaHistory);
                 }
-                tapConnectorContext.getStateMap().put(MYSQL_SCHEMA_HISTORY, json);
-                MysqlSchemaHistoryTransfer.save();
-            });
+            }
+        } finally {
+            tapLogger.debug("Mysql init/save cdc schema unlock, {}", System.currentTimeMillis());
         }
     }
 
-    private void initDebeziumServerName(TapConnectorContext tapConnectorContext) {
+    protected void saveMysqlSchemaHistory(TapConnectorContext tapConnectorContext) {
+        tapLogger.debug("Mysql save/init cdc schema lock, {}", System.currentTimeMillis());
+        try {
+            tapConnectorContext.configContext();
+            Thread.currentThread().setName("Save-Mysql-Schema-History-" + serverName);
+            if (!schemaHistoryTransfer.isSave()) {
+                schemaHistoryTransfer.executeWithLock(n -> !isAlive.get(), () -> {
+                    Object json = InstanceFactory.instance(JsonParser.class).toJson(schemaHistoryTransfer.getHistoryMap());
+                    try {
+                        json = StringCompressUtil.compress((String) json);
+                    } catch (IOException e) {
+                        tapLogger.warn("Compress Mysql schema history failed, string: " + (((String) json).length() > 65535 ? "...(mysql Schema History too long, more than 655350)" : json) + ", error message: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
+                        return;
+                    }
+                    tapConnectorContext.getStateMap().put(MYSQL_SCHEMA_HISTORY, json);
+                    schemaHistoryTransfer.save();
+                });
+            }
+        } finally {
+            tapLogger.debug("Mysql save/init cdc schema unlock, {}", System.currentTimeMillis());
+        }
+    }
+
+    protected void initDebeziumServerName(TapConnectorContext tapConnectorContext) {
         this.serverName = UUID.randomUUID().toString().toLowerCase();
         KVMap<Object> stateMap = tapConnectorContext.getStateMap();
         Object serverNameFromStateMap = stateMap.get(SERVER_NAME_KEY);
@@ -442,6 +638,10 @@ public class MysqlReader implements Closeable {
             } catch (IOException e) {
                 tapLogger.warn("Close CDC engine failed, error: " + e.getMessage() + "\n" + TapSimplify.getStackString(e));
             }
+        });
+        saveMysqlSchemaHistory(tapConnectorContext);
+        LockManager.mysqlSchemaHistoryTransferManager.computeIfPresent(serverName, (key, value) -> {
+            return null;
         });
         Optional.ofNullable(mysqlSchemaHistoryMonitor).ifPresent(ExecutorService::shutdownNow);
     }
@@ -478,7 +678,7 @@ public class MysqlReader implements Closeable {
         }
     }
 
-    private void sourceRecordConsumer(SourceRecord record) {
+    protected void sourceRecordConsumer(SourceRecord record) {
         if (null != throwableAtomicReference.get()) {
             throw new RuntimeException(throwableAtomicReference.get());
         }
@@ -510,17 +710,11 @@ public class MysqlReader implements Closeable {
 
     protected MysqlStreamEvent wrapDML(SourceRecord record) {
         TapRecordEvent tapRecordEvent = null;
-        MysqlStreamEvent mysqlStreamEvent;
         Schema valueSchema = record.valueSchema();
         Struct value = (Struct) record.value();
         Struct source = value.getStruct("source");
         Long eventTime = source.getInt64("ts_ms");
-        String table = Optional.of(record.topic().split("\\.")).map(arr -> {
-            if (arr.length > 0) {
-                return URLDecoder.decode(arr[arr.length - 1]);
-            }
-            return null;
-        }).orElse(source.getString("table"));
+        String table = source.getString("table");
         //双活情形下，需要过滤_tap_double_active记录的同事务数据
         if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
             if ("_tap_double_active".equals(table)) {
@@ -543,36 +737,36 @@ public class MysqlReader implements Closeable {
             return null;
         }
         Map<String, TapIllegalDate> beforeInvalidMap = new HashMap<>();
-        if (null != value.schema().field("beforeInvalid")){
+        if (null != value.schema().field("beforeInvalid")) {
             Struct invalid = value.getStruct("beforeInvalid");
             for (Field field : invalid.schema().fields()) {
                 byte[] bytes = invalid.getBytes(field.name());
                 try {
                     Object o = TapIllegalDate.byteToIllegalDate(bytes);
-                    if (o instanceof TapIllegalDate){
-                        beforeInvalidMap.put(field.name(),(TapIllegalDate) o);
+                    if (o instanceof TapIllegalDate) {
+                        beforeInvalidMap.put(field.name(), (TapIllegalDate) o);
                     }
                 } catch (IOException e) {
-                    throw new RuntimeException("byte to tap illegal date error",e);
+                    throw new RuntimeException("byte to tap illegal date error", e);
                 } catch (ClassNotFoundException e) {
-                    throw new RuntimeException("byte to tap illegal date error",e);
+                    throw new RuntimeException("byte to tap illegal date error", e);
                 }
             }
         }
         Map<String, TapIllegalDate> afterInvalidMap = new HashMap<>();
-        if (null != value.schema().field("afterInvalid")){
+        if (null != value.schema().field("afterInvalid")) {
             Struct invalid = value.getStruct("afterInvalid");
             for (Field field : invalid.schema().fields()) {
                 byte[] bytes = invalid.getBytes(field.name());
                 try {
                     Object o = TapIllegalDate.byteToIllegalDate(bytes);
-                    if (o instanceof TapIllegalDate){
-                        afterInvalidMap.put(field.name(),(TapIllegalDate) o);
+                    if (o instanceof TapIllegalDate) {
+                        afterInvalidMap.put(field.name(), (TapIllegalDate) o);
                     }
                 } catch (IOException e) {
-                    throw new RuntimeException("byte to tap illegal date error",e);
+                    throw new RuntimeException("byte to tap illegal date error", e);
                 } catch (ClassNotFoundException e) {
-                    throw new RuntimeException("byte to tap illegal date error",e);
+                    throw new RuntimeException("byte to tap illegal date error", e);
                 }
             }
         }
@@ -584,10 +778,10 @@ public class MysqlReader implements Closeable {
                 if (null == valueSchema.field("after"))
                     throw new RuntimeException("Found insert record does not have after: " + record);
                 after = struct2Map(value.getStruct("after"), table);
-                if (!EmptyKit.isEmpty(afterInvalidMap)){
+                if (!EmptyKit.isEmpty(afterInvalidMap)) {
                     after.putAll(afterInvalidMap);
                     tapRecordEvent.setContainsIllegalDate(true);
-                    ((TapInsertRecordEvent)tapRecordEvent).setAfterIllegalDateFieldName(afterInvalidMap.keySet().stream().collect(Collectors.toList()));
+                    ((TapInsertRecordEvent) tapRecordEvent).setAfterIllegalDateFieldName(afterInvalidMap.keySet().stream().collect(Collectors.toList()));
                 }
                 ((TapInsertRecordEvent) tapRecordEvent).setAfter(after);
                 break;
@@ -595,7 +789,7 @@ public class MysqlReader implements Closeable {
                 tapRecordEvent = new TapUpdateRecordEvent().init();
                 if (null != valueSchema.field("before")) {
                     before = struct2Map(value.getStruct("before"), table);
-                    if (!EmptyKit.isEmpty(beforeInvalidMap)){
+                    if (!EmptyKit.isEmpty(beforeInvalidMap)) {
                         before.putAll(beforeInvalidMap);
                         tapRecordEvent.setContainsIllegalDate(true);
                         ((TapUpdateRecordEvent) tapRecordEvent).setBeforeIllegalDateFieldName(beforeInvalidMap.keySet().stream().collect(Collectors.toList()));
@@ -605,7 +799,7 @@ public class MysqlReader implements Closeable {
                 if (null == valueSchema.field("after"))
                     throw new RuntimeException("Found update record does not have after: " + record);
                 after = struct2Map(value.getStruct("after"), table);
-                if (!EmptyKit.isEmpty(beforeInvalidMap) || !EmptyKit.isEmpty(afterInvalidMap)){
+                if (!EmptyKit.isEmpty(beforeInvalidMap) || !EmptyKit.isEmpty(afterInvalidMap)) {
                     before.putAll(beforeInvalidMap);
                     after.putAll(afterInvalidMap);
                     tapRecordEvent.setContainsIllegalDate(true);
@@ -620,10 +814,10 @@ public class MysqlReader implements Closeable {
                     throw new RuntimeException("Found delete record does not have before: " + record);
                 before = struct2Map(value.getStruct("before"), table);
                 ((TapDeleteRecordEvent) tapRecordEvent).setBefore(before);
-                if (!EmptyKit.isEmpty(beforeInvalidMap)){
+                if (!EmptyKit.isEmpty(beforeInvalidMap)) {
                     before.putAll(beforeInvalidMap);
                     tapRecordEvent.setContainsIllegalDate(true);
-                    ((TapDeleteRecordEvent)tapRecordEvent).setBeforeIllegalDateFieldName(beforeInvalidMap.keySet().stream().collect(Collectors.toList()));
+                    ((TapDeleteRecordEvent) tapRecordEvent).setBeforeIllegalDateFieldName(beforeInvalidMap.keySet().stream().collect(Collectors.toList()));
                 }
                 break;
             default:
@@ -631,11 +825,13 @@ public class MysqlReader implements Closeable {
         }
         tapRecordEvent.setTableId(table);
         tapRecordEvent.setReferenceTime(eventTime);
-        MysqlStreamOffset mysqlStreamOffset = getMysqlStreamOffset(record);
-        tapLogger.debug("Read DML - Table: " + table + "\n  - Operation: " + mysqlOpType.getOp()
-                + "\n  - Before: " + before + "\n  - After: " + after + "\n  - Offset: " + mysqlStreamOffset);
-        mysqlStreamEvent = new MysqlStreamEvent(tapRecordEvent, mysqlStreamOffset);
-        return mysqlStreamEvent;
+        tapRecordEvent.setExactlyOnceId(getExactlyOnceId(record));
+        return wrapOffsetEvent(tapRecordEvent, record);
+    }
+
+    protected MysqlStreamEvent wrapOffsetEvent(TapEvent tapEvent, SourceRecord sourceRecord) {
+        MysqlStreamOffset mysqlStreamOffset = getMysqlStreamOffset(sourceRecord);
+        return new MysqlStreamEvent(tapEvent, mysqlStreamOffset);
     }
 
     protected List<MysqlStreamEvent> wrapDDL(SourceRecord record) {
@@ -661,6 +857,7 @@ public class MysqlReader implements Closeable {
                             tapDDLEvent.setTime(System.currentTimeMillis());
                             tapDDLEvent.setReferenceTime(eventTime);
                             tapDDLEvent.setOriginDDL(ddlStr);
+                            tapDDLEvent.setExactlyOnceId(getExactlyOnceId(record));
                             mysqlStreamEvents.add(mysqlStreamEvent);
                             tapLogger.info("Read DDL: " + ddlStr + ", about to be packaged as some event(s)");
                         }
@@ -671,30 +868,12 @@ public class MysqlReader implements Closeable {
                 tapDDLEvent.setTime(System.currentTimeMillis());
                 tapDDLEvent.setReferenceTime(eventTime);
                 tapDDLEvent.setOriginDDL(ddlStr);
+                tapDDLEvent.setExactlyOnceId(getExactlyOnceId(record));
                 mysqlStreamEvents.add(mysqlStreamEvent);
 //                throw new RuntimeException("Handle ddl failed: " + ddlStr + ", error: " + e.getMessage(), e);
             }
         }
-        printDDLEventLog(mysqlStreamEvents);
         return mysqlStreamEvents;
-    }
-
-    private void printDDLEventLog(List<MysqlStreamEvent> mysqlStreamEvents) {
-        if (CollectionUtils.isEmpty(mysqlStreamEvents)) {
-            return;
-        }
-        for (MysqlStreamEvent mysqlStreamEvent : mysqlStreamEvents) {
-            if (null == mysqlStreamEvent || null == mysqlStreamEvent.getTapEvent()) {
-                continue;
-            }
-            TapEvent tapEvent = mysqlStreamEvent.getTapEvent();
-            if (!(tapEvent instanceof TapDDLEvent)) {
-                continue;
-            }
-            tapLogger.info("DDL event  - Table: " + ((TapDDLEvent) tapEvent).getTableId()
-                    + "\n  - Event type: " + tapEvent.getClass().getSimpleName()
-                    + "\n  - Offset: " + mysqlStreamEvent.getMysqlStreamOffset());
-        }
     }
 
     protected Map<String, Object> struct2Map(Struct struct, String table) {
@@ -720,13 +899,45 @@ public class MysqlReader implements Closeable {
             if (value instanceof ByteBuffer) {
                 value = ((ByteBuffer) value).array();
             }
-            value = handleDatetime(table, fieldName, value);
+            if (mysqlConfig.getOldVersionTimezone()) {
+                value = handleDatetimeWithOldVersion(table, fieldName, value);
+            } else {
+                value = handleDatetime(table, fieldName, value);
+            }
             result.put(fieldName, value);
         }
         return result;
     }
 
-    private Object handleDatetime(String table, String fieldName, Object value) {
+    protected Object handleDatetime(String table, String fieldName, Object value) {
+        TapTable tapTable = tapTableMap.get(table);
+        if (null == tapTable) return value;
+        if (null == tapTable.getNameFieldMap()) {
+            return value;
+        }
+        TapField tapField = tapTable.getNameFieldMap().get(fieldName);
+        if (null == tapField) return value;
+        TapType tapType = tapField.getTapType();
+        if (tapType instanceof TapDateTime) {
+            int fraction = ((TapDateTime) tapType).getFraction();
+            if (value instanceof Long) {
+                if (fraction > 3) {
+                    value = ((Long) value + diff * 1000) / (long) Math.pow(10, 6 - fraction);
+                } else {
+                    value = ((Long) value + diff) / (long) Math.pow(10, 3 - fraction);
+                }
+            } else if (value instanceof String) {
+                if (StringUtils.isNotBlank((CharSequence) value)) {
+                    value = Instant.parse((CharSequence) value).atZone(dbTimeZone.toZoneId()).toLocalDateTime().atZone(ZoneOffset.UTC);
+                }
+            }
+        } else if (tapType instanceof TapDate && (value instanceof Integer)) {
+            value = ((Integer) value).longValue() * 24 * 60 * 60 * 1000L;
+        }
+        return value;
+    }
+
+    private Object handleDatetimeWithOldVersion(String table, String fieldName, Object value) {
         TapTable tapTable = tapTableMap.get(table);
         if (null == tapTable) return value;
         if (null == tapTable.getNameFieldMap()) {
@@ -750,18 +961,23 @@ public class MysqlReader implements Closeable {
             } else if (value instanceof String) {
                 try {
                     Instant instant = Instant.parse((CharSequence) value);
-                    long milliOffset = DB_TIME_ZONE.getRawOffset() + diff;
+                    long milliOffset = timeZone.getRawOffset() + diff;
                     value = instant.getEpochSecond() * (long) Math.pow(10, fraction) + instant.getNano() / (long) Math.pow(10, 9 - fraction) + (long) (milliOffset * Math.pow(10, fraction - 3));
                 } catch (Exception ignored) {
                 }
             }
         } else if (tapType instanceof TapDate && (value instanceof Integer)) {
-            value = (Integer) value * 24 * 60 * 60 * 1000L + diff;
+            value = ((Integer) value).longValue() * 24 * 60 * 60 * 1000L + diff;
         }
         return value;
     }
 
-    private MysqlStreamOffset getMysqlStreamOffset(SourceRecord record) {
+    protected String getExactlyOnceId(SourceRecord record) {
+        Map<String, ?> offset = record.sourceOffset();
+        return offset.get("file") + "_" + offset.get("pos") + "_" + offset.get("row") + "_" + offset.get("event");
+    }
+
+    protected MysqlStreamOffset getMysqlStreamOffset(SourceRecord record) {
         MysqlStreamOffset mysqlStreamOffset = new MysqlStreamOffset();
         Map<String, Object> partition = (Map<String, Object>) record.sourcePartition();
         Map<String, Object> offset = (Map<String, Object>) record.sourceOffset();
@@ -779,22 +995,7 @@ public class MysqlReader implements Closeable {
         return mysqlStreamOffset;
     }
 
-    private void eventQueueConsumer() {
-        while (isAlive.get()) {
-            MysqlStreamEvent mysqlStreamEvent;
-            try {
-                mysqlStreamEvent = eventQueue.poll(3L, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                break;
-            }
-            if (null == mysqlStreamEvent) continue;
-            ArrayList<TapEvent> events = new ArrayList<>(1);
-            events.add(mysqlStreamEvent.getTapEvent());
-            streamReadConsumer.accept(events, mysqlStreamEvent.getMysqlStreamOffset());
-        }
-    }
-
-    private void enqueue(MysqlStreamEvent mysqlStreamEvent) {
+    protected void enqueue(MysqlStreamEvent mysqlStreamEvent) {
         while (isAlive.get()) {
             try {
                 if (eventQueue.offer(mysqlStreamEvent, 3L, TimeUnit.SECONDS)) {
@@ -850,5 +1051,8 @@ public class MysqlReader implements Closeable {
         return dateTypeSet;
     }
 
+    public MysqlJdbcContextV2 mysqlJdbcContextV2() {
+        return mysqlJdbcContext;
+    }
 
 }

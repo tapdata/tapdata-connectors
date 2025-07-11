@@ -4,20 +4,21 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.ddl.DDLSqlGenerator;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
+import io.tapdata.entity.TapConstraintException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
+import io.tapdata.entity.event.ddl.constraint.TapDropConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.index.TapDeleteIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.entity.schema.TapField;
-import io.tapdata.entity.schema.TapIndex;
-import io.tapdata.entity.schema.TapIndexField;
-import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.*;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.FilterResult;
@@ -26,13 +27,19 @@ import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TapFilter;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.SQLRecoverableException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -45,7 +52,11 @@ public abstract class CommonDbConnector extends ConnectorBase {
     //offset for Primary key sorting area reading
     private final static Long offsetSize = 1000000L;
     protected static final int BATCH_ADVANCE_READ_LIMIT = 1000;
-
+    protected Map<String, DataMap> writtenTableMap = new ConcurrentHashMap<>();
+    protected static final String HAS_UNIQUE_INDEX = "HAS_UNIQUE_INDEX";
+    protected static final String HAS_MULTI_UNIQUE_INDEX = "HAS_MULTI_UNIQUE_INDEX";
+    protected static final String HAS_AUTO_INCR = "HAS_AUTO_INCR";
+    protected static final String HAS_REMOVED_COLUMN = "HAS_REMOVED_COLUMN";
     //ddlHandlers which for ddl collection
     protected BiClassHandlers<TapFieldBaseEvent, TapConnectorContext, List<String>> fieldDDLHandlers;
     //ddlSqlMaker which for ddl execution
@@ -74,12 +85,21 @@ public abstract class CommonDbConnector extends ConnectorBase {
         multiThreadDiscoverSchema(tableList, tableSize, consumer);
     }
 
+    /**
+     * when your connector need to support partition table and main-curl table
+     * you should impl this function to discover those tablies relations
+     */
+    protected List<TapTable> discoverPartitionInfo(List<TapTable> tapTableList) {
+        return tapTableList;
+    }
+
     @Override
     protected void singleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
         List<TapTable> tapTableList = TapSimplify.list();
         List<String> subTableNames = subList.stream().map(v -> v.getString("tableName")).collect(Collectors.toList());
         List<DataMap> columnList = jdbcContext.queryAllColumns(subTableNames);
         List<DataMap> indexList = jdbcContext.queryAllIndexes(subTableNames);
+        List<DataMap> fkList = jdbcContext.queryAllForeignKeys(subTableNames);
         subList.forEach(subTable -> {
             //2、table name/comment
             String table = subTable.getString("tableName");
@@ -105,14 +125,15 @@ public abstract class CommonDbConnector extends ConnectorBase {
                         tapTable.add(tapField);
                     });
             tapTable.setIndexList(tapIndexList);
+            tapTable.setConstraintList(makeForeignKey(fkList, table));
             tapTableList.add(tapTable);
         });
-        syncSchemaSubmit(tapTableList, consumer);
+        syncSchemaSubmit(discoverPartitionInfo(tapTableList), consumer);
     }
 
     //some datasource makePrimaryKeyAndIndex in not the same way, such as db2
     protected void makePrimaryKeyAndIndex(List<DataMap> indexList, String table, List<String> primaryKey, List<TapIndex> tapIndexList) {
-        Map<String, List<DataMap>> indexMap = indexList.stream().filter(idx -> table.equals(idx.getString("tableName")))
+        Map<String, List<DataMap>> indexMap = indexList.stream().filter(idx -> table.equals(idx.getString("tableName")) && EmptyKit.isNotBlank(idx.getString("indexName")))
                 .collect(Collectors.groupingBy(idx -> idx.getString("indexName"), LinkedHashMap::new, Collectors.toList()));
         indexMap.forEach((key, value) -> {
             if (value.stream().anyMatch(v -> ("1".equals(v.getString("isPk"))))) {
@@ -126,6 +147,12 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return new CommonColumn(dataMap).getTapField();
     }
 
+    protected List<TapConstraint> makeForeignKey(List<DataMap> fkList, String table) {
+        List<TapConstraint> tapConstraints = new ArrayList<>();
+        fkList.stream().filter(v -> Objects.nonNull(v) && table.equals(v.getString("tableName"))).collect(Collectors.groupingBy(map -> map.getString("constraintName"))).forEach((constraintName, fk) -> tapConstraints.add(makeTapConstraint(constraintName, fk)));
+        return tapConstraints;
+    }
+
     protected Map<String, Object> getSpecificAttr(DataMap dataMap) {
         return null;
     }
@@ -134,7 +161,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         jdbcContext.queryAllTables(list(), batchSize, listConsumer);
     }
 
-    private CreateTableOptions createTable(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent, Boolean commentInField) throws SQLException {
+    protected CreateTableOptions createTable(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent, Boolean commentInField, String append) throws SQLException {
         if (Boolean.TRUE.equals(commonDbConfig.getDoubleActive())) {
             createDoubleActiveTempTable();
         }
@@ -147,16 +174,19 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
         Map<String, TapField> fieldMap = tapTable.getNameFieldMap();
         for (String field : fieldMap.keySet()) {
-            String fieldDefault = (String) fieldMap.get(field).getDefaultValue();
-            if (EmptyKit.isNotEmpty(fieldDefault)) {
-                if (fieldDefault.contains("'")) {
-                    fieldDefault = fieldDefault.replaceAll("'", "''");
-                    fieldMap.get(field).setDefaultValue(fieldDefault);
+            Object defaultValue = fieldMap.get(field).getDefaultValue();
+            if (defaultValue instanceof String) {
+                String fieldDefault = (String) fieldMap.get(field).getDefaultValue();
+                if (EmptyKit.isNotEmpty(fieldDefault) && !Boolean.TRUE.equals(fieldMap.get(field).getAutoInc()) && EmptyKit.isNull(fieldMap.get(field).getDefaultFunction())) {
+                    if (fieldDefault.contains("'")) {
+                        fieldDefault = fieldDefault.replaceAll("'", "''");
+                        fieldMap.get(field).setDefaultValue(fieldDefault);
+                    }
                 }
             }
         }
         List<String> sqlList = TapSimplify.list();
-        sqlList.add(getCreateTableSql(tapTable, commentInField));
+        sqlList.add(getCreateTableSql(tapTable, commentInField) + " " + append);
         if (!commentInField) {
             //comment on table and column
             if (EmptyKit.isNotNull(tapTable.getComment())) {
@@ -182,17 +212,18 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     //for pg,oracle type
     protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
-        return createTable(connectorContext, createTableEvent, false);
+        return createTable(connectorContext, createTableEvent, false, "");
     }
 
     //for mysql type
     protected CreateTableOptions createTableV3(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
-        return createTable(connectorContext, createTableEvent, true);
+        return createTable(connectorContext, createTableEvent, true, "");
     }
 
     protected void createDoubleActiveTempTable() throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList("_tap_double_active")).size() < 1) {
-            jdbcContext.execute(String.format("create table %s (c1 int primary key, c2 varchar(50))", getSchemaAndTable("_tap_double_active")));
+            jdbcContext.execute(String.format("create table %s (%s int primary key, %s varchar(50))", getSchemaAndTable("_tap_double_active"),
+                    commonDbConfig.getEscapeChar() + "c1" + commonDbConfig.getEscapeChar(), commonDbConfig.getEscapeChar() + "c2" + commonDbConfig.getEscapeChar()));
             jdbcContext.execute(String.format("insert into %s values (1, null)", getSchemaAndTable("_tap_double_active")));
         }
     }
@@ -338,14 +369,18 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
-        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() == 1) {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
             jdbcContext.execute("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
+        } else {
+            tapLogger.warn("Table {} not exists, skip truncate", tapClearTableEvent.getTableId());
         }
     }
 
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
-        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() == 1) {
+        if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
             jdbcContext.execute("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
+        } else {
+            tapLogger.warn("Table {} not exists, skip drop", tapDropTableEvent.getTableId());
         }
     }
 
@@ -371,7 +406,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
             try {
                 jdbcContext.query(sql, resultSet -> {
                     if (resultSet.next()) {
-                        filterResult.setResult(DbKit.getRowFromResultSet(resultSet, columnNames));
+                        DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                        processDataMap(dataMap, tapTable);
+                        filterResult.setResult(dataMap);
                     }
                 });
             } catch (Throwable e) {
@@ -384,7 +421,6 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void createIndex(TapConnectorContext connectorContext, TapTable tapTable, TapCreateIndexEvent createIndexEvent) throws SQLException {
-        List<String> sqlList = TapSimplify.list();
         List<TapIndex> indexList = createIndexEvent.getIndexList()
                 .stream()
                 .filter(v -> discoverIndex(tapTable.getId())
@@ -392,10 +428,78 @@ public abstract class CommonDbConnector extends ConnectorBase {
                         .noneMatch(i -> DbKit.ignoreCreateIndex(i, v)))
                 .collect(Collectors.toList());
         if (EmptyKit.isNotEmpty(indexList)) {
-            indexList.stream().filter(i -> !i.isPrimary()).forEach(i ->
-                    sqlList.add(getCreateIndexSql(tapTable, i)));
+            indexList.stream().filter(i -> !i.isPrimary()).forEach(i -> {
+                String sql = getCreateIndexSql(tapTable, i);
+                try {
+                    jdbcContext.execute(sql);
+                } catch (SQLException e) {
+                    if (!exceptionCollector.violateIndexName(e)) {
+                        tapLogger.warn("Create index failed {}, please execute it manually [{}]", e.getMessage(), sql);
+                    } else {
+                        String rename = i.getName().substring(0, i.getName().length() - 5) + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                        tapLogger.warn("Create index failed {}, rename {} to {} and retry ...", e.getMessage(), i.getName(), rename);
+                        i.setName(rename);
+                        sql = getCreateIndexSql(tapTable, i);
+                        try {
+                            jdbcContext.execute(sql);
+                        } catch (SQLException e1) {
+                            tapLogger.warn("Create index failed again {}, please execute it manually [{}]", e1.getMessage(), sql);
+                        }
+                    }
+                }
+            });
+            List<String> afterUniqueAutoIncrementSql = getAfterUniqueAutoIncrementFields(tapTable, indexList);
+            if (EmptyKit.isNotEmpty(afterUniqueAutoIncrementSql)) {
+                afterUniqueAutoIncrementSql.forEach(sql -> {
+                    try {
+                        jdbcContext.execute(sql);
+                    } catch (SQLException e) {
+                        tapLogger.warn("Failed to update auto-increment column {}, please execute it manually [{}]", e.getMessage(), sql);
+                    }
+                });
+            }
         }
-        jdbcContext.batchExecute(sqlList);
+
+    }
+
+    protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
+        if (!Boolean.TRUE.equals(commonDbConfig.getApplyForeignKey())) {
+            return;
+        }
+        List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
+        if (EmptyKit.isNotEmpty(constraintList)) {
+            List<String> constraintSqlList = new ArrayList<>();
+            TapConstraintException exception = new TapConstraintException(tapTable.getId());
+            constraintList.forEach(c -> {
+                String sql = getCreateConstraintSql(tapTable, c);
+                if (create) {
+                    try {
+                        jdbcContext.execute(sql);
+                    } catch (Exception e) {
+                        if (!exceptionCollector.violateConstraintName(e)) {
+                            exception.addException(c, sql, e);
+                        } else {
+                            String rename = c.getName() + "_" + UUID.randomUUID().toString().replaceAll("-", "").substring(28);
+                            c.setName(rename);
+                            sql = getCreateConstraintSql(tapTable, c);
+                            try {
+                                jdbcContext.execute(sql);
+                            } catch (Exception e1) {
+                                exception.addException(c, sql, e1);
+                            }
+                        }
+                    }
+                } else {
+                    constraintSqlList.add(sql);
+                }
+            });
+            if (!create) {
+                createConstraintEvent.setConstraintSqlList(constraintSqlList);
+            }
+            if (EmptyKit.isNotEmpty(exception.getExceptions())) {
+                throw exception;
+            }
+        }
     }
 
     protected TapIndex makeTapIndex(String key, List<DataMap> value) {
@@ -422,10 +526,43 @@ public abstract class CommonDbConnector extends ConnectorBase {
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
-        Map<String, List<DataMap>> indexMap = indexList.stream()
+        Map<String, List<DataMap>> indexMap = indexList.stream().filter(idx -> EmptyKit.isNotBlank(idx.getString("indexName")))
                 .collect(Collectors.groupingBy(idx -> idx.getString("indexName"), LinkedHashMap::new, Collectors.toList()));
         indexMap.forEach((key, value) -> tapIndexList.add(makeTapIndex(key, value)));
         return tapIndexList;
+    }
+
+    protected TapConstraint makeTapConstraint(String key, List<DataMap> value) {
+        TapConstraint tapConstraint = new TapConstraint(key, TapConstraint.ConstraintType.FOREIGN_KEY);
+        value.forEach(f -> {
+            tapConstraint.referencesTable(f.getString("referencesTableName"));
+            tapConstraint.add(new TapConstraintMapping()
+                    .foreignKey(f.getString("fk"))
+                    .referenceKey(f.getString("rfk")));
+            if (EmptyKit.isNotBlank(f.getString("onUpdate"))) {
+                tapConstraint.onUpdate(f.getString("onUpdate"));
+            }
+            if (EmptyKit.isNotBlank(f.getString("onDelete"))) {
+                tapConstraint.onDelete(f.getString("onDelete"));
+            }
+        });
+        return tapConstraint;
+    }
+
+    protected List<TapConstraint> discoverConstraint(String tableName) {
+        List<DataMap> constraintList;
+        try {
+            constraintList = jdbcContext.queryAllForeignKeys(Collections.singletonList(tableName));
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+        return makeForeignKey(constraintList, tableName);
+    }
+
+    protected void beforeWriteRecord(TapTable tapTable) throws SQLException {
+        if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
+            writtenTableMap.put(tapTable.getId(), DataMap.create());
+        }
     }
 
     protected void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) throws SQLException {
@@ -433,7 +570,12 @@ public abstract class CommonDbConnector extends ConnectorBase {
         if (null == sqlList) {
             return;
         }
-        jdbcContext.batchExecute(sqlList);
+        try {
+            jdbcContext.batchExecute(sqlList);
+        } catch (SQLException e) {
+            exceptionCollector.collectWritePrivileges("execute sqls: " + TapSimplify.toJson(sqlList), Collections.emptyList(), e);
+            throw e;
+        }
     }
 
     protected List<String> alterFieldAttr(TapFieldBaseEvent tapFieldBaseEvent, TapConnectorContext tapConnectorContext) {
@@ -472,9 +614,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         StringBuilder sb = new StringBuilder();
         char escapeChar = commonDbConfig.getEscapeChar();
         if (EmptyKit.isNotBlank(commonDbConfig.getSchema())) {
-            sb.append(escapeChar).append(commonDbConfig.getSchema()).append(escapeChar).append('.');
+            sb.append(escapeChar).append(StringKit.escape(commonDbConfig.getSchema(), escapeChar)).append(escapeChar).append('.');
         }
-        sb.append(escapeChar).append(tableId).append(escapeChar);
+        sb.append(escapeChar).append(StringKit.escape(tableId, escapeChar)).append(escapeChar);
         return sb.toString();
     }
 
@@ -485,14 +627,18 @@ public abstract class CommonDbConnector extends ConnectorBase {
         Collection<String> primaryKeys = tapTable.primaryKeys();
         if (EmptyKit.isNotEmpty(primaryKeys)) {
             sb.append(", primary key (").append(escapeChar)
-                    .append(String.join(escapeChar + "," + escapeChar, primaryKeys))
+                    .append(primaryKeys.stream().map(pk -> StringKit.escape(pk, escapeChar)).collect(Collectors.joining(escapeChar + "," + escapeChar)))
                     .append(escapeChar).append(')');
         }
         sb.append(')');
         if (commentInField && EmptyKit.isNotBlank(tapTable.getComment())) {
-            sb.append(" comment='").append(tapTable.getComment()).append("'");
+            commentOnTable(sb, tapTable);
         }
         return sb.toString();
+    }
+
+    protected void commentOnTable(StringBuilder sb, TapTable tapTable) {
+        sb.append(" comment='").append(tapTable.getComment().replaceAll("'", "''")).append("'");
     }
 
     protected String getCreateIndexSql(TapTable tapTable, TapIndex tapIndex) {
@@ -502,27 +648,45 @@ public abstract class CommonDbConnector extends ConnectorBase {
             sb.append("unique ");
         }
         sb.append("index ");
-        if (EmptyKit.isNotBlank(tapIndex.getName())) {
-            sb.append(escapeChar).append(tapIndex.getName()).append(escapeChar);
-        } else {
-            sb.append(escapeChar).append(DbKit.buildIndexName(tapTable.getId())).append(escapeChar);
-        }
+        String indexName = DbKit.buildIndexName(tapTable.getId(), tapIndex, commonDbConfig.getMaxIndexNameLength());
+        tapIndex.setName(indexName);
+        sb.append(escapeChar).append(indexName).append(escapeChar);
         sb.append(" on ").append(getSchemaAndTable(tapTable.getId())).append('(')
                 .append(tapIndex.getIndexFields().stream().map(f -> escapeChar + f.getName() + escapeChar + " " + (f.getFieldAsc() ? "asc" : "desc"))
                         .collect(Collectors.joining(","))).append(')');
         return sb.toString();
     }
 
+    protected String getCreateConstraintSql(TapTable tapTable, TapConstraint tapConstraint) {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        StringBuilder sb = new StringBuilder("alter table ");
+        sb.append(getSchemaAndTable(tapTable.getId())).append(" add constraint ");
+        if (EmptyKit.isNotBlank(tapConstraint.getName())) {
+            sb.append(escapeChar).append(tapConstraint.getName()).append(escapeChar);
+        } else {
+            sb.append(escapeChar).append(DbKit.buildForeignKeyName(tapTable.getId(), tapConstraint, 32)).append(escapeChar);
+        }
+        sb.append(" foreign key (").append(escapeChar).append(tapConstraint.getMappingFields().stream().map(TapConstraintMapping::getForeignKey).collect(Collectors.joining(escapeChar + "," + escapeChar))).append(escapeChar).append(") references ")
+                .append(getSchemaAndTable(tapConstraint.getReferencesTableName())).append('(').append(escapeChar).append(tapConstraint.getMappingFields().stream().map(TapConstraintMapping::getReferenceKey).collect(Collectors.joining(escapeChar + "," + escapeChar))).append(escapeChar).append(')');
+        if (EmptyKit.isNotNull(tapConstraint.getOnUpdate())) {
+            sb.append(" on update ").append(tapConstraint.getOnUpdate().toString().replaceAll("_", " "));
+        }
+        if (EmptyKit.isNotNull(tapConstraint.getOnDelete())) {
+            sb.append(" on delete ").append(tapConstraint.getOnDelete().toString().replaceAll("_", " "));
+        }
+        return sb.toString();
+    }
+
     private String getTableCommentSql(TapTable tapTable) {
         return "comment on table " + getSchemaAndTable(tapTable.getId()) +
-                " is '" + tapTable.getComment() + '\'';
+                " is '" + tapTable.getComment().replace("'", "''") + '\'';
     }
 
     private String getColumnCommentSql(TapTable tapTable, TapField tapField) {
         char escapeChar = commonDbConfig.getEscapeChar();
         return "comment on column " + getSchemaAndTable(tapTable.getId()) + '.' +
                 escapeChar + tapField.getName() + escapeChar +
-                " is '" + tapField.getComment() + '\'';
+                " is '" + tapField.getComment().replace("'", "''") + '\'';
     }
 
     private String getSelectSql(TapTable tapTable) {
@@ -550,7 +714,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void batchReadWithoutOffset(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        if (commonDbConfig.getHashSplit()) {
+        if (Boolean.TRUE.equals(commonDbConfig.getHashSplit())) {
             batchReadWithHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
         } else {
             batchReadWithoutHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
@@ -558,9 +722,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void batchReadWithoutHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + c + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
-        String sql = String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
-
+        String sql = getBatchReadSelectSql(tapTable);
         jdbcContext.query(sql, resultSet -> {
             List<TapEvent> tapEvents = list();
             //get all column names
@@ -592,38 +754,83 @@ public abstract class CommonDbConnector extends ConnectorBase {
         throw new UnsupportedOperationException("getHashSplitStringSql is not supported");
     }
 
+    protected String getHashSplitModConditions(TapTable tapTable, int maxSplit, int currentSplit) {
+        return "mod(" + getHashSplitStringSql(tapTable) + "," + maxSplit + ")=" + currentSplit;
+    }
+
+    protected String getBatchReadSelectSql(TapTable tapTable) {
+        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + StringKit.escape(c, commonDbConfig.getEscapeChar()) + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
+        return "SELECT " + columns + " FROM " + getSchemaAndTable(tapTable.getId());
+    }
+
     protected void batchReadWithHashSplit(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        String columns = tapTable.getNameFieldMap().keySet().stream().map(c -> commonDbConfig.getEscapeChar() + c + commonDbConfig.getEscapeChar()).collect(Collectors.joining(","));
-        String sql = String.format("SELECT %s FROM " + getSchemaAndTable(tapTable.getId()), columns);
-        for (int i = 0; i < commonDbConfig.getMaxSplit(); i++) {
-            String splitSql = sql + " WHERE mod(" + getHashSplitStringSql(tapTable) + "," + commonDbConfig.getMaxSplit() + ")=" + i;
-            tapLogger.info("batchRead, splitSql[{}]: {}", i + 1, splitSql);
-            jdbcContext.query(splitSql, resultSet -> {
-                List<TapEvent> tapEvents = list();
-                //get all column names
-                List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
-                try {
-                    while (isAlive() && resultSet.next()) {
-                        DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
-                        processDataMap(dataMap, tapTable);
-                        tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
-                        if (tapEvents.size() == eventBatchSize) {
-                            eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
-                            tapEvents = list();
+        String sql = getBatchReadSelectSql(tapTable);
+        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        CountDownLatch countDownLatch = new CountDownLatch(commonDbConfig.getBatchReadThreadSize());
+        ExecutorService executorService = Executors.newFixedThreadPool(commonDbConfig.getBatchReadThreadSize());
+        try {
+            for (int i = 0; i < commonDbConfig.getBatchReadThreadSize(); i++) {
+                final int threadIndex = i;
+                executorService.submit(() -> {
+                    try {
+                        for (int ii = threadIndex; ii < commonDbConfig.getMaxSplit(); ii += commonDbConfig.getBatchReadThreadSize()) {
+                            String splitSql = sql + " WHERE " + getHashSplitModConditions(tapTable, commonDbConfig.getMaxSplit(), ii);
+                            tapLogger.info("batchRead, splitSql[{}]: {}", ii + 1, splitSql);
+                            int retry = 20;
+                            while (retry-- > 0 && isAlive()) {
+                                try {
+                                    jdbcContext.query(splitSql, resultSet -> {
+                                        List<TapEvent> tapEvents = list();
+                                        //get all column names
+                                        List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
+                                        while (isAlive() && resultSet.next()) {
+                                            DataMap dataMap = DbKit.getRowFromResultSet(resultSet, columnNames);
+                                            processDataMap(dataMap, tapTable);
+                                            tapEvents.add(insertRecordEvent(dataMap, tapTable.getId()));
+                                            if (tapEvents.size() == eventBatchSize) {
+                                                syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                                tapEvents = list();
+                                            }
+                                        }
+                                        //last events those less than eventBatchSize
+                                        if (EmptyKit.isNotEmpty(tapEvents)) {
+                                            syncEventSubmit(tapEvents, eventsOffsetConsumer);
+                                        }
+                                    });
+                                    break;
+                                } catch (Exception e) {
+                                    if (retry == 0 || !(e instanceof SQLRecoverableException || e instanceof IOException)) {
+                                        throw e;
+                                    }
+                                    tapLogger.warn("batchRead, splitSql[{}]: {} failed, retrying...", ii + 1, splitSql);
+                                }
+                            }
                         }
+                    } catch (Exception e) {
+                        throwable.set(e);
+                    } finally {
+                        countDownLatch.countDown();
                     }
-                } catch (SQLException e) {
-                    exceptionCollector.collectTerminateByServer(e);
-                    exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
-                    exceptionCollector.revealException(e);
-                    throw e;
-                }
-                //last events those less than eventBatchSize
-                if (EmptyKit.isNotEmpty(tapEvents)) {
-                    eventsOffsetConsumer.accept(tapEvents, new HashMap<>());
-                }
-            });
+                });
+            }
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            if (EmptyKit.isNotNull(throwable.get())) {
+                exceptionCollector.collectTerminateByServer(throwable.get());
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), throwable.get());
+                exceptionCollector.revealException(throwable.get());
+                throw throwable.get();
+            }
+        } finally {
+            executorService.shutdown();
         }
+    }
+
+    protected synchronized void syncEventSubmit(List<TapEvent> eventList, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+        eventsOffsetConsumer.accept(eventList, TapSimplify.list());
     }
 
     //for mysql type (with offset & limit)
@@ -634,7 +841,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
             try {
                 while (resultSet.next()) {
                     List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
-                    filterResults.add(DbKit.getRowFromResultSet(resultSet, allColumn));
+                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, allColumn);
+                    processDataMap(dataMap, table);
+                    filterResults.add(dataMap);
                     if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
                         consumer.accept(filterResults);
                         filterResults = new FilterResults();
@@ -661,7 +870,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 while (resultSet.next()) {
                     List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
                     allColumn.remove("ROWNO_");
-                    filterResults.add(DbKit.getRowFromResultSet(resultSet, allColumn));
+                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, allColumn);
+                    processDataMap(dataMap, table);
+                    filterResults.add(dataMap);
                     if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
                         consumer.accept(filterResults);
                         filterResults = new FilterResults();
@@ -711,11 +922,22 @@ public abstract class CommonDbConnector extends ConnectorBase {
         consumer.accept(discoverIndex(table.getId()));
     }
 
+    protected void queryConstraint(TapConnectorContext connectorContext, TapTable table, Consumer<List<TapConstraint>> consumer) throws Throwable {
+        consumer.accept(discoverConstraint(table.getId()));
+    }
+
     protected void dropIndexes(TapConnectorContext connectorContext, TapTable table, TapDeleteIndexEvent deleteIndexEvent) throws SQLException {
         char escapeChar = commonDbConfig.getEscapeChar();
         List<String> dropIndexesSql = new ArrayList<>();
         deleteIndexEvent.getIndexNames().forEach(idx -> dropIndexesSql.add("drop index " + getSchemaAndTable(table.getId()) + "." + escapeChar + idx + escapeChar));
         jdbcContext.batchExecute(dropIndexesSql);
+    }
+
+    protected void dropConstraint(TapConnectorContext connectorContext, TapTable table, TapDropConstraintEvent tapDropConstraintEvent) throws SQLException {
+        char escapeChar = commonDbConfig.getEscapeChar();
+        List<String> dropConstraintsSql = new ArrayList<>();
+        tapDropConstraintEvent.getConstraintList().forEach(fk -> dropConstraintsSql.add("alter table " + getSchemaAndTable(table.getId()) + " drop constraint " + escapeChar + fk.getName() + escapeChar));
+        jdbcContext.batchExecute(dropConstraintsSql);
     }
 
     protected long countRawCommand(TapConnectorContext connectorContext, String command, TapTable tapTable) throws SQLException {
@@ -751,4 +973,21 @@ public abstract class CommonDbConnector extends ConnectorBase {
         });
         return count.get();
     }
+
+    protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
+        return new ArrayList<>();
+    }
+
+    protected void executeCommandV2(TapConnectionContext connectionContext, String sqlType, String sql, Consumer<List<DataMap>> consumer) throws Throwable {
+        switch (sqlType) {
+            case "execute":
+                jdbcContext.execute(sql);
+                consumer.accept(null);
+                break;
+            case "query":
+                jdbcContext.query(sql, resultSet -> consumer.accept(DbKit.getDataFromResultSet(resultSet)));
+                break;
+        }
+    }
+
 }

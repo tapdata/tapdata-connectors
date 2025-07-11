@@ -1,5 +1,6 @@
 package io.tapdata.connector.doris.streamload;
 
+import io.tapdata.entity.logger.TapLogger;
 import org.apache.http.Header;
 import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
@@ -14,13 +15,16 @@ import org.apache.http.util.Args;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @Author dayun
  * @Date 7/14/22
  */
 public class HttpUtil {
-    public static final int CONNECT_TIMEOUT = 120000;
+    public static final int CONNECT_TIMEOUT = 5000;
+    public static final int READ_TIMEOUT = 300000;
+    public static final String TAG = HttpUtil.class.getSimpleName();
     private final HttpClientBuilder httpClientBuilder = HttpClients
             .custom()
             .setRedirectStrategy(new DefaultRedirectStrategy() {
@@ -70,8 +74,7 @@ public class HttpUtil {
             });
             RequestConfig requestConfig = RequestConfig.custom()
                     .setConnectTimeout(CONNECT_TIMEOUT)
-                    .setConnectionRequestTimeout(CONNECT_TIMEOUT)
-                    .setSocketTimeout(CONNECT_TIMEOUT)
+                    .setSocketTimeout(READ_TIMEOUT)
                     .build();
             custom.setDefaultRequestConfig(requestConfig);
             CloseableHttpClient httpClient = custom

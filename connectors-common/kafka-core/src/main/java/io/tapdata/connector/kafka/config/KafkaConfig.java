@@ -24,6 +24,7 @@ public class KafkaConfig extends MqConfig {
     private Integer partitionNum;
 
     private Integer replicasSize;
+    private String topicName;
     private String script;
 
     public Integer getPartitionNum() {
@@ -69,6 +70,7 @@ public class KafkaConfig extends MqConfig {
     private String authCredentialsSource;
     private String authUserName;
     private String authPassword;
+    private String securityProtocol;
 
     public Boolean getBasicAuth() {
         return basicAuth;
@@ -78,6 +80,13 @@ public class KafkaConfig extends MqConfig {
         this.basicAuth = basicAuth;
     }
 
+    public String getSecurityProtocol() {
+        return securityProtocol;
+    }
+
+    public void setSecurityProtocol(String securityProtocol) {
+        this.securityProtocol = securityProtocol;
+    }
 
     /**
      * kafka source (Consumer)
@@ -345,6 +354,14 @@ public class KafkaConfig extends MqConfig {
 
     public void setEnableScript(Boolean enableScript) {
         this.enableScript = enableScript;
+    }
+
+    public String getTopicName() {
+        return topicName;
+    }
+
+    public void setTopicName(String topicName) {
+        this.topicName = topicName;
     }
 
     public String getScript() {

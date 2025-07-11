@@ -1,5 +1,6 @@
 package io.tapdata.common.dml;
 
+import io.netty.buffer.PooledByteBufAllocator;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.JdbcContext;
 import io.tapdata.common.exception.AbstractExceptionCollector;
@@ -10,16 +11,16 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
+import io.tapdata.utils.ErrorCodeUtils;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Collections;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -32,6 +33,7 @@ public class NormalRecordWriter {
     protected NormalWriteRecorder updateRecorder;
     protected String updatePolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
     protected NormalWriteRecorder deleteRecorder;
+    protected String deletePolicy = ConnectionOptions.DML_DELETE_POLICY_IGNORE_ON_NON_EXISTS;
     protected String version;
     protected Connection connection;
     protected final TapTable tapTable;
@@ -39,8 +41,11 @@ public class NormalRecordWriter {
     };
     protected boolean isTransaction = false;
     protected Log tapLogger;
+    protected List<String> autoIncFields;
+    protected Map<String, Object> autoIncMap = new HashMap<>();
     protected boolean largeSql = false;
     protected CommonDbConfig commonDbConfig;
+    protected boolean needCloseIdentity = false;
 
     public NormalRecordWriter(JdbcContext jdbcContext, TapTable tapTable) throws SQLException {
         this.commonDbConfig = jdbcContext.getConfig();
@@ -68,11 +73,15 @@ public class NormalRecordWriter {
         try {
             insertRecorder.setVersion(version);
             insertRecorder.setInsertPolicy(insertPolicy);
+            if (commonDbConfig.getEnableFileInput() && ConnectionOptions.DML_INSERT_POLICY_JUST_INSERT.equals(insertPolicy)) {
+                insertRecorder.enableFileInput(new PooledByteBufAllocator().directBuffer(commonDbConfig.getBufferCapacity().intValue()));
+            }
             insertRecorder.setTapLogger(tapLogger);
             updateRecorder.setVersion(version);
             updateRecorder.setUpdatePolicy(updatePolicy);
             updateRecorder.setTapLogger(tapLogger);
             deleteRecorder.setVersion(version);
+            deleteRecorder.setDeletePolicy(deletePolicy);
             deleteRecorder.setTapLogger(tapLogger);
             //doubleActive
             if (Boolean.TRUE.equals(commonDbConfig.getDoubleActive())) {
@@ -81,6 +90,32 @@ public class NormalRecordWriter {
                 }
             }
             //insert,update,delete events must consecutive, so execute the other two first
+            writePart(tapRecordEvents, listResult, isAlive);
+            //release resource
+
+        } catch (SQLException e) {
+            errorHandler(e, null);
+            exceptionCollector.revealException(e);
+            throw e;
+        } finally {
+            insertRecorder.releaseResource();
+            updateRecorder.releaseResource();
+            deleteRecorder.releaseResource();
+            if (!isTransaction) {
+                if (needCloseIdentity) {
+                    openIdentity();
+                }
+                connection.close();
+            }
+            writeListResultConsumer.accept(listResult
+                    .insertedCount(insertRecorder.getAtomicLong().get())
+                    .modifiedCount(updateRecorder.getAtomicLong().get())
+                    .removedCount(deleteRecorder.getAtomicLong().get()));
+        }
+    }
+
+    protected void writePart(List<TapRecordEvent> tapRecordEvents, WriteListResult<TapRecordEvent> listResult, Supplier<Boolean> isAlive) {
+        try {
             for (TapRecordEvent recordEvent : tapRecordEvents) {
                 if (null != isAlive && !isAlive.get()) {
                     break;
@@ -90,6 +125,13 @@ public class NormalRecordWriter {
                     deleteRecorder.executeBatch(listResult);
                     TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
                     insertRecorder.addInsertBatch(insertRecordEvent.getAfter(), listResult);
+                    if (EmptyKit.isNotEmpty(autoIncFields)) {
+                        autoIncFields.forEach(field -> {
+                            if (EmptyKit.isNotNull(insertRecordEvent.getAfter().get(field))) {
+                                autoIncMap.put(field, insertRecordEvent.getAfter().get(field));
+                            }
+                        });
+                    }
                     insertRecorder.addAndCheckCommit(recordEvent, listResult);
                 } else if (recordEvent instanceof TapUpdateRecordEvent) {
                     insertRecorder.executeBatch(listResult);
@@ -112,33 +154,30 @@ public class NormalRecordWriter {
             if (!connection.getAutoCommit() && !isTransaction) {
                 connection.commit();
             }
-            //release resource
-
         } catch (SQLException e) {
-            exceptionCollector.collectTerminateByServer(e);
-            exceptionCollector.collectViolateNull(null, e);
-            TapRecordEvent errorEvent = null;
-            if (EmptyKit.isNotNull(listResult.getErrorMap())) {
-                errorEvent = listResult.getErrorMap().keySet().stream().findFirst().orElse(null);
+            try {
+                connection.rollback();
+            } catch (Exception ignore) {
             }
-            exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), errorEvent, null, e);
-            exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
-            exceptionCollector.collectWriteType(null, null, errorEvent, e);
-            exceptionCollector.collectWriteLength(null, null, errorEvent, e);
-            exceptionCollector.revealException(e);
-            throw e;
-        } finally {
-            insertRecorder.releaseResource();
-            updateRecorder.releaseResource();
-            deleteRecorder.releaseResource();
-            if (!isTransaction) {
-                connection.close();
+            if (tapRecordEvents.size() == 1) {
+                errorHandler(e, tapRecordEvents.get(0));
+                throw new RuntimeException(String.format("Error occurred when retrying write record: %s", tapRecordEvents.get(0)), e);
+            } else {
+                int eachPieceSize = Math.max(tapRecordEvents.size() / 10, 1);
+                tapLogger.warn("writeRecord failed, dismantle them, size: {}", eachPieceSize);
+                DbKit.splitToPieces(tapRecordEvents, eachPieceSize).forEach(pieces -> writePart(pieces, listResult, isAlive));
             }
-            writeListResultConsumer.accept(listResult
-                    .insertedCount(insertRecorder.getAtomicLong().get())
-                    .modifiedCount(updateRecorder.getAtomicLong().get())
-                    .removedCount(deleteRecorder.getAtomicLong().get()));
         }
+    }
+
+    private void errorHandler(SQLException e, Object data) {
+        if (null != data) {
+            data = ErrorCodeUtils.truncateData(data);
+        }
+        exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), data, null, e);
+        exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
+        exceptionCollector.collectWriteType(null, null, data, e);
+        exceptionCollector.collectWriteLength(null, null, data, e);
     }
 
     public NormalRecordWriter setVersion(String version) {
@@ -156,14 +195,74 @@ public class NormalRecordWriter {
         return this;
     }
 
+    public NormalRecordWriter setDeletePolicy(String deletePolicy) {
+        this.deletePolicy = deletePolicy;
+        return this;
+    }
+
     public NormalRecordWriter setTapLogger(Log tapLogger) {
         this.tapLogger = tapLogger;
         return this;
+    }
+
+    public NormalRecordWriter setRemovedColumn(List<String> removedColumn) {
+        insertRecorder.setRemovedColumn(removedColumn);
+        updateRecorder.setRemovedColumn(removedColumn);
+        deleteRecorder.setRemovedColumn(removedColumn);
+        return this;
+    }
+
+    public void setAutoIncFields(List<String> autoIncFields) {
+        this.autoIncFields = autoIncFields;
+    }
+
+    public Map<String, Object> getAutoIncMap() {
+        return autoIncMap;
     }
 
     protected String upsertDoubleActive() {
         char escapeChar = commonDbConfig.getEscapeChar();
         return "update " + escapeChar + commonDbConfig.getSchema() + escapeChar + "." + escapeChar + "_tap_double_active" + escapeChar + " set " +
                 escapeChar + "c2" + escapeChar + " = '" + UUID.randomUUID() + "' where " + escapeChar + "c1" + escapeChar + " = '1'";
+    }
+
+    public void closeConstraintCheck() throws SQLException {
+        String sql = getCloseConstraintCheckSql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+    }
+
+    protected String getCloseConstraintCheckSql() {
+        return null;
+    }
+
+    public void closeIdentity() throws SQLException {
+        String sql = getIdentitySql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+        needCloseIdentity = true;
+    }
+
+    protected String getIdentitySql() {
+        return null;
+    }
+
+    public void openIdentity() throws SQLException {
+        String sql = getOpenIdentitySql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+    }
+
+    protected String getOpenIdentitySql() {
+        return null;
     }
 }

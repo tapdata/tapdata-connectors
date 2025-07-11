@@ -4,7 +4,6 @@
     "icon": "icons/hudi.png",
     "id": "hudi",
     "doc": "${doc}",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
@@ -183,7 +182,7 @@
           "x-index": 140,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {

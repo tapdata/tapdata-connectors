@@ -61,7 +61,7 @@
     <properties>
         <java.version>8</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <tapdata.pdk.api.version>1.3.5-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>2.0.0-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
 
     <build>
@@ -80,6 +80,7 @@
                                 <Implementation-Version>${project.version}</Implementation-Version>
                                 <Implementation-Vendor>${project.groupId}</Implementation-Vendor>
                                 <Authentication>Beta</Authentication>
+                                <PayMode>${pay.mode}</PayMode>
                                 <Build-OS>${os.name} ${os.version}</Build-OS>
                                 <Build-Java>Java ${java.version}</Build-Java>
                                 <PDK-Runner-Version>${tapdata.pdk.runner.version}</PDK-Runner-Version>

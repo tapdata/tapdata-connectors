@@ -2,6 +2,7 @@ package io.tapdata.connector.elasticsearch;
 
 import com.google.common.collect.Lists;
 import io.tapdata.base.ConnectorBase;
+import io.tapdata.connector.elasticsearch.cons.FieldsMappingMode;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
@@ -205,7 +206,11 @@ public class ElasticsearchConnector extends ConnectorBase {
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
-        new ElasticsearchRecordWriter(elasticsearchHttpContext, tapTable).log(connectorContext.getLog()).write(tapRecordEvents, writeListResultConsumer);
+        new ElasticsearchRecordWriter(elasticsearchHttpContext, tapTable,
+                connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY),
+                connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY))
+                .log(connectorContext.getLog())
+                .write(tapRecordEvents, writeListResultConsumer);
     }
 
     protected void createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws Throwable {
@@ -224,52 +229,54 @@ public class ElasticsearchConnector extends ConnectorBase {
                 xContentBuilder.startObject();
                 xContentBuilder.field("dynamic", "true");
                 xContentBuilder.startObject("properties");
-                for (TapField field : tapTable.getNameFieldMap().values()) {
-                    if (null != createTableFieldFilters) {
-                        boolean filter = false;
-                        for (Predicate<CreateTableFieldWrapper> createTableFieldFilter : createTableFieldFilters) {
-                            CreateTableFieldWrapper createTableFieldWrapper = new CreateTableFieldWrapper(field, tapTable);
-                            filter = createTableFieldFilter.test(createTableFieldWrapper);
-                            if (filter) break;
+                if (FieldsMappingMode.SCHEMA == elasticsearchConfig.getFieldsMappingModeEnum()) {
+                    for (TapField field : tapTable.getNameFieldMap().values()) {
+                        if (null != createTableFieldFilters) {
+                            boolean filter = false;
+                            for (Predicate<CreateTableFieldWrapper> createTableFieldFilter : createTableFieldFilters) {
+                                CreateTableFieldWrapper createTableFieldWrapper = new CreateTableFieldWrapper(field, tapTable);
+                                filter = createTableFieldFilter.test(createTableFieldWrapper);
+                                if (filter) break;
+                            }
+                            if (filter) continue;
                         }
-                        if (filter) continue;
-                    }
-                    String dataType = field.getDataType();
-                    if (null == dataType) {
-                        continue;
-                    }
-                    switch (dataType) {
-                        case "text":
-                            xContentBuilder.startObject(field.getName())
+                        String dataType = field.getDataType();
+                        if (null == dataType) {
+                            continue;
+                        }
+                        switch (dataType) {
+                            case "text":
+                                xContentBuilder.startObject(field.getName())
                                     .field("type", "text")
                                     .startObject("fields").startObject("keyword")
                                     .field("ignore_above", 256)
                                     .field("type", "keyword")
                                     .endObject().endObject()
                                     .endObject();
-                            break;
-                        case "unsigned_long":
-                            xContentBuilder.startObject(field.getName())
+                                break;
+                            case "unsigned_long":
+                                xContentBuilder.startObject(field.getName())
                                     .field("type", "unsigned_long")
                                     .endObject();
-                            break;
-                        case "scaled_float":
-                            xContentBuilder.startObject(field.getName())
+                                break;
+                            case "scaled_float":
+                                xContentBuilder.startObject(field.getName())
                                     .field("type", "scaled_float")
                                     .field("scaling_factor", 100)
                                     .endObject();
-                            break;
-                        case "date":
-                            xContentBuilder.startObject(field.getName())
+                                break;
+                            case "date":
+                                xContentBuilder.startObject(field.getName())
                                     .field("type", "date")
-                                    .field("format", format("{}||{}||{}||epoch_millis",elasticsearchConfig.getDateFormat(),elasticsearchConfig.getDatetimeFormat(),elasticsearchConfig.getTimeFormat()))
+                                    .field("format", format("{}||{}||{}||epoch_millis", elasticsearchConfig.getDateFormat(), elasticsearchConfig.getDatetimeFormat(), elasticsearchConfig.getTimeFormat()))
                                     .endObject();
-                            break;
-                        default:
-                            xContentBuilder.startObject(field.getName())
+                                break;
+                            default:
+                                xContentBuilder.startObject(field.getName())
                                     .field("type", dataType)
                                     .endObject();
-                            break;
+                                break;
+                        }
                     }
                 }
                 xContentBuilder.endObject();

@@ -12,6 +12,7 @@ import com.hierynomus.smbj.connection.Connection;
 import com.hierynomus.smbj.session.Session;
 import com.hierynomus.smbj.share.DiskShare;
 import com.hierynomus.smbj.share.File;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.file.TapFile;
 import io.tapdata.file.TapFileStorage;
 import io.tapdata.storage.kit.EmptyKit;
@@ -32,6 +33,7 @@ public class SmbFileStorage implements TapFileStorage {
     private Connection connection;
     private Session session;
     private DiskShare share;
+    private static final String TAG = SmbFileStorage.class.getSimpleName();
 
     @Override
     public void init(Map<String, Object> params) throws IOException {
@@ -45,22 +47,40 @@ public class SmbFileStorage implements TapFileStorage {
             ac = AuthenticationContext.anonymous();
         }
         session = connection.authenticate(ac);
-        share = (DiskShare) session.connectShare(smbConfig.getSmbShareDir());
+        if (EmptyKit.isNotBlank(smbConfig.getSmbShareDir())) {
+            share = (DiskShare) session.connectShare(smbConfig.getSmbShareDir());
+        }
     }
 
     @Override
     public void destroy() throws IOException {
         if (EmptyKit.isNotNull(share)) {
-            share.close();
+            try {
+                share.close();
+            } catch (Exception ignore) {
+                TapLogger.warn(TAG, String.format("SMB destroy DiskShare failed message %s", ignore.getMessage()));
+            }
         }
         if (EmptyKit.isNotNull(session)) {
-            session.close();
+            try {
+                session.close();
+            } catch (Exception ignore) {
+                TapLogger.warn(TAG, String.format("SMB destroy session failed message %s", ignore.getMessage()));
+            }
         }
         if (EmptyKit.isNotNull(connection)) {
-            connection.close();
+            try {
+                connection.close();
+            } catch (Exception ignore) {
+                TapLogger.warn(TAG, String.format("SMB destroy connection failed message %s", ignore.getMessage()));
+            }
         }
         if (EmptyKit.isNotNull(smbClient)) {
-            smbClient.close();
+            try {
+                smbClient.close();
+            } catch (Exception ignore) {
+                TapLogger.warn(TAG, String.format("SMB destroy smbClient failed message %s", ignore.getMessage()));
+            }
         }
     }
 
@@ -104,8 +124,21 @@ public class SmbFileStorage implements TapFileStorage {
     }
 
     @Override
+    public InputStream readFile(String path) throws Exception {
+        if (!isFileExist(path)) {
+            return null;
+        }
+        return share.openFile(path, EnumSet.of(AccessMask.GENERIC_READ), null,
+                SMB2ShareAccess.ALL, SMB2CreateDisposition.FILE_OPEN, null).getInputStream();
+    }
+
+    @Override
     public boolean isFileExist(String path) {
-        return share.fileExists(path);
+        if (null != share) {
+            return share.fileExists(path);
+        } else {
+            return false;
+        }
     }
 
     @Override
@@ -198,7 +231,11 @@ public class SmbFileStorage implements TapFileStorage {
 
     @Override
     public boolean isDirectoryExist(String path) {
-        return share.folderExists(path);
+        if (null != share) {
+            return share.folderExists(path);
+        } else {
+            return false;
+        }
     }
 
     @Override

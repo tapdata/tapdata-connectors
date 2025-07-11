@@ -17,7 +17,6 @@ public abstract class BaseTapdataConverter implements CustomConverter<SchemaBuil
 
     protected SchemaBuilder schemaBuilder;
     protected Object defaultValue;
-    protected RelationalColumn column;
     protected long milliSecondOffset = 0L;
 
     abstract SchemaBuilder initSchemaBuilder(Properties props);
@@ -26,7 +25,7 @@ public abstract class BaseTapdataConverter implements CustomConverter<SchemaBuil
 
     abstract boolean needConvert(RelationalColumn column);
 
-    abstract Object convert(Object data);
+    abstract Object convert(Object data, RelationalColumn column);
 
     @Override
     public final void configure(Properties props) {
@@ -37,8 +36,7 @@ public abstract class BaseTapdataConverter implements CustomConverter<SchemaBuil
     @Override
     public final void converterFor(RelationalColumn field, ConverterRegistration<SchemaBuilder> registration) {
         if (needConvert(field)) {
-            this.column = field;
-            registration.register(schemaBuilder, d -> convert(d, field, defaultValue, this::convert));
+            registration.register(schemaBuilder, d -> convert(d, field, defaultValue, obj -> convert(obj, field)));
         }
     }
 

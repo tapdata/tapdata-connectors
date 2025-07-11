@@ -4,7 +4,6 @@
     "icon": "icons/doris.png",
     "id": "doris",
     "docs": "${docs}",
-    "authentication": "Beta",
     "tags": ["Database"]
   },
   "configOptions": {
@@ -83,6 +82,18 @@
           "apiServerKey": "database_password",
           "x-index": 60
         },
+        "backendNum": {
+          "type": "string",
+          "title": "${backendNum}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "backend_Num",
+          "required": false,
+          "x-decorator-props": {
+            "tooltip": "${backendNumTip}"
+          },
+          "x-index": 61
+        },
         "OPTIONAL_FIELDS": {
           "type": "void",
           "properties": {
@@ -120,7 +131,7 @@
               "x-component": "Select",
               "enum": [
                 {
-                  "label": "Database Timezone",
+                  "label": "",
                   "value": ""
                 },
                 {
@@ -305,10 +316,10 @@
           "x-reactions": [
             "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
             {
-              "dependencies":["writeStrategy", ".uniqueKeyType"],
+              "dependencies":["writeStrategy", ".uniqueKeyType", "type"],
               "fulfill":{
                 "state":{
-                  "display": "{{$deps[0] === \"appendWrite\" && $deps[1] === \"Duplicate\" ? \"visible\":\"hidden\"}}"
+                  "display": "{{$deps[0] === \"appendWrite\" && $deps[1] === \"Duplicate\" && $deps[2] !== 'database' ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -331,10 +342,10 @@
           "x-reactions": [
             "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
             {
-              "dependencies":["$inputs"],
+              "dependencies":["$inputs", "type"],
               "fulfill":{
                 "state":{
-                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                  "display": "{{$deps[0].length > 0 && $deps[1] !== 'database' ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -484,6 +495,27 @@
               "value": "csv"
             }
           ]
+        },
+        "applyDefault": {
+          "type": "boolean",
+          "title": "${applyDefault}",
+          "default": false,
+          "x-index": 8,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${applyDefaultTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -508,6 +540,8 @@
       "timezone": "Timezone for Datetime",
       "timezoneTips": "Affect Type: DATE",
       "writeByteBufferCapacity": "Write buffer capacity(KB)",
+      "applyDefault": "Apply default value",
+      "applyDefaultTooltip": "When the switch is turned on, the default value will be applied to the target. If there are unadapted functions or expressions, it may cause an error",
       "writeFormat": "Write format",
       "doc": "docs/readme_en_US.md",
       "duplicateKey": "duplicateKey",
@@ -522,7 +556,9 @@
       "tablePropertiesTip": "Table properties, for example: {replication_num: 3, storage_format: v2}",
       "propKey": "Property Name",
       "propValue": "Property Value",
-      "useHTTPS": "Enable HTTPS"
+      "useHTTPS": "Enable HTTPS",
+      "backendNum": "The number of BE nodes",
+      "backendNumTip": "During Doris connection testing, a table is created and data is written to Doris for testing. It is necessary to obtain the number of BE nodes when building a table. If the table is not built according to the number of BE nodes, it may cause an error. admin permission is required to obtain the number of BE nodes. If you do not want to grant admin permission, please enter the number of BE manually to avoid errors in the table."
     },
     "zh_CN": {
       "host": "数据库地址",
@@ -542,6 +578,8 @@
       "timezone": "时间类型的时区",
       "timezoneTips": "影响类型: DATE",
       "writeByteBufferCapacity": "写入缓冲区容量(KB)",
+      "applyDefault": "应用默认值",
+      "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错",
       "writeFormat": "写入格式",
       "doc": "docs/readme_zh_CN.md",
       "duplicateKey": "排序字段",
@@ -556,7 +594,9 @@
       "tablePropertiesTip": "表属性，例如：{replication_num: 3, storage_format: v2}",
       "propKey": "属性名",
       "propValue": "属性值",
-      "useHTTPS": "开启HTTPS"
+      "useHTTPS": "开启HTTPS",
+      "backendNum": "BE节点的数量",
+      "backendNumTip": "Doris连接测试时，会在Doris建表并写入数据进行测试。在建表时需要获取BE节点数量，如果不根据BE数量去建表可能会导致报错。获取BE节点的数量需要admin 权限，如果不想授予admin权限，请手动输入BE数量，以免建表报错。"
     },
     "zh_TW": {
       "host": "數據庫地址",
@@ -576,6 +616,8 @@
       "timezone": "时间类型的时区",
       "timezoneTips": "影響類型: DATE",
       "writeByteBufferCapacity": "寫入緩沖區容量(KB)",
+      "applyDefault": "應用默認值",
+      "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯",
       "writeFormat": "寫入格式",
       "doc": "docs/readme_zh_CN.md",
       "duplicateKey": "排序字段",
@@ -590,7 +632,9 @@
       "tablePropertiesTip": "表屬性，例如：{replication_num: 3, storage_format: v2}",
       "propKey": "屬性名",
       "propValue": "屬性值",
-      "useHTTPS": "開啓HTTPS"
+      "useHTTPS": "開啓HTTPS",
+      "backendNum": "BE節點的數量",
+      "backendNumTip": "Doris連接測試時，會在Doris建表並寫入數據進行測試。在建表時需要獲取BE節點數量，如果不根據BE數量去建表可能會導致報錯。獲取BE節點的數量需要admin 權限，如果不想授予admin權限，請手動輸入BE數量，以免建表報錯。"
     }
   },
   "dataTypes": {
@@ -660,6 +704,22 @@
       "defaultScale": 0,
       "to": "TapNumber"
     },
+    "decimalv3[($precision,$scale)]": {
+      "to": "TapNumber",
+      "precision": [
+        1,
+        65
+      ],
+      "scale": [
+        0,
+        30
+      ],
+      "defaultPrecision": 10,
+      "defaultScale": 0,
+      "unsigned": "unsigned",
+      "fixed": true,
+      "queryOnly": true
+    },
     "date": {
       "byte": 3,
       "range": [
@@ -668,6 +728,15 @@
       ],
       "to": "TapDate"
     },
+    "datev2": {
+      "byte": 3,
+      "range": [
+        "1000-01-01",
+        "9999-12-31"
+      ],
+      "to": "TapDate",
+      "queryOnly": true
+    },
     "datetime": {
       "byte": 8,
       "range": [
@@ -675,6 +744,20 @@
         "9999-12-31 23:59:59"
       ],
       "to": "TapDateTime"
+    },
+    "datetimev2[($fraction)]": {
+      "to": "TapDateTime",
+      "range": [
+        "1000-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "defaultFraction": 0,
+      "queryOnly": true
     },
     "char[($byte)]": {
       "byte": 255,
@@ -695,6 +778,11 @@
       "byte": "16385",
       "to": "TapNumber",
       "queryOnly": true
+    },
+    "text": {
+      "to": "TapString",
+      "byte": "64k",
+      "pkEnablement": false
     }
   }
 }

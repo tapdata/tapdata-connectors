@@ -4,8 +4,7 @@
     "icon": "icons/atlas.png",
     "doc" : "${doc}",
     "tags" : ["schema-free","Database"],
-    "id": "mongodb-atlas",
-    "authentication": "Alpha"
+    "id": "mongodb-atlas"
   },
   "configOptions": {
     "capabilities": [
@@ -106,6 +105,12 @@
           "x-component": "Input",
           "apiServerKey": "database_uri",
           "required": true,
+          "x-validator": [
+            {
+              "pattern": "^mongodb\\+srv:\\/\\/[^/]+\\/([^/?]+)",
+              "message": "${uri_missing_database_name}"
+            }
+          ],
           "x-index": 20
         },
         "uriTips": {
@@ -375,6 +380,28 @@
             }
           },
           "x-index": 79
+        },
+        "preImage": {
+          "title": "${preImage}",
+          "type": "boolean",
+          "x-component": "Switch",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "layout": "horizontal",
+            "tooltip": "${preImageTips}"
+          },
+          "default": false,
+          "x-reactions": {
+            "dependencies": [
+              "$outputs"
+            ],
+            "fulfill": {
+              "state": {
+                "visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0}}"
+              }
+            }
+          },
+          "x-index": 6
         }
       }
     }
@@ -390,6 +417,7 @@
       "dataForm_form_options_URIMode": "URI Mode",
       "dataForm_form_options_standardMode": "Standard Mode",
       "dataForm_form_databaseUri": "Database URI",
+      "uri_missing_database_name": "Database name is missing in the URI. Please include it.",
       "dataForm_form_host": "DB Address",
       "connection_form_database_host_placeholder": "Please enter the database address",
       "dataForm_form_databaseName": "DB Name",
@@ -411,7 +439,9 @@
       "syncIndex": "Sync Index",
       "schemaLimit": "Fields Load Limit For Each Collection",
       "node_shard_collection": " Synchronize Partition Properties ",
-      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster "
+      "node_shard_collection_tip": "Synchronize as Shard table when source table is Shard table, only supports source tables from MongoDB to MongoDB, this configuration takes effect when the target is a sharded cluster ",
+      "preImage": "Document Preimages",
+      "preImageTips": "Enable the preimage function:\\n1. Only MongoDB6.0 and above support enabling it;\\n2. Confirm that the collection has enabled changeStreamPreAndPostImages;\\n3. Confirm the expiration time of the preimage"
     },
     "zh_CN": {
       "doc": "docs/mongodb_atlas_zh_CN.md",
@@ -422,6 +452,7 @@
       "dataForm_form_options_URIMode": "URI模式",
       "dataForm_form_options_standardMode": "标准模式",
       "dataForm_form_databaseUri": "数据库 URI",
+      "uri_missing_database_name": "URI 中缺少数据库名称，请添加数据库名",
       "dataForm_form_host": "数据库地址",
       "connection_form_database_host_placeholder": "请输入数据库地址",
       "dataForm_form_databaseName": "数据库名称",
@@ -443,7 +474,9 @@
       "syncIndex": "同步索引",
       "schemaLimit": "每张表加载的字段数限制",
       "node_shard_collection": "同步分区属性",
-      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效"
+      "node_shard_collection_tip": "源表为Shard表时同步为Shard表，仅支持源表为MongoDB到MongoDB，目标为分片集群时此配置生效",
+      "preImage": "文档原像",
+      "preImageTips": "启用原像功能：\n1. 只有MongoDB6.0及以上才支持开启；\n2.确认集合已开启changeStreamPreAndPostImages；\n3.确认原像的过期时间"
     },
     "zh_TW": {
       "doc": "docs/mongodb_atlas_zh_TW.md",
@@ -454,6 +487,7 @@
       "dataForm_form_options_URIMode": "URI模式",
       "dataForm_form_options_standardMode": "標準模式",
       "dataForm_form_databaseUri": "數據庫 URI",
+      "uri_missing_database_name": "URI 中缺少數據庫名稱，請添加數據庫名",
       "dataForm_form_host": "數據庫地址",
       "connection_form_database_host_placeholder": "請輸入數據庫地址",
       "dataForm_form_databaseName": "數據庫名稱",
@@ -475,7 +509,9 @@
       "syncIndex": "同步索引",
       "schemaLimit": "每张表加載的字段數限制",
       "node_shard_collection": "同步分區内容",
-      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效"
+      "node_shard_collection_tip": "源錶為Shard錶時同步為Shard錶，僅支持源錶為MongoDB到MongoDB，目標為分片集羣時此配寘生效",
+      "preImage": "文檔原像",
+      "preImageTips": "啟用原像功能：\n1. 只有MongoDB6.0以上才支援開啟；\n2.確認集合已開啟changeStreamPreAndPostImages；\n3.確認原像的過期時間"
     }
   },
   "dataTypes": {

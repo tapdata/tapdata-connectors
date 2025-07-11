@@ -106,7 +106,7 @@ public abstract class FileConnector extends ConnectorBase {
         return 1;
     }
 
-    protected long batchCount(TapConnectorContext tapConnectorContext, TapTable tapTable) {
+    protected long batchCount(TapConnectorContext tapConnectorContext, TapTable tapTable) throws Exception {
         return 0;
     }
 
@@ -260,6 +260,10 @@ public abstract class FileConnector extends ConnectorBase {
                 }
             }
         });
+    }
+
+    protected String correctPath(String path) {
+        return path.endsWith("/") ? path : (path + "/");
     }
 
 }

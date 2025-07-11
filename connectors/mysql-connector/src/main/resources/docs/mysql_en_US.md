@@ -3,6 +3,7 @@
 Please follow the instructions below to ensure that the MySQL database is successfully added and used in Tapdata.
 ### **2.  Supported versions**
 MySQL 5.0, 5.1, 5.5, 5.6, 5.7, 8.x
+- Explanation: If using MySQL middleware connection (including but not limited to ProxySQL), the `useCursorfetch=false` attribute needs to be added to the connection parameters in the advanced settings
 ### **3.  Prerequisites (as source)**
 #### **3.1 Enable Binlog**
 -The binlog of MySQL must be enabled for Tapdata to complete the synchronization normally.

@@ -10,8 +10,11 @@ import org.apache.commons.io.FileUtils;
 
 import java.io.File;
 import java.io.Serializable;
+import java.net.URLEncoder;
+import java.time.ZoneId;
 import java.util.Map;
 import java.util.Properties;
+import java.util.TimeZone;
 
 /**
  * common relation database config
@@ -38,7 +41,22 @@ public class CommonDbConfig implements Serializable {
     private char escapeChar = '"';
     private Boolean hashSplit = false;
     private int maxSplit = 20;
+    private int batchReadThreadSize = 4;
     private Boolean doubleActive = false;
+    private Boolean oldVersionTimezone = false;
+    private Boolean createAutoInc = false;
+    private long autoIncJumpValue = 1000000L;
+    private long autoIncCacheValue = 100;
+    private Boolean applyDefault = false;
+    private Boolean applyForeignKey = false;
+    private Integer writeThreadSize = 15;
+    protected String timezone = "+00:00";
+    protected ZoneId zoneId;
+    protected Integer zoneOffsetHour;
+    protected ZoneId sysZoneId;
+
+    protected Boolean enableFileInput = false;
+    protected Long bufferCapacity = 10000000L;
 
     private Boolean useSSL = false;
     private String sslCa;
@@ -46,6 +64,8 @@ public class CommonDbConfig implements Serializable {
     private String sslKey;
     private String sslKeyPassword;
     protected String sslRandomPath;
+
+    private int maxIndexNameLength = 30;
 
     //pattern for jdbc-url
     public String getDatabaseUrlPattern() {
@@ -69,7 +89,7 @@ public class CommonDbConfig implements Serializable {
         if (EmptyKit.isNotEmpty(this.getExtParams()) && !this.getExtParams().startsWith("?") && !this.getExtParams().startsWith(":")) {
             this.setExtParams("?" + this.getExtParams());
         }
-        return String.format(this.getDatabaseUrlPattern(), this.getHost(), this.getPort(), this.getDatabase(), this.getExtParams());
+        return String.format(this.getDatabaseUrlPattern(), this.getHost(), this.getPort(), URLEncoder.encode(this.getDatabase()), this.getExtParams());
     }
 
     public CommonDbConfig load(String json) {
@@ -77,6 +97,12 @@ public class CommonDbConfig implements Serializable {
             assert beanUtils != null;
             assert jsonParser != null;
             beanUtils.copyProperties(jsonParser.fromJson(json, this.getClass()), this);
+            if (EmptyKit.isBlank(timezone)) {
+                timezone = "+00:00";
+            }
+            TimeZone timeZone = TimeZone.getTimeZone("GMT" + timezone);
+            zoneId = timeZone.toZoneId();
+            zoneOffsetHour = timeZone.getRawOffset() / 1000 / 60 / 60;
             return this;
         } catch (Exception e) {
             throw new IllegalArgumentException("json string is not valid for db config");
@@ -90,9 +116,17 @@ public class CommonDbConfig implements Serializable {
      * @return ? extends CommonDbConfig
      */
     public CommonDbConfig load(Map<String, Object> map) {
-        properties = new Properties();
+        if (EmptyKit.isNull(properties)) {
+            properties = new Properties();
+        }
         assert beanUtils != null;
         beanUtils.mapToBean(map, this);
+        if (EmptyKit.isBlank(timezone)) {
+            timezone = "+00:00";
+        }
+        TimeZone timeZone = TimeZone.getTimeZone("GMT" + timezone);
+        zoneId = timeZone.toZoneId();
+        zoneOffsetHour = timeZone.getRawOffset() / 1000 / 60 / 60;
         if (useSSL && EmptyKit.isNotEmpty(map) && map.containsKey("useSSL")) {
             try {
                 generateSSlFile();
@@ -236,12 +270,124 @@ public class CommonDbConfig implements Serializable {
         this.maxSplit = maxSplit;
     }
 
+    public int getBatchReadThreadSize() {
+        return batchReadThreadSize;
+    }
+
+    public void setBatchReadThreadSize(int batchReadThreadSize) {
+        this.batchReadThreadSize = batchReadThreadSize;
+    }
+
     public Boolean getDoubleActive() {
         return doubleActive;
     }
 
     public void setDoubleActive(Boolean doubleActive) {
         this.doubleActive = doubleActive;
+    }
+
+    public Boolean getOldVersionTimezone() {
+        return oldVersionTimezone;
+    }
+
+    public void setOldVersionTimezone(Boolean oldVersionTimezone) {
+        this.oldVersionTimezone = oldVersionTimezone;
+    }
+
+    public Boolean getCreateAutoInc() {
+        return createAutoInc;
+    }
+
+    public void setCreateAutoInc(Boolean createAutoInc) {
+        this.createAutoInc = createAutoInc;
+    }
+
+    public long getAutoIncJumpValue() {
+        return autoIncJumpValue;
+    }
+
+    public void setAutoIncJumpValue(long autoIncJumpValue) {
+        this.autoIncJumpValue = autoIncJumpValue;
+    }
+
+    public long getAutoIncCacheValue() {
+        return autoIncCacheValue;
+    }
+
+    public void setAutoIncCacheValue(long autoIncCacheValue) {
+        this.autoIncCacheValue = autoIncCacheValue;
+    }
+
+    public Boolean getApplyDefault() {
+        return applyDefault;
+    }
+
+    public void setApplyDefault(Boolean applyDefault) {
+        this.applyDefault = applyDefault;
+    }
+
+    public Boolean getApplyForeignKey() {
+        return applyForeignKey;
+    }
+
+    public void setApplyForeignKey(Boolean applyForeignKey) {
+        this.applyForeignKey = applyForeignKey;
+    }
+
+    public Integer getWriteThreadSize() {
+        return writeThreadSize;
+    }
+
+    public void setWriteThreadSize(Integer writeThreadSize) {
+        this.writeThreadSize = writeThreadSize;
+    }
+
+    public String getTimezone() {
+        return timezone;
+    }
+
+    public void setTimezone(String timezone) {
+        this.timezone = timezone;
+    }
+
+    public ZoneId getZoneId() {
+        return zoneId;
+    }
+
+    public void setZoneId(ZoneId zoneId) {
+        this.zoneId = zoneId;
+    }
+
+    public Integer getZoneOffsetHour() {
+        return zoneOffsetHour;
+    }
+
+    public void setZoneOffsetHour(Integer zoneOffsetHour) {
+        this.zoneOffsetHour = zoneOffsetHour;
+    }
+
+    public ZoneId getSysZoneId() {
+        return sysZoneId;
+    }
+
+    public void setSysZoneId(ZoneId sysZoneId) {
+        this.sysZoneId = sysZoneId;
+    }
+
+    public Boolean getEnableFileInput() {
+        return enableFileInput;
+    }
+
+    public void setEnableFileInput(Boolean enableFileInput) {
+        this.enableFileInput = enableFileInput;
+    }
+
+    public Long getBufferCapacity() {
+        return bufferCapacity;
+    }
+
+    public void setBufferCapacity(Long bufferCapacity) {
+        this.bufferCapacity = bufferCapacity;
     }
 
     public Boolean getUseSSL() {
@@ -290,5 +436,13 @@ public class CommonDbConfig implements Serializable {
 
     public void setSslRandomPath(String sslRandomPath) {
         this.sslRandomPath = sslRandomPath;
+    }
+
+    public int getMaxIndexNameLength() {
+        return maxIndexNameLength;
+    }
+
+    public void setMaxIndexNameLength(int maxIndexNameLength) {
+        this.maxIndexNameLength = maxIndexNameLength;
     }
 }

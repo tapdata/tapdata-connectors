@@ -3,17 +3,20 @@ package io.tapdata.connector.doris;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.doris.bean.DorisConfig;
+import io.tapdata.connector.doris.ddl.DorisDDLSqlGenerator;
 import io.tapdata.connector.doris.streamload.DorisStreamLoader;
 import io.tapdata.connector.doris.streamload.DorisTableType;
 import io.tapdata.connector.doris.streamload.HttpUtil;
 import io.tapdata.connector.doris.streamload.exception.DorisRetryableException;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.entity.codec.TapCodecsRegistry;
-import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
+import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
@@ -28,26 +31,19 @@ import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
-import org.apache.http.*;
-import org.apache.http.client.RedirectStrategy;
-import org.apache.http.client.methods.HttpPut;
-import org.apache.http.client.methods.HttpUriRequest;
-import org.apache.http.conn.ssl.NoopHostnameVerifier;
-import org.apache.http.conn.ssl.TrustAllStrategy;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.http.impl.client.LaxRedirectStrategy;
-import org.apache.http.protocol.HttpContext;
-import org.apache.http.ssl.SSLContexts;
-import org.eclipse.jetty.client.HttpClient;
 
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.SSLContext;
 import java.io.IOException;
-import java.net.URI;
-
+import java.math.BigDecimal;
+import java.sql.Date;
 import java.sql.SQLException;
-import java.util.*;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -59,15 +55,13 @@ import java.util.stream.Collectors;
 @TapConnectorClass("spec_doris.json")
 public class DorisConnector extends CommonDbConnector {
 
-    public static final String TAG = DorisConnector.class.getSimpleName();
     private DorisJdbcContext dorisJdbcContext;
     private DorisConfig dorisConfig;
     private final Map<String, DorisStreamLoader> dorisStreamLoaderMap = new ConcurrentHashMap<>();
 
 
-
     @Override
-    public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
+    public void onStart(TapConnectionContext tapConnectionContext) {
         this.dorisConfig = new DorisConfig().load(tapConnectionContext.getConnectionConfig());
         isConnectorStarted(tapConnectionContext, connectorContext -> dorisConfig.load(connectorContext.getNodeConfig()));
         dorisJdbcContext = new DorisJdbcContext(dorisConfig);
@@ -75,11 +69,20 @@ public class DorisConnector extends CommonDbConnector {
 //            dorisConfig.setUpdateSpecific(false);
 //            dorisConfig.setUniqueKeyType("Unique");
 //        }
+        if (tapConnectionContext instanceof TapConnectorContext) {
+            ddlSqlGenerator = new DorisDDLSqlGenerator();
+        }
+        tapLogger = tapConnectionContext.getLog();
         commonDbConfig = dorisConfig;
         jdbcContext = dorisJdbcContext;
         commonSqlMaker = new DorisSqlMaker();
+        commonSqlMaker.applyDefault(commonDbConfig.getApplyDefault());
         exceptionCollector = new DorisExceptionCollector();
-
+        fieldDDLHandlers = new BiClassHandlers<>();
+        fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
+        fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
+        fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
+        fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
     }
 
 
@@ -135,8 +138,8 @@ public class DorisConnector extends CommonDbConnector {
             return 0;
         });
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "text", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null)
-                return toJson(tapValue.getValue());
+            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
+                return toJson(tapValue.getValue().getValue());
             return "null";
         });
 
@@ -147,11 +150,21 @@ public class DorisConnector extends CommonDbConnector {
             }
             return "null";
         });
-        codecRegistry.registerFromTapValue(TapYearValue.class, tapYearValue -> formatTapDateTime(tapYearValue.getValue(), "yyyy"));
-        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
+        codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
+            if (dorisConfig.getOldVersionTimezone()) {
+                return tapDateTimeValue.getValue().toTimestamp();
+            } else {
+                return tapDateTimeValue.getValue().toInstant().atZone(dorisConfig.getZoneId()).toLocalDateTime();
+            }
+        });
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
+        connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
+        connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
+        connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
+        connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
 
     }
 
@@ -175,7 +188,7 @@ public class DorisConnector extends CommonDbConnector {
             } else {
                 httpClient = new HttpUtil().getHttpClient();
             }
-            DorisStreamLoader dorisStreamLoader = new DorisStreamLoader(context,httpClient);
+            DorisStreamLoader dorisStreamLoader = new DorisStreamLoader(context, httpClient);
             dorisStreamLoaderMap.put(threadName, dorisStreamLoader);
         }
         return dorisStreamLoaderMap.get(threadName);
@@ -189,6 +202,10 @@ public class DorisConnector extends CommonDbConnector {
                 // TODO: 2023/4/28 jdbc writeRecord
             }
         } catch (Throwable t) {
+            dorisStreamLoaderMap.computeIfPresent(Thread.currentThread().getName(), (key, value) -> {
+                value.shutdown();
+                return null;
+            });
             exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
             throw t;
         }
@@ -236,14 +253,14 @@ public class DorisConnector extends CommonDbConnector {
         }
         stringBuilder.append("`) DISTRIBUTED BY HASH(`");
         //generate distributed key
-        if (EmptyKit.isEmpty(primaryKeys)) {
-            if (EmptyKit.isEmpty(dorisConfig.getDistributedKey())) {
+        if (EmptyKit.isEmpty(dorisConfig.getDistributedKey())) {
+            if (EmptyKit.isEmpty(primaryKeys)) {
                 stringBuilder.append(String.join("`,`", tapTable.getNameFieldMap().keySet()));
             } else {
-                stringBuilder.append(String.join("`,`", dorisConfig.getDistributedKey()));
+                stringBuilder.append(String.join("`,`", primaryKeys));
             }
         } else {
-            stringBuilder.append(String.join("`,`", primaryKeys));
+            stringBuilder.append(String.join("`,`", dorisConfig.getDistributedKey()));
         }
         //generate bucket
         stringBuilder.append("`) BUCKETS ").append(dorisConfig.getBucket()).append(" PROPERTIES(");
@@ -346,5 +363,40 @@ public class DorisConnector extends CommonDbConnector {
         tableInfo.setNumOfRows(Long.valueOf(dataMap.getString("TABLE_ROWS")));
         tableInfo.setStorageSize(Long.valueOf(dataMap.getString("DATA_LENGTH")));
         return tableInfo;
+    }
+
+    protected void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) throws SQLException {
+        List<String> sqlList = fieldDDLHandlers.handle(tapFieldBaseEvent, tapConnectorContext);
+        if (null == sqlList) {
+            return;
+        }
+        try {
+            jdbcContext.batchExecute(sqlList);
+        } catch (SQLException e) {
+            if (e.getErrorCode() == 1105 && e.getMessage().contains("Nothing is changed")) {
+                return;
+            }
+            exceptionCollector.collectWritePrivileges("execute sqls: " + TapSimplify.toJson(sqlList), Collections.emptyList(), e);
+            throw e;
+        }
+    }
+
+    @Override
+    protected void processDataMap(DataMap dataMap, TapTable tapTable) {
+        if (!dorisConfig.getOldVersionTimezone()) {
+            for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
+                Object value = entry.getValue();
+                if (value instanceof LocalDateTime) {
+                    if (!tapTable.getNameFieldMap().containsKey(entry.getKey())) {
+                        continue;
+                    }
+                    entry.setValue(((LocalDateTime) value).minusHours(dorisConfig.getZoneOffsetHour()));
+                } else if (value instanceof java.sql.Date) {
+                    entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
+                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().equals("largeint")) {
+                    entry.setValue(new BigDecimal((String) value));
+                }
+            }
+        }
     }
 }

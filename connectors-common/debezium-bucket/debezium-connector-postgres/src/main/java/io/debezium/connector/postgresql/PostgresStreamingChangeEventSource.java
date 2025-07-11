@@ -5,23 +5,8 @@
  */
 package io.debezium.connector.postgresql;
 
-import java.sql.SQLException;
-import java.util.Map;
-import java.util.Objects;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicReference;
-
-import org.apache.kafka.connect.errors.ConnectException;
-import org.postgresql.core.BaseConnection;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import io.debezium.connector.postgresql.connection.Lsn;
-import io.debezium.connector.postgresql.connection.PostgresConnection;
-import io.debezium.connector.postgresql.connection.ReplicationConnection;
+import io.debezium.connector.postgresql.connection.*;
 import io.debezium.connector.postgresql.connection.ReplicationMessage.Operation;
-import io.debezium.connector.postgresql.connection.ReplicationStream;
-import io.debezium.connector.postgresql.connection.WalPositionLocator;
 import io.debezium.connector.postgresql.spi.Snapshotter;
 import io.debezium.heartbeat.Heartbeat;
 import io.debezium.pipeline.ErrorHandler;
@@ -30,9 +15,18 @@ import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
 import io.debezium.relational.TableId;
 import io.debezium.util.Clock;
 import io.debezium.util.DelayStrategy;
+import org.apache.kafka.connect.errors.ConnectException;
+import org.postgresql.core.BaseConnection;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.sql.SQLException;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- *
  * @author Horia Chiorean (hchiorea@redhat.com), Jiri Pechanec
  */
 public class PostgresStreamingChangeEventSource implements StreamingChangeEventSource {
@@ -104,8 +98,7 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
                 LOGGER.info("Retrieved latest position from stored offset '{}'", lsn);
                 walPosition = new WalPositionLocator(offsetContext.lastCommitLsn(), lsn);
                 replicationStream.compareAndSet(null, replicationConnection.startStreaming(lsn, walPosition));
-            }
-            else {
+            } else {
                 LOGGER.info("No previous LSN found in Kafka, streaming from the latest xlogpos or flushed LSN...");
                 walPosition = new WalPositionLocator();
                 replicationStream.compareAndSet(null, replicationConnection.startStreaming(walPosition));
@@ -133,8 +126,7 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
                     if (!isInPreSnapshotCatchUpStreaming()) {
                         connection.commit();
                     }
-                }
-                catch (Exception e) {
+                } catch (Exception e) {
                     LOGGER.info("Commit failed while preparing for reconnect", e);
                 }
                 walPosition.enableFiltering();
@@ -145,11 +137,9 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
                 stream.startKeepAlive(Executors.newSingleThreadExecutor());
             }
             processMessages(context, stream);
-        }
-        catch (Throwable e) {
+        } catch (Throwable e) {
             errorHandler.setProducerThrowable(e);
-        }
-        finally {
+        } finally {
             if (replicationConnection != null) {
                 LOGGER.debug("stopping streaming...");
                 // stop the keep alive thread, this also shuts down the
@@ -166,8 +156,7 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
                         connection.commit();
                     }
                     replicationConnection.close();
-                }
-                catch (Exception e) {
+                } catch (Exception e) {
                     LOGGER.debug("Exception while closing the connection", e);
                 }
                 replicationStream.set(null);
@@ -205,8 +194,7 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
                             taskContext.getSlotXmin(connection));
                     if (message.getOperation() == Operation.BEGIN) {
                         dispatcher.dispatchTransactionStartedEvent(Long.toString(message.getTransactionId()), offsetContext);
-                    }
-                    else if (message.getOperation() == Operation.COMMIT) {
+                    } else if (message.getOperation() == Operation.COMMIT) {
                         commitMessage(lsn);
                         dispatcher.dispatchTransactionCommittedEvent(offsetContext);
                     }
@@ -216,7 +204,7 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
                 else {
                     TableId tableId = null;
                     if (message.getOperation() != Operation.NOOP) {
-                        tableId = PostgresSchema.parse(message.getTable());
+                        tableId = message.getTableId();
                         Objects.requireNonNull(tableId);
                     }
 
@@ -239,8 +227,7 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
 
             if (receivedMessage) {
                 noMessageIterations = 0;
-            }
-            else {
+            } else {
                 if (offsetContext.hasCompletelyProcessedPosition()) {
                     dispatcher.dispatchHeartbeatEvent(offsetContext);
                 }
@@ -275,8 +262,7 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
 
             if (receivedMessage) {
                 noMessageIterations = 0;
-            }
-            else {
+            } else {
                 noMessageIterations++;
                 if (noMessageIterations >= THROTTLE_NO_MESSAGE_BEFORE_PAUSE) {
                     noMessageIterations = 0;
@@ -307,23 +293,21 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
      * The purpose of this method is to detect this situation and log a warning
      * every {@link #GROWING_WAL_WARNING_LOG_INTERVAL} filtered events.
      *
-     * @param dispatched
-     *            Whether an event was sent to the broker or not
+     * @param dispatched Whether an event was sent to the broker or not
      */
     private void maybeWarnAboutGrowingWalBacklog(boolean dispatched) {
         if (dispatched) {
             numberOfEventsSinceLastEventSentOrWalGrowingWarning = 0;
-        }
-        else {
+        } else {
             numberOfEventsSinceLastEventSentOrWalGrowingWarning++;
         }
 
         if (numberOfEventsSinceLastEventSentOrWalGrowingWarning > GROWING_WAL_WARNING_LOG_INTERVAL && !dispatcher.heartbeatsEnabled()) {
             LOGGER.warn("Received {} events which were all filtered out, so no offset could be committed. "
-                    + "This prevents the replication slot from acknowledging the processed WAL offsets, "
-                    + "causing a growing backlog of non-removeable WAL segments on the database server. "
-                    + "Consider to either adjust your filter configuration or enable heartbeat events "
-                    + "(via the {} option) to avoid this situation.",
+                            + "This prevents the replication slot from acknowledging the processed WAL offsets, "
+                            + "causing a growing backlog of non-removeable WAL segments on the database server. "
+                            + "Consider to either adjust your filter configuration or enable heartbeat events "
+                            + "(via the {} option) to avoid this situation.",
                     numberOfEventsSinceLastEventSentOrWalGrowingWarning, Heartbeat.HEARTBEAT_INTERVAL_PROPERTY_NAME);
 
             numberOfEventsSinceLastEventSentOrWalGrowingWarning = 0;
@@ -334,22 +318,24 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
     public void commitOffset(Map<String, ?> offset) {
         try {
             ReplicationStream replicationStream = this.replicationStream.get();
-            final Lsn commitLsn = Lsn.valueOf((Long) offset.get(PostgresOffsetContext.LAST_COMMIT_LSN_KEY));
-            final Lsn changeLsn = Lsn.valueOf((Long) offset.get(PostgresOffsetContext.LAST_COMPLETELY_PROCESSED_LSN_KEY));
+            final Lsn commitLsn = Lsn.valueOf(Long.valueOf(offset.get(PostgresOffsetContext.LAST_COMMIT_LSN_KEY).toString()));
+            final Lsn changeLsn = Lsn.valueOf(Long.valueOf(offset.get(PostgresOffsetContext.LAST_COMPLETELY_PROCESSED_LSN_KEY).toString()));
             final Lsn lsn = (commitLsn != null) ? commitLsn : changeLsn;
 
-            if (replicationStream != null && lsn != null) {
+            if (replicationStream == null) {
+                LOGGER.debug("Streaming has already stopped, ignoring commit callback...");
+                throw new ConnectException("Streaming has already stopped, ignoring commit callback...");
+            }
+            if (lsn != null) {
                 if (LOGGER.isDebugEnabled()) {
                     LOGGER.debug("Flushing LSN to server: {}", lsn);
                 }
                 // tell the server the point up to which we've processed data, so it can be free to recycle WAL segments
                 replicationStream.flushLsn(lsn);
-            }
-            else {
+            } else {
                 LOGGER.debug("Streaming has already stopped, ignoring commit callback...");
             }
-        }
-        catch (SQLException e) {
+        } catch (SQLException e) {
             throw new ConnectException(e);
         }
     }
@@ -358,7 +344,7 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
      * Returns whether the current streaming phase is running a catch up streaming
      * phase that runs before a snapshot. This is useful for transaction
      * management.
-     *
+     * <p>
      * During pre-snapshot catch up streaming, we open the snapshot transaction
      * early and hold the transaction open throughout the pre snapshot catch up
      * streaming phase so that we know where to stop streaming and can start the

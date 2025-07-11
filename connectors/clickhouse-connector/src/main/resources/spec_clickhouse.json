@@ -4,7 +4,6 @@
     "icon": "icons/clickhouse.png",
     "id": "clickhouse",
     "doc": "${doc}",
-    "authentication": "Alpha",
     "tags": [
       "Database"
     ]
@@ -15,7 +14,6 @@
         "id": "dml_insert_policy",
         "alternatives": [
           "update_on_exists",
-          "ignore_on_exists",
           "just_insert"
         ]
       },
@@ -110,7 +108,7 @@
               "x-index": 7,
               "enum": [
                 {
-                  "label": "Database Timezone",
+                  "label": "",
                   "value": ""
                 },
                 {
@@ -246,6 +244,27 @@
               }
             }
           ]
+        },
+        "mixFastWrite": {
+          "type": "boolean",
+          "title": "${mixFastWrite}",
+          "default": false,
+          "x-index": 2,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${mixFastWriteTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -264,8 +283,10 @@
       "extParams": "Connection Parameter String",
       "extParamsTip": "Additional connection parameters in URI, you can write according to personalized scenarios",
       "timezone": "timezone",
-      "timezoneTip": "Specify the time zone, otherwise the database time zone will be used by default",
+      "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
       "mergeMinutes": "Optimize Interval (Minutes)",
+      "mixFastWrite": "Mix Fast Write",
+      "mixFastWriteTooltip": "Enable mix fast write, but the target table will create is_deleted, delete_time columns, insert strategy is used for insert, update, delete, greatly improve performance",
       "doc": "docs/clickhouse_en_US.md"
     },
     "zh_CN": {
@@ -280,8 +301,10 @@
       "extParams": "连接参数",
       "extParamsTip": "URI额外的连接参数，可以根据个性化场景书写",
       "timezone": "时区",
-      "timezoneTip": "指定时区，否则默认使用数据库时区",
+      "timezoneTip": "指定时区，否则不做时区处理",
       "mergeMinutes": "合并分区间隔(分钟)",
+      "mixFastWrite": "混合快速写入",
+      "mixFastWriteTooltip": "启用混合快速写入，但目标表会多创建is_deleted, delete_time列, 增删改统一使用插入策略大大提升性能",
       "doc": "docs/clickhouse_zh_CN.md"
     },
     "zh_TW": {
@@ -296,8 +319,10 @@
       "extParams": "連接參數",
       "extParamsTip": "URI額外的連接參數，可以根據個性化場景書寫",
       "timezone": "時區",
-      "timezoneTip": "指定時區，否則默認使用數據庫時區",
+      "timezoneTip": "指定時區，否則不做時區處理",
       "mergeMinutes": "合併分區間隔(分鐘)",
+      "mixFastWrite": "混合快速寫入",
+      "mixFastWriteTooltip": "啟用混合快速寫入，但目標表會多創建is_deleted, delete_time列, 增刪改統一使用插入策略大大提升性能",
       "doc": "docs/clickhouse_zh_TW.md"
     }
   },
@@ -482,7 +507,8 @@
         "1925-01-01",
         "9999-12-31"
       ],
-      "pattern": "yyyy-MM-dd"
+      "pattern": "yyyy-MM-dd",
+      "queryOnly": true
     },
     "DateTime[($fraction)]": {
       "to": "TapDateTime",
@@ -508,8 +534,7 @@
         0,
         6
       ],
-      "defaultFraction": 0,
-      "withTimeZone": true
+      "defaultFraction": 0
     },
     "Enum8($enums)": {
       "name": "enum",

@@ -19,13 +19,14 @@ public class DorisConfig extends CommonDbConfig {
     private List<String> distributedKey;
     private Integer writeByteBufferCapacity = 10240;
     private String writeFormat = "json";
-    private String timezone;
     private String uniqueKeyType = "Unique";
     private int bucket = 2;
     private List<LinkedHashMap<String, String>> tableProperties = new ArrayList<>();
     private Boolean jdbcCompletion = false;
 
     private Boolean useHTTPS =false;
+
+    private Integer backendNum;
 
     //customize
     public DorisConfig() {
@@ -47,6 +48,11 @@ public class DorisConfig extends CommonDbConfig {
 
     public String getDatabaseUrlPattern() {
         return "jdbc:mysql://%s:%s/%s?rewriteBatchedStatements=true%s";
+    }
+
+    @Override
+    public String getConnectionString() {
+        return getHost() + ":" + getPort() + "/" + getDatabase();
     }
 
     public String getDatabaseUrl() {
@@ -99,14 +105,6 @@ public class DorisConfig extends CommonDbConfig {
         this.writeFormat = writeFormat;
     }
 
-    public String getTimezone() {
-        return timezone;
-    }
-
-    public void setTimezone(String timezone) {
-        this.timezone = timezone;
-    }
-
     public String getUniqueKeyType() {
         return uniqueKeyType;
     }
@@ -117,6 +115,14 @@ public class DorisConfig extends CommonDbConfig {
 
     public int getBucket() {
         return bucket;
+    }
+
+    public Integer getBackendNum() {
+        return backendNum;
+    }
+
+    public void setBackendNum(Integer backendNum) {
+        this.backendNum = backendNum;
     }
 
     public Boolean getUseHTTPS() {

@@ -106,7 +106,7 @@ public class MySqlConnectorTask extends BaseSourceTask {
         final boolean tableIdCaseInsensitive = connection.isTableIdCaseSensitive();
 
         this.schema = new MySqlDatabaseSchema(connectorConfig, valueConverters, topicSelector, schemaNameAdjuster, tableIdCaseInsensitive);
-
+        this.schema.setLowerCaseTableNames(connection.lowerCaseTableNames());
         validateAndLoadDatabaseHistory(connectorConfig, previousOffset, schema);
         // If the binlog position is not available it is necessary to reexecute snapshot
         if (validateSnapshotFeasibility(connectorConfig, previousOffset)) {

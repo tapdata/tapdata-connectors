@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.nio.ByteBuffer;
+import java.util.HashMap;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -73,7 +74,6 @@ public class BeginTransactionTest {
     @Nested
     class CollectTest {
         ByteBuffer logEvent;
-        AnalyzeLog.AnalyzeParam param;
 
         int readIndexV1;
         int readIndexV2;
@@ -83,9 +83,8 @@ public class BeginTransactionTest {
             readIndexV1 = 0;
             readIndexV2 = 0;
             logEvent = mock(ByteBuffer.class);
-            param = mock(AnalyzeLog.AnalyzeParam.class);
 
-            when(event.analyze(logEvent, param)).thenCallRealMethod();
+            when(event.analyze(logEvent, new HashMap<>())).thenCallRealMethod();
         }
 
         void assertVerify(String commitTag, String userTag,
@@ -121,7 +120,7 @@ public class BeginTransactionTest {
                 time.when(() -> {
                     TimeUtil.parseTimestamp(anyString(), anyInt());
                 }).thenReturn(0L);
-                Event.EventEntity<TapEvent> analyze = event.analyze(logEvent, param);
+                Event.EventEntity<TapEvent> analyze = event.analyze(logEvent, new HashMap<>());
                 Assertions.assertNotNull(analyze);
                 util.verify(() -> {
                     LogicUtil.read(any(ByteBuffer.class), anyInt());

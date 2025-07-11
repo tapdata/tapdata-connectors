@@ -136,6 +136,7 @@
                             <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
                             <Version>${project.version}</Version>
                             <Authentication>Beta</Authentication>
+                            <PayMode>${pay.mode}</PayMode>
                             <Git-Build-Time>${git.build.time}</Git-Build-Time>
                             <Git-Branch>${git.branch}</Git-Branch>
                             <Git-Commit-Id>${git.commit.id}</Git-Commit-Id>
@@ -220,7 +221,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.6</version>
+                <version>0.8.8</version>
                 <executions>
                     <!--first execution : for preparing JaCoCo runtime agent-->
                     <execution>

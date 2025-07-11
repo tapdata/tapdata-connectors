@@ -51,8 +51,7 @@
         <dependency>
             <groupId>com.taosdata.jdbc</groupId>
             <artifactId>taos-jdbcdriver</artifactId>
-            <version>3.2.7</version>
-            <scope>compile</scope>
+            <version>3.2.11</version>
             <exclusions>
                 <exclusion>
                     <artifactId>slf4j-api</artifactId>
@@ -115,6 +114,7 @@
                                 <Tapdata-API-Version>${tapdata.pdk.api.version}</Tapdata-API-Version>
                                 <Version>${project.version}</Version>
                                 <Authentication>Beta</Authentication>
+                                <PayMode>${pay.mode}</PayMode>
                                 <Git-Build-Time>${git.build.time}</Git-Build-Time>
                                 <Git-Branch>${git.branch}</Git-Branch>
                                 <Git-Commit-Id>${git.commit.id}</Git-Commit-Id>

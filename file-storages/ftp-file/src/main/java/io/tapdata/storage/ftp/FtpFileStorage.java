@@ -107,6 +107,14 @@ public class FtpFileStorage implements TapFileStorage {
     }
 
     @Override
+    public synchronized InputStream readFile(String path) throws Exception {
+        if (!isFileExist(path)) {
+            return null;
+        }
+        return ftpClient.retrieveFileStream(encodeISO(path));
+    }
+
+    @Override
     public boolean isFileExist(String path) throws IOException {
         return !isDirectoryExist(path) && ftpClient.listFiles(encodeISO(path)).length == 1;
     }

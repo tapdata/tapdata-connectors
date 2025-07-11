@@ -6,11 +6,15 @@ import io.tapdata.common.constant.MqOp;
 import io.tapdata.connector.kafka.admin.Admin;
 import io.tapdata.connector.kafka.admin.DefaultAdmin;
 import io.tapdata.connector.kafka.config.*;
+import io.tapdata.connector.kafka.data.KafkaOffset;
+import io.tapdata.connector.kafka.util.BatchPusher;
+import io.tapdata.connector.kafka.util.KafkaOffsetUtils;
 import io.tapdata.connector.kafka.util.Krb5Util;
 import io.tapdata.connector.kafka.util.ObjectUtils;
 import io.tapdata.constant.MqTestItem;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -21,6 +25,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.script.ScriptFactory;
 import io.tapdata.entity.script.ScriptOptions;
 import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.exception.StopException;
@@ -38,11 +43,15 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.TopicPartitionInfo;
+import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
 import javax.script.Invocable;
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
+import javax.ws.rs.core.Application;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -299,6 +308,7 @@ public class KafkaService extends AbstractMqService {
         AtomicLong delete = new AtomicLong(0);
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
+        String topic = EmptyKit.isBlank(((KafkaConfig) mqConfig).getTopicName()) ? tapTable.getId() : ((KafkaConfig) mqConfig).getTopicName();
         try {
             for (TapRecordEvent event : tapRecordEvents) {
                 if (null != isAlive && !isAlive.get()) {
@@ -339,7 +349,7 @@ public class KafkaService extends AbstractMqService {
                         countDownLatch.countDown();
                     }
                 };
-                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapTable.getId(),
+                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(topic,
                         null, event.getTime(), getKafkaMessageKey(data, tapTable), body,
                         new RecordHeaders().add("mqOp", mqOp.getOp().getBytes()));
                 kafkaProducer.send(producerRecord, callback);
@@ -371,11 +381,13 @@ public class KafkaService extends AbstractMqService {
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         CountDownLatch countDownLatch = new CountDownLatch(tapRecordEvents.size());
         ScriptEngine scriptEngine;
+        String topic = EmptyKit.isBlank(((KafkaConfig) mqConfig).getTopicName()) ? tapTable.getId() : ((KafkaConfig) mqConfig).getTopicName();
         String script = ((KafkaConfig) mqConfig).getScript();
-        Map<String, Object> record = new HashMap();
+        Map<String, Object> record = new HashMap<>();
         try {
+            ClassLoader appClassLoader = ScriptOptions.class.getClassLoader();
             scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
-                    new ScriptOptions().engineName("graal.js"));
+                    new ScriptOptions().engineName("graal.js").classLoader(appClassLoader));
             String buildInMethod = initBuildInMethod();
             String scripts = script + System.lineSeparator() + buildInMethod;
             scriptEngine.eval(scripts);
@@ -388,7 +400,7 @@ public class KafkaService extends AbstractMqService {
                     break;
                 }
                 Map<String, Object> data;
-                Map<String, Map<String, Object>> allData = new HashMap();
+                Map<String, Object> allData = new HashMap<>();
                 MqOp mqOp = MqOp.INSERT;
                 if (event instanceof TapInsertRecordEvent) {
                     data = ((TapInsertRecordEvent) event).getAfter();
@@ -408,16 +420,19 @@ public class KafkaService extends AbstractMqService {
                 } else {
                     data = new HashMap<>();
                 }
+                if (EmptyKit.isNotBlank(((KafkaConfig) mqConfig).getTopicName())) {
+                    record.put("tableName", tapTable.getId());
+                }
                 byte[] kafkaMessageKey = getKafkaMessageKey(data, tapTable);
                 record.put("data", allData);
-                Map<String, Object> header = new HashMap();
+                Map<String, Object> header = new HashMap<>();
                 header.put("mqOp", mqOp.getOp());
                 record.put("header", header);
                 String op = mqOp.getOp();
                 Collection<String> conditionKeys = tapTable.primaryKeys(true);
                 RecordHeaders recordHeaders = new RecordHeaders();
-                byte[] body = {};
                 Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, op, conditionKeys));
+                byte[] body = {};
                 if (null == eventObj) {
                     continue;
                 } else {
@@ -475,7 +490,7 @@ public class KafkaService extends AbstractMqService {
                         countDownLatch.countDown();
                     }
                 };
-                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapTable.getId(),
+                ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(topic,
                         null, event.getTime(), kafkaMessageKey, body,
                         recordHeaders);
                 kafkaProducer.send(producerRecord, callback);
@@ -526,7 +541,34 @@ public class KafkaService extends AbstractMqService {
     @Override
     public void produce(TapFieldBaseEvent tapFieldBaseEvent) {
         AtomicReference<Throwable> reference = new AtomicReference<>();
-        byte[] body = jsonParser.toJsonBytes(tapFieldBaseEvent);
+        String tableId = tapFieldBaseEvent.getTableId();
+        ScriptEngine scriptEngine;
+        String script = ((KafkaConfig) mqConfig).getScript();
+        Map<String, Object> record = new HashMap<>();
+        record.put("data", tapFieldBaseEvent.getOriginDDL());
+        record.put("tableName", tableId);
+        byte[] body;
+        if (((KafkaConfig) mqConfig).getEnableScript()) {
+            try {
+                scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
+                        new ScriptOptions().engineName("graal.js"));
+                String buildInMethod = initBuildInMethod();
+                String scripts = script + System.lineSeparator() + buildInMethod;
+                scriptEngine.eval(scripts);
+            } catch (Exception e) {
+                throw new CoreException("Engine initialization failed!");
+            }
+            Object eventObj = ObjectUtils.covertData(executeScript(scriptEngine, "process", record, MqOp.DDL.getOp(), Collections.emptyList()));
+            if (eventObj instanceof Map) {
+                body = jsonParser.toJsonBytes(eventObj);
+            } else if (eventObj == null) {
+                return;
+            } else {
+                body = eventObj.toString().getBytes();
+            }
+        } else {
+            body = tapFieldBaseEvent.getOriginDDL().toString().getBytes();
+        }
         ProducerRecord<byte[], byte[]> producerRecord = new ProducerRecord<>(tapFieldBaseEvent.getTableId(),
                 null, tapFieldBaseEvent.getTime(), null, body,
                 new RecordHeaders()
@@ -540,67 +582,135 @@ public class KafkaService extends AbstractMqService {
     }
 
     private byte[] getKafkaMessageKey(Map<String, Object> data, TapTable tapTable) {
-        if (EmptyKit.isEmpty(tapTable.primaryKeys(true))) {
-            return null;
+        if (EmptyKit.isNotBlank(((KafkaConfig) mqConfig).getTopicName())) {
+            DataMap dataMap = DataMap.create();
+            if (EmptyKit.isNotEmpty(tapTable.primaryKeys(true))) {
+                tapTable.primaryKeys(true).forEach(key -> dataMap.put(key, data.get(key)));
+            }
+            return jsonParser.toJsonBytes(dataMap);
         } else {
-            return jsonParser.toJsonBytes(tapTable.primaryKeys(true).stream().map(key -> String.valueOf(data.get(key))).collect(Collectors.joining("_")));
+            if (EmptyKit.isEmpty(tapTable.primaryKeys(true))) {
+                return null;
+            } else {
+                return jsonParser.toJsonBytes(tapTable.primaryKeys(true).stream().map(key -> String.valueOf(data.get(key))).collect(Collectors.joining("_")));
+            }
         }
+    }
+
+    //kafka查询topic的partition数量
+    private List<Integer> getPartitionList(String topic) {
+        AdminConfiguration configuration = new AdminConfiguration(((KafkaConfig) mqConfig), connectorId);
+        try (
+                Admin admin = new DefaultAdmin(configuration)
+        ) {
+            List<TopicPartitionInfo> partitionInfos = admin.getTopicPartitionInfo(topic);
+            return partitionInfos.stream().map(TopicPartitionInfo::partition).collect(Collectors.toList());
+        } catch (Exception e) {
+            tapLogger.warn("get partition count error", e);
+        }
+        return Collections.emptyList();
     }
 
     @Override
     public void consumeOne(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         consuming.set(true);
-        List<TapEvent> list = TapSimplify.list();
         String tableName = tapTable.getId();
         ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(((KafkaConfig) mqConfig), connectorId, true);
-        KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
-        kafkaConsumer.subscribe(Collections.singleton(tapTable.getId()));
-        while (consuming.get()) {
-            ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(6L));
-            if (consumerRecords.isEmpty()) {
-                break;
+        AtomicReference<Throwable> throwable = new AtomicReference<>();
+        List<Integer> partitionInfo = getPartitionList(tableName);
+        int threadSize = Math.min(Math.max(partitionInfo.size(), 1), 8);
+        List<List<Integer>> partitionGroup = DbKit.splitToPieces(partitionInfo, (partitionInfo.size() - 1) / threadSize + 1);
+        CountDownLatch countDownLatch = new CountDownLatch(threadSize);
+        ExecutorService executorService = Executors.newFixedThreadPool(threadSize);
+        try {
+            for (int i = 0; i < threadSize; i++) {
+                List<Integer> partitions = partitionGroup.get(i);
+                executorService.submit(() -> {
+                    try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
+                        List<TapEvent> list = TapSimplify.list();
+                        if (threadSize > 1) {
+                            kafkaConsumer.assign(partitions.stream().map(v -> new TopicPartition(tapTable.getId(), v)).collect(Collectors.toList()));
+                        } else {
+                            kafkaConsumer.subscribe(Collections.singleton(tapTable.getId()));
+                        }
+                        while (consuming.get()) {
+                            ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(6L));
+                            if (consumerRecords.isEmpty()) {
+                                break;
+                            }
+                            for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+                                makeMessage(consumerRecord, tableName, list::add);
+                                if (list.size() >= eventBatchSize) {
+                                    syncEventSubmit(list, eventsOffsetConsumer);
+                                    list = TapSimplify.list();
+                                }
+                            }
+                        }
+                        if (EmptyKit.isNotEmpty(list)) {
+                            syncEventSubmit(list, eventsOffsetConsumer);
+                        }
+                    } catch (Exception e) {
+                        throwable.set(e);
+                    } finally {
+                        countDownLatch.countDown();
+                    }
+                });
             }
-            for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-                makeMessage(consumerRecord, list, tableName);
-                if (list.size() >= eventBatchSize) {
-                    eventsOffsetConsumer.accept(list, TapSimplify.list());
-                    list = TapSimplify.list();
-                }
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
             }
+            if (EmptyKit.isNotNull(throwable.get())) {
+                throw new RuntimeException(throwable.get());
+            }
+        } finally {
+            executorService.shutdown();
         }
-        kafkaConsumer.close();
-        if (EmptyKit.isNotEmpty(list)) {
-            eventsOffsetConsumer.accept(list, TapSimplify.list());
-        }
+    }
+
+    private synchronized void syncEventSubmit(List<TapEvent> eventList, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+        eventsOffsetConsumer.accept(eventList, TapSimplify.list());
     }
 
     @Override
-    public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+    public void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         consuming.set(true);
-        ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration(((KafkaConfig) mqConfig), connectorId, true);
-        KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build());
-        kafkaConsumer.subscribe(tableList);
-        List<TapEvent> list = TapSimplify.list();
-        while (consuming.get()) {
-            ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
-            if (consumerRecords.isEmpty()) {
-                continue;
-            }
-            for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-                makeMessage(consumerRecord, list, consumerRecord.topic());
-                if (list.size() >= eventBatchSize) {
-                    eventsOffsetConsumer.accept(list, TapSimplify.list());
-                    list = TapSimplify.list();
+        int maxDelay = 500;
+        KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
+        ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration((kafkaConfig), connectorId, true);
+        try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
+            KafkaOffset streamOffset = KafkaOffsetUtils.setConsumerByOffset(kafkaConsumer, tableList, offset, consuming);
+            try (BatchPusher<TapEvent> batchPusher = new BatchPusher<TapEvent>(
+                    tapEvents -> eventsOffsetConsumer.accept(tapEvents, streamOffset.clone())
+            ).batchSize(eventBatchSize).maxDelay(maxDelay)) {
+                // 将初始化的 offset 推送到目标，让指定时间的增量任务下次启动时拿到 offset
+                Optional.of(new HeartbeatEvent()).ifPresent(event -> {
+                    event.setTime(System.currentTimeMillis());
+                    batchPusher.add(event);
+                });
+
+                // 消费数据
+                while (consuming.get()) {
+                    ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
+                    if (consumerRecords.isEmpty()) {
+                        batchPusher.checkAndSummit();
+                    } else {
+                        for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+                            streamOffset.addTopicOffset(consumerRecord); // 推进 offset
+                            makeMessage(consumerRecord, consumerRecord.topic(), batchPusher::add);
+                        }
+                    }
                 }
             }
+        } catch (InterruptedException | InterruptException ex) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ex) {
+            tapLogger.error("Stream consume occur: {}", ex.getMessage(), ex);
         }
-        if (EmptyKit.isNotEmpty(list)) {
-            eventsOffsetConsumer.accept(list, TapSimplify.list());
-        }
-        kafkaConsumer.close();
     }
 
-    private void makeMessage(ConsumerRecord<byte[], byte[]> consumerRecord, List<TapEvent> list, String tableName) {
+    private void makeMessage(ConsumerRecord<byte[], byte[]> consumerRecord, String tableName, Consumer<TapEvent> consumer) {
         AtomicReference<String> mqOpReference = new AtomicReference<>();
         mqOpReference.set(MqOp.INSERT.getOp());
         consumerRecord.headers().headers("mqOp").forEach(header -> mqOpReference.set(new String(header.value())));
@@ -612,19 +722,20 @@ public class KafkaService extends AbstractMqService {
                 } catch (ClassNotFoundException e) {
                     throw new RuntimeException(e);
                 }
-                list.add(tapFieldBaseEvent);
+                consumer.accept(tapFieldBaseEvent);
             });
         } else {
             Map<String, Object> data = jsonParser.fromJsonBytes(consumerRecord.value(), Map.class);
+            long referenceTime = consumerRecord.timestamp();
             switch (MqOp.fromValue(mqOpReference.get())) {
                 case INSERT:
-                    list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
+                    consumer.accept(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(referenceTime));
                     break;
                 case UPDATE:
-                    list.add(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
+                    consumer.accept(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(referenceTime));
                     break;
                 case DELETE:
-                    list.add(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()));
+                    consumer.accept(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(referenceTime));
                     break;
             }
         }

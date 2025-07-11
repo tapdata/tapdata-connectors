@@ -6,19 +6,6 @@
 
 package io.debezium.connector.mysql;
 
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.OptionalLong;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import io.debezium.DebeziumException;
 import io.debezium.config.CommonConnectorConfig;
 import io.debezium.config.CommonConnectorConfig.EventProcessingFailureHandlingMode;
@@ -31,6 +18,14 @@ import io.debezium.jdbc.JdbcConnection;
 import io.debezium.relational.TableId;
 import io.debezium.relational.history.DatabaseHistory;
 import io.debezium.util.Strings;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.SQLException;
+import java.time.Duration;
+import java.util.*;
 
 /**
  * {@link JdbcConnection} extension to be used with MySQL Server
@@ -54,12 +49,6 @@ public class MySqlConnection extends JdbcConnection {
     /**
      * Creates a new connection using the supplied configuration.
      *
-     * @param config {@link Configuration} instance, may not be null.
-     * @param sourceTimestampMode strategy for populating {@code source.ts_ms}.
-     * @param config
-     *            {@link Configuration} instance, may not be null.
-     * @param valueConverters
-     *            {@link SqlServerValueConverters} instance
      */
     public MySqlConnection(MySqlConnectionConfiguration connectionConfig) {
         super(connectionConfig.config(), connectionConfig.factory());
@@ -171,27 +160,29 @@ public class MySqlConnection extends JdbcConnection {
         String value = connectionConfig.config().getString(field);
         if (value != null) {
             value = value.trim();
-            String existingValue = System.getProperty(property);
-            if (existingValue == null) {
-                // There was no existing property ...
-                String existing = System.setProperty(property, value);
-                originalSystemProperties.put(property, existing); // the existing value may be null
-            }
-            else {
-                existingValue = existingValue.trim();
-                if (!existingValue.equalsIgnoreCase(value)) {
-                    // There was an existing property, and the value is different ...
-                    String msg = "System or JVM property '" + property + "' is already defined, but the configuration property '"
-                            + field.name()
-                            + "' defines a different value";
-                    if (showValueInError) {
-                        msg = "System or JVM property '" + property + "' is already defined as " + existingValue
-                                + ", but the configuration property '" + field.name() + "' defines a different value '" + value + "'";
-                    }
-                    throw new DebeziumException(msg);
-                }
-                // Otherwise, there was an existing property, and the value is exactly the same (so do nothing!)
-            }
+            String existing = System.setProperty(property, value);
+            originalSystemProperties.put(property, existing); // the existing value may be null
+//            String existingValue = System.getProperty(property);
+//            if (existingValue == null) {
+//                // There was no existing property ...
+//                String existing = System.setProperty(property, value);
+//                originalSystemProperties.put(property, existing); // the existing value may be null
+//            }
+//            else {
+//                existingValue = existingValue.trim();
+//                if (!existingValue.equalsIgnoreCase(value)) {
+//                    // There was an existing property, and the value is different ...
+//                    String msg = "System or JVM property '" + property + "' is already defined, but the configuration property '"
+//                            + field.name()
+//                            + "' defines a different value";
+//                    if (showValueInError) {
+//                        msg = "System or JVM property '" + property + "' is already defined as " + existingValue
+//                                + ", but the configuration property '" + field.name() + "' defines a different value '" + value + "'";
+//                    }
+//                    throw new DebeziumException(msg);
+//                }
+//                // Otherwise, there was an existing property, and the value is exactly the same (so do nothing!)
+//            }
         }
     }
 
@@ -236,7 +227,22 @@ public class MySqlConnection extends JdbcConnection {
      */
     public String knownGtidSet() {
         try {
-            return queryAndMap("SHOW MASTER STATUS", rs -> {
+            String binLogStatusSql = "SHOW MASTER STATUS";
+            try (
+                    Connection connection = connection()
+            ) {
+                DatabaseMetaData databaseMetaData = connection.getMetaData();
+                String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
+                String[] versionNums = version.split("\\.");
+                if (versionNums.length >= 2) {
+                    int majorVersion = Integer.parseInt(versionNums[0]);
+                    int minorVersion = Integer.parseInt(versionNums[1]);
+                    if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
+                        binLogStatusSql = "SHOW BINARY LOG STATUS";
+                    }
+                }
+            }
+            return queryAndMap(binLogStatusSql, rs -> {
                 if (rs.next() && rs.getMetaData().getColumnCount() > 4) {
                     return rs.getString(5); // GTID set, may be null, blank, or contain a GTID set
                 }
@@ -426,7 +432,11 @@ public class MySqlConnection extends JdbcConnection {
     }
 
     public boolean isTableIdCaseSensitive() {
-        return !"0".equals(readMySqlSystemVariables().get(MySqlSystemVariables.LOWER_CASE_TABLE_NAMES));
+        return 0 != lowerCaseTableNames();
+    }
+
+    public int lowerCaseTableNames() {
+        return Integer.parseInt(readMySqlSystemVariables().get(MySqlSystemVariables.LOWER_CASE_TABLE_NAMES));
     }
 
     /**

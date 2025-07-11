@@ -3,13 +3,14 @@
     "name": "GreenPlum",
     "icon": "icons/greenplum.png",
     "doc" : "${doc}",
-    "id": "greenplum"
+    "id": "greenplum",
+    "tags": ["Database"]
   },
   "configOptions": {
     "capabilities":[
       {
         "id": "dml_insert_policy",
-        "alternatives": ["ignore_on_exists"]
+        "alternatives": ["update_on_exists", "ignore_on_exists", "just_insert"]
       },
       {
         "id": "dml_update_policy",
@@ -127,7 +128,7 @@
           "x-index": 9,
           "enum": [
             {
-              "label": "Database Timezone",
+              "label": "",
               "value": ""
             },
             {
@@ -237,6 +238,29 @@
           ]
         }
       }
+    },
+    "node": {
+      "type": "object",
+      "properties": {
+        "enableFileInput": {
+          "type": "boolean",
+          "title": "${enableFileInput}",
+          "default": false,
+          "x-index": 17,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        }
+      }
     }
   },
   "messages": {
@@ -251,7 +275,8 @@
       "user" : "user",
       "password" : "password",
       "logPluginName" : "logPluginName",
-      "timezone": "timezone"
+      "timezone": "timezone",
+      "enableFileInput": "Enable File Input"
     },
     "zh_CN": {
       "doc": "docs/greenplum_zh_CN.md",
@@ -263,7 +288,8 @@
       "user" : "账号",
       "password" : "密码",
       "logPluginName" : "日志插件",
-      "timezone": "时区"
+      "timezone": "时区",
+      "enableFileInput": "启用文件输入"
     },
     "zh_TW": {
       "doc": "docs/greenplum_zh_TW.md",
@@ -275,7 +301,8 @@
       "user" : "賬號",
       "password" : "密碼",
       "logPluginName" : "日誌插件",
-      "timezone": "時區"
+      "timezone": "時區",
+      "enableFileInput": "啟用文件輸入"
     }
   },
   "dataTypes": {

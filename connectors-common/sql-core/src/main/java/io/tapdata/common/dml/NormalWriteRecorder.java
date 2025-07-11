@@ -1,5 +1,7 @@
 package io.tapdata.common.dml;
 
+import io.netty.buffer.ByteBuf;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
@@ -22,8 +24,9 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import static io.tapdata.common.dml.WritePolicyEnum.LOG_ON_NONEXISTS;
 
 public abstract class NormalWriteRecorder {
 
@@ -32,14 +35,18 @@ public abstract class NormalWriteRecorder {
     protected final String schema;
 
     protected final List<String> allColumn;
-    protected final List<String> updatedColumn;
+    protected List<String> updatedColumn;
+    protected List<String> removedColumn;
     protected final List<String> uniqueCondition;
     protected final Map<String, String> columnTypeMap;
     protected boolean hasPk = false;
 
     protected String version;
-    protected String insertPolicy;
-    protected String updatePolicy;
+    protected WritePolicyEnum insertPolicy;
+    protected Boolean fileInput = false;
+    protected ByteBuf buffer;
+    protected WritePolicyEnum updatePolicy;
+    protected WritePolicyEnum deletePolicy;
     protected char escapeChar = '"';
 
     protected String preparedStatementKey;
@@ -50,6 +57,7 @@ public abstract class NormalWriteRecorder {
 
     protected final AtomicLong atomicLong = new AtomicLong(0); //record counter
     protected final List<TapRecordEvent> batchCache = TapSimplify.list(); //event cache
+    protected int batchCacheSize = 0;
     protected Log tapLogger;
 
     public NormalWriteRecorder(Connection connection, TapTable tapTable, String schema) {
@@ -64,11 +72,18 @@ public abstract class NormalWriteRecorder {
         } else {
             uniqueCondition = new ArrayList<>(tapTable.primaryKeys(true));
         }
+        if (EmptyKit.isEmpty(uniqueCondition)) {
+            removeBigColumnAsCondition();
+        }
         updatedColumn = allColumn.stream().filter(v -> !uniqueCondition.contains(v)).collect(Collectors.toList());
         if (EmptyKit.isEmpty(updatedColumn)) {
             updatedColumn.addAll(allColumn);
         }
         columnTypeMap = tapTable.getNameFieldMap().entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, v -> v.getValue().getDataType()));
+    }
+
+    protected void removeBigColumnAsCondition() {
+
     }
 
     public void setLargeSql(boolean largeSql) {
@@ -78,13 +93,23 @@ public abstract class NormalWriteRecorder {
         }
     }
 
+    public void setRemovedColumn(List<String> removedColumn) {
+        this.removedColumn = removedColumn;
+        allColumn.removeAll(removedColumn);
+        updatedColumn.removeAll(removedColumn);
+        if (EmptyKit.isEmpty(updatedColumn)) {
+            updatedColumn.addAll(allColumn);
+        }
+        uniqueCondition.removeAll(removedColumn);
+    }
+
     /**
      * batch write events
      *
      * @param listResult results of WriteRecord
      */
     public void executeBatch(WriteListResult<TapRecordEvent> listResult) throws SQLException {
-        long succeed = batchCache.size();
+        long succeed = batchCacheSize;
         if (succeed <= 0) {
             return;
         }
@@ -92,30 +117,49 @@ public abstract class NormalWriteRecorder {
             try (Statement statement = connection.createStatement()) {
                 statement.execute(getLargeInsertSql());
                 largeSqlValues.clear();
-                batchCache.clear();
+                batchCacheSize = 0;
             }
+            atomicLong.addAndGet(succeed);
+            return;
+        }
+        if (fileInput) {
+            fileInput();
+            buffer.clear();
+            batchCacheSize = 0;
             atomicLong.addAndGet(succeed);
             return;
         }
         try {
             if (preparedStatement != null) {
                 int[] writeResults = preparedStatement.executeBatch();
-                if ("log_on_nonexists".equals(updatePolicy) && batchCache.get(0) instanceof TapUpdateRecordEvent) {
+                if (LOG_ON_NONEXISTS == updatePolicy) {
                     Iterator<TapRecordEvent> iterator = batchCache.iterator();
                     int index = 0;
                     while (iterator.hasNext()) {
                         TapRecordEvent event = iterator.next();
                         if (0 >= writeResults[index++]) {
-                            tapLogger.info("update record ignored: {}", event);
+                            tapLogger.warn("update record ignored: {}", event);
+                        }
+                    }
+                }
+                if (LOG_ON_NONEXISTS == deletePolicy) {
+                    Iterator<TapRecordEvent> iterator = batchCache.iterator();
+                    int index = 0;
+                    while (iterator.hasNext()) {
+                        TapRecordEvent event = iterator.next();
+                        if (0 >= writeResults[index++]) {
+                            tapLogger.warn("delete record ignored: {}", event);
                         }
                     }
                 }
                 preparedStatement.clearBatch();
                 batchCache.clear();
+                batchCacheSize = 0;
             }
         } catch (SQLException e) {
-            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
-            listResult.addErrors(map);
+//            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
+//            listResult.addErrors(map);
+            batchCacheSize = 0;
             throw e;
         }
         atomicLong.addAndGet(succeed);
@@ -123,14 +167,22 @@ public abstract class NormalWriteRecorder {
 
     //commit when cacheSize >= 1000
     public void addAndCheckCommit(TapRecordEvent recordEvent, WriteListResult<TapRecordEvent> listResult) throws SQLException {
-        batchCache.add(recordEvent);
-        if (batchCache.size() >= 1000) {
+        batchCacheSize++;
+        if (updatePolicy == LOG_ON_NONEXISTS && recordEvent instanceof TapUpdateRecordEvent || deletePolicy == LOG_ON_NONEXISTS && recordEvent instanceof TapDeleteRecordEvent) {
+            batchCache.add(recordEvent);
+        }
+        if (batchCacheSize >= 1000) {
             executeBatch(listResult);
         }
     }
 
+    public void addBatchCacheSize() {
+        batchCacheSize++;
+    }
+
     public void releaseResource() {
         preparedStatementMap.forEach((key, value) -> EmptyKit.closeQuietly(value));
+        Optional.ofNullable(buffer).ifPresent(ByteBuf::release);
     }
 
     public void setVersion(String version) {
@@ -138,11 +190,20 @@ public abstract class NormalWriteRecorder {
     }
 
     public void setInsertPolicy(String insertPolicy) {
-        this.insertPolicy = insertPolicy;
+        this.insertPolicy = WritePolicyEnum.valueOf(insertPolicy.toUpperCase());
+    }
+
+    public void enableFileInput(ByteBuf buffer) {
+        this.fileInput = true;
+        this.buffer = buffer;
     }
 
     public void setUpdatePolicy(String updatePolicy) {
-        this.updatePolicy = updatePolicy;
+        this.updatePolicy = WritePolicyEnum.valueOf(updatePolicy.toUpperCase());
+    }
+
+    public void setDeletePolicy(String deletePolicy) {
+        this.deletePolicy = WritePolicyEnum.valueOf(deletePolicy.toUpperCase());
     }
 
     public void setTapLogger(Log tapLogger) {
@@ -167,7 +228,12 @@ public abstract class NormalWriteRecorder {
             return;
         }
         if (EmptyKit.isEmpty(uniqueCondition)) {
-            justInsert(after);
+            if (fileInput) {
+                fileInsert(after);
+                return;
+            } else {
+                justInsert(after);
+            }
         } else {
             if (hasPk && uniqueCondition.stream().anyMatch(v -> EmptyKit.isNull(after.get(v)))) {
                 tapLogger.warn("primary key has null value, record ignored or string => '': {}", after);
@@ -187,22 +253,52 @@ public abstract class NormalWriteRecorder {
                 }
             }
             switch (insertPolicy) {
-                case "update_on_exists":
+                case UPDATE_ON_EXISTS:
                     upsert(after, listResult);
                     break;
-                case "ignore_on_exists":
+                case IGNORE_ON_EXISTS:
                     insertIgnore(after, listResult);
                     break;
                 default:
-                    justInsert(after);
+                    if (fileInput) {
+                        fileInsert(after);
+                        return;
+                    } else {
+                        justInsert(after);
+                    }
                     break;
             }
         }
         preparedStatement.addBatch();
     }
 
+    protected void generatePrepareStatement(String sql, boolean containsNull, WriteListResult<TapRecordEvent> listResult) throws SQLException {
+        String preparedStatementKey = "|" + containsNull;
+        if (preparedStatementKey.equals(this.preparedStatementKey)) {
+            preparedStatement = preparedStatementMap.get(preparedStatementKey);
+        } else {
+            if (EmptyKit.isNull(this.preparedStatementKey)) {
+                preparedStatement = connection.prepareStatement(sql);
+                preparedStatementMap.put(preparedStatementKey, preparedStatement);
+            } else {
+                executeBatch(listResult);
+                preparedStatement = preparedStatementMap.get(preparedStatementKey);
+                if (EmptyKit.isNull(preparedStatement)) {
+                    preparedStatement = connection.prepareStatement(sql);
+                    preparedStatementMap.put(preparedStatementKey, preparedStatement);
+                }
+            }
+            this.preparedStatementKey = preparedStatementKey;
+        }
+        preparedStatement.clearParameters();
+    }
+
     //插入唯一键冲突时转更新
     protected void upsert(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
+        throw new UnsupportedOperationException("upsert is not supported");
+    }
+
+    public String getUpsertSql(Map<String, Object> after) throws SQLException {
         throw new UnsupportedOperationException("upsert is not supported");
     }
 
@@ -215,19 +311,35 @@ public abstract class NormalWriteRecorder {
         throw new UnsupportedOperationException("largeInsert is not supported");
     }
 
+    protected String quoteAndEscape(String value) {
+        return escapeChar + StringKit.escape(value, escapeChar) + escapeChar;
+    }
+
+    protected String getSchemaAndTable() {
+        return quoteAndEscape(schema) + "." + quoteAndEscape(tapTable.getId());
+    }
+
     //直接插入
     protected void justInsert(Map<String, Object> after) throws SQLException {
         if (EmptyKit.isNull(preparedStatement)) {
-            String insertSql = "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                    + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") " +
+            String insertSql = "INSERT INTO " + getSchemaAndTable() + " ("
+                    + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") " +
                     "VALUES(" + StringKit.copyString("?", allColumn.size(), ",") + ") ";
             preparedStatement = connection.prepareStatement(insertSql);
         }
         preparedStatement.clearParameters();
         int pos = 1;
         for (String key : allColumn) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, after, key);
         }
+    }
+
+    protected void fileInsert(Map<String, Object> after) {
+        buffer.writeBytes((allColumn.stream().map(v -> String.valueOf(after.get(v))).collect(Collectors.joining(",")) + "\n").getBytes());
+    }
+
+    protected void fileInput() throws SQLException {
+        throw new UnsupportedOperationException("fileInput is not supported");
     }
 
     public void addUpdateBatch(Map<String, Object> after, Map<String, Object> before, WriteListResult<TapRecordEvent> listResult) throws SQLException {
@@ -237,11 +349,14 @@ public abstract class NormalWriteRecorder {
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
-            case "insert_on_nonexists":
+            case INSERT_ON_NONEXISTS:
                 insertUpdate(after, lastBefore, listResult);
                 break;
             default:
                 Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
+                if (EmptyKit.isEmpty(lastAfter)) {
+                    return;
+                }
                 justUpdate(lastAfter, lastBefore, listResult);
                 break;
         }
@@ -276,26 +391,26 @@ public abstract class NormalWriteRecorder {
         preparedStatement.clearParameters();
         int pos = 1;
         for (String key : after.keySet()) {
-            preparedStatement.setObject(pos++, filterValue(after.get(key), columnTypeMap.get(key)));
+            setPrepareStatement(pos++, after, key);
         }
         setBeforeValue(containsNull, before, pos);
     }
 
     protected String getLargeInsertSql() {
-        return "INSERT INTO " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " ("
-                + allColumn.stream().map(k -> escapeChar + k + escapeChar).collect(Collectors.joining(", ")) + ") VALUES "
+        return "INSERT INTO " + getSchemaAndTable() + " ("
+                + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") VALUES "
                 + String.join(", ", largeSqlValues);
     }
 
     protected String getUpdateSql(Map<String, Object> after, Map<String, Object> before, boolean containsNull) {
         if (!containsNull) {
-            return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
-                    after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
-                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+            return "UPDATE " + getSchemaAndTable() + " SET " +
+                    after.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(", ")) + " WHERE " +
+                    before.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(" AND "));
         } else {
-            return "UPDATE " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " SET " +
-                    after.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(", ")) + " WHERE " +
-                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ? IS NULL))")
+            return "UPDATE " + getSchemaAndTable() + " SET " +
+                    after.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(", ")) + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + quoteAndEscape(k) + "=? OR (" + quoteAndEscape(k) + " IS NULL AND ? IS NULL))")
                             .collect(Collectors.joining(" AND "));
         }
     }
@@ -308,10 +423,12 @@ public abstract class NormalWriteRecorder {
         uniqueCondition.stream().filter(before::containsKey).forEach(v -> lastBefore.put(v, before.get(v)));
         //Mongo为源端时，非_id为更新条件时，lastBefore为空，此时需要原始before直接删除
         if (EmptyKit.isEmpty(lastBefore)) {
-            justDelete(before, listResult);
-        } else {
-            justDelete(lastBefore, listResult);
+            lastBefore.putAll(before);
         }
+        if (EmptyKit.isNotEmpty(removedColumn)) {
+            removedColumn.forEach(lastBefore::remove);
+        }
+        justDelete(lastBefore, listResult);
         preparedStatement.addBatch();
     }
 
@@ -342,24 +459,28 @@ public abstract class NormalWriteRecorder {
 
     protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
         if (!containsNull) {
-            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
-                    before.keySet().stream().map(k -> escapeChar + k + escapeChar + "=?").collect(Collectors.joining(" AND "));
+            return "DELETE FROM " + getSchemaAndTable() + " WHERE " +
+                    before.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(" AND "));
         } else {
-            return "DELETE FROM " + escapeChar + schema + escapeChar + "." + escapeChar + tapTable.getId() + escapeChar + " WHERE " +
-                    before.keySet().stream().map(k -> "(" + escapeChar + k + escapeChar + "=? OR (" + escapeChar + k + escapeChar + " IS NULL AND ? IS NULL))")
+            return "DELETE FROM " + getSchemaAndTable() + " WHERE " +
+                    before.keySet().stream().map(k -> "(" + quoteAndEscape(k) + "=? OR (" + quoteAndEscape(k) + " IS NULL AND ? IS NULL))")
                             .collect(Collectors.joining(" AND "));
         }
+    }
+
+    protected void setPrepareStatement(int pos, Map<String, Object> data, String key) throws SQLException {
+        preparedStatement.setObject(pos, filterValue(data.get(key), columnTypeMap.get(key)));
     }
 
     protected void setBeforeValue(boolean containsNull, Map<String, Object> before, int pos) throws SQLException {
         if (!containsNull) {
             for (String key : before.keySet()) {
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, before, key);
             }
         } else {
             for (String key : before.keySet()) {
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
-                preparedStatement.setObject(pos++, filterValue(before.get(key), columnTypeMap.get(key)));
+                setPrepareStatement(pos++, before, key);
+                setPrepareStatement(pos++, before, key);
             }
         }
     }
@@ -395,5 +516,16 @@ public abstract class NormalWriteRecorder {
             return "'" + obj + "'";
         }
         return result;
+    }
+
+    protected String byteArrayToHexString(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02X", b));
+        }
+        return "0x"+ sb;
     }
 }

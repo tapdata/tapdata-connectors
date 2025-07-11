@@ -24,6 +24,7 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.FormatUtils;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -35,6 +36,7 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.entity.message.CommandInfo;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 import javax.script.Invocable;
@@ -59,6 +61,7 @@ public class CustomConnector extends ConnectorBase {
     private CustomConfig customConfig;
     private ScriptEngine initScriptEngine;
     private ConcurrentHashMap<String, ScriptEngine> writeEnginePool;
+    private final static String pdkId = "custom";
 
     private void initConnection(TapConnectionContext connectorContext) throws ScriptException {
         customConfig = new CustomConfig().load(connectorContext.getConnectionConfig());
@@ -326,6 +329,12 @@ public class CustomConnector extends ConnectorBase {
         }
 
         @Override
+        public void trace(String message, Object... params) {
+            logger.trace(message, params);
+            logRecords.add(new LogRecord("TRACE", FormatUtils.format(message, params), System.currentTimeMillis()));
+        }
+
+        @Override
         public void warn(String message, Object... params) {
             logger.warn(message, params);
             logRecords.add(new LogRecord("WARN", FormatUtils.format(message, params), System.currentTimeMillis()));
@@ -421,6 +430,7 @@ public class CustomConnector extends ConnectorBase {
         AtomicLong insert = new AtomicLong(0);
         AtomicLong update = new AtomicLong(0);
         AtomicLong delete = new AtomicLong(0);
+        List<Map<String, Object>> list = new ArrayList<>();
         for (TapRecordEvent event : tapRecordEvents) {
             Map<String, Object> temp = new HashMap<>();
             if (event instanceof TapInsertRecordEvent) {
@@ -437,16 +447,28 @@ public class CustomConnector extends ConnectorBase {
                 delete.incrementAndGet();
             }
             temp.put("from", tapTable.getId());
-            try {
-                ScriptUtil.executeScript(scriptEngine, ScriptUtil.TARGET_FUNCTION_NAME, new ArrayList<Map<String, Object>>() {{
-                    add(temp);
-                }});
-                result.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get());
-            } catch (Exception e) {
-                result.addError(event, e);
-                break;
+            if(!customConfig.getBatchProcess()){
+                try {
+                    ScriptUtil.executeScript(scriptEngine, ScriptUtil.TARGET_FUNCTION_NAME, new ArrayList<Map<String, Object>>() {{
+                        add(temp);
+                    }});
+                    result.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get());
+                } catch (Exception e) {
+                    result.addError(event, e);
+                    break;
+                }
+            }else{
+                list.add(temp);
             }
         }
+       if(CollectionUtils.isNotEmpty(list)){
+           try {
+               ScriptUtil.executeScript(scriptEngine, ScriptUtil.TARGET_FUNCTION_NAME, list);
+               result.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get());
+           } catch (Exception e) {
+               throw new TapPdkRetryableEx(pdkId,e);
+           }
+       }
         writeListResultConsumer.accept(result);
     }
 
@@ -454,13 +476,12 @@ public class CustomConnector extends ConnectorBase {
         return 0;
     }
 
-    private void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws ScriptException {
+    protected void batchRead(TapConnectorContext tapConnectorContext, TapTable tapTable, Object offsetState, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws ScriptException {
         ScriptCore scriptCore = new ScriptCore(tapTable.getId());
         assert scriptFactory != null;
         ScriptEngine scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(customConfig.getJsEngineName()).log(tapConnectorContext.getLog()));
         scriptEngine.eval(ScriptUtil.appendSourceFunctionScript(customConfig.getHistoryScript(), true));
         scriptEngine.put("core", scriptCore);
-//        scriptEngine.put("log", new CustomLog());
         AtomicReference<Throwable> scriptException = new AtomicReference<>();
         Runnable runnable = () -> {
             Invocable invocable = (Invocable) scriptEngine;
@@ -474,25 +495,25 @@ public class CustomConnector extends ConnectorBase {
         t.start();
         List<TapEvent> eventList = new ArrayList<>();
         while (isAlive() && t.isAlive()) {
-            try {
-                CustomEventMessage message = null;
-                try {
-                    message = scriptCore.getEventQueue().poll(1, TimeUnit.SECONDS);
-                } catch (InterruptedException ignored) {
-                }
-                if (EmptyKit.isNotNull(message)) {
-                    eventList.add(message.getTapEvent());
-                    if (eventList.size() == eventBatchSize) {
-                        eventsOffsetConsumer.accept(eventList, new HashMap<>());
-                        eventList = new ArrayList<>();
-                    }
-                }
-            } catch (Exception e) {
-                break;
-            }
-        }
-        if (EmptyKit.isNotNull(scriptException.get())) {
-            throw new RuntimeException(scriptException.get());
+			CustomEventMessage message = null;
+			try {
+				message = scriptCore.getEventQueue().poll(1, TimeUnit.SECONDS);
+			} catch (InterruptedException ignored) {
+			}
+			if (EmptyKit.isNotNull(message)) {
+				eventList.add(message.getTapEvent());
+				if (eventList.size() == eventBatchSize) {
+					eventsOffsetConsumer.accept(eventList, new HashMap<>());
+					eventList = new ArrayList<>();
+				}
+			}
+			if (EmptyKit.isNotNull(scriptException.get())) {
+				throw new RuntimeException(scriptException.get());
+			}
+		}
+        while(isAlive() && !scriptCore.getEventQueue().isEmpty()) {
+            CustomEventMessage message = scriptCore.getEventQueue().poll();
+            eventList.add(message.getTapEvent());
         }
         if (isAlive() && EmptyKit.isNotEmpty(eventList)) {
             eventsOffsetConsumer.accept(eventList, new HashMap<>());

@@ -63,7 +63,7 @@ public class PostgresChangeRecordEmitter extends RelationalChangeRecordEmitter {
         this.connectorConfig = connectorConfig;
         this.connection = connection;
 
-        this.tableId = PostgresSchema.parse(message.getTable());
+        this.tableId = message.getTableId();
         this.unchangedToastColumnMarkerMissing = !connectorConfig.plugin().hasUnchangedToastColumnMarker();
         this.nullToastedValuesMissingFromOld = !connectorConfig.plugin().sendsNullToastedValuesInOld();
         Objects.requireNonNull(tableId);

@@ -1,6 +1,7 @@
 package io.tapdata.connector.clickhouse.dml;
 
 import io.tapdata.common.dml.NormalWriteRecorder;
+import io.tapdata.connector.clickhouse.config.ClickhouseConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
@@ -21,13 +22,14 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         setEscapeChar('`');
     }
 
+    public void addIsDeleted() {
+        allColumn.add("is_deleted");
+    }
+
     @Override
     public void addAndCheckCommit(TapRecordEvent recordEvent, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (recordEvent instanceof TapInsertRecordEvent) {
-            batchCache.add(recordEvent);
-            if (batchCache.size() >= 1000) {
-                executeBatch(listResult);
-            }
+            batchCacheSize++;
         }
     }
 
@@ -43,8 +45,11 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
+        if (EmptyKit.isEmpty(lastAfter)) {
+            return;
+        }
         switch (updatePolicy) {
-            case "insert_on_nonexists":
+            case INSERT_ON_NONEXISTS:
                 justInsert(lastAfter);
                 preparedStatement.addBatch();
                 break;
@@ -102,12 +107,18 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         if (EmptyKit.isNull(dataType)) {
             return value;
         }
+        if (EmptyKit.isNull(value)) {
+            return null;
+        }
         if (dataType.contains("Int")) {
             if (value instanceof Float) {
                 return ((Float) value).intValue();
             } else if (value instanceof Double) {
                 return ((Double) value).intValue();
             }
+        }
+        if (dataType.startsWith("Decimal")) {
+            return value.toString();
         }
         return value;
     }

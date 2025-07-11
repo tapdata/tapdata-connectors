@@ -5,7 +5,6 @@ import com.zaxxer.hikari.pool.HikariProxyStatement;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.JdbcContext;
 import io.tapdata.common.ResultSetConsumer;
-import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
@@ -19,6 +18,7 @@ import java.text.DecimalFormat;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 public class MysqlJdbcContextV2 extends JdbcContext {
 
@@ -46,11 +46,12 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     }
 
     public TimeZone queryTimeZone() throws SQLException {
-        if (EmptyKit.isNotBlank(((MysqlConfig) getConfig()).getTimezone())) {
-            return TimeZone.getTimeZone(ZoneId.of(((MysqlConfig) getConfig()).getTimezone()));
-        }
         AtomicReference<Long> timeOffset = new AtomicReference<>();
-        queryWithNext(MYSQL_TIMEZONE, resultSet -> timeOffset.set(resultSet.getLong(1)));
+        normalQuery(MYSQL_TIMEZONE, resultSet -> {
+            if (resultSet.next()) {
+                timeOffset.set(resultSet.getLong(1));
+            }
+        });
         DecimalFormat decimalFormat = new DecimalFormat("00");
         if (timeOffset.get() >= 0) {
             return TimeZone.getTimeZone(ZoneId.of("+" + decimalFormat.format(timeOffset.get()) + ":00"));
@@ -61,20 +62,26 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     @Override
     protected String queryAllTablesSql(String schema, List<String> tableNames) {
-        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(MYSQL_ALL_TABLE, schema, tableSql);
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'\\")).collect(Collectors.joining("','")) + "')" : "";
+        return String.format(MYSQL_ALL_TABLE, StringKit.escape(schema, "'\\"), tableSql);
     }
 
     @Override
     protected String queryAllColumnsSql(String schema, List<String> tableNames) {
-        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(MYSQL_ALL_COLUMN, schema, tableSql);
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'\\")).collect(Collectors.joining("','")) + "')" : "";
+        return String.format(MYSQL_ALL_COLUMN, StringKit.escape(schema, "'\\"), tableSql);
     }
 
     @Override
     protected String queryAllIndexesSql(String schema, List<String> tableNames) {
-        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN (" + StringKit.joinString(tableNames, "'", ",") + ")" : "";
-        return String.format(MYSQL_ALL_INDEX, schema, tableSql);
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'\\")).collect(Collectors.joining("','")) + "')" : "";
+        return String.format(MYSQL_ALL_INDEX, StringKit.escape(schema, "'\\"), tableSql);
+    }
+
+    @Override
+    protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND k.TABLE_NAME IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'\\")).collect(Collectors.joining("','")) + "')" : "";
+        return String.format(MYSQL_ALL_FOREIGN_KEY, StringKit.escape(schema, "'\\"), tableSql);
     }
 
     public DataMap getTableInfo(String tableName) {
@@ -83,7 +90,7 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         list.add("TABLE_ROWS");
         list.add("DATA_LENGTH");
         try {
-            query(String.format(GET_TABLE_INFO_SQL, getConfig().getDatabase(), tableName), resultSet -> {
+            query(String.format(GET_TABLE_INFO_SQL, StringKit.escape(getConfig().getDatabase(), "'\\"), StringKit.escape(tableName, "'\\")), resultSet -> {
                 while (resultSet.next()) {
                     dataMap.putAll(DbKit.getRowFromResultSet(resultSet, list));
                 }
@@ -129,7 +136,22 @@ public class MysqlJdbcContextV2 extends JdbcContext {
 
     public MysqlBinlogPosition readBinlogPosition() throws Throwable {
         AtomicReference<MysqlBinlogPosition> mysqlBinlogPositionAtomicReference = new AtomicReference<>();
-        normalQuery("SHOW MASTER STATUS", rs -> {
+        String binLogStatusSql = "SHOW MASTER STATUS";
+        try (
+                Connection connection = getConnection()
+        ) {
+            DatabaseMetaData databaseMetaData = connection.getMetaData();
+            String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
+            String[] versionNums = version.split("\\.");
+            if (versionNums.length >= 2) {
+                int majorVersion = Integer.parseInt(versionNums[0]);
+                int minorVersion = Integer.parseInt(versionNums[1]);
+                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
+                    binLogStatusSql = "SHOW BINARY LOG STATUS";
+                }
+            }
+        }
+        normalQuery(binLogStatusSql, rs -> {
             if (rs.next()) {
                 String binlogFilename = rs.getString(1);
                 long binlogPosition = rs.getLong(2);
@@ -143,23 +165,33 @@ public class MysqlJdbcContextV2 extends JdbcContext {
         });
         return mysqlBinlogPositionAtomicReference.get();
     }
+
     public Map<String, Object> querySlaveStatus() throws Throwable {
         Map<String, Object> hostPortAndStatus = new HashMap<>();
         normalQuery("SHOW SLAVE STATUS", rs -> {
             if (rs.next()) {
-                hostPortAndStatus.put("host",rs.getString("Master_Host"));
-                hostPortAndStatus.put("port",rs.getInt("Master_Port"));
-                hostPortAndStatus.put("slaveIoRunning",rs.getString("Slave_IO_Running"));
-                hostPortAndStatus.put("slaveSqlRunning",rs.getString("Slave_SQL_Running"));
+                hostPortAndStatus.put("host", rs.getString("Master_Host"));
+                hostPortAndStatus.put("port", rs.getInt("Master_Port"));
+                hostPortAndStatus.put("slaveIoRunning", rs.getString("Slave_IO_Running"));
+                hostPortAndStatus.put("slaveSqlRunning", rs.getString("Slave_SQL_Running"));
             }
         });
         return hostPortAndStatus;
     }
+
     public Timestamp queryCurrentTime() throws SQLException {
         AtomicReference<Timestamp> currentTime = new AtomicReference<>();
         queryWithNext(MYSQL_CURRENT_TIME, resultSet -> currentTime.set(resultSet.getTimestamp(1)));
         return currentTime.get();
     }
+
+    @Override
+    public Long queryTimestamp() throws SQLException {
+        AtomicReference<Long> currentTime = new AtomicReference<>();
+        queryWithNext(MYSQL_TIMESTAMP, resultSet -> currentTime.set(resultSet.getLong(1)));
+        return currentTime.get();
+    }
+
     public String getServerId() throws Throwable {
         AtomicReference<String> serverId = new AtomicReference<>();
         normalQuery("SHOW VARIABLES LIKE 'SERVER_ID'", rs -> {
@@ -209,7 +241,9 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "       COLUMN_NAME `columnName`,\n" +
                     "       COLUMN_TYPE `dataType`,\n" +
                     "       IS_NULLABLE `nullable`,\n" +
-                    "       COLUMN_COMMENT `columnComment`\n" +
+                    "       COLUMN_COMMENT `columnComment`,\n" +
+                    "       COLUMN_DEFAULT `columnDefault`,\n" +
+                    "       IF(EXTRA = 'auto_increment', 1, 0) `autoInc`" +
                     "FROM INFORMATION_SCHEMA.COLUMNS\n" +
                     "WHERE TABLE_SCHEMA = '%s' %s\n" +
                     "ORDER BY ORDINAL_POSITION";
@@ -219,8 +253,8 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "\tTABLE_NAME `tableName`,\n" +
                     "\tINDEX_NAME `indexName`,\n" +
                     "\t(CASE\n" +
-                    "\t\tWHEN COLLATION = 'A' THEN 1\n" +
-                    "\t\tELSE 0\n" +
+                    "\t\tWHEN COLLATION = 'D' THEN 0\n" +
+                    "\t\tELSE 1\n" +
                     "\tEND) `isAsc`,\n" +
                     "\t(CASE\n" +
                     "\t\tWHEN NON_UNIQUE = 0 THEN 1\n" +
@@ -230,7 +264,8 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "\t\tWHEN INDEX_NAME = 'PRIMARY' THEN 1\n" +
                     "\t\tELSE 0\n" +
                     "\tEND) `isPk`,\n" +
-                    "\tCOLUMN_NAME `columnName`\n" +
+                    "\tCOLUMN_NAME `columnName`,\n" +
+                    "\tSUB_PART `subPosition`\n" +
                     "FROM\n" +
                     "\tINFORMATION_SCHEMA.STATISTICS\n" +
                     "WHERE\n" +
@@ -239,11 +274,30 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "\tINDEX_NAME,\n" +
                     "\tSEQ_IN_INDEX";
 
-    private final static String MYSQL_VERSION = "SELECT VERSION()";
+    private final static String MYSQL_ALL_FOREIGN_KEY =
+            "SELECT\n" +
+                    "    k.CONSTRAINT_NAME `constraintName`,\n" +
+                    "    k.TABLE_NAME `tableName`,\n" +
+                    "    k.REFERENCED_TABLE_NAME `referencesTableName`,\n" +
+                    "    c.DELETE_RULE `onDelete`,\n" +
+                    "    c.UPDATE_RULE `onUpdate`,\n" +
+                    "    k.COLUMN_NAME `fk`,\n" +
+                    "    k.REFERENCED_COLUMN_NAME `rfk`\n" +
+                    "FROM\n" +
+                    "    information_schema.KEY_COLUMN_USAGE k\n" +
+                    "JOIN information_schema.REFERENTIAL_CONSTRAINTS c\n" +
+                    "ON c.CONSTRAINT_SCHEMA=k.TABLE_SCHEMA\n" +
+                    "AND c.CONSTRAINT_NAME=k.CONSTRAINT_NAME\n" +
+                    "WHERE\n" +
+                    "    k.REFERENCED_TABLE_NAME IS NOT NULL\n" +
+                    "    AND k.CONSTRAINT_SCHEMA = '%s' %s";
+
+    protected final static String MYSQL_VERSION = "SELECT VERSION()";
     private final static String MYSQL_CURRENT_TIME = "SELECT NOW();";
+    protected final static String MYSQL_TIMESTAMP = "SELECT REPLACE(unix_timestamp(NOW(3)),'.','') AS currentTimeMillis";
 
     public final static String MYSQL_TIMEZONE = "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()) as timeoffset";
 
-    private static final String GET_TABLE_INFO_SQL = "SELECT TABLE_ROWS,DATA_LENGTH  FROM information_schema.tables WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='%s'";
+    protected static final String GET_TABLE_INFO_SQL = "SELECT TABLE_ROWS,DATA_LENGTH  FROM information_schema.tables WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='%s'";
 
 }

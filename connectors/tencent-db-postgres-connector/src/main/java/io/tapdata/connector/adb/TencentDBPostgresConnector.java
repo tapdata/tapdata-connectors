@@ -23,7 +23,7 @@ public class TencentDBPostgresConnector extends PostgresConnector {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                TencentDBPostgresTest tencentDBPostgresTest = new TencentDBPostgresTest(postgresConfig, consumer).initContext()
+                TencentDBPostgresTest tencentDBPostgresTest = new TencentDBPostgresTest(postgresConfig, consumer, connectionOptions).initContext()
         ) {
             tencentDBPostgresTest.testOneByOne();
             return connectionOptions;

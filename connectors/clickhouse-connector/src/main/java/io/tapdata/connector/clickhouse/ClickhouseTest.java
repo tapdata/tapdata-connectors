@@ -2,21 +2,26 @@ package io.tapdata.connector.clickhouse;
 
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.clickhouse.config.ClickhouseConfig;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestCurrentTimeConsistentEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Consumer;
 
-import static io.tapdata.base.ConnectorBase.testItem;
-
+import static io.tapdata.base.ConnectorBase.*;
 
 public class ClickhouseTest extends CommonDbTest {
+    protected ConnectionOptions connectionOptions;
 
-    public ClickhouseTest(ClickhouseConfig clickhouseConfig, Consumer<TestItem> consumer) {
+    public ClickhouseTest(ClickhouseConfig clickhouseConfig, Consumer<TestItem> consumer, ConnectionOptions connectionOptions) {
         super(clickhouseConfig, consumer);
         jdbcContext = new ClickhouseJdbcContext(clickhouseConfig);
+        this.connectionOptions = connectionOptions;
     }
 
     protected Boolean testWritePrivilege() {
@@ -38,7 +43,18 @@ public class ClickhouseTest extends CommonDbTest {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
+        }
+        return true;
+    }
+
+    @Override
+    public Boolean testTimeDifference(){
+        try {
+            long nowTime = jdbcContext.queryTimestamp();
+            connectionOptions.setTimeDifference(getTimeDifference(nowTime));
+        } catch (SQLException e) {
+            consumer.accept(new TestItem(TestItem.ITEM_TIME_DETECTION, new TapTestCurrentTimeConsistentEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         return true;
     }

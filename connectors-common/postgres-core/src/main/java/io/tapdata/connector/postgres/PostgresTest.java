@@ -5,11 +5,18 @@ import io.tapdata.common.CommonDbTest;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
+import io.tapdata.kit.StringKit;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.testItem.TapTestCurrentTimeConsistentEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestReadPrivilegeEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestStreamReadEx;
+import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
+import io.tapdata.util.NetUtil;
 import org.postgresql.Driver;
 
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -18,16 +25,29 @@ import static io.tapdata.base.ConnectorBase.testItem;
 
 public class PostgresTest extends CommonDbTest {
 
+    protected ConnectionOptions connectionOptions;
+
     public PostgresTest() {
         super();
     }
 
-    public PostgresTest(PostgresConfig postgresConfig, Consumer<TestItem> consumer) {
+    public PostgresTest(PostgresConfig postgresConfig, Consumer<TestItem> consumer, ConnectionOptions connectionOptions) {
         super(postgresConfig, consumer);
+        this.connectionOptions = connectionOptions;
     }
 
     public PostgresTest initContext() {
         jdbcContext = new PostgresJdbcContext((PostgresConfig) commonDbConfig);
+        return this;
+    }
+
+    public PostgresTest withPostgresVersion(String version) {
+        ((PostgresJdbcContext) jdbcContext).withPostgresVersion(version);
+        return this;
+    }
+
+    public PostgresTest withPostgresVersion() throws SQLException {
+        ((PostgresJdbcContext) jdbcContext).withPostgresVersion(jdbcContext.queryVersion());
         return this;
     }
 
@@ -40,8 +60,8 @@ public class PostgresTest extends CommonDbTest {
     public Boolean testReadPrivilege() {
         try {
             AtomicInteger tableSelectPrivileges = new AtomicInteger();
-            jdbcContext.queryWithNext(String.format(PG_TABLE_SELECT_NUM, commonDbConfig.getUser(),
-                    commonDbConfig.getDatabase(), commonDbConfig.getSchema()), resultSet -> tableSelectPrivileges.set(resultSet.getInt(1)));
+            jdbcContext.queryWithNext(String.format(PG_TABLE_SELECT_NUM, StringKit.escape(commonDbConfig.getUser(), "'"),
+                    StringKit.escape(commonDbConfig.getDatabase(), "'"), StringKit.escape(commonDbConfig.getSchema(), "'")), resultSet -> tableSelectPrivileges.set(resultSet.getInt(1)));
             if (tableSelectPrivileges.get() >= tableCount()) {
                 consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY, "All tables can be selected"));
             } else {
@@ -50,12 +70,19 @@ public class PostgresTest extends CommonDbTest {
             }
             return true;
         } catch (Throwable e) {
-            consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_FAILED, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_READ, new TapTestReadPrivilegeEx(e), TestItem.RESULT_FAILED));
             return false;
         }
     }
 
     public Boolean testStreamRead() {
+        if ("walminer".equals(((PostgresConfig) commonDbConfig).getLogPluginName())) {
+            if (EmptyKit.isBlank(((PostgresConfig) commonDbConfig).getPgtoHost())) {
+                return testWalMiner();
+            } else {
+                return testWalMinerPgto();
+            }
+        }
         Properties properties = new Properties();
         properties.put("user", commonDbConfig.getUser());
         properties.put("password", commonDbConfig.getPassword());
@@ -73,15 +100,38 @@ public class PostgresTest extends CommonDbTest {
             consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY, "Cdc can work normally"));
             return true;
         } catch (Throwable e) {
-            consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
-                    String.format("Test log plugin failed: {%s}, Maybe cdc events cannot work", ErrorKit.getLastCause(e).getMessage())));
+            consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestStreamReadEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
+            return null;
+        }
+    }
+
+    public Boolean testWalMiner() {
+        try {
+            jdbcContext.query("select walminer_stop()", resultSet -> {
+                if (resultSet.next()) {
+                    consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY, "Cdc can work normally"));
+                }
+            });
+            return true;
+        } catch (Throwable e) {
+            consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestStreamReadEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
+            return null;
+        }
+    }
+
+    public Boolean testWalMinerPgto() {
+        try {
+            NetUtil.validateHostPortWithSocket(((PostgresConfig) commonDbConfig).getPgtoHost(), ((PostgresConfig) commonDbConfig).getPgtoPort());
+            return true;
+        } catch (Throwable e) {
+            consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestStreamReadEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return null;
         }
     }
 
     protected int tableCount() throws Throwable {
         AtomicInteger tableCount = new AtomicInteger();
-        jdbcContext.queryWithNext(PG_TABLE_NUM, resultSet -> tableCount.set(resultSet.getInt(1)));
+        jdbcContext.queryWithNext(String.format(PG_TABLE_NUM, StringKit.escape(commonDbConfig.getSchema(), "'")), resultSet -> tableCount.set(resultSet.getInt(1)));
         return tableCount.get();
     }
 
@@ -96,7 +146,7 @@ public class PostgresTest extends CommonDbTest {
     protected Boolean testWritePrivilege() {
         try {
             List<String> sqls = new ArrayList<>();
-            String schemaPrefix = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? ("\"" + commonDbConfig.getSchema() + "\".") : "";
+            String schemaPrefix = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? ("\"" + StringKit.escape(commonDbConfig.getSchema(), "\"") + "\".") : "";
             if (jdbcContext.queryAllTables(Arrays.asList(TEST_WRITE_TABLE, TEST_WRITE_TABLE.toUpperCase())).size() > 0) {
                 sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
             }
@@ -113,8 +163,25 @@ public class PostgresTest extends CommonDbTest {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, e.getMessage()));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
+        return true;
+    }
+
+    @Override
+    public Boolean testTimeDifference() {
+        try {
+            long nowTime = jdbcContext.queryTimestamp();
+            connectionOptions.setTimeDifference(getTimeDifference(nowTime));
+        } catch (SQLException e) {
+            consumer.accept(new TestItem(TestItem.ITEM_TIME_DETECTION, new TapTestCurrentTimeConsistentEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
+        }
+        return true;
+    }
+
+    @Override
+    protected Boolean testDatasourceInstanceInfo() {
+        buildDatasourceInstanceInfo(connectionOptions);
         return true;
     }
 }
