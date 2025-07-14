@@ -46,6 +46,7 @@ public class NormalRecordWriter {
     protected boolean largeSql = false;
     protected CommonDbConfig commonDbConfig;
     protected boolean needCloseIdentity = false;
+    protected boolean needDisableTrigger = false;
 
     public NormalRecordWriter(JdbcContext jdbcContext, TapTable tapTable) throws SQLException {
         this.commonDbConfig = jdbcContext.getConfig();
@@ -108,6 +109,9 @@ public class NormalRecordWriter {
             if (!isTransaction) {
                 if (needCloseIdentity) {
                     openIdentity();
+                }
+                if(needDisableTrigger) {
+                    enableTrigger();
                 }
                 connection.close();
             }
@@ -271,6 +275,33 @@ public class NormalRecordWriter {
     }
 
     protected String getOpenIdentitySql() {
+        return null;
+    }
+
+    public void disableTrigger() throws SQLException {
+        String sql = getDisableTriggerSql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+        needDisableTrigger = true;
+    }
+
+    public void enableTrigger() throws SQLException {
+        String sql = getEnableTriggerSql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+    }
+
+    protected String getDisableTriggerSql() {
+        return null;
+    }
+
+    protected String getEnableTriggerSql() {
         return null;
     }
 }
