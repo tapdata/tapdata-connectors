@@ -67,6 +67,8 @@ public class CommonDbConfig implements Serializable {
 
     private int maxIndexNameLength = 30;
 
+    private Boolean disableTrigger = false;
+
     //pattern for jdbc-url
     public String getDatabaseUrlPattern() {
         // last %s reserved for extend params
@@ -444,5 +446,13 @@ public class CommonDbConfig implements Serializable {
 
     public void setMaxIndexNameLength(int maxIndexNameLength) {
         this.maxIndexNameLength = maxIndexNameLength;
+    }
+
+    public Boolean getDisableTrigger() {
+        return disableTrigger;
+    }
+
+    public void setDisableTrigger(Boolean disableTrigger) {
+        this.disableTrigger = disableTrigger;
     }
 }
