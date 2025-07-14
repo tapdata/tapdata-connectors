@@ -102,7 +102,6 @@
           "x-index": 70
         },
         "logPluginName": {
-          "required": true,
           "type": "string",
           "title": "${logPluginName}",
           "default": "pgoutput",
@@ -142,7 +141,17 @@
               "label": "WALMINER",
               "value": "walminer"
             }
-          ]
+          ],
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "OPTIONAL_FIELDS": {
           "type": "void",
