@@ -121,7 +121,6 @@
           "x-index": 70
         },
         "logPluginName": {
-          "required": true,
           "type": "string",
           "title": "${logPluginName}",
           "default": "pgoutput",
@@ -161,7 +160,17 @@
               "label": "WALMINER",
               "value": "walminer"
             }
-          ]
+          ],
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "pgtoHost": {
           "type": "string",
@@ -172,10 +181,10 @@
           "x-index": 90,
           "x-reactions": [
             {
-              "dependencies": [".logPluginName"],
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName"],
               "fulfill": {
-                "state": {
-                  "visible": "{{$deps[0] === 'walminer'}}"
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='walminer' ? null:\"none\"}}"
                 }
               }
             }
@@ -190,10 +199,10 @@
           "x-index": 100,
           "x-reactions": [
             {
-              "dependencies": [".logPluginName"],
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName"],
               "fulfill": {
-                "state": {
-                  "visible": "{{$deps[0] === 'walminer'}}"
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='walminer' ? null:\"none\"}}"
                 }
               }
             }
