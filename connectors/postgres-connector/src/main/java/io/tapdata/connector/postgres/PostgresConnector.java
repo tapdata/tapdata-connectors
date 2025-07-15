@@ -386,9 +386,13 @@ public class PostgresConnector extends CommonDbConnector {
                 .withPostgresConfig(postgresConfig);
     }
 
-    protected void openIdentity(TapTable tapTable) throws SQLException {
+    protected void openIdentity(TapTable tapTable) {
         if (EmptyKit.isEmpty(tapTable.primaryKeys())) {
-            jdbcContext.execute("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" REPLICA IDENTITY FULL");
+            try {
+                jdbcContext.execute("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" REPLICA IDENTITY FULL");
+            } catch (Exception e) {
+                tapLogger.warn("Failed to open identity for table " + tapTable, e);
+            }
         }
     }
 
