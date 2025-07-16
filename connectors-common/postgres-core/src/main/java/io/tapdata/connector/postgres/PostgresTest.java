@@ -59,7 +59,7 @@ public class PostgresTest extends CommonDbTest {
     public Boolean testReadPrivilege() {
         try {
             AtomicInteger tableSelectPrivileges = new AtomicInteger();
-            jdbcContext.queryWithNext(String.format(PG_TABLE_SELECT_NUM, StringKit.escape(commonDbConfig.getUser(), "'"),
+            jdbcContext.queryWithNext(String.format(PG_TABLE_SELECT_NUM,
                     StringKit.escape(commonDbConfig.getDatabase(), "'"), StringKit.escape(commonDbConfig.getSchema(), "'")), resultSet -> tableSelectPrivileges.set(resultSet.getInt(1)));
             if (tableSelectPrivileges.get() >= tableCount()) {
                 consumer.accept(testItem(TestItem.ITEM_READ, TestItem.RESULT_SUCCESSFULLY, "All tables can be selected"));
@@ -121,8 +121,8 @@ public class PostgresTest extends CommonDbTest {
     }
 
     private final static String PG_TABLE_NUM = "SELECT COUNT(*) FROM pg_tables WHERE schemaname='%s'";
-    private final static String PG_TABLE_SELECT_NUM = "SELECT count(*) FROM information_schema.table_privileges " +
-            "WHERE grantee='%s' AND table_catalog='%s' AND table_schema='%s' AND privilege_type='SELECT'";
+    private final static String PG_TABLE_SELECT_NUM = "SELECT count(*) FROM information_schema.tables " +
+            "WHERE  table_catalog='%s' AND table_schema='%s' AND table_type='BASE TABLE'";
     protected final static String PG_LOG_PLUGIN_CREATE_TEST = "SELECT pg_create_logical_replication_slot('%s','%s')";
     protected final static String PG_LOG_PLUGIN_DROP_TEST = "select pg_drop_replication_slot(a.slot_name) " +
             "from (select * from pg_replication_slots where slot_name like 'test_tapdata_%') a;";
