@@ -25,6 +25,7 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapConstraint;
@@ -422,9 +423,13 @@ public class PostgresConnector extends CommonDbConnector {
                 .withPostgresConfig(postgresConfig);
     }
 
-    protected void openIdentity(TapTable tapTable) throws SQLException {
+    protected void openIdentity(TapTable tapTable) {
         if (EmptyKit.isEmpty(tapTable.primaryKeys())) {
-            jdbcContext.execute("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" REPLICA IDENTITY FULL");
+            try {
+                jdbcContext.execute("ALTER TABLE \"" + jdbcContext.getConfig().getSchema() + "\".\"" + tapTable.getId() + "\" REPLICA IDENTITY FULL");
+            } catch (Exception e) {
+                tapLogger.warn("Failed to open identity for table " + tapTable, e);
+            }
         }
     }
 
@@ -1194,9 +1199,11 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     public String exportEventSql(TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
+        PostgresWriteRecorder postgresWriter = new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
         if (tapEvent instanceof TapInsertRecordEvent) {
-            PostgresWriteRecorder postgresWriter = new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
             return postgresWriter.getUpsertSql(((TapInsertRecordEvent) tapEvent).getAfter());
+        }else if(tapEvent instanceof TapDeleteRecordEvent){
+            return postgresWriter.getDeleteSql(((TapDeleteRecordEvent) tapEvent).getBefore());
         }
         return null;
     }

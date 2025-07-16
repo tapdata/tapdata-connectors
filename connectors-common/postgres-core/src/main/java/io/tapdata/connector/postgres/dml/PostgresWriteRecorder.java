@@ -267,7 +267,9 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         return sql;
     }
 
-    private String formatValueForSql(Object value, String dataType) {
+
+    @Override
+    public String formatValueForSql(Object value, String dataType) {
         if (dataType.startsWith("bit")) {
             if (value instanceof Boolean) {
                 value = ((Boolean) value) ? "1" : "0";

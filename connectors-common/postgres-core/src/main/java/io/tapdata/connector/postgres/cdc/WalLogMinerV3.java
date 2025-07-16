@@ -66,6 +66,7 @@ public class WalLogMinerV3 extends AbstractWalLogMiner {
                     }
                 } catch (Exception e) {
                     threadException.set(e);
+                    return;
                 }
             }
         });
