@@ -498,6 +498,75 @@
               "value": "csv"
             }
           ]
+        },
+        "flushSizeMB": {
+          "required": false,
+          "type": "int",
+          "x-index": 8,
+          "title": "${flushSizeMB}",
+          "default": 100,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${flushSizeMBTip}",
+            "min": 1,
+            "max": 1024
+          },
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          },
+          "apiServerKey": "node_flushSizeMB"
+        },
+        "flushTimeoutSeconds": {
+          "required": false,
+          "type": "int",
+          "x-index": 9,
+          "title": "${flushTimeoutSeconds}",
+          "default": 300,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${flushTimeoutSecondsTip}",
+            "min": 1,
+            "max": 3600
+          },
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          },
+          "apiServerKey": "node_flushTimeoutSeconds"
+        },
+        "minuteLimitMB": {
+          "required": false,
+          "type": "int",
+          "x-index": 10,
+          "title": "${minuteLimitMB}",
+          "default": 0,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${minuteLimitMBTip}",
+            "min": 0,
+            "max": 10000
+          },
+          "x-reactions": {
+            "dependencies": ["$inputs"],
+            "fulfill": {
+              "state": {
+                "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+              }
+            }
+          },
+          "apiServerKey": "node_minuteLimitMB"
         }
       }
     }
@@ -538,7 +607,13 @@
       "propValue": "Property Value",
       "useHTTPS": "Enable HTTPS",
       "backendNum": "The number of BE nodes",
-      "backendNumTip": "During Doris connection testing, a table is created and data is written to Doris for testing. It is necessary to obtain the number of BE nodes when building a table. If the table is not built according to the number of BE nodes, it may cause an error. admin permission is required to obtain the number of BE nodes. If you do not want to grant admin permission, please enter the number of BE manually to avoid errors in the table."
+      "backendNumTip": "During Doris connection testing, a table is created and data is written to Doris for testing. It is necessary to obtain the number of BE nodes when building a table. If the table is not built according to the number of BE nodes, it may cause an error. admin permission is required to obtain the number of BE nodes. If you do not want to grant admin permission, please enter the number of BE manually to avoid errors in the table.",
+      "flushSizeMB": "Flush Size (MB)",
+      "flushSizeMBTip": "Buffer data locally and flush when reaching this size threshold (in MB). Default is 100MB. This setting takes priority over general write count configurations.",
+      "flushTimeoutSeconds": "Flush Timeout (Seconds)",
+      "flushTimeoutSecondsTip": "Maximum wait time before flushing buffered data (in seconds). Default is 300 seconds. This setting takes priority over general timeout configurations.",
+      "minuteLimitMB": "Per-Minute Write Limit (MB)",
+      "minuteLimitMBTip": "Maximum data to write per minute (in MB). Set to 0 to disable limit. If exceeded, writing will pause until the next minute."
     },
     "zh_CN": {
       "host": "数据库地址",
@@ -574,7 +649,13 @@
       "propValue": "属性值",
       "useHTTPS": "开启HTTPS",
       "backendNum": "BE节点的数量",
-      "backendNumTip": "Doris连接测试时，会在Doris建表并写入数据进行测试。在建表时需要获取BE节点数量，如果不根据BE数量去建表可能会导致报错。获取BE节点的数量需要admin 权限，如果不想授予admin权限，请手动输入BE数量，以免建表报错。"
+      "backendNumTip": "Doris连接测试时，会在Doris建表并写入数据进行测试。在建表时需要获取BE节点数量，如果不根据BE数量去建表可能会导致报错。获取BE节点的数量需要admin 权限，如果不想授予admin权限，请手动输入BE数量，以免建表报错。",
+      "flushSizeMB": "刷新大小 (MB)",
+      "flushSizeMBTip": "本地缓冲数据，达到此大小阈值时刷新（单位：MB）。默认值为100MB。此设置优先级高于通用写入条数配置。",
+      "flushTimeoutSeconds": "刷新超时 (秒)",
+      "flushTimeoutSecondsTip": "刷新缓冲数据前的最大等待时间（单位：秒）。默认值为300秒。此设置优先级高于通用超时配置。",
+      "minuteLimitMB": "每分钟写入限制 (MB)",
+      "minuteLimitMBTip": "每分钟最大写入数据量（单位：MB）。设置为0表示不限制。如果超过限制，将暂停写入直到下一分钟。"
     },
     "zh_TW": {
       "host": "數據庫地址",
@@ -610,7 +691,13 @@
       "propValue": "屬性值",
       "useHTTPS": "開啓HTTPS",
       "backendNum": "BE節點的數量",
-      "backendNumTip": "Doris連接測試時，會在Doris建表並寫入數據進行測試。在建表時需要獲取BE節點數量，如果不根據BE數量去建表可能會導致報錯。獲取BE節點的數量需要admin 權限，如果不想授予admin權限，請手動輸入BE數量，以免建表報錯。"
+      "backendNumTip": "Doris連接測試時，會在Doris建表並寫入數據進行測試。在建表時需要獲取BE節點數量，如果不根據BE數量去建表可能會導致報錯。獲取BE節點的數量需要admin 權限，如果不想授予admin權限，請手動輸入BE數量，以免建表報錯。",
+      "flushSizeMB": "刷新大小 (MB)",
+      "flushSizeMBTip": "本地緩衝數據，達到此大小閾值時刷新（單位：MB）。默認值為100MB。此設置優先級高於通用寫入條數配置。",
+      "flushTimeoutSeconds": "刷新超時 (秒)",
+      "flushTimeoutSecondsTip": "刷新緩衝數據前的最大等待時間（單位：秒）。默認值為300秒。此設置優先級高於通用超時配置。",
+      "minuteLimitMB": "每分鐘寫入限制 (MB)",
+      "minuteLimitMBTip": "每分鐘最大寫入數據量（單位：MB）。設置為0表示不限制。如果超過限制，將暫停寫入直到下一分鐘。"
     }
   },
   "dataTypes": {

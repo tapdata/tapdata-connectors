@@ -189,7 +189,16 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-index": 3,
-          "required": true
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "database": {
           "type": "string",
@@ -226,7 +235,6 @@
           "x-index": 7
         },
         "rootServerList": {
-          "required": true,
           "type": "string",
           "title": "${rootServerList}",
           "x-decorator": "FormItem",
@@ -235,26 +243,54 @@
           "x-decorator-props": {
             "tooltip": "${rootServerListTooltip}"
           },
-          "x-index": 8
+          "x-index": 8,
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "rawLogServerHost": {
-          "required": true,
           "type": "string",
           "title": "${rawLogServerHost}",
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "rawLogServerHost",
-          "x-index": 9
+          "x-index": 9,
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "rawLogServerPort": {
-          "required": true,
           "type": "string",
           "default": 50051,
           "title": "${rawLogServerPort}",
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "apiServerKey": "rawLogServerPort",
-          "x-index": 10
+          "x-index": 10,
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "cdcUser": {
           "type": "string",
@@ -264,7 +300,16 @@
           "apiServerKey": "cdcUser",
           "default": "root@sys",
           "x-index": 11,
-          "required": true
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "cdcPassword": {
           "type": "string",
@@ -272,7 +317,17 @@
           "x-decorator": "FormItem",
           "x-component": "Password",
           "apiServerKey": "cdcPassword",
-          "x-index": 12
+          "x-index": 12,
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "timezone": {
           "type": "string",
@@ -526,17 +581,12 @@
     },
     "bit(1)": {
       "to": "TapBoolean",
-      "bit": 1,
-      "queryOnly": true
+      "bit": 1
     },
     "bit[($bit)]": {
       "to": "TapNumber",
       "bit": 64,
       "queryOnly": true
-    },
-    "tinyint(1)": {
-      "to": "TapBoolean",
-      "bit": 1
     },
     "tinyint[($zerofill)]": {
       "to": "TapNumber",

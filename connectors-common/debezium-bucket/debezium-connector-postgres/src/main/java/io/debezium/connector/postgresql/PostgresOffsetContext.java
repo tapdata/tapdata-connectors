@@ -140,8 +140,8 @@ public class PostgresOffsetContext implements OffsetContext {
 
     public void updateCommitPosition(Lsn lsn, Lsn lastCompletelyProcessedLsn, Instant commitTime, Long txId, TableId tableId, Long xmin) {
         this.lastCompletelyProcessedLsn = lastCompletelyProcessedLsn;
-        this.lastCommitLsn = lastCompletelyProcessedLsn;
-        sourceInfo.update(lsn, commitTime, txId, tableId, xmin, lastCompletelyProcessedLsn);
+        this.lastCommitLsn = lsn;
+        sourceInfo.update(lsn, commitTime, txId, tableId, xmin, lastCommitLsn);
     }
 
     boolean hasLastKnownPosition() {
@@ -206,7 +206,7 @@ public class PostgresOffsetContext implements OffsetContext {
         public OffsetContext load(Map<String, ?> offset) {
             final Lsn lsn = Lsn.valueOf(readOptionalLong(offset, SourceInfo.LSN_KEY));
             final Lsn lastCompletelyProcessedLsn = Lsn.valueOf(readOptionalLong(offset, LAST_COMPLETELY_PROCESSED_LSN_KEY));
-            final Lsn lastCommitLsn = Lsn.valueOf(readOptionalLong(offset, LAST_COMPLETELY_PROCESSED_LSN_KEY));
+            final Lsn lastCommitLsn = Lsn.valueOf(readOptionalLong(offset, LAST_COMMIT_LSN_KEY));
             final Long txId = readOptionalLong(offset, SourceInfo.TXID_KEY);
 
             final Instant useconds = Conversions.toInstantFromMicros((Long) offset.get(SourceInfo.TIMESTAMP_USEC_KEY));

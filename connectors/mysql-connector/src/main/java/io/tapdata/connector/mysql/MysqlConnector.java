@@ -66,6 +66,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -95,7 +96,7 @@ public class MysqlConnector extends CommonDbConnector {
 
     protected final AtomicBoolean started = new AtomicBoolean(false);
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
-    public HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave;
+    public java.util.HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave;
 
 
     @Override
@@ -244,7 +245,7 @@ public class MysqlConnector extends CommonDbConnector {
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
         codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
 
-        codecRegistry.registerFromTapValue(TapBooleanValue.class, "tinyint(1)", TapValue::getValue);
+        codecRegistry.registerFromTapValue(TapBooleanValue.class, "bit(1)", TapValue::getValue);
 
         codecRegistry.registerToTapValue(TapIllegalDate.class, new ToTapValueCodec<TapValue<?, ?>>() {
             @Override
@@ -287,6 +288,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportGetTableNamesFunction(this::getTableNames);
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> mysqlJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandV2Function(this::executeCommandV2);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         //connectorFunctions.supportQueryFieldMinMaxValueFunction(this::minMaxValue);
         //connectorFunctions.supportGetReadPartitionsFunction(this::getReadPartitions);
@@ -1043,6 +1045,16 @@ public class MysqlConnector extends CommonDbConnector {
         });
 
         return uniqueAutoIncrementFields.stream().map(f -> String.format(sql, tapTable.getId(), f, tapTable.getNameFieldMap().get(f).getDataType())).collect(Collectors.toList());
+    }
+
+    protected int getLowerCaseTableNames() throws SQLException {
+        AtomicInteger res = new AtomicInteger(0);
+        mysqlJdbcContext.normalQuery("show variables like 'lower_case_table_names'", resultSet -> {
+            if(resultSet.next()) {
+                res.set(resultSet.getInt("Value"));
+            }
+        });
+        return res.get();
     }
 
 }

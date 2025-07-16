@@ -318,11 +318,15 @@ public class PostgresStreamingChangeEventSource implements StreamingChangeEventS
     public void commitOffset(Map<String, ?> offset) {
         try {
             ReplicationStream replicationStream = this.replicationStream.get();
-            final Lsn commitLsn = Lsn.valueOf((Long) offset.get(PostgresOffsetContext.LAST_COMMIT_LSN_KEY));
-            final Lsn changeLsn = Lsn.valueOf((Long) offset.get(PostgresOffsetContext.LAST_COMPLETELY_PROCESSED_LSN_KEY));
+            final Lsn commitLsn = Lsn.valueOf(Long.valueOf(offset.get(PostgresOffsetContext.LAST_COMMIT_LSN_KEY).toString()));
+            final Lsn changeLsn = Lsn.valueOf(Long.valueOf(offset.get(PostgresOffsetContext.LAST_COMPLETELY_PROCESSED_LSN_KEY).toString()));
             final Lsn lsn = (commitLsn != null) ? commitLsn : changeLsn;
 
-            if (replicationStream != null && lsn != null) {
+            if (replicationStream == null) {
+                LOGGER.debug("Streaming has already stopped, ignoring commit callback...");
+                throw new ConnectException("Streaming has already stopped, ignoring commit callback...");
+            }
+            if (lsn != null) {
                 if (LOGGER.isDebugEnabled()) {
                     LOGGER.debug("Flushing LSN to server: {}", lsn);
                 }

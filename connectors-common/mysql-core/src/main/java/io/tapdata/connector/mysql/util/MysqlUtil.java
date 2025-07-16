@@ -198,7 +198,7 @@ public class MysqlUtil extends JdbcUtil {
 		}
 		mysqlConfig.setAvailableMasterSlaveAddress(availableMasterSlaveAddress);
 	}
-	public static void buildMasterNode(MysqlConfig mysqlConfig, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) {
+	public static void buildMasterNode(MysqlConfig mysqlConfig, java.util.HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) {
 		if (null == mysqlConfig) return;
 		String deploymentMode = mysqlConfig.getDeploymentMode();
 		if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
@@ -254,7 +254,7 @@ public class MysqlUtil extends JdbcUtil {
 			}
 		}
 	}
-	public static ArrayList<Map<String, Object>> compareMasterSlaveCurrentTime(MysqlConfig mysqlConfig, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave){
+	public static ArrayList<Map<String, Object>> compareMasterSlaveCurrentTime(MysqlConfig mysqlConfig, java.util.HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave){
 		if (null == mysqlConfig) return null;
 		String deploymentMode = mysqlConfig.getDeploymentMode();
 		if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
@@ -298,9 +298,9 @@ public class MysqlUtil extends JdbcUtil {
 		}
 		return null;
 	}
-	public static HashMap<String, MysqlJdbcContextV2> buildContextMapForMasterSlave(MysqlConfig mysqlConfig){
+	public static java.util.HashMap<String, MysqlJdbcContextV2> buildContextMapForMasterSlave(MysqlConfig mysqlConfig){
 		if (null == mysqlConfig) return null;
-		HashMap<String, MysqlJdbcContextV2> contextMap = new HashMap<>();
+		java.util.HashMap<String, MysqlJdbcContextV2> contextMap = new java.util.HashMap<>();
 		String deploymentMode = mysqlConfig.getDeploymentMode();
 		if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
 			testHostPortForMasterSlave(mysqlConfig);

@@ -329,6 +329,7 @@ public class HighgoConnector extends CommonDbConnector {
         });
         commonSqlMaker = new PostgresSqlMaker().closeNotNull(postgresConfig.getCloseNotNull());
         postgresVersion = postgresJdbcContext.queryVersion();
+        postgresJdbcContext.withPostgresVersion(postgresVersion);
         ddlSqlGenerator = new PostgresDDLSqlGenerator();
         tapLogger = connectionContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();

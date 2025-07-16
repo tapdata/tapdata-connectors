@@ -28,6 +28,15 @@ public class StarrocksConfig extends CommonDbConfig {
 
     private Integer backendNum;
 
+    // 新增配置：刷新大小阈值（MB）
+    private Integer flushSizeMB = 100;
+
+    // 新增配置：刷新超时阈值（秒）
+    private Integer flushTimeoutSeconds = 300;
+
+    // 新增配置：每分钟写入限制（MB，0表示不限制）
+    private Integer minuteLimitMB = 0;
+
     //customize
     public StarrocksConfig() {
         setDbType("starrocks");
@@ -160,5 +169,29 @@ public class StarrocksConfig extends CommonDbConfig {
 
     public WriteFormat getWriteFormatEnum() {
         return WriteFormat.valueOf(writeFormat);
+    }
+
+    public Integer getFlushSizeMB() {
+        return flushSizeMB;
+    }
+
+    public void setFlushSizeMB(Integer flushSizeMB) {
+        this.flushSizeMB = flushSizeMB;
+    }
+
+    public Integer getFlushTimeoutSeconds() {
+        return flushTimeoutSeconds;
+    }
+
+    public void setFlushTimeoutSeconds(Integer flushTimeoutSeconds) {
+        this.flushTimeoutSeconds = flushTimeoutSeconds;
+    }
+
+    public Integer getMinuteLimitMB() {
+        return minuteLimitMB;
+    }
+
+    public void setMinuteLimitMB(Integer minuteLimitMB) {
+        this.minuteLimitMB = minuteLimitMB;
     }
 }

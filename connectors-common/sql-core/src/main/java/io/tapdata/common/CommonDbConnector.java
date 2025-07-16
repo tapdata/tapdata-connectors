@@ -222,7 +222,8 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected void createDoubleActiveTempTable() throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList("_tap_double_active")).size() < 1) {
-            jdbcContext.execute(String.format("create table %s (c1 int primary key, c2 varchar(50))", getSchemaAndTable("_tap_double_active")));
+            jdbcContext.execute(String.format("create table %s (%s int primary key, %s varchar(50))", getSchemaAndTable("_tap_double_active"),
+                    commonDbConfig.getEscapeChar() + "c1" + commonDbConfig.getEscapeChar(), commonDbConfig.getEscapeChar() + "c2" + commonDbConfig.getEscapeChar()));
             jdbcContext.execute(String.format("insert into %s values (1, null)", getSchemaAndTable("_tap_double_active")));
         }
     }
@@ -975,6 +976,18 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
         return new ArrayList<>();
+    }
+
+    protected void executeCommandV2(TapConnectionContext connectionContext, String sqlType, String sql, Consumer<List<DataMap>> consumer) throws Throwable {
+        switch (sqlType) {
+            case "execute":
+                jdbcContext.execute(sql);
+                consumer.accept(null);
+                break;
+            case "query":
+                jdbcContext.query(sql, resultSet -> consumer.accept(DbKit.getDataFromResultSet(resultSet)));
+                break;
+        }
     }
 
 }

@@ -24,6 +24,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -61,7 +62,7 @@ public abstract class AbstractWalLogMiner {
         tableList.forEach(tableName -> {
             TapTable table = tableMap.get(tableName);
             if (EmptyKit.isNotNull(table)) {
-                dataTypeMap.putAll(table.getNameFieldMap().entrySet().stream().collect(Collectors.toMap(v -> tableName + "." + v.getKey(), e -> e.getValue().getPureDataType())));
+                dataTypeMap.putAll(table.getNameFieldMap().entrySet().stream().collect(Collectors.toMap(v -> tableName + "." + v.getKey(), e -> Optional.ofNullable(e.getValue().getPureDataType()).orElse(e.getValue().getDataType()))));
             }
         });
         return this;

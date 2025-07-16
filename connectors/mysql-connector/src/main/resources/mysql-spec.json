@@ -44,6 +44,13 @@
         "new_field_event", "alter_field_name_event", "alter_field_attributes_event", "drop_field_event"
       ]
     },
+    "monitorAPI": {
+      "lowerCaseTableNames": {
+        "title": "${lowerCaseTableNames}",
+        "type": "string",
+        "method": "io.tapdata.connector.mysql.MysqlConnector#getLowerCaseTableNames"
+      }
+    },
     "connection": {
       "type": "object",
       "properties": {
@@ -519,7 +526,8 @@
       "maxSplit": "Maximum number of splits",
       "batchReadThreadSize": "Batch read thread size",
       "maximumQueueSize": "Maximum queue size",
-      "maximumQueueSizeTip": "The queue size for reading incremental data in MySQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting."
+      "maximumQueueSizeTip": "The queue size for reading incremental data in MySQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting.",
+      "lowerCaseTableNames": "Lower Case TableNames"
     },
     "zh_CN": {
       "host": "地址",
@@ -555,7 +563,8 @@
       "maxSplit": "最大分片数",
       "batchReadThreadSize": "批量读取线程数",
       "maximumQueueSize": "最大队列大小",
-      "maximumQueueSizeTip": "MySql读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置。"
+      "maximumQueueSizeTip": "MySql读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置。",
+      "lowerCaseTableNames": "大小写敏感"
     },
     "zh_TW": {
       "host": "地址",
@@ -591,7 +600,8 @@
       "maxSplit": "最大分片數",
       "batchReadThreadSize": "批量讀取線程數",
       "maximumQueueSize": "最大隊列大小",
-      "maximumQueueSizeTip": "MySql 讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置。"
+      "maximumQueueSizeTip": "MySql 讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置。",
+      "lowerCaseTableNames": "大小寫敏感"
     }
   },
   "dataTypes": {
@@ -667,13 +677,9 @@
       "queryOnly": true
     },
     "bit[($bit)]": {
-      "to": "TapNumber",
+      "to": "TapBinary",
       "bit": 64,
       "queryOnly": true
-    },
-    "tinyint(1)": {
-      "to": "TapBoolean",
-      "bit": 1
     },
     "tinyint[($zerofill)]": {
       "to": "TapNumber",
