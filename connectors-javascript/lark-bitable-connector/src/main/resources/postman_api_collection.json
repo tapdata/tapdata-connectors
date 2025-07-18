@@ -195,6 +195,49 @@
 				}
 			},
 			"response": []
+		},
+		{
+			"name": "batchAddRows",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "{{Authorization}}",
+						"type": "default"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\"records\":{{records}}}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records/batch_create",
+					"protocol": "https",
+					"host": [
+						"open",
+						"feishu",
+						"cn"
+					],
+					"path": [
+						"open-apis",
+						"bitable",
+						"v1",
+						"apps",
+						"{{app_token}}",
+						"tables",
+						"{{table_id}}",
+						"records",
+						"batch_create"
+					]
+				}
+			},
+			"response": []
 		}
 	],
 	"event": [
@@ -255,6 +298,11 @@
 		},
 		{
 			"key": "body",
+			"value": "",
+			"type": "default"
+		},
+		{
+			"key": "records",
 			"value": "",
 			"type": "default"
 		}
