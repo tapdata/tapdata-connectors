@@ -27,6 +27,9 @@ public enum JSFunctionNames {
     DeleteRecordFunction("deleteRecord", "DeleteRecordFunction", "","writeRecord"),
     InsertRecordFunction("insertRecord", "InsertRecordFunction", "","writeRecord"),
     UpdateRecordFunction("updateRecord", "UpdateRecordFunction", "","writeRecord"),
+    DeleteRecordBatchFunction("deleteRecordBatch", "DeleteRecordBatchFunction", "","writeRecord", true),
+    InsertRecordBatchFunction("insertRecordBatch", "InsertRecordBatchFunction", "","writeRecord", true),
+    UpdateRecordBatchFunction("updateRecordBatch", "UpdateRecordBatchFunction", "","writeRecord", true),
 
     SCANNING_CAPABILITIES_IN_JAVA_SCRIPT("_scanning_capabilities_in_java_script", "scanningCapabilitiesInJavaScript", ""),
     ;
@@ -34,18 +37,28 @@ public enum JSFunctionNames {
     String javaName;
     String description;
     String baseFunction;
+    boolean batch;
 
     JSFunctionNames(String jsName, String javaName, String description,String baseFunction) {
         this.javaName = javaName;
         this.jsName = jsName;
         this.description = description;
         this.baseFunction = baseFunction;
+        this.batch = false;
+    }
+    JSFunctionNames(String jsName, String javaName, String description,String baseFunction, boolean batch) {
+        this.javaName = javaName;
+        this.jsName = jsName;
+        this.description = description;
+        this.baseFunction = baseFunction;
+        this.batch = batch;
     }
     JSFunctionNames(String jsName, String javaName, String description) {
         this.javaName = javaName;
         this.jsName = jsName;
         this.description = description;
         this.baseFunction = "base";
+        this.batch = false;
     }
 
     public String jsName() {
@@ -71,5 +84,9 @@ public enum JSFunctionNames {
 
     public static boolean isSupported(String functionName) {
         return Objects.nonNull(JSFunctionNames.isSupport(functionName));
+    }
+
+    public boolean isBatch() {
+        return batch;
     }
 }
