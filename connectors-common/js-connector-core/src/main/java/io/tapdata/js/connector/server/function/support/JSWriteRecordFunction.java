@@ -29,6 +29,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static io.tapdata.js.connector.base.EventType.insert;
+
 
 public class JSWriteRecordFunction extends FunctionBase implements FunctionSupport<WriteRecordFunction> {
     public static final String TAG = JSWriteRecordFunction.class.getSimpleName();
@@ -55,7 +57,10 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
     private boolean doSubFunctionNotSupported() {
         return this.doNotSupport(JSFunctionNames.InsertRecordFunction)
                 && this.doNotSupport(JSFunctionNames.DeleteRecordFunction)
-                && this.doNotSupport(JSFunctionNames.UpdateRecordFunction);
+                && this.doNotSupport(JSFunctionNames.UpdateRecordFunction)
+                && this.doNotSupport(JSFunctionNames.InsertRecordBatchFunction)
+                && this.doNotSupport(JSFunctionNames.UpdateRecordBatchFunction)
+                && this.doNotSupport(JSFunctionNames.DeleteRecordBatchFunction);
     }
 
     private boolean doNotSupport(JSFunctionNames function) {
@@ -76,7 +81,7 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
             String cacheEventType = null;
             List<Map<String, Object>> execData = new ArrayList<>();
             for (Map<String, Object> event : machiningEvents) {
-                String cacheEventTypeTemp = String.valueOf(Optional.ofNullable(event.get(EventTag.EVENT_TYPE)).orElse(EventType.insert));
+                String cacheEventTypeTemp = String.valueOf(Optional.ofNullable(event.get(EventTag.EVENT_TYPE)).orElse(insert));
                 if (Objects.isNull(cacheEventType) || !cacheEventType.equals(cacheEventTypeTemp)) {
                     if (!execData.isEmpty()) {
                         this.execDrop(cacheEventType, context, execData, writeListResultConsumer, tableJsonString);
@@ -96,10 +101,24 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
         this.writeCache = new ConcurrentHashMap<>();
     }
 
+    JSFunctionNames supportButch(String eventType) {
+        if (insert.equals(eventType)) {
+            return !this.doNotSupport(JSFunctionNames.InsertRecordBatchFunction) ? JSFunctionNames.InsertRecordBatchFunction : JSFunctionNames.InsertRecordFunction;
+        } else if (EventType.update.equals(eventType)) {
+            return !this.doNotSupport(JSFunctionNames.UpdateRecordBatchFunction) ? JSFunctionNames.UpdateRecordBatchFunction : JSFunctionNames.UpdateRecordFunction;
+        } else {
+            return !this.doNotSupport(JSFunctionNames.DeleteRecordBatchFunction) ? JSFunctionNames.DeleteRecordBatchFunction : JSFunctionNames.DeleteRecordFunction;
+        }
+    }
+
     private void execDrop(String cacheEventType, TapConnectorContext context, List<Map<String, Object>> execData,Consumer<WriteListResult<TapRecordEvent>> consumer, String tableJsonString){
-        JSFunctionNames functionName = cacheEventType.equals(EventType.insert) ? JSFunctionNames.InsertRecordFunction : (cacheEventType.equals(EventType.update) ? JSFunctionNames.UpdateRecordFunction : JSFunctionNames.DeleteRecordFunction);
-        for (Map<String, Object> execDatum : execData) {
-            this.exec(context, execDatum, functionName, consumer, tableJsonString);
+        JSFunctionNames functionName = supportButch(cacheEventType);
+        if (functionName.isBatch()) {
+            this.exec(context, execData, functionName, consumer, tableJsonString);
+        } else {
+            for (Map<String, Object> execDatum : execData) {
+                this.exec(context, execDatum, functionName, consumer, tableJsonString);
+            }
         }
     }
 
@@ -141,6 +160,15 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
                     );
                 }
                 if (!isWriteRecord) {
+                    if (invoker instanceof Map) {
+                        Map<String, Object> res = (Map<String, Object>) invoker;
+                        Integer insertCount = Optional.ofNullable(res.get("insert")).map(v -> v instanceof Number ? ((Number) v).intValue() : 0).orElse(0);
+                        Integer updateCount = Optional.ofNullable(res.get("update")).map(v -> v instanceof Number ? ((Number) v).intValue() : 0).orElse(0);
+                        Integer deleteCount = Optional.ofNullable(res.get("delete")).map(v -> v instanceof Number ? ((Number) v).intValue() : 0).orElse(0);
+                        WriteListResult<TapRecordEvent> result = new WriteListResult<>();
+                        consumer.accept(result.insertedCount(insertCount).modifiedCount(updateCount).removedCount(deleteCount));
+                        return;
+                    }
                     boolean isNotIgnore;
                     try {
                         isNotIgnore = Objects.isNull(invoker) || (invoker instanceof Boolean ? (Boolean) invoker : Boolean.parseBoolean(String.valueOf(invoker)));
@@ -206,7 +234,7 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
                 if (this.hasCached(after)) {
                     return;
                 }
-                event.put(EventTag.EVENT_TYPE, EventType.insert);
+                event.put(EventTag.EVENT_TYPE, insert);
                 event.put(EventTag.AFTER_DATA, after);
                 //insert.incrementAndGet();
             } else if (tapRecord instanceof TapUpdateRecordEvent) {

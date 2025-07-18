@@ -90,92 +90,288 @@ function connectionTest(connectionConfig) {
 function commandCallback(connectionConfig, nodeConfig, commandInfo) {
 
 }
-
-function insertRecord(connectionConfig, nodeConfig, eventDataMap, settings){
-    let tableSettings = {};
-    if(settings){
-    tableSettings = JSON.parse(settings);
-    }
-    if(tableSettings && tableSettings.keys && tableSettings.keys.length > 0 &&
-    eventDataMap && eventDataMap.afterData && eventDataMap.afterData[tableSettings.keys[0]]){
-      let response = invoker.invoke('findRow',{"filter":"CurrentValue.["+tableSettings.keys[0]+"]=\""+eventDataMap.afterData[tableSettings.keys[0]]+"\""});
-      if(response && response.result && response.result.code === 0 && response.result.data && response.result.data.items && response.result.data.items.length >0){
-        let record_id = response.result.data.items[0].record_id;
-        let body = tapUtil.fromJson(eventDataMap.afterData);
-        let responseA = invoker.invoke('editRow',{"record_id":record_id,"body":body});
-        if(responseA.result && responseA.result.code === 0){
-            return true;
-        }
-        if(responseA.result){
-            log.warn("update recode fail:{}",responseA.result.msg);
-        }
-        return false;
-      }
-    }
-    let body = tapUtil.fromJson(eventDataMap.afterData);
-    let response = invoker.invoke('addRow',{"body":body});
-    if(response.result && response.result.code === 0){
-      return true;
-    }
-    if(response.result){
-       log.warn("update recode fail:{}",response.result.msg);
-    }
-    return false;
+function insertRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings) {
+    return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings);
 }
 
-function updateRecord(connectionConfig, nodeConfig, eventDataMap, settings){
+function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings) {
     let tableSettings = {};
     if(settings){
-    tableSettings = JSON.parse(settings);
+        tableSettings = JSON.parse(settings);
     }
-    if(tableSettings && tableSettings.keys && tableSettings.keys.length > 0 &&
-    eventDataMap && eventDataMap.afterData && eventDataMap.afterData[tableSettings.keys[0]]){
-      let response = invoker.invoke('findRow',{"filter":"CurrentValue.["+tableSettings.keys[0]+"]=\""+eventDataMap.afterData[tableSettings.keys[0]]+"\""});
-      if(response && response.result && response.result.code === 0 && response.result.data && response.result.data.items && response.result.data.items.length >0){
-        let record_id = response.result.data.items[0].record_id;
-        let body = tapUtil.fromJson(eventDataMap.afterData);
-        let responseA = invoker.invoke('editRow',{"record_id":record_id,"body":body});
-        if(responseA.result && responseA.result.code === 0){
-            return true;
-        }
-        if(responseA.result){
-            log.warn("update recode fail:{}",responseA.result.msg);
-        }
+
+    // 检查必要参数
+    if(!eventDataMaps || !tableSettings || !tableSettings.keys || tableSettings.keys.length === 0) {
+        log.warn("Missing required parameters");
         return false;
-      }
     }
-    let body = tapUtil.fromJson(eventDataMap.afterData);
-    let response = invoker.invoke('addRow',{"body":body});
-    if(response.result && response.result.code === 0){
-      return true;
+
+    // 确保eventDataMaps是数组
+    if(!Array.isArray(eventDataMaps)) {
+        eventDataMaps = [eventDataMaps];
     }
-    if(response.result){
-        log.warn("update recode fail:{}",response.result.msg);
+
+    // 提取有效数据
+    let validData = [];
+    eventDataMaps.forEach((eventData) => {
+        validData.push(eventData.afterData);
+    });
+
+    if(validData.length === 0) {
+        log.warn("No valid data to process");
+        return false;
     }
-    return false;
+
+    // 分批处理
+    const BATCH_SIZE = 500; // 减小批次大小
+    let allSuccess = true;
+
+    let insertCount = 0;
+    let updateCount = 0;
+    for(let i = 0; i < validData.length; i += BATCH_SIZE) {
+        let batchData = validData.slice(i, i + BATCH_SIZE);
+        let filterConditions = {
+            "conjunction": "or",
+            "children": batchData.map(value => {
+                let children = [];
+                tableSettings.keys.forEach(key => {
+                    children.push({
+                        "field_name": key,
+                        "operator": "is",
+                        "value": [value[key]]
+                    })
+                });
+                return {
+                    "conjunction": "and",
+                    "conditions": children
+                }
+            })
+        };
+        // 分离更新和插入的记录
+        let recordsToUpdate = [];
+        let recordsToInsert = [];
+        let singleRecords = [];
+        try {
+            // 修正搜索请求格式
+            let searchRequest = {
+                "filter": {"value": filterConditions},
+                "page_size": 500,
+                "fieldNames": tableSettings.keys
+            };
+            //log.info("Search request: {}", JSON.stringify(searchRequest));
+            let searchResponse = invoker.invoke('searchRecords', searchRequest);
+            //log.info("Search response: {}", JSON.stringify(searchResponse));
+
+            if(searchResponse && searchResponse.result && searchResponse.result.code === 0) {
+                if(searchResponse.result.data && searchResponse.result.data.items) {
+                    for(let index in searchResponse.result.data.items) {
+                        let item = searchResponse.result.data.items[index];
+                        for (let batchDataIndex in batchData) {
+                            let data = batchData[batchDataIndex];
+                            let fields = {};
+                            data.forEach((key, value) => {
+                                fields[key] = value;
+                            });
+                            //log.info("each existing record: {}", JSON.stringify(item))
+                            if (recordsMatch(data, item, tableSettings.keys)) {
+                                singleRecords.push({
+                                    "record_id": item["record_id"],
+                                    "fields": fields,
+                                    "dataIndex": batchDataIndex
+                                })
+                                //log.info("add each existing record to update: {}, {}", JSON.stringify(item), JSON.stringify(data))
+                            }
+                        }
+                    }
+                }
+            } else if(searchResponse && searchResponse.result) {
+                log.warn("Search failed: code={}, msg={}",
+                    searchResponse.result.code, searchResponse.result.msg);
+            }
+        } catch(e) {
+            log.error("Search error: {}", e.message);
+        }
+
+        //log.info("singleRecords: {}", JSON.stringify(singleRecords));
+        if (singleRecords.length > 0) {
+            let indexOfExists = []
+            singleRecords.forEach(item => {
+                recordsToUpdate.push(item);
+                indexOfExists.push(item.dataIndex);
+            })
+            for (let batchDataIndex in batchData) {
+                if (!indexOfExists.includes(batchDataIndex)) {
+                    let data = batchData[batchDataIndex];
+                    let fields = {};
+                    data.forEach((key, value) => {
+                        fields[key] = value;
+                    });
+                    recordsToInsert.push({"fields": fields})
+                }
+            }
+        } else {
+            for (let batchDataIndex in batchData) {
+                let data = batchData[batchDataIndex];
+                let fields = {};
+                data.forEach((key, value) => {
+                    fields[key] = value;
+                });
+                recordsToInsert.push({"fields": fields})
+            }
+        }
+
+
+        // 执行批量更新
+        if(recordsToUpdate.length > 0) {
+            try {
+                let updateRequest = {
+                    "records": recordsToUpdate
+                };
+
+                //log.info("Update request: {}", JSON.stringify(updateRequest));
+
+                let updateResponse = invoker.invoke('batchUpdateRecords', updateRequest);
+
+                //log.info("Update response: {}", JSON.stringify(updateResponse));
+
+                if(!updateResponse || !updateResponse.result || updateResponse.result.code !== 0) {
+                    log.warn("Batch update failed: code={}, msg={} {}",
+                        updateResponse?.result?.code, updateResponse?.result?.msg, JSON.stringify(recordsToUpdate));
+                    allSuccess = false;
+                }
+            } catch(e) {
+                log.error("Update error: {} {}", e.message, JSON.stringify(recordsToUpdate));
+                allSuccess = false;
+            }
+        }
+
+        // 执行批量插入
+        if(recordsToInsert.length > 0) {
+            try {
+                let insertRequest = {
+                    "records": recordsToInsert
+                };
+
+                //log.info("Insert request: {}", JSON.stringify(insertRequest));
+
+                let insertResponse = invoker.invoke('batchCreateRecords', insertRequest);
+
+                //log.info("Insert response: {}", JSON.stringify(insertResponse));
+
+                if(!insertResponse || !insertResponse.result || insertResponse.result.code !== 0) {
+                    log.warn("Batch insert failed: code={}, msg={}, {}",
+                        insertResponse?.result?.code, insertResponse?.result?.msg, JSON.stringify(recordsToInsert));
+                    allSuccess = false;
+                }
+            } catch(e) {
+                log.error("Insert error: {}, {}", e.message, JSON.stringify(recordsToInsert));
+                allSuccess = false;
+            }
+        }
+        insertCount += recordsToInsert.length;
+        updateCount += recordsToUpdate.length;
+    }
+
+    return {
+        "insert": insertCount,
+        "update": updateCount,
+        "delete": 0
+    };
 }
 
-function deleteRecord(connectionConfig, nodeConfig, eventDataMap, settings){
+function recordsMatch(objMap, keyMaps, keys) {
+    let allMatch = true;
+    for (let kIndex in keys) {
+        let k = keys[kIndex];
+        let element = keyMaps["fields"][k];
+        for (let eleIndex in element) {
+            let ele = element[eleIndex];
+            let eleType = ele["type"];
+            let value = ele[eleType];
+            //log.info("recordMatch: {}, {}, {}", objMap[k], k, value);
+            allMatch = allMatch && recordMatch(objMap, k, value);
+            if (!allMatch) {
+                return false;
+            }
+        }
+    }
+    return allMatch;
+}
+
+function recordMatch(objMap, key, value) {
+    return objMap[key] !== undefined && value !== undefined && objMap[key] === value;
+}
+
+function updateRecordBatch(connectionConfig, nodeConfig, eventDataMap, settings) {
+    return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings);
+}
+
+function deleteRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings){
     let tableSettings = {};
     if(settings){
-    tableSettings = JSON.parse(settings);
+        tableSettings = JSON.parse(settings);
     }
-    if(tableSettings && tableSettings.keys && tableSettings.keys.length > 0 &&
-    eventDataMap && eventDataMap.beforeData && eventDataMap.beforeData[tableSettings.keys[0]]){
-      let response = invoker.invoke('findRow',{"filter":"CurrentValue.["+tableSettings.keys[0]+"]=\""+eventDataMap.beforeData[tableSettings.keys[0]]+"\""});
-      if(response && response.result && response.result.code === 0 && response.result.data && response.result.data.items && response.result.data.items.length >0){
-        let record_id = response.result.data.items[0].record_id;
-        let responseA = invoker.invoke('deleteRow',{"record_id":record_id});
-        if(responseA.result && responseA.result.code === 0){
-            return true;
-        }
-        if(responseA.result){
-            log.warn("update recode fail:{}",responseA.result.msg);
-        }
+
+    // 检查必要参数
+    if(!eventDataMaps || !tableSettings || !tableSettings.keys || tableSettings.keys.length === 0) {
         return false;
-      }
     }
-    return false;
+
+    // 如果是单条记录，转换为数组格式
+    if(!Array.isArray(eventDataMaps)) {
+        eventDataMaps = [eventDataMaps];
+    }
+
+    // 提取主键值
+    let keyValues = [];
+    eventDataMaps.forEach((eventData) => {
+        if (eventData.beforeData && eventData.beforeData[tableSettings.keys[0]]) {
+            keyValues.push(eventData.beforeData[tableSettings.keys[0]]);
+        }
+    });
+
+    if(keyValues.length === 0) {
+        return false;
+    }
+
+    // 构建查询条件
+    let filterCondition = keyValues.map(value =>
+        `CurrentValue.[${tableSettings.keys[0]}]="${value}"`
+    ).join(" OR ");
+
+    // 查询要删除的记录
+    let recordIdsToDelete = [];
+    let searchResponse = invoker.invoke('searchRecords', {
+        "filter": filterCondition
+    });
+
+    if(searchResponse && searchResponse.result && searchResponse.result.code === 0 &&
+        searchResponse.result.data && searchResponse.result.data.items) {
+        searchResponse.result.data.items.forEach(item => {
+            recordIdsToDelete.push(item.record_id);
+        });
+    }
+
+    // 执行批量删除
+    if(recordIdsToDelete.length > 0) {
+        let deleteResponse = invoker.invoke('batchDeleteRecords', {
+            "records": recordIdsToDelete
+        });
+
+        if(!deleteResponse || !deleteResponse.result || deleteResponse.result.code !== 0) {
+            log.warn("Batch delete failed: code={}, msg={}",
+                deleteResponse?.result?.code, deleteResponse?.result?.msg);
+            return false;
+        }
+
+        return true;
+    }
+
+    return {
+        "insert": 0,
+        "update": 0,
+        "delete": recordIdsToDelete.length
+    };
 }
 
 /**
@@ -193,13 +389,14 @@ function deleteRecord(connectionConfig, nodeConfig, eventDataMap, settings){
  *      - {"key":"value",...} : Type is Object and has key-value ,  At this point, these values will be used to call the interface again after the results are returned.
  * */
 function updateToken(connectionConfig, nodeConfig, apiResponse) {
-log.warn("http code:{}",apiResponse.httpCode);
-log.warn("result code:{}",apiResponse.result.code);
-    if (apiResponse.httpCode === 403 || apiResponse.httpCode === 400 || (apiResponse.result && apiResponse.result.code === 99991663 )) {
+    if (apiResponse.httpCode === 403
+        || apiResponse.httpCode === 400
+        || apiResponse.result && apiResponse.result.code === 99991663) {
+        log.warn("Http code:{}, result code:{}, result msg: {}",apiResponse.httpCode, apiResponse.result.code, apiResponse.result.msg);
         try{
             let refreshToken = invoker.invokeWithoutIntercept("getToken");
             if(refreshToken && refreshToken.result &&refreshToken.result.app_access_token){
-                log.warn('token:' + refreshToken.result.app_access_token);
+                log.info('Token updated: ' + refreshToken.result.app_access_token);
                 return {"Authorization": 'Bearer ' + refreshToken.result.app_access_token};
             }
         }catch (e) {
