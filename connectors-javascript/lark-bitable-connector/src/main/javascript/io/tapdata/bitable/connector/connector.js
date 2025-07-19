@@ -1,4 +1,5 @@
 config.setStreamReadIntervalSeconds(10);
+
 /**
  * @return The returned result cannot be empty and must conform to one of the following forms:
  *      (1)Form one:  A string (representing only one table name)
@@ -27,10 +28,7 @@ config.setStreamReadIntervalSeconds(10);
  * */
 function discoverSchema(connectionConfig) {
     //return ['Leads','Contacts','Accounts','Potentials','Quotes'];
-    return [{
-        "name":connectionConfig.table_id,
-        "fields": {}
-    }]
+    return [connectionConfig.table_id]
 }
 
 /**
@@ -72,11 +70,33 @@ function streamRead(connectionConfig, nodeConfig, offset, tableNameList, pageSiz
  * @param connectionConfig  Configuration property information of the connection page
  * */
 function connectionTest(connectionConfig) {
-    return [{
-        "test": "Example test item",
-        "code": 1,
-        "result": "Pass"
-    }];
+    let app;
+    try {
+        app = invoker.invoke("getTableMateInfo").result;
+        let isApp = 1;
+        if (app.code !== 0) {
+            return [{
+                "test": "Get Multidimensional table metadata",
+                "code": -1,
+                "result": "Can not get Multidimensional table metadata, please check you App ID or App Secret or table ID"
+                    + (app.msg !== undefined && app.msg !== null && app.msg !== "" ? ", error message: " + app.msg : "")
+            }];
+        }
+        if (app.data === undefined || app.data === null) {
+            isApp = -1;
+        }
+        return [{
+            "test": "Get Multidimensional table metadata",
+            "code": isApp,
+            "result": isApp === 1 ? "Table name is: " + app.data.app.name : "Can not get Multidimensional table metadata info, please check you App ID and App Secret and table ID"
+        }];
+    } catch (e) {
+        return [{
+            "test": " Input parameter check ",
+            "code": -1,
+            "result": "Can not get Multidimensional table metadata, please check you App ID and App Secret and table ID"
+        }];
+    }
 }
 
 
@@ -86,28 +106,134 @@ function connectionTest(connectionConfig) {
  * @param nodeConfig
  * @param commandInfo
  * */
-
 function commandCallback(connectionConfig, nodeConfig, commandInfo) {
 
 }
-function insertRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings) {
-    return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings);
+
+
+function insertRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, capabilities) {
+    let dmlInsertPolicy = capabilities["dml_insert_policy"];
+    log.debug("insertRecordBatch: {}", dmlInsertPolicy);
+    //@todo
+    dmlInsertPolicy = "update_on_exists";
+    return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, dmlInsertPolicy);
 }
 
-function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings) {
+function findRecord(batchData, tableSettings, apiDelay, accept) {
+    let filterConditions = {
+        "conjunction": "or",
+        "children": batchData.map(value => {
+            let children = [];
+            tableSettings.keys.forEach(key => {
+                children.push({
+                    "field_name": key,
+                    "operator": "is",
+                    "value": [value[key]]
+                })
+            });
+            return {
+                "conjunction": "and",
+                "conditions": children
+            }
+        })
+    };
+    let singleRecords = [];
+    try {
+        // 修正搜索请求格式
+        let searchRequest = {
+            "filter": {"value": filterConditions},
+            "page_size": 500,
+            "fieldNames": tableSettings.keys,
+            "pageToken": null,
+            "_tap_sleep_time_": apiDelay
+        };
+        //log.info("Search request: {}", JSON.stringify(searchRequest));
+        while (isAlive()) {
+            let searchResponse = invoker.invoke('searchRecords', searchRequest);
+            //log.info("Search response: {}", JSON.stringify(searchResponse));
+            if (searchResponse
+                && searchResponse.result
+                && searchResponse.result.code === 0
+                && searchResponse.result.data
+                && searchResponse.result.data.items) {
+                for (let index in searchResponse.result.data.items) {
+                    let item = searchResponse.result.data.items[index];
+                    for (let batchDataIndex in batchData) {
+                        let data = batchData[batchDataIndex];
+                        let fields = {};
+                        data.forEach((key, value) => {
+                            fields[key] = value;
+                        });
+                        //log.info("each existing record: {}", JSON.stringify(item))
+                        if (recordsMatch(data, item, tableSettings.keys)) {
+                            singleRecords.push({
+                                "record_id": item["record_id"],
+                                "fields": fields,
+                                "dataIndex": batchDataIndex
+                            })
+                            //log.info("add each existing record to update: {}, {}", JSON.stringify(item), JSON.stringify(data))
+                        }
+                    }
+                }
+                let hasMore = searchResponse.result.data.has_more;
+                log.info("has more: {}", hasMore);
+                if (hasMore) {
+                    if (searchResponse.result.data.page_token !== undefined && searchResponse.result.data.page_token !== null) {
+                        searchRequest.pageToken = searchResponse.result.data.page_token;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+                if (singleRecords.length >= 500) {
+                    accept(singleRecords);
+                    singleRecords.length = 0;
+                    log.info("accept 500 records");
+                }
+            } else if (searchResponse && searchResponse.result) {
+                log.warn("Search failed: code={}, msg={}",
+                    searchResponse.result.code, searchResponse.result.msg);
+                break;
+            } else {
+                log.warn("Search failed: {}", JSON.stringify(searchResponse));
+                break;
+            }
+        }
+    } catch (e) {
+        log.error("Search error: {}", e.message);
+    }
+    if (singleRecords.length > 0) {
+        accept(singleRecords);
+        log.info("accept last {} records", singleRecords.length);
+    }
+}
+
+function getDelayTime(nodeConfig, key) {
+    let apiDelay = nodeConfig[key];
+    if (apiDelay === undefined || apiDelay === null || apiDelay > 10000 || apiDelay < 0) {
+        apiDelay = 0;
+    }
+    return apiDelay;
+}
+
+function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, policy) {
+    let queryApiDelay = getDelayTime(nodeConfig, "queryApiDelay");
+    let writeApiDelay = getDelayTime(nodeConfig, "writeApiDelay");
+
     let tableSettings = {};
-    if(settings){
+    if (settings) {
         tableSettings = JSON.parse(settings);
     }
 
     // 检查必要参数
-    if(!eventDataMaps || !tableSettings || !tableSettings.keys || tableSettings.keys.length === 0) {
+    if (!eventDataMaps || !tableSettings || !tableSettings.keys || tableSettings.keys.length === 0) {
         log.warn("Missing required parameters");
         return false;
     }
 
     // 确保eventDataMaps是数组
-    if(!Array.isArray(eventDataMaps)) {
+    if (!Array.isArray(eventDataMaps)) {
         eventDataMaps = [eventDataMaps];
     }
 
@@ -117,98 +243,69 @@ function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, 
         validData.push(eventData.afterData);
     });
 
-    if(validData.length === 0) {
+    if (validData.length === 0) {
         log.warn("No valid data to process");
         return false;
     }
-
     // 分批处理
     const BATCH_SIZE = 500; // 减小批次大小
-    let allSuccess = true;
-
     let insertCount = 0;
     let updateCount = 0;
-    for(let i = 0; i < validData.length; i += BATCH_SIZE) {
+    for (let i = 0; i < validData.length; i += BATCH_SIZE) {
         let batchData = validData.slice(i, i + BATCH_SIZE);
-        let filterConditions = {
-            "conjunction": "or",
-            "children": batchData.map(value => {
-                let children = [];
-                tableSettings.keys.forEach(key => {
-                    children.push({
-                        "field_name": key,
-                        "operator": "is",
-                        "value": [value[key]]
-                    })
-                });
-                return {
-                    "conjunction": "and",
-                    "conditions": children
-                }
-            })
-        };
+
         // 分离更新和插入的记录
         let recordsToUpdate = [];
         let recordsToInsert = [];
-        let singleRecords = [];
-        try {
-            // 修正搜索请求格式
-            let searchRequest = {
-                "filter": {"value": filterConditions},
-                "page_size": 500,
-                "fieldNames": tableSettings.keys
-            };
-            //log.info("Search request: {}", JSON.stringify(searchRequest));
-            let searchResponse = invoker.invoke('searchRecords', searchRequest);
-            //log.info("Search response: {}", JSON.stringify(searchResponse));
-
-            if(searchResponse && searchResponse.result && searchResponse.result.code === 0) {
-                if(searchResponse.result.data && searchResponse.result.data.items) {
-                    for(let index in searchResponse.result.data.items) {
-                        let item = searchResponse.result.data.items[index];
-                        for (let batchDataIndex in batchData) {
+        if (policy !== "just_insert") {
+            findRecord(batchData, tableSettings, queryApiDelay, (singleRecords) => {
+                //log.info("singleRecords: {}", JSON.stringify(singleRecords));
+                if (singleRecords.length > 0) {
+                    let indexOfExists = []
+                    singleRecords.forEach(item => {
+                        recordsToUpdate.push(item);
+                        indexOfExists.push(item.dataIndex);
+                        //log.info("add each existing record to update: {}, {}", JSON.stringify(item), JSON.stringify(batchData[item.dataIndex]));
+                        if (recordsToUpdate.length >= 1000) {
+                            updateCount += acceptRecords(recordsToUpdate, policy, "batchUpdateRecords", "update", writeApiDelay);
+                            log.info("B Update : {}", JSON.stringify(recordsToUpdate));
+                            recordsToUpdate.length = 0;
+                            log.info("A Update : {}", JSON.stringify(recordsToUpdate));
+                        }
+                    })
+                    for (let batchDataIndex in batchData) {
+                        if (!indexOfExists.includes(batchDataIndex)) {
                             let data = batchData[batchDataIndex];
                             let fields = {};
                             data.forEach((key, value) => {
                                 fields[key] = value;
                             });
-                            //log.info("each existing record: {}", JSON.stringify(item))
-                            if (recordsMatch(data, item, tableSettings.keys)) {
-                                singleRecords.push({
-                                    "record_id": item["record_id"],
-                                    "fields": fields,
-                                    "dataIndex": batchDataIndex
-                                })
-                                //log.info("add each existing record to update: {}, {}", JSON.stringify(item), JSON.stringify(data))
+                            recordsToInsert.push({"fields": fields})
+                            if (recordsToInsert.length >= 1000) {
+                                insertCount += acceptRecords(recordsToInsert, policy, "batchCreateRecords", "insert", writeApiDelay);
+                                log.info("B Insert : {}", JSON.stringify(recordsToInsert));
+                                recordsToInsert.length = 0;
+                                log.info("Insert : {}", JSON.stringify(recordsToInsert));
                             }
                         }
                     }
+                } else {
+                    for (let batchDataIndex in batchData) {
+                        let data = batchData[batchDataIndex];
+                        let fields = {};
+                        data.forEach((key, value) => {
+                            fields[key] = value;
+                        });
+                        recordsToInsert.push({"fields": fields});
+                        if (recordsToInsert.length >= 1000) {
+                            insertCount += acceptRecords(recordsToInsert, policy, "batchCreateRecords", "insert", writeApiDelay);
+                            log.info("B Insert : {}", JSON.stringify(recordsToInsert));
+                            recordsToInsert.length = 0;
+                            log.info("Insert : {}", JSON.stringify(recordsToInsert));
+                        }
+                    }
                 }
-            } else if(searchResponse && searchResponse.result) {
-                log.warn("Search failed: code={}, msg={}",
-                    searchResponse.result.code, searchResponse.result.msg);
-            }
-        } catch(e) {
-            log.error("Search error: {}", e.message);
-        }
-
-        //log.info("singleRecords: {}", JSON.stringify(singleRecords));
-        if (singleRecords.length > 0) {
-            let indexOfExists = []
-            singleRecords.forEach(item => {
-                recordsToUpdate.push(item);
-                indexOfExists.push(item.dataIndex);
-            })
-            for (let batchDataIndex in batchData) {
-                if (!indexOfExists.includes(batchDataIndex)) {
-                    let data = batchData[batchDataIndex];
-                    let fields = {};
-                    data.forEach((key, value) => {
-                        fields[key] = value;
-                    });
-                    recordsToInsert.push({"fields": fields})
-                }
-            }
+            });
         } else {
             for (let batchDataIndex in batchData) {
                 let data = batchData[batchDataIndex];
@@ -216,67 +313,173 @@ function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, 
                 data.forEach((key, value) => {
                     fields[key] = value;
                 });
-                recordsToInsert.push({"fields": fields})
-            }
-        }
-
-
-        // 执行批量更新
-        if(recordsToUpdate.length > 0) {
-            try {
-                let updateRequest = {
-                    "records": recordsToUpdate
-                };
-
-                //log.info("Update request: {}", JSON.stringify(updateRequest));
-
-                let updateResponse = invoker.invoke('batchUpdateRecords', updateRequest);
-
-                //log.info("Update response: {}", JSON.stringify(updateResponse));
-
-                if(!updateResponse || !updateResponse.result || updateResponse.result.code !== 0) {
-                    log.warn("Batch update failed: code={}, msg={} {}",
-                        updateResponse?.result?.code, updateResponse?.result?.msg, JSON.stringify(recordsToUpdate));
-                    allSuccess = false;
+                recordsToInsert.push({"fields": fields});
+                if (recordsToInsert.length >= 1000) {
+                    insertCount += acceptRecords(recordsToInsert, policy, "batchCreateRecords", "insert", writeApiDelay);
+                    log.info("B Insert : {}", JSON.stringify(recordsToInsert));
+                    recordsToInsert.length = 0;
+                    log.info("Insert : {}", JSON.stringify(recordsToInsert));
                 }
-            } catch(e) {
-                log.error("Update error: {} {}", e.message, JSON.stringify(recordsToUpdate));
-                allSuccess = false;
             }
         }
 
-        // 执行批量插入
-        if(recordsToInsert.length > 0) {
-            try {
-                let insertRequest = {
-                    "records": recordsToInsert
-                };
 
-                //log.info("Insert request: {}", JSON.stringify(insertRequest));
+        // let filterConditions = {
+        //     "conjunction": "or",
+        //     "children": batchData.map(value => {
+        //         let children = [];
+        //         tableSettings.keys.forEach(key => {
+        //             children.push({
+        //                 "field_name": key,
+        //                 "operator": "is",
+        //                 "value": [value[key]]
+        //             })
+        //         });
+        //         return {
+        //             "conjunction": "and",
+        //             "conditions": children
+        //         }
+        //     })
+        // };
+        // // 分离更新和插入的记录
+        // let recordsToUpdate = [];
+        // let recordsToInsert = [];
+        // let singleRecords = [];
+        // try {
+        //     // 修正搜索请求格式
+        //     let searchRequest = {
+        //         "filter": {"value": filterConditions},
+        //         "page_size": 500,
+        //         "fieldNames": tableSettings.keys
+        //     };
+        //     //log.info("Search request: {}", JSON.stringify(searchRequest));
+        //     let searchResponse = invoker.invoke('searchRecords', searchRequest);
+        //     //log.info("Search response: {}", JSON.stringify(searchResponse));
+        //
+        //     if(searchResponse && searchResponse.result && searchResponse.result.code === 0) {
+        //         if(searchResponse.result.data && searchResponse.result.data.items) {
+        //             for(let index in searchResponse.result.data.items) {
+        //                 let item = searchResponse.result.data.items[index];
+        //                 for (let batchDataIndex in batchData) {
+        //                     let data = batchData[batchDataIndex];
+        //                     let fields = {};
+        //                     data.forEach((key, value) => {
+        //                         fields[key] = value;
+        //                     });
+        //                     //log.info("each existing record: {}", JSON.stringify(item))
+        //                     if (recordsMatch(data, item, tableSettings.keys)) {
+        //                         singleRecords.push({
+        //                             "record_id": item["record_id"],
+        //                             "fields": fields,
+        //                             "dataIndex": batchDataIndex
+        //                         })
+        //                         //log.info("add each existing record to update: {}, {}", JSON.stringify(item), JSON.stringify(data))
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //     } else if(searchResponse && searchResponse.result) {
+        //         log.warn("Search failed: code={}, msg={}",
+        //             searchResponse.result.code, searchResponse.result.msg);
+        //     }
+        // } catch(e) {
+        //     log.error("Search error: {}", e.message);
+        // }
 
-                let insertResponse = invoker.invoke('batchCreateRecords', insertRequest);
-
-                //log.info("Insert response: {}", JSON.stringify(insertResponse));
-
-                if(!insertResponse || !insertResponse.result || insertResponse.result.code !== 0) {
-                    log.warn("Batch insert failed: code={}, msg={}, {}",
-                        insertResponse?.result?.code, insertResponse?.result?.msg, JSON.stringify(recordsToInsert));
-                    allSuccess = false;
-                }
-            } catch(e) {
-                log.error("Insert error: {}, {}", e.message, JSON.stringify(recordsToInsert));
-                allSuccess = false;
-            }
+        //log.info("recordsToUpdate: {}", JSON.stringify(recordsToUpdate));
+        //log.info("recordsToInsert: {}", JSON.stringify(recordsToInsert));
+        if (recordsToUpdate.length > 0) {
+            updateCount += acceptRecords(recordsToUpdate, policy, "batchUpdateRecords", "update", writeApiDelay);
         }
-        insertCount += recordsToInsert.length;
-        updateCount += recordsToUpdate.length;
+        if (recordsToInsert.length > 0) {
+            insertCount += acceptRecords(recordsToInsert, policy, "batchCreateRecords", "insert", writeApiDelay);
+        }
+        // switch (policy) {
+        //     case "insert_on_nonexists":
+        //     case "update_on_exists":
+        //         if (callBatchApi(recordsToUpdate, "batchUpdateRecords", "update")) {
+        //             updateCount += recordsToUpdate.length;
+        //         }
+        //         if (callBatchApi(recordsToInsert, "batchCreateRecords", "insert")) {
+        //             insertCount += recordsToInsert.length;
+        //         }
+        //         break;
+        //     case "ignore_on_exists":
+        //     case "just_insert":
+        //     case "ignore_on_nonexists":
+        //         if (callBatchApi(recordsToInsert, "batchCreateRecords", "insert")) {
+        //             insertCount += recordsToInsert.length;
+        //         }
+        //         break;
+        //     default:
+        //         //do nothing
+        // }
     }
-
     return {
         "insert": insertCount,
         "update": updateCount,
         "delete": 0
     };
+}
+
+function acceptRecords(records, policy, apiName, type, apiDelay) {
+    //log.info("acceptRecords: {}, {}, {}, {}", JSON.stringify(records), policy, apiName, type);
+    let acceptCount = 0;
+    switch (policy) {
+        case "insert_on_nonexists":
+        case "update_on_exists":
+            if (type === "update") {
+                if (callBatchApi(records, "batchUpdateRecords", "update", apiDelay)) {
+                    acceptCount += records.length;
+                }
+            } else {
+                if (callBatchApi(records, "batchCreateRecords", "insert", apiDelay)) {
+                    acceptCount += records.length;
+                }
+            }
+            break;
+        case "ignore_on_exists":
+        case "just_insert":
+        case "ignore_on_nonexists":
+            if (type === "insert") {
+                if (callBatchApi(records, "batchCreateRecords", "insert", apiDelay)) {
+                    acceptCount += records.length;
+                }
+            }
+            break;
+        default:
+        //do nothing
+    }
+    return acceptCount;
+}
+
+function callBatchApi(batchData, apiName, type, apiDelay) {
+    // 执行批量插入
+    if (batchData.length <= 0) {
+        return true;
+    }
+    let allSuccess = true;
+    try {
+        let requestParam = {
+            "records": batchData,
+            "_tap_sleep_time_": apiDelay
+        };
+        //log.info("{} request: {}", type, JSON.stringify(insertRequest));
+        let insertResponse = invoker.invoke(apiName, requestParam);
+        //log.info("{} response: {}", type, JSON.stringify(insertResponse));
+        if (!insertResponse || !insertResponse.result || insertResponse.result.code !== 0) {
+            log.warn("Batch {} failed: code={}, msg={}, {}",
+                type,
+                insertResponse?.result?.code,
+                insertResponse?.result?.msg,
+                JSON.stringify(batchData));
+            allSuccess = false;
+        }
+    } catch (e) {
+        log.error("Do batch {} error: {}, {}", type, e.message, JSON.stringify(batchData));
+        allSuccess = false;
+    }
+    return allSuccess;
 }
 
 function recordsMatch(objMap, keyMaps, keys) {
@@ -302,23 +505,29 @@ function recordMatch(objMap, key, value) {
     return objMap[key] !== undefined && value !== undefined && objMap[key] === value;
 }
 
-function updateRecordBatch(connectionConfig, nodeConfig, eventDataMap, settings) {
-    return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings);
+function updateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, capabilities) {
+    let dmlUpdatePolicy = capabilities["dml_update_policy"];
+    log.debug("updateRecordBatch: {}", dmlUpdatePolicy);
+    //@todo
+    dmlUpdatePolicy = "insert_on_nonexists";
+    return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, dmlUpdatePolicy);
 }
 
-function deleteRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings){
+function deleteRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, capabilities) {
+    let queryApiDelay = getDelayTime(nodeConfig, "queryApiDelay");
+    let writeApiDelay = getDelayTime(nodeConfig, "writeApiDelay");
     let tableSettings = {};
-    if(settings){
+    if (settings) {
         tableSettings = JSON.parse(settings);
     }
 
     // 检查必要参数
-    if(!eventDataMaps || !tableSettings || !tableSettings.keys || tableSettings.keys.length === 0) {
+    if (!eventDataMaps || !tableSettings || !tableSettings.keys || tableSettings.keys.length === 0) {
         return false;
     }
 
     // 如果是单条记录，转换为数组格式
-    if(!Array.isArray(eventDataMaps)) {
+    if (!Array.isArray(eventDataMaps)) {
         eventDataMaps = [eventDataMaps];
     }
 
@@ -330,47 +539,53 @@ function deleteRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings
         }
     });
 
-    if(keyValues.length === 0) {
+    if (keyValues.length === 0) {
         return false;
     }
 
-    // 构建查询条件
-    let filterCondition = keyValues.map(value =>
-        `CurrentValue.[${tableSettings.keys[0]}]="${value}"`
-    ).join(" OR ");
-
-    // 查询要删除的记录
+    let deleteCount = 0;
     let recordIdsToDelete = [];
-    let searchResponse = invoker.invoke('searchRecords', {
-        "filter": filterCondition
+    findRecord(eventDataMaps, tableSettings, queryApiDelay, (singleRecords) => {
+        //log.info("singleRecords: {}", JSON.stringify(singleRecords));
+        if (singleRecords.length <= 0) {
+            return;
+        }
+        singleRecords.forEach(item => {
+            recordIdsToDelete.push(item["record_id"]);
+            if (recordIdsToDelete.length >= 1000) {
+                let deleteResponse = invoker.invoke('batchDeleteRecords', {
+                    "records": recordIdsToDelete,
+                    "_tap_sleep_time_": writeApiDelay
+                });
+                if (!deleteResponse || !deleteResponse.result || deleteResponse.result.code !== 0) {
+                    log.warn("Batch delete failed: code={}, msg={}, batch count: {}, {}",
+                        deleteResponse?.result?.code, deleteResponse?.result?.msg, recordIdsToDelete.length, JSON.stringify(recordIdsToDelete));
+                } else {
+                    deleteCount += recordIdsToDelete.length;
+                }
+                log.info("B Delete : {}", JSON.stringify(recordIdsToDelete));
+                recordIdsToDelete.length = 0;
+                log.info("A Delete : {}", JSON.stringify(recordIdsToDelete));
+            }
+        })
     });
 
-    if(searchResponse && searchResponse.result && searchResponse.result.code === 0 &&
-        searchResponse.result.data && searchResponse.result.data.items) {
-        searchResponse.result.data.items.forEach(item => {
-            recordIdsToDelete.push(item.record_id);
-        });
-    }
 
     // 执行批量删除
-    if(recordIdsToDelete.length > 0) {
+    if (recordIdsToDelete.length > 0) {
         let deleteResponse = invoker.invoke('batchDeleteRecords', {
-            "records": recordIdsToDelete
+            "records": recordIdsToDelete,
+            "_tap_sleep_time_": writeApiDelay
         });
-
-        if(!deleteResponse || !deleteResponse.result || deleteResponse.result.code !== 0) {
-            log.warn("Batch delete failed: code={}, msg={}",
-                deleteResponse?.result?.code, deleteResponse?.result?.msg);
-            return false;
+        if (!deleteResponse || !deleteResponse.result || deleteResponse.result.code !== 0) {
+            log.warn("Batch delete failed: code={}, msg={}, batch count: {}, {}",
+                deleteResponse?.result?.code, deleteResponse?.result?.msg, recordIdsToDelete.length, JSON.stringify(recordIdsToDelete));
         }
-
-        return true;
     }
-
     return {
         "insert": 0,
         "update": 0,
-        "delete": recordIdsToDelete.length
+        "delete": deleteCount
     };
 }
 
@@ -392,14 +607,14 @@ function updateToken(connectionConfig, nodeConfig, apiResponse) {
     if (apiResponse.httpCode === 403
         || apiResponse.httpCode === 400
         || apiResponse.result && apiResponse.result.code === 99991663) {
-        log.warn("Http code:{}, result code:{}, result msg: {}",apiResponse.httpCode, apiResponse.result.code, apiResponse.result.msg);
-        try{
+        log.warn("Http code:{}, result code:{}, result msg: {}", apiResponse.httpCode, apiResponse.result.code, apiResponse.result.msg);
+        try {
             let refreshToken = invoker.invokeWithoutIntercept("getToken");
-            if(refreshToken && refreshToken.result &&refreshToken.result.app_access_token){
+            if (refreshToken && refreshToken.result && refreshToken.result.app_access_token) {
                 log.info('Token updated: ' + refreshToken.result.app_access_token);
                 return {"Authorization": 'Bearer ' + refreshToken.result.app_access_token};
             }
-        }catch (e) {
+        } catch (e) {
             log.warn(e)
         }
     }
@@ -407,8 +622,8 @@ function updateToken(connectionConfig, nodeConfig, apiResponse) {
 }
 
 function handleData(data) {
-    for(let x in data){
-        if(data[x] !== undefined && data[x] !== null) {
+    for (let x in data) {
+        if (data[x] !== undefined && data[x] !== null) {
             let sss = data[x].toString()
             if (Array.isArray(data[x])) {
                 data[x] = handleData(data[x])
@@ -416,8 +631,8 @@ function handleData(data) {
                 data[x] = handleData(data[x])
             }
         }
-        if(x && x.startsWith('$')){
-            let key = x.replace('$','_');
+        if (x && x.startsWith('$')) {
+            let key = x.replace('$', '_');
             data[key] = data[x];
             delete data[x];
         }
