@@ -39,6 +39,46 @@
       "response": []
     },
     {
+      "name": "getTableMateInfo",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{Authorization}}",
+            "type": "default"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "default"
+          }
+        ],
+        "url": {
+          "raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/:app_token",
+          "protocol": "https",
+          "host": [
+            "open",
+            "feishu",
+            "cn"
+          ],
+          "path": [
+            "open-apis",
+            "bitable",
+            "v1",
+            "apps"
+          ],
+          "variable": [
+            {
+              "key": "app_token",
+              "value": "{{app_token}}"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
       "name": "searchRecords",
       "request": {
         "method": "POST",

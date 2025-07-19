@@ -18,6 +18,7 @@ import io.tapdata.js.connector.server.function.JSFunctionNames;
 import io.tapdata.js.connector.server.function.base.SchemaAccept;
 import io.tapdata.js.connector.server.sender.WriteRecordRender;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.connector.target.WriteRecordFunction;
 
@@ -149,6 +150,15 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
             try {
                 boolean isWriteRecord = JSFunctionNames.WriteRecordFunction.jsName().equals(function.jsName());
                 Object invoker;
+                Map<String, String> capabilities = new HashMap<>();
+                String insertDmlPolicy = Optional.ofNullable(context.getConnectorCapabilities())
+                                .map(c -> c.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY))
+                                        .orElse(ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS);
+                String updateDmlPolicy = Optional.ofNullable(context.getConnectorCapabilities())
+                                .map(c -> c.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY))
+                                        .orElse(ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS);
+                capabilities.put(ConnectionOptions.DML_INSERT_POLICY, insertDmlPolicy);
+                capabilities.put(ConnectionOptions.DML_UPDATE_POLICY, updateDmlPolicy);
                 synchronized (JSConnector.execLock) {
                     invoker = super.javaScripter.invoker(
                             function.jsName(),
@@ -156,7 +166,8 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
                             Optional.ofNullable(context.getNodeConfig()).orElse(new DataMap()),
                             execData,
                             isWriteRecord ? writeResultCollector : tableJsonString,
-                            isWriteRecord ? tableJsonString : null
+                            isWriteRecord ? tableJsonString : capabilities,
+                            isWriteRecord ? capabilities : null
                     );
                 }
                 if (!isWriteRecord) {

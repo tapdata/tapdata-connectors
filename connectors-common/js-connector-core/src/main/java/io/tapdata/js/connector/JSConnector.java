@@ -38,12 +38,7 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 
 import java.net.URL;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -110,6 +105,14 @@ public class JSConnector extends ConnectorBase {
     @Override
     public int tableCount(TapConnectionContext connectionContext) throws Throwable {
         return BaseTableCountFunction.tableCount(this.javaScripter).get(connectionContext);
+    }
+
+    public List<String> getLowerCaseTableNames(TapConnectionContext connectionContext) throws Throwable {
+        List<String> tableNames = new ArrayList<>();
+        BaseDiscoverSchemaFunction.discover(this.javaScripter).invoker(connectionContext, consumer -> {
+            consumer.forEach(table -> tableNames.add(table.getId().toLowerCase()));
+        });
+        return tableNames;
     }
 
     protected void instanceScript(TapConnectionContext connectionContext, Map<String, Object> configMap) {

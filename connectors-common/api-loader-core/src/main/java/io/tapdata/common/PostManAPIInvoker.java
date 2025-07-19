@@ -120,6 +120,16 @@ public class PostManAPIInvoker
         if (Objects.nonNull(this.interceptor) && invoker) {
             response = this.interceptor.intercept(response, uriOrName, method, params);
         }
+        if (params.containsKey("_tap_sleep_time_") && params.get("_tap_sleep_time_") instanceof Number) {
+            long tapSleepTime = ((Number) params.get("_tap_sleep_time_")).longValue();
+            if (tapSleepTime > 0 && tapSleepTime < 10000) {
+                try {
+                    Thread.sleep(tapSleepTime);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
         //System.out.println("DEBUG-INFO: Results obtained from this execution: \n" + toJson(response));
         return response;
     }
