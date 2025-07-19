@@ -40,6 +40,7 @@ public class PostManAPIInvoker
 
     private PostManAnalysis analysis;
     private Map<String,Object> httpConfig;
+    public static final String SLEEP_CONFIG_PARAM_KEY = "_tap_sleep_time_";
 
     public PostManAPIInvoker analysis(PostManAnalysis analysis) {
         this.analysis = analysis;
@@ -120,18 +121,25 @@ public class PostManAPIInvoker
         if (Objects.nonNull(this.interceptor) && invoker) {
             response = this.interceptor.intercept(response, uriOrName, method, params);
         }
-        if (params.containsKey("_tap_sleep_time_") && params.get("_tap_sleep_time_") instanceof Number) {
-            long tapSleepTime = ((Number) params.get("_tap_sleep_time_")).longValue();
-            if (tapSleepTime > 0 && tapSleepTime < 10000) {
-                try {
-                    Thread.sleep(tapSleepTime);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        }
+        doWaitByParamConfig(params);
         //System.out.println("DEBUG-INFO: Results obtained from this execution: \n" + toJson(response));
         return response;
+    }
+
+    protected void doWaitByParamConfig(Map<String, Object> params) {
+        if (!params.containsKey(SLEEP_CONFIG_PARAM_KEY) || !(params.get(SLEEP_CONFIG_PARAM_KEY) instanceof Number)) {
+            return;
+        }
+        Number param = (Number) params.get(SLEEP_CONFIG_PARAM_KEY);
+        long tapSleepTime = param.longValue();
+        if (tapSleepTime <= 0L || tapSleepTime > 10000L) {
+            return;
+        }
+        try {
+            Thread.sleep(tapSleepTime);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override

@@ -27,7 +27,6 @@ config.setStreamReadIntervalSeconds(10);
  * @param connectionConfig  Configuration property information of the connection page
  * */
 function discoverSchema(connectionConfig) {
-    //return ['Leads','Contacts','Accounts','Potentials','Quotes'];
     return [connectionConfig.table_id]
 }
 
@@ -110,7 +109,20 @@ function commandCallback(connectionConfig, nodeConfig, commandInfo) {
 
 }
 
+/**
+ * PDK js-function: insert-batch
+ * */
+function updateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, capabilities) {
+    let dmlUpdatePolicy = capabilities["dml_update_policy"];
+    log.debug("updateRecordBatch: {}", dmlUpdatePolicy);
+    //@todo
+    dmlUpdatePolicy = "insert_on_nonexists";
+    return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, dmlUpdatePolicy);
+}
 
+/**
+ * PDK js-function: update-batch
+ * */
 function insertRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, capabilities) {
     let dmlInsertPolicy = capabilities["dml_insert_policy"];
     log.debug("insertRecordBatch: {}", dmlInsertPolicy);
@@ -119,24 +131,140 @@ function insertRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings
     return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, dmlInsertPolicy);
 }
 
+/**
+ * PDK js-function: delete-batch
+ * */
+function deleteRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, capabilities) {
+    let queryApiDelay = getDelayTime(nodeConfig, "queryApiDelay");
+    let writeApiDelay = getDelayTime(nodeConfig, "writeApiDelay");
+    let tableSettings = {};
+    if (settings) {
+        tableSettings = JSON.parse(settings);
+    }
+
+    // 检查必要参数
+    if (!eventDataMaps || !tableSettings || !tableSettings.keys || tableSettings.keys.length === 0) {
+        return false;
+    }
+
+    // 如果是单条记录，转换为数组格式
+    if (!Array.isArray(eventDataMaps)) {
+        eventDataMaps = [eventDataMaps];
+    }
+
+    // 提取主键值
+    let keyValues = [];
+    // 提取有效数据
+    let validData = [];
+    eventDataMaps.forEach((eventData) => {
+        if (!isAlive()) {
+            return;
+        }
+        if (eventData.beforeData && eventData.beforeData[tableSettings.keys[0]]) {
+            keyValues.push(eventData.beforeData[tableSettings.keys[0]]);
+        }
+        validData.push(eventData.beforeData);
+    });
+
+    if (keyValues.length === 0) {
+        return false;
+    }
+
+    let deleteCount = 0;
+    let recordIdsToDelete = [];
+
+    //单Key可以构建较为简单的查询条件，支持筛选查询条件集合长度限制50，多Key查询条件复杂收API字段校验限制只能查询10条
+    const BATCH_SIZE = tableSettings.keys.length === 1 ? 50 : 10;
+    for (let i = 0; i < validData.length; i += BATCH_SIZE) {
+        if (!isAlive()) {
+            break;
+        }
+        let batchData = validData.slice(i, i + BATCH_SIZE);
+        findRecord(batchData, tableSettings, queryApiDelay, (singleRecords) => {
+            //log.info("singleRecords: {}", JSON.stringify(singleRecords));
+            if (singleRecords.length <= 0) {
+                log.info("Not any records need to delete");
+                return;
+            }
+            singleRecords.forEach(item => {
+                if (!isAlive()) {
+                    return;
+                }
+                recordIdsToDelete.push(item["record_id"]);
+                if (recordIdsToDelete.length >= 1000) {
+                    let deleteResponse = invoker.invoke('batchDeleteRecords', {
+                        "records": recordIdsToDelete,
+                        "_tap_sleep_time_": writeApiDelay
+                    });
+                    if (!deleteResponse || !deleteResponse.result || deleteResponse.result.code !== 0) {
+                        log.warn("Batch delete failed: code={}, msg={}, batch count: {}, {}",
+                            deleteResponse?.result?.code, deleteResponse?.result?.msg, recordIdsToDelete.length, JSON.stringify(recordIdsToDelete));
+                    } else {
+                        deleteCount += recordIdsToDelete.length;
+                    }
+                    //log.info("B Delete : {}", JSON.stringify(recordIdsToDelete));
+                    recordIdsToDelete.length = 0;
+                    //log.info("A Delete : {}", JSON.stringify(recordIdsToDelete));
+                }
+            })
+        });
+    }
+
+
+    // 执行批量删除
+    if (recordIdsToDelete.length > 0) {
+        let deleteResponse = invoker.invoke('batchDeleteRecords', {
+            "records": recordIdsToDelete,
+            "_tap_sleep_time_": writeApiDelay
+        });
+        if (!deleteResponse || !deleteResponse.result || deleteResponse.result.code !== 0) {
+            log.warn("Batch delete failed: code={}, msg={}, batch count: {}, {}",
+                deleteResponse?.result?.code, deleteResponse?.result?.msg, recordIdsToDelete.length, JSON.stringify(recordIdsToDelete));
+        } else {
+            deleteCount += recordIdsToDelete.length;
+        }
+    }
+    return {
+        "insert": 0,
+        "update": 0,
+        "delete": deleteCount
+    };
+}
+
 function findRecord(batchData, tableSettings, apiDelay, accept) {
-    let filterConditions = {
-        "conjunction": "or",
-        "children": batchData.map(value => {
-            let children = [];
-            tableSettings.keys.forEach(key => {
-                children.push({
+    let filterConditions = {};
+    if (tableSettings.keys.length == 1) {
+        let key = tableSettings.keys[0];
+        filterConditions = {
+            "conjunction": "or",
+            "conditions": batchData.map(value => {
+                return {
                     "field_name": key,
                     "operator": "is",
                     "value": [value[key]]
-                })
-            });
-            return {
-                "conjunction": "and",
-                "conditions": children
-            }
-        })
-    };
+                }
+            })
+        };
+    } else {
+        filterConditions = {
+            "conjunction": "or",
+            "children": batchData.map(value => {
+                let children = [];
+                tableSettings.keys.forEach(key => {
+                    children.push({
+                        "field_name": key,
+                        "operator": "is",
+                        "value": [value[key]]
+                    })
+                });
+                return {
+                    "conjunction": "and",
+                    "conditions": children
+                }
+            })
+        };
+    }
+
     let singleRecords = [];
     try {
         // 修正搜索请求格式
@@ -147,10 +275,8 @@ function findRecord(batchData, tableSettings, apiDelay, accept) {
             "pageToken": null,
             "_tap_sleep_time_": apiDelay
         };
-        //log.info("Search request: {}", JSON.stringify(searchRequest));
         while (isAlive()) {
             let searchResponse = invoker.invoke('searchRecords', searchRequest);
-            //log.info("Search response: {}", JSON.stringify(searchResponse));
             if (searchResponse
                 && searchResponse.result
                 && searchResponse.result.code === 0
@@ -164,19 +290,16 @@ function findRecord(batchData, tableSettings, apiDelay, accept) {
                         data.forEach((key, value) => {
                             fields[key] = value;
                         });
-                        //log.info("each existing record: {}", JSON.stringify(item))
                         if (recordsMatch(data, item, tableSettings.keys)) {
                             singleRecords.push({
                                 "record_id": item["record_id"],
                                 "fields": fields,
                                 "dataIndex": batchDataIndex
                             })
-                            //log.info("add each existing record to update: {}, {}", JSON.stringify(item), JSON.stringify(data))
                         }
                     }
                 }
                 let hasMore = searchResponse.result.data.has_more;
-                log.info("has more: {}", hasMore);
                 if (hasMore) {
                     if (searchResponse.result.data.page_token !== undefined && searchResponse.result.data.page_token !== null) {
                         searchRequest.pageToken = searchResponse.result.data.page_token;
@@ -189,7 +312,6 @@ function findRecord(batchData, tableSettings, apiDelay, accept) {
                 if (singleRecords.length >= 500) {
                     accept(singleRecords);
                     singleRecords.length = 0;
-                    log.info("accept 500 records");
                 }
             } else if (searchResponse && searchResponse.result) {
                 log.warn("Search failed: code={}, msg={}",
@@ -203,10 +325,7 @@ function findRecord(batchData, tableSettings, apiDelay, accept) {
     } catch (e) {
         log.error("Search error: {}", e.message);
     }
-    if (singleRecords.length > 0) {
-        accept(singleRecords);
-        log.info("accept last {} records", singleRecords.length);
-    }
+    accept(singleRecords);
 }
 
 function getDelayTime(nodeConfig, key) {
@@ -248,24 +367,30 @@ function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, 
         return false;
     }
     // 分批处理
-    const BATCH_SIZE = 500; // 减小批次大小
+    //单Key可以构建较为简单的查询条件，支持筛选查询条件集合长度限制50，多Key查询条件复杂收API字段校验限制只能查询10条
+    const BATCH_SIZE = tableSettings.keys.length === 1 ? 50 : 10;
     let insertCount = 0;
     let updateCount = 0;
+    if (policy !== "just_insert") {
+        log.info("Will Check data records through primary key({}) to obtain record_id", JSON.stringify(tableSettings.keys));
+    } else {
+        log.info("Will just insert data all records");
+    }
     for (let i = 0; i < validData.length; i += BATCH_SIZE) {
+        if (!isAlive()) {
+            break;
+        }
         let batchData = validData.slice(i, i + BATCH_SIZE);
-
         // 分离更新和插入的记录
         let recordsToUpdate = [];
         let recordsToInsert = [];
         if (policy !== "just_insert") {
             findRecord(batchData, tableSettings, queryApiDelay, (singleRecords) => {
-                //log.info("singleRecords: {}", JSON.stringify(singleRecords));
                 if (singleRecords.length > 0) {
                     let indexOfExists = []
                     singleRecords.forEach(item => {
                         recordsToUpdate.push(item);
                         indexOfExists.push(item.dataIndex);
-                        //log.info("add each existing record to update: {}, {}", JSON.stringify(item), JSON.stringify(batchData[item.dataIndex]));
                         if (recordsToUpdate.length >= 1000) {
                             updateCount += acceptRecords(recordsToUpdate, policy, "batchUpdateRecords", "update", writeApiDelay);
                             log.info("B Update : {}", JSON.stringify(recordsToUpdate));
@@ -274,6 +399,9 @@ function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, 
                         }
                     })
                     for (let batchDataIndex in batchData) {
+                        if (!isAlive()) {
+                            break;
+                        }
                         if (!indexOfExists.includes(batchDataIndex)) {
                             let data = batchData[batchDataIndex];
                             let fields = {};
@@ -291,6 +419,9 @@ function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, 
                     }
                 } else {
                     for (let batchDataIndex in batchData) {
+                        if (!isAlive()) {
+                            break;
+                        }
                         let data = batchData[batchDataIndex];
                         let fields = {};
                         data.forEach((key, value) => {
@@ -316,104 +447,16 @@ function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, 
                 recordsToInsert.push({"fields": fields});
                 if (recordsToInsert.length >= 1000) {
                     insertCount += acceptRecords(recordsToInsert, policy, "batchCreateRecords", "insert", writeApiDelay);
-                    log.info("B Insert : {}", JSON.stringify(recordsToInsert));
                     recordsToInsert.length = 0;
-                    log.info("Insert : {}", JSON.stringify(recordsToInsert));
                 }
             }
         }
-
-
-        // let filterConditions = {
-        //     "conjunction": "or",
-        //     "children": batchData.map(value => {
-        //         let children = [];
-        //         tableSettings.keys.forEach(key => {
-        //             children.push({
-        //                 "field_name": key,
-        //                 "operator": "is",
-        //                 "value": [value[key]]
-        //             })
-        //         });
-        //         return {
-        //             "conjunction": "and",
-        //             "conditions": children
-        //         }
-        //     })
-        // };
-        // // 分离更新和插入的记录
-        // let recordsToUpdate = [];
-        // let recordsToInsert = [];
-        // let singleRecords = [];
-        // try {
-        //     // 修正搜索请求格式
-        //     let searchRequest = {
-        //         "filter": {"value": filterConditions},
-        //         "page_size": 500,
-        //         "fieldNames": tableSettings.keys
-        //     };
-        //     //log.info("Search request: {}", JSON.stringify(searchRequest));
-        //     let searchResponse = invoker.invoke('searchRecords', searchRequest);
-        //     //log.info("Search response: {}", JSON.stringify(searchResponse));
-        //
-        //     if(searchResponse && searchResponse.result && searchResponse.result.code === 0) {
-        //         if(searchResponse.result.data && searchResponse.result.data.items) {
-        //             for(let index in searchResponse.result.data.items) {
-        //                 let item = searchResponse.result.data.items[index];
-        //                 for (let batchDataIndex in batchData) {
-        //                     let data = batchData[batchDataIndex];
-        //                     let fields = {};
-        //                     data.forEach((key, value) => {
-        //                         fields[key] = value;
-        //                     });
-        //                     //log.info("each existing record: {}", JSON.stringify(item))
-        //                     if (recordsMatch(data, item, tableSettings.keys)) {
-        //                         singleRecords.push({
-        //                             "record_id": item["record_id"],
-        //                             "fields": fields,
-        //                             "dataIndex": batchDataIndex
-        //                         })
-        //                         //log.info("add each existing record to update: {}, {}", JSON.stringify(item), JSON.stringify(data))
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //     } else if(searchResponse && searchResponse.result) {
-        //         log.warn("Search failed: code={}, msg={}",
-        //             searchResponse.result.code, searchResponse.result.msg);
-        //     }
-        // } catch(e) {
-        //     log.error("Search error: {}", e.message);
-        // }
-
-        //log.info("recordsToUpdate: {}", JSON.stringify(recordsToUpdate));
-        //log.info("recordsToInsert: {}", JSON.stringify(recordsToInsert));
         if (recordsToUpdate.length > 0) {
             updateCount += acceptRecords(recordsToUpdate, policy, "batchUpdateRecords", "update", writeApiDelay);
         }
         if (recordsToInsert.length > 0) {
             insertCount += acceptRecords(recordsToInsert, policy, "batchCreateRecords", "insert", writeApiDelay);
         }
-        // switch (policy) {
-        //     case "insert_on_nonexists":
-        //     case "update_on_exists":
-        //         if (callBatchApi(recordsToUpdate, "batchUpdateRecords", "update")) {
-        //             updateCount += recordsToUpdate.length;
-        //         }
-        //         if (callBatchApi(recordsToInsert, "batchCreateRecords", "insert")) {
-        //             insertCount += recordsToInsert.length;
-        //         }
-        //         break;
-        //     case "ignore_on_exists":
-        //     case "just_insert":
-        //     case "ignore_on_nonexists":
-        //         if (callBatchApi(recordsToInsert, "batchCreateRecords", "insert")) {
-        //             insertCount += recordsToInsert.length;
-        //         }
-        //         break;
-        //     default:
-        //         //do nothing
-        // }
     }
     return {
         "insert": insertCount,
@@ -464,7 +507,10 @@ function callBatchApi(batchData, apiName, type, apiDelay) {
             "records": batchData,
             "_tap_sleep_time_": apiDelay
         };
-        //log.info("{} request: {}", type, JSON.stringify(insertRequest));
+        //log.info("{} request: {}", type, JSON.stringify(requestParam));
+        if (!isAlive()) {
+            return false;
+        }
         let insertResponse = invoker.invoke(apiName, requestParam);
         //log.info("{} response: {}", type, JSON.stringify(insertResponse));
         if (!insertResponse || !insertResponse.result || insertResponse.result.code !== 0) {
@@ -505,90 +551,6 @@ function recordMatch(objMap, key, value) {
     return objMap[key] !== undefined && value !== undefined && objMap[key] === value;
 }
 
-function updateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, capabilities) {
-    let dmlUpdatePolicy = capabilities["dml_update_policy"];
-    log.debug("updateRecordBatch: {}", dmlUpdatePolicy);
-    //@todo
-    dmlUpdatePolicy = "insert_on_nonexists";
-    return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, dmlUpdatePolicy);
-}
-
-function deleteRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, capabilities) {
-    let queryApiDelay = getDelayTime(nodeConfig, "queryApiDelay");
-    let writeApiDelay = getDelayTime(nodeConfig, "writeApiDelay");
-    let tableSettings = {};
-    if (settings) {
-        tableSettings = JSON.parse(settings);
-    }
-
-    // 检查必要参数
-    if (!eventDataMaps || !tableSettings || !tableSettings.keys || tableSettings.keys.length === 0) {
-        return false;
-    }
-
-    // 如果是单条记录，转换为数组格式
-    if (!Array.isArray(eventDataMaps)) {
-        eventDataMaps = [eventDataMaps];
-    }
-
-    // 提取主键值
-    let keyValues = [];
-    eventDataMaps.forEach((eventData) => {
-        if (eventData.beforeData && eventData.beforeData[tableSettings.keys[0]]) {
-            keyValues.push(eventData.beforeData[tableSettings.keys[0]]);
-        }
-    });
-
-    if (keyValues.length === 0) {
-        return false;
-    }
-
-    let deleteCount = 0;
-    let recordIdsToDelete = [];
-    findRecord(eventDataMaps, tableSettings, queryApiDelay, (singleRecords) => {
-        //log.info("singleRecords: {}", JSON.stringify(singleRecords));
-        if (singleRecords.length <= 0) {
-            return;
-        }
-        singleRecords.forEach(item => {
-            recordIdsToDelete.push(item["record_id"]);
-            if (recordIdsToDelete.length >= 1000) {
-                let deleteResponse = invoker.invoke('batchDeleteRecords', {
-                    "records": recordIdsToDelete,
-                    "_tap_sleep_time_": writeApiDelay
-                });
-                if (!deleteResponse || !deleteResponse.result || deleteResponse.result.code !== 0) {
-                    log.warn("Batch delete failed: code={}, msg={}, batch count: {}, {}",
-                        deleteResponse?.result?.code, deleteResponse?.result?.msg, recordIdsToDelete.length, JSON.stringify(recordIdsToDelete));
-                } else {
-                    deleteCount += recordIdsToDelete.length;
-                }
-                log.info("B Delete : {}", JSON.stringify(recordIdsToDelete));
-                recordIdsToDelete.length = 0;
-                log.info("A Delete : {}", JSON.stringify(recordIdsToDelete));
-            }
-        })
-    });
-
-
-    // 执行批量删除
-    if (recordIdsToDelete.length > 0) {
-        let deleteResponse = invoker.invoke('batchDeleteRecords', {
-            "records": recordIdsToDelete,
-            "_tap_sleep_time_": writeApiDelay
-        });
-        if (!deleteResponse || !deleteResponse.result || deleteResponse.result.code !== 0) {
-            log.warn("Batch delete failed: code={}, msg={}, batch count: {}, {}",
-                deleteResponse?.result?.code, deleteResponse?.result?.msg, recordIdsToDelete.length, JSON.stringify(recordIdsToDelete));
-        }
-    }
-    return {
-        "insert": 0,
-        "update": 0,
-        "delete": deleteCount
-    };
-}
-
 /**
  * This method is used to update the access key
  *  @param connectionConfig :type is Object
@@ -604,10 +566,13 @@ function deleteRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings
  *      - {"key":"value",...} : Type is Object and has key-value ,  At this point, these values will be used to call the interface again after the results are returned.
  * */
 function updateToken(connectionConfig, nodeConfig, apiResponse) {
+    if (!isAlive()) {
+        return null;
+    }
     if (apiResponse.httpCode === 403
         || apiResponse.httpCode === 400
         || apiResponse.result && apiResponse.result.code === 99991663) {
-        log.warn("Http code:{}, result code:{}, result msg: {}", apiResponse.httpCode, apiResponse.result.code, apiResponse.result.msg);
+        log.info("Http code: {}, result code: {}, result msg: {}", apiResponse.httpCode, apiResponse.result.code, apiResponse.result.msg);
         try {
             let refreshToken = invoker.invokeWithoutIntercept("getToken");
             if (refreshToken && refreshToken.result && refreshToken.result.app_access_token) {
