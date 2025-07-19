@@ -15,19 +15,7 @@ import io.tapdata.js.connector.base.TapConnectorLog;
 import io.tapdata.js.connector.iengine.LoadJavaScripter;
 import io.tapdata.js.connector.server.decorator.APIFactoryDecorator;
 import io.tapdata.js.connector.server.function.FunctionSupport;
-import io.tapdata.js.connector.server.function.support.BaseConnectionTestFunction;
-import io.tapdata.js.connector.server.function.support.BaseDiscoverSchemaFunction;
-import io.tapdata.js.connector.server.function.support.BaseTableCountFunction;
-import io.tapdata.js.connector.server.function.support.BaseUpdateTokenFunction;
-import io.tapdata.js.connector.server.function.support.JSBatchCountFunction;
-import io.tapdata.js.connector.server.function.support.JSBatchReadFunction;
-import io.tapdata.js.connector.server.function.support.JSCommandFunction;
-import io.tapdata.js.connector.server.function.support.JSCreateTableV2Function;
-import io.tapdata.js.connector.server.function.support.JSExecuteCommandFunction;
-import io.tapdata.js.connector.server.function.support.JSRawDataCallbackFunction;
-import io.tapdata.js.connector.server.function.support.JSStreamReadFunction;
-import io.tapdata.js.connector.server.function.support.JSTimestampToStreamOffsetFunction;
-import io.tapdata.js.connector.server.function.support.JSWriteRecordFunction;
+import io.tapdata.js.connector.server.function.support.*;
 import io.tapdata.js.connector.server.inteceptor.JSAPIInterceptorConfig;
 import io.tapdata.js.connector.server.inteceptor.JSAPIResponseInterceptor;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -105,14 +93,6 @@ public class JSConnector extends ConnectorBase {
     @Override
     public int tableCount(TapConnectionContext connectionContext) throws Throwable {
         return BaseTableCountFunction.tableCount(this.javaScripter).get(connectionContext);
-    }
-
-    public List<String> getLowerCaseTableNames(TapConnectionContext connectionContext) throws Throwable {
-        List<String> tableNames = new ArrayList<>();
-        BaseDiscoverSchemaFunction.discover(this.javaScripter).invoker(connectionContext, consumer -> {
-            consumer.forEach(table -> tableNames.add(table.getId().toLowerCase()));
-        });
-        return tableNames;
     }
 
     protected void instanceScript(TapConnectionContext connectionContext, Map<String, Object> configMap) {

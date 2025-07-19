@@ -55,16 +55,16 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
         return this::write;
     }
 
-    private boolean doSubFunctionNotSupported() {
-        return this.doNotSupport(JSFunctionNames.InsertRecordFunction)
-                && this.doNotSupport(JSFunctionNames.DeleteRecordFunction)
-                && this.doNotSupport(JSFunctionNames.UpdateRecordFunction)
-                && this.doNotSupport(JSFunctionNames.InsertRecordBatchFunction)
-                && this.doNotSupport(JSFunctionNames.UpdateRecordBatchFunction)
-                && this.doNotSupport(JSFunctionNames.DeleteRecordBatchFunction);
+    protected boolean doSubFunctionNotSupported() {
+        return doNotSupport(JSFunctionNames.InsertRecordFunction)
+                && doNotSupport(JSFunctionNames.DeleteRecordFunction)
+                && doNotSupport(JSFunctionNames.UpdateRecordFunction)
+                && doNotSupport(JSFunctionNames.InsertRecordBatchFunction)
+                && doNotSupport(JSFunctionNames.UpdateRecordBatchFunction)
+                && doNotSupport(JSFunctionNames.DeleteRecordBatchFunction);
     }
 
-    private boolean doNotSupport(JSFunctionNames function) {
+    protected boolean doNotSupport(JSFunctionNames function) {
         return !this.javaScripter.functioned(function.jsName());
     }
 
@@ -112,7 +112,7 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
         }
     }
 
-    private void execDrop(String cacheEventType, TapConnectorContext context, List<Map<String, Object>> execData,Consumer<WriteListResult<TapRecordEvent>> consumer, String tableJsonString){
+    protected void execDrop(String cacheEventType, TapConnectorContext context, List<Map<String, Object>> execData, Consumer<WriteListResult<TapRecordEvent>> consumer, String tableJsonString) {
         JSFunctionNames functionName = supportButch(cacheEventType);
         if (functionName.isBatch()) {
             this.exec(context, execData, functionName, consumer, tableJsonString);
@@ -123,7 +123,20 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
         }
     }
 
-    private void exec(TapConnectorContext context, Object execData, JSFunctionNames function,Consumer<WriteListResult<TapRecordEvent>> consumer, String tableJsonString) {
+    protected Map<String, String> capabilities(TapConnectorContext context) {
+        Map<String, String> capabilities = new HashMap<>();
+        String insertDmlPolicy = Optional.ofNullable(context.getConnectorCapabilities())
+                .map(c -> c.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY))
+                .orElse(ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS);
+        String updateDmlPolicy = Optional.ofNullable(context.getConnectorCapabilities())
+                .map(c -> c.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY))
+                .orElse(ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS);
+        capabilities.put(ConnectionOptions.DML_INSERT_POLICY, insertDmlPolicy);
+        capabilities.put(ConnectionOptions.DML_UPDATE_POLICY, updateDmlPolicy);
+        return capabilities;
+    }
+
+    protected void exec(TapConnectorContext context, Object execData, JSFunctionNames function,Consumer<WriteListResult<TapRecordEvent>> consumer, String tableJsonString) {
         if (!this.doNotSupport(function)) {
             WriteRecordRender writeResultCollector= data -> {
                 AtomicLong insert = new AtomicLong();
@@ -150,15 +163,7 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
             try {
                 boolean isWriteRecord = JSFunctionNames.WriteRecordFunction.jsName().equals(function.jsName());
                 Object invoker;
-                Map<String, String> capabilities = new HashMap<>();
-                String insertDmlPolicy = Optional.ofNullable(context.getConnectorCapabilities())
-                                .map(c -> c.getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY))
-                                        .orElse(ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS);
-                String updateDmlPolicy = Optional.ofNullable(context.getConnectorCapabilities())
-                                .map(c -> c.getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY))
-                                        .orElse(ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS);
-                capabilities.put(ConnectionOptions.DML_INSERT_POLICY, insertDmlPolicy);
-                capabilities.put(ConnectionOptions.DML_UPDATE_POLICY, updateDmlPolicy);
+                Map<String, String> capabilities = capabilities(context);
                 synchronized (JSConnector.execLock) {
                     invoker = super.javaScripter.invoker(
                             function.jsName(),
@@ -166,8 +171,7 @@ public class JSWriteRecordFunction extends FunctionBase implements FunctionSuppo
                             Optional.ofNullable(context.getNodeConfig()).orElse(new DataMap()),
                             execData,
                             isWriteRecord ? writeResultCollector : tableJsonString,
-                            isWriteRecord ? tableJsonString : capabilities,
-                            isWriteRecord ? capabilities : null
+                            isWriteRecord ? tableJsonString : capabilities, isWriteRecord ? capabilities : null
                     );
                 }
                 if (!isWriteRecord) {
