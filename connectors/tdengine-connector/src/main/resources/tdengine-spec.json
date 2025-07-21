@@ -93,16 +93,16 @@
           "default": false,
           "x-decorator": "FormItem",
           "x-component": "Switch",
-          "x-reactions": [
-            {
-              "target": "*(originPort)",
-              "fulfill": {
-                "state": {
-                  "visible": "{{$self.value===false}}"
-                }
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
               }
             }
-          ],
+          },
           "x-index": 8
         },
         "originPort": {
@@ -112,7 +112,17 @@
           "x-component": "InputNumber",
           "default": 6030,
           "x-index": 9,
-          "required": true
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type",
+              "supportWebSocket"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && !$deps[1] ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "extParams": {
           "type": "string",

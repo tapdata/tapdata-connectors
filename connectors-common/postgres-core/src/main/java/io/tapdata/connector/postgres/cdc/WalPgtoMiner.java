@@ -69,6 +69,7 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
                         }
                     } catch (Exception e) {
                         threadException.set(e);
+                        return;
                     }
                 }
             });
