@@ -1,262 +1,418 @@
 {
-	"info": {
-		"_postman_id": "25bc7706-d27c-4478-b05c-8a87d0af2059",
-		"name": "feishu",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-	},
-	"item": [
-		{
-			"name": "getToken",
-			"request": {
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "raw",
-					"raw": "{\n    \"app_id\":\"{{app_id}}\",\n    \"app_secret\":\"{{app_secret}}\"\n}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal",
-					"protocol": "https",
-					"host": [
-						"open",
-						"feishu",
-						"cn"
-					],
-					"path": [
-						"open-apis",
-						"auth",
-						"v3",
-						"app_access_token",
-						"internal"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "addRow",
-			"request": {
-				"method": "POST",
-				"header": [
-					{
-						"key": "Authorization",
-						"value": "{{Authorization}}",
-						"type": "default"
-					}
-				],
-				"body": {
-					"mode": "raw",
-					"raw": "{\"fields\":{{body}}}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records",
-					"protocol": "https",
-					"host": [
-						"open",
-						"feishu",
-						"cn"
-					],
-					"path": [
-						"open-apis",
-						"bitable",
-						"v1",
-						"apps",
-						"{{app_token}}",
-						"tables",
-						"{{table_id}}",
-						"records"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "findRow",
-			"request": {
-				"method": "GET",
-				"header": [
-					{
-						"key": "Authorization",
-						"value": "{{Authorization}}",
-						"type": "default"
-					}
-				],
-				"url": {
-					"raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records?filter={{filter}}",
-					"protocol": "https",
-					"host": [
-						"open",
-						"feishu",
-						"cn"
-					],
-					"path": [
-						"open-apis",
-						"bitable",
-						"v1",
-						"apps",
-						"{{app_token}}",
-						"tables",
-						"{{table_id}}",
-						"records"
-					],
-					"query": [
-						{
-							"key": "filter",
-							"value": "{{filter}}"
-						}
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "editRow",
-			"request": {
-				"method": "PUT",
-				"header": [
-					{
-						"key": "Authorization",
-						"value": "{{Authorization}}",
-						"type": "default"
-					}
-				],
-				"body": {
-					"mode": "raw",
-					"raw": "{\"fields\":{{body}}}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records/{{record_id}}",
-					"protocol": "https",
-					"host": [
-						"open",
-						"feishu",
-						"cn"
-					],
-					"path": [
-						"open-apis",
-						"bitable",
-						"v1",
-						"apps",
-						"{{app_token}}",
-						"tables",
-						"{{table_id}}",
-						"records",
-						"{{record_id}}"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "deleteRow",
-			"request": {
-				"method": "DELETE",
-				"header": [
-					{
-						"key": "Authorization",
-						"value": "{{Authorization}}",
-						"type": "default"
-					}
-				],
-				"url": {
-					"raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records/{{record_id}}",
-					"protocol": "https",
-					"host": [
-						"open",
-						"feishu",
-						"cn"
-					],
-					"path": [
-						"open-apis",
-						"bitable",
-						"v1",
-						"apps",
-						"{{app_token}}",
-						"tables",
-						"{{table_id}}",
-						"records",
-						"{{record_id}}"
-					]
-				}
-			},
-			"response": []
-		}
-	],
-	"event": [
-		{
-			"listen": "prerequest",
-			"script": {
-				"type": "text/javascript",
-				"exec": [
-					""
-				]
-			}
-		},
-		{
-			"listen": "test",
-			"script": {
-				"type": "text/javascript",
-				"exec": [
-					""
-				]
-			}
-		}
-	],
-	"variable": [
-		{
-			"key": "app_id",
-			"value": "cli_a4ca0b675931100c",
-			"type": "default"
-		},
-		{
-			"key": "app_secret",
-			"value": "oa3X2YoPxOnKVTEWznWntjXKh0Bto3rP",
-			"type": "default"
-		},
-		{
-			"key": "app_token",
-			"value": "HpsSbr1ykaTqw7s1MspcDWP4nSc",
-			"type": "default"
-		},
-		{
-			"key": "table_id",
-			"value": "tblHMmBph1E3gvsm",
-			"type": "default"
-		},
-		{
-			"key": "Authorization",
-			"value": "Bearer t-g104atmAA5GOGRDTKXJACTURFWKODFGU6A32Q2DM",
-			"type": "default"
-		},
-		{
-			"key": "filter",
-			"value": "",
-			"type": "default"
-		},
-		{
-			"key": "record_id",
-			"value": "",
-			"type": "default"
-		},
-		{
-			"key": "body",
-			"value": "",
-			"type": "default"
-		}
-	]
+  "info": {
+    "_postman_id": "25bc7706-d27c-4478-b05c-8a87d0af2059",
+    "name": "feishu",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "getToken",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"app_id\":\"{{app_id}}\",\n    \"app_secret\":\"{{app_secret}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal",
+          "protocol": "https",
+          "host": [
+            "open",
+            "feishu",
+            "cn"
+          ],
+          "path": [
+            "open-apis",
+            "auth",
+            "v3",
+            "app_access_token",
+            "internal"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "getTableMateInfo",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{Authorization}}",
+            "type": "default"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "default"
+          }
+        ],
+        "url": {
+          "raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/:app_token",
+          "protocol": "https",
+          "host": [
+            "open",
+            "feishu",
+            "cn"
+          ],
+          "path": [
+            "open-apis",
+            "bitable",
+            "v1",
+            "apps"
+          ],
+          "variable": [
+            {
+              "key": "app_token",
+              "value": "{{app_token}}"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "searchRecords",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{Authorization}}",
+            "type": "default"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "default"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"filter\": {{filter}}, \"field_names\": {{fieldNames}}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records/search?page_size=500",
+          "protocol": "https",
+          "host": [
+            "open",
+            "feishu",
+            "cn"
+          ],
+          "path": [
+            "open-apis",
+            "bitable",
+            "v1",
+            "apps",
+            "{{app_token}}",
+            "tables",
+            "{{table_id}}",
+            "records",
+            "search"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "batchCreateRecords",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{Authorization}}",
+            "type": "default"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "default"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"records\": {{records}}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records/batch_create",
+          "protocol": "https",
+          "host": [
+            "open",
+            "feishu",
+            "cn"
+          ],
+          "path": [
+            "open-apis",
+            "bitable",
+            "v1",
+            "apps",
+            "{{app_token}}",
+            "tables",
+            "{{table_id}}",
+            "records",
+            "batch_create"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "batchUpdateRecords",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{Authorization}}",
+            "type": "default"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "default"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"records\": {{records}}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records/batch_update",
+          "protocol": "https",
+          "host": [
+            "open",
+            "feishu",
+            "cn"
+          ],
+          "path": [
+            "open-apis",
+            "bitable",
+            "v1",
+            "apps",
+            "{{app_token}}",
+            "tables",
+            "{{table_id}}",
+            "records",
+            "batch_update"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "batchDeleteRecords",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{Authorization}}",
+            "type": "default"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "default"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"records\": {{records}}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records/batch_delete",
+          "protocol": "https",
+          "host": [
+            "open",
+            "feishu",
+            "cn"
+          ],
+          "path": [
+            "open-apis",
+            "bitable",
+            "v1",
+            "apps",
+            "{{app_token}}",
+            "tables",
+            "{{table_id}}",
+            "records",
+            "batch_delete"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "deleteRow",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{Authorization}}",
+            "type": "default"
+          }
+        ],
+        "url": {
+          "raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records/{{record_id}}",
+          "protocol": "https",
+          "host": [
+            "open",
+            "feishu",
+            "cn"
+          ],
+          "path": [
+            "open-apis",
+            "bitable",
+            "v1",
+            "apps",
+            "{{app_token}}",
+            "tables",
+            "{{table_id}}",
+            "records",
+            "{{record_id}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "batchDeleteRows",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "{{Authorization}}",
+            "type": "default"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "default"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"records\":{{records}}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://open.feishu.cn/open-apis/bitable/v1/apps/{{app_token}}/tables/{{table_id}}/records/batch_delete",
+          "protocol": "https",
+          "host": [
+            "open",
+            "feishu",
+            "cn"
+          ],
+          "path": [
+            "open-apis",
+            "bitable",
+            "v1",
+            "apps",
+            "{{app_token}}",
+            "tables",
+            "{{table_id}}",
+            "records",
+            "batch_delete"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "app_id",
+      "value": "cli_a4ca0b675931100c",
+      "type": "default"
+    },
+    {
+      "key": "app_secret",
+      "value": "oa3X2YoPxOnKVTEWznWntjXKh0Bto3rP",
+      "type": "default"
+    },
+    {
+      "key": "app_token",
+      "value": "HpsSbr1ykaTqw7s1MspcDWP4nSc",
+      "type": "default"
+    },
+    {
+      "key": "table_id",
+      "value": "tblHMmBph1E3gvsm",
+      "type": "default"
+    },
+    {
+      "key": "Authorization",
+      "value": "Bearer t-g104atmAA5GOGRDTKXJACTURFWKODFGU6A32Q2DM",
+      "type": "default"
+    },
+    {
+      "key": "filter",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "record_id",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "body",
+      "value": "",
+      "type": "default"
+    }
+  ]
 }
