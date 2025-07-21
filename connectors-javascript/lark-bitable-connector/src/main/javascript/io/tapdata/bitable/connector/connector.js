@@ -114,9 +114,8 @@ function commandCallback(connectionConfig, nodeConfig, commandInfo) {
  * */
 function updateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, capabilities) {
     let dmlUpdatePolicy = capabilities["dml_update_policy"];
-    log.debug("updateRecordBatch: {}", dmlUpdatePolicy);
-    //@todo
-    dmlUpdatePolicy = "insert_on_nonexists";
+    log.info("Update record batch policy: {}", dmlUpdatePolicy);
+    //dmlUpdatePolicy = "insert_on_nonexists";
     return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, dmlUpdatePolicy);
 }
 
@@ -125,9 +124,8 @@ function updateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings
  * */
 function insertRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, capabilities) {
     let dmlInsertPolicy = capabilities["dml_insert_policy"];
-    log.debug("insertRecordBatch: {}", dmlInsertPolicy);
-    //@todo
-    dmlInsertPolicy = "update_on_exists";
+    log.debug("Insert record batch policy: {}", dmlInsertPolicy);
+    //dmlInsertPolicy = "update_on_exists";
     return insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, settings, dmlInsertPolicy);
 }
 
