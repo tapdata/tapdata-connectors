@@ -52,21 +52,23 @@ public class StarrocksStreamLoader {
     private final RecordStream recordStream;
 
     private boolean loadBatchFirstRecord;
-    private AtomicInteger lastEventFlag;
-    private final AtomicReference<Set<String>> dataColumns;
+    // 改为按表存储dataColumns
+    private final Map<String, Set<String>> dataColumnsByTable;
     private MessageSerializer messageSerializer;
     private TapTable tapTable;
     private final Metrics metrics;
 
     // 新增字段：时间和大小控制
     private long lastFlushTime;
-    private long currentBatchSize;
+    private final Map<String, Long> currentBatchSizeByTable; // 改为按表管理
+    private final Map<String, Long> lastFlushTimeByTable; // 按表管理刷新时间
     private final MinuteWriteLimiter minuteWriteLimiter;
 
-    // 文件缓存相关字段
-    private Path tempCacheFile;
-    private FileOutputStream cacheFileStream;
-    private boolean isFirstRecord = true;
+    // 文件缓存相关字段 - 改为按表管理
+    private final Map<String, Path> tempCacheFilesByTable;
+    private final Map<String, FileOutputStream> cacheFileStreamsByTable;
+    private final Map<String, Boolean> isFirstRecordByTable;
+    private final Set<String> pendingFlushTables; // 记录还没有flush的表
 
     // 日志打印控制
     private long lastLogTime;
@@ -76,6 +78,11 @@ public class StarrocksStreamLoader {
     private final Object writeLock = new Object();
     private ScheduledExecutorService flushScheduler;
     private ScheduledFuture<?> flushTask;
+
+    // 内存保护：限制同时处理的表数量
+    private static final int MAX_CONCURRENT_TABLES = 50;
+    private long lastMemoryCheckTime = 0;
+    private static final long MEMORY_CHECK_INTERVAL = 30000; // 30秒检查一次内存
 
     public StarrocksStreamLoader(StarrocksJdbcContext StarrocksJdbcContext, CloseableHttpClient httpClient) {
         this.StarrocksConfig = (StarrocksConfig) StarrocksJdbcContext.getConfig();
@@ -88,19 +95,22 @@ public class StarrocksStreamLoader {
         }
         this.recordStream = new RecordStream(writeByteBufferCapacity, Constants.CACHE_BUFFER_COUNT);
         this.loadBatchFirstRecord = true;
-        this.lastEventFlag = new AtomicInteger(0);
-        this.dataColumns = new AtomicReference<>();
+        this.dataColumnsByTable = new ConcurrentHashMap<>();
         initMessageSerializer();
         this.metrics = new Metrics();
 
         // 初始化新的字段
         this.lastFlushTime = System.currentTimeMillis();
-        this.currentBatchSize = 0;
+        this.currentBatchSizeByTable = new ConcurrentHashMap<>();
+        this.lastFlushTimeByTable = new ConcurrentHashMap<>();
         this.minuteWriteLimiter = new MinuteWriteLimiter(StarrocksConfig.getMinuteLimitMB());
         this.lastLogTime = System.currentTimeMillis();
 
-        // 初始化文件缓存
-        initializeCacheFile();
+        // 初始化文件缓存相关的Map
+        this.tempCacheFilesByTable = new ConcurrentHashMap<>();
+        this.cacheFileStreamsByTable = new ConcurrentHashMap<>();
+        this.isFirstRecordByTable = new ConcurrentHashMap<>();
+        this.pendingFlushTables = ConcurrentHashMap.newKeySet();
 
         // 初始化定时刷新
         initializeFlushScheduler();
@@ -120,28 +130,110 @@ public class StarrocksStreamLoader {
     }
 
     /**
-     * 初始化缓存文件
+     * 为指定表初始化缓存文件
      */
-    private void initializeCacheFile() {
+    private void initializeCacheFileForTable(String tableName) {
         try {
+            // 内存保护：检查表数量限制
+            checkMemoryAndTableLimits(tableName);
+
+            // 先清理该表的现有资源（如果存在）
+            cleanupCacheFileForTable(tableName);
+
             // 创建临时目录
             Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"), "starrocks-cache");
             if (!Files.exists(tempDir)) {
                 Files.createDirectories(tempDir);
             }
 
-            // 创建临时缓存文件
-            String fileName = String.format("starrocks-cache-%d-%d.tmp",
-                Thread.currentThread().getId(), System.currentTimeMillis());
-            tempCacheFile = tempDir.resolve(fileName);
+            // 创建临时缓存文件，使用简化的文件名避免过多对象创建
+            long timestamp = System.currentTimeMillis();
+            long threadId = Thread.currentThread().getId();
+            String fileName = String.format("starrocks-cache-%s-%d-%d.tmp", tableName, threadId, timestamp);
+            Path tempCacheFile = tempDir.resolve(fileName);
 
             // 初始化文件输出流
-            cacheFileStream = new FileOutputStream(tempCacheFile.toFile());
+            FileOutputStream cacheFileStream = new FileOutputStream(tempCacheFile.toFile());
 
-            //TapLogger.info(TAG, "Initialized cache file: {}", tempCacheFile.toString());
+            // 存储到Map中
+            tempCacheFilesByTable.put(tableName, tempCacheFile);
+            cacheFileStreamsByTable.put(tableName, cacheFileStream);
+            isFirstRecordByTable.put(tableName, true);
+
+            TapLogger.debug(TAG, "Initialized cache file for table {}: {}", tableName, tempCacheFile.toString());
         } catch (IOException e) {
-            TapLogger.error(TAG, "Failed to initialize cache file: {}", e.getMessage());
-            throw new StarrocksRuntimeException("Failed to initialize cache file", e);
+            TapLogger.error(TAG, "Failed to initialize cache file for table {}: {}", tableName, e.getMessage());
+            throw new StarrocksRuntimeException("Failed to initialize cache file for table " + tableName, e);
+        }
+    }
+
+    /**
+     * 获取总的批次大小
+     */
+    private long getTotalBatchSize() {
+        return currentBatchSizeByTable.values().stream().mapToLong(Long::longValue).sum();
+    }
+
+    /**
+     * 获取指定表的批次大小
+     */
+    private long getTableBatchSize(String tableName) {
+        return currentBatchSizeByTable.getOrDefault(tableName, 0L);
+    }
+
+    /**
+     * 获取指定表的上次刷新时间
+     */
+    private long getTableLastFlushTime(String tableName) {
+        return lastFlushTimeByTable.getOrDefault(tableName, System.currentTimeMillis());
+    }
+
+    /**
+     * 检查内存使用情况和表数量限制
+     */
+    private void checkMemoryAndTableLimits(String tableName) {
+        // 检查表数量限制
+        if (tempCacheFilesByTable.size() >= MAX_CONCURRENT_TABLES) {
+            TapLogger.warn(TAG, "Too many concurrent tables ({}), forcing cleanup of oldest tables",
+                tempCacheFilesByTable.size());
+
+            // 强制清理一些最老的表（简单策略：清理前10个）
+            int cleanupCount = 0;
+            for (String table : new HashSet<>(tempCacheFilesByTable.keySet())) {
+                if (cleanupCount >= 10) break;
+                if (!table.equals(tableName)) {
+                    cleanupCacheFileForTable(table);
+                    pendingFlushTables.remove(table);
+                    cleanupCount++;
+                }
+            }
+        }
+
+        // 定期检查内存使用情况
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastMemoryCheckTime > MEMORY_CHECK_INTERVAL) {
+            lastMemoryCheckTime = currentTime;
+
+            Runtime runtime = Runtime.getRuntime();
+            long totalMemory = runtime.totalMemory();
+            long freeMemory = runtime.freeMemory();
+            long usedMemory = totalMemory - freeMemory;
+            long maxMemory = runtime.maxMemory();
+
+            double memoryUsagePercent = (double) usedMemory / maxMemory * 100;
+
+            TapLogger.info(TAG, "Memory usage: {}% ({}/{} MB), active tables: {}",
+                String.format("%.1f", memoryUsagePercent),
+                usedMemory / 1024 / 1024,
+                maxMemory / 1024 / 1024,
+                tempCacheFilesByTable.size());
+
+            // 如果内存使用率超过80%，强制垃圾回收
+            if (memoryUsagePercent > 80) {
+                TapLogger.warn(TAG, "High memory usage detected ({}%), forcing garbage collection",
+                    String.format("%.1f", memoryUsagePercent));
+                System.gc();
+            }
         }
     }
 
@@ -168,32 +260,45 @@ public class StarrocksStreamLoader {
     }
 
     /**
-     * 检查并在需要时执行刷新
+     * 检查并在需要时执行刷新 - 检查所有表的未刷新文件
      */
     private void checkAndFlushIfNeeded() {
         synchronized (writeLock) {
-            if (lastEventFlag.get() == 0) {
+            if (pendingFlushTables.isEmpty()) {
                 return; // 没有数据需要刷新
             }
 
             long currentTime = System.currentTimeMillis();
-            long timeSinceLastFlush = currentTime - lastFlushTime;
             long flushTimeoutMs = StarrocksConfig.getFlushTimeoutSeconds() * 1000L;
+            long flushSizeBytes = StarrocksConfig.getFlushSizeMB() * 1024L * 1024L;
 
-            if (timeSinceLastFlush >= flushTimeoutMs) {
+            // 检查每个表是否需要刷新
+            Set<String> tablesToFlush = new HashSet<>();
+
+            for (String tableName : new HashSet<>(pendingFlushTables)) {
+                long tableLastFlushTime = getTableLastFlushTime(tableName);
+                long timeSinceLastFlush = currentTime - tableLastFlushTime;
+                long tableSize = getTableBatchSize(tableName);
+
+                boolean timeoutReached = timeSinceLastFlush >= flushTimeoutMs;
+                boolean sizeReached = tableSize >= flushSizeBytes;
+
+                if (timeoutReached || sizeReached) {
+                    tablesToFlush.add(tableName);
+                    String reason = sizeReached ? "size_threshold" : "timeout";
+                    TapLogger.info(TAG, "Table {} scheduled flush triggered by {}: table_size={}, " +
+                        "waiting_time={} ms, timeout_threshold={} ms",
+                        tableName, reason, formatBytes(tableSize), timeSinceLastFlush, flushTimeoutMs);
+                }
+            }
+
+            // 刷新需要刷新的表
+            if (!tablesToFlush.isEmpty()) {
                 try {
-                    TapLogger.info(TAG, "Scheduled flush triggered by timeout: waiting_time={} ms, " +
-                        "timeout_threshold={} ms, accumulated_size={}, {}",
-                        timeSinceLastFlush, flushTimeoutMs, formatBytes(currentBatchSize),
-                        metrics.getCachedInfo());
+                    TapLogger.info(TAG, "Scheduled flush: {} tables to flush, total_size={}, {}",
+                        tablesToFlush.size(), formatBytes(getTotalBatchSize()), metrics.getCachedInfo());
 
-                    // 执行刷新并处理 metrics
-                    RespContent respContent = flush(tapTable);
-                    if (respContent != null) {
-                        // 清理缓存的 metrics，因为数据已成功刷新
-                        metrics.clearCache();
-                        TapLogger.debug(TAG, "Cleared cached metrics after scheduled flush");
-                    }
+                    flushSpecificTables(tablesToFlush);
                 } catch (Exception e) {
                     TapLogger.error(TAG, "Failed to execute scheduled flush: {}", e.getMessage());
                 }
@@ -201,15 +306,78 @@ public class StarrocksStreamLoader {
         }
     }
 
+    /**
+     * 刷新指定的表
+     */
+    private void flushSpecificTables(Set<String> tablesToFlush) throws StarrocksRetryableException {
+        for (String tableName : tablesToFlush) {
+            try {
+                // 为每个表创建临时的TapTable对象进行刷新
+                if (tapTable != null && tapTable.getId().equals(tableName)) {
+                    RespContent respContent = flushTable(tableName, tapTable);
+                    if (respContent != null) {
+                        TapLogger.debug(TAG, "Successfully flushed table {} during scheduled flush", tableName);
+                    }
+                } else {
+                    TapLogger.warn(TAG, "Cannot flush table {} - no matching TapTable found", tableName);
+                }
+            } catch (Exception e) {
+                TapLogger.error(TAG, "Failed to flush table {} during scheduled flush: {}", tableName, e.getMessage());
+            }
+        }
+
+        // 清理缓存的 metrics，因为数据已成功刷新
+        if (!tablesToFlush.isEmpty()) {
+            metrics.clearCache();
+            TapLogger.debug(TAG, "Cleared cached metrics after scheduled flush");
+        }
+    }
+
+    /**
+     * 刷新所有待刷新的表
+     */
+    private void flushAllPendingTables() throws StarrocksRetryableException {
+        // 创建待刷新表的副本，避免在迭代过程中修改集合
+        Set<String> tablesToFlush = new HashSet<>(pendingFlushTables);
+
+        for (String tableName : tablesToFlush) {
+            try {
+                // 为每个表创建临时的TapTable对象进行刷新
+                if (tapTable != null && tapTable.getId().equals(tableName)) {
+                    RespContent respContent = flushTable(tableName, tapTable);
+                    if (respContent != null) {
+                        TapLogger.debug(TAG, "Successfully flushed table {} during scheduled flush", tableName);
+                    }
+                } else {
+                    TapLogger.warn(TAG, "Cannot flush table {} - no matching TapTable found", tableName);
+                }
+            } catch (Exception e) {
+                TapLogger.error(TAG, "Failed to flush table {} during scheduled flush: {}", tableName, e.getMessage());
+            }
+        }
+
+        // 清理缓存的 metrics，因为数据已成功刷新
+        if (!pendingFlushTables.isEmpty()) {
+            metrics.clearCache();
+            TapLogger.debug(TAG, "Cleared cached metrics after scheduled flush");
+        }
+    }
+
     public void writeRecord(final List<TapRecordEvent> tapRecordEvents, final TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
         synchronized (writeLock) {
             try {
-                TapLogger.debug(TAG, "Batch events length is: {}", tapRecordEvents.size());
                 WriteListResult<TapRecordEvent> listResult = writeListResult();
                 this.tapTable = table;
+                String tableName = table.getId();
                 boolean isAgg = StarrocksTableType.Aggregate.toString().equals(StarrocksConfig.getUniqueKeyType());
 
-            long batchStartSize = currentBatchSize;
+                // 确保该表有缓存文件
+                if (!tempCacheFilesByTable.containsKey(tableName)) {
+                    TapLogger.info(TAG, "Initializing cache file for new table: {}", tableName);
+                    initializeCacheFileForTable(tableName);
+                }
+
+            long batchStartSize = getTotalBatchSize();
             int processedEvents = 0;
             long batchDataSize = 0;
 
@@ -224,7 +392,7 @@ public class StarrocksStreamLoader {
                         formatBytes(minuteWriteLimiter.getCurrentMinuteWritten()), formatBytes(minuteWriteLimiter.getMinuteLimitBytes()), secondsToWait);
 
                     // 先刷新当前缓冲的数据
-                    if (lastEventFlag.get() != 0) {
+                    if (!pendingFlushTables.isEmpty()) {
                         flush(table);
                     }
 
@@ -237,14 +405,23 @@ public class StarrocksStreamLoader {
                     }
                 }
 
-                if (needFlush(tapRecordEvent, bytes.length, isAgg)) {
-                    flush(table);
+                if (needFlush(tapRecordEvent, bytes.length, isAgg, tableName)) {
+                    flushTable(tableName, table);
                 }
-                if (lastEventFlag.get() == 0) {
-                    startLoad(tapRecordEvent);
+
+                // 检查该表是否需要初始化startLoad（每个表第一次处理时都需要）
+                boolean needStartLoad = !dataColumnsByTable.containsKey(tableName);
+
+                if (needStartLoad) {
+                    startLoad(tapRecordEvent, tableName);
                 }
-                writeToCacheFile(bytes);
-                currentBatchSize += bytes.length;
+                writeToCacheFile(bytes, tableName);
+
+                // 更新该表的批次大小
+                currentBatchSizeByTable.put(tableName, getTableBatchSize(tableName) + bytes.length);
+
+                // 将该表标记为待刷新
+                pendingFlushTables.add(tableName);
 
                 // 直接统计到listResult
                 if (tapRecordEvent instanceof TapInsertRecordEvent) {
@@ -269,7 +446,7 @@ public class StarrocksStreamLoader {
                 // 刷新时也打印一次状态
                 logCurrentStatus(processedEvents, batchDataSize, currentTime);
                 lastLogTime = currentTime;
-                flush(table);
+                flushTable(tableName, table);
             }
                 writeListResultConsumer.accept(listResult);
             } catch (Throwable e) {
@@ -289,49 +466,85 @@ public class StarrocksStreamLoader {
     }
 
     /**
-     * 将数据写入缓存文件
+     * 将数据写入指定表的缓存文件
      */
-    private void writeToCacheFile(byte[] data) throws IOException {
+    private void writeToCacheFile(byte[] data, String tableName) throws IOException {
         try {
+            FileOutputStream cacheFileStream = cacheFileStreamsByTable.get(tableName);
+            if (cacheFileStream == null) {
+                // 缓存文件流不存在，可能是被清理了，重新初始化
+                TapLogger.warn(TAG, "Cache file stream not found for table {}, reinitializing...", tableName);
+                initializeCacheFileForTable(tableName);
+                cacheFileStream = cacheFileStreamsByTable.get(tableName);
+
+                if (cacheFileStream == null) {
+                    throw new IOException("Failed to reinitialize cache file stream for table: " + tableName);
+                }
+            }
+
+            Boolean isFirstRecord = isFirstRecordByTable.get(tableName);
+            if (isFirstRecord == null) {
+                isFirstRecord = true;
+            }
+
             if (!isFirstRecord) {
                 // 写入分隔符
                 cacheFileStream.write(messageSerializer.lineEnd());
             } else {
                 // 写入批次开始标记
                 cacheFileStream.write(messageSerializer.batchStart());
-                isFirstRecord = false;
+                isFirstRecordByTable.put(tableName, false);
             }
             // 写入实际数据
             cacheFileStream.write(data);
             cacheFileStream.flush(); // 确保数据写入磁盘
 
-            TapLogger.debug(TAG, "Written {} bytes to cache file", data.length);
+            TapLogger.debug(TAG, "Written {} bytes to cache file for table {}", data.length, tableName);
         } catch (IOException e) {
-            TapLogger.error(TAG, "Failed to write to cache file: {}", e.getMessage());
+            TapLogger.error(TAG, "Failed to write to cache file for table {}: {}", tableName, e.getMessage());
             throw e;
         }
     }
 
-    public void startLoad(final TapRecordEvent recordEvent) throws IOException {
+    public void startLoad(final TapRecordEvent recordEvent, String tableName) throws IOException {
         recordStream.startInput();
-        lastEventFlag.set(OperationType.getOperationFlag(recordEvent));
-        dataColumns.set(getDataColumns(recordEvent));
-        loadBatchFirstRecord = true;
-        isFirstRecord = true; // 重置文件记录标志
 
-        TapLogger.debug(TAG, "Started new load batch for operation: {}",
-            OperationType.getOperationFlag(recordEvent));
+        // 确保该表有缓存文件
+        if (!tempCacheFilesByTable.containsKey(tableName)) {
+            TapLogger.info(TAG, "Initializing cache file for table {} in startLoad", tableName);
+            initializeCacheFileForTable(tableName);
+        }
+
+        // 为指定表设置dataColumns
+        Set<String> newDataColumns = getDataColumns(recordEvent);
+        dataColumnsByTable.put(tableName, newDataColumns);
+
+        loadBatchFirstRecord = true;
+        isFirstRecordByTable.put(tableName, true); // 重置该表的文件记录标志
+
+        TapLogger.info(TAG, "Started new load batch for table {} with operation: {}, dataColumns: {}",
+            tableName, OperationType.getOperationFlag(recordEvent), newDataColumns);
     }
 
     private Set<String> getDataColumns(TapRecordEvent recordEvent) {
+        Set<String> columns = Collections.emptySet();
+        String eventType = "unknown";
+
         if (recordEvent instanceof TapInsertRecordEvent) {
-            return ((TapInsertRecordEvent) recordEvent).getAfter().keySet();
+            TapInsertRecordEvent insertEvent = (TapInsertRecordEvent) recordEvent;
+            columns = insertEvent.getAfter() != null ? insertEvent.getAfter().keySet() : Collections.emptySet();
+            eventType = "INSERT";
         } else if (recordEvent instanceof TapUpdateRecordEvent) {
-            return ((TapUpdateRecordEvent) recordEvent).getAfter().keySet();
+            TapUpdateRecordEvent updateEvent = (TapUpdateRecordEvent) recordEvent;
+            columns = updateEvent.getAfter() != null ? updateEvent.getAfter().keySet() : Collections.emptySet();
+            eventType = "UPDATE";
         } else if (recordEvent instanceof TapDeleteRecordEvent) {
-            return ((TapDeleteRecordEvent) recordEvent).getBefore().keySet();
+            TapDeleteRecordEvent deleteEvent = (TapDeleteRecordEvent) recordEvent;
+            columns = deleteEvent.getBefore() != null ? deleteEvent.getBefore().keySet() : Collections.emptySet();
+            eventType = "DELETE";
         }
-        return Collections.emptySet();
+
+        return columns;
     }
 
     public RespContent put(final TapTable table) throws StreamLoadException, StarrocksRetryableException {
@@ -339,14 +552,35 @@ public class StarrocksStreamLoader {
         try {
             final String loadUrl = buildLoadUrl(StarrocksConfig.getStarrocksHttp(), StarrocksConfig.getDatabase(), table.getId());
             final String prefix = buildPrefix(table.getId());
+            String tableName = table.getId();
 
             String label = prefix + "-" + UUID.randomUUID();
             List<String> columns = new ArrayList<>();
+
+            // 获取该表的dataColumns
+            Set<String> tableDataColumns = dataColumnsByTable.get(tableName);
+            if (tableDataColumns == null) {
+                tableDataColumns = Collections.emptySet();
+            }
+
+            // 打印调试信息 - put方法
+            TapLogger.info(TAG, "[PUT] Building columns for table {}: tableDataColumns={}, tapTable.getNameFieldMap().keySet()={}, uniqueKeyType={}",
+                tableName, tableDataColumns, tapTable.getNameFieldMap().keySet(), StarrocksConfig.getUniqueKeyType());
+
             for (String col : tapTable.getNameFieldMap().keySet()) {
-                if (dataColumns.get().contains(col) || StarrocksTableType.Aggregate.toString().equals(StarrocksConfig.getUniqueKeyType())) {
+                boolean isInDataColumns = tableDataColumns.contains(col);
+                boolean isAggregateType = StarrocksTableType.Aggregate.toString().equals(StarrocksConfig.getUniqueKeyType());
+                boolean shouldInclude = isInDataColumns || isAggregateType;
+
+                TapLogger.debug(TAG, "[PUT] Column {}: isInDataColumns={}, isAggregateType={}, shouldInclude={}",
+                    col, isInDataColumns, isAggregateType, shouldInclude);
+
+                if (shouldInclude) {
                     columns.add("`" + col + "`");
                 }
             }
+
+            TapLogger.info(TAG, "[PUT] Final columns list for table {}: {}", tableName, columns);
             // add the Starrocks_DELETE_SIGN at the end of the column
             columns.add(Constants.Starrocks_DELETE_SIGN);
             HttpPutBuilder putBuilder = new HttpPutBuilder();
@@ -391,20 +625,48 @@ public class StarrocksStreamLoader {
         try {
             final String loadUrl = buildLoadUrl(StarrocksConfig.getStarrocksHttp(), StarrocksConfig.getDatabase(), table.getId());
             final String prefix = buildPrefix(table.getId());
+            String tableName = table.getId();
 
             String label = prefix + "-" + UUID.randomUUID();
             List<String> columns = new ArrayList<>();
+
+            // 获取该表的dataColumns
+            Set<String> tableDataColumns = dataColumnsByTable.get(tableName);
+            if (tableDataColumns == null) {
+                tableDataColumns = Collections.emptySet();
+            }
+
+            // 打印调试信息 - putFromFile方法
+            TapLogger.info(TAG, "[PUT_FROM_FILE] Building columns for table {}: tableDataColumns={}, tapTable.getNameFieldMap().keySet()={}, uniqueKeyType={}",
+                tableName, tableDataColumns, tapTable.getNameFieldMap().keySet(), StarrocksConfig.getUniqueKeyType());
+
             for (String col : tapTable.getNameFieldMap().keySet()) {
-                if (dataColumns.get().contains(col) || StarrocksTableType.Aggregate.toString().equals(StarrocksConfig.getUniqueKeyType())) {
+                boolean isInDataColumns = tableDataColumns.contains(col);
+                boolean isAggregateType = StarrocksTableType.Aggregate.toString().equals(StarrocksConfig.getUniqueKeyType());
+                boolean shouldInclude = isInDataColumns || isAggregateType;
+
+                TapLogger.debug(TAG, "[PUT_FROM_FILE] Column {}: isInDataColumns={}, isAggregateType={}, shouldInclude={}",
+                    col, isInDataColumns, isAggregateType, shouldInclude);
+
+                if (shouldInclude) {
                     columns.add("`" + col + "`");
                 }
             }
+
+            TapLogger.info(TAG, "[PUT_FROM_FILE] Columns before adding DELETE_SIGN for table {}: {}", tableName, columns);
             // add the Starrocks_DELETE_SIGN at the end of the column
             columns.add(Constants.Starrocks_DELETE_SIGN);
 
-            // 直接从文件创建 InputStreamEntity，模仿 curl -T 的行为
-            long fileSize = Files.size(tempCacheFile);
-            FileInputStream fileInputStream = new FileInputStream(tempCacheFile.toFile());
+            TapLogger.info(TAG, "[PUT_FROM_FILE] Final columns list for table {} (with DELETE_SIGN): {}", tableName, columns);
+
+            // 直接从指定表的缓存文件创建 InputStreamEntity，模仿 curl -T 的行为
+            Path tableCacheFile = tempCacheFilesByTable.get(tableName);
+            if (tableCacheFile == null || !Files.exists(tableCacheFile)) {
+                throw new StreamLoadException("Cache file not found for table: " + tableName);
+            }
+
+            long fileSize = Files.size(tableCacheFile);
+            FileInputStream fileInputStream = new FileInputStream(tableCacheFile.toFile());
             InputStreamEntity entity = new InputStreamEntity(fileInputStream, fileSize);
             entity.setContentType("application/json");
 
@@ -469,26 +731,29 @@ public class StarrocksStreamLoader {
         return respContent;
     }
 
-    public RespContent flush(TapTable table) throws StarrocksRetryableException {
-        // the stream is not started yet, no response to get
-        if (lastEventFlag.get() == 0) {
+    /**
+     * 刷新指定表的数据
+     */
+    public RespContent flushTable(String tableName, TapTable table) throws StarrocksRetryableException {
+        // 检查该表是否有数据需要刷新
+        if (!pendingFlushTables.contains(tableName)) {
             return null;
         }
 
         // 记录刷新开始时间和状态
         long flushStartTime = System.currentTimeMillis();
         long waitTime = flushStartTime - lastFlushTime;
-        long flushDataSize = currentBatchSize;
+        long tableDataSize = getTableBatchSize(tableName);
 
         try {
-            // 完成缓存文件写入
-            finalizeCacheFile();
+            // 完成该表的缓存文件写入
+            finalizeCacheFileForTable(tableName);
 
             // 记录写入的数据量到每分钟限制器
             if (minuteWriteLimiter.isLimitEnabled()) {
-                minuteWriteLimiter.recordWrite(currentBatchSize);
+                minuteWriteLimiter.recordWrite(tableDataSize);
                 TapLogger.debug(TAG, "Recorded {} bytes to minute limiter. Current minute total: {} bytes",
-                    currentBatchSize, minuteWriteLimiter.getCurrentMinuteWritten());
+                    tableDataSize, minuteWriteLimiter.getCurrentMinuteWritten());
             }
 
             // 直接从文件发送，模仿 curl 的行为
@@ -499,63 +764,75 @@ public class StarrocksStreamLoader {
             long flushDuration = flushEndTime - flushStartTime;
 
             // 记录刷新详细信息
-            TapLogger.info(TAG, "Flush completed: flushed_size={}, waiting_time={} ms, " +
+            TapLogger.info(TAG, "Table {} flush completed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, response={}",
-                formatBytes(flushDataSize), waitTime, flushDuration, respContent);
+                tableName, formatBytes(tableDataSize), waitTime, flushDuration, respContent);
 
-            metrics.clearCache();
             return respContent;
         } catch (StarrocksRetryableException e) {
             long flushEndTime = System.currentTimeMillis();
             long flushDuration = flushEndTime - flushStartTime;
-            TapLogger.error(TAG, "Flush failed: flushed_size={}, waiting_time={} ms, " +
+            TapLogger.error(TAG, "Table {} flush failed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, error={}",
-                formatBytes(flushDataSize), waitTime, flushDuration, e.getMessage());
+                tableName, formatBytes(tableDataSize), waitTime, flushDuration, e.getMessage());
             throw e;
         } catch (Exception e) {
             long flushEndTime = System.currentTimeMillis();
             long flushDuration = flushEndTime - flushStartTime;
-            TapLogger.error(TAG, "Flush failed: flushed_size={}, waiting_time={} ms, " +
+            TapLogger.error(TAG, "Table {} flush failed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, error={}",
-                formatBytes(flushDataSize), waitTime, flushDuration, e.getMessage());
+                tableName, formatBytes(tableDataSize), waitTime, flushDuration, e.getMessage());
             throw new StarrocksRuntimeException(e);
         } finally {
-            lastEventFlag.set(0);
-            recordStream.setContentLength(0L);
-            // 重置批次大小和刷新时间
-            currentBatchSize = 0;
-            lastFlushTime = System.currentTimeMillis();
-            // 清理缓存文件
-            cleanupCacheFile();
+            // 清理该表的缓存文件
+            cleanupCacheFileForTable(tableName);
+            // 从待刷新列表中移除该表
+            pendingFlushTables.remove(tableName);
+            // 清理该表的批次大小
+            currentBatchSizeByTable.remove(tableName);
+            // 更新该表的刷新时间
+            lastFlushTimeByTable.put(tableName, System.currentTimeMillis());
+
+            // 如果所有表都已刷新，重置全局状态
+            if (pendingFlushTables.isEmpty()) {
+                recordStream.setContentLength(0L);
+                lastFlushTime = System.currentTimeMillis();
+            }
         }
     }
 
+    public RespContent flush(TapTable table) throws StarrocksRetryableException {
+        // 兼容性方法，调用新的flushTable方法
+        return flushTable(table.getId(), table);
+    }
+
     /**
-     * 在停止时刷新剩余数据
+     * 在停止时刷新剩余数据 - 刷新所有待刷新的表
      */
     public void flushOnStop() throws StarrocksRetryableException {
         synchronized (writeLock) {
-            if (lastEventFlag.get() > 0 && tapTable != null) {
-                TapLogger.info(TAG, "Flushing remaining data on stop: accumulated_size={}, {}",
-                    formatBytes(currentBatchSize), metrics.getCachedInfo());
+            if (!pendingFlushTables.isEmpty()) {
+                TapLogger.info(TAG, "Flushing remaining data on stop: accumulated_size={}, pending_tables={}, {}",
+                    formatBytes(getTotalBatchSize()), pendingFlushTables.size(), metrics.getCachedInfo());
 
-                RespContent respContent = flush(tapTable);
-                if (respContent != null) {
-                    // 清理缓存的 metrics，因为数据已成功刷新
-                    metrics.clearCache();
-                    TapLogger.info(TAG, "Cleared cached metrics after stop flush");
-                }
+                // 刷新所有待刷新的表
+                flushAllPendingTables();
+
+                // 清理缓存的 metrics，因为数据已成功刷新
+                metrics.clearCache();
+                TapLogger.info(TAG, "Cleared cached metrics after stop flush");
             }
         }
     }
 
     public void shutdown() {
         try {
-//            this.stopLoad();
+            TapLogger.info(TAG, "Shutting down StarrocksStreamLoader, active tables: {}", tempCacheFilesByTable.size());
 
             // 停止定时刷新调度器
             if (flushTask != null) {
                 flushTask.cancel(false);
+                flushTask = null;
             }
             if (flushScheduler != null) {
                 flushScheduler.shutdown();
@@ -567,28 +844,32 @@ public class StarrocksStreamLoader {
                     flushScheduler.shutdownNow();
                     Thread.currentThread().interrupt();
                 }
+                flushScheduler = null;
             }
 
-            this.httpClient.close();
-
-            // 清理缓存文件
-            if (cacheFileStream != null) {
-                try {
-                    cacheFileStream.close();
-                } catch (IOException e) {
-                    TapLogger.warn(TAG, "Failed to close cache file stream during shutdown: {}", e.getMessage());
-                }
+            // 关闭HTTP客户端
+            if (this.httpClient != null) {
+                this.httpClient.close();
             }
 
-            if (tempCacheFile != null && Files.exists(tempCacheFile)) {
-                try {
-                    Files.deleteIfExists(tempCacheFile);
-                    TapLogger.info(TAG, "Cleaned up cache file during shutdown: {}", tempCacheFile.toString());
-                } catch (IOException e) {
-                    TapLogger.warn(TAG, "Failed to delete cache file during shutdown: {}", e.getMessage());
-                }
-            }
-        } catch (Exception ignored) {
+            // 清理所有表的缓存文件
+            cleanupAllCacheFiles();
+
+            // 清理所有Map，释放内存
+            tempCacheFilesByTable.clear();
+            cacheFileStreamsByTable.clear();
+            isFirstRecordByTable.clear();
+            dataColumnsByTable.clear();
+            pendingFlushTables.clear();
+            currentBatchSizeByTable.clear();
+            lastFlushTimeByTable.clear();
+
+            // 强制垃圾回收
+            System.gc();
+
+            TapLogger.info(TAG, "StarrocksStreamLoader shutdown completed");
+        } catch (Exception e) {
+            TapLogger.error(TAG, "Error during shutdown: {}", e.getMessage());
         }
     }
 
@@ -629,7 +910,7 @@ public class StarrocksStreamLoader {
         TapLogger.info(TAG, "Status: events_in_batch={}, batch_data_size={}, " +
             "accumulated_buffer_size={}, flush_size_config={} MB, " +
             "flush_timeout_config={} seconds, waiting_time={} ms, {}",
-            processedEvents, formatBytes(batchDataSize), formatBytes(currentBatchSize),
+            processedEvents, formatBytes(batchDataSize), formatBytes(getTotalBatchSize()),
             flushSizeMB, flushTimeoutSeconds, waitTime, metrics.getCachedInfo());
     }
 
@@ -648,131 +929,127 @@ public class StarrocksStreamLoader {
     }
 
     /**
-     * 完成缓存文件写入
+     * 完成指定表的缓存文件写入
      */
-    private void finalizeCacheFile() throws IOException {
+    private void finalizeCacheFileForTable(String tableName) throws IOException {
         try {
-            if (cacheFileStream != null) {
+            FileOutputStream cacheFileStream = cacheFileStreamsByTable.get(tableName);
+            Path tempCacheFile = tempCacheFilesByTable.get(tableName);
+
+            if (cacheFileStream != null && tempCacheFile != null) {
                 // 写入批次结束标记
                 cacheFileStream.write(messageSerializer.batchEnd());
                 cacheFileStream.flush();
                 cacheFileStream.close();
 
-                TapLogger.debug(TAG, "Finalized cache file: {}, size: {}",
-                    tempCacheFile.toString(), formatBytes(Files.size(tempCacheFile)));
+                TapLogger.debug(TAG, "Finalized cache file for table {}: {}, size: {}",
+                    tableName, tempCacheFile.toString(), formatBytes(Files.size(tempCacheFile)));
             }
         } catch (IOException e) {
-            TapLogger.error(TAG, "Failed to finalize cache file: {}", e.getMessage());
+            TapLogger.error(TAG, "Failed to finalize cache file for table {}: {}", tableName, e.getMessage());
             throw e;
         }
     }
 
     /**
-     * 从缓存文件加载数据到 recordStream
+     * 清理指定表的缓存文件
      */
-    private void loadCacheFileToStream() throws IOException {
+    private void cleanupCacheFileForTable(String tableName) {
         try {
-            if (tempCacheFile != null && Files.exists(tempCacheFile)) {
-                recordStream.startInput();
+            FileOutputStream cacheFileStream = cacheFileStreamsByTable.get(tableName);
+            Path tempCacheFile = tempCacheFilesByTable.get(tableName);
 
-                // 分块读取文件内容并写入到 recordStream，避免一次性加载大文件导致内存问题
-                long fileSize = Files.size(tempCacheFile);
-                recordStream.setContentLength(fileSize);
-
-                // 使用较小的缓冲区分块读取，避免阻塞
-                int bufferSize = (int) (Constants.CACHE_BUFFER_SIZE / 1.5);
-                byte[] buffer = new byte[bufferSize];
-
-                try (FileInputStream fis = new FileInputStream(tempCacheFile.toFile())) {
-                    int bytesRead;
-                    long totalRead = 0;
-                    while ((bytesRead = fis.read(buffer)) != -1) {
-                        if (bytesRead == buffer.length) {
-                            recordStream.write(buffer);
-                        } else {
-                            // 最后一块可能不满，需要创建正确大小的数组
-                            byte[] lastChunk = new byte[bytesRead];
-                            System.arraycopy(buffer, 0, lastChunk, 0, bytesRead);
-                            recordStream.write(lastChunk);
-                        }
-                        totalRead += bytesRead;
-                    }
-
-                    TapLogger.debug(TAG, "Loaded cache file to stream in chunks: {}, total_size={}, chunks_size={}, total_read={}",
-                        tempCacheFile.toString(), formatBytes(fileSize), formatBytes(bufferSize), formatBytes(totalRead));
-                }
-
-                recordStream.endInput();
-            }
-        } catch (IOException e) {
-            TapLogger.error(TAG, "Failed to load cache file to stream: {}", e.getMessage());
-            throw e;
-        }
-    }
-
-    /**
-     * 清理缓存文件
-     */
-    private void cleanupCacheFile() {
-        try {
             if (cacheFileStream != null) {
                 try {
                     cacheFileStream.close();
                 } catch (IOException e) {
-                    TapLogger.warn(TAG, "Failed to close cache file stream: {}", e.getMessage());
+                    TapLogger.warn(TAG, "Failed to close cache file stream for table {}: {}", tableName, e.getMessage());
                 }
-                cacheFileStream = null;
+                cacheFileStreamsByTable.remove(tableName);
             }
 
             if (tempCacheFile != null && Files.exists(tempCacheFile)) {
-                long fileSize = Files.size(tempCacheFile);
-                Files.deleteIfExists(tempCacheFile);
-                TapLogger.debug(TAG, "Cleaned up cache file: {}, was {} in size",
-                    tempCacheFile.toString(), formatBytes(fileSize));
+                try {
+                    long fileSize = Files.size(tempCacheFile);
+                    Files.deleteIfExists(tempCacheFile);
+                    TapLogger.debug(TAG, "Cleaned up cache file for table {}: {}, was {} in size",
+                        tableName, tempCacheFile.toString(), formatBytes(fileSize));
+                } catch (IOException e) {
+                    TapLogger.warn(TAG, "Failed to delete cache file for table {}: {}", tableName, e.getMessage());
+                }
+                tempCacheFilesByTable.remove(tableName);
             }
 
-            // 重新初始化缓存文件以备下次使用
-            initializeCacheFile();
-        } catch (IOException e) {
-            TapLogger.error(TAG, "Failed to cleanup cache file: {}", e.getMessage());
+            // 清理相关状态
+            isFirstRecordByTable.remove(tableName);
+            dataColumnsByTable.remove(tableName);
+            currentBatchSizeByTable.remove(tableName);
+            lastFlushTimeByTable.remove(tableName);
+        } catch (Exception e) {
+            TapLogger.error(TAG, "Failed to cleanup cache file for table {}: {}", tableName, e.getMessage());
         }
     }
 
-    protected boolean needFlush(TapRecordEvent recordEvent, int length, boolean noNeed) {
-        int lastEventType = lastEventFlag.get();
+    /**
+     * 清理所有表的缓存文件
+     */
+    private void cleanupAllCacheFiles() {
+        // 创建表名列表的副本，避免在迭代过程中修改集合
+        Set<String> tableNames = new HashSet<>(tempCacheFilesByTable.keySet());
 
-        // 优先检查新的配置：大小和时间阈值
+        for (String tableName : tableNames) {
+            cleanupCacheFileForTable(tableName);
+        }
+
+        TapLogger.info(TAG, "Cleaned up cache files for {} tables during shutdown", tableNames.size());
+    }
+
+
+
+
+
+
+
+    protected boolean needFlush(TapRecordEvent recordEvent, int length, boolean noNeed, String tableName) {
+        // 检查该表是否有数据（通过pendingFlushTables判断）
+        boolean hasData = pendingFlushTables.contains(tableName);
+
+        // 按表独立检查刷新条件
         long currentTime = System.currentTimeMillis();
-        long timeSinceLastFlush = currentTime - lastFlushTime;
+        long tableLastFlushTime = getTableLastFlushTime(tableName);
+        long timeSinceLastFlush = currentTime - tableLastFlushTime;
         long flushTimeoutMs = StarrocksConfig.getFlushTimeoutSeconds() * 1000L;
         long flushSizeBytes = StarrocksConfig.getFlushSizeMB() * 1024L * 1024L;
 
-        // 检查是否达到大小阈值
-        boolean sizeThresholdReached = currentBatchSize + length >= flushSizeBytes;
+        // 检查该表是否达到大小阈值
+        long tableCurrentSize = getTableBatchSize(tableName);
+        boolean sizeThresholdReached = tableCurrentSize + length >= flushSizeBytes;
 
-        // 检查是否达到时间阈值
+        // 检查该表是否达到时间阈值
         boolean timeThresholdReached = timeSinceLastFlush >= flushTimeoutMs;
 
-        // 新配置的优先级高于通用配置
-        if (lastEventType > 0 && (sizeThresholdReached || timeThresholdReached)) {
+        // 按表独立判断是否需要刷新
+        if (hasData && (sizeThresholdReached || timeThresholdReached)) {
             String reason = sizeThresholdReached ? "size_threshold" : "time_threshold";
-            TapLogger.info(TAG, "Flush triggered by {}: current_size={}, size_threshold={}, " +
-                "waiting_time={} ms, time_threshold={} ms",
-                reason, formatBytes(currentBatchSize + length), formatBytes(flushSizeBytes),
-                timeSinceLastFlush, flushTimeoutMs);
+            TapLogger.info(TAG, "Table {} flush triggered by {}: table_size={}, size_threshold={}, " +
+                "waiting_time={} ms, time_threshold={} ms, total_size={}",
+                tableName, reason, formatBytes(tableCurrentSize + length), formatBytes(flushSizeBytes),
+                timeSinceLastFlush, flushTimeoutMs, formatBytes(getTotalBatchSize()));
 
             // 更新日志时间，避免重复打印
             lastLogTime = System.currentTimeMillis();
             return true;
         }
 
-        // 检查原有的刷新逻辑
-        boolean dataColumnsChanged = lastEventType > 0 && !getDataColumns(recordEvent).equals(dataColumns.get()) && !noNeed;
+        // 检查原有的刷新逻辑 - 按表检查dataColumns
+        Set<String> currentDataColumns = dataColumnsByTable.get(tableName);
+        boolean dataColumnsChanged = hasData && currentDataColumns != null &&
+            !getDataColumns(recordEvent).equals(currentDataColumns) && !noNeed;
         boolean bufferFull = !recordStream.canWrite(length);
 
         if (dataColumnsChanged || bufferFull) {
             String reason = dataColumnsChanged ? "data_columns_changed" : "buffer_full";
-            TapLogger.info(TAG, "Flush triggered by {}: current_size={}", reason, formatBytes(currentBatchSize + length));
+            TapLogger.info(TAG, "Flush triggered by {}: current_size={}", reason, formatBytes(getTotalBatchSize() + length));
 
             // 更新日志时间，避免重复打印
             lastLogTime = System.currentTimeMillis();
@@ -787,7 +1064,7 @@ public class StarrocksStreamLoader {
      * 只有在达到时间阈值时才刷新，大小阈值在单个记录处理时已经检查过了
      */
     private boolean shouldFlushAfterBatch() {
-        if (lastEventFlag.get() == 0) {
+        if (pendingFlushTables.isEmpty()) {
             return false; // 没有数据需要刷新
         }
 
@@ -799,19 +1076,19 @@ public class StarrocksStreamLoader {
         if (timeSinceLastFlush >= flushTimeoutMs) {
             TapLogger.info(TAG, "Batch flush triggered by time_threshold: " +
                 "waiting_time={} ms, time_threshold={} ms, accumulated_size={}",
-                timeSinceLastFlush, flushTimeoutMs, formatBytes(currentBatchSize));
+                timeSinceLastFlush, flushTimeoutMs, formatBytes(getTotalBatchSize()));
             return true;
         }
 
         TapLogger.debug(TAG, "Batch flush not needed: waiting_time={} ms, time_threshold={} ms, accumulated_size={}",
-            timeSinceLastFlush, flushTimeoutMs, formatBytes(currentBatchSize));
+            timeSinceLastFlush, flushTimeoutMs, formatBytes(getTotalBatchSize()));
         return false;
     }
 
     private void stopLoad() throws StarrocksRetryableException {
-        if (null != tapTable && lastEventFlag.get() > 0) {
+        if (null != tapTable && !pendingFlushTables.isEmpty()) {
             TapLogger.info(TAG, "Flushing remaining cached data on stop: accumulated_size={}",
-                formatBytes(currentBatchSize));
+                formatBytes(getTotalBatchSize()));
             flush(tapTable);
         }
     }
