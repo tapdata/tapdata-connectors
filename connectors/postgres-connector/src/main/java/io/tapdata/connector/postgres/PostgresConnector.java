@@ -936,7 +936,7 @@ public class PostgresConnector extends CommonDbConnector {
     protected Object processData(Object value, String dataType) {
         if (!postgresConfig.getOldVersionTimezone()) {
             if (value instanceof Timestamp) {
-                if (dataType.endsWith("with time zone")) {
+                if (!dataType.endsWith("with time zone")) {
                     value = ((Timestamp) value).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour());
                 } else {
                     value = (((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
@@ -944,7 +944,7 @@ public class PostgresConnector extends CommonDbConnector {
             } else if (value instanceof Date) {
                 value = (Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
             } else if (value instanceof Time) {
-                if (dataType.endsWith("with time zone")) {
+                if (!dataType.endsWith("with time zone")) {
                     value = (Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));
                 } else {
                     value = (Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneOffset.UTC));
