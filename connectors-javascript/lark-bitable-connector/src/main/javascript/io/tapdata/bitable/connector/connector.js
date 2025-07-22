@@ -479,13 +479,22 @@ function acceptRecords(records, policy, apiName, type, apiDelay) {
         case "ignore_on_exists":
             if (type === "update") {
                 log.info("ignore_on_exists: {}", JSON.stringify(records));
-                break;
+            } else {
+                if (callBatchApi(records, "batchCreateRecords", "insert", apiDelay)) {
+                    acceptCount += records.length;
+                }
             }
+            break;
         case "ignore_on_nonexists":
-            if (type === "update") {
+            if (type === "insert") {
                 log.info("ignore_on_nonexists: {}", JSON.stringify(records));
                 break;
+            } else {
+                if (callBatchApi(records, "batchUpdateRecords", "update", apiDelay)) {
+                    acceptCount += records.length;
+                }
             }
+            break;
         case "just_insert":
             if (type === "insert"
                 && callBatchApi(records, "batchCreateRecords", "insert", apiDelay)) {
