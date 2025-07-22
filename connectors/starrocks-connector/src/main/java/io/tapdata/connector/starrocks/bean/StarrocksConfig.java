@@ -19,7 +19,7 @@ public class StarrocksConfig extends CommonDbConfig {
     private List<String> distributedKey;
     private Integer writeByteBufferCapacity = 10240;
     private String writeFormat = "json";
-    private String uniqueKeyType = "Unique";
+    private String uniqueKeyType = "Primary";
     private int bucket = 2;
     private List<LinkedHashMap<String, String>> tableProperties = new ArrayList<>();
     private Boolean jdbcCompletion = false;
