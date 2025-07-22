@@ -239,7 +239,7 @@ function findRecord(batchData, tableSettings, apiDelay, accept) {
                 return {
                     "field_name": key,
                     "operator": "is",
-                    "value": [value[key]]
+                    "value": [""+value[key]]
                 }
             })
         };
@@ -252,7 +252,7 @@ function findRecord(batchData, tableSettings, apiDelay, accept) {
                     children.push({
                         "field_name": key,
                         "operator": "is",
-                        "value": [value[key]]
+                        "value": [""+value[key]]
                     })
                 });
                 return {
@@ -387,13 +387,14 @@ function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, 
                 if (singleRecords.length > 0) {
                     let indexOfExists = []
                     singleRecords.forEach(item => {
-                        recordsToUpdate.push(item);
+                        //recordsToUpdate.push(item);
                         indexOfExists.push(item.dataIndex);
+                        recordsToUpdate.push({"fields": item.fields, "record_id": item["record_id"]});
                         if (recordsToUpdate.length >= 1000) {
                             updateCount += acceptRecords(recordsToUpdate, policy, "batchUpdateRecords", "update", writeApiDelay);
-                            log.info("B Update : {}", JSON.stringify(recordsToUpdate));
+                            //log.info("B Update : {}", JSON.stringify(recordsToUpdate));
                             recordsToUpdate.length = 0;
-                            log.info("A Update : {}", JSON.stringify(recordsToUpdate));
+                            //log.info("A Update : {}", JSON.stringify(recordsToUpdate));
                         }
                     })
                     for (let batchDataIndex in batchData) {
@@ -409,9 +410,7 @@ function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, 
                             recordsToInsert.push({"fields": fields})
                             if (recordsToInsert.length >= 1000) {
                                 insertCount += acceptRecords(recordsToInsert, policy, "batchCreateRecords", "insert", writeApiDelay);
-                                log.info("B Insert : {}", JSON.stringify(recordsToInsert));
                                 recordsToInsert.length = 0;
-                                log.info("Insert : {}", JSON.stringify(recordsToInsert));
                             }
                         }
                     }
@@ -428,9 +427,7 @@ function insertOrUpdateRecordBatch(connectionConfig, nodeConfig, eventDataMaps, 
                         recordsToInsert.push({"fields": fields});
                         if (recordsToInsert.length >= 1000) {
                             insertCount += acceptRecords(recordsToInsert, policy, "batchCreateRecords", "insert", writeApiDelay);
-                            log.info("B Insert : {}", JSON.stringify(recordsToInsert));
                             recordsToInsert.length = 0;
-                            log.info("Insert : {}", JSON.stringify(recordsToInsert));
                         }
                     }
                 }
@@ -480,12 +477,19 @@ function acceptRecords(records, policy, apiName, type, apiDelay) {
             }
             break;
         case "ignore_on_exists":
-        case "just_insert":
+            if (type === "update") {
+                log.info("ignore_on_exists: {}", JSON.stringify(records));
+                break;
+            }
         case "ignore_on_nonexists":
-            if (type === "insert") {
-                if (callBatchApi(records, "batchCreateRecords", "insert", apiDelay)) {
-                    acceptCount += records.length;
-                }
+            if (type === "update") {
+                log.info("ignore_on_nonexists: {}", JSON.stringify(records));
+                break;
+            }
+        case "just_insert":
+            if (type === "insert"
+                && callBatchApi(records, "batchCreateRecords", "insert", apiDelay)) {
+                acceptCount += records.length;
             }
             break;
         default:
@@ -531,15 +535,43 @@ function recordsMatch(objMap, keyMaps, keys) {
     for (let kIndex in keys) {
         let k = keys[kIndex];
         let element = keyMaps["fields"][k];
-        for (let eleIndex in element) {
-            let ele = element[eleIndex];
-            let eleType = ele["type"];
-            let value = ele[eleType];
-            //log.info("recordMatch: {}, {}, {}", objMap[k], k, value);
-            allMatch = allMatch && recordMatch(objMap, k, value);
+        if ((typeof element === 'number' && !isNaN(element))
+            || typeof element === 'boolean'
+            || typeof element === 'string') {
+            // 1. 判断 数字 值
+            // 1. 判断 Boolean 值
+            // 2. 判断 String 类型
+            allMatch = allMatch && recordMatch(objMap, k, element);
             if (!allMatch) {
                 return false;
             }
+        } else if (Array.isArray(element)) {
+            // 3. 判断 String Array 类型
+            // 检查数组是否全是字符串
+            const isStringArray = element.every(function(item) {
+                return typeof item === 'string';
+            });
+            if (isStringArray) {
+                // 对比数组是否和 compareValue 相等（假设 compareValue 也是数组）
+                allMatch = allMatch && recordMatch(objMap, k, element);
+                if (!allMatch) {
+                    return false;
+                }
+            } else {
+                for (let eleIndex in element) {
+                    let ele = element[eleIndex];
+                    let eleType = ele["type"];
+                    let value = ele[eleType];
+                    allMatch = allMatch && recordMatch(objMap, k, value);
+                    if (!allMatch) {
+                        return false;
+                    }
+                }
+            }
+        } else {
+            log.info("The primary key [{}] types are not numbers, regular text, regular single choice, regular multiple choice, and Boolean values are currently not supported for recognition: {}"
+                , JSON.stringify(keys), JSON.stringify(element));
+            return false;
         }
     }
     return allMatch;
