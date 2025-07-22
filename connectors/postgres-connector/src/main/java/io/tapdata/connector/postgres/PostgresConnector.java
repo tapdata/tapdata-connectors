@@ -917,7 +917,7 @@ public class PostgresConnector extends CommonDbConnector {
                     String tiemstampString = resultSet.getString(colName);
                     if (StringUtils.isNotEmpty(tiemstampString)) {
                         LocalDateTime localDateTime = LocalDateTime.parse(tiemstampString.replace(" ", "T"));
-                        dataMap.put(colName, localDateTime);
+                        dataMap.put(colName, localDateTime.minusHours(postgresConfig.getZoneOffsetHour()));
                     } else {
                         dataMap.put(colName, null);
                     }
