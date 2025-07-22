@@ -144,7 +144,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\"records\": {{records}}\n}",
+          "raw": "{\"records\": {{records}},\"ignore_consistency_check\":true}",
           "options": {
             "raw": {
               "language": "json"
@@ -192,7 +192,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"records\": {{records}}\n}",
+          "raw": "{\"records\": {{records}},\"ignore_consistency_check\": true}",
           "options": {
             "raw": {
               "language": "json"
