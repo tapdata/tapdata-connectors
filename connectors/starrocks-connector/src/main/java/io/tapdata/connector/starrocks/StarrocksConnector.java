@@ -40,10 +40,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -266,7 +263,11 @@ public class StarrocksConnector extends CommonDbConnector {
         //generate bucket
         stringBuilder.append("`) BUCKETS ").append(starrocksConfig.getBucket()).append(" PROPERTIES(");
         //generate properties
-        stringBuilder.append(starrocksConfig.getTableProperties().stream().map(v -> "\"" + v.get("propKey") + "\"=\"" + v.get("propValue") + "\"").collect(Collectors.joining(", ")));
+        if (!starrocksConfig.getTableProperties().isEmpty()) {
+            stringBuilder.append(starrocksConfig.getTableProperties().stream().map(v -> "\"" + v.get("propKey") + "\"=\"" + v.get("propValue") + "\"").collect(Collectors.joining(", ")));
+        } else {
+            stringBuilder.append("\"replication_num\"=\"1\"");
+        }
         stringBuilder.append(")");
         createTableOptions.setTableExists(false);
         try {
