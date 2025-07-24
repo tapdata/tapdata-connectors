@@ -32,7 +32,6 @@
           "title": "${pdServer}",
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "required": true,
           "x-decorator-props": {
             "tooltip": "${pdServerTip}"
           },
@@ -107,11 +106,20 @@
           "default": 20160,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
-          "required": false,
           "x-decorator-props": {
             "tooltip": "${tiKvPortTip}"
           },
-          "x-index": 80
+          "x-index": 80,
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "OPTIONAL_FIELDS": {
           "type": "void",

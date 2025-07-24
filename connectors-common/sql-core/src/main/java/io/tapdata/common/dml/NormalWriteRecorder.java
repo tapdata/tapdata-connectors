@@ -159,6 +159,7 @@ public abstract class NormalWriteRecorder {
         } catch (SQLException e) {
 //            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
 //            listResult.addErrors(map);
+            batchCacheSize = 0;
             throw e;
         }
         atomicLong.addAndGet(succeed);
@@ -299,6 +300,26 @@ public abstract class NormalWriteRecorder {
 
     public String getUpsertSql(Map<String, Object> after) throws SQLException {
         throw new UnsupportedOperationException("upsert is not supported");
+    }
+
+    public String getDeleteSql(Map<String, Object> before) throws SQLException {
+        boolean containsNull = !hasPk && before.containsValue(null);
+        String sql = getDeleteSql(before,containsNull);
+        if(!containsNull){
+            for (String key : before.keySet()) {
+                sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
+            }
+        }else{
+            for (String key : before.keySet()) {
+                sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
+                sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
+            }
+        }
+        return sql;
+    }
+
+    public String formatValueForSql(Object value, String dataType) throws SQLException {
+        return object2String(filterValue(value, dataType));
     }
 
     //插入唯一键冲突时忽略

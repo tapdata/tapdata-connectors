@@ -37,9 +37,60 @@
         "id": "source_support_partition"
       }
     ],
+    "monitorAPI": {
+      "walLogSize": {
+        "title": "${walLogSize}",
+        "type": "string",
+        "sqlType": "query",
+        "sql": "SELECT round(sum(size)/1024/1024) FROM pg_ls_waldir()"
+      },
+      "clearIdleSlot": {
+        "type": "button",
+        "className": "DataSourceExecuteService",
+        "method": "execute",
+        "args": ["{{connectionId}}", "method", "io.tapdata.connector.postgres.PostgresConnector#clearIdleSlot"],
+        "title": "${clearIdleSlot}"
+      }
+    },
     "connection": {
       "type": "object",
       "properties": {
+        "deploymentMode": {
+          "type": "string",
+          "title": "${deploymentMode}",
+          "default": "standalone",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 5,
+          "enum": [
+            {
+              "label": "${standalone}",
+              "value": "standalone"
+            },
+            {
+              "label": "${master-slave}",
+              "value": "master-slave"
+            }
+          ],
+          "x-reactions": [
+            {
+              "target": "*(host,port)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value === 'standalone'}}"
+                }
+              }
+            },
+            {
+              "target": "*(masterSlaveAddress)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value === 'master-slave'}}"
+                }
+              }
+            }
+          ]
+        },
         "host": {
           "required": true,
           "type": "string",
@@ -64,6 +115,57 @@
             "tooltip": "${portTip}"
           },
           "x-index": 20
+        },
+        "masterSlaveAddress": {
+          "type": "array",
+          "title": "${master-slaveAddress}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${master-slaveAddressTip}"
+          },
+          "x-component": "ArrayItems",
+          "x-index": 25,
+          "items": {
+            "type": "object",
+            "properties": {
+              "space": {
+                "type": "void",
+                "x-component": "Space",
+                "properties": {
+                  "host": {
+                    "type": "string",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${Address}"
+                    },
+                    "x-index": 1
+                  },
+                  "port": {
+                    "type": "number",
+                    "x-decorator": "FormItem",
+                    "x-component": "InputNumber",
+                    "x-component-props": {
+                      "placeholder": "${serverPort}"
+                    },
+                    "x-index": 2
+                  },
+                  "remove": {
+                    "type": "void",
+                    "x-decorator": "FormItem",
+                    "x-component": "ArrayItems.Remove"
+                  }
+                }
+              }
+            }
+          },
+          "properties": {
+            "add": {
+              "type": "void",
+              "title": "${prompt}",
+              "x-component": "ArrayItems.Addition"
+            }
+          }
         },
         "database": {
           "required": true,
@@ -106,7 +208,6 @@
           "x-index": 70
         },
         "logPluginName": {
-          "required": true,
           "type": "string",
           "title": "${logPluginName}",
           "default": "pgoutput",
@@ -146,7 +247,17 @@
               "label": "WALMINER",
               "value": "walminer"
             }
-          ]
+          ],
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
         },
         "pgtoHost": {
           "type": "string",
@@ -157,10 +268,10 @@
           "x-index": 90,
           "x-reactions": [
             {
-              "dependencies": [".logPluginName"],
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName"],
               "fulfill": {
-                "state": {
-                  "visible": "{{$deps[0] === 'walminer'}}"
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='walminer' ? null:\"none\"}}"
                 }
               }
             }
@@ -175,10 +286,10 @@
           "x-index": 100,
           "x-reactions": [
             {
-              "dependencies": [".logPluginName"],
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName"],
               "fulfill": {
-                "state": {
-                  "visible": "{{$deps[0] === 'walminer'}}"
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='walminer' ? null:\"none\"}}"
                 }
               }
             }
@@ -573,6 +684,26 @@
               }
             }
           ]
+        },
+        "customSlotName": {
+          "type": "string",
+          "title": "${customSlotName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 18,
+          "x-decorator-props": {
+            "tooltip": "${customSlotNameTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -581,6 +712,14 @@
     "default": "en_US",
     "en_US": {
       "doc": "docs/postgres_en_US.md",
+      "deploymentMode": "Deployment mode",
+      "standalone": "Single machine deployment",
+      "master-slave": "Master-Slave Architecture",
+      "master-slaveAddress" : "Server address",
+      "master-slaveAddressTip" : "The address port group that the master-slave architecture needs to fill in, the address port of the master database needs to be filled in the first line, for example: 192.168.1.200:3306, 192.168.1.201:3307",
+      "Address" : "Please enter the server address",
+      "serverPort": "Server port",
+      "prompt": "Add",
       "host": "Host",
       "hostTip": "The address of the database, it can be an IP address or a domain name, for example: 192.168.1.200",
       "port": "Port",
@@ -617,10 +756,22 @@
       "partitionRootTooltip": "Only postgres-v13 and above and log plugin pgoutput are supported. When the switch is turned on, the partition table CDC event only perceives the root table, and when the switch is turned off, only perceives each sub-table",
       "maximumQueueSize": "Maximum queue size",
       "maximumQueueSizeTip": "The queue size for reading incremental data in PostgreSQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting",
-      "enableFileInput": "Enable file input"
+      "enableFileInput": "Enable file input",
+      "customSlotName": "Specifies the logical replication slot name",
+      "customSlotNameTip": "You can manually specify a logical replication slot that is created in advance in the database, and if the logical replication slot does not exist, the delta may not work",
+      "walLogSize": "Wal log total size(MB)",
+      "clearIdleSlot": "Clear idle replication slot"
     },
     "zh_CN": {
       "doc": "docs/postgres_zh_CN.md",
+      "deploymentMode": "部署模式",
+      "standalone": "单机部署",
+      "master-slave": "主从架构",
+      "master-slaveAddress" : "服务器地址",
+      "master-slaveAddressTip" : "主从架构需要填写的地址端口组，主库的地址端口需填写在第一行，例如：192.168.1.200:3306, 192.168.1.201:3306",
+      "Address" : "服务器地址",
+      "serverPort": "服务器端口",
+      "prompt": "添加",
       "host": "地址",
       "hostTip": "数据库的地址，它可以是IP地址或者域名，例如：192.168.1.200",
       "port": "端口",
@@ -657,10 +808,22 @@
       "partitionRootTooltip": "仅postgres-v13以上且日志插件pgoutput时才支持，开关打开时，分区表CDC事件仅感知根表，关闭时，仅感知各子表",
       "maximumQueueSize": "最大队列大小",
       "maximumQueueSizeTip": "PostgreSQL读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置",
-      "enableFileInput": "启用文件输入"
+      "enableFileInput": "启用文件输入",
+      "customSlotName": "指定逻辑复制槽名字",
+      "customSlotNameTip": "可以手动指定在数据库提前创建好的逻辑复制槽，如果逻辑复制槽不存在，则可能会导致增量不工作",
+      "walLogSize": "Wal日志总大小(MB)",
+      "clearIdleSlot": "清理空闲复制槽"
     },
     "zh_TW": {
       "doc": "docs/postgres_zh_TW.md",
+      "deploymentMode": "部署模式",
+      "standalone": "單機部署",
+      "master-slave": "主從架構",
+      "master-slaveAddress" : "服務器地址",
+      "master-slaveAddressTip" : "主從架構需要填寫的地址端口組，主庫的地址端口需填寫在第壹行，例如：192.168.1.200:3306, 192.168.1.201:3306",
+      "Address" : "服務器地址",
+      "serverPort": "端口",
+      "prompt": "添加",
       "host": "地址",
       "hostTip": "數據庫的地址，它可以是IP地址或者域名，例如：192.168.1.200",
       "port": "端口",
@@ -697,7 +860,11 @@
       "partitionRootTooltip": "僅postgres-v13以上且日誌插件pgoutput時才支持，開關打開時，分區表CDC事件僅感知根表，關閉時，僅感知各子表",
       "maximumQueueSize": "最大隊列大小",
       "maximumQueueSizeTip": "PostgreSQL讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置",
-      "enableFileInput": "啟用文件輸入"
+      "enableFileInput": "啟用文件輸入",
+      "customSlotName": "指定邏輯複製槽名字",
+      "customSlotNameTip": "可以手動指定在數據庫提前創建好的邏輯複製槽，如果邏輯複製槽不存在，則可能會導致增量不工作",
+      "walLogSize": "Wal日誌總大小(MB)",
+      "clearIdleSlot": "清理空閒複製槽"
     }
   },
   "dataTypes": {

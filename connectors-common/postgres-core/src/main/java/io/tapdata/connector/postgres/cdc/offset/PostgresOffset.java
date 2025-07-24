@@ -35,6 +35,15 @@ public class PostgresOffset implements Serializable {
         return offsetValue;
     }
 
+    @Override
+    public String toString() {
+        return "PostgresOffset{" +
+                "sortString='" + sortString + '\'' +
+                ", offsetValue=" + offsetValue +
+                ", sourceOffset='" + sourceOffset + '\'' +
+                '}';
+    }
+
     public void setOffsetValue(Long offsetValue) {
         this.offsetValue = offsetValue;
     }

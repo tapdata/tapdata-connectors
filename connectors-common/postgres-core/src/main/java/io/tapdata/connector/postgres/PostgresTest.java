@@ -18,6 +18,7 @@ import org.postgresql.Driver;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -26,6 +27,7 @@ import static io.tapdata.base.ConnectorBase.testItem;
 public class PostgresTest extends CommonDbTest {
 
     protected ConnectionOptions connectionOptions;
+    protected boolean masterConnected = true;
 
     public PostgresTest() {
         super();
@@ -33,12 +35,43 @@ public class PostgresTest extends CommonDbTest {
 
     public PostgresTest(PostgresConfig postgresConfig, Consumer<TestItem> consumer, ConnectionOptions connectionOptions) {
         super(postgresConfig, consumer);
+        testFunctionMap.put("testMaster", this::testMaster);
         this.connectionOptions = connectionOptions;
     }
 
     public PostgresTest initContext() {
+        if ("master-slave".equals(((PostgresConfig) commonDbConfig).getDeploymentMode())) {
+            testHostPortForMasterSlave();
+        }
         jdbcContext = new PostgresJdbcContext((PostgresConfig) commonDbConfig);
         return this;
+    }
+
+    private void testHostPortForMasterSlave() {
+        AtomicBoolean isMaster = new AtomicBoolean();
+        String availableHost = null;
+        int availablePort = 0;
+        for (LinkedHashMap<String, Integer> hostPort : ((PostgresConfig) commonDbConfig).getMasterSlaveAddress()) {
+            commonDbConfig.setHost(String.valueOf(hostPort.get("host")));
+            commonDbConfig.setPort(hostPort.get("port"));
+            try (PostgresJdbcContext jdbcContext = new PostgresJdbcContext((PostgresConfig) commonDbConfig)) {
+                jdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> {
+                    isMaster.set(!resultSet.getBoolean(1));
+                });
+                if (isMaster.get()) {
+                    return;
+                } else {
+                    availableHost = commonDbConfig.getHost();
+                    availablePort = commonDbConfig.getPort();
+                    masterConnected = false;
+                }
+            } catch (Throwable ignore) {
+            }
+        }
+        if (EmptyKit.isNotNull(availableHost)) {
+            commonDbConfig.setHost(availableHost);
+            commonDbConfig.setPort(availablePort);
+        }
     }
 
     public PostgresTest withPostgresVersion(String version) {
@@ -54,6 +87,13 @@ public class PostgresTest extends CommonDbTest {
     @Override
     protected List<String> supportVersions() {
         return Lists.newArrayList("9.4", "9.5", "9.6", "1*");
+    }
+
+    protected boolean testMaster() {
+        if (!masterConnected) {
+            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "Current node is not master, please check the connection address"));
+        }
+        return true;
     }
 
     //Test number of tables and privileges

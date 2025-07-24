@@ -6,10 +6,8 @@ import io.tapdata.kit.EmptyKit;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Postgres database config
@@ -27,14 +25,25 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private Integer maximumQueueSize = 8000;
     private List<String> distributedKey = new ArrayList<>();
     private Boolean isPartition = false;
+    private String customSlotName;
     private String pgtoHost = "127.0.0.1";
     private int pgtoPort = 9876;
+
+    private String deploymentMode;
+    private ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress;
 
     //customize
     public PostgresConfig() {
         setDbType("postgresql");
         setJdbcDriver("org.postgresql.Driver");
         setMaxIndexNameLength(63);
+    }
+
+    public String getConnectionString() {
+        if ("master-slave".equals(deploymentMode)) {
+            return masterSlaveAddress.stream().map(v -> v.get("host") + ":" + v.get("port")).collect(Collectors.joining(",")) + "/" + getDatabase() + "/" + getSchema();
+        }
+        return super.getConnectionString();
     }
 
     @Override
@@ -139,6 +148,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
         return pgtoHost;
     }
 
+    public String getCustomSlotName() {
+        return customSlotName;
+    }
+
+    public void setCustomSlotName(String customSlotName) {
+        this.customSlotName = customSlotName;
+    }
+
     public void setPgtoHost(String pgtoHost) {
         this.pgtoHost = pgtoHost;
     }
@@ -149,5 +166,21 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setPgtoPort(int pgtoPort) {
         this.pgtoPort = pgtoPort;
+    }
+
+    public String getDeploymentMode() {
+        return deploymentMode;
+    }
+
+    public void setDeploymentMode(String deploymentMode) {
+        this.deploymentMode = deploymentMode;
+    }
+
+    public ArrayList<LinkedHashMap<String, Integer>> getMasterSlaveAddress() {
+        return masterSlaveAddress;
+    }
+
+    public void setMasterSlaveAddress(ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress) {
+        this.masterSlaveAddress = masterSlaveAddress;
     }
 }
