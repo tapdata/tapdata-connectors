@@ -980,4 +980,15 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return new ArrayList<>();
     }
 
+    protected void executeCommandV2(TapConnectionContext connectionContext, String sqlType, String sql, Consumer<List<DataMap>> consumer) throws Throwable {
+        switch (sqlType) {
+            case "execute":
+                jdbcContext.execute(sql);
+                consumer.accept(null);
+                break;
+            case "query":
+                jdbcContext.query(sql, resultSet -> consumer.accept(DbKit.getDataFromResultSet(resultSet)));
+                break;
+        }
+    }
 }

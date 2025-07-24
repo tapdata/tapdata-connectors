@@ -78,8 +78,11 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
 
     @Override
     public void collectOffsetInvalid(Object offset, Throwable cause) {
-        if (cause instanceof MongoCommandException && (((MongoCommandException) cause).getCode()) == 286) {
-            throw new TapPdkOffsetOutOfLogEx(getPdkId(), offset, ErrorKit.getLastCause(cause));
+        if (cause instanceof MongoCommandException) {
+            int errorCode = ((MongoCommandException) cause).getCode();
+            if (errorCode == 280 || errorCode == 286) {
+                throw new TapPdkOffsetOutOfLogEx(getPdkId(), offset, ErrorKit.getLastCause(cause));
+            }
         }
     }
 
