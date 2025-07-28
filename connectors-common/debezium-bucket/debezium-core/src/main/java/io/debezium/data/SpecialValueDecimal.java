@@ -184,6 +184,7 @@ public class SpecialValueDecimal implements Serializable {
             case STRING:
                 return value.toString();
             case DOUBLE:
+            case PRECISE:
                 return value.toDouble();
             default:
                 throw new ConnectException("Got a special value (NaN/Infinity) for Decimal type in column " + columnName + " but current mode does not handle it. "
