@@ -230,13 +230,16 @@ public class NormalRecordWriter {
                 escapeChar + "c2" + escapeChar + " = '" + UUID.randomUUID() + "' where " + escapeChar + "c1" + escapeChar + " = '1'";
     }
 
-    public void closeConstraintCheck() throws SQLException {
+    public boolean closeConstraintCheck() {
         String sql = getCloseConstraintCheckSql();
         if (EmptyKit.isNotBlank(sql)) {
             try (Statement statement = connection.createStatement()) {
                 statement.execute(sql);
+            } catch (SQLException e) {
+                return false;
             }
         }
+        return true;
     }
 
     protected String getCloseConstraintCheckSql() {

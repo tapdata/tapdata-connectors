@@ -522,7 +522,12 @@ public class PostgresConnector extends CommonDbConnector {
                     .setDeletePolicy(deleteDmlPolicy)
                     .setTapLogger(tapLogger);
         }
-        postgresRecordWriter.closeConstraintCheck();
+        if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
+            boolean canClose = postgresRecordWriter.closeConstraintCheck();
+            writtenTableMap.get(tapTable.getId()).put(CANNOT_CLOSE_CONSTRAINT, !canClose);
+        } else if (Boolean.FALSE.equals(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
+            postgresRecordWriter.closeConstraintCheck();
+        }
         if (postgresConfig.getCreateAutoInc() && Integer.parseInt(postgresVersion) > 100000 && EmptyKit.isNotEmpty(autoIncFields)
                 && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
             postgresRecordWriter.setAutoIncFields(autoIncFields);
@@ -1202,7 +1207,7 @@ public class PostgresConnector extends CommonDbConnector {
         PostgresWriteRecorder postgresWriter = new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
         if (tapEvent instanceof TapInsertRecordEvent) {
             return postgresWriter.getUpsertSql(((TapInsertRecordEvent) tapEvent).getAfter());
-        }else if(tapEvent instanceof TapDeleteRecordEvent){
+        } else if (tapEvent instanceof TapDeleteRecordEvent) {
             return postgresWriter.getDeleteSql(((TapDeleteRecordEvent) tapEvent).getBefore());
         }
         return null;
