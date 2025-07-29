@@ -136,7 +136,6 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportQueryConstraints(this::queryConstraint);
         connectorFunctions.supportCreateConstraint(this::createConstraint);
         connectorFunctions.supportDropConstraint(this::dropConstraint);
-        connectorFunctions.supportFlushOffsetFunction(this::flushOffset);
         // source
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
