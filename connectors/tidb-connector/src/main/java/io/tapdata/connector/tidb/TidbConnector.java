@@ -296,6 +296,7 @@ public class TidbConnector extends CommonDbConnector {
         new TidbRecordWriter(tidbJdbcContext, tapTable)
                 .setInsertPolicy(insertDmlPolicy)
                 .setUpdatePolicy(updateDmlPolicy)
+                .setTapLogger(tapLogger)
                 .write(tapRecordEvents, consumer, this::isAlive);
     }
 
