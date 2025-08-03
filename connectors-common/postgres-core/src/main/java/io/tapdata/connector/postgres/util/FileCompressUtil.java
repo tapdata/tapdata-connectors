@@ -8,6 +8,7 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.HashSet;
 import java.util.Set;
@@ -95,12 +96,31 @@ public class FileCompressUtil {
             // 处理符号链接
             String linkTarget = entry.getLinkName();
             Path linkPath = Paths.get(outputFile.getAbsolutePath());
-            Path targetPath = Paths.get(linkTarget);
+
+            // 如果目标是相对路径，需要相对于链接文件的目录
+            Path targetPath;
+            if (linkTarget.startsWith("/")) {
+                // 绝对路径
+                targetPath = Paths.get(linkTarget);
+            } else {
+                // 相对路径，相对于链接文件的父目录
+                targetPath = Paths.get(linkTarget);
+            }
 
             try {
+                // 删除可能已存在的文件
+                if (Files.exists(linkPath)) {
+                    Files.delete(linkPath);
+                }
+
                 Files.createSymbolicLink(linkPath, targetPath);
+                System.out.println("Created symbolic link: " + entryName + " -> " + linkTarget);
             } catch (Exception e) {
                 System.err.println("Failed to create symbolic link: " + linkPath + " -> " + targetPath + ", " + e.getMessage());
+                e.printStackTrace();
+
+                // 如果符号链接创建失败，尝试创建硬链接或复制文件
+                createFallbackLink(outputFile, linkTarget, outputDirectory);
             }
         }
     }
@@ -259,35 +279,121 @@ public class FileCompressUtil {
             return false;
         }
 
-        // 检查关键文件
-        String[] criticalFiles = {
-            "bin/walminer",
-            "lib/libpq.so.5",
-            "lib/libwalminer.so"
-        };
+        // 检查关键文件和符号链接
+        return validateBinaryFiles(dir) && validateLibraryFiles(dir);
+    }
 
-        for (String filePath : criticalFiles) {
-            File file = new File(dir, filePath);
-            if (!file.exists()) {
-                System.err.println("Critical file missing: " + file.getAbsolutePath());
-                return false;
-            }
+    /**
+     * 验证二进制文件
+     */
+    private static boolean validateBinaryFiles(File walMinerDir) {
+        File binDir = new File(walMinerDir, "bin");
+        if (!binDir.exists() || !binDir.isDirectory()) {
+            System.err.println("bin directory missing: " + binDir.getAbsolutePath());
+            return false;
+        }
 
-            if (file.length() == 0) {
-                System.err.println("Critical file is empty: " + file.getAbsolutePath());
-                return false;
-            }
+        File walMinerBin = new File(binDir, "walminer");
+        if (!walMinerBin.exists()) {
+            System.err.println("walminer binary missing: " + walMinerBin.getAbsolutePath());
+            return false;
+        }
 
-            // 检查二进制文件的执行权限
-            if (filePath.startsWith("bin/") && !file.canExecute()) {
-                System.err.println("Binary file is not executable: " + file.getAbsolutePath());
-                return false;
-            }
+        if (!walMinerBin.canExecute()) {
+            System.err.println("walminer binary is not executable: " + walMinerBin.getAbsolutePath());
+            return false;
+        }
 
-            System.out.println("Validated: " + file.getAbsolutePath() + " (size: " + file.length() + " bytes)");
+        if (!isValidELFFile(walMinerBin)) {
+            System.err.println("walminer binary is not a valid ELF file: " + walMinerBin.getAbsolutePath());
+            return false;
+        }
+
+        System.out.println("✅ Binary validated: " + walMinerBin.getAbsolutePath() + " (size: " + walMinerBin.length() + " bytes)");
+        return true;
+    }
+
+    /**
+     * 验证库文件和符号链接
+     */
+    private static boolean validateLibraryFiles(File walMinerDir) {
+        File libDir = new File(walMinerDir, "lib");
+        if (!libDir.exists() || !libDir.isDirectory()) {
+            System.err.println("lib directory missing: " + libDir.getAbsolutePath());
+            return false;
+        }
+
+        // 检查实际的库文件
+        File libpqActual = new File(libDir, "libpq.so.5.15");
+        if (!libpqActual.exists()) {
+            System.err.println("Actual libpq library missing: " + libpqActual.getAbsolutePath());
+            return false;
+        }
+
+        if (libpqActual.length() == 0) {
+            System.err.println("Actual libpq library is empty: " + libpqActual.getAbsolutePath());
+            return false;
+        }
+
+        if (!isValidELFFile(libpqActual)) {
+            System.err.println("Actual libpq library is not a valid ELF file: " + libpqActual.getAbsolutePath());
+            return false;
+        }
+
+        System.out.println("✅ Actual library validated: " + libpqActual.getAbsolutePath() + " (size: " + libpqActual.length() + " bytes)");
+
+        // 检查符号链接
+        File libpqSo5 = new File(libDir, "libpq.so.5");
+        File libpqSo = new File(libDir, "libpq.so");
+
+        if (!validateSymbolicLink(libpqSo5, "libpq.so.5.15")) {
+            return false;
+        }
+
+        if (!validateSymbolicLink(libpqSo, "libpq.so.5.15")) {
+            return false;
         }
 
         return true;
+    }
+
+    /**
+     * 验证符号链接
+     */
+    private static boolean validateSymbolicLink(File linkFile, String expectedTarget) {
+        if (!linkFile.exists()) {
+            System.err.println("Symbolic link missing: " + linkFile.getAbsolutePath());
+            return false;
+        }
+
+        try {
+            if (Files.isSymbolicLink(linkFile.toPath())) {
+                Path target = Files.readSymbolicLink(linkFile.toPath());
+                String targetName = target.getFileName().toString();
+
+                if (expectedTarget.equals(targetName)) {
+                    System.out.println("✅ Symbolic link validated: " + linkFile.getName() + " -> " + targetName);
+                    return true;
+                } else {
+                    System.err.println("❌ Symbolic link target mismatch: " + linkFile.getName() +
+                                     " -> " + targetName + " (expected: " + expectedTarget + ")");
+                    return false;
+                }
+            } else {
+                // 不是符号链接，检查是否是有效的文件
+                if (linkFile.length() > 0 && isValidELFFile(linkFile)) {
+                    System.out.println("⚠️  File instead of symbolic link (but valid): " + linkFile.getName());
+                    return true;
+                } else {
+                    System.err.println("❌ Expected symbolic link but found invalid file: " + linkFile.getAbsolutePath() +
+                                     " (size: " + linkFile.length() + ")");
+                    return false;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("❌ Error checking symbolic link: " + linkFile.getAbsolutePath() + " - " + e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -309,5 +415,60 @@ public class FileCompressUtil {
         } catch (IOException e) {
             return false;
         }
+    }
+
+    /**
+     * 创建备用链接（当符号链接创建失败时）
+     */
+    private static void createFallbackLink(File linkFile, String linkTarget, File baseDirectory) {
+        try {
+            // 尝试找到目标文件
+            File targetFile = new File(linkFile.getParentFile(), linkTarget);
+            if (!targetFile.exists()) {
+                // 如果相对路径找不到，尝试在基础目录中查找
+                targetFile = findFileInDirectory(baseDirectory, linkTarget);
+            }
+
+            if (targetFile != null && targetFile.exists()) {
+                // 尝试创建硬链接
+                try {
+                    Files.createLink(linkFile.toPath(), targetFile.toPath());
+                    System.out.println("Created hard link as fallback: " + linkFile.getName() + " -> " + targetFile.getName());
+                } catch (Exception e) {
+                    // 如果硬链接也失败，复制文件
+                    Files.copy(targetFile.toPath(), linkFile.toPath());
+                    System.out.println("Copied file as fallback: " + linkFile.getName() + " -> " + targetFile.getName());
+                }
+            } else {
+                System.err.println("Cannot find target file for link: " + linkTarget);
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to create fallback link: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 在目录中递归查找文件
+     */
+    private static File findFileInDirectory(File directory, String fileName) {
+        if (directory == null || !directory.isDirectory()) {
+            return null;
+        }
+
+        File[] files = directory.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (file.getName().equals(fileName)) {
+                    return file;
+                }
+                if (file.isDirectory()) {
+                    File found = findFileInDirectory(file, fileName);
+                    if (found != null) {
+                        return found;
+                    }
+                }
+            }
+        }
+        return null;
     }
 }
