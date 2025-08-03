@@ -20,7 +20,6 @@ import org.postgresql.Driver;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.JarURLConnection;
 import java.net.URL;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -186,28 +185,41 @@ public class PostgresTest extends CommonDbTest {
         if ((!toolDir.exists() || !toolDir.isDirectory()) && !toolDir.mkdirs()) {
             return false;
         }
-        File file = new File(FileUtil.paths("run-resources", "pg-db"));
-        if (!file.exists() || !file.isFile()) {
-            try {
-                URL gzUrl = this.getClass().getClassLoader().getResource("walminer/" + WALMINER_PACKAGE_NAME + ".tar.gz");
-                JarURLConnection jarConnection = (JarURLConnection) gzUrl.openConnection();
-                try (
-                        InputStream jarInputStream = jarConnection.getInputStream();
-                ) {
-                    FileCompressUtil.extractTarGz(jarInputStream, FileUtil.paths("run-resources", "pg-db", "walminer"));
-                }
-            } catch (Exception e) {
 
-            }
-            Runtime runtime = Runtime.getRuntime();
+        // 检查 walminer 工具是否已经存在
+        File walMinerDir = new File(toolDir, WALMINER_PACKAGE_NAME);
+        if (!walMinerDir.exists() || !walMinerDir.isDirectory()) {
             try {
-                runtime.exec(new String[]{"/bin/sh", "-c", "export PATH=$PATH:" + toolDir.getAbsolutePath() + "/" + WALMINER_PACKAGE_NAME + "/bin/"}).waitFor(3, TimeUnit.SECONDS);
-                runtime.exec(new String[]{"/bin/sh", "-c", "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:" + toolDir.getAbsolutePath() + "/" + WALMINER_PACKAGE_NAME + "/lib/"}).waitFor(3, TimeUnit.SECONDS);
-                runtime.exec(new String[]{"/bin/sh", "-c", String.format("walminer builtdic -d %s -h %s -p %s -u %s -D %s/walminer.dic -W %s -f", commonDbConfig.getDatabase(), commonDbConfig.getHost(), commonDbConfig.getPort(), commonDbConfig.getUser(), toolDir.getAbsolutePath(), commonDbConfig.getPassword())});
-            } catch (IOException|InterruptedException ignored) {
-            } finally {
-                runtime.exit(0);
+                // 从资源中提取 tar.gz 文件
+                URL gzUrl = this.getClass().getClassLoader().getResource("walminer/" + WALMINER_PACKAGE_NAME + ".tar.gz");
+                if (gzUrl == null) {
+                    System.err.println("Cannot find resource: walminer/" + WALMINER_PACKAGE_NAME + ".tar.gz");
+                    return false;
+                }
+
+                // 使用更安全的方式获取输入流
+                try (InputStream jarInputStream = gzUrl.openStream()) {
+                    FileCompressUtil.extractTarGz(jarInputStream, toolPath);
+                }
+
+                // 设置执行权限
+//                setExecutablePermissions(walMinerDir);
+
+            } catch (Exception e) {
+                System.err.println("Failed to extract walminer package: " + e.getMessage());
+                e.printStackTrace();
+                return false;
             }
+        }
+        Runtime runtime = Runtime.getRuntime();
+        try {
+            runtime.exec(new String[]{"/bin/sh", "-c", "export PATH=$PATH:" + toolDir.getAbsolutePath() + "/" + WALMINER_PACKAGE_NAME + "/bin/"}).waitFor(3, TimeUnit.SECONDS);
+            runtime.exec(new String[]{"/bin/sh", "-c", "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:" + toolDir.getAbsolutePath() + "/" + WALMINER_PACKAGE_NAME + "/lib/"}).waitFor(3, TimeUnit.SECONDS);
+            runtime.exec(new String[]{"/bin/sh", "-c", String.format("walminer builtdic -d %s -h %s -p %s -u %s -D %s/walminer.dic -W %s -f", commonDbConfig.getDatabase(), commonDbConfig.getHost(), commonDbConfig.getPort(), commonDbConfig.getUser(), toolDir.getAbsolutePath(), commonDbConfig.getPassword())});
+        } catch (IOException | InterruptedException ignored) {
+        } finally {
+            runtime.exit(0);
+        }
 
 //            try {
 //                ResourcesLoader.unzipSources(zipName, toolPath, log);
@@ -233,7 +245,7 @@ public class PostgresTest extends CommonDbTest {
 //            if (!cdcTool.exists() || !cdcTool.isFile()) {
 //                log.error("TiCDC must not start normally, TiCDC server depends on {}, make sure this file in you file system", cdcTool.getAbsolutePath());
 //            }
-        }
+//        }
 //        permission(file);
         return true;
 
@@ -293,5 +305,42 @@ public class PostgresTest extends CommonDbTest {
     protected Boolean testDatasourceInstanceInfo() {
         buildDatasourceInstanceInfo(connectionOptions);
         return true;
+    }
+
+    /**
+     * 设置 walminer 工具的执行权限
+     */
+    private void setExecutablePermissions(File walMinerDir) {
+        try {
+            // 设置 bin 目录下所有文件的执行权限
+            File binDir = new File(walMinerDir, "bin");
+            if (binDir.exists() && binDir.isDirectory()) {
+                File[] binFiles = binDir.listFiles();
+                if (binFiles != null) {
+                    for (File binFile : binFiles) {
+                        if (binFile.isFile()) {
+                            binFile.setExecutable(true, false);
+                            binFile.setReadable(true, false);
+                        }
+                    }
+                }
+            }
+
+            // 设置 lib 目录下所有 .so 文件的权限
+            File libDir = new File(walMinerDir, "lib");
+            if (libDir.exists() && libDir.isDirectory()) {
+                File[] libFiles = libDir.listFiles();
+                if (libFiles != null) {
+                    for (File libFile : libFiles) {
+                        if (libFile.isFile() && libFile.getName().endsWith(".so")) {
+                            libFile.setReadable(true, false);
+                            libFile.setExecutable(true, false);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to set executable permissions: " + e.getMessage());
+        }
     }
 }
