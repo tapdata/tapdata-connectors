@@ -34,7 +34,11 @@ public class FileCompressUtil {
 
         System.out.println("Starting extraction to: " + outputDir);
         int fileCount = 0;
+        int symlinkCount = 0;
         long totalSize = 0;
+
+        // 存储符号链接信息，稍后处理
+        java.util.List<SymlinkInfo> pendingSymlinks = new java.util.ArrayList<>();
 
         try (BufferedInputStream bufferedInputStream = new BufferedInputStream(inputStream);
              GzipCompressorInputStream gzipInputStream = new GzipCompressorInputStream(bufferedInputStream);
@@ -42,15 +46,43 @@ public class FileCompressUtil {
 
             TarArchiveEntry entry;
             while ((entry = tarInputStream.getNextTarEntry()) != null) {
-                extractTarEntry(tarInputStream, entry, outputDirectory);
-                if (entry.isFile()) {
-                    fileCount++;
-                    totalSize += entry.getSize();
+                if (entry.isSymbolicLink()) {
+                    // 先收集符号链接信息，稍后处理
+                    pendingSymlinks.add(new SymlinkInfo(entry.getName(), entry.getLinkName(), outputDirectory));
+                    symlinkCount++;
+                    System.out.println("Collected symbolic link: " + entry.getName() + " -> " + entry.getLinkName());
+                } else {
+                    extractTarEntry(tarInputStream, entry, outputDirectory);
+                    if (entry.isFile()) {
+                        fileCount++;
+                        totalSize += entry.getSize();
+                    }
                 }
             }
         }
 
-        System.out.println("Extraction completed. Files extracted: " + fileCount + ", Total size: " + totalSize + " bytes");
+        // 处理所有符号链接
+        System.out.println("Processing " + pendingSymlinks.size() + " symbolic links...");
+        for (SymlinkInfo symlinkInfo : pendingSymlinks) {
+            createSymbolicLink(symlinkInfo);
+        }
+
+        System.out.println("Extraction completed. Files: " + fileCount + ", Symlinks: " + symlinkCount + ", Total size: " + totalSize + " bytes");
+    }
+
+    /**
+     * 符号链接信息类
+     */
+    private static class SymlinkInfo {
+        final String linkName;
+        final String targetName;
+        final File baseDirectory;
+
+        SymlinkInfo(String linkName, String targetName, File baseDirectory) {
+            this.linkName = linkName;
+            this.targetName = targetName;
+            this.baseDirectory = baseDirectory;
+        }
     }
 
     /**
@@ -93,35 +125,8 @@ public class FileCompressUtil {
             setFilePermissions(outputFile, entry);
             System.out.println("Successfully extracted: " + entryName);
         } else if (entry.isSymbolicLink()) {
-            // 处理符号链接
-            String linkTarget = entry.getLinkName();
-            Path linkPath = Paths.get(outputFile.getAbsolutePath());
-
-            // 如果目标是相对路径，需要相对于链接文件的目录
-            Path targetPath;
-            if (linkTarget.startsWith("/")) {
-                // 绝对路径
-                targetPath = Paths.get(linkTarget);
-            } else {
-                // 相对路径，相对于链接文件的父目录
-                targetPath = Paths.get(linkTarget);
-            }
-
-            try {
-                // 删除可能已存在的文件
-                if (Files.exists(linkPath)) {
-                    Files.delete(linkPath);
-                }
-
-                Files.createSymbolicLink(linkPath, targetPath);
-                System.out.println("Created symbolic link: " + entryName + " -> " + linkTarget);
-            } catch (Exception e) {
-                System.err.println("Failed to create symbolic link: " + linkPath + " -> " + targetPath + ", " + e.getMessage());
-                e.printStackTrace();
-
-                // 如果符号链接创建失败，尝试创建硬链接或复制文件
-                createFallbackLink(outputFile, linkTarget, outputDirectory);
-            }
+            // 符号链接在主循环中已经被收集，这里不应该到达
+            System.err.println("Warning: Symbolic link processed in main loop: " + entryName);
         }
     }
 
@@ -414,6 +419,64 @@ public class FileCompressUtil {
             return header[0] == 0x7F && header[1] == 'E' && header[2] == 'L' && header[3] == 'F';
         } catch (IOException e) {
             return false;
+        }
+    }
+
+    /**
+     * 创建符号链接
+     */
+    private static void createSymbolicLink(SymlinkInfo symlinkInfo) {
+        try {
+            File linkFile = new File(symlinkInfo.baseDirectory, symlinkInfo.linkName);
+            String linkTarget = symlinkInfo.targetName;
+
+            // 确保父目录存在
+            File parentDir = linkFile.getParentFile();
+            if (parentDir != null && !parentDir.exists() && !parentDir.mkdirs()) {
+                throw new IOException("Failed to create parent directory: " + parentDir.getAbsolutePath());
+            }
+
+            Path linkPath = linkFile.toPath();
+            Path targetPath = Paths.get(linkTarget); // 使用相对路径
+
+            // 删除可能已存在的文件
+            if (Files.exists(linkPath)) {
+                if (Files.isSymbolicLink(linkPath)) {
+                    Path currentTarget = Files.readSymbolicLink(linkPath);
+                    if (linkTarget.equals(currentTarget.toString())) {
+                        System.out.println("✅ Symbolic link already correct: " + symlinkInfo.linkName + " -> " + linkTarget);
+                        return;
+                    }
+                }
+                Files.delete(linkPath);
+                System.out.println("🗑️  Deleted existing file: " + symlinkInfo.linkName);
+            }
+
+            // 创建符号链接
+            Files.createSymbolicLink(linkPath, targetPath);
+            System.out.println("✅ Created symbolic link: " + symlinkInfo.linkName + " -> " + linkTarget);
+
+            // 验证符号链接
+            if (Files.isSymbolicLink(linkPath)) {
+                Path actualTarget = Files.readSymbolicLink(linkPath);
+                System.out.println("   Verified target: " + actualTarget);
+
+                // 检查目标文件是否存在
+                Path resolvedTarget = linkPath.getParent().resolve(actualTarget);
+                if (Files.exists(resolvedTarget)) {
+                    System.out.println("   ✅ Target file exists: " + resolvedTarget);
+                } else {
+                    System.out.println("   ⚠️  Target file not found: " + resolvedTarget);
+                }
+            }
+
+        } catch (Exception e) {
+            System.err.println("❌ Failed to create symbolic link: " + symlinkInfo.linkName + " -> " + symlinkInfo.targetName);
+            System.err.println("   Error: " + e.getMessage());
+
+            // 尝试备用方案
+            createFallbackLink(new File(symlinkInfo.baseDirectory, symlinkInfo.linkName),
+                             symlinkInfo.targetName, symlinkInfo.baseDirectory);
         }
     }
 
