@@ -2,7 +2,9 @@ package io.tapdata.connector.postgres;
 
 import com.google.common.collect.Lists;
 import io.tapdata.common.CommonDbTest;
+import io.tapdata.common.util.FileUtil;
 import io.tapdata.connector.postgres.config.PostgresConfig;
+import io.tapdata.connector.postgres.util.FileCompressUtil;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
@@ -15,9 +17,15 @@ import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 import io.tapdata.util.NetUtil;
 import org.postgresql.Driver;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.JarURLConnection;
+import java.net.URL;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -164,9 +172,71 @@ public class PostgresTest extends CommonDbTest {
             NetUtil.validateHostPortWithSocket(((PostgresConfig) commonDbConfig).getPgtoHost(), ((PostgresConfig) commonDbConfig).getPgtoPort());
             return true;
         } catch (Throwable e) {
+            deployPgto();
             consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestStreamReadEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return null;
         }
+    }
+
+    private static final String WALMINER_PACKAGE_NAME = "walminer_x86_64_v4.11.0";
+
+    private boolean deployPgto() {
+        String toolPath = FileUtil.paths("run-resources", "pg-db", "walminer");
+        File toolDir = new File(toolPath);
+        if ((!toolDir.exists() || !toolDir.isDirectory()) && !toolDir.mkdirs()) {
+            return false;
+        }
+        File file = new File(FileUtil.paths("run-resources", "pg-db"));
+        if (!file.exists() || !file.isFile()) {
+            try {
+                URL gzUrl = this.getClass().getClassLoader().getResource("walminer/" + WALMINER_PACKAGE_NAME + ".tar.gz");
+                JarURLConnection jarConnection = (JarURLConnection) gzUrl.openConnection();
+                try (
+                        InputStream jarInputStream = jarConnection.getInputStream();
+                ) {
+                    FileCompressUtil.extractTarGz(jarInputStream, FileUtil.paths("run-resources", "pg-db", "walminer"));
+                }
+            } catch (Exception e) {
+
+            }
+            Runtime runtime = Runtime.getRuntime();
+            try {
+                runtime.exec(new String[]{"/bin/sh", "-c", "export PATH=$PATH:" + toolDir.getAbsolutePath() + "/" + WALMINER_PACKAGE_NAME + "/bin/"}).waitFor(3, TimeUnit.SECONDS);
+                runtime.exec(new String[]{"/bin/sh", "-c", "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:" + toolDir.getAbsolutePath() + "/" + WALMINER_PACKAGE_NAME + "/lib/"}).waitFor(3, TimeUnit.SECONDS);
+                runtime.exec(new String[]{"/bin/sh", "-c", String.format("walminer builtdic -d %s -h %s -p %s -u %s -D %s/walminer.dic -W %s -f", commonDbConfig.getDatabase(), commonDbConfig.getHost(), commonDbConfig.getPort(), commonDbConfig.getUser(), toolDir.getAbsolutePath(), commonDbConfig.getPassword())});
+            } catch (IOException|InterruptedException ignored) {
+            } finally {
+                runtime.exit(0);
+            }
+
+//            try {
+//                ResourcesLoader.unzipSources(zipName, toolPath, log);
+//            } catch (CoreException e) {
+//                if (e.getCode() != ResourcesLoader.ZIP_NOT_EXISTS) {
+//                    throw new CoreException(CDC_TOOL_NOT_EXISTS, e.getMessage());
+//                }
+//                String paths = FileUtil.paths(toolPath, zipName);
+//                log.info("No available TiCDC resources found, sources name: {}, going to directory {} to match custom resources soon",
+//                        zipName, paths);
+//                File f = new File(paths);
+//                if (f.exists() || !f.isFile()) {
+//                    log.warn("File {} does not exist, please manually add it", f.getAbsolutePath());
+//                } else {
+//                    try {
+//                        ZipUtils.unzip(paths, toolPath);
+//                    } catch (Exception e1) {
+//                        log.warn("Unzip custom resources filed, message: {}", e1.getMessage());
+//                    }
+//                }
+//            }
+//            File cdcTool = new File(getCdcToolPath());
+//            if (!cdcTool.exists() || !cdcTool.isFile()) {
+//                log.error("TiCDC must not start normally, TiCDC server depends on {}, make sure this file in you file system", cdcTool.getAbsolutePath());
+//            }
+        }
+//        permission(file);
+        return true;
+
     }
 
     protected int tableCount() throws Throwable {
