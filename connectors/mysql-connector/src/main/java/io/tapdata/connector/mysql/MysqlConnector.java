@@ -3,7 +3,6 @@ package io.tapdata.connector.mysql;
 import com.mysql.cj.exceptions.StatementIsClosedException;
 import io.debezium.type.TapIllegalDate;
 import io.tapdata.common.CommonDbConnector;
-import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.common.ResultSetConsumer;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.ddl.type.DDLParserType;
@@ -13,6 +12,7 @@ import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
 import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
+import io.tapdata.connector.mysql.dml.sqlmaker.MysqlSqlMaker;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
@@ -113,7 +113,7 @@ public class MysqlConnector extends CommonDbConnector {
         }
         commonDbConfig = mysqlConfig;
         jdbcContext = mysqlJdbcContext;
-        commonSqlMaker = new CommonSqlMaker('`');
+        commonSqlMaker = new MysqlSqlMaker('`');
         if (Boolean.TRUE.equals(mysqlConfig.getCreateAutoInc())) {
             commonSqlMaker.createAutoInc(true);
         }
@@ -201,7 +201,7 @@ public class MysqlConnector extends CommonDbConnector {
         }
         commonDbConfig = mysqlConfig;
         jdbcContext = mysqlJdbcContext;
-        commonSqlMaker = new CommonSqlMaker('`');
+        commonSqlMaker = new MysqlSqlMaker('`');
         tapLogger = tapConnectionContext.getLog();
         exceptionCollector = new MysqlExceptionCollector();
         ((MysqlExceptionCollector) exceptionCollector).setMysqlConfig(mysqlConfig);
