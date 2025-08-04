@@ -137,7 +137,7 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
 
     private String castFloatAndQuoteEscape(String value) {
         if (columnTypeMap.get(value).contains("float")) {
-            return "CAST(" + quoteAndEscape(value) + " AS decimal(20,8))";
+            return "CAST(" + quoteAndEscape(value) + " AS decimal(10,6))";
         } else {
             return quoteAndEscape(value);
         }
