@@ -24,6 +24,7 @@ import java.util.function.Supplier;
 public class WalPgtoMiner extends AbstractWalLogMiner {
 
     private String connectorId;
+    private String lsn;
 
     public WalPgtoMiner(PostgresJdbcContext postgresJdbcContext, String connectorId, Log tapLogger) {
         super(postgresJdbcContext, tapLogger);
@@ -32,15 +33,20 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
 
     @Override
     public AbstractWalLogMiner offset(Object offsetState) {
+        lsn = EmptyKit.isNull(offsetState) ? null : String.valueOf(offsetState);
         return this;
     }
 
     private final static String WALMINER_ADD_SUB = "ADDSUB:%s %s.%s.%s";
+    private final static String WALMINER_REV_SUB = "REVSUB:%s %s";
 
     @Override
     public void startMiner(Supplier<Boolean> isAlive) throws Throwable {
         for (String table : tableList) {
             HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format(WALMINER_ADD_SUB, connectorId, postgresConfig.getDatabase(), postgresConfig.getSchema(), table));
+        }
+        if (EmptyKit.isNotNull(lsn)) {
+            HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format(WALMINER_REV_SUB, connectorId, lsn));
         }
         try (ConcurrentProcessor<String, NormalRedo> concurrentProcessor = TapExecutors.createSimple(8, 32, "wal-miner")) {
             Thread t = new Thread(() -> {
