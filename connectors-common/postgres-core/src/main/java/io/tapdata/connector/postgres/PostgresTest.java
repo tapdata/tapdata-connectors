@@ -180,7 +180,7 @@ public class PostgresTest extends CommonDbTest {
         }
     }
 
-    private static final String WALMINER_PACKAGE_NAME = "walminer_x86_64_v4.11.0";
+    private static final String WALMINER_PACKAGE_NAME = "walminer_x86_64_v4.11.2";
 
     private boolean deployPgto() {
         String toolPath = FileUtil.paths("run-resources", "pg-db", "walminer");

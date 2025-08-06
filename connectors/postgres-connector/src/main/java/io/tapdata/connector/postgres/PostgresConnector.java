@@ -679,7 +679,7 @@ public class PostgresConnector extends CommonDbConnector {
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotBlank(postgresConfig.getPgtoHost())) {
-                if(EmptyKit.isNotNull(offsetStartTime)) {
+                if (EmptyKit.isNotNull(offsetStartTime)) {
                     return new PostgresOffset();
                 } else {
                     return timestampToWalLsnV2(null).split(",")[0];
