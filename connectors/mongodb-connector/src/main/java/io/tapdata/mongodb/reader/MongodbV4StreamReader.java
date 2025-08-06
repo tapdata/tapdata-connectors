@@ -146,6 +146,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                             }
                         } catch (Exception e) {
                             throwableAtomicReference.set(e);
+                            return;
                         }
                     }
                 });
