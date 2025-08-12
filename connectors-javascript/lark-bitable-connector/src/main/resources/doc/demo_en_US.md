@@ -19,3 +19,23 @@ Table ID: Create a new Base in Feishu cloud document , in the url table_id is th
 
 
 ---
+
+
+### Hints
+
+#### As Target
+
+- Lark bitble supports multiple DML types of events, including: adding, modifying, and deleting
+
+- Lark bitble supports three insertion strategies and two update strategies simultaneously:
+
+    - Insertion strategy: Update when the target exists (requires turning off the `Index with unique identifier` switch to take effect), ignore when the target exists, insert only
+    - Update strategy: Insert if non-existent, discard if non-existent
+
+- Supports batch writing, but there are the following current limiting measures for various interfaces on the Lark server. Please be aware:
+
+    - Batch insertion and modification of interfaces: Interface access frequency of 50 times/second, maximum submission of 1000 records per request
+    - Batch deletion of interfaces: Interface access frequency of 50 times/second, maximum number of submitted records per request of 500
+    - Batch query interface: Interface access frequency: 20 times/second. For single primary key field table queries, 50 records can be obtained each time. For multiple primary keys, only 10 records can be obtained each time
+
+---

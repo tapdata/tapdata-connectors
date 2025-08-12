@@ -64,11 +64,15 @@ class PgOutputColumnValue extends AbstractColumnValue<String> {
 
     @Override
     public SpecialValueDecimal asDecimal() {
-        if ("NaN".equals(value)) {
-            return SpecialValueDecimal.NOT_A_NUMBER;
-        }
-        else {
-            return new SpecialValueDecimal(new BigDecimal(value));
+        switch (value) {
+            case "NaN":
+                return SpecialValueDecimal.NOT_A_NUMBER;
+            case "-Infinity":
+                return SpecialValueDecimal.NEGATIVE_INF;
+            case "Infinity":
+                return SpecialValueDecimal.POSITIVE_INF;
+            default:
+                return new SpecialValueDecimal(new BigDecimal(value));
         }
     }
 

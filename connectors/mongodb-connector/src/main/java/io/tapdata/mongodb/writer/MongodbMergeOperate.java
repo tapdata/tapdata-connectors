@@ -4,6 +4,7 @@ import com.mongodb.client.model.DeleteOneModel;
 import com.mongodb.client.model.InsertOneModel;
 import com.mongodb.client.model.UpdateManyModel;
 import com.mongodb.client.model.WriteModel;
+import io.tapdata.common.utils.MergeUtils;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -452,11 +453,11 @@ public class MongodbMergeOperate {
 	}
 
 	public static void updateMerge(MergeBundle mergeBundle, MergeTableProperties currentProperty, MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter) {
-		final String targetPath = currentProperty.getTargetPath();
-		final boolean array = currentProperty.getIsArray();
-		final MergeBundle.EventOperation operation = mergeBundle.getOperation();
+		boolean array = currentProperty.getIsArray();
+		MergeBundle.EventOperation operation = mergeBundle.getOperation();
 		Map<String, Object> before = mergeBundle.getBefore();
 		Map<String, Object> after = mergeBundle.getAfter();
+		String targetPath = MergeUtils.dynamicKey(currentProperty.getTargetPath(), after);
 		removeIdIfNeed(after, currentProperty);
 		Map<String, Object> filterMap = buildFilterMap(operation, after, before);
 		Document filter = filter(
@@ -816,7 +817,9 @@ public class MongodbMergeOperate {
 	private static Document filter(Map<String, Object> data, List<Map<String, String>> joinKeys) {
 		Document document = new Document();
 		for (Map<String, String> joinKey : joinKeys) {
-			document.put(joinKey.get("target"), MapUtil.getValueByKey(data, joinKey.get("source")));
+			String target = joinKey.get("target");
+			target = MergeUtils.dynamicKey(target, data);
+			document.put(target, MapUtil.getValueByKey(data, joinKey.get("source")));
 		}
 		return document;
 	}

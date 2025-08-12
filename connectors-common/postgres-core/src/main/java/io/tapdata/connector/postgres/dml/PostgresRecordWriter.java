@@ -47,7 +47,7 @@ public class PostgresRecordWriter extends NormalRecordWriter {
         }
     }
 
-    public void closeConstraintCheck() {
+    public boolean closeConstraintCheck() {
         String sql = "SET session_replication_role = 'replica'";
         try (Statement statement = connection.createStatement()) {
             statement.execute(sql);
@@ -56,7 +56,9 @@ public class PostgresRecordWriter extends NormalRecordWriter {
                 connection.rollback();
             } catch (SQLException ignored) {
             }
+            return false;
         }
+        return true;
     }
 
 }

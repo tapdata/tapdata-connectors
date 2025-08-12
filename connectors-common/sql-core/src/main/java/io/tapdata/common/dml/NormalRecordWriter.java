@@ -164,7 +164,7 @@ public class NormalRecordWriter {
                 throw new RuntimeException(String.format("Error occurred when retrying write record: %s", tapRecordEvents.get(0)), e);
             } else {
                 int eachPieceSize = Math.max(tapRecordEvents.size() / 10, 1);
-                tapLogger.warn("writeRecord failed, dismantle them, size: {}", eachPieceSize);
+                tapLogger.info("writeRecord failed, dismantle them, size: {}, error message: {}", eachPieceSize, e.getMessage());
                 DbKit.splitToPieces(tapRecordEvents, eachPieceSize).forEach(pieces -> writePart(pieces, listResult, isAlive));
             }
         }
@@ -226,13 +226,16 @@ public class NormalRecordWriter {
                 escapeChar + "c2" + escapeChar + " = '" + UUID.randomUUID() + "' where " + escapeChar + "c1" + escapeChar + " = '1'";
     }
 
-    public void closeConstraintCheck() throws SQLException {
+    public boolean closeConstraintCheck() {
         String sql = getCloseConstraintCheckSql();
         if (EmptyKit.isNotBlank(sql)) {
             try (Statement statement = connection.createStatement()) {
                 statement.execute(sql);
+            } catch (SQLException e) {
+                return false;
             }
         }
+        return true;
     }
 
     protected String getCloseConstraintCheckSql() {

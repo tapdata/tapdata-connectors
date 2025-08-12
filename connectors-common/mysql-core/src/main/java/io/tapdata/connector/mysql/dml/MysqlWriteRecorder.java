@@ -122,4 +122,25 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
         return value;
     }
 
+    @Override
+    protected String getUpdateSql(Map<String, Object> after, Map<String, Object> before, boolean containsNull) {
+        return "UPDATE " + getSchemaAndTable() + " SET " +
+                after.keySet().stream().map(k -> quoteAndEscape(k) + "=?").collect(Collectors.joining(", ")) + " WHERE " +
+                before.keySet().stream().map(k -> castFloatAndQuoteEscape(k) + "<=>?").collect(Collectors.joining(" AND "));
+    }
+
+    @Override
+    protected String getDeleteSql(Map<String, Object> before, boolean containsNull) {
+        return "DELETE FROM " + getSchemaAndTable() + " WHERE " +
+                before.keySet().stream().map(k -> castFloatAndQuoteEscape(k) + "<=>?").collect(Collectors.joining(" AND "));
+    }
+
+    private String castFloatAndQuoteEscape(String value) {
+        if (columnTypeMap.get(value).contains("float")) {
+            return "CAST(" + quoteAndEscape(value) + " AS decimal(10,6))";
+        } else {
+            return quoteAndEscape(value);
+        }
+    }
+
 }

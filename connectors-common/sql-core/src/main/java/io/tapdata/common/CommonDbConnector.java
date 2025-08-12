@@ -57,6 +57,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
     protected static final String HAS_MULTI_UNIQUE_INDEX = "HAS_MULTI_UNIQUE_INDEX";
     protected static final String HAS_AUTO_INCR = "HAS_AUTO_INCR";
     protected static final String HAS_REMOVED_COLUMN = "HAS_REMOVED_COLUMN";
+    protected static final String CANNOT_CLOSE_CONSTRAINT = "CANNOT_CLOSE_CONSTRAINT";
     //ddlHandlers which for ddl collection
     protected BiClassHandlers<TapFieldBaseEvent, TapConnectorContext, List<String>> fieldDDLHandlers;
     //ddlSqlMaker which for ddl execution

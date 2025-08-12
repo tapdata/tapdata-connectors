@@ -24,6 +24,7 @@ import org.mockito.MockedStatic;
 import java.time.Instant;
 import java.util.*;
 
+import static io.tapdata.common.utils.MergeUtils.dynamicKey;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mockStatic;
@@ -748,6 +749,129 @@ class MongodbMergeOperateTest {
 			mergeTableProperties.setJoinKeys(joinKeys);
 			MongodbMergeOperate.removeIdIfNeed(data, mergeTableProperties);
 			assertTrue(data.containsKey("_id"));
+		}
+	}
+
+	@Nested
+	@DisplayName("Method targetPath test")
+	class targetPathTest {
+		@Test
+		@DisplayName("test simple variable substitution")
+		void testSimpleVariableSubstitution() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("txn_id", 1);
+			data.put("item_id", 1);
+
+			String targetPath = "txn_array_${txn_id}_${item_id}";
+			String result = dynamicKey(targetPath, data);
+
+			assertEquals("txn_array_1_1", result);
+		}
+
+		@Test
+		@DisplayName("test nested variable substitution")
+		void testNestedVariableSubstitution() {
+			Map<String, Object> data = new HashMap<>();
+			Map<String, Object> nested = new HashMap<>();
+			nested.put("id", 123);
+			data.put("transaction", nested);
+			data.put("user_id", "user456");
+
+			String targetPath = "user_${user_id}_txn_${transaction.id}";
+			String result = dynamicKey(targetPath, data);
+
+			assertEquals("user_user456_txn_123", result);
+		}
+
+		@Test
+		@DisplayName("test no variables in targetPath")
+		void testNoVariables() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("txn_id", 1);
+
+			String targetPath = "simple_path";
+			String result = dynamicKey(targetPath, data);
+
+			assertEquals("simple_path", result);
+		}
+
+		@Test
+		@DisplayName("test variable not found in data")
+		void testVariableNotFound() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("txn_id", 1);
+
+			String targetPath = "txn_array_${txn_id}_${missing_id}";
+			String result = dynamicKey(targetPath, data);
+
+			assertEquals("txn_array_1_${missing_id}", result);
+		}
+
+		@Test
+		@DisplayName("test empty targetPath")
+		void testEmptyTargetPath() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("txn_id", 1);
+
+			String result = dynamicKey("", data);
+
+			assertEquals("", result);
+		}
+
+		@Test
+		@DisplayName("test null targetPath")
+		void testNullTargetPath() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("txn_id", 1);
+
+			String result = dynamicKey(null, data);
+
+			assertNull(result);
+		}
+
+		@Test
+		@DisplayName("test empty data")
+		void testEmptyData() {
+			Map<String, Object> data = new HashMap<>();
+
+			String targetPath = "txn_array_${txn_id}_${item_id}";
+			String result = dynamicKey(targetPath, data);
+
+			assertEquals("txn_array_${txn_id}_${item_id}", result);
+		}
+
+		@Test
+		@DisplayName("test null data")
+		void testNullData() {
+			String targetPath = "txn_array_${txn_id}_${item_id}";
+			String result = dynamicKey(targetPath, null);
+
+			assertEquals("txn_array_${txn_id}_${item_id}", result);
+		}
+
+		@Test
+		@DisplayName("test multiple same variables")
+		void testMultipleSameVariables() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("id", 42);
+
+			String targetPath = "prefix_${id}_middle_${id}_suffix";
+			String result = dynamicKey(targetPath, data);
+
+			assertEquals("prefix_42_middle_42_suffix", result);
+		}
+
+		@Test
+		@DisplayName("test variable with null value")
+		void testVariableWithNullValue() {
+			Map<String, Object> data = new HashMap<>();
+			data.put("txn_id", null);
+			data.put("item_id", 1);
+
+			String targetPath = "txn_array_${txn_id}_${item_id}";
+			String result = dynamicKey(targetPath, data);
+
+			assertEquals("txn_array_${txn_id}_1", result);
 		}
 	}
 }
