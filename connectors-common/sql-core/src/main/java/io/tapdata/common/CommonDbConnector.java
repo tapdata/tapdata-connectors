@@ -2,6 +2,7 @@ package io.tapdata.common;
 
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.ddl.DDLSqlGenerator;
+import io.tapdata.common.dml.NormalWriteRecorder;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.entity.TapConstraintException;
@@ -11,6 +12,8 @@ import io.tapdata.entity.event.ddl.constraint.TapDropConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.index.TapDeleteIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.*;
 import io.tapdata.entity.simplify.TapSimplify;
@@ -991,4 +994,12 @@ public abstract class CommonDbConnector extends ConnectorBase {
         }
     }
 
+    public String exportEventSql(NormalWriteRecorder writeRecorder, TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
+        if (tapEvent instanceof TapInsertRecordEvent) {
+            return writeRecorder.getUpsertSql(((TapInsertRecordEvent) tapEvent).getAfter());
+        } else if (tapEvent instanceof TapDeleteRecordEvent) {
+            return writeRecorder.getDeleteSql(((TapDeleteRecordEvent) tapEvent).getBefore());
+        }
+        return null;
+    }
 }
