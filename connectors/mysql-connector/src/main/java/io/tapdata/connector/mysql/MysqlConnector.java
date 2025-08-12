@@ -898,7 +898,7 @@ public class MysqlConnector extends CommonDbConnector {
 
             switch (type) {
                 case TapType.TYPE_DATETIME:
-                    sql.append("round(UNIX_TIMESTAMP( CAST(").append("`" + fieldName + "`").append(" as char(19)) )),");
+                    sql.append("FLOOR(DATEDIFF(").append("`" + fieldName + "`").append(", '1970-01-01') * 86400) + TIME_TO_SEC(TIME(`" + fieldName + "`)),");
                     break;
                 case TapType.TYPE_BINARY:
                     break;
