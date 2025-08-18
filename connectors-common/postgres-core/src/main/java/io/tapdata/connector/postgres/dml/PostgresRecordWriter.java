@@ -4,10 +4,14 @@ import io.tapdata.common.JdbcContext;
 import io.tapdata.common.dml.NormalRecordWriter;
 import io.tapdata.connector.postgres.exception.PostgresExceptionCollector;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.utils.ErrorCodeUtils;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Collections;
+
+import static io.tapdata.entity.simplify.TapSimplify.toJson;
 
 public class PostgresRecordWriter extends NormalRecordWriter {
 
@@ -45,6 +49,18 @@ public class PostgresRecordWriter extends NormalRecordWriter {
             updateRecorder = new OldPostgresWriteRecorder(connection, tapTable, jdbcContext.getConfig().getSchema());
             deleteRecorder = new OldPostgresWriteRecorder(connection, tapTable, jdbcContext.getConfig().getSchema());
         }
+    }
+
+    @Override
+    public void errorHandler(SQLException e, Object data) {
+        if (null != data) {
+            data = ErrorCodeUtils.truncateData(data);
+        }
+        exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), data, null, e);
+        exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), e);
+        exceptionCollector.collectWriteType(null, null, data, e);
+        exceptionCollector.collectWriteLength(null, null, data, e);
+        exceptionCollector.collectViolateNull(null, e);
     }
 
     public boolean closeConstraintCheck() {

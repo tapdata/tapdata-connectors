@@ -174,7 +174,7 @@ public class NormalRecordWriter {
         }
     }
 
-    private void errorHandler(SQLException e, Object data) {
+    public void errorHandler(SQLException e, Object data) {
         if (null != data) {
             data = ErrorCodeUtils.truncateData(data);
         }
