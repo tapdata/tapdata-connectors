@@ -1,5 +1,6 @@
 package io.tapdata.connector.starrocks.streamload;
 
+import cn.hutool.core.codec.Base64;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -63,6 +64,8 @@ public class CsvSerializer implements MessageSerializer {
                         } else {
                             joiner.add("0");
                         }
+                    } else if (value instanceof byte[]) {
+                        joiner.add(Base64.encode((byte[]) value));
                     } else {
                         joiner.add(value.toString());
                     }
