@@ -18,6 +18,7 @@ import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.rest.RestStatus;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -99,7 +100,12 @@ public class ElasticsearchRecordWriter {
             for (BulkItemResponse bulkItemResponse : bulkResponse) {
                 if (bulkItemResponse.isFailed()) {
                     BulkItemResponse.Failure failure = bulkItemResponse.getFailure();
-                    throw failure.getCause();
+                    if (failure.getStatus() == RestStatus.NOT_FOUND) {
+                        log.warn("Document not found for update, discarding: {}", failure.getId());
+                        continue;
+                    } else {
+                        throw failure.getCause();
+                    }
                 }
                 switch (bulkItemResponse.getOpType()) {
                     case INDEX:
