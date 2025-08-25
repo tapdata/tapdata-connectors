@@ -1,5 +1,6 @@
 package io.tapdata.connector.starrocks.streamload;
 
+import cn.hutool.core.codec.Base64;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
@@ -74,11 +75,13 @@ public class JsonSerializer implements MessageSerializer {
 					linkedRecord.put(field, null);
 				} else {
 					if (value instanceof Boolean) {
-						if ((Boolean)value) {
+						if ((Boolean) value) {
 							linkedRecord.put(field, 1);
 						} else {
 							linkedRecord.put(field, 0);
 						}
+					} else if (value instanceof byte[]) {
+						linkedRecord.put(field + "_tmp", Base64.encode((byte[]) value));
 					} else {
 						linkedRecord.put(field, value.toString());
 					}

@@ -616,7 +616,12 @@ public class StarrocksStreamLoader {
                     col, isInDataColumns, isAggregateType, shouldInclude);
 
                 if (shouldInclude) {
-                    columns.add("`" + col + "`");
+                    if (table.getNameFieldMap().get(col).getDataType().contains("binary")) {
+                        columns.add("`" + col + "_tmp`");
+                        columns.add("`" + col + "`=from_base64(`" + col + "_tmp`)");
+                    } else {
+                        columns.add("`" + col + "`");
+                    }
                 }
             }
 
@@ -689,7 +694,12 @@ public class StarrocksStreamLoader {
                     col, isInDataColumns, isAggregateType, shouldInclude);
 
                 if (shouldInclude) {
-                    columns.add("`" + col + "`");
+                    if (table.getNameFieldMap().get(col).getDataType().contains("binary")) {
+                        columns.add("`" + col + "_tmp`");
+                        columns.add("`" + col + "`=from_base64(`" + col + "_tmp`)");
+                    } else {
+                        columns.add("`" + col + "`");
+                    }
                 }
             }
 
