@@ -484,8 +484,12 @@ public class MysqlReader implements Closeable {
                 builder.with("database.requireSSL", "true");
                 if ("true".equals(mysqlConfig.getProperties().getProperty("verifyServerCertificate"))) {
                     builder.with("database.ssl.mode", "required");
-                    builder.with("database.database.ssl.keystore", mysqlConfig.getProperties().getProperty("clientCertificateKeyStoreUrl").replace("file:", ""));
-                    builder.with("database.database.ssl.keystore.password", mysqlConfig.getProperties().getProperty("clientCertificateKeyStorePassword"));
+                    if(StringUtils.isNotBlank(mysqlConfig.getProperties().getProperty("clientCertificateKeyStoreUrl"))) {
+                        builder.with("database.ssl.keystore", mysqlConfig.getProperties().getProperty("clientCertificateKeyStoreUrl").replace("file:", ""));
+                    }
+                    if(StringUtils.isNotBlank(mysqlConfig.getProperties().getProperty("clientCertificateKeyStorePassword"))) {
+                        builder.with("database.ssl.keystore.password", mysqlConfig.getProperties().getProperty("clientCertificateKeyStorePassword"));
+                    }
                     builder.with("database.database.ssl.truststore", mysqlConfig.getProperties().getProperty("trustCertificateKeyStoreUrl").replace("file:", ""));
                     builder.with("database.database.ssl.truststore.password", mysqlConfig.getProperties().getProperty("trustCertificateKeyStorePassword"));
                 }
