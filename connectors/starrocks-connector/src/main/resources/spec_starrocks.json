@@ -847,6 +847,17 @@
       "to": "TapString",
       "defaultByte": 1
     },
+    "binary[($byte)]": {
+      "to": "TapBinary",
+      "byte": "2g",
+      "defaultByte": 1,
+      "fixed": true
+    },
+    "varbinary[($byte)]": {
+      "to": "TapBinary",
+      "byte": "2g",
+      "defaultByte": 1
+    },
     "string": {
       "byte": "2147483643",
       "to": "TapString"

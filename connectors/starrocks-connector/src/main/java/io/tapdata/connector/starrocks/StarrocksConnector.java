@@ -134,12 +134,12 @@ public class StarrocksConnector extends CommonDbConnector {
             }
             return 0;
         });
-
-        codecRegistry.registerFromTapValue(TapBinaryValue.class, "text", tapValue -> {
-            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
-                return toJson(tapValue.getValue().getValue());
-            return "null";
-        });
+//
+//        codecRegistry.registerFromTapValue(TapBinaryValue.class, "text", tapValue -> {
+//            if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
+//                return toJson(tapValue.getValue().getValue());
+//            return "null";
+//        });
 
         //TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
         codecRegistry.registerFromTapValue(TapTimeValue.class, "varchar(10)", tapValue -> {
