@@ -40,10 +40,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -127,7 +124,8 @@ public class StarrocksConnector extends CommonDbConnector {
                 return toJson(tapValue.getValue());
             return "null";
         });
-        codecRegistry.registerFromTapValue(TapBooleanValue.class, "boolean", tapValue -> {
+
+        codecRegistry.registerFromTapValue(TapBooleanValue.class, "tinyint(1)", tapValue -> {
             if (tapValue != null) {
                 Boolean value = tapValue.getValue();
                 if (value != null && value) {
@@ -136,6 +134,7 @@ public class StarrocksConnector extends CommonDbConnector {
             }
             return 0;
         });
+
         codecRegistry.registerFromTapValue(TapBinaryValue.class, "text", tapValue -> {
             if (tapValue != null && tapValue.getValue() != null && tapValue.getValue().getValue() != null)
                 return toJson(tapValue.getValue().getValue());
@@ -264,7 +263,11 @@ public class StarrocksConnector extends CommonDbConnector {
         //generate bucket
         stringBuilder.append("`) BUCKETS ").append(starrocksConfig.getBucket()).append(" PROPERTIES(");
         //generate properties
-        stringBuilder.append(starrocksConfig.getTableProperties().stream().map(v -> "\"" + v.get("propKey") + "\"=\"" + v.get("propValue") + "\"").collect(Collectors.joining(", ")));
+        if (!starrocksConfig.getTableProperties().isEmpty()) {
+            stringBuilder.append(starrocksConfig.getTableProperties().stream().map(v -> "\"" + v.get("propKey") + "\"=\"" + v.get("propValue") + "\"").collect(Collectors.joining(", ")));
+        } else {
+            stringBuilder.append("\"replication_num\"=\"1\"");
+        }
         stringBuilder.append(")");
         createTableOptions.setTableExists(false);
         try {
@@ -344,6 +347,13 @@ public class StarrocksConnector extends CommonDbConnector {
         ErrorKit.ignoreAnyError(() -> {
             for (StarrocksStreamLoader StarrocksStreamLoader : StarrocksStreamLoaderMap.values()) {
                 if (EmptyKit.isNotNull(StarrocksStreamLoader)) {
+                    // 在停止前先刷新剩余数据
+                    try {
+                        StarrocksStreamLoader.flushOnStop();
+                        tapLogger.info("StarrocksConnector", "Flushed remaining data before stopping StarrocksStreamLoader");
+                    } catch (Exception e) {
+                        tapLogger.warn("StarrocksConnector", "Failed to flush data before stopping: {}", e.getMessage());
+                    }
                     StarrocksStreamLoader.shutdown();
                 }
             }

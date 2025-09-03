@@ -7,10 +7,59 @@
     "tags": ["SaaS"]
   },
   "configOptions": {
+    "capabilities": [
+      {
+        "id": "dml_insert_policy",
+        "alternatives": [
+          "update_on_exists",
+          "ignore_on_exists",
+          "just_insert"
+        ]
+      },
+      {
+        "id": "dml_update_policy",
+        "alternatives": [
+          "ignore_on_nonexists",
+          "insert_on_nonexists"
+        ]
+      }
+    ],
     "pdkExpansion": [],
     "node": {
       "type": "object",
       "properties": {
+        "queryApiDelay": {
+          "required": true,
+          "type": "string",
+          "title": "${QueryDelayMillSeconds}",
+          "default": 0,
+          "x-index": 10,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${QueryDelayMillSecondsTip}"
+          },
+          "x-component-props": {
+            "min": 0,
+            "max": 10000
+          }
+        },
+        "writeApiDelay": {
+          "required": true,
+          "type": "string",
+          "title": "${WriteDelayMillSeconds}",
+          "default": 0,
+          "x-index": 20,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${WriteDelayMillSecondsTip}"
+          },
+          "x-component-props": {
+            "min": 0,
+            "max": 10000
+          }
+        }
       }
     },
     "connection": {
@@ -67,7 +116,11 @@
       "code": "Authorize",
       "OAuthButtonTitle": "Authorize",
       "OAuthButton": "Please authorize API access to continue",
-      "OAuthButtonOK": "Authorization successful"
+      "OAuthButtonOK": "Authorization successful",
+      "QueryDelayMillSeconds": "Single query request delay (milliseconds)",
+      "WriteDelayMillSeconds": "Single write request delay (milliseconds)",
+      "QueryDelayMillSecondsTip": "Due to the frequency limit of API query interface (50 times/second), you can control the interface access frequency through the sub parameter",
+      "WriteDelayMillSecondsTip": "Due to the frequency limit of writing API interfaces (50 times/second), you can control the interface access frequency through the sub parameter"
     },
     "zh_CN": {
       "doc": "doc/demo_zh_CN.md",
@@ -83,7 +136,11 @@
       "code": "授权",
       "OAuthButtonTitle": "授权",
       "OAuthButton": "请先授权成功再点击连接测试或保存",
-      "OAuthButtonOK": "成功授权"
+      "OAuthButtonOK": "成功授权",
+      "QueryDelayMillSeconds": "单次查询请求延时（毫秒）",
+      "WriteDelayMillSeconds": "单次写入请求延时（毫秒）",
+      "QueryDelayMillSecondsTip": "受查询API接口频率限制（50次/每秒），你可以通过次参数来控制接口访问频次",
+      "WriteDelayMillSecondsTip": "受写入API接口频率限制（50次/每秒），你可以通过次参数来控制接口访问频次"
     },
     "zh_TW": {
       "doc": "doc/demo_zh_TW.md",
@@ -99,7 +156,11 @@
       "code": "授權",
       "OAuthButtonTitle": "授權",
       "OAuthButton": "請先授權成功再點擊鏈接測試或保存",
-      "OAuthButtonOK": "成功授權"
+      "OAuthButtonOK": "成功授權",
+      "QueryDelayMillSeconds": "單次査詢請求延時（毫秒）",
+      "WriteDelayMillSeconds": "單次寫入請求延時（毫秒）",
+      "QueryDelayMillSecondsTip": "受査詢API介面頻率限制（50次/每秒），你可以通過次參數來控制介面訪問頻次",
+      "WriteDelayMillSecondsTip": "受寫入API介面頻率限制（50次/每秒），你可以通過次參數來控制介面訪問頻次"
     }
   }
 }

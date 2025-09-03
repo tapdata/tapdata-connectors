@@ -112,6 +112,7 @@ public class RegisterMain {
         SALESFORCE(ALPHA),
         SELECTDB(BETA),
         SHEIN(BETA),
+        STARROCKS(BETA),
         TABLESTORE(ALPHA),
         TDENGINE(BETA),
         TEMU(ALPHA),

@@ -34,6 +34,7 @@ import org.bson.io.ByteBufferBsonInput;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -145,6 +146,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                             }
                         } catch (Exception e) {
                             throwableAtomicReference.set(e);
+                            return;
                         }
                     }
                 });
@@ -315,10 +317,14 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         }
 
                         TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
-//							Map<String, Object> info = new DataMap();
+                        Map<String, Object> info = new DataMap();
 //							Map<String, Object> unset = new DataMap();
                         List<String> removedFields = new ArrayList<>();
-                        if (updateDescription != null) {
+
+                        LinkedHashSet<String> updatedFields = new LinkedHashSet<>();
+                        if (operationType == OperationType.REPLACE) {
+                            updatedFields.addAll(fullDocument.keySet());
+                        } else if (updateDescription != null) {
                             for (String f : updateDescription.getRemovedFields()) {
 
                                 if (after.keySet().stream().noneMatch(v -> v.equals(f))) {
@@ -335,8 +341,16 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                             if (removedFields.size() > 0) {
                                 recordEvent.removedFields(removedFields);
                             }
+
+                            BsonDocument bsonUpdatedFields = updateDescription.getUpdatedFields();
+                            if (null != bsonUpdatedFields) {
+                                updatedFields.addAll(bsonUpdatedFields.keySet());
+                            }
                         }
-//							recordEvent.setInfo(info);
+
+                        // 双活场景依赖此属性，区分是否为业务数据修改
+                        info.put("updatedFields", updatedFields);
+                        recordEvent.setInfo(info);
                         recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
                         recordEvent.setIsReplaceEvent(operationType.equals(OperationType.REPLACE));
                         offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());

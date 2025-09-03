@@ -33,6 +33,8 @@ import org.apache.commons.lang3.StringUtils;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -272,7 +274,7 @@ public class OceanbaseReader {
                     dataFormat = DateUtil.determineDateFormat(field.getValue().toString());
                     dataFormatMap.put(table + "." + field.getFieldname(), dataFormat);
                 }
-                return DateUtil.parseInstantWithZone(field.getValue().toString(), dataFormat, ZoneOffset.UTC);
+                return ZonedDateTime.parse(field.getValue().toString(), DateTimeFormatter.ofPattern(dataFormat)).toInstant().atZone(ZoneOffset.UTC);
             }
             case "YEAR":
                 return Integer.parseInt(field.getValue().toString());

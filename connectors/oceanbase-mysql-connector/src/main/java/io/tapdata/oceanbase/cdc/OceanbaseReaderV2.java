@@ -32,6 +32,8 @@ import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -280,7 +282,7 @@ public class OceanbaseReaderV2 {
                     dataFormat = DateUtil.determineDateFormat(valueString);
                     dataFormatMap.put(column, dataFormat);
                 }
-                return DateUtil.parseInstantWithZone(valueString, dataFormat, ZoneOffset.UTC);
+                return ZonedDateTime.parse(valueString, DateTimeFormatter.ofPattern(dataFormat)).toInstant().atZone(ZoneOffset.UTC);
             }
             case "year":
                 return Integer.parseInt(valueString);

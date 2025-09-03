@@ -577,13 +577,13 @@
       "host": "DB Address",
       "hostTip": "The address of the database, it can be an IP address or a domain name, for example: 192.168.1.200",
       "port": "Port",
-      "portTip": "The port number of the database, the default port of Doris is 9030",
+      "portTip": "The port number of the database, the default port of Starrocks is 9030",
       "starrocksHttp": "http/https Address",
       "starrocksHttpTip": "The address of the Starrocks Http/Https interface, for example: 192.168.1.200:8030",
       "catalog": "Starrocks Catalog",
-      "catalogTip": "The directory of Doris can be left blank for non clustered Doris or those that do not require narrowing down the data range, such as doris_cluster",
+      "catalogTip": "The directory of Starrocks can be left blank for non clustered Starrocks or those that do not require narrowing down the data range, such as Starrocks_cluster",
       "database": "DB Name",
-      "databaseTip": "The name of the database, you can list all Doris databases with the \\\\\"show databases\\\\\" command, case sensitive",
+      "databaseTip": "The name of the database, you can list all Starrocks databases with the \\\\\"show databases\\\\\" command, case sensitive",
       "user": "User",
       "password": "Password",
       "extParams": "Other connection string parameters",
@@ -607,7 +607,7 @@
       "propValue": "Property Value",
       "useHTTPS": "Enable HTTPS",
       "backendNum": "The number of BE nodes",
-      "backendNumTip": "During Doris connection testing, a table is created and data is written to Doris for testing. It is necessary to obtain the number of BE nodes when building a table. If the table is not built according to the number of BE nodes, it may cause an error. admin permission is required to obtain the number of BE nodes. If you do not want to grant admin permission, please enter the number of BE manually to avoid errors in the table.",
+      "backendNumTip": "During Starrocks connection testing, a table is created and data is written to Starrocks for testing. It is necessary to obtain the number of BE nodes when building a table. If the table is not built according to the number of BE nodes, it may cause an error. admin permission is required to obtain the number of BE nodes. If you do not want to grant admin permission, please enter the number of BE manually to avoid errors in the table.",
       "flushSizeMB": "Flush Size (MB)",
       "flushSizeMBTip": "Buffer data locally and flush when reaching this size threshold (in MB). Default is 100MB. This setting takes priority over general write count configurations.",
       "flushTimeoutSeconds": "Flush Timeout (Seconds)",
@@ -619,13 +619,13 @@
       "host": "数据库地址",
       "hostTip": "数据库的地址，它可以是IP地址或者域名，例如：192.168.1.200",
       "port": "端口",
-      "portTip": "数据库的端口号，Doris默认端口9030",
-      "dorisHttp": "http/https接口地址",
-      "dorisHttpTip": "Doris的http/https接口地址，例如：192.168.1.200:8030",
-      "catalog": "Doris目录",
-      "catalogTip": "Doris的目录，非集群Doris或不需要缩小数据范围的可以不填写，例如：doris_cluster",
+      "portTip": "数据库的端口号，Starrocks默认端口9030",
+      "StarrocksHttp": "http/https接口地址",
+      "StarrocksHttpTip": "Starrocks的http/https接口地址，例如：192.168.1.200:8030",
+      "catalog": "Starrocks目录",
+      "catalogTip": "Starrocks的目录，非集群Starrocks或不需要缩小数据范围的可以不填写，例如：Starrocks_cluster",
       "database": "数据库名称",
-      "databaseTip": "数据库名称，可以通过 show databases 命令列出Doris所有数据库，区分大小写",
+      "databaseTip": "数据库名称，可以通过 show databases 命令列出Starrocks所有数据库，区分大小写",
       "user": "账号",
       "password": "密码",
       "extParams": "其他连接串参数",
@@ -649,7 +649,7 @@
       "propValue": "属性值",
       "useHTTPS": "开启HTTPS",
       "backendNum": "BE节点的数量",
-      "backendNumTip": "Doris连接测试时，会在Doris建表并写入数据进行测试。在建表时需要获取BE节点数量，如果不根据BE数量去建表可能会导致报错。获取BE节点的数量需要admin 权限，如果不想授予admin权限，请手动输入BE数量，以免建表报错。",
+      "backendNumTip": "Starrocks连接测试时，会在Starrocks建表并写入数据进行测试。在建表时需要获取BE节点数量，如果不根据BE数量去建表可能会导致报错。获取BE节点的数量需要admin 权限，如果不想授予admin权限，请手动输入BE数量，以免建表报错。",
       "flushSizeMB": "刷新大小 (MB)",
       "flushSizeMBTip": "本地缓冲数据，达到此大小阈值时刷新（单位：MB）。默认值为100MB。此设置优先级高于通用写入条数配置。",
       "flushTimeoutSeconds": "刷新超时 (秒)",
@@ -661,13 +661,13 @@
       "host": "數據庫地址",
       "hostTip": "數據庫的地址，它可以是IP地址或者域名，例如：192.168.1.200",
       "port": "端口",
-      "portTip": "數據庫的端口號，Doris默認端口9030",
-      "dorisHttp": "http/https接口地址",
-      "dorisHttpTip": "Doris的http/https接口地址，例如：192.168.1.200:8030",
-      "catalog": "Doris目錄",
-      "catalogTip": "Doris的目錄，非集群Doris或不需要縮小數據範圍的可以不填寫，例如：doris_cluster",
+      "portTip": "數據庫的端口號，Starrocks默認端口9030",
+      "StarrocksHttp": "http/https接口地址",
+      "StarrocksHttpTip": "Starrocks的http/https接口地址，例如：192.168.1.200:8030",
+      "catalog": "Starrocks目錄",
+      "catalogTip": "Starrocks的目錄，非集群Starrocks或不需要縮小數據範圍的可以不填寫，例如：Starrocks_cluster",
       "database": "数据库名称",
-      "databaseTip": "数据库名称，可以通过 show databases 命令列出Doris所有数据库，区分大小写",
+      "databaseTip": "数据库名称，可以通过 show databases 命令列出Starrocks所有数据库，区分大小写",
       "user": "账号",
       "password": "密码",
       "extParams": "其他连接串参数",
@@ -691,7 +691,7 @@
       "propValue": "屬性值",
       "useHTTPS": "開啓HTTPS",
       "backendNum": "BE節點的數量",
-      "backendNumTip": "Doris連接測試時，會在Doris建表並寫入數據進行測試。在建表時需要獲取BE節點數量，如果不根據BE數量去建表可能會導致報錯。獲取BE節點的數量需要admin 權限，如果不想授予admin權限，請手動輸入BE數量，以免建表報錯。",
+      "backendNumTip": "Starrocks連接測試時，會在Starrocks建表並寫入數據進行測試。在建表時需要獲取BE節點數量，如果不根據BE數量去建表可能會導致報錯。獲取BE節點的數量需要admin 權限，如果不想授予admin權限，請手動輸入BE數量，以免建表報錯。",
       "flushSizeMB": "刷新大小 (MB)",
       "flushSizeMBTip": "本地緩衝數據，達到此大小閾值時刷新（單位：MB）。默認值為100MB。此設置優先級高於通用寫入條數配置。",
       "flushTimeoutSeconds": "刷新超時 (秒)",
@@ -701,10 +701,6 @@
     }
   },
   "dataTypes": {
-    "boolean": {
-      "bit": 8,
-      "to": "TapBoolean"
-    },
     "tinyint[($zerofill)]": {
       "to": "TapNumber",
       "bit": 8,
@@ -746,12 +742,30 @@
       "to": "TapNumber"
     },
     "float": {
-      "bit": 32,
-      "to": "TapNumber"
+      "to": "TapNumber",
+      "precision": [
+        1,
+        6
+      ],
+      "scale": [
+        0,
+        6
+      ],
+      "fixed": false
     },
     "double": {
-      "bit": 64,
-      "to": "TapNumber"
+      "to": "TapNumber",
+      "precision": [
+        1,
+        17
+      ],
+      "preferPrecision": 11,
+      "preferScale": 4,
+      "scale": [
+        0,
+        17
+      ],
+      "fixed": false
     },
     "decimal[($precision,$scale)]": {
       "bit": 128,

@@ -2,6 +2,7 @@ package io.tapdata.connector.postgres;
 
 import com.google.common.collect.Lists;
 import io.tapdata.common.CommonDbTest;
+import io.tapdata.common.util.FileUtil;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
@@ -13,11 +14,16 @@ import io.tapdata.pdk.apis.exception.testItem.TapTestReadPrivilegeEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestStreamReadEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestWritePrivilegeEx;
 import io.tapdata.util.NetUtil;
+import org.apache.commons.io.IOUtils;
 import org.postgresql.Driver;
 
+import java.io.*;
+import java.net.URL;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -26,6 +32,7 @@ import static io.tapdata.base.ConnectorBase.testItem;
 public class PostgresTest extends CommonDbTest {
 
     protected ConnectionOptions connectionOptions;
+    protected boolean masterConnected = true;
 
     public PostgresTest() {
         super();
@@ -33,12 +40,43 @@ public class PostgresTest extends CommonDbTest {
 
     public PostgresTest(PostgresConfig postgresConfig, Consumer<TestItem> consumer, ConnectionOptions connectionOptions) {
         super(postgresConfig, consumer);
+        testFunctionMap.put("testMaster", this::testMaster);
         this.connectionOptions = connectionOptions;
     }
 
     public PostgresTest initContext() {
+        if ("master-slave".equals(((PostgresConfig) commonDbConfig).getDeploymentMode())) {
+            testHostPortForMasterSlave();
+        }
         jdbcContext = new PostgresJdbcContext((PostgresConfig) commonDbConfig);
         return this;
+    }
+
+    private void testHostPortForMasterSlave() {
+        AtomicBoolean isMaster = new AtomicBoolean();
+        String availableHost = null;
+        int availablePort = 0;
+        for (LinkedHashMap<String, Integer> hostPort : ((PostgresConfig) commonDbConfig).getMasterSlaveAddress()) {
+            commonDbConfig.setHost(String.valueOf(hostPort.get("host")));
+            commonDbConfig.setPort(hostPort.get("port"));
+            try (PostgresJdbcContext jdbcContext = new PostgresJdbcContext((PostgresConfig) commonDbConfig)) {
+                jdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> {
+                    isMaster.set(!resultSet.getBoolean(1));
+                });
+                if (isMaster.get()) {
+                    return;
+                } else {
+                    availableHost = commonDbConfig.getHost();
+                    availablePort = commonDbConfig.getPort();
+                    masterConnected = false;
+                }
+            } catch (Throwable ignore) {
+            }
+        }
+        if (EmptyKit.isNotNull(availableHost)) {
+            commonDbConfig.setHost(availableHost);
+            commonDbConfig.setPort(availablePort);
+        }
     }
 
     public PostgresTest withPostgresVersion(String version) {
@@ -54,6 +92,13 @@ public class PostgresTest extends CommonDbTest {
     @Override
     protected List<String> supportVersions() {
         return Lists.newArrayList("9.4", "9.5", "9.6", "1*");
+    }
+
+    protected boolean testMaster() {
+        if (!masterConnected) {
+            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "Current node is not master, please check the connection address"));
+        }
+        return true;
     }
 
     //Test number of tables and privileges
@@ -122,11 +167,107 @@ public class PostgresTest extends CommonDbTest {
     public Boolean testWalMinerPgto() {
         try {
             NetUtil.validateHostPortWithSocket(((PostgresConfig) commonDbConfig).getPgtoHost(), ((PostgresConfig) commonDbConfig).getPgtoPort());
+            consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY, "Cdc can work normally"));
             return true;
         } catch (Throwable e) {
-            consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestStreamReadEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
-            return null;
+            if ("127.0.0.1,localhost".contains(((PostgresConfig) commonDbConfig).getPgtoHost()) && deployPgto()) {
+                consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY, "pgto server deployed successfully"));
+                return true;
+            } else {
+                consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestStreamReadEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
+                return null;
+            }
         }
+    }
+
+    private static final String WALMINER_PACKAGE_NAME = "walminer_x86_64_v4.11.2";
+
+    private boolean deployPgto() {
+        String toolPath = FileUtil.paths("run-resources", "pg-db", "walminer");
+        File toolDir = new File(toolPath);
+        if ((!toolDir.exists() || !toolDir.isDirectory()) && !toolDir.mkdirs()) {
+            return false;
+        }
+
+        try {
+            // 从资源中提取 tar.gz 文件
+            URL gzUrl = this.getClass().getClassLoader().getResource("walminer/" + WALMINER_PACKAGE_NAME + ".tar.gz");
+            if (gzUrl == null) {
+                System.err.println("Cannot find resource: walminer/" + WALMINER_PACKAGE_NAME + ".tar.gz");
+                return false;
+            }
+
+            // 使用更安全的方式获取输入流
+            try (InputStream jarInputStream = gzUrl.openStream()) {
+                File tempFile = new File(toolDir, WALMINER_PACKAGE_NAME + ".tar.gz");
+                try (FileOutputStream fileOutputStream = new FileOutputStream(tempFile)) {
+                    IOUtils.copy(jarInputStream, fileOutputStream);
+                }
+            }
+
+        } catch (Exception e) {
+            return false;
+        }
+        Runtime runtime = Runtime.getRuntime();
+        try {
+            Process process = runtime.exec(new String[]{"/bin/sh", "-c", "hostid"});
+            process.waitFor(10, TimeUnit.SECONDS);
+            String hostId;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                hostId = reader.readLine();
+            }
+            String ctlDir = "walminer_" + commonDbConfig.getHost() + "_" + commonDbConfig.getPort();
+            String dicName = "walminer_" + commonDbConfig.getHost() + "_" + commonDbConfig.getPort() + ".dic";
+            String slotName = "_tap_walminer_slot_" + hostId;
+            if (!new File(FileUtil.paths(toolPath, ctlDir)).exists()) {
+                try {
+                    jdbcContext.query(String.format("select * from pg_drop_replication_slot('%s')", slotName), resultSet -> {
+                    });
+                } catch (Exception ignore) {
+                }
+            }
+            runtime.exec(new String[]{"/bin/sh", "-c", "tar -xvf " + toolDir.getAbsolutePath() + "/" + WALMINER_PACKAGE_NAME + ".tar.gz -C " + toolDir.getAbsolutePath()}).waitFor(10, TimeUnit.SECONDS);
+            String appendBinPath = toolDir.getAbsolutePath() + "/" + WALMINER_PACKAGE_NAME + "/bin";
+            String appendLdPath = toolDir.getAbsolutePath() + "/" + WALMINER_PACKAGE_NAME + "/lib";
+            ProcessBuilder processBuilder = new ProcessBuilder("/bin/sh", "-c", String.format("walminer builtdic -d %s -h %s -p %s -u %s -D %s -W %s -f", commonDbConfig.getDatabase(), commonDbConfig.getHost(), commonDbConfig.getPort(), commonDbConfig.getUser(), toolDir.getAbsolutePath() + "/" + dicName, commonDbConfig.getPassword()));
+            Map<String, String> env = processBuilder.environment();
+            String currentBinPath = env.get("PATH");
+            String newBinPath = (currentBinPath == null || currentBinPath.isEmpty()) ? appendBinPath : (currentBinPath + ":" + appendBinPath);
+            env.put("PATH", newBinPath);
+            String currentLdPath = env.get("LD_LIBRARY_PATH");
+            String newLdPath = (currentLdPath == null || currentLdPath.isEmpty()) ? appendLdPath : (currentLdPath + ":" + appendLdPath);
+            env.put("LD_LIBRARY_PATH", newLdPath);
+            process = processBuilder.start();
+            process.waitFor(60, TimeUnit.SECONDS);
+            new File(FileUtil.paths(toolPath, ctlDir)).mkdir();
+            processBuilder.command("/bin/sh", "-c", String.format("walminer pgto -i -c %s -s '%s' -e %s -t 4 --source-connstr1='host=%s port=%s username=%s dbanme=%s password=%s'", toolDir.getAbsolutePath() + "/" + ctlDir, slotName, ((PostgresConfig) commonDbConfig).getPgtoPort(), commonDbConfig.getHost(), commonDbConfig.getPort(), commonDbConfig.getUser(), commonDbConfig.getDatabase(), commonDbConfig.getPassword()));
+            process = processBuilder.start();
+            process.waitFor(60, TimeUnit.SECONDS);
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    System.out.println(line);
+                }
+            }
+            int exitCode = process.waitFor();
+            System.out.println("exit code: " + exitCode);
+            processBuilder.command("/bin/sh", "-c", String.format("walminer pgto -m -c %s", toolDir.getAbsolutePath() + "/" + ctlDir));
+            processBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            process = processBuilder.start();
+            process.waitFor(60, TimeUnit.SECONDS);
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    System.out.println(line);
+                }
+            }
+            exitCode = process.waitFor();
+            System.out.println("exit code: " + exitCode);
+        } catch (IOException | InterruptedException ignored) {
+            return false;
+        }
+        return true;
+
     }
 
     protected int tableCount() throws Throwable {
