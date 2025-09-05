@@ -17,16 +17,17 @@ import java.util.Optional;
  * @description 根据输入的模型结果生成表模型：
  * input:
  * {
- *     [{
- *      "tableName": "",
- *      "fields": {'fieldName': 'my_field', 'fieldType': 'string','primaryKey': true,'comment': 'my comment'}
- *     }]
+ * [{
+ * "tableName": "",
+ * "fields": {'fieldName': 'my_field', 'fieldType': 'string','primaryKey': true,'comment': 'my comment'}
+ * }]
  * }
- *
+ * <p>
  * output: TapTable
  */
 public class SchemaParser {
     public static final String TYPE_MATCH = "^string$|^integer$|^long$|^double$|^date$|^object$|^array$|^boolean$|^datetime(\\()?([0-9](?:\\))|(?:\\)))?|^timestamp(\\()?([0-9](?:\\))|(?:\\)))?|^time(\\()?([0-9](?:\\))|(?:\\)))?";
+
     private SchemaParser() {
 
     }
@@ -38,7 +39,7 @@ public class SchemaParser {
             logger.warn("Table {} fields is empty", schema.getTableName());
             return tapTable;
         }
-        int keyIndex = 0;
+        int keyIndex = 1;
         for (Field field : fields) {
             if (null == field || StringUtils.isBlank(field.getFieldName())) {
                 logger.warn("Table {} field is null", schema.getTableName());
@@ -51,12 +52,12 @@ public class SchemaParser {
                 continue;
             }
             tapField.dataType(fieldType);
-            if (null != field.isPrimaryKey()) {
-                tapField.setPrimaryKey(field.isPrimaryKey());
+            if (null != field.isPrimaryKey() && field.isPrimaryKey()) {
+                tapField.setPrimaryKey(true);
                 tapField.primaryKeyPos(keyIndex);
                 keyIndex++;
             }
-            if (null != field.isNullable()) {
+            if (null != field.isNullable() && !field.isNullable()) {
                 tapField.setNullable(field.isNullable());
             }
             Optional.ofNullable(field.getComment()).ifPresent(tapField::comment);
