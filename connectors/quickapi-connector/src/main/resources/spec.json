@@ -79,6 +79,44 @@
             }
           ],
           "required": false
+        },
+        "autoLoadSchema": {
+          "type": "boolean",
+          "title": "${auto_load_schema}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "default": false,
+          "x-decorator-props": {
+            "colon": false,
+            "tooltip": "${tip_auto_load_schema}"
+          },
+          "x-reactions": [
+            {
+              "target": "schemaTxt",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===false}}"
+                }
+              }
+            }
+          ],
+          "x-display": "hidden",
+          "x-index": 50
+        },
+        "schemaTxt": {
+          "type": "String",
+          "title": "${schema_txt}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-component-props": {
+            "type": "textarea"
+          },
+          "x-decorator-props": {
+            "colon": false,
+            "tooltip": "${tip_schema_txt}"
+          },
+          "x-index": 60,
+          "required": false
         }
       }
     },
@@ -96,7 +134,11 @@
       "jsonTxt": "Postman Collection in JSON",
       "expireStatus": "Expiration Status Desc",
       "tokenParams": "Token parameter specification",
-      "hookButton": "Generate Service URL"
+      "hookButton": "Generate Service URL",
+      "auto_load_schema": "Auto Load Schema",
+      "tip_auto_load_schema": "Automatically call each interface when loading the model and parse the table model from the returned results",
+      "schema_txt": "Table Schema",
+      "tip_schema_txt": "Declare the table model, for example: [{\n 'tableName': 'my_table_name',\n 'fields': [{'fieldName': 'my_field', 'fieldType': 'string'}]\n}], supported field types: string, integer, long, double, date, time, datetime, timestamp, object, array, boolean"
     },
     "zh_CN": {
       "doc": "docs/quickapi_zh_CN.md",
@@ -104,7 +146,11 @@
       "jsonTxt": "PostMan导出的API JSON",
       "expireStatus": "过期状态描述",
       "tokenParams": "Token 参数指定",
-      "hookButton": "生成服务URL"
+      "hookButton": "生成服务URL",
+      "auto_load_schema": "自动加载模型",
+      "tip_auto_load_schema": "加载模型时自动调用每个接口并从返回结果中解析表模型",
+      "schema_txt": "表模型",
+      "tip_schema_txt": "声明表模型，如：[{\n 'tableName': 'my_table_name',\n 'fields': [{'fieldName': 'my_field', 'fieldType': 'string'}]\n}]，支持的类型：string, integer, long, double, date, time, datetime, datetime, object, array, boolean"
     },
     "zh_TW": {
       "doc": "docs/quickapi_zh_TW.md",
@@ -112,10 +158,98 @@
       "jsonTxt": "PostMan匯出的API JSON",
       "expireStatus": "過期狀態描述",
       "tokenParams": "Token 參數指定",
-      "hookButton": "生成服務URL"
+      "hookButton": "生成服務URL",
+      "auto_load_schema": "自動加載模型",
+      "tip_auto_load_schema": "加載模型時自動調用每個介面並從返回結果中解析錶模型",
+      "schema_txt": "錶模型",
+      "tip_schema_txt": "聲明錶模型，如：[{\n 'tableName': 'my_table_name',\n 'fields': [{'fieldName': 'my_field', 'fieldType': 'string'}]\n}]，支持的類型：string，integer，long，double，date, time, datetime，datetime，object，array，boolean"
     }
   },
   "dataTypes": {
-
+    "string": {
+      "to" : "TapString",
+      "byte" : 255
+    },
+    "integer": {
+      "to": "TapNumber",
+      "value" : [-2147483648, 2147483647]
+    },
+    "long": {
+      "to": "TapNumber",
+      "value" : [-9223372036854775808, 9223372036854775807]
+    },
+    "double": {
+      "to": "TapNumber",
+      "precision": [
+        1,
+        17
+      ],
+      "preferPrecision": 11,
+      "preferScale": 4,
+      "scale": [
+        0,
+        17
+      ],
+      "fixed": false
+    },
+    "date": {
+      "to": "TapDate",
+      "range": [
+        "1000-01-01",
+        "9999-12-31"
+      ],
+      "pattern": "yyyy-MM-dd"
+    },
+    "time[($fraction)]": {
+      "to": "TapTime",
+      "fraction": [
+        0,
+        6
+      ],
+      "defaultFraction": 0,
+      "range": [
+        "-838:59:59",
+        "838:59:59"
+      ],
+      "pattern": "HH:mm:ss"
+    },
+    "datetime[($fraction)]": {
+      "to": "TapDateTime",
+      "range": [
+        "1000-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "defaultFraction": 0
+    },
+    "timestamp[($fraction)]": {
+      "to": "TapDateTime",
+      "range": [
+        "1970-01-01 00:00:01",
+        "2038-01-19 03:14:07"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "defaultFraction": 0,
+      "withTimeZone": true
+    },
+    "object": {
+      "to": "TapBinary",
+      "byte": "16m"
+    },
+    "array": {
+      "to": "TapArray",
+      "byte": "16m"
+    },
+    "boolean": {
+      "to": "TapBoolean"
+    }
   }
 }
