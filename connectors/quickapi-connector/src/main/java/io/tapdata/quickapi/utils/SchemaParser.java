@@ -32,22 +32,22 @@ public class SchemaParser {
     }
 
     static TapTable parseOnce(Table schema, Log logger) {
-        TapTable tapTable = new TapTable(schema.getName(), schema.getName());
+        TapTable tapTable = new TapTable(schema.getTableName(), schema.getTableName());
         List<Field> fields = schema.getFields();
         if (null == fields || fields.isEmpty()) {
-            logger.warn("Table {} fields is empty", schema.getName());
+            logger.warn("Table {} fields is empty", schema.getTableName());
             return tapTable;
         }
         int keyIndex = 0;
         for (Field field : fields) {
-            if (null == field || StringUtils.isBlank(field.getName())) {
-                logger.warn("Table {} field is null", schema.getName());
+            if (null == field || StringUtils.isBlank(field.getFieldName())) {
+                logger.warn("Table {} field is null", schema.getTableName());
                 continue;
             }
-            TapField tapField = new TapField(field.getName().trim(), field.getType());
-            String fieldType = checkType(field.getType(), logger);
+            TapField tapField = new TapField(field.getFieldName().trim(), field.getFieldType());
+            String fieldType = checkType(field.getFieldType(), logger);
             if (null == fieldType) {
-                logger.warn("Table {}'s field {}'s type is not supported, invalid type: {}", schema.getName(), field.getName(), field.getType());
+                logger.warn("Table {}'s field {}'s type is not supported, invalid type: {}", schema.getTableName(), field.getFieldName(), field.getFieldType());
                 continue;
             }
             tapField.dataType(fieldType);
@@ -96,15 +96,15 @@ public class SchemaParser {
 
 
     public static class Table {
-        private String name;
+        private String tableName;
         private List<Field> fields;
 
-        public String getName() {
-            return name;
+        public String getTableName() {
+            return tableName;
         }
 
-        public void setName(String name) {
-            this.name = name;
+        public void setTableName(String tableName) {
+            this.tableName = tableName;
         }
 
         public List<Field> getFields() {
@@ -116,26 +116,26 @@ public class SchemaParser {
         }
     }
     public static class Field {
-        private String name;
-        private String type;
+        private String fieldName;
+        private String fieldType;
         private Boolean primaryKey;
         private String comment;
         private Boolean nullable;
 
-        public String getName() {
-            return name;
+        public String getFieldName() {
+            return fieldName;
         }
 
-        public void setName(String name) {
-            this.name = name;
+        public void setFieldName(String fieldName) {
+            this.fieldName = fieldName;
         }
 
-        public String getType() {
-            return type;
+        public String getFieldType() {
+            return fieldType;
         }
 
-        public void setType(String type) {
-            this.type = type;
+        public void setFieldType(String fieldType) {
+            this.fieldType = fieldType;
         }
 
         public Boolean isPrimaryKey() {
