@@ -520,11 +520,13 @@ public class PostgresConnector extends CommonDbConnector {
                     .setDeletePolicy(deleteDmlPolicy)
                     .setTapLogger(tapLogger);
         }
-        if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
-            boolean canClose = postgresRecordWriter.closeConstraintCheck();
-            writtenTableMap.get(tapTable.getId()).put(CANNOT_CLOSE_CONSTRAINT, !canClose);
-        } else if (Boolean.FALSE.equals(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
-            postgresRecordWriter.closeConstraintCheck();
+        if (Boolean.TRUE.equals(postgresConfig.getAllowReplication())) {
+            if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
+                boolean canClose = postgresRecordWriter.closeConstraintCheck();
+                writtenTableMap.get(tapTable.getId()).put(CANNOT_CLOSE_CONSTRAINT, !canClose);
+            } else if (Boolean.FALSE.equals(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
+                postgresRecordWriter.closeConstraintCheck();
+            }
         }
         if (postgresConfig.getCreateAutoInc() && Integer.parseInt(postgresVersion) > 100000 && EmptyKit.isNotEmpty(autoIncFields)
                 && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {

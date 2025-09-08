@@ -429,6 +429,17 @@
                   "value": "+14:00"
                 }
               ]
+            },
+            "allowReplication": {
+              "type": "boolean",
+              "title": "${allowReplication}",
+              "default": true,
+              "x-index": 100,
+              "x-decorator": "FormItem",
+              "x-component": "Switch",
+              "x-decorator-props": {
+                "tooltip": "${allowReplicationTooltip}"
+              }
             }
           }
         }
@@ -738,6 +749,8 @@
       "PgtoPort": "Pgto Server Port",
       "timezone": "timezone",
       "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
+      "allowReplication": "Allow setting up replication sessions",
+      "allowReplicationTooltip": "Enabled by default. If disabled, the writing to tables with foreign keys will be affected if no separate replication role is set.",
       "closeNotNull": "Ignore NotNull",
       "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded",
       "tableOwner": "Specify table owner",
@@ -790,6 +803,8 @@
       "pgtoPort": "Pgto Server端口",
       "timezone": "时区",
       "timezoneTip": "指定时区，否则不做时区处理",
+      "allowReplication": "允许设置复制会话",
+      "allowReplicationTooltip": "默认开启，关闭后如果没有单独设置replication role会影响含外键表的写入",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "开关打开时会将非空限制丢弃",
       "tableOwner": "指定表所有者",
@@ -842,6 +857,8 @@
       "pgtoPort": "Pgto Server端口",
       "timezone": "時區",
       "timezoneTip": "指定時區，否則不做時區處理",
+      "allowReplication": "允許設定複製會話",
+      "allowReplicationTooltip": "默認開啟，關閉後如果沒有單獨設定replication role會影響含外鍵錶的寫入",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "開關打開時會將非空限制丟棄",
       "tableOwner": "指定表所有者",
