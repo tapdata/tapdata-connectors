@@ -19,6 +19,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     private String logPluginName = "pgoutput"; //default log plugin for postgres, pay attention to lower version
     private Boolean closeNotNull = false;
+    private Boolean allowReplication = true;
     private String tableOwner = "";
     private String replaceBlank = "";
     private Boolean partitionRoot = false;
@@ -94,6 +95,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setCloseNotNull(Boolean closeNotNull) {
         this.closeNotNull = closeNotNull;
+    }
+
+    public Boolean getAllowReplication() {
+        return allowReplication;
+    }
+
+    public void setAllowReplication(Boolean allowReplication) {
+        this.allowReplication = allowReplication;
     }
 
     public String getTableOwner() {
