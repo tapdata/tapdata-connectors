@@ -37,10 +37,7 @@ import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.exception.TapCodeException;
-import io.tapdata.kit.DbKit;
-import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
-import io.tapdata.kit.StringKit;
+import io.tapdata.kit.*;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -266,6 +263,12 @@ public class PostgresConnector extends CommonDbConnector {
             }
             if (EmptyKit.isNotNull(slotName)) {
                 clearSlot();
+            }
+            if ("walminer".equals(postgresConfig.getLogPluginName())) {
+                if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
+                    //取消订阅
+                    HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format("DELSUB:%s all", firstConnectorId));
+                }
             }
         } finally {
             onStop(connectorContext);

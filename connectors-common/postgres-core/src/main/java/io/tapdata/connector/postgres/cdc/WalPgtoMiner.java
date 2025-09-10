@@ -43,7 +43,10 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
     @Override
     public void startMiner(Supplier<Boolean> isAlive) throws Throwable {
         for (String table : tableList) {
-            HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format(WALMINER_ADD_SUB, connectorId, postgresConfig.getDatabase(), postgresConfig.getSchema(), table));
+            String response = HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format(WALMINER_ADD_SUB, connectorId, postgresConfig.getDatabase(), postgresConfig.getSchema(), table));
+            if (response.startsWith("Top many subs limit")) {
+                throw new RuntimeException("Top many subs limit failed");
+            }
         }
         if (EmptyKit.isNotNull(lsn)) {
             HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format(WALMINER_REV_SUB, connectorId, lsn));
