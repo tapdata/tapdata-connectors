@@ -57,6 +57,18 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
         }
     }
 
+    @Override
+    public String getUpsertSql(Map<String, Object> after) throws SQLException {
+        String sql = getUpsertSql();
+        for (String key : allColumn) {
+            sql = sql.replaceFirst("\\?", formatValueForSql(after.get(key), columnTypeMap.get(key)));
+        }
+        for (String key : updatedColumn) {
+            sql = sql.replaceFirst("\\?", formatValueForSql(after.get(key), columnTypeMap.get(key)));
+        }
+        return sql;
+    }
+
     protected String getUpsertSql() {
         return "INSERT INTO " + getSchemaAndTable() + " ("
                 + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") " +

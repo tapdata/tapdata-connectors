@@ -25,8 +25,6 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
-import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
-import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapConstraint;
 import io.tapdata.entity.schema.TapField;
@@ -1210,13 +1208,8 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     public String exportEventSql(TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
-        PostgresWriteRecorder postgresWriter = new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
-        if (tapEvent instanceof TapInsertRecordEvent) {
-            return postgresWriter.getUpsertSql(((TapInsertRecordEvent) tapEvent).getAfter());
-        } else if (tapEvent instanceof TapDeleteRecordEvent) {
-            return postgresWriter.getDeleteSql(((TapDeleteRecordEvent) tapEvent).getBefore());
-        }
-        return null;
+        PostgresWriteRecorder writeRecorder = new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
+        return exportEventSql(writeRecorder, connectorContext, tapEvent, table);
     }
 
     protected void clearIdleSlot() throws SQLException {

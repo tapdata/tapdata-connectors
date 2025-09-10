@@ -12,6 +12,7 @@ import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
 import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
+import io.tapdata.connector.mysql.dml.MysqlWriteRecorder;
 import io.tapdata.connector.mysql.dml.sqlmaker.MysqlSqlMaker;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.mysql.util.MysqlUtil;
@@ -297,6 +298,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
         connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
         connectorFunctions.supportQueryHashByAdvanceFilterFunction(this::queryTableHash);
+        connectorFunctions.supportExportEventSqlFunction(this::exportEventSql);
 
     }
 
@@ -898,7 +900,7 @@ public class MysqlConnector extends CommonDbConnector {
 
             switch (type) {
                 case TapType.TYPE_DATETIME:
-                    sql.append("round(UNIX_TIMESTAMP( CAST(").append("`" + fieldName + "`").append(" as char(19)) )),");
+                    sql.append("FLOOR(DATEDIFF(").append("`" + fieldName + "`").append(", '1970-01-01') * 86400) + TIME_TO_SEC(TIME(`" + fieldName + "`)),");
                     break;
                 case TapType.TYPE_BINARY:
                     break;
@@ -1055,6 +1057,11 @@ public class MysqlConnector extends CommonDbConnector {
             }
         });
         return res.get();
+    }
+
+    public String exportEventSql(TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
+        MysqlWriteRecorder writeRecorder = new MysqlWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
+        return exportEventSql(writeRecorder, connectorContext, tapEvent, table);
     }
 
 }
