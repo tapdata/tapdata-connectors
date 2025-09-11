@@ -661,6 +661,8 @@ public class MongodbConnector extends ConnectorBase {
 
 	protected void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
 		if (null == indexList || indexList.isEmpty()) return;
+		List<IndexModel> indexModels = new ArrayList<>();
+		MongoCollection<Document> targetCollection = mongoDatabase.getCollection(table.getName());
 		indexList.forEach(index -> {
 			log.info("find index: {}" + index.getName());
 			try {
@@ -674,7 +676,6 @@ public class MongodbConnector extends ConnectorBase {
 				if (dIndex == null) {
 					return;
 				}
-				MongoCollection<Document> targetCollection = mongoDatabase.getCollection(table.getName());
 				IndexOptions indexOptions = new IndexOptions();
 				// 1. 遍历 index, 生成 indexOptions
 				dIndex.forEach((key, value) -> {
@@ -716,16 +717,18 @@ public class MongodbConnector extends ConnectorBase {
 						indexOptions.version((Integer) value);
 					}
 				});
-                try {
-                    targetCollection.createIndex(dIndex.get("key", Document.class), indexOptions);
-                } catch (Exception ignored) {
-                    log.warn("create index failed 1: " + ignored.getMessage());
-                }
+				indexModels.add(new IndexModel(dIndex.get("key", Document.class), indexOptions));
             } catch (Exception ignored) {
                 log.warn("create index failed 2: " + ignored.getMessage());
                 // TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
             }
 		});
+		CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
+		try {
+			targetCollection.createIndexes(indexModels, createIndexOptions);
+		} catch (Exception e) {
+			log.warn("create index failed 1: " + e.getMessage());
+		}
 	}
 
 	private boolean createSharedCollection(DataMap nodeConfig, TapTable table, Collection<String> pks, String database, Log log) {
@@ -1177,6 +1180,8 @@ public class MongodbConnector extends ConnectorBase {
 		final List<TapIndex> indexList = tapCreateIndexEvent.getIndexList();
 		if (CollectionUtils.isNotEmpty(indexList)) {
 			Document keys = new Document();
+			List<IndexModel> indexModels = new ArrayList<>();
+			MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
 			for (TapIndex tapIndex : indexList) {
 				try {
 					final List<TapIndexField> indexFields = tapIndex.getIndexFields();
@@ -1184,7 +1189,6 @@ public class MongodbConnector extends ConnectorBase {
 						if (indexFields.size() == 1 && "_id".equals(indexFields.stream().findFirst().get().getName())) {
 							continue;
 						}
-						final MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
 						keys = new Document();
 						for (TapIndexField indexField : indexFields) {
 							keys.append(indexField.getName(), 1);
@@ -1197,8 +1201,10 @@ public class MongodbConnector extends ConnectorBase {
 						if (EmptyKit.isNotEmpty(tapIndex.getName())) {
 							indexOptions.name(tapIndex.getName());
 						}
-						collection.createIndex(keys, indexOptions);
+						indexModels.add(new IndexModel(keys, indexOptions));
 					}
+					CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
+					collection.createIndexes(indexModels, createIndexOptions);
 				} catch (Exception e) {
 					if (e instanceof MongoCommandException) {
 						MongoCommandException mongoCommandException = (MongoCommandException) e;
