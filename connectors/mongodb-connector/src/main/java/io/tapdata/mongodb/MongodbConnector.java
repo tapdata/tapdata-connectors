@@ -723,13 +723,31 @@ public class MongodbConnector extends ConnectorBase {
                 // TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
             }
 		});
-		CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
 		try {
-			targetCollection.createIndexes(indexModels, createIndexOptions);
+			if (isCommitQuorumSupported()) {
+				CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
+				targetCollection.createIndexes(indexModels, createIndexOptions);
+			} else {
+				targetCollection.createIndexes(indexModels);
+			}
 		} catch (Exception e) {
 			log.warn("create index failed 1: " + e.getMessage());
 		}
 	}
+
+		// Check if MongoDB server supports commitQuorum option (available since MongoDB 4.4)
+		private boolean isCommitQuorumSupported() {
+			try {
+				String versionStr = MongodbUtil.getVersionString(mongoClient, mongoConfig.getDatabase());
+				String[] parts = versionStr.split("\\.");
+				int major = Integer.parseInt(parts[0]);
+				int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+				return major > 4 || (major == 4 && minor >= 4);
+			} catch (Throwable ignored) {
+				return false;
+			}
+		}
+
 
 	private boolean createSharedCollection(DataMap nodeConfig, TapTable table, Collection<String> pks, String database, Log log) {
 		Object shardCollection = nodeConfig.get("shardCollection");
@@ -1203,8 +1221,12 @@ public class MongodbConnector extends ConnectorBase {
 						}
 						indexModels.add(new IndexModel(keys, indexOptions));
 					}
-					CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
-					collection.createIndexes(indexModels, createIndexOptions);
+					if (isCommitQuorumSupported()) {
+						CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
+						collection.createIndexes(indexModels, createIndexOptions);
+					} else {
+						collection.createIndexes(indexModels);
+					}
 				} catch (Exception e) {
 					if (e instanceof MongoCommandException) {
 						MongoCommandException mongoCommandException = (MongoCommandException) e;
