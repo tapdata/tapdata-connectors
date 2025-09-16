@@ -138,7 +138,7 @@
       "auto_load_schema": "Auto Load Schema",
       "tip_auto_load_schema": "Automatically call each interface when loading the model and parse the table model from the returned results",
       "schema_txt": "Table Schema",
-      "tip_schema_txt": "Declare the table model, for example: [{\n 'tableName': 'my_table_name',\n 'fields': [{'fieldName': 'my_field', 'fieldType': 'string'}]\n}], supported field types: string, integer, long, double, date, time, datetime, timestamp, object, array, boolean"
+      "tip_schema_txt": "Declare the table model, for example: [{\n 'tableName': 'my_table_name',\n 'fields': [{'fieldName': 'my_field', 'fieldType': 'string','primaryKey': true,'comment': 'my comment', 'nullable': true}]\n}], supported field types: string, integer, long, double, date, time, datetime, timestamp, object, array, boolean"
     },
     "zh_CN": {
       "doc": "docs/quickapi_zh_CN.md",
@@ -150,7 +150,7 @@
       "auto_load_schema": "自动加载模型",
       "tip_auto_load_schema": "加载模型时自动调用每个接口并从返回结果中解析表模型",
       "schema_txt": "表模型",
-      "tip_schema_txt": "声明表模型，如：[{\n 'tableName': 'my_table_name',\n 'fields': [{'fieldName': 'my_field', 'fieldType': 'string'}]\n}]，支持的类型：string, integer, long, double, date, time, datetime, datetime, object, array, boolean"
+      "tip_schema_txt": "声明表模型，如：[{\n 'tableName': 'my_table_name',\n 'fields': [{'fieldName': 'my_field', 'fieldType': 'string','primaryKey': true,'comment': 'my comment', 'nullable': true}]\n}]，支持的类型：string, integer, long, double, date, time, datetime, datetime, object, array, boolean"
     },
     "zh_TW": {
       "doc": "docs/quickapi_zh_TW.md",
@@ -162,7 +162,7 @@
       "auto_load_schema": "自動加載模型",
       "tip_auto_load_schema": "加載模型時自動調用每個介面並從返回結果中解析錶模型",
       "schema_txt": "錶模型",
-      "tip_schema_txt": "聲明錶模型，如：[{\n 'tableName': 'my_table_name',\n 'fields': [{'fieldName': 'my_field', 'fieldType': 'string'}]\n}]，支持的類型：string，integer，long，double，date, time, datetime，datetime，object，array，boolean"
+      "tip_schema_txt": "聲明錶模型，如：[{\n 'tableName': 'my_table_name',\n 'fields': [{'fieldName': 'my_field', 'fieldType': 'string','primaryKey': true,'comment': 'my comment', 'nullable': true}]\n}]，支持的類型：string，integer，long，double，date, time, datetime，datetime，object，array，boolean"
     }
   },
   "dataTypes": {
