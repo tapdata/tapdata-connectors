@@ -59,6 +59,11 @@ public abstract class NormalWriteRecorder {
     protected final List<TapRecordEvent> batchCache = TapSimplify.list(); //event cache
     protected int batchCacheSize = 0;
     protected Log tapLogger;
+    protected List<String> autoIncFields;
+
+    public void setAutoIncFields(List<String> autoIncFields) {
+        this.autoIncFields = autoIncFields;
+    }
 
     public NormalWriteRecorder(Connection connection, TapTable tapTable, String schema) {
         this.connection = connection;
