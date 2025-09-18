@@ -16,6 +16,7 @@ public class TidbConfig extends MysqlConfig implements Serializable {
     private String mqTopic;
     private String mqUsername;
     private String mqPassword;
+    private String tiKvAddress;
     private Integer tiKvPort;
 
     public String getNameSrvAddr() {
@@ -89,4 +90,11 @@ public class TidbConfig extends MysqlConfig implements Serializable {
         return config;
     }
 
+    public String getTiKvAddress() {
+        return tiKvAddress;
+    }
+
+    public void setTiKvAddress(String tiKvAddress) {
+        this.tiKvAddress = tiKvAddress;
+    }
 }
