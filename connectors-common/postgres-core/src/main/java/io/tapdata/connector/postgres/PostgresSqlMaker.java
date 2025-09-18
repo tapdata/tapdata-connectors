@@ -32,7 +32,7 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         if (closeNotNull) {
             nullable = true;
         }
-        if (!nullable || tapField.getPrimaryKey()) {
+        if (!nullable || (null != tapField.getPrimaryKeyPos() && tapField.getPrimaryKeyPos() > 0)) {
             builder.append("NOT NULL").append(' ');
         }
     }
