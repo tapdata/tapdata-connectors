@@ -224,7 +224,8 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     private static final String MYSQL_ALL_TABLE =
             "SELECT\n" +
                     "\tTABLE_NAME `tableName`,\n" +
-                    "\tTABLE_COMMENT `tableComment`\n" +
+                    "\tTABLE_COMMENT `tableComment`,\n" +
+                    "\tTABLE_COLLATION `tableCollation`\n" +
                     "FROM\n" +
                     "\tINFORMATION_SCHEMA.TABLES\n" +
                     "WHERE\n" +
