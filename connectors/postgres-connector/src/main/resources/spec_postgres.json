@@ -429,6 +429,28 @@
                   "value": "+14:00"
                 }
               ]
+            },
+            "allowReplication": {
+              "type": "boolean",
+              "title": "${allowReplication}",
+              "default": true,
+              "x-index": 100,
+              "x-decorator": "FormItem",
+              "x-component": "Switch",
+              "x-decorator-props": {
+                "tooltip": "${allowReplicationTooltip}"
+              }
+            },
+            "defaultWalLogSize": {
+              "type": "string",
+              "title": "${defaultWalLogSize}",
+              "default": 102400,
+              "x-decorator": "FormItem",
+              "x-component": "InputNumber",
+              "x-decorator-props": {
+                "tooltip": "${defaultWalLogSizeTip}"
+              },
+              "x-index": 110
             }
           }
         }
@@ -734,10 +756,14 @@
       "password" : "password",
       "logPluginName" : "logPluginName",
       "logPluginNameTip": "The higher version PG comes with the PGOUTPUT plugin, but the before data in the logs is not complete. \nThe author recommends using WAL2JSON, and the installation method can be found in the MD documentation",
-      "PgtoHost": "Pgto Server Host",
-      "PgtoPort": "Pgto Server Port",
+      "pgtoHost": "Pgto Server Host",
+      "pgtoPort": "Pgto Server Port",
       "timezone": "timezone",
       "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
+      "allowReplication": "Allow setting up replication sessions",
+      "allowReplicationTooltip": "Enabled by default. If disabled, the writing to tables with foreign keys will be affected if no separate replication role is set.",
+      "defaultWalLogSize": "Default Wal log total size(MB)",
+      "defaultWalLogSizeTip": "This configuration takes effect when the data source monitoring is turned on. When the Wal log size reaches the default value of 75%, an email alarm will be started to automatically clean up the Wal log to avoid disk space being full",
       "closeNotNull": "Ignore NotNull",
       "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded",
       "tableOwner": "Specify table owner",
@@ -790,6 +816,10 @@
       "pgtoPort": "Pgto Server端口",
       "timezone": "时区",
       "timezoneTip": "指定时区，否则不做时区处理",
+      "allowReplication": "允许设置复制会话",
+      "allowReplicationTooltip": "默认开启，关闭后如果没有单独设置replication role会影响含外键表的写入",
+      "defaultWalLogSize": "预设Wal日志总大小(MB)",
+      "defaultWalLogSizeTip": "当打开数据源监控时，该配置才生效，Wal日志大小达到预设值75%时开始邮件告警，会自动清理Wal日志，避免磁盘空间被撑满",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "开关打开时会将非空限制丢弃",
       "tableOwner": "指定表所有者",
@@ -842,6 +872,10 @@
       "pgtoPort": "Pgto Server端口",
       "timezone": "時區",
       "timezoneTip": "指定時區，否則不做時區處理",
+      "allowReplication": "允許設定複製會話",
+      "allowReplicationTooltip": "默認開啟，關閉後如果沒有單獨設定replication role會影響含外鍵錶的寫入",
+      "defaultWalLogSize": "預設Wal日誌總大小(MB)",
+      "defaultWalLogSizeTip": "當打開數據源監控時，該配置才生效，Wal日誌大小達到預設值75%時開始郵件告警，會自動清理Wal日誌，避免磁盤空間被撐滿",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "開關打開時會將非空限制丟棄",
       "tableOwner": "指定表所有者",

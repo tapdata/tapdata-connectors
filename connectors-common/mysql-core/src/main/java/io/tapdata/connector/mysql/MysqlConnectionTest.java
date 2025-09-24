@@ -8,6 +8,7 @@ import io.tapdata.connector.mysql.constant.MysqlTestItem;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.constant.ConnectionTypeEnum;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.exception.testItem.*;
@@ -19,8 +20,11 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-import static io.tapdata.base.ConnectorBase.*;
+import static io.tapdata.base.ConnectorBase.testItem;
+
 /**
  * @author samuel
  * @Description
@@ -38,7 +42,7 @@ public class MysqlConnectionTest extends CommonDbTest {
 
     protected ConnectionOptions connectionOptions;
 
-    public MysqlConnectionTest(MysqlConfig mysqlConfig, Consumer<TestItem> consumer,ConnectionOptions connectionOptions) {
+    public MysqlConnectionTest(MysqlConfig mysqlConfig, Consumer<TestItem> consumer, ConnectionOptions connectionOptions) {
         super(mysqlConfig, consumer);
         jdbcContext = new MysqlJdbcContextV2(mysqlConfig);
         this.connectionOptions = connectionOptions;
@@ -56,16 +60,17 @@ public class MysqlConnectionTest extends CommonDbTest {
             testFunctionMap.put("testCurrentTimeConsistent", this::testCurrentTimeConsistent);
         }
     }
-    protected Boolean testCurrentTimeConsistent(){
+
+    protected Boolean testCurrentTimeConsistent() {
         AtomicReference<TestItem> testItem = new AtomicReference<>();
-        if (commonDbConfig instanceof MysqlConfig){
+        if (commonDbConfig instanceof MysqlConfig) {
             HashMap<String, MysqlJdbcContextV2> contextMap = MysqlUtil.buildContextMapForMasterSlave((MysqlConfig) commonDbConfig);
             ArrayList<Map<String, Object>> maps = MysqlUtil.compareMasterSlaveCurrentTime((MysqlConfig) commonDbConfig, contextMap);
-            if (EmptyKit.isEmpty(maps)){
+            if (EmptyKit.isEmpty(maps)) {
                 testItem.set(testItem(MysqlTestItem.CHECK_NODE_CURRENT_TIME_CONSISTENT.getContent(), TestItem.RESULT_SUCCESSFULLY));
             } else {
                 cdcCapability = false;
-                if (maps.size() == 2){
+                if (maps.size() == 2) {
                     testItem.set(testItem(MysqlTestItem.CHECK_NODE_CURRENT_TIME_CONSISTENT.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN,
                             String.format("The time of each node is inconsistent, please check nodes: %s and %s", maps.get(0).toString(), maps.get(1).toString())));
                 }
@@ -77,11 +82,6 @@ public class MysqlConnectionTest extends CommonDbTest {
 
     protected String getGrantsSql() {
         return "SHOW GRANTS FOR CURRENT_USER";
-    }
-
-    @Override
-    public Boolean testWritePrivilege() {
-        return WriteOrReadPrivilege("write");
     }
 
     protected boolean WriteOrReadPrivilege(String mark) {
@@ -97,7 +97,7 @@ public class MysqlConnectionTest extends CommonDbTest {
             jdbcContext.normalQuery(getGrantsSql(), resultSet -> {
                 while (resultSet.next()) {
                     String grantSql = resultSet.getString(1);
-                    if (testWriteOrReadPrivilege(grantSql, tableList, commonDbConfig.getDatabase(), mark)) {
+                    if (testWriteOrReadPrivilegeV2(grantSql, tableList, commonDbConfig.getDatabase(), mark)) {
                         testItem.set(testItem(finalItemMark, TestItem.RESULT_SUCCESSFULLY));
                         globalWrite.set(true);
                         return;
@@ -106,7 +106,7 @@ public class MysqlConnectionTest extends CommonDbTest {
 
             });
         } catch (Throwable e) {
-            consumer.accept(new TestItem(itemMark, new TapTestReadPrivilegeEx(e), TestItem.RESULT_FAILED));
+            consumer.accept(new TestItem(itemMark, new TapTestReadPrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return false;
         }
         if (globalWrite.get() != null) {
@@ -117,7 +117,7 @@ public class MysqlConnectionTest extends CommonDbTest {
             consumer.accept(testItem(itemMark, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, JSONObject.toJSONString(tableList)));
             return true;
         }
-        consumer.accept(testItem(itemMark, TestItem.RESULT_FAILED, "Without table can " + mark));
+        consumer.accept(testItem(itemMark, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "Without table can " + mark));
         return false;
     }
 
@@ -156,6 +156,25 @@ public class MysqlConnectionTest extends CommonDbTest {
             String table = grantSql.substring(grantSql.indexOf(databaseName.replace("_", "\\_") + "`."), grantSql.indexOf("TO")).trim();
             if (privilege) {
                 tableList.add(table);
+            }
+        }
+        return false;
+    }
+
+    public boolean testWriteOrReadPrivilegeV2(String grantSql, List<String> tableList, String databaseName, String mark) {
+        Pattern pattern = Pattern.compile(("GRANT (.*) ON (.*)\\.\\* TO (.*)@`%`"));
+        Matcher matcher = pattern.matcher(grantSql);
+        if (matcher.find()) {
+            String privilege = matcher.group(1);
+            String databaseRegex = matcher.group(2);
+            databaseRegex = StringKit.removeHeadTail(databaseRegex, "`", null).replace("*", ".*").replace("%", ".*");
+            if (Pattern.matches(databaseRegex, databaseName)) {
+                if (mark.equals("write")) {
+                    return privilege.contains("INSERT") && privilege.contains("UPDATE") && privilege.contains("DELETE")
+                            || privilege.contains("ALL PRIVILEGES");
+                } else {
+                    return privilege.contains("SELECT") || privilege.contains("ALL PRIVILEGES");
+                }
             }
         }
         return false;
@@ -288,13 +307,14 @@ public class MysqlConnectionTest extends CommonDbTest {
             }
         } catch (Throwable e) {
             cdcCapability = false;
-            testItem.set(new TestItem(MysqlTestItem.CHECK_BINLOG_ROW_IMAGE.getContent(), new TapTestUnknownEx("Check binlog row image failed.",e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
+            testItem.set(new TestItem(MysqlTestItem.CHECK_BINLOG_ROW_IMAGE.getContent(), new TapTestUnknownEx("Check binlog row image failed.", e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
         }
         consumer.accept(testItem.get());
         return cdcCapability;
     }
+
     @Override
-    public Boolean testTimeDifference(){
+    public Boolean testTimeDifference() {
         try {
             long nowTime = jdbcContext.queryTimestamp();
             connectionOptions.setTimeDifference(getTimeDifference(nowTime));

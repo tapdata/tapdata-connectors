@@ -37,10 +37,7 @@ import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.exception.TapCodeException;
-import io.tapdata.kit.DbKit;
-import io.tapdata.kit.EmptyKit;
-import io.tapdata.kit.ErrorKit;
-import io.tapdata.kit.StringKit;
+import io.tapdata.kit.*;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -74,6 +71,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -177,11 +175,13 @@ public class PostgresConnector extends CommonDbConnector {
         });
         codecRegistry.registerFromTapValue(TapArrayValue.class, "text", tapValue -> {
             if (tapValue != null && tapValue.getValue() != null) {
-                if (tapValue.getOriginType().endsWith(" array")) {
-                    if (tapValue.getOriginValue() instanceof PgArray) {
-                        return tapValue.getOriginValue();
-                    } else {
-                        return tapValue.getValue();
+                if (EmptyKit.isNotNull(tapValue.getOriginType())) {
+                    if (tapValue.getOriginType().endsWith(" array")) {
+                        if (tapValue.getOriginValue() instanceof PgArray) {
+                            return tapValue.getOriginValue();
+                        } else {
+                            return tapValue.getValue();
+                        }
                     }
                 }
                 return toJson(tapValue.getValue());
@@ -266,6 +266,12 @@ public class PostgresConnector extends CommonDbConnector {
             }
             if (EmptyKit.isNotNull(slotName)) {
                 clearSlot();
+            }
+            if ("walminer".equals(postgresConfig.getLogPluginName())) {
+                if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
+                    //取消订阅
+                    HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format("DELSUB:%s all", firstConnectorId));
+                }
             }
         } finally {
             onStop(connectorContext);
@@ -520,11 +526,13 @@ public class PostgresConnector extends CommonDbConnector {
                     .setDeletePolicy(deleteDmlPolicy)
                     .setTapLogger(tapLogger);
         }
-        if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
-            boolean canClose = postgresRecordWriter.closeConstraintCheck();
-            writtenTableMap.get(tapTable.getId()).put(CANNOT_CLOSE_CONSTRAINT, !canClose);
-        } else if (Boolean.FALSE.equals(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
-            postgresRecordWriter.closeConstraintCheck();
+        if (Boolean.TRUE.equals(postgresConfig.getAllowReplication())) {
+            if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
+                boolean canClose = postgresRecordWriter.closeConstraintCheck();
+                writtenTableMap.get(tapTable.getId()).put(CANNOT_CLOSE_CONSTRAINT, !canClose);
+            } else if (Boolean.FALSE.equals(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
+                postgresRecordWriter.closeConstraintCheck();
+            }
         }
         if (postgresConfig.getCreateAutoInc() && Integer.parseInt(postgresVersion) > 100000 && EmptyKit.isNotEmpty(autoIncFields)
                 && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
@@ -534,9 +542,26 @@ public class PostgresConnector extends CommonDbConnector {
                 List<String> alterSqls = new ArrayList<>();
                 postgresRecordWriter.getAutoIncMap().forEach((k, v) -> {
                     String sequenceName = tapTable.getNameFieldMap().get(k).getSequenceName();
+                    AtomicLong actual = new AtomicLong(0);
                     if (EmptyKit.isNotBlank(sequenceName)) {
+                        try {
+                            jdbcContext.queryWithNext("select last_value from " + getSchemaAndTable(sequenceName), resultSet -> actual.set(resultSet.getLong(1)));
+                        } catch (SQLException ignore) {
+                        }
+                        if (actual.get() >= (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue())) {
+                            return;
+                        }
                         alterSqls.add("select setval('" + getSchemaAndTable(sequenceName) + "'," + (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue()) + ", false) ");
                     } else {
+                        AtomicReference<String> actualSequenceName = new AtomicReference<>();
+                        try {
+                            jdbcContext.queryWithNext("select pg_get_serial_sequence('" + getSchemaAndTable(tapTable.getId()) + "', '\"" + k + "\"')", resultSet -> actualSequenceName.set(resultSet.getString(1)));
+                            jdbcContext.queryWithNext("select last_value from " + actualSequenceName.get(), resultSet -> actual.set(resultSet.getLong(1)));
+                        } catch (SQLException ignore) {
+                        }
+                        if (actual.get() >= (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue())) {
+                            return;
+                        }
                         alterSqls.add("ALTER TABLE " + getSchemaAndTable(tapTable.getId()) + " ALTER COLUMN \"" + k + "\" SET GENERATED BY DEFAULT RESTART WITH " + (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue()));
                     }
                 });
