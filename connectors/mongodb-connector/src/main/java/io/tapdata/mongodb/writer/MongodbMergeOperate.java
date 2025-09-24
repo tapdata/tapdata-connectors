@@ -1,9 +1,6 @@
 package io.tapdata.mongodb.writer;
 
-import com.mongodb.client.model.DeleteOneModel;
-import com.mongodb.client.model.InsertOneModel;
-import com.mongodb.client.model.UpdateManyModel;
-import com.mongodb.client.model.WriteModel;
+import com.mongodb.client.model.*;
 import io.tapdata.common.utils.MergeUtils;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -14,6 +11,7 @@ import io.tapdata.mongodb.entity.MergeBundle;
 import io.tapdata.mongodb.entity.MergeFilter;
 import io.tapdata.mongodb.entity.MergeResult;
 import io.tapdata.mongodb.merge.MergeFilterManager;
+import io.tapdata.mongodb.util.MapDiffUtil;
 import io.tapdata.mongodb.util.MapUtil;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
 import io.tapdata.pdk.apis.entity.merge.MergeLookupResult;
@@ -40,9 +38,15 @@ public class MongodbMergeOperate {
 			writeModels = new ArrayList<>();
 			final MergeBundle mergeBundle = mergeBundle(tapRecordEvent);
 			final Map<String, Object> info = tapRecordEvent.getInfo();
+			List<MapDiffUtil.KeyDiffInfo> updateKeyDiffInfos = null;
 			if (tapRecordEvent instanceof TapInsertRecordEvent) {
 				inserted.incrementAndGet();
 			} else if (tapRecordEvent instanceof TapUpdateRecordEvent) {
+				if (MapUtils.isNotEmpty(((TapUpdateRecordEvent) tapRecordEvent).getBefore())
+						&& MapUtils.isNotEmpty(((TapUpdateRecordEvent) tapRecordEvent).getAfter())) {
+					updateKeyDiffInfos = MapDiffUtil.compareAndFindMissingKeys(((TapUpdateRecordEvent) tapRecordEvent).getBefore(),
+							((TapUpdateRecordEvent) tapRecordEvent).getAfter());
+				}
 				updated.incrementAndGet();
 			} else if (tapRecordEvent instanceof TapDeleteRecordEvent) {
 				deleted.incrementAndGet();
@@ -69,7 +73,8 @@ public class MongodbMergeOperate {
 						updateJoinKeys,
 						sharedJoinKeys,
 						mergeFilter,
-						level
+						level,
+						updateKeyDiffInfos
 				);
 
 				if (CollectionUtils.isNotEmpty(mergeResults)) {
@@ -103,7 +108,8 @@ public class MongodbMergeOperate {
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
 			Set<String> sharedJoinKeys,
 			MergeFilter mergeFilter,
-			int topLevel
+			int topLevel,
+			List<MapDiffUtil.KeyDiffInfo> updateKeyDiffInfos
 	) {
 		recursiveMerge(
 				mergeBundle,
@@ -117,7 +123,8 @@ public class MongodbMergeOperate {
 				null,
 				mergeFilter,
 				topLevel,
-				1
+				1,
+				updateKeyDiffInfos
 		);
 	}
 
@@ -133,9 +140,11 @@ public class MongodbMergeOperate {
 			MergeTableProperties parentProperties,
 			MergeFilter mergeFilter,
 			int topLevel,
-			int loopTime
+			int loopTime,
+			List<MapDiffUtil.KeyDiffInfo> updateKeyDiffInfos
 	) {
 		boolean unsetResultNull = null == unsetResult;
+		MergeResult updateKeyDiff = null;
 		switch (properties.getMergeType()) {
 			case updateOrInsert:
 				upsertMerge(mergeBundle, properties, mergeResult);
@@ -150,6 +159,7 @@ public class MongodbMergeOperate {
 				}
 				mergeResult = addMergeResults(mergeResults, mergeResult);
 				mergeResult = updateMergeIfNeed(mergeBundle, properties, mergeResult, sharedJoinKeys, mergeFilter);
+				updateKeyDiff = keyDiffUnsetWhenUpdateWrite(mergeResult, updateKeyDiffInfos);
 				break;
 			case updateIntoArray:
 				unsetResult = updateIntoArrayUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, parentProperties, mergeFilter, loopTime);
@@ -187,19 +197,33 @@ public class MongodbMergeOperate {
 						properties,
 						mergeFilter,
 						topLevel,
-						privateLoopTime
+						privateLoopTime,
+						null
 				);
 				recursiveOnce = true;
 			}
 			return;
 		}
 
-		if (mergeResult != null) {
-			mergeResults.add(mergeResult);
-		}
+		Optional.ofNullable(mergeResult).ifPresent(mergeResults::add);
+		Optional.ofNullable(updateKeyDiff).ifPresent(mergeResults::add);
 		if (mergeFilter.isAppend()) {
 			mergeFilter.removeLast();
 		}
+	}
+
+	private static MergeResult keyDiffUnsetWhenUpdateWrite(MergeResult mergeResult, List<MapDiffUtil.KeyDiffInfo> updateKeyDiffInfos) {
+		if (CollectionUtils.isNotEmpty(updateKeyDiffInfos)) {
+			Document unset = new Document();
+			updateKeyDiffInfos.forEach(updateKeyDiffInfo -> unset.append(updateKeyDiffInfo.getFullPath(), 1));
+			MergeResult updateKeyDiffUnset = new MergeResult();
+			updateKeyDiffUnset.setFilter(mergeResult.getFilter());
+			updateKeyDiffUnset.setOperation(MergeResult.Operation.UPDATE);
+			updateKeyDiffUnset.setUpdate(new Document("$unset", unset));
+			updateKeyDiffUnset.setUpdateOptions(new UpdateOptions().upsert(false));
+			return updateKeyDiffUnset;
+		}
+		return null;
 	}
 
 	private static MergeResult updateIntoArrayMergeIfNeed(MergeBundle mergeBundle, MergeTableProperties properties, MergeResult mergeResult, MergeFilter mergeFilter) {
