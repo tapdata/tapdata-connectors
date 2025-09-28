@@ -15,6 +15,7 @@ import org.postgresql.jdbc.PgSQLXML;
 import org.postgresql.util.PGobject;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -234,6 +235,8 @@ public class PostgresWriteRecorder extends NormalWriteRecorder {
         String dataType = columnTypeMap.get(key);
         if (EmptyKit.isNotNull(dataType) && dataType.endsWith(" array")) {
             preparedStatement.setObject(pos, filterValue(data.get(key), oidColumnTypeMap.get(key)));
+        } else if (null != dataType && dataType.startsWith("numeric") && data.get(key) instanceof BigDecimal) {
+            preparedStatement.setString(pos, data.get(key).toString());
         } else {
             preparedStatement.setObject(pos, filterValue(data.get(key), columnTypeMap.get(key)));
         }

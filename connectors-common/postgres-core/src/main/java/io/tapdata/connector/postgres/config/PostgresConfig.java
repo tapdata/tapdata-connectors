@@ -6,6 +6,7 @@ import io.tapdata.kit.EmptyKit;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.net.URLEncoder;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -79,6 +80,15 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
         if (EmptyKit.isNotBlank(getSslKeyPassword())) {
             properties.setProperty("sslpassword", getSslKeyPassword());
         }
+    }
+    public String getDatabaseUrl() {
+        if (EmptyKit.isNull(this.getExtParams())) {
+            this.setExtParams("?stringtype=unspecified&prepareThreshold=0");
+        }
+        if (EmptyKit.isNotEmpty(this.getExtParams()) && !this.getExtParams().startsWith("?") && !this.getExtParams().startsWith(":")) {
+            this.setExtParams("?" + this.getExtParams()+"&stringtype=unspecified&prepareThreshold=0");
+        }
+        return String.format(this.getDatabaseUrlPattern(), this.getHost(), this.getPort(), URLEncoder.encode(this.getDatabase()), this.getExtParams());
     }
 
     public String getLogPluginName() {
