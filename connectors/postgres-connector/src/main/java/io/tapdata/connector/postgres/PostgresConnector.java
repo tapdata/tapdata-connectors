@@ -2,6 +2,7 @@ package io.tapdata.connector.postgres;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.util.concurrent.AtomicDouble;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.dml.NormalRecordWriter;
@@ -1240,5 +1241,13 @@ public class PostgresConnector extends CommonDbConnector {
                 "from (\n" +
                 "select * from pg_replication_slots where active='false' and slot_name like 'tapdata_cdc_%') a", resultSet -> {
         });
+    }
+
+    protected double showWalLogPercent() throws SQLException {
+        AtomicDouble walLogPercent = new AtomicDouble(0);
+        postgresJdbcContext.queryWithNext("SELECT round(sum(size)/1024/1024) FROM pg_ls_waldir()", resultSet -> {
+            walLogPercent.set(resultSet.getDouble(1) / postgresConfig.getDefaultWalLogSize());
+        });
+        return walLogPercent.get();
     }
 }
