@@ -33,10 +33,7 @@ import org.bson.conversions.Bson;
 import org.bson.io.ByteBufferBsonInput;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -104,8 +101,11 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 //        pipeline = new ArrayList<>();
 //        List<Bson> collList = tableList.stream().map(t -> Filters.eq("ns.coll", t)).collect(Collectors.toList());
 //        List<Bson> pipeline1 = asList(Aggregates.match(Filters.or(collList)));
-        FullDocument fullDocumentOption = FullDocument.UPDATE_LOOKUP;
+        FullDocument fullDocumentOption = FullDocument.DEFAULT;
         FullDocumentBeforeChange fullDocumentBeforeChangeOption = FullDocumentBeforeChange.WHEN_AVAILABLE;
+        if (mongodbConfig.isEnableFillingModifiedData()) {
+            fullDocumentOption = FullDocument.UPDATE_LOOKUP;
+        }
         while (running.get()) {
             ChangeStreamIterable<RawBsonDocument> changeStream;
             if (offset != null) {
@@ -278,6 +278,60 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 } else {
                     TapLogger.warn(TAG, "Document key is null, failed to delete. {}", event);
                 }
+            } else if (operationType == OperationType.UPDATE) {
+                UpdateDescription updateDescription = event.getUpdateDescription();
+                if (null == event.getDocumentKey()) {
+                    throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));
+                } else if (null == updateDescription) {
+                    throw new RuntimeException(String.format("UpdateDescription key is null, failed to update. %s", event));
+                }
+
+                DataMap before = new DataMap();
+                DataMap after = new DataMap();
+                if (isPreImage && MapUtils.isNotEmpty(fullDocumentBeforeChange)) {
+                    before.putAll(fullDocumentBeforeChange);
+                }
+                Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
+                after.putAll(decodeDocument);
+
+                if (null != updateDescription.getUpdatedFields()) {
+                    Document decodeUpdateDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
+                    decodeUpdateDocument.forEach((k, v) -> {
+                        if (k.contains(".")) {
+                            return;
+                        }
+                        after.put(k, v);
+                    });
+                }
+
+                TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
+                Map<String, Object> info = new DataMap();
+
+                List<String> removedFields = new ArrayList<>();
+                if (null != updateDescription.getRemovedFields()) {
+                    for (String f : updateDescription.getRemovedFields()) {
+
+                        if (after.keySet().stream().noneMatch(v -> v.equals(f))) {
+                            removedFields.add(f);
+                        }
+                    }
+                }
+                if (!removedFields.isEmpty()) {
+                    recordEvent.removedFields(removedFields);
+                }
+
+                LinkedHashSet<String> updatedFields = new LinkedHashSet<>();
+                BsonDocument bsonUpdatedFields = updateDescription.getUpdatedFields();
+                if (null != bsonUpdatedFields) {
+                    updatedFields.addAll(bsonUpdatedFields.keySet());
+                }
+
+                // 双活场景依赖此属性，区分是否为业务数据修改
+                info.put("updatedFields", updatedFields);
+                recordEvent.setInfo(info);
+                recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
+                recordEvent.setIsReplaceEvent(false);
+                offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
             }
         } else {
             ByteBuffer byteBuffer = event.getFullDocument().getByteBuffer().asNIO();
