@@ -502,8 +502,8 @@ public class MongodbMergeOperate {
 			final List<Document> arrayFilter = arrayFilter(
 					filterMap,
 					currentProperty.getJoinKeys(),
-					currentProperty.getArrayPath()
-			);
+					null != currentProperty.getArrayPath() ? currentProperty.getArrayPath() : currentProperty.getTargetPath(
+					));
 			mergeResult.getUpdateOptions().arrayFilters(arrayFilter);
 		}
 		appendAllParentMergeFilters(mergeResult, mergeFilter);
