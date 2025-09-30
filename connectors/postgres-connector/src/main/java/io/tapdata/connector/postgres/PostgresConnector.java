@@ -1246,7 +1246,7 @@ public class PostgresConnector extends CommonDbConnector {
     protected double showWalLogPercent() throws SQLException {
         AtomicDouble walLogPercent = new AtomicDouble(0);
         postgresJdbcContext.queryWithNext("SELECT round(sum(size)/1024/1024) FROM pg_ls_waldir()", resultSet -> {
-            walLogPercent.set(resultSet.getDouble(1) / postgresConfig.getDefaultWalLogSize());
+            walLogPercent.set(Math.round(resultSet.getDouble(1) / postgresConfig.getDefaultWalLogSize() * 1000) / 1000.0);
         });
         return walLogPercent.get();
     }
