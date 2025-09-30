@@ -26,6 +26,7 @@ import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TapFilter;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.sql.Connection;
@@ -105,6 +106,11 @@ public abstract class CommonDbConnector extends ConnectorBase {
             TapTable tapTable = table(table);
             tapTable.setTableAttr(getSpecificAttr(subTable));
             tapTable.setComment(subTable.getString("tableComment"));
+            String tableCollation = subTable.getString("tableCollation");
+            if (StringUtils.isNotBlank(tableCollation)) {
+                String charset = tableCollation.split("_")[0];
+                tapTable.setCharset(charset);
+            }
             //3、primary key and table index
             List<String> primaryKey = TapSimplify.list();
             List<TapIndex> tapIndexList = TapSimplify.list();

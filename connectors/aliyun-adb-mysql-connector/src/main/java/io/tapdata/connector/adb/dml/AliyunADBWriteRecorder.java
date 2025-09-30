@@ -119,7 +119,7 @@ public class AliyunADBWriteRecorder extends NormalWriteRecorder {
 
     private String filterSetOrWhere(Map<String, Object> map, String key, boolean isWhere) {
         if (isWhere && EmptyKit.isNull(map.get(key))) {
-            return escapeChar + key + escapeChar + " is null " + map.get(key);
+            return escapeChar + key + escapeChar + " is null ";
         } else {
             return escapeChar + key + escapeChar + "=" + MysqlUtil.object2String(map.get(key));
         }
