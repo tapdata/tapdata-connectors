@@ -1,0 +1,364 @@
+{
+  "properties": {
+    "name": "Paimon",
+    "icon": "icons/paimon.png",
+    "doc": "${doc}",
+    "tags": ["Database", "schema-free"],
+    "id": "paimon"
+  },
+  "configOptions": {
+    "capabilities": [
+      {
+        "id": "dml_insert_policy",
+        "alternatives": ["update_on_exists", "ignore_on_exists", "just_insert"]
+      },
+      {
+        "id": "dml_update_policy",
+        "alternatives": ["ignore_on_nonexists", "insert_on_nonexists", "log_on_nonexists"]
+      }
+    ],
+    "connection": {
+      "type": "object",
+      "properties": {
+        "warehouse": {
+          "type": "string",
+          "title": "${warehouse}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-component-props": {
+            "placeholder": "${warehouse_placeholder}"
+          },
+          "required": true,
+          "x-index": 10
+        },
+        "storageType": {
+          "type": "string",
+          "title": "${storageType}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "enum": [
+            {
+              "label": "S3",
+              "value": "s3"
+            },
+            {
+              "label": "HDFS",
+              "value": "hdfs"
+            },
+            {
+              "label": "OSS",
+              "value": "oss"
+            },
+            {
+              "label": "Local",
+              "value": "local"
+            }
+          ],
+          "default": "local",
+          "required": true,
+          "x-index": 20,
+          "x-reactions": [
+            {
+              "target": "*(s3Endpoint,s3AccessKey,s3SecretKey,s3Region)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value==='s3'}}"
+                }
+              }
+            },
+            {
+              "target": "*(hdfsHost,hdfsPort,hdfsUser)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value==='hdfs'}}"
+                }
+              }
+            },
+            {
+              "target": "*(ossEndpoint,ossAccessKey,ossSecretKey)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value==='oss'}}"
+                }
+              }
+            }
+          ]
+        },
+        "s3Endpoint": {
+          "type": "string",
+          "title": "${s3Endpoint}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-component-props": {
+            "placeholder": "${s3Endpoint_placeholder}"
+          },
+          "x-index": 30
+        },
+        "s3AccessKey": {
+          "type": "string",
+          "title": "${s3AccessKey}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 40
+        },
+        "s3SecretKey": {
+          "type": "string",
+          "title": "${s3SecretKey}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "x-index": 50
+        },
+        "s3Region": {
+          "type": "string",
+          "title": "${s3Region}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-component-props": {
+            "placeholder": "${s3Region_placeholder}"
+          },
+          "x-index": 60
+        },
+        "hdfsHost": {
+          "type": "string",
+          "title": "${hdfsHost}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-component-props": {
+            "placeholder": "${hdfsHost_placeholder}"
+          },
+          "x-index": 70
+        },
+        "hdfsPort": {
+          "type": "number",
+          "title": "${hdfsPort}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "default": 9000,
+          "x-index": 80
+        },
+        "hdfsUser": {
+          "type": "string",
+          "title": "${hdfsUser}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "hadoop",
+          "x-index": 90
+        },
+        "ossEndpoint": {
+          "type": "string",
+          "title": "${ossEndpoint}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-component-props": {
+            "placeholder": "${ossEndpoint_placeholder}"
+          },
+          "x-index": 100
+        },
+        "ossAccessKey": {
+          "type": "string",
+          "title": "${ossAccessKey}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 110
+        },
+        "ossSecretKey": {
+          "type": "string",
+          "title": "${ossSecretKey}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "x-index": 120
+        }
+      }
+    },
+    "node": {
+      "properties": {
+        "database": {
+          "type": "string",
+          "title": "${database}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-component-props": {
+            "placeholder": "${database_placeholder}"
+          },
+          "default": "default",
+          "required": true,
+          "x-index": 10
+        }
+      }
+    }
+  },
+  "messages": {
+    "default": "en_US",
+    "en_US": {
+      "doc": "docs/paimon_en_US.md",
+      "warehouse": "Warehouse Path",
+      "warehouse_placeholder": "e.g., /path/to/warehouse or s3://bucket/warehouse",
+      "storageType": "Storage Type",
+      "s3Endpoint": "S3 Endpoint",
+      "s3Endpoint_placeholder": "e.g., https://s3.amazonaws.com",
+      "s3AccessKey": "S3 Access Key",
+      "s3SecretKey": "S3 Secret Key",
+      "s3Region": "S3 Region",
+      "s3Region_placeholder": "e.g., us-east-1",
+      "hdfsHost": "HDFS Host",
+      "hdfsHost_placeholder": "e.g., namenode.example.com",
+      "hdfsPort": "HDFS Port",
+      "hdfsUser": "HDFS User",
+      "ossEndpoint": "OSS Endpoint",
+      "ossEndpoint_placeholder": "e.g., https://oss-cn-hangzhou.aliyuncs.com",
+      "ossAccessKey": "OSS Access Key",
+      "ossSecretKey": "OSS Secret Key",
+      "database": "Database Name",
+      "database_placeholder": "Paimon database name"
+    },
+    "zh_CN": {
+      "doc": "docs/paimon_zh_CN.md",
+      "warehouse": "仓库路径",
+      "warehouse_placeholder": "例如：/path/to/warehouse 或 s3://bucket/warehouse",
+      "storageType": "存储类型",
+      "s3Endpoint": "S3 端点",
+      "s3Endpoint_placeholder": "例如：https://s3.amazonaws.com",
+      "s3AccessKey": "S3 访问密钥",
+      "s3SecretKey": "S3 密钥",
+      "s3Region": "S3 区域",
+      "s3Region_placeholder": "例如：us-east-1",
+      "hdfsHost": "HDFS 主机",
+      "hdfsHost_placeholder": "例如：namenode.example.com",
+      "hdfsPort": "HDFS 端口",
+      "hdfsUser": "HDFS 用户",
+      "ossEndpoint": "OSS 端点",
+      "ossEndpoint_placeholder": "例如：https://oss-cn-hangzhou.aliyuncs.com",
+      "ossAccessKey": "OSS 访问密钥",
+      "ossSecretKey": "OSS 密钥",
+      "database": "数据库名称",
+      "database_placeholder": "Paimon 数据库名称"
+    },
+    "zh_TW": {
+      "doc": "docs/paimon_zh_TW.md",
+      "warehouse": "倉庫路徑",
+      "warehouse_placeholder": "例如：/path/to/warehouse 或 s3://bucket/warehouse",
+      "storageType": "存儲類型",
+      "s3Endpoint": "S3 端點",
+      "s3Endpoint_placeholder": "例如：https://s3.amazonaws.com",
+      "s3AccessKey": "S3 訪問密鑰",
+      "s3SecretKey": "S3 密鑰",
+      "s3Region": "S3 區域",
+      "s3Region_placeholder": "例如：us-east-1",
+      "hdfsHost": "HDFS 主機",
+      "hdfsHost_placeholder": "例如：namenode.example.com",
+      "hdfsPort": "HDFS 端口",
+      "hdfsUser": "HDFS 用戶",
+      "ossEndpoint": "OSS 端點",
+      "ossEndpoint_placeholder": "例如：https://oss-cn-hangzhou.aliyuncs.com",
+      "ossAccessKey": "OSS 訪問密鑰",
+      "ossSecretKey": "OSS 密鑰",
+      "database": "數據庫名稱",
+      "database_placeholder": "Paimon 數據庫名稱"
+    }
+  },
+  "dataTypes": {
+    "BOOLEAN": {
+      "to": "TapBoolean"
+    },
+    "TINYINT": {
+      "to": "TapNumber",
+      "bit": 8,
+      "precision": 3,
+      "value": [-128, 127]
+    },
+    "SMALLINT": {
+      "to": "TapNumber",
+      "bit": 16,
+      "precision": 5,
+      "value": [-32768, 32767]
+    },
+    "INT": {
+      "to": "TapNumber",
+      "bit": 32,
+      "precision": 10,
+      "value": [-2147483648, 2147483647]
+    },
+    "BIGINT": {
+      "to": "TapNumber",
+      "bit": 64,
+      "precision": 19,
+      "value": [-9223372036854775808, 9223372036854775807]
+    },
+    "FLOAT": {
+      "to": "TapNumber",
+      "bit": 32,
+      "precision": 7,
+      "scale": 7,
+      "fixed": false
+    },
+    "DOUBLE": {
+      "to": "TapNumber",
+      "bit": 64,
+      "precision": 15,
+      "scale": 15,
+      "fixed": false
+    },
+    "DECIMAL[($precision,$scale)]": {
+      "to": "TapNumber",
+      "precision": [1, 38],
+      "scale": [0, 38],
+      "defaultPrecision": 10,
+      "defaultScale": 0,
+      "fixed": true
+    },
+    "CHAR[($byte)]": {
+      "to": "TapString",
+      "byte": 255,
+      "fixed": true
+    },
+    "VARCHAR[($byte)]": {
+      "to": "TapString",
+      "byte": 65535
+    },
+    "STRING": {
+      "to": "TapString",
+      "byte": "2147483647"
+    },
+    "BINARY[($byte)]": {
+      "to": "TapBinary",
+      "byte": "2147483647"
+    },
+    "VARBINARY[($byte)]": {
+      "to": "TapBinary",
+      "byte": "2147483647"
+    },
+    "DATE": {
+      "to": "TapDate",
+      "range": ["0001-01-01", "9999-12-31"],
+      "pattern": "yyyy-MM-dd"
+    },
+    "TIMESTAMP[($fraction)]": {
+      "to": "TapDateTime",
+      "range": ["1970-01-01 00:00:00.000000", "2038-01-19 03:14:07.999999"],
+      "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS",
+      "fraction": [0, 6],
+      "defaultFraction": 6
+    },
+    "TIMESTAMP_LTZ[($fraction)]": {
+      "to": "TapDateTime",
+      "range": ["1970-01-01 00:00:00.000000", "2038-01-19 03:14:07.999999"],
+      "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS",
+      "fraction": [0, 6],
+      "defaultFraction": 6,
+      "withTimeZone": true
+    },
+    "ARRAY": {
+      "to": "TapArray",
+      "byte": "2147483647"
+    },
+    "MAP": {
+      "to": "TapMap",
+      "byte": "2147483647"
+    },
+    "ROW": {
+      "to": "TapMap",
+      "byte": "2147483647"
+    }
+  }
+}
+
