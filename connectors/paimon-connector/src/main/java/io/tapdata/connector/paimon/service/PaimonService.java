@@ -14,13 +14,19 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.options.Options;
+import io.tapdata.entity.schema.value.DateTime;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -37,8 +43,8 @@ public class PaimonService implements Closeable {
 
     private final PaimonConfig config;
     private Catalog catalog;
-    private final Map<String, BatchTableWrite> writerCache = new HashMap<>();
-    private final Map<String, BatchTableCommit> commitCache = new HashMap<>();
+    // Note: Both BatchTableWrite and BatchTableCommit only support one-time committing
+    // We don't cache them and create new instances for each write operation
 
     public PaimonService(PaimonConfig config) {
         this.config = config;
@@ -126,7 +132,11 @@ public class PaimonService implements Closeable {
         try {
             // Try to create a test database if it doesn't exist
             String testDb = config.getDatabase();
-            if (!catalog.databaseExists(testDb)) {
+            try {
+                catalog.getDatabase(testDb);
+                // Database exists
+            } catch (Catalog.DatabaseNotExistException e) {
+                // Database does not exist, create it
                 catalog.createDatabase(testDb, true);
             }
             return true;
@@ -145,7 +155,10 @@ public class PaimonService implements Closeable {
         String database = config.getDatabase();
 
         // Check if database exists
-        if (!catalog.databaseExists(database)) {
+        try {
+            catalog.getDatabase(database);
+        } catch (Catalog.DatabaseNotExistException e) {
+            // Database does not exist
             return 0;
         }
 
@@ -164,12 +177,15 @@ public class PaimonService implements Closeable {
     public List<TapTable> discoverTables(List<String> tableNames) throws Exception {
         List<TapTable> tables = new ArrayList<>();
         String database = config.getDatabase();
-        
+
         // Ensure database exists
-        if (!catalog.databaseExists(database)) {
+        try {
+            catalog.getDatabase(database);
+        } catch (Catalog.DatabaseNotExistException e) {
+            // Database does not exist
             return tables;
         }
-        
+
         // Get all tables in database
         List<String> allTables = catalog.listTables(database);
         
@@ -274,22 +290,40 @@ public class PaimonService implements Closeable {
     public boolean createTable(TapTable tapTable) throws Exception {
         String database = config.getDatabase();
         String tableName = tapTable.getName();
-        
+
         // Ensure database exists
-        if (!catalog.databaseExists(database)) {
+        try {
+            catalog.getDatabase(database);
+        } catch (Catalog.DatabaseNotExistException e) {
+            // Database does not exist, create it
             catalog.createDatabase(database, true);
         }
-        
+
         Identifier identifier = Identifier.create(database, tableName);
-        
+
         // Check if table already exists
-        if (catalog.tableExists(identifier)) {
-            return false;
+        try {
+            catalog.getTable(identifier);
+            // Table exists, check if bucket mode matches
+            boolean existingIsDynamic = isTableDynamicBucket(identifier);
+            boolean configIsDynamic = config.isDynamicBucketMode();
+
+            if (existingIsDynamic != configIsDynamic) {
+                // Bucket mode mismatch, need to recreate table
+                // WARNING: This will delete all existing data
+                catalog.dropTable(identifier, true);
+                // Continue to create table with new bucket mode
+            } else {
+                // Table exists and bucket mode matches, no need to recreate
+                return false;
+            }
+        } catch (Catalog.TableNotExistException e) {
+            // Table does not exist, continue to create
         }
-        
+
         // Build schema
         Schema.Builder schemaBuilder = Schema.newBuilder();
-        
+
         // Add fields
         Map<String, TapField> fields = tapTable.getNameFieldMap();
         if (fields != null) {
@@ -300,16 +334,31 @@ public class PaimonService implements Closeable {
                 schemaBuilder.column(fieldName, dataType);
             }
         }
-        
+
         // Set primary keys
         Collection<String> primaryKeys = tapTable.primaryKeys();
         if (primaryKeys != null && !primaryKeys.isEmpty()) {
             schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
         }
-        
+
+        // Set bucket configuration based on bucket mode
+        if (config.isDynamicBucketMode()) {
+            // Dynamic bucket mode: set bucket to -1
+            // This mode uses StreamTableWrite and provides better flexibility
+            schemaBuilder.option("bucket", "-1");
+        } else {
+            // Fixed bucket mode: set specific bucket count
+            // This mode uses BatchTableWrite and provides better performance
+            Integer bucketCount = config.getBucketCount();
+            if (bucketCount == null || bucketCount <= 0) {
+                bucketCount = 4; // Default to 4 buckets if not configured
+            }
+            schemaBuilder.option("bucket", String.valueOf(bucketCount));
+        }
+
         // Create table
-        catalog.createTable(identifier, schemaBuilder.build(), true);
-        
+        catalog.createTable(identifier, schemaBuilder.build(), false);
+
         return true;
     }
 
@@ -372,8 +421,12 @@ public class PaimonService implements Closeable {
         String database = config.getDatabase();
         Identifier identifier = Identifier.create(database, tableName);
 
-        if (catalog.tableExists(identifier)) {
+        try {
+            catalog.getTable(identifier);
+            // Table exists, proceed to drop
             catalog.dropTable(identifier, true);
+        } catch (Catalog.TableNotExistException e) {
+            // Table does not exist, do nothing
         }
     }
 
@@ -387,12 +440,16 @@ public class PaimonService implements Closeable {
         String database = config.getDatabase();
         Identifier identifier = Identifier.create(database, tableName);
 
-        if (!catalog.tableExists(identifier)) {
-            throw new IllegalArgumentException("Table does not exist: " + tableName);
+        // Get table, if not exists, return
+        Table table;
+        try {
+            table = catalog.getTable(identifier);
+        } catch (Catalog.TableNotExistException e) {
+            // Table does not exist, nothing to clear
+            return;
         }
 
         // Drop and recreate table to clear data
-        Table table = catalog.getTable(identifier);
 
         // Rebuild schema from table
         Schema.Builder schemaBuilder = Schema.newBuilder();
@@ -409,10 +466,24 @@ public class PaimonService implements Closeable {
             schemaBuilder.primaryKey(primaryKeys);
         }
 
+        // Preserve all table options (including bucket configuration)
+        // But exclude options that cannot be used when creating table with FileSystemCatalog
+        Map<String, String> options = table.options();
+        if (options != null && !options.isEmpty()) {
+            for (Map.Entry<String, String> entry : options.entrySet()) {
+                String key = entry.getKey();
+                // Skip 'path' option as FileSystemCatalog doesn't support custom table path
+                if ("path".equals(key)) {
+                    continue;
+                }
+                schemaBuilder.option(key, entry.getValue());
+            }
+        }
+
         Schema schema = schemaBuilder.build();
 
         catalog.dropTable(identifier, true);
-        catalog.createTable(identifier, schema, true);
+        catalog.createTable(identifier, schema, false);
     }
 
     /**
@@ -442,30 +513,81 @@ public class PaimonService implements Closeable {
                                                         TapTable table,
                                                         String insertPolicy,
                                                         String updatePolicy) throws Exception {
+        // Detect actual bucket mode from the table
+        String database = config.getDatabase();
+        String tableName = table.getName();
+        Identifier identifier = Identifier.create(database, tableName);
+
+        boolean isDynamicBucket = isTableDynamicBucket(identifier);
+
+        // Choose write method based on actual table bucket mode
+        if (isDynamicBucket) {
+            return writeRecordsWithStreamWrite(recordEvents, table, insertPolicy, updatePolicy);
+        } else {
+            return writeRecordsWithBatchWrite(recordEvents, table, insertPolicy, updatePolicy);
+        }
+    }
+
+    /**
+     * Check if table is using dynamic bucket mode
+     *
+     * @param identifier table identifier
+     * @return true if dynamic bucket mode, false if fixed bucket mode
+     * @throws Exception if check fails
+     */
+    private boolean isTableDynamicBucket(Identifier identifier) throws Exception {
+        Table paimonTable = catalog.getTable(identifier);
+        // Get bucket option from table options
+        String bucketOption = paimonTable.options().get("bucket");
+
+        // If bucket is -1 or not set, it's dynamic bucket mode
+        if (bucketOption == null) {
+            return true; // Default is dynamic
+        }
+
+        try {
+            int bucket = Integer.parseInt(bucketOption);
+            return bucket == -1;
+        } catch (NumberFormatException e) {
+            return true; // If parse fails, assume dynamic
+        }
+    }
+
+    /**
+     * Write records using BatchTableWrite (for fixed bucket mode)
+     *
+     * @param recordEvents list of record events
+     * @param table target table
+     * @param insertPolicy insert policy
+     * @param updatePolicy update policy
+     * @return write result
+     * @throws Exception if write fails
+     */
+    private WriteListResult<TapRecordEvent> writeRecordsWithBatchWrite(List<TapRecordEvent> recordEvents,
+                                                                        TapTable table,
+                                                                        String insertPolicy,
+                                                                        String updatePolicy) throws Exception {
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         String database = config.getDatabase();
         String tableName = table.getName();
         Identifier identifier = Identifier.create(database, tableName);
 
-        // Get or create writer
-        BatchTableWrite writer = getOrCreateWriter(identifier);
-        BatchTableCommit commit = getOrCreateCommit(identifier);
+        // Create new writer and commit for each batch
+        // Note: Both BatchTableWrite and BatchTableCommit only support one-time committing
+        BatchTableWrite writer = createBatchWriter(identifier);
+        BatchTableCommit commit = createBatchCommit(identifier);
 
         try {
             for (TapRecordEvent event : recordEvents) {
-                try {
-                    if (event instanceof TapInsertRecordEvent) {
-                        handleInsert((TapInsertRecordEvent) event, writer, table);
-                        result.incrementInserted(1);
-                    } else if (event instanceof TapUpdateRecordEvent) {
-                        handleUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy);
-                        result.incrementModified(1);
-                    } else if (event instanceof TapDeleteRecordEvent) {
-                        handleDelete((TapDeleteRecordEvent) event, writer, table);
-                        result.incrementRemove(1);
-                    }
-                } catch (Exception e) {
-                    result.addError(event, e);
+                if (event instanceof TapInsertRecordEvent) {
+                    handleBatchInsert((TapInsertRecordEvent) event, writer, table);
+                    result.incrementInserted(1);
+                } else if (event instanceof TapUpdateRecordEvent) {
+                    handleBatchUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy);
+                    result.incrementModified(1);
+                } else if (event instanceof TapDeleteRecordEvent) {
+                    handleBatchDelete((TapDeleteRecordEvent) event, writer, table);
+                    result.incrementRemove(1);
                 }
             }
 
@@ -474,63 +596,159 @@ public class PaimonService implements Closeable {
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to write records to table " + tableName, e);
+        } finally {
+            // Close writer and commit after use since they only support one-time committing
+            try {
+                writer.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
+            try {
+                commit.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
         }
 
         return result;
     }
 
     /**
-     * Get or create writer for table
+     * Write records using StreamTableWrite (for dynamic bucket mode)
+     *
+     * @param recordEvents list of record events
+     * @param table target table
+     * @param insertPolicy insert policy
+     * @param updatePolicy update policy
+     * @return write result
+     * @throws Exception if write fails
+     */
+    private WriteListResult<TapRecordEvent> writeRecordsWithStreamWrite(List<TapRecordEvent> recordEvents,
+                                                                         TapTable table,
+                                                                         String insertPolicy,
+                                                                         String updatePolicy) throws Exception {
+        WriteListResult<TapRecordEvent> result = new WriteListResult<>();
+        String database = config.getDatabase();
+        String tableName = table.getName();
+        Identifier identifier = Identifier.create(database, tableName);
+
+        // Create stream writer and commit
+        StreamTableWrite writer = createStreamWriter(identifier);
+        StreamTableCommit commit = createStreamCommit(identifier);
+
+        try {
+            for (TapRecordEvent event : recordEvents) {
+                if (event instanceof TapInsertRecordEvent) {
+                    handleStreamInsert((TapInsertRecordEvent) event, writer, table);
+                    result.incrementInserted(1);
+                } else if (event instanceof TapUpdateRecordEvent) {
+                    handleStreamUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy);
+                    result.incrementModified(1);
+                } else if (event instanceof TapDeleteRecordEvent) {
+                    handleStreamDelete((TapDeleteRecordEvent) event, writer, table);
+                    result.incrementRemove(1);
+                }
+            }
+
+            // Prepare commit with commitIdentifier
+            // Use current timestamp as commitIdentifier for simplicity
+            long commitIdentifier = System.currentTimeMillis();
+            List<org.apache.paimon.table.sink.CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+
+            // Commit the batch
+            commit.commit(commitIdentifier, messages);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to write records to table " + tableName, e);
+        } finally {
+            // Close writer and commit after use
+            try {
+                writer.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
+            try {
+                commit.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Create a new batch writer for table
+     * Note: BatchTableWrite only supports one-time committing, so we create a new writer each time
      *
      * @param identifier table identifier
      * @return batch table writer
      * @throws Exception if creation fails
      */
-    private BatchTableWrite getOrCreateWriter(Identifier identifier) throws Exception {
-        String key = identifier.getFullName();
-        if (!writerCache.containsKey(key)) {
-            Table table = catalog.getTable(identifier);
-            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-            BatchTableWrite writer = writeBuilder.newWrite();
-            writerCache.put(key, writer);
-        }
-        return writerCache.get(key);
+    private BatchTableWrite createBatchWriter(Identifier identifier) throws Exception {
+        Table table = catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        return writeBuilder.newWrite();
     }
 
     /**
-     * Get or create commit for table
+     * Create a new batch commit for table
+     * Note: BatchTableCommit only supports one-time committing, so we create a new commit each time
      *
      * @param identifier table identifier
      * @return batch table commit
      * @throws Exception if creation fails
      */
-    private BatchTableCommit getOrCreateCommit(Identifier identifier) throws Exception {
-        String key = identifier.getFullName();
-        if (!commitCache.containsKey(key)) {
-            Table table = catalog.getTable(identifier);
-            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-            BatchTableCommit commit = writeBuilder.newCommit();
-            commitCache.put(key, commit);
-        }
-        return commitCache.get(key);
+    private BatchTableCommit createBatchCommit(Identifier identifier) throws Exception {
+        Table table = catalog.getTable(identifier);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        return writeBuilder.newCommit();
     }
 
     /**
-     * Handle insert event
+     * Create a new stream writer for table
+     *
+     * @param identifier table identifier
+     * @return stream table writer
+     * @throws Exception if creation fails
+     */
+    private StreamTableWrite createStreamWriter(Identifier identifier) throws Exception {
+        Table table = catalog.getTable(identifier);
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
+        return writeBuilder.newWrite();
+    }
+
+    /**
+     * Create a new stream commit for table
+     *
+     * @param identifier table identifier
+     * @return stream table commit
+     * @throws Exception if creation fails
+     */
+    private StreamTableCommit createStreamCommit(Identifier identifier) throws Exception {
+        Table table = catalog.getTable(identifier);
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
+        return writeBuilder.newCommit();
+    }
+
+    /**
+     * Handle insert event with batch writer
      *
      * @param event insert event
      * @param writer batch writer
      * @param table table definition
      * @throws Exception if insert fails
      */
-    private void handleInsert(TapInsertRecordEvent event, BatchTableWrite writer, TapTable table) throws Exception {
+    private void handleBatchInsert(TapInsertRecordEvent event, BatchTableWrite writer, TapTable table) throws Exception {
         Map<String, Object> after = event.getAfter();
-        GenericRow row = convertToGenericRow(after, table);
+        String database = config.getDatabase();
+        Identifier identifier = Identifier.create(database, table.getName());
+        GenericRow row = convertToGenericRow(after, table, identifier);
         writer.write(row);
     }
 
     /**
-     * Handle update event
+     * Handle update event with batch writer
      *
      * @param event update event
      * @param writer batch writer
@@ -538,24 +756,80 @@ public class PaimonService implements Closeable {
      * @param updatePolicy update policy
      * @throws Exception if update fails
      */
-    private void handleUpdate(TapUpdateRecordEvent event, BatchTableWrite writer,
-                             TapTable table, String updatePolicy) throws Exception {
+    private void handleBatchUpdate(TapUpdateRecordEvent event, BatchTableWrite writer,
+                                    TapTable table, String updatePolicy) throws Exception {
         Map<String, Object> after = event.getAfter();
-        GenericRow row = convertToGenericRow(after, table);
+        String database = config.getDatabase();
+        Identifier identifier = Identifier.create(database, table.getName());
+        GenericRow row = convertToGenericRow(after, table, identifier);
         writer.write(row);
     }
 
     /**
-     * Handle delete event
+     * Handle delete event with batch writer
      *
      * @param event delete event
      * @param writer batch writer
      * @param table table definition
      * @throws Exception if delete fails
      */
-    private void handleDelete(TapDeleteRecordEvent event, BatchTableWrite writer, TapTable table) throws Exception {
+    private void handleBatchDelete(TapDeleteRecordEvent event, BatchTableWrite writer, TapTable table) throws Exception {
         Map<String, Object> before = event.getBefore();
-        GenericRow row = convertToGenericRow(before, table);
+        String database = config.getDatabase();
+        Identifier identifier = Identifier.create(database, table.getName());
+        GenericRow row = convertToGenericRow(before, table, identifier);
+        // Set row kind to DELETE
+        row.setRowKind(org.apache.paimon.types.RowKind.DELETE);
+        writer.write(row);
+    }
+
+    /**
+     * Handle insert event with stream writer
+     *
+     * @param event insert event
+     * @param writer stream writer
+     * @param table table definition
+     * @throws Exception if insert fails
+     */
+    private void handleStreamInsert(TapInsertRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
+        Map<String, Object> after = event.getAfter();
+        String database = config.getDatabase();
+        Identifier identifier = Identifier.create(database, table.getName());
+        GenericRow row = convertToGenericRow(after, table, identifier);
+        writer.write(row);
+    }
+
+    /**
+     * Handle update event with stream writer
+     *
+     * @param event update event
+     * @param writer stream writer
+     * @param table table definition
+     * @param updatePolicy update policy
+     * @throws Exception if update fails
+     */
+    private void handleStreamUpdate(TapUpdateRecordEvent event, StreamTableWrite writer,
+                                     TapTable table, String updatePolicy) throws Exception {
+        Map<String, Object> after = event.getAfter();
+        String database = config.getDatabase();
+        Identifier identifier = Identifier.create(database, table.getName());
+        GenericRow row = convertToGenericRow(after, table, identifier);
+        writer.write(row);
+    }
+
+    /**
+     * Handle delete event with stream writer
+     *
+     * @param event delete event
+     * @param writer stream writer
+     * @param table table definition
+     * @throws Exception if delete fails
+     */
+    private void handleStreamDelete(TapDeleteRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
+        Map<String, Object> before = event.getBefore();
+        String database = config.getDatabase();
+        Identifier identifier = Identifier.create(database, table.getName());
+        GenericRow row = convertToGenericRow(before, table, identifier);
         // Set row kind to DELETE
         row.setRowKind(org.apache.paimon.types.RowKind.DELETE);
         writer.write(row);
@@ -566,45 +840,167 @@ public class PaimonService implements Closeable {
      *
      * @param data data map
      * @param table table definition
+     * @param identifier table identifier
      * @return GenericRow
+     * @throws Exception if conversion fails
      */
-    private GenericRow convertToGenericRow(Map<String, Object> data, TapTable table) {
-        Map<String, TapField> fields = table.getNameFieldMap();
-        int fieldCount = fields.size();
+    private GenericRow convertToGenericRow(Map<String, Object> data, TapTable table, Identifier identifier) throws Exception {
+        // Get Paimon table to access actual field types
+        Table paimonTable = catalog.getTable(identifier);
+        List<DataField> paimonFields = paimonTable.rowType().getFields();
+
+        Map<String, TapField> tapFields = table.getNameFieldMap();
+        int fieldCount = tapFields.size();
         Object[] values = new Object[fieldCount];
 
         int index = 0;
-        for (Map.Entry<String, TapField> entry : fields.entrySet()) {
+        for (Map.Entry<String, TapField> entry : tapFields.entrySet()) {
             String fieldName = entry.getKey();
             Object value = data.get(fieldName);
-            values[index++] = value;
+
+            // Get corresponding Paimon field type
+            DataType paimonType = null;
+            for (DataField paimonField : paimonFields) {
+                if (paimonField.name().equals(fieldName)) {
+                    paimonType = paimonField.type();
+                    break;
+                }
+            }
+
+            // Convert value to Paimon-compatible type
+            values[index++] = convertValueToPaimonType(value, paimonType);
         }
 
         return GenericRow.of(values);
     }
 
+    /**
+     * Convert value to Paimon-compatible type
+     *
+     * @param value original value
+     * @param paimonType target Paimon data type
+     * @return converted value
+     */
+    private Object convertValueToPaimonType(Object value, DataType paimonType) {
+        if (value == null || paimonType == null) {
+            return null;
+        }
+
+        // Get the type root for comparison (ignores nullable attribute)
+        String typeString = paimonType.toString().toUpperCase();
+
+        // Handle STRING type - convert to BinaryString
+        if (typeString.contains("STRING") || typeString.contains("VARCHAR") || typeString.contains("CHAR")) {
+            if (value instanceof String) {
+                return BinaryString.fromString((String) value);
+            } else {
+                return BinaryString.fromString(String.valueOf(value));
+            }
+        }
+
+        // Handle TIMESTAMP type
+        if (typeString.contains("TIMESTAMP")) {
+            if (value instanceof DateTime) {
+                DateTime dateTime = (DateTime) value;
+                // Convert DateTime to Paimon Timestamp
+                // DateTime.getSeconds() returns seconds since epoch (can be negative for dates before 1970)
+                // DateTime.getNano() returns nanoseconds part
+                long epochSecond = dateTime.getSeconds();
+                int nanoSecond = dateTime.getNano();
+
+                // Convert to milliseconds and nanos-of-millisecond
+                // Similar to Timestamp.fromInstant() implementation
+                long millisecond = epochSecond * 1000L + nanoSecond / 1_000_000;
+                int nanoOfMillisecond = nanoSecond % 1_000_000;
+
+                // Ensure nanoOfMillisecond is always positive (0-999,999)
+                if (nanoOfMillisecond < 0) {
+                    millisecond -= 1;
+                    nanoOfMillisecond += 1_000_000;
+                }
+
+                return Timestamp.fromEpochMillis(millisecond, nanoOfMillisecond);
+            } else if (value instanceof java.sql.Timestamp) {
+                java.sql.Timestamp ts = (java.sql.Timestamp) value;
+                return Timestamp.fromEpochMillis(ts.getTime());
+            } else if (value instanceof java.util.Date) {
+                java.util.Date date = (java.util.Date) value;
+                return Timestamp.fromEpochMillis(date.getTime());
+            } else if (value instanceof Long) {
+                return Timestamp.fromEpochMillis((Long) value);
+            }
+        }
+
+        // Handle DATE type
+        if (typeString.contains("DATE") && !typeString.contains("TIMESTAMP")) {
+            if (value instanceof DateTime) {
+                DateTime dateTime = (DateTime) value;
+                // Convert to days since epoch (1970-01-01)
+                long millis = dateTime.getSeconds() * 1000L;
+                return (int) (millis / (1000 * 60 * 60 * 24));
+            } else if (value instanceof java.sql.Date) {
+                java.sql.Date date = (java.sql.Date) value;
+                // Convert to days since epoch (1970-01-01)
+                return (int) (date.getTime() / (1000 * 60 * 60 * 24));
+            } else if (value instanceof java.util.Date) {
+                java.util.Date date = (java.util.Date) value;
+                return (int) (date.getTime() / (1000 * 60 * 60 * 24));
+            }
+        }
+
+        // Handle numeric types - ensure correct Java type
+        if (typeString.contains("TINYINT")) {
+            if (value instanceof Number) {
+                return ((Number) value).byteValue();
+            }
+        }
+
+        if (typeString.contains("SMALLINT")) {
+            if (value instanceof Number) {
+                return ((Number) value).shortValue();
+            }
+        }
+
+        if (typeString.contains("INT") && !typeString.contains("BIGINT") && !typeString.contains("SMALLINT") && !typeString.contains("TINYINT")) {
+            if (value instanceof Number) {
+                return ((Number) value).intValue();
+            }
+        }
+
+        if (typeString.contains("BIGINT")) {
+            if (value instanceof Number) {
+                return ((Number) value).longValue();
+            }
+        }
+
+        if (typeString.contains("FLOAT")) {
+            if (value instanceof Number) {
+                return ((Number) value).floatValue();
+            }
+        }
+
+        if (typeString.contains("DOUBLE")) {
+            if (value instanceof Number) {
+                return ((Number) value).doubleValue();
+            }
+        }
+
+        if (typeString.contains("BOOLEAN")) {
+            if (value instanceof Boolean) {
+                return value;
+            } else if (value instanceof Number) {
+                return ((Number) value).intValue() != 0;
+            } else if (value instanceof String) {
+                return Boolean.parseBoolean((String) value);
+            }
+        }
+
+        // For other types, return as-is
+        return value;
+    }
+
     @Override
     public void close() {
-        // Close all writers
-        for (BatchTableWrite writer : writerCache.values()) {
-            try {
-                writer.close();
-            } catch (Exception e) {
-                // Ignore close errors
-            }
-        }
-        writerCache.clear();
-
-        // Close all commits
-        for (BatchTableCommit commit : commitCache.values()) {
-            try {
-                commit.close();
-            } catch (Exception e) {
-                // Ignore close errors
-            }
-        }
-        commitCache.clear();
-
         // Close catalog
         if (catalog != null) {
             try {
