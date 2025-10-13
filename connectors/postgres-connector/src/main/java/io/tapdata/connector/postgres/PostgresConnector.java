@@ -550,9 +550,11 @@ public class PostgresConnector extends CommonDbConnector {
                     } else {
                         AtomicReference<String> actualSequenceName = new AtomicReference<>();
                         try {
-                            jdbcContext.queryWithNext("select pg_get_serial_sequence('" + getSchemaAndTable(tapTable.getId()) + "', '\"" + k + "\"')", resultSet -> actualSequenceName.set(resultSet.getString(1)));
+                            String tableName = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? commonDbConfig.getSchema() + "." + tapTable.getId() : tapTable.getId();
+                            jdbcContext.queryWithNext("select pg_get_serial_sequence('" + tableName + "', '" + k + "')", resultSet -> actualSequenceName.set(resultSet.getString(1)));
                             jdbcContext.queryWithNext("select last_value from " + actualSequenceName.get(), resultSet -> actual.set(resultSet.getLong(1)));
                         } catch (SQLException ignore) {
+
                         }
                         if (actual.get() >= (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue())) {
                             return;
