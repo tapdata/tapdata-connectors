@@ -183,6 +183,47 @@
           "default": "default",
           "required": true,
           "x-index": 10
+        },
+        "bucketMode": {
+          "type": "string",
+          "title": "${bucketMode}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "enum": [
+            {
+              "label": "${bucketMode_dynamic}",
+              "value": "dynamic"
+            },
+            {
+              "label": "${bucketMode_fixed}",
+              "value": "fixed"
+            }
+          ],
+          "default": "dynamic",
+          "required": true,
+          "x-index": 20,
+          "x-reactions": [
+            {
+              "target": "bucketCount",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value==='fixed'}}"
+                }
+              }
+            }
+          ]
+        },
+        "bucketCount": {
+          "type": "number",
+          "title": "${bucketCount}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 1,
+            "placeholder": "${bucketCount_placeholder}"
+          },
+          "default": 4,
+          "x-index": 30
         }
       }
     }
@@ -209,7 +250,12 @@
       "ossAccessKey": "OSS Access Key",
       "ossSecretKey": "OSS Secret Key",
       "database": "Database Name",
-      "database_placeholder": "Paimon database name"
+      "database_placeholder": "Paimon database name",
+      "bucketMode": "Bucket Mode",
+      "bucketMode_dynamic": "Dynamic (Recommended for general use)",
+      "bucketMode_fixed": "Fixed (Better performance)",
+      "bucketCount": "Bucket Count",
+      "bucketCount_placeholder": "Number of buckets for fixed mode (must be > 0)"
     },
     "zh_CN": {
       "doc": "docs/paimon_zh_CN.md",
@@ -231,7 +277,12 @@
       "ossAccessKey": "OSS 访问密钥",
       "ossSecretKey": "OSS 密钥",
       "database": "数据库名称",
-      "database_placeholder": "Paimon 数据库名称"
+      "database_placeholder": "Paimon 数据库名称",
+      "bucketMode": "分桶模式",
+      "bucketMode_dynamic": "动态模式（推荐通用场景）",
+      "bucketMode_fixed": "固定模式（更好的性能）",
+      "bucketCount": "分桶数量",
+      "bucketCount_placeholder": "固定模式下的桶数量（必须大于 0）"
     },
     "zh_TW": {
       "doc": "docs/paimon_zh_TW.md",
@@ -253,7 +304,12 @@
       "ossAccessKey": "OSS 訪問密鑰",
       "ossSecretKey": "OSS 密鑰",
       "database": "數據庫名稱",
-      "database_placeholder": "Paimon 數據庫名稱"
+      "database_placeholder": "Paimon 數據庫名稱",
+      "bucketMode": "分桶模式",
+      "bucketMode_dynamic": "動態模式（推薦通用場景）",
+      "bucketMode_fixed": "固定模式（更好的性能）",
+      "bucketCount": "分桶數量",
+      "bucketCount_placeholder": "固定模式下的桶數量（必須大於 0）"
     }
   },
   "dataTypes": {

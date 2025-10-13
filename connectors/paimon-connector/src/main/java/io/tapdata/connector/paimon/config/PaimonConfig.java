@@ -39,6 +39,15 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Database name (Paimon database)
     private String database = "default";
 
+    // Bucket mode: "dynamic" or "fixed"
+    // Dynamic mode: better for general use, uses StreamTableWrite
+    // Fixed mode: better performance, uses BatchTableWrite
+    private String bucketMode = "dynamic";
+
+    // Bucket count for fixed bucket mode (only used when bucketMode = "fixed")
+    // Must be > 0 when using fixed mode
+    private Integer bucketCount = 4;
+
     public String getWarehouse() {
         return warehouse;
     }
@@ -145,6 +154,31 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         this.database = database;
     }
 
+    public String getBucketMode() {
+        return bucketMode;
+    }
+
+    public void setBucketMode(String bucketMode) {
+        this.bucketMode = bucketMode;
+    }
+
+    public Integer getBucketCount() {
+        return bucketCount;
+    }
+
+    public void setBucketCount(Integer bucketCount) {
+        this.bucketCount = bucketCount;
+    }
+
+    /**
+     * Check if using dynamic bucket mode
+     *
+     * @return true if using dynamic bucket mode
+     */
+    public boolean isDynamicBucketMode() {
+        return "dynamic".equalsIgnoreCase(bucketMode);
+    }
+
     /**
      * Override load method to return PaimonConfig type
      *
@@ -194,9 +228,24 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         if (warehouse == null || warehouse.trim().isEmpty()) {
             throw new IllegalArgumentException("Warehouse path is required");
         }
-        
+
         if (storageType == null || storageType.trim().isEmpty()) {
             throw new IllegalArgumentException("Storage type is required");
+        }
+
+        if (bucketMode == null || bucketMode.trim().isEmpty()) {
+            throw new IllegalArgumentException("Bucket mode is required");
+        }
+
+        if (!"dynamic".equalsIgnoreCase(bucketMode) && !"fixed".equalsIgnoreCase(bucketMode)) {
+            throw new IllegalArgumentException("Bucket mode must be either 'dynamic' or 'fixed'");
+        }
+
+        // Validate bucket count only for fixed mode
+        if ("fixed".equalsIgnoreCase(bucketMode)) {
+            if (bucketCount == null || bucketCount <= 0) {
+                throw new IllegalArgumentException("Bucket count must be greater than 0 when using fixed bucket mode");
+            }
         }
         
         switch (storageType.toLowerCase()) {
