@@ -165,7 +165,7 @@ public class PaimonConnector extends ConnectorBase {
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
         // Target capabilities
         connectorFunctions.supportWriteRecord(this::writeRecord);
-        connectorFunctions.supportCreateTableV2(this::createTableV2);
+        connectorFunctions.supportCreateTableV2(this::createTable);
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportCreateIndex(this::createIndex);
         connectorFunctions.supportClearTable(this::clearTable);
@@ -213,8 +213,8 @@ public class PaimonConnector extends ConnectorBase {
      * @return create table options
      * @throws Throwable if creation fails
      */
-    private CreateTableOptions createTableV2(TapConnectorContext connectorContext, 
-                                             TapCreateTableEvent createTableEvent) throws Throwable {
+    private CreateTableOptions createTable(TapConnectorContext connectorContext,
+                                           TapCreateTableEvent createTableEvent) throws Throwable {
         final Log log = connectorContext.getLog();
         CreateTableOptions createTableOptions = new CreateTableOptions();
         createTableOptions.setTableExists(false);
