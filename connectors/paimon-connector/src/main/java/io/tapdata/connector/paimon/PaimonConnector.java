@@ -49,14 +49,16 @@ public class PaimonConnector extends ConnectorBase {
      */
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Throwable {
-        final DataMap connectionConfig = connectionContext.getConnectionConfig();
+        DataMap connectionConfig = connectionContext.getConnectionConfig();
+        DataMap nodeConfig = connectionContext.getNodeConfig();
         if (MapUtils.isEmpty(connectionConfig)) {
             throw new RuntimeException("Connection config cannot be empty");
         }
         
         // Load configuration
         paimonConfig = new PaimonConfig().load(connectionConfig);
-        paimonConfig.load(connectionContext.getNodeConfig());
+        nodeConfig.remove("database");
+        paimonConfig.load(nodeConfig);
         
         // Initialize Paimon service
         paimonService = new PaimonService(paimonConfig);

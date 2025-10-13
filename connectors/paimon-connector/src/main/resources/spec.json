@@ -167,11 +167,7 @@
           "x-decorator": "FormItem",
           "x-component": "Password",
           "x-index": 120
-        }
-      }
-    },
-    "node": {
-      "properties": {
+        },
         "database": {
           "type": "string",
           "title": "${database}",
@@ -182,8 +178,12 @@
           },
           "default": "default",
           "required": true,
-          "x-index": 10
-        },
+          "x-index": 130
+        }
+      }
+    },
+    "node": {
+      "properties": {
         "bucketMode": {
           "type": "string",
           "title": "${bucketMode}",
