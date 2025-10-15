@@ -11,6 +11,9 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.partition.TapSubPartitionTableInfo;
+import io.tapdata.entity.utils.cache.Entry;
+import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
@@ -22,10 +25,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.TimeZone;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -65,6 +65,7 @@ public abstract class AbstractWalLogMiner {
                 dataTypeMap.putAll(table.getNameFieldMap().entrySet().stream().collect(Collectors.toMap(v -> tableName + "." + v.getKey(), e -> Optional.ofNullable(e.getValue().getPureDataType()).orElse(e.getValue().getDataType()))));
             }
         });
+        tableList.addAll(getSubPartitionTables(tableMap, tableList));
         return this;
     }
 
@@ -241,4 +242,34 @@ public abstract class AbstractWalLogMiner {
     }
 
     protected static final String WALMINER_STOP = "select walminer_stop()";
+
+    private List<String> getSubPartitionTables(KVReadOnlyMap<TapTable> tableMap, List<String> tables) {
+        if (tableMap == null || EmptyKit.isEmpty(tables)) {
+            return Collections.emptyList();
+        }
+        Iterator<Entry<TapTable>> iterator = tableMap.iterator();
+        Map<String, TapTable> normalTableMap = new HashMap<>();
+        while (iterator.hasNext()) {
+            Entry<TapTable> entry = iterator.next();
+            normalTableMap.put(entry.getKey(), entry.getValue());
+        }
+        List<String> subPartitionTableNames = new ArrayList<>();
+        tables.forEach(table -> {
+            TapTable tableInfo = normalTableMap.get(table);
+            if (tableInfo != null && tableInfo.checkIsMasterPartitionTable()) {
+                if (tableInfo.getPartitionInfo().getSubPartitionTableInfo() != null) {
+                    List<String> subTableNames = tableInfo.getPartitionInfo().getSubPartitionTableInfo()
+                            .stream().filter(Objects::nonNull)
+                            .map(TapSubPartitionTableInfo::getTableName)
+                            .filter(n -> !tables.contains(n))
+                            .collect(Collectors.toList());
+                    subTableNames.forEach(t -> tableMap.get(table).getNameFieldMap().forEach((k, field) -> {
+                        dataTypeMap.put(t + "." + k, field.getPureDataType());
+                    }));
+                    subPartitionTableNames.addAll(subTableNames);
+                }
+            }
+        });
+        return subPartitionTableNames;
+    }
 }
