@@ -126,6 +126,7 @@ public class RegisterMain {
         YASHANDB(BETA, TAG_JDBC),
         ZOHO_CRM(BETA),
         ZOHO_DESK(BETA),
+        PAIMON(ALPHA),
         ;
 
         private final String path;
