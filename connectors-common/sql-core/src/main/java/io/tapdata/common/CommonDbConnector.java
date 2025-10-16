@@ -6,6 +6,7 @@ import io.tapdata.common.dml.NormalWriteRecorder;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.entity.TapConstraintException;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.constraint.TapDropConstraintEvent;
@@ -124,15 +125,19 @@ public abstract class CommonDbConnector extends ConnectorBase {
             AtomicInteger keyPos = new AtomicInteger(0);
             columnList.stream().filter(col -> table.equals(col.getString("tableName")))
                     .forEach(col -> {
-                        TapField tapField = makeTapField(col);
-                        if (null == tapField) return;
-                        tapField.setPos(keyPos.incrementAndGet());
-                        tapField.setPrimaryKey(primaryKey.contains(tapField.getName()));
-                        tapField.setPrimaryKeyPos(primaryKey.indexOf(tapField.getName()) + 1);
-                        if (tapField.getPrimaryKey()) {
-                            tapField.setNullable(false);
+                        try {
+                            TapField tapField = makeTapField(col);
+                            if (null == tapField) return;
+                            tapField.setPos(keyPos.incrementAndGet());
+                            tapField.setPrimaryKey(primaryKey.contains(tapField.getName()));
+                            tapField.setPrimaryKeyPos(primaryKey.indexOf(tapField.getName()) + 1);
+                            if (tapField.getPrimaryKey()) {
+                                tapField.setNullable(false);
+                            }
+                            tapTable.add(tapField);
+                        } catch (Exception e) {
+                            throw new CoreException("Construct field failed, table: " + table + ", column: " + col + ", error: " + e.getMessage());
                         }
-                        tapTable.add(tapField);
                     });
             tapTable.setIndexList(tapIndexList);
             tapTable.setConstraintList(makeForeignKey(fkList, table));
