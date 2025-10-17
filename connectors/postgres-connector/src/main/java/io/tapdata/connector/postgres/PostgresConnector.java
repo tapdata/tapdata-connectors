@@ -650,9 +650,6 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
-        cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
-        testReplicateIdentity(nodeContext.getTableMap());
-        buildSlot(nodeContext, true);
         Map<String, List<String>> schemaTableMap = new HashMap<>();
         for (ConnectionConfigWithTables withTables : connectionConfigWithTables) {
             if (null == withTables.getConnectionConfig())
@@ -676,12 +673,20 @@ public class PostgresConnector extends CommonDbConnector {
             });
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            new WalLogMinerV2(postgresJdbcContext, tapLogger)
-                    .watch(schemaTableMap, nodeContext.getTableMap())
-                    .withWalLogDirectory(getWalDirectory())
-                    .offset(offsetState)
-                    .registerConsumer(consumer, batchSize)
-                    .startMiner(this::isAlive);
+            if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
+                new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
+                        .watch(schemaTableMap, nodeContext.getTableMap())
+                        .offset(offsetState)
+                        .registerConsumer(consumer, batchSize)
+                        .startMiner(this::isAlive);
+            } else {
+                new WalLogMinerV2(postgresJdbcContext, tapLogger)
+                        .watch(schemaTableMap, nodeContext.getTableMap())
+                        .withWalLogDirectory(getWalDirectory())
+                        .offset(offsetState)
+                        .registerConsumer(consumer, batchSize)
+                        .startMiner(this::isAlive);
+            }
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
