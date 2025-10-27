@@ -211,7 +211,12 @@ public class DbKit {
     public static Map<String, Object> getAfterForUpdate(Map<String, Object> after, Map<String, Object> before, Collection<String> allColumn, Collection<String> uniqueCondition) {
         Map<String, Object> lastBefore = getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         if (EmptyKit.isNotEmpty(before)) {
-            lastBefore.putAll(before);
+            for (Map.Entry<String, Object> entry : before.entrySet()) {
+                if (EmptyKit.isNull(entry.getValue()) && EmptyKit.isNull(after.get(entry.getKey()))) {
+                    continue;
+                }
+                lastBefore.put(entry.getKey(), entry.getValue());
+            }
         }
         Map<String, Object> lastAfter = new HashMap<>();
         for (Map.Entry<String, Object> entry : after.entrySet()) {
