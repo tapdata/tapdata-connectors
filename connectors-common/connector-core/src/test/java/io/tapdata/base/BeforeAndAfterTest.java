@@ -74,6 +74,57 @@ class BeforeAndAfterTest {
         assertBeforeAndAfter(COMMON_ALL_COLUMN, COMMON_UNIQUE_CONDITION, after, before, lastAfter, lastBefore);
     }
 
+    @Test
+    void testNullBeforeAndNotNullAfter() {
+        Map<String, Object> after = map(
+                entry("id1", 1),
+                entry("id2", 2),
+                entry("name", null),
+                entry("age", 18),
+                entry("birth", "2022-05-29")
+        );
+        Map<String, Object> before = map(
+                entry("id1", 1),
+                entry("id2", 2),
+                entry("name", "wim"),
+                entry("age", 18),
+                entry("birth", "2022-05-29")
+        );
+        Map<String, Object> lastBefore = map(
+                entry("id1", 1),
+                entry("id2", 2)
+        );
+        Map<String, Object> lastAfter = map(
+                entry("name", null)
+        );
+        assertBeforeAndAfter(COMMON_ALL_COLUMN, COMMON_UNIQUE_CONDITION, after, before, lastAfter, lastBefore);
+    }
+
+    @Test
+    void testNullBeforeAndNullAfter() {
+        Map<String, Object> after = map(
+                entry("id1", 1),
+                entry("id2", 2),
+                entry("name", null),
+                entry("age", 18),
+                entry("birth", "2022-05-29")
+        );
+        Map<String, Object> before = map(
+                entry("id1", 1),
+                entry("id2", 2),
+                entry("name", null),
+                entry("age", 18),
+                entry("birth", "2022-05-29")
+        );
+        Map<String, Object> lastBefore = map(
+                entry("id1", 1),
+                entry("id2", 2)
+        );
+        Map<String, Object> lastAfter = map(
+                entry("name", null)
+        );
+        assertBeforeAndAfter(COMMON_ALL_COLUMN, COMMON_UNIQUE_CONDITION, after, before, lastAfter, lastBefore);
+    }
     /**
      * 2、just update name from sam to jarad
      */
