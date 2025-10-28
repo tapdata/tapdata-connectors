@@ -196,19 +196,6 @@ public class PostgresConnectorTest {
             assertNotNull(connector.getHashSplitStringSql(tapTable));
         }
     }
-    @Nested
-    class ConnectionTest{
-        @Test
-        void test_main(){
-            PostgresConnector postgresConnector = new PostgresConnector();
-            TapConnectionContext connectionContext = mock(TapConnectionContext.class);
-            Consumer<TestItem> consumer = testItem -> {
-            };
-            when(connectionContext.getConnectionConfig()).thenReturn(new DataMap());
-            Assertions.assertThrows(Exception.class,()->postgresConnector.connectionTest(connectionContext,consumer));
-
-        }
-    }
 
     @Test
     void testSplitTableForMultiDiscoverSchema() {

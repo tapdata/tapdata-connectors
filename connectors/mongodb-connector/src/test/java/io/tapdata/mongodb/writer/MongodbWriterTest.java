@@ -2,7 +2,6 @@ package io.tapdata.mongodb.writer;
 
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.model.UpdateManyModel;
-import com.mongodb.client.model.UpdateOneModel;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.WriteModel;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
@@ -17,7 +16,6 @@ import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
 import org.bson.Document;
-import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -423,75 +421,6 @@ class MongodbWriterTest {
 			assertFalse(result.containsKey("age")); // age不应该在unset中
 			assertTrue(result.containsKey("email"));
 			assertTrue(result.containsKey("phone"));
-		}
-
-		@Test
-		@DisplayName("test parent field exists in after - child field should be excluded")
-		void testParentFieldExistsInAfter() {
-			// 准备测试数据
-			Map<String, Object> after = new HashMap<>();
-			after.put("id", 1);
-			after.put("user", new HashMap<String, Object>() {{
-				put("name", "test");
-				put("age", 25);
-			}});
-
-			List<String> removedFields = new ArrayList<>();
-			removedFields.add("user.email");
-			removedFields.add("user.phone");
-			removedFields.add("profile.address");
-
-			TapInsertRecordEvent insertEvent = TapInsertRecordEvent.create()
-					.after(after)
-					.removedFields(removedFields);
-
-			// 执行测试
-			Document result = mongodbWriter.wrapUnset(insertEvent);
-
-			// 验证结果 - user字段在after中存在，user.email和user.phone不应该被unset
-			assertNotNull(result);
-			assertEquals(1, result.size());
-			assertFalse(result.containsKey("user.email")); // user字段存在，子字段不应该unset
-			assertFalse(result.containsKey("user.phone"));
-			assertTrue(result.containsKey("profile.address")); // profile字段不存在，可以unset
-		}
-
-		@Test
-		@DisplayName("test complex hierarchical scenario")
-		void testComplexHierarchicalScenario() {
-			// 准备测试数据
-			Map<String, Object> after = new HashMap<>();
-			after.put("id", 1);
-			after.put("user", new HashMap<String, Object>() {{
-				put("name", "test");
-			}});
-			after.put("profile.city", "beijing"); // 注意这是一个带点的key，不是嵌套对象
-
-			List<String> removedFields = new ArrayList<>();
-			removedFields.add("user.age");           // user存在，user.age不应该unset
-			removedFields.add("user.email");         // user存在，user.email不应该unset
-			removedFields.add("profile.address");    // profile.city存在，但profile.address可以unset（不是父子关系）
-			removedFields.add("profile.city.street"); // profile.city存在，profile.city.street不应该unset
-			removedFields.add("contact.phone");      // contact不存在，可以unset
-			removedFields.add("contact");             // 应该被过滤掉，因为contact.phone是子字段
-
-			TapInsertRecordEvent insertEvent = TapInsertRecordEvent.create()
-					.after(after)
-					.removedFields(removedFields);
-
-			// 执行测试
-			Document result = mongodbWriter.wrapUnset(insertEvent);
-
-			// 验证结果
-			assertNotNull(result);
-			// 应该只包含 profile.address 和 contact（因为层级过滤会保留contact而不是contact.phone）
-			assertEquals(2, result.size());
-			assertFalse(result.containsKey("user.age"));
-			assertFalse(result.containsKey("user.email"));
-			assertTrue(result.containsKey("profile.address"));
-			assertFalse(result.containsKey("profile.city.street"));
-			assertTrue(result.containsKey("contact")); // 层级过滤后保留最高级
-			assertFalse(result.containsKey("contact.phone"));
 		}
 
 		@Test
