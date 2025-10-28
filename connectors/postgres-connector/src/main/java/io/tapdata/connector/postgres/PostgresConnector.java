@@ -273,6 +273,8 @@ public class PostgresConnector extends CommonDbConnector {
                     //取消订阅
                     HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format("DELSUB:%s all", firstConnectorId));
                 }
+            } else if ("pgoutput".equals(postgresConfig.getLogPluginName()) && postgresConfig.getPartPublication()) {
+                ErrorKit.ignoreAnyError(this::dropPublication);
             }
         } finally {
             onStop(connectorContext);
@@ -286,6 +288,10 @@ public class PostgresConnector extends CommonDbConnector {
                 postgresJdbcContext.execute("SELECT pg_drop_replication_slot('" + slotName + "')");
             }
         });
+    }
+
+    private void dropPublication() throws Throwable {
+        postgresJdbcContext.execute("DROP PUBLICATION " + slotName);
     }
 
     private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
@@ -725,7 +731,9 @@ public class PostgresConnector extends CommonDbConnector {
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
         if (canCdc) {
             if ("pgoutput".equals(postgresConfig.getLogPluginName()) && Integer.parseInt(postgresVersion) > 100000) {
-                createPublicationIfNotExist();
+                if (!postgresConfig.getPartPublication()) {
+                    createAllPublicationIfNotExist();
+                }
             }
             testReplicateIdentity(connectorContext.getTableMap());
             buildSlot(connectorContext, false);
@@ -823,7 +831,7 @@ public class PostgresConnector extends CommonDbConnector {
         return walDirectory.get();
     }
 
-    private void createPublicationIfNotExist() throws SQLException {
+    private void createAllPublicationIfNotExist() throws SQLException {
         String publicationName = postgresConfig.getPartitionRoot() ? "dbz_publication_root" : "dbz_publication";
         AtomicBoolean needCreate = new AtomicBoolean(false);
         postgresJdbcContext.queryWithNext(String.format("SELECT COUNT(1) FROM pg_publication WHERE pubname = '%s'", publicationName), resultSet -> {
