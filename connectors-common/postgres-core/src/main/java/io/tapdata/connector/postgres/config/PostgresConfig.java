@@ -30,6 +30,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String pgtoHost = "127.0.0.1";
     private int pgtoPort = 9876;
     private Integer defaultWalLogSize = 102400;
+    private Boolean partPublication = false;
 
     private String deploymentMode;
     private ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress;
@@ -184,6 +185,14 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setDefaultWalLogSize(Integer defaultWalLogSize) {
         this.defaultWalLogSize = defaultWalLogSize;
+    }
+
+    public Boolean getPartPublication() {
+        return partPublication;
+    }
+
+    public void setPartPublication(Boolean partPublication) {
+        this.partPublication = partPublication;
     }
 
     public String getDeploymentMode() {
