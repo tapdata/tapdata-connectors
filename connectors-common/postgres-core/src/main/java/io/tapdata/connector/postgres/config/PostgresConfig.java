@@ -82,10 +82,10 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
         }
     }
     public String getDatabaseUrl() {
-        if (EmptyKit.isNull(this.getExtParams())) {
+        if (EmptyKit.isBlank(this.getExtParams())) {
             this.setExtParams("?stringtype=unspecified&prepareThreshold=0");
         }
-        if (EmptyKit.isNotEmpty(this.getExtParams()) && !this.getExtParams().startsWith("?") && !this.getExtParams().startsWith(":")) {
+        if (EmptyKit.isNotBlank(this.getExtParams()) && !this.getExtParams().startsWith("?") && !this.getExtParams().startsWith(":")) {
             this.setExtParams("?" + this.getExtParams()+"&stringtype=unspecified&prepareThreshold=0");
         }
         return String.format(this.getDatabaseUrlPattern(), this.getHost(), this.getPort(), URLEncoder.encode(this.getDatabase()), this.getExtParams());
