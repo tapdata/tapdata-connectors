@@ -907,31 +907,44 @@ public class PostgresConnector extends CommonDbConnector {
     @Override
     protected void queryByAdvanceFilterWithOffset(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
         String sql = commonSqlMaker.buildSelectClause(table, filter, false) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilter(filter);
-        jdbcContext.query(sql, resultSet -> {
-            FilterResults filterResults = new FilterResults();
-            try {
-                Map<String, String> typeAndName = new HashMap<>();
-                table.getNameFieldMap().forEach((key, value) -> {
-                    typeAndName.put(key, value.getDataType());
-                });
-                List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
-                while (resultSet.next()) {
-                    filterResults.add(filterTimeForPG(resultSet, typeAndName, allColumn));
-                    if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
-                        consumer.accept(filterResults);
-                        filterResults = new FilterResults();
+        try(Connection connection = jdbcContext.getConnection()) {
+            if(EmptyKit.isEmpty(filter.getMatch()) && commonSqlMaker.checkOrderColumInPrimaryKey(table, filter)) {
+                String seqScan = "SET enable_seqscan = off;";
+                if (EmptyKit.isNotBlank(sql)) {
+                    try (Statement statement = connection.createStatement()) {
+                        statement.execute(seqScan);
+                    } catch (SQLException e) {
+                        tapLogger.warn("Failed to set enable_seqscan to off, error: {}", e.getMessage());
                     }
                 }
-            } catch (SQLException e) {
-                exceptionCollector.collectTerminateByServer(e);
-                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
-                exceptionCollector.revealException(e);
-                throw e;
             }
-            if (EmptyKit.isNotEmpty(filterResults.getResults())) {
-                consumer.accept(filterResults);
-            }
-        });
+            jdbcContext.query(connection,sql, resultSet -> {
+                FilterResults filterResults = new FilterResults();
+                try {
+                    Map<String, String> typeAndName = new HashMap<>();
+                    table.getNameFieldMap().forEach((key, value) -> {
+                        typeAndName.put(key, value.getDataType());
+                    });
+                    List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
+                    while (resultSet.next()) {
+                        filterResults.add(filterTimeForPG(resultSet, typeAndName, allColumn));
+                        if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
+                            consumer.accept(filterResults);
+                            filterResults = new FilterResults();
+                        }
+                    }
+                } catch (SQLException e) {
+                    exceptionCollector.collectTerminateByServer(e);
+                    exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+                    exceptionCollector.revealException(e);
+                    throw e;
+                }
+                if (EmptyKit.isNotEmpty(filterResults.getResults())) {
+                    consumer.accept(filterResults);
+                }
+            });
+        }
+
     }
 
     private Map<String, Object> filterTimeForPG(ResultSet resultSet, Map<String, String> typeAndName, List<String> allColumn) {

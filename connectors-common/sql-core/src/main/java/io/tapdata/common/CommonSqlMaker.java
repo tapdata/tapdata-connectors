@@ -10,16 +10,14 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.Projection;
 import io.tapdata.pdk.apis.entity.QueryOperator;
+import io.tapdata.pdk.apis.entity.SortOn;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 
 import java.text.DecimalFormat;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -413,6 +411,22 @@ public class CommonSqlMaker {
                     .reduce((v1, v2) -> v1 + ", " + v2).orElseGet(String::new));
         }
         return orderBy.toString();
+    }
+
+    public boolean checkOrderColumInPrimaryKey(TapTable tapTable, TapAdvanceFilter filter) {
+        if (EmptyKit.isEmpty(filter.getSortOnList()) || EmptyKit.isEmpty(tapTable.primaryKeys())) {
+            return false;
+        }
+        List<String> sortOnKeys = filter.getSortOnList().stream()
+                .map(SortOn::getKey)
+                .collect(Collectors.toList());
+        Collection<String> primaryKeys = tapTable.primaryKeys();
+        for (String sortOnKey : sortOnKeys) {
+            if (!primaryKeys.contains(sortOnKey)) {
+                return false;
+            }
+        }
+        return true;
     }
 
 }

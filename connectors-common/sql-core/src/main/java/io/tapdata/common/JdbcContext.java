@@ -144,6 +144,21 @@ public abstract class JdbcContext implements AutoCloseable {
         }
     }
 
+    public void query(Connection connection,String sql, ResultSetConsumer resultSetConsumer) throws SQLException {
+        try (
+                Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)
+        ) {
+            statement.setFetchSize(2000); //protected from OM
+            try (
+                    ResultSet resultSet = statement.executeQuery(sql)
+            ) {
+                if (EmptyKit.isNotNull(resultSet)) {
+                    resultSetConsumer.accept(resultSet);
+                }
+            }
+        }
+    }
+
     public void streamQueryWithTimeout(String querySql, ResultSetConsumer resultSetConsumer, ArrayList<String> timeoutSqls, Integer fetchSize) throws Exception {
         try (
                 Connection connection = getConnection();
