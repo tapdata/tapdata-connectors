@@ -905,26 +905,26 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void commitTransaction(TapConnectorContext connectorContext) throws Throwable {
-        for (Map.Entry<String, Connection> entry : transactionConnectionMap.entrySet()) {
+        transactionConnectionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
             try {
-                entry.getValue().commit();
-            } finally {
-                EmptyKit.closeQuietly(entry.getValue());
+                v.commit();
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
             }
-        }
-        transactionConnectionMap.clear();
+            return null;
+        });
         isTransaction = false;
     }
 
     protected void rollbackTransaction(TapConnectorContext connectorContext) throws Throwable {
-        for (Map.Entry<String, Connection> entry : transactionConnectionMap.entrySet()) {
+        transactionConnectionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
             try {
-                entry.getValue().rollback();
-            } finally {
-                EmptyKit.closeQuietly(entry.getValue());
+                v.rollback();
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
             }
-        }
-        transactionConnectionMap.clear();
+            return null;
+        });
         isTransaction = false;
     }
 

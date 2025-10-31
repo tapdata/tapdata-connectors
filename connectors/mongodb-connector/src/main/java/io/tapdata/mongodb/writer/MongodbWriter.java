@@ -57,8 +57,9 @@ public class MongodbWriter {
 	private final Map<String,Set<String>> shardKeyMap;
 	private String insertPolicy;
 	private String updatePolicy;
+	private final Map<String, ClientSession> sessionMap;
 
-	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger, Map<String,Set<String>> shardKeyMap) {
+	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger, Map<String,Set<String>> shardKeyMap, Map<String, ClientSession> sessionMap) {
 		this.globalStateMap = globalStateMap;
 		this.mongoClient = mongoClient;
 		this.mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
@@ -67,6 +68,7 @@ public class MongodbWriter {
 		this.is_cloud = AppType.currentType().isCloud();
 		this.tapLogger = tapLogger;
 		this.shardKeyMap = shardKeyMap;
+		this.sessionMap = sessionMap;
 	}
 
 	/**
@@ -84,25 +86,37 @@ public class MongodbWriter {
 	 * @param tapRecordEvents
 	 * @param writeListResultConsumer
 	 */
-	public void writeRecord(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
-		if (CollectionUtils.isEmpty(tapRecordEvents)) {
-			return;
-		}
-		if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive())) {
-			try (ClientSession session = mongoClient.startSession()) {
-				session.startTransaction();
-				Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
-				UpdateOptions options = new UpdateOptions().upsert(true);
-				mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
-				write(table, tapRecordEvents, writeListResultConsumer, session);
-				session.commitTransaction();
-			}
-		} else {
-			write(table, tapRecordEvents, writeListResultConsumer, null);
-		}
-	}
+    public void writeRecord(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
+        if (CollectionUtils.isEmpty(tapRecordEvents)) {
+            return;
+        }
+        ClientSession clientSession = sessionMap.get(Thread.currentThread().getName());
+        if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive())) {
+            if (null != clientSession) {
+                doubleActiveWrite(tapRecordEvents, table, writeListResultConsumer, clientSession);
+            } else {
+                try (ClientSession session = mongoClient.startSession()) {
+                    doubleActiveWrite(tapRecordEvents, table, writeListResultConsumer, session);
+                    session.commitTransaction();
+                }
+            }
+        } else {
+            if (null != clientSession) {
+                clientSession.startTransaction();
+            }
+            write(table, tapRecordEvents, writeListResultConsumer, clientSession);
+        }
+    }
 
-	private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
+    private void doubleActiveWrite(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
+        session.startTransaction();
+        Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
+        UpdateOptions options = new UpdateOptions().upsert(true);
+        mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
+        write(table, tapRecordEvents, writeListResultConsumer, session);
+    }
+
+    private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
 		AtomicLong inserted = new AtomicLong(0); //insert count
 		AtomicLong updated = new AtomicLong(0); //update count
 		AtomicLong deleted = new AtomicLong(0); //delete count
