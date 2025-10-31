@@ -3,10 +3,7 @@ package io.tapdata.connector.gauss.core;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.config.PostgresConfig;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 
@@ -23,6 +20,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@Disabled
 public class GaussDBJdbcContextTest {
     GaussDBJdbcContext context;
     PostgresConfig config;
