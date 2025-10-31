@@ -763,6 +763,24 @@
               }
             }
           ]
+        },
+        "splitUpdatePk": {
+          "type": "boolean",
+          "title": "${splitUpdatePk}",
+          "default": true,
+          "x-index": 19,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -824,6 +842,7 @@
       "enableFileInput": "Enable file input",
       "customSlotName": "Specifies the logical replication slot name",
       "customSlotNameTip": "You can manually specify a logical replication slot that is created in advance in the database, and if the logical replication slot does not exist, the delta may not work",
+      "splitUpdatePk": "Split update unique key",
       "walLogSize": "Wal log total size(MB)",
       "clearIdleSlot": "Clear idle replication slot",
       "walLogPercent": "Wal log usage rate"
@@ -883,6 +902,7 @@
       "enableFileInput": "启用文件输入",
       "customSlotName": "指定逻辑复制槽名字",
       "customSlotNameTip": "可以手动指定在数据库提前创建好的逻辑复制槽，如果逻辑复制槽不存在，则可能会导致增量不工作",
+      "splitUpdatePk": "修改唯一键拆分",
       "walLogSize": "Wal日志总大小(MB)",
       "clearIdleSlot": "清理空闲复制槽",
       "walLogPercent": "Wal日志占用率"
@@ -942,6 +962,7 @@
       "enableFileInput": "啟用文件輸入",
       "customSlotName": "指定邏輯複製槽名字",
       "customSlotNameTip": "可以手動指定在數據庫提前創建好的邏輯複製槽，如果邏輯複製槽不存在，則可能會導致增量不工作",
+      "splitUpdatePk": "修改唯一鍵拆分",
       "walLogSize": "Wal日誌總大小(MB)",
       "clearIdleSlot": "清理空閒複製槽",
       "walLogPercent": "Wal日志占用率"

@@ -145,6 +145,7 @@ public class PostgresDebeziumConfig {
             String tableWhiteList = schemaTableMap.entrySet().stream().map(v -> v.getValue().stream().map(l -> StringKit.escapeRegex(v.getKey()) + "." + StringKit.escapeRegex(l)).collect(Collectors.joining(", "))).collect(Collectors.joining(", "));
             builder.with("table.whitelist", tableWhiteList);
         }
+        builder.with("tap.split.update.pk", postgresConfig.getSplitUpdatePk());
         return builder.build();
     }
 
