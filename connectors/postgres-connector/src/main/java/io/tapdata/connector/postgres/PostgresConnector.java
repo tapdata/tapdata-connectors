@@ -27,11 +27,10 @@ import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.schema.TapConstraint;
-import io.tapdata.entity.schema.TapField;
-import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.*;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
@@ -1200,6 +1199,23 @@ public class PostgresConnector extends CommonDbConnector {
                 tapLogger.warn("Cluster index failed, table:{}, index:{}", tapTable.getId(), v.getName());
             }
         });
+    }
+
+    protected TapIndex makeTapIndex(String key, List<DataMap> value) {
+        TapIndex index = new TapIndex();
+        index.setName(key);
+        List<TapIndexField> fieldList = TapSimplify.list();
+        value.forEach(v -> {
+            TapIndexField field = new TapIndexField();
+            field.setFieldAsc("1".equals(v.getString("isAsc")));
+            field.setName(v.getString("columnName"));
+            fieldList.add(field);
+        });
+        index.setUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isUnique")))));
+        index.setCoreUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isCoreUnique")))));
+        index.setPrimary(value.stream().anyMatch(v -> ("1".equals(v.getString("isPk")))));
+        index.setIndexFields(fieldList);
+        return index;
     }
 
     protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {

@@ -105,6 +105,7 @@ public class MongodbConnector extends ConnectorBase {
 	private final MongodbExecuteCommandFunction mongodbExecuteCommandFunction = new MongodbExecuteCommandFunction();
 	protected ThreadPoolExecutor sourceRunner;
 	protected Future<?> sourceRunnerFuture;
+	protected Map<String, ClientSession> transactionSessionMap = new ConcurrentHashMap<>();
 	/**
 	 * Reference：<a href="https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml">error_codes.yml</a>
 	 * connectors/mongodb-connector/src/main/resources/mongo-error-codes.yml
@@ -563,6 +564,9 @@ public class MongodbConnector extends ConnectorBase {
 		connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
 		connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
 		connectorFunctions.supportQueryIndexes(this::queryIndexes);
+		connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
+		connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
+		connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
 	}
 
 	protected void queryIndexes(TapConnectorContext tapConnectorContext, TapTable tapTable, Consumer<List<TapIndex>> listConsumer) {
@@ -1336,7 +1340,7 @@ public class MongodbConnector extends ConnectorBase {
 		String threadName = Thread.currentThread().getName();
 		MongodbWriter mongodbWriter = writerMap.get(threadName);
 		if (EmptyKit.isNull(mongodbWriter)) {
-			mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
+			mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap, transactionSessionMap);
 			writerMap.put(threadName, mongodbWriter);
 		}
 		try {
@@ -1827,5 +1831,31 @@ public class MongodbConnector extends ConnectorBase {
 		Integer integer = config.getInteger("mongodbLoadSchemaSampleSize");
 		if (null == integer || integer <= 0) return SAMPLE_SIZE_BATCH_SIZE;
 		return integer;
+	}
+
+	protected void beginTransaction(TapConnectorContext connectorContext) {
+		transactionSessionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+			v.abortTransaction();
+			v.close();
+			v = mongoClient.startSession();
+			return v;
+		});
+		transactionSessionMap.computeIfAbsent(Thread.currentThread().getName(), key -> mongoClient.startSession());
+	}
+
+	protected void commitTransaction(TapConnectorContext connectorContext) {
+		transactionSessionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+			v.commitTransaction();
+			v.close();
+			return null;
+		});
+	}
+
+	protected void rollbackTransaction(TapConnectorContext connectorContext) {
+		transactionSessionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+			v.abortTransaction();
+			v.close();
+			return null;
+		});
 	}
 }

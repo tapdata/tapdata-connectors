@@ -2,7 +2,7 @@ package io.tapdata.connector.tidb.cdc.process.analyse;
 
 import io.tapdata.connector.tidb.cdc.process.ddl.convert.Convert;
 import io.tapdata.connector.tidb.cdc.process.dml.entity.DMLObject;
-import io.tapdata.connector.tidb.cdc.process.dml.entity.DMLType;
+import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;

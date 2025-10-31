@@ -1,6 +1,7 @@
 package io.tapdata.common.dml;
 
 import io.netty.buffer.ByteBuf;
+import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
@@ -54,6 +55,7 @@ public abstract class NormalWriteRecorder {
     protected PreparedStatement preparedStatement = null;
     protected List<String> largeSqlValues;
     protected boolean largeSql = false;
+    protected DMLType dmlType;
 
     protected final AtomicLong atomicLong = new AtomicLong(0); //record counter
     protected final List<TapRecordEvent> batchCache = TapSimplify.list(); //event cache
@@ -93,6 +95,10 @@ public abstract class NormalWriteRecorder {
         }
     }
 
+    public void setDmlType(DMLType dmlType) {
+        this.dmlType = dmlType;
+    }
+
     public void setRemovedColumn(List<String> removedColumn) {
         this.removedColumn = removedColumn;
         allColumn.removeAll(removedColumn);
@@ -115,7 +121,7 @@ public abstract class NormalWriteRecorder {
         }
         if (largeSql) {
             try (Statement statement = connection.createStatement()) {
-                statement.execute(getLargeInsertSql());
+                statement.execute(getLargeSql());
                 largeSqlValues.clear();
                 batchCacheSize = 0;
             }
@@ -366,6 +372,10 @@ public abstract class NormalWriteRecorder {
         if (EmptyKit.isEmpty(after)) {
             return;
         }
+        if (largeSql) {
+            largeInsert(after);
+            return;
+        }
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
@@ -416,7 +426,7 @@ public abstract class NormalWriteRecorder {
         setBeforeValue(containsNull, before, pos);
     }
 
-    protected String getLargeInsertSql() {
+    protected String getLargeSql() {
         return "INSERT INTO " + getSchemaAndTable() + " ("
                 + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") VALUES "
                 + String.join(", ", largeSqlValues);
@@ -437,6 +447,10 @@ public abstract class NormalWriteRecorder {
 
     public void addDeleteBatch(Map<String, Object> before, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (EmptyKit.isEmpty(before)) {
+            return;
+        }
+        if (largeSql) {
+            largeInsert(before);
             return;
         }
         Map<String, Object> lastBefore = new HashMap<>();
