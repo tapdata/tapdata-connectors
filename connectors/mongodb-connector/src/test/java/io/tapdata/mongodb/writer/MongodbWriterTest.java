@@ -93,7 +93,7 @@ class MongodbWriterTest {
 		mongoClient = mock(MongoClient.class);
 		log = mock(Log.class);
 		shardKeyMap = new HashMap<>();
-		mongodbWriter = new MongodbWriter(globalStateMap, mongodbConfig, mongoClient, log, shardKeyMap);
+		mongodbWriter = new MongodbWriter(globalStateMap, mongodbConfig, mongoClient, log, shardKeyMap, new HashMap<>());
 	}
 
 	@Nested
