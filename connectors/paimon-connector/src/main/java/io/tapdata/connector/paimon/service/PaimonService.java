@@ -57,16 +57,17 @@ public class PaimonService implements Closeable {
      */
     public void init() throws Exception {
         config.validate();
-        
+
         Options options = new Options();
         options.set("warehouse", config.getFullWarehousePath());
-        
+
         // Configure storage based on type
         configureStorage(options);
-        
-        // Create catalog context
-        CatalogContext context = CatalogContext.create(options, new Configuration());
-        
+
+        // Create catalog context with Hadoop configuration (for S3A, etc.)
+        Configuration hadoopConf = buildHadoopConfiguration();
+        CatalogContext context = CatalogContext.create(options, hadoopConf);
+
         // Create catalog
         catalog = CatalogFactory.createCatalog(context);
     }
@@ -78,7 +79,7 @@ public class PaimonService implements Closeable {
      */
     private void configureStorage(Options options) {
         String storageType = config.getStorageType().toLowerCase();
-        
+
         switch (storageType) {
             case "s3":
                 options.set("s3.endpoint", config.getS3Endpoint());
@@ -106,6 +107,48 @@ public class PaimonService implements Closeable {
             default:
                 throw new IllegalArgumentException("Unsupported storage type: " + storageType);
         }
+    }
+
+    /**
+     * Build Hadoop Configuration when needed (e.g., S3A)
+     */
+    private Configuration buildHadoopConfiguration() {
+        Configuration conf = new Configuration();
+        String storageType = config.getStorageType() == null ? "" : config.getStorageType().toLowerCase();
+        if ("s3".equals(storageType)) {
+            String endpoint = config.getS3Endpoint();
+            String accessKey = config.getS3AccessKey();
+            String secretKey = config.getS3SecretKey();
+            String region = config.getS3Region();
+
+            if (endpoint != null && !endpoint.isEmpty()) {
+                // Strip scheme for fs.s3a.endpoint, and set SSL flag accordingly
+                String ep = endpoint.trim();
+                boolean https = false;
+                if (ep.startsWith("http://")) {
+                    ep = ep.substring("http://".length());
+                } else if (ep.startsWith("https://")) {
+                    ep = ep.substring("https://".length());
+                    https = true;
+                }
+                conf.set("fs.s3a.endpoint", ep);
+                conf.setBoolean("fs.s3a.connection.ssl.enabled", https);
+            }
+            if (accessKey != null) {
+                conf.set("fs.s3a.access.key", accessKey);
+            }
+            if (secretKey != null) {
+                conf.set("fs.s3a.secret.key", secretKey);
+            }
+            if (region != null && !region.isEmpty()) {
+                conf.set("fs.s3a.region", region);
+            }
+            // Path-style access is typically needed for MinIO
+            conf.setBoolean("fs.s3a.path.style.access", true);
+            // Use simple static credentials to avoid picking up instance profiles accidentally
+            conf.set("fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider");
+        }
+        return conf;
     }
 
     /**
@@ -188,25 +231,25 @@ public class PaimonService implements Closeable {
 
         // Get all tables in database
         List<String> allTables = catalog.listTables(database);
-        
+
         // Filter tables if specific names provided
         if (tableNames != null && !tableNames.isEmpty()) {
             allTables.retainAll(tableNames);
         }
-        
+
         // Load schema for each table
         for (String tableName : allTables) {
             try {
                 Identifier identifier = Identifier.create(database, tableName);
                 Table paimonTable = catalog.getTable(identifier);
-                
+
                 TapTable tapTable = convertToTapTable(tableName, paimonTable);
                 tables.add(tapTable);
             } catch (Exception e) {
                 // Skip tables that cannot be loaded
             }
         }
-        
+
         return tables;
     }
 
@@ -219,7 +262,7 @@ public class PaimonService implements Closeable {
      */
     private TapTable convertToTapTable(String tableName, Table paimonTable) {
         TapTable tapTable = new TapTable(tableName);
-        
+
         // Convert fields
         List<DataField> fields = paimonTable.rowType().getFields();
         for (DataField field : fields) {
@@ -227,7 +270,7 @@ public class PaimonService implements Closeable {
             tapField.setNullable(field.type().isNullable());
             tapTable.add(tapField);
         }
-        
+
         // Set primary keys
         List<String> primaryKeys = paimonTable.primaryKeys();
         if (primaryKeys != null && !primaryKeys.isEmpty()) {
@@ -236,7 +279,7 @@ public class PaimonService implements Closeable {
                 .unique(true)
                 .primary(true));
         }
-        
+
         return tapTable;
     }
 
@@ -796,7 +839,8 @@ public class PaimonService implements Closeable {
         String database = config.getDatabase();
         Identifier identifier = Identifier.create(database, table.getName());
         GenericRow row = convertToGenericRow(after, table, identifier);
-        writer.write(row);
+        int bucket = selectBucketForDynamic(after, table);
+        writer.write(row, bucket);
     }
 
     /**
@@ -814,7 +858,8 @@ public class PaimonService implements Closeable {
         String database = config.getDatabase();
         Identifier identifier = Identifier.create(database, table.getName());
         GenericRow row = convertToGenericRow(after, table, identifier);
-        writer.write(row);
+        int bucket = selectBucketForDynamic(after, table);
+        writer.write(row, bucket);
     }
 
     /**
@@ -832,7 +877,40 @@ public class PaimonService implements Closeable {
         GenericRow row = convertToGenericRow(before, table, identifier);
         // Set row kind to DELETE
         row.setRowKind(org.apache.paimon.types.RowKind.DELETE);
-        writer.write(row);
+        int bucket = selectBucketForDynamic(before, table);
+        writer.write(row, bucket);
+    }
+
+    /**
+     * Select deterministic bucket for dynamic-bucket tables.
+     * Use primary keys if present; otherwise hash all fields (sorted by name).
+     */
+    private int selectBucketForDynamic(Map<String, Object> data, TapTable table) {
+        int hint = (config.getBucketCount() != null && config.getBucketCount() > 0) ? config.getBucketCount() : 4;
+        int hash = 0;
+        Collection<String> pks = table.primaryKeys();
+        if (pks != null && !pks.isEmpty()) {
+            for (String key : pks) {
+                Object v = data.get(key);
+                hash = 31 * hash + (v == null ? 0 : v.hashCode());
+            }
+        } else {
+            Map<String, TapField> fields = table.getNameFieldMap();
+            if (fields != null && !fields.isEmpty()) {
+                List<String> names = new ArrayList<>(fields.keySet());
+                Collections.sort(names);
+                for (String name : names) {
+                    Object v = data.get(name);
+                    hash = 31 * hash + (v == null ? 0 : v.hashCode());
+                }
+            } else {
+                for (Map.Entry<String, Object> e : data.entrySet()) {
+                    Object v = e.getValue();
+                    hash = 31 * hash + (v == null ? 0 : v.hashCode());
+                }
+            }
+        }
+        return Math.floorMod(hash, hint);
     }
 
     /**
