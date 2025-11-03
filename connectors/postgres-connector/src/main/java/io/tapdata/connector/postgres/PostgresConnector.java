@@ -1212,7 +1212,7 @@ public class PostgresConnector extends CommonDbConnector {
             fieldList.add(field);
         });
         index.setUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isUnique")))));
-        index.setCoreUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isCoreUnique")))));
+//        index.setCoreUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isCoreUnique")))));
         index.setPrimary(value.stream().anyMatch(v -> ("1".equals(v.getString("isPk")))));
         index.setIndexFields(fieldList);
         return index;
