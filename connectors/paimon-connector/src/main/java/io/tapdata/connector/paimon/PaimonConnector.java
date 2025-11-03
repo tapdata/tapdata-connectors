@@ -57,9 +57,11 @@ public class PaimonConnector extends ConnectorBase {
         
         // Load configuration
         paimonConfig = new PaimonConfig().load(connectionConfig);
-        nodeConfig.remove("database");
-        paimonConfig.load(nodeConfig);
-        
+        if (MapUtils.isNotEmpty(nodeConfig)) {
+            nodeConfig.remove("database");
+            paimonConfig.load(nodeConfig);
+        }
+
         // Initialize Paimon service
         paimonService = new PaimonService(paimonConfig);
         paimonService.init();
@@ -99,8 +101,6 @@ public class PaimonConnector extends ConnectorBase {
             onStart(connectionContext);
             
             // Test warehouse accessibility
-            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, 
-                "Testing warehouse connection..."));
             
             boolean warehouseAccessible = paimonService.testWarehouseAccess();
             if (warehouseAccessible) {
@@ -113,9 +113,6 @@ public class PaimonConnector extends ConnectorBase {
             }
             
             // Test write permission
-            consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, 
-                "Testing write permission..."));
-            
             boolean canWrite = paimonService.testWritePermission();
             if (canWrite) {
                 consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, 
