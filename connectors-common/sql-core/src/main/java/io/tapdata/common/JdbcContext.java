@@ -54,6 +54,11 @@ public abstract class JdbcContext implements AutoCloseable {
         }
     }
 
+    public Connection getOriginConnection() throws Exception {
+        Class.forName(config.getJdbcDriver());
+        return DriverManager.getConnection(config.getDatabaseUrl(), config.getUser(), config.getPassword());
+    }
+
     /**
      * query version of database
      *
