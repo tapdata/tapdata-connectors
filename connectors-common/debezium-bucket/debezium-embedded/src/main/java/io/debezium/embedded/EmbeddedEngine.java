@@ -788,7 +788,7 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
                             try {
                                 LOGGER.debug("Embedded engine is polling task for records on thread {}", runningThread.get());
                                 changeRecords = task.poll(); // blocks until there are values ...
-                                if((firstStart && !changeRecords.isEmpty()) || (firstStart && count >= 5)){
+                                if(firstStart && (!changeRecords.isEmpty() || count >= 5)){
                                     connectorCallback.ifPresent(DebeziumEngine.ConnectorCallback::taskStarted);
                                     firstStart = false;
                                 }else if(firstStart){
