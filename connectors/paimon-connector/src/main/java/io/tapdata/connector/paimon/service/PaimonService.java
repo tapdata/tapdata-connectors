@@ -33,6 +33,7 @@ import org.apache.paimon.types.DataTypes;
 
 import java.io.Closeable;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Service class for Paimon operations
@@ -46,8 +47,69 @@ public class PaimonService implements Closeable {
     // Note: Both BatchTableWrite and BatchTableCommit only support one-time committing
     // We don't cache them and create new instances for each write operation
 
+    // Lightweight schema cache per table to avoid repeated catalog and type lookups
+    private final Map<String, TableSchemaCache> schemaCache = new ConcurrentHashMap<>();
+
     public PaimonService(PaimonConfig config) {
         this.config = config;
+    }
+
+    /**
+     * Cached schema info for fast value conversion and hashing.
+     */
+    private static final class TableSchemaCache {
+        final String[] fieldNamesInOrder;      // Paimon rowType order
+        final DataType[] fieldTypesInOrder;    // Parallel to fieldNamesInOrder
+        final List<String> primaryKeys;        // From table metadata
+        final String[] sortedFieldNamesForHash;// For hashing when no PK
+
+        TableSchemaCache(String[] fieldNamesInOrder,
+                         DataType[] fieldTypesInOrder,
+                         List<String> primaryKeys,
+                         String[] sortedFieldNamesForHash) {
+            this.fieldNamesInOrder = fieldNamesInOrder;
+            this.fieldTypesInOrder = fieldTypesInOrder;
+            this.primaryKeys = primaryKeys;
+            this.sortedFieldNamesForHash = sortedFieldNamesForHash;
+        }
+    }
+
+    private String cacheKey(Identifier identifier) {
+        return identifier.getDatabaseName() + "." + identifier.getObjectName();
+    }
+
+    private TableSchemaCache getOrCreateSchemaCache(Identifier identifier, TapTable tapTable) throws Exception {
+        final String key = cacheKey(identifier);
+        TableSchemaCache cached = schemaCache.get(key);
+        if (cached != null) return cached;
+
+        Table paimonTable = catalog.getTable(identifier);
+        List<DataField> paimonFields = paimonTable.rowType().getFields();
+        int n = paimonFields.size();
+        String[] names = new String[n];
+        DataType[] types = new DataType[n];
+        for (int i = 0; i < n; i++) {
+            DataField f = paimonFields.get(i);
+            names[i] = f.name();
+            types[i] = f.type();
+        }
+        List<String> pks = paimonTable.primaryKeys() == null ? Collections.emptyList() : new ArrayList<>(paimonTable.primaryKeys());
+
+        // Build sorted field names for hash when no PK
+        String[] sortedForHash;
+        if (tapTable != null && tapTable.getNameFieldMap() != null && !tapTable.getNameFieldMap().isEmpty()) {
+            List<String> all = new ArrayList<>(tapTable.getNameFieldMap().keySet());
+            Collections.sort(all);
+            sortedForHash = all.toArray(new String[0]);
+        } else {
+            String[] copy = Arrays.copyOf(names, names.length);
+            Arrays.sort(copy);
+            sortedForHash = copy;
+        }
+
+        TableSchemaCache built = new TableSchemaCache(names, types, pks, sortedForHash);
+        schemaCache.put(key, built);
+        return built;
     }
 
     /**
@@ -468,6 +530,8 @@ public class PaimonService implements Closeable {
             catalog.getTable(identifier);
             // Table exists, proceed to drop
             catalog.dropTable(identifier, true);
+            // Invalidate schema cache for this table
+            schemaCache.remove(cacheKey(identifier));
         } catch (Catalog.TableNotExistException e) {
             // Table does not exist, do nothing
         }
@@ -527,6 +591,8 @@ public class PaimonService implements Closeable {
 
         catalog.dropTable(identifier, true);
         catalog.createTable(identifier, schema, false);
+        // Invalidate schema cache for this table in case schema/options changed
+        schemaCache.remove(cacheKey(identifier));
     }
 
     /**
@@ -623,13 +689,13 @@ public class PaimonService implements Closeable {
         try {
             for (TapRecordEvent event : recordEvents) {
                 if (event instanceof TapInsertRecordEvent) {
-                    handleBatchInsert((TapInsertRecordEvent) event, writer, table);
+                    handleBatchInsert((TapInsertRecordEvent) event, writer, table, identifier);
                     result.incrementInserted(1);
                 } else if (event instanceof TapUpdateRecordEvent) {
-                    handleBatchUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy);
+                    handleBatchUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy, identifier);
                     result.incrementModified(1);
                 } else if (event instanceof TapDeleteRecordEvent) {
-                    handleBatchDelete((TapDeleteRecordEvent) event, writer, table);
+                    handleBatchDelete((TapDeleteRecordEvent) event, writer, table, identifier);
                     result.incrementRemove(1);
                 }
             }
@@ -682,13 +748,13 @@ public class PaimonService implements Closeable {
         try {
             for (TapRecordEvent event : recordEvents) {
                 if (event instanceof TapInsertRecordEvent) {
-                    handleStreamInsert((TapInsertRecordEvent) event, writer, table);
+                    handleStreamInsert((TapInsertRecordEvent) event, writer, table, identifier);
                     result.incrementInserted(1);
                 } else if (event instanceof TapUpdateRecordEvent) {
-                    handleStreamUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy);
+                    handleStreamUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy, identifier);
                     result.incrementModified(1);
                 } else if (event instanceof TapDeleteRecordEvent) {
-                    handleStreamDelete((TapDeleteRecordEvent) event, writer, table);
+                    handleStreamDelete((TapDeleteRecordEvent) event, writer, table, identifier);
                     result.incrementRemove(1);
                 }
             }
@@ -782,10 +848,8 @@ public class PaimonService implements Closeable {
      * @param table table definition
      * @throws Exception if insert fails
      */
-    private void handleBatchInsert(TapInsertRecordEvent event, BatchTableWrite writer, TapTable table) throws Exception {
+    private void handleBatchInsert(TapInsertRecordEvent event, BatchTableWrite writer, TapTable table, Identifier identifier) throws Exception {
         Map<String, Object> after = event.getAfter();
-        String database = config.getDatabase();
-        Identifier identifier = Identifier.create(database, table.getName());
         GenericRow row = convertToGenericRow(after, table, identifier);
         writer.write(row);
     }
@@ -800,10 +864,8 @@ public class PaimonService implements Closeable {
      * @throws Exception if update fails
      */
     private void handleBatchUpdate(TapUpdateRecordEvent event, BatchTableWrite writer,
-                                    TapTable table, String updatePolicy) throws Exception {
+                                    TapTable table, String updatePolicy, Identifier identifier) throws Exception {
         Map<String, Object> after = event.getAfter();
-        String database = config.getDatabase();
-        Identifier identifier = Identifier.create(database, table.getName());
         GenericRow row = convertToGenericRow(after, table, identifier);
         writer.write(row);
     }
@@ -816,10 +878,8 @@ public class PaimonService implements Closeable {
      * @param table table definition
      * @throws Exception if delete fails
      */
-    private void handleBatchDelete(TapDeleteRecordEvent event, BatchTableWrite writer, TapTable table) throws Exception {
+    private void handleBatchDelete(TapDeleteRecordEvent event, BatchTableWrite writer, TapTable table, Identifier identifier) throws Exception {
         Map<String, Object> before = event.getBefore();
-        String database = config.getDatabase();
-        Identifier identifier = Identifier.create(database, table.getName());
         GenericRow row = convertToGenericRow(before, table, identifier);
         // Set row kind to DELETE
         row.setRowKind(org.apache.paimon.types.RowKind.DELETE);
@@ -834,10 +894,8 @@ public class PaimonService implements Closeable {
      * @param table table definition
      * @throws Exception if insert fails
      */
-    private void handleStreamInsert(TapInsertRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
+    private void handleStreamInsert(TapInsertRecordEvent event, StreamTableWrite writer, TapTable table, Identifier identifier) throws Exception {
         Map<String, Object> after = event.getAfter();
-        String database = config.getDatabase();
-        Identifier identifier = Identifier.create(database, table.getName());
         GenericRow row = convertToGenericRow(after, table, identifier);
         int bucket = selectBucketForDynamic(after, table);
         writer.write(row, bucket);
@@ -853,10 +911,8 @@ public class PaimonService implements Closeable {
      * @throws Exception if update fails
      */
     private void handleStreamUpdate(TapUpdateRecordEvent event, StreamTableWrite writer,
-                                     TapTable table, String updatePolicy) throws Exception {
+                                     TapTable table, String updatePolicy, Identifier identifier) throws Exception {
         Map<String, Object> after = event.getAfter();
-        String database = config.getDatabase();
-        Identifier identifier = Identifier.create(database, table.getName());
         GenericRow row = convertToGenericRow(after, table, identifier);
         int bucket = selectBucketForDynamic(after, table);
         writer.write(row, bucket);
@@ -870,10 +926,8 @@ public class PaimonService implements Closeable {
      * @param table table definition
      * @throws Exception if delete fails
      */
-    private void handleStreamDelete(TapDeleteRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
+    private void handleStreamDelete(TapDeleteRecordEvent event, StreamTableWrite writer, TapTable table, Identifier identifier) throws Exception {
         Map<String, Object> before = event.getBefore();
-        String database = config.getDatabase();
-        Identifier identifier = Identifier.create(database, table.getName());
         GenericRow row = convertToGenericRow(before, table, identifier);
         // Set row kind to DELETE
         row.setRowKind(org.apache.paimon.types.RowKind.DELETE);
@@ -887,30 +941,31 @@ public class PaimonService implements Closeable {
      */
     private int selectBucketForDynamic(Map<String, Object> data, TapTable table) {
         int hint = (config.getBucketCount() != null && config.getBucketCount() > 0) ? config.getBucketCount() : 4;
-        int hash = 0;
-        Collection<String> pks = table.primaryKeys();
-        if (pks != null && !pks.isEmpty()) {
-            for (String key : pks) {
-                Object v = data.get(key);
-                hash = 31 * hash + (v == null ? 0 : v.hashCode());
-            }
-        } else {
-            Map<String, TapField> fields = table.getNameFieldMap();
-            if (fields != null && !fields.isEmpty()) {
-                List<String> names = new ArrayList<>(fields.keySet());
-                Collections.sort(names);
+        try {
+            Identifier identifier = Identifier.create(config.getDatabase(), table.getName());
+            TableSchemaCache cache = getOrCreateSchemaCache(identifier, table);
+            int hash = 0;
+            if (cache.primaryKeys != null && !cache.primaryKeys.isEmpty()) {
+                for (String key : cache.primaryKeys) {
+                    Object v = data.get(key);
+                    hash = 31 * hash + (v == null ? 0 : v.hashCode());
+                }
+            } else {
+                String[] names = cache.sortedFieldNamesForHash;
                 for (String name : names) {
                     Object v = data.get(name);
                     hash = 31 * hash + (v == null ? 0 : v.hashCode());
                 }
-            } else {
-                for (Map.Entry<String, Object> e : data.entrySet()) {
-                    Object v = e.getValue();
-                    hash = 31 * hash + (v == null ? 0 : v.hashCode());
-                }
             }
+            return Math.floorMod(hash, hint);
+        } catch (Exception ignore) {
+            int hash = 0;
+            for (Map.Entry<String, Object> e : data.entrySet()) {
+                Object v = e.getValue();
+                hash = 31 * hash + (v == null ? 0 : v.hashCode());
+            }
+            return Math.floorMod(hash, hint);
         }
-        return Math.floorMod(hash, hint);
     }
 
     /**
@@ -923,32 +978,15 @@ public class PaimonService implements Closeable {
      * @throws Exception if conversion fails
      */
     private GenericRow convertToGenericRow(Map<String, Object> data, TapTable table, Identifier identifier) throws Exception {
-        // Get Paimon table to access actual field types
-        Table paimonTable = catalog.getTable(identifier);
-        List<DataField> paimonFields = paimonTable.rowType().getFields();
-
-        Map<String, TapField> tapFields = table.getNameFieldMap();
-        int fieldCount = tapFields.size();
-        Object[] values = new Object[fieldCount];
-
-        int index = 0;
-        for (Map.Entry<String, TapField> entry : tapFields.entrySet()) {
-            String fieldName = entry.getKey();
+        // Use cached schema (field order and types) to avoid repeated catalog calls and scans
+        TableSchemaCache cache = getOrCreateSchemaCache(identifier, table);
+        int n = cache.fieldNamesInOrder.length;
+        Object[] values = new Object[n];
+        for (int i = 0; i < n; i++) {
+            String fieldName = cache.fieldNamesInOrder[i];
             Object value = data.get(fieldName);
-
-            // Get corresponding Paimon field type
-            DataType paimonType = null;
-            for (DataField paimonField : paimonFields) {
-                if (paimonField.name().equals(fieldName)) {
-                    paimonType = paimonField.type();
-                    break;
-                }
-            }
-
-            // Convert value to Paimon-compatible type
-            values[index++] = convertValueToPaimonType(value, paimonType);
+            values[i] = convertValueToPaimonType(value, cache.fieldTypesInOrder[i]);
         }
-
         return GenericRow.of(values);
     }
 
@@ -966,6 +1004,37 @@ public class PaimonService implements Closeable {
 
         // Get the type root for comparison (ignores nullable attribute)
         String typeString = paimonType.toString().toUpperCase();
+
+        // Handle DECIMAL type
+        if (typeString.contains("DECIMAL")) {
+            int precision = 38;
+            int scale = 10;
+            try {
+                if (paimonType instanceof org.apache.paimon.types.DecimalType) {
+                    org.apache.paimon.types.DecimalType dt = (org.apache.paimon.types.DecimalType) paimonType;
+                    precision = dt.getPrecision();
+                    scale = dt.getScale();
+                }
+            } catch (Throwable ignore) {
+            }
+
+            if (value instanceof org.apache.paimon.data.Decimal) {
+                return value;
+            }
+
+            java.math.BigDecimal bd;
+            if (value instanceof java.math.BigDecimal) {
+                bd = (java.math.BigDecimal) value;
+            } else if (value instanceof Number) {
+                bd = new java.math.BigDecimal(String.valueOf(value));
+            } else if (value instanceof String) {
+                bd = new java.math.BigDecimal((String) value);
+            } else {
+                bd = new java.math.BigDecimal(String.valueOf(value));
+            }
+
+            return org.apache.paimon.data.Decimal.fromBigDecimal(bd, precision, scale);
+        }
 
         // Handle STRING type - convert to BinaryString
         if (typeString.contains("STRING") || typeString.contains("VARCHAR") || typeString.contains("CHAR")) {
