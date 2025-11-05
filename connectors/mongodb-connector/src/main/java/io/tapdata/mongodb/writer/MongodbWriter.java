@@ -23,6 +23,7 @@ import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.mongodb.writer.error.BulkWriteErrorCodeHandlerEnum;
+import io.tapdata.mongodb.writer.error.IgnoreWriteModel;
 import io.tapdata.mongodb.writer.error.TapMongoBulkWriteException;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -167,7 +168,7 @@ public class MongodbWriter {
 					try {
 						String dumpPath = dumpBulkWriteErrorContext(e, bulkWriteModel, bulkWriteOptions, collection);
 						if (dumpPath != null) {
-							tapLogger.warn("MongoDB bulk write error context saved to file: {}", dumpPath);
+							tapLogger.info("MongoDB bulk write error context saved to file: {}", dumpPath);
 						}
 					} catch (Throwable ignored) {
 						// Never affect main flow
@@ -255,6 +256,8 @@ public class MongodbWriter {
 		List<BulkWriteError> cantHandleErrors = new ArrayList<>();
 		List<WriteModel<Document>> retryWriteModels = new ArrayList<>();
 		List<Integer> handledIndexes = new ArrayList<>();
+		List<Integer> ignoredIndexes = new ArrayList<>();
+
 		for (BulkWriteError writeError : writeErrors) {
 			int code = writeError.getCode();
 			int index = writeError.getIndex();
@@ -267,8 +270,12 @@ public class MongodbWriter {
 				} catch (Exception ignored) {
 				}
 				if (null != retryWriteModel) {
-					retryWriteModels.add(retryWriteModel);
 					handledIndexes.add(index);
+					if (retryWriteModel == IgnoreWriteModel.INSTANCE) {
+						ignoredIndexes.add(index);
+					} else {
+						retryWriteModels.add(retryWriteModel);
+					}
 				} else {
 					cantHandleErrors.add(writeError);
 				}
@@ -298,8 +305,13 @@ public class MongodbWriter {
 						continue;
 					}
 					if (handledIndexes.contains(i)) {
-						newWriteModelList.add(retryWriteModels.get(0));
-						retryWriteModels.remove(0);
+						if (ignoredIndexes.contains(i)) {
+							// skip ignored index
+							continue;
+						} else {
+							newWriteModelList.add(retryWriteModels.get(0));
+							retryWriteModels.remove(0);
+						}
 					} else {
 						newWriteModelList.add(bulkWriteModel.getAllOpWriteModels().get(i));
 					}
