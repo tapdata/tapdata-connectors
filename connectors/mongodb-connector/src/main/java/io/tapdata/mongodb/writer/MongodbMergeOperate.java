@@ -86,6 +86,7 @@ public class MongodbMergeOperate {
 								break;
 							case UPDATE:
 								writeModels.add(new UpdateManyModel<>(mergeResult.getFilter(), mergeResult.getUpdate(), mergeResult.getUpdateOptions()));
+								writeModels.add(new UpdateManyModel<>(mergeResult.getFilter(), mergeResult.getUpdate(), mergeResult.getUpdateOptions()));
 								break;
 							case DELETE:
 								writeModels.add(new DeleteOneModel<>(mergeResult.getFilter()));
