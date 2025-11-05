@@ -770,8 +770,10 @@ public class MongodbMergeOperate {
 				String unsetKey = key;
 				if (EmptyKit.isNotEmpty(targetPath)) {
 					unsetKey = String.join(".", targetPath, key);
+					unsetDoc.append(unsetKey, true);
+				}else if(!unsetKey.equals("_id")){
+					unsetDoc.append(unsetKey, true);
 				}
-				unsetDoc.append(unsetKey, true);
 			});
 			unsetDoc.keySet().removeIf(key -> isShareJoinKey(sharedJoinKeys, key));
 		}

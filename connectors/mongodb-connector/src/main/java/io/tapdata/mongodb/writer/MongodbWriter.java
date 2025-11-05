@@ -32,6 +32,13 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.bson.Document;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -54,7 +61,7 @@ public class MongodbWriter {
 	private final Log tapLogger;
 
 	private boolean is_cloud;
-	private final Map<String,Set<String>> shardKeyMap;
+	private final Map<String, Set<String>> shardKeyMap;
 	private String insertPolicy;
 	private String updatePolicy;
 
@@ -128,6 +135,8 @@ public class MongodbWriter {
 
 		BulkWriteOptions bulkWriteOptions;
 		AtomicReference<RuntimeException> mongoBulkWriteException = new AtomicReference<>();
+		boolean errorContextDumped = false;
+
 		while (!bulkWriteModel.isEmpty()) {
 			bulkWriteOptions = buildBulkWriteOptions(bulkWriteModel);
 			try {
@@ -139,6 +148,18 @@ public class MongodbWriter {
 				}
 				bulkWriteModel.clearAll();
 			} catch (MongoBulkWriteException e) {
+				// Dump error context only once per batch to avoid duplicate files across retries.
+				if (!errorContextDumped) {
+					try {
+						String dumpPath = dumpBulkWriteErrorContext(e, bulkWriteModel, bulkWriteOptions, collection);
+						if (dumpPath != null) {
+							tapLogger.warn("MongoDB bulk write error context saved to file: {}", dumpPath);
+						}
+					} catch (Throwable ignored) {
+						// Never affect main flow
+					}
+					errorContextDumped = true;
+				}
 				Consumer<RuntimeException> errorConsumer = mongoBulkWriteException::set;
 				if (!handleBulkWriteError(e, bulkWriteModel, bulkWriteOptions, collection, errorConsumer)) {
 					if (null != mongoBulkWriteException.get()) {
@@ -204,17 +225,17 @@ public class MongodbWriter {
 			tapLogger.info("update record ignored: {}", tapRecordEvent);
 		}
 		writeListResultConsumer.accept(writeListResult
-			.insertedCount(0)
-			.modifiedCount(1)
-			.removedCount(0));
+				.insertedCount(0)
+				.modifiedCount(1)
+				.removedCount(0));
 	}
 
 	private boolean handleBulkWriteError(
-		MongoBulkWriteException originMongoBulkWriteException,
-		BulkWriteModel bulkWriteModel,
-		BulkWriteOptions bulkWriteOptions,
-		MongoCollection<Document> collection,
-		Consumer<RuntimeException> errorConsumer
+			MongoBulkWriteException originMongoBulkWriteException,
+			BulkWriteModel bulkWriteModel,
+			BulkWriteOptions bulkWriteOptions,
+			MongoCollection<Document> collection,
+			Consumer<RuntimeException> errorConsumer
 	) {
 		List<BulkWriteError> writeErrors = originMongoBulkWriteException.getWriteErrors();
 		List<BulkWriteError> cantHandleErrors = new ArrayList<>();
@@ -244,11 +265,11 @@ public class MongodbWriter {
 		if (CollectionUtils.isNotEmpty(cantHandleErrors)) {
 			// Keep errors that cannot handle
 			MongoBulkWriteException mongoBulkWriteException = new MongoBulkWriteException(
-				originMongoBulkWriteException.getWriteResult(),
-				cantHandleErrors,
-				originMongoBulkWriteException.getWriteConcernError(),
-				originMongoBulkWriteException.getServerAddress(),
-				originMongoBulkWriteException.getErrorLabels()
+					originMongoBulkWriteException.getWriteResult(),
+					cantHandleErrors,
+					originMongoBulkWriteException.getWriteConcernError(),
+					originMongoBulkWriteException.getServerAddress(),
+					originMongoBulkWriteException.getErrorLabels()
 			);
 			List<WriteModel<Document>> errorWriteModels = new ArrayList<>();
 			cantHandleErrors.forEach(writeError -> errorWriteModels.add(bulkWriteModel.getWriteModels().get(writeError.getIndex())));
@@ -276,6 +297,159 @@ public class MongodbWriter {
 				retryWriteModels.forEach(bulkWriteModel::addAnyOpModel);
 			}
 			return true;
+		}
+	}
+
+	protected String dumpBulkWriteErrorContext(MongoBulkWriteException ex,
+											   BulkWriteModel bulkWriteModel,
+											   BulkWriteOptions bulkWriteOptions,
+											   MongoCollection<Document> collection) {
+		try {
+			String thread = Thread.currentThread().getName();
+			String ns = collection != null ? collection.getNamespace().getFullName() : "unknown";
+			String database = collection != null ? collection.getNamespace().getDatabaseName() : "unknown";
+			String collectionName = collection != null ? collection.getNamespace().getCollectionName() : "unknown";
+			String sanitizedThread = thread.replaceAll("[^a-zA-Z0-9_.-]", "_");
+			String dateMinute = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm").format(LocalDateTime.now());
+
+			String fileName = "mongodb_bulk_write_error_" + dateMinute + "_" + sanitizedThread + ".log";
+			String baseTmp = System.getProperty("java.io.tmpdir", ".");
+			Path dir = Paths.get(baseTmp, "tapdata-mongodb-errors");
+			String content = buildBulkWriteErrorContent(ex, bulkWriteModel, bulkWriteOptions, ns, database, collectionName, thread, dateMinute);
+			try {
+				Files.createDirectories(dir);
+				Path filePath = dir.resolve(fileName);
+				Files.write(filePath, content.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+				return filePath.toAbsolutePath().toString();
+			} catch (Throwable t1) {
+				// Fallback to current working directory
+				String userDir = System.getProperty("user.dir", ".");
+				Path fallbackDir = Paths.get(userDir, "tapdata-mongodb-errors");
+				try {
+					Files.createDirectories(fallbackDir);
+					Path filePath = fallbackDir.resolve(fileName);
+					Files.write(filePath, content.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+					return filePath.toAbsolutePath().toString();
+				} catch (Throwable ignored) {
+					return null;
+				}
+			}
+		} catch (Throwable ignored) {
+			return null;
+		}
+	}
+
+	private String buildBulkWriteErrorContent(MongoBulkWriteException ex,
+											  BulkWriteModel bulkWriteModel,
+											  BulkWriteOptions bulkWriteOptions,
+											  String namespace,
+											  String database,
+											  String collectionName,
+											  String thread,
+											  String dateMinute) {
+		StringBuilder sb = new StringBuilder(8192);
+		sb.append("==== MongoDB Bulk Write Error Dump ====")
+				.append('\n');
+		sb.append("dateMinute=").append(dateMinute).append(" thread=").append(thread).append('\n');
+		sb.append("database=").append(database).append(" collection=").append(collectionName).append('\n');
+		sb.append("namespace=").append(namespace).append('\n');
+		sb.append("bulkWriteOptions.ordered=").append(bulkWriteOptions != null && bulkWriteOptions.isOrdered()).append('\n');
+		sb.append("bulkWriteOptions.toString=").append(bulkWriteOptions).append('\n');
+		Map<Integer, List<BulkWriteError>> errorByIndex = new HashMap<>();
+
+		if (ex != null) {
+			sb.append("exceptionClass=").append(ex.getClass().getName()).append('\n');
+			sb.append("exceptionMessage=").append(ex.getMessage()).append('\n');
+			sb.append("serverAddress=").append(ex.getServerAddress()).append('\n');
+			sb.append("writeConcernError=").append(ex.getWriteConcernError()).append('\n');
+			List<BulkWriteError> errs = ex.getWriteErrors();
+			if (errs != null && !errs.isEmpty()) {
+				for (BulkWriteError we : errs) {
+					errorByIndex.computeIfAbsent(we.getIndex(), k -> new ArrayList<>()).add(we);
+				}
+			}
+			if (!errs.isEmpty()) {
+				sb.append("writeErrors(size=").append(errs.size()).append("):").append('\n');
+				for (int i = 0; i < errs.size(); i++) {
+					BulkWriteError we = errs.get(i);
+					sb.append("  [").append(i).append("] index=").append(we.getIndex())
+							.append(" code=").append(we.getCode())
+							.append(" message=").append(we.getMessage())
+							.append(" details=").append(we.getDetails())
+							.append('\n');
+				}
+			}
+		}
+		// Dump write models
+		try {
+			List<WriteModel<Document>> allOps = bulkWriteModel != null ? bulkWriteModel.getAllOpWriteModels() : null;
+			List<WriteModel<Document>> onlyInserts = bulkWriteModel != null ? bulkWriteModel.getOnlyInsertWriteModels() : null;
+			if (allOps != null) {
+				sb.append("allOpWriteModels(size=").append(allOps.size()).append("):").append('\n');
+				for (int i = 0; i < allOps.size(); i++) {
+					sb.append("  [").append(i).append("] ").append(describeWriteModel(allOps.get(i))).append('\n');
+					List<BulkWriteError> idxErrs = errorByIndex.get(i);
+					if (idxErrs != null && !idxErrs.isEmpty()) {
+						for (BulkWriteError we : idxErrs) {
+							sb.append("    -> error index=").append(we.getIndex())
+									.append(" code=").append(we.getCode())
+									.append(" message=").append(we.getMessage())
+									.append(" details=").append(we.getDetails())
+									.append('\n');
+						}
+					}
+				}
+			}
+			if (onlyInserts != null) {
+				sb.append("onlyInsertWriteModels(size=").append(onlyInserts.size()).append("):").append('\n');
+				for (int i = 0; i < onlyInserts.size(); i++) {
+					sb.append("  [").append(i).append("] ").append(describeWriteModel(onlyInserts.get(i))).append('\n');
+				}
+			}
+		} catch (Throwable ignored) {
+			// ignore model rendering errors
+		}
+		sb.append("==== END ====").append('\n');
+		return sb.toString();
+	}
+
+
+	private String describeWriteModel(WriteModel<Document> model) {
+		if (model == null) return "null";
+		try {
+			if (model instanceof InsertOneModel) {
+				InsertOneModel<Document> m = (InsertOneModel<Document>) model;
+				return "InsertOneModel document=" + safeToJson(m.getDocument());
+			} else if (model instanceof UpdateOneModel) {
+				UpdateOneModel<Document> m = (UpdateOneModel<Document>) model;
+				return "UpdateOneModel filter=" + safeToJson(m.getFilter()) + " update=" + safeToJson(m.getUpdate()) + " options=" + m.getOptions();
+			} else if (model instanceof UpdateManyModel) {
+				UpdateManyModel<Document> m = (UpdateManyModel<Document>) model;
+				return "UpdateManyModel filter=" + safeToJson(m.getFilter()) + " update=" + safeToJson(m.getUpdate()) + " options=" + m.getOptions();
+			} else if (model instanceof ReplaceOneModel) {
+				ReplaceOneModel<Document> m = (ReplaceOneModel<Document>) model;
+				return "ReplaceOneModel filter=" + safeToJson(m.getFilter()) + " replacement=" + safeToJson(m.getReplacement()) + " options=" + m.getReplaceOptions();
+			} else if (model instanceof DeleteOneModel) {
+				DeleteOneModel<Document> m = (DeleteOneModel<Document>) model;
+				return "DeleteOneModel filter=" + safeToJson(m.getFilter());
+			} else if (model instanceof DeleteManyModel) {
+				DeleteManyModel<Document> m = (DeleteManyModel<Document>) model;
+				return "DeleteManyModel filter=" + safeToJson(m.getFilter());
+			} else {
+				return String.valueOf(model);
+			}
+		} catch (Throwable t) {
+			return String.valueOf(model);
+		}
+	}
+
+	private String safeToJson(Object obj) {
+		try {
+			if (obj == null) return "null";
+			if (obj instanceof Document) return ((Document) obj).toJson();
+			return String.valueOf(obj);
+		} catch (Throwable ignored) {
+			return String.valueOf(obj);
 		}
 	}
 
@@ -358,20 +532,20 @@ public class MongodbWriter {
 			Collection<String> allColumn = tapTable.getNameFieldMap().keySet();
 			TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
 			Map<String, Object> after = updateRecordEvent.getAfter();
-            Map<String, Object> before = updateRecordEvent.getBefore();
-            before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
-            if (!((TapUpdateRecordEvent) recordEvent).getIsReplaceEvent()) {
-                after = DbKit.getAfterForUpdateMongo(after, before, allColumn, pks);
-            }
+			Map<String, Object> before = updateRecordEvent.getBefore();
+			before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
+			if (!((TapUpdateRecordEvent) recordEvent).getIsReplaceEvent()) {
+				after = DbKit.getAfterForUpdateMongo(after, before, allColumn, pks);
+			}
 			Map<String, Object> info = recordEvent.getInfo();
 			Document pkFilter;
 			Document u = new Document();
 			if (info != null && info.get("$op") != null) {
 				WriteModel<Document> writeModel;
-                Object id = info.get("_id");
-                id = MongodbUtil.convertValue(id);
-                pkFilter = new Document("_id", id);
-                ((Map<String, Object>) info.get("$op")).forEach((k, v) -> u.put(k, MongodbUtil.convertValue(v)));
+				Object id = info.get("_id");
+				id = MongodbUtil.convertValue(id);
+				pkFilter = new Document("_id", id);
+				((Map<String, Object>) info.get("$op")).forEach((k, v) -> u.put(k, MongodbUtil.convertValue(v)));
 				u.remove("$v"); // Exists '$v' in update operation of MongoDB(v3.6), remove it because can't apply in write model.
 				boolean isUpdate = u.keySet().stream().anyMatch(k -> k.startsWith("$"));
 				if (isUpdate) {
@@ -443,9 +617,9 @@ public class MongodbWriter {
 	/**
 	 * 过滤层级字段，保留最高层级的字段
 	 * 例如：[a, a.b, a.c] -> [a]
-	 *      [a.b, a.c] -> [a.b, a.c]
-	 *      [a, a.b, a.b.c] -> [a]
-	 *      [a.b, a.b.c, a.b.e] -> [a.b]
+	 * [a.b, a.c] -> [a.b, a.c]
+	 * [a, a.b, a.b.c] -> [a]
+	 * [a.b, a.b.c, a.b.e] -> [a.b]
 	 */
 	private List<String> filterHierarchicalFields(List<String> fields) {
 		if (CollectionUtils.isEmpty(fields)) {
@@ -482,8 +656,8 @@ public class MongodbWriter {
 	/**
 	 * 判断field是否是parentField的子字段
 	 * 例如：isChildField("a.b", "a") -> true
-	 *      isChildField("a.b.c", "a.b") -> true
-	 *      isChildField("a", "a.b") -> false
+	 * isChildField("a.b.c", "a.b") -> true
+	 * isChildField("a", "a.b") -> false
 	 */
 	private boolean isChildField(String field, String parentField) {
 		return field.startsWith(parentField + ".");
@@ -492,8 +666,8 @@ public class MongodbWriter {
 	/**
 	 * 判断parentField是否是field的父字段
 	 * 例如：isParentField("a", "a.b") -> true
-	 *      isParentField("a.b", "a.b.c") -> true
-	 *      isParentField("a.b", "a") -> false
+	 * isParentField("a.b", "a.b.c") -> true
+	 * isParentField("a.b", "a") -> false
 	 */
 	private boolean isParentField(String parentField, String field) {
 		return field.startsWith(parentField + ".");
