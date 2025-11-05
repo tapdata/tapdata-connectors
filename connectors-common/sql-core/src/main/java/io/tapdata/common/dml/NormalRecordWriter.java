@@ -296,6 +296,24 @@ public class NormalRecordWriter {
             }
         }
     }
+    public NormalRecordWriter setFromCharset(String fromCharset) {
+        insertRecorder.setFromCharset(fromCharset);
+        updateRecorder.setFromCharset(fromCharset);
+        deleteRecorder.setFromCharset(fromCharset);
+        return this;
+    }
+    public NormalRecordWriter setToCharset(String toCharset) {
+        insertRecorder.setToCharset(toCharset);
+        updateRecorder.setToCharset(toCharset);
+        deleteRecorder.setToCharset(toCharset);
+        return this;
+    }
+    public NormalRecordWriter setTargetNeedEncode(boolean targetNeedEncode) {
+        insertRecorder.setTargetNeedEncode(targetNeedEncode);
+        updateRecorder.setTargetNeedEncode(targetNeedEncode);
+        deleteRecorder.setTargetNeedEncode(targetNeedEncode);
+        return this;
+    }
 
     protected String getDisableTriggerSql() {
         return null;

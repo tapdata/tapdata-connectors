@@ -40,6 +40,9 @@ public abstract class NormalWriteRecorder {
     protected final List<String> uniqueCondition;
     protected final Map<String, String> columnTypeMap;
     protected boolean hasPk = false;
+    protected boolean targetNeedEncode = false;
+    protected String fromCharset;
+    protected String toCharset;
 
     protected String version;
     protected WritePolicyEnum insertPolicy;
@@ -514,6 +517,17 @@ public abstract class NormalWriteRecorder {
         return value;
     }
 
+
+    public void setTargetNeedEncode(boolean targetNeedEncode) {
+        this.targetNeedEncode = targetNeedEncode;
+    }
+
+    public void setFromCharset(String fromCharset) {
+        this.fromCharset = fromCharset;
+    }
+    public void setToCharset(String toCharset) {
+        this.toCharset = toCharset;
+    }
     private static final DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS");
     private static final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
 
