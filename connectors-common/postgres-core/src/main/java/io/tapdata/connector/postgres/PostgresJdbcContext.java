@@ -234,18 +234,19 @@ public class PostgresJdbcContext extends JdbcContext {
                     "    pg_class i,\n" +
                     "    pg_index ix,\n" +
                     "    pg_attribute a,\n" +
-                    "    information_schema.tables tt\n" +
+                    "    information_schema.tables tt,\n" +
+                    "    LATERAL generate_subscripts(ix.indkey, 1) AS pos \n" +
                     "WHERE\n" +
                     "        t.oid = ix.indrelid\n" +
                     "  AND i.oid = ix.indexrelid\n" +
                     "  AND a.attrelid = t.oid\n" +
-                    "  AND a.attnum = ANY(ix.indkey)\n" +
+                    "  AND a.attnum = ix.indkey[pos]\n" +
                     "  AND t.relkind IN ('r', 'p')\n" +
                     "  AND tt.table_name=t.relname\n" +
                     "  AND tt.table_schema=(select nspname from pg_namespace where oid=t.relnamespace)\n" +
                     "  AND tt.table_catalog='%s'\n" +
                     "  AND tt.table_schema='%s' %s\n" +
-                    "ORDER BY t.relname, i.relname, a.attnum";
+                    "ORDER BY t.relname, i.relname, pos";
 
     protected final static String PG_ALL_FOREIGN_KEY = "select con.\"constraintName\",con.\"tableName\",con.\"referencesTableName\",con.\"onUpdate\",con.\"onDelete\",\n" +
             "(select column_name from information_schema.columns where table_schema=con.nspname and table_name=con.\"tableName\" and ordinal_position=con.fk) fk,\n" +
