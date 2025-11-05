@@ -758,7 +758,6 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
                         };
                         task.initialize(taskContext);
                         task.start(taskConfigs.get(0));
-                        connectorCallback.ifPresent(DebeziumEngine.ConnectorCallback::taskStarted);
                     }
                     catch (Throwable t) {
                         // Clean-up allocated resources
@@ -779,6 +778,8 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
 
                     recordsSinceLastCommit = 0;
                     Throwable handlerError = null;
+                    boolean firstStart = true;
+                    int count = 0;
                     try {
                         timeOfLastCommitMillis = clock.currentTimeInMillis();
                         RecordCommitter committer = buildRecordCommitter(offsetWriter, task, commitTimeout);
@@ -787,6 +788,12 @@ public final class EmbeddedEngine implements DebeziumEngine<SourceRecord> {
                             try {
                                 LOGGER.debug("Embedded engine is polling task for records on thread {}", runningThread.get());
                                 changeRecords = task.poll(); // blocks until there are values ...
+                                if(firstStart && (!changeRecords.isEmpty() || count >= 5)){
+                                    connectorCallback.ifPresent(DebeziumEngine.ConnectorCallback::taskStarted);
+                                    firstStart = false;
+                                }else if(firstStart){
+                                    count++;
+                                }
                                 LOGGER.debug("Embedded engine returned from polling task for records");
                             }
                             catch (InterruptedException e) {
