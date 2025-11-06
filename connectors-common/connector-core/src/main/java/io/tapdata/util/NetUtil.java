@@ -2,14 +2,9 @@ package io.tapdata.util;
 
 import io.tapdata.kit.EmptyKit;
 
-import java.io.IOException;
-import java.net.InetAddress;
+import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.SocketAddress;
-import java.net.UnixDomainSocketAddress;
-import java.nio.channels.SocketChannel;
-import java.nio.file.Path;
 
 /**
  * @author samuel
@@ -34,14 +29,25 @@ public class NetUtil {
         if (port < 0 || port >= 65536)
             throw new IllegalArgumentException("Port must greater than 0 and smaller then 65536");
         timeoutMs = timeoutMs <= 1000 ? DEFAULT_SOCKET_TIMEOUT_MS : timeoutMs;
-        try {
-            Socket s = new Socket();
-            if(port == 0) {
+        try (Socket s = new Socket()) {
+            if (port == 0) {
                 return;
             } else {
                 s.connect(new InetSocketAddress(host, port), timeoutMs);
             }
-            s.close();
+            s.setSoTimeout(3000);
+            try (
+                    InputStream in = s.getInputStream();
+                    OutputStream out = s.getOutputStream()
+            ) {
+                String request = "GET / HTTP/1.1\r\nHost: " + host + "\r\n\r\n";
+                out.write(request.getBytes());
+                out.flush();
+
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(in))) {
+                    reader.readLine();
+                }
+            }
         } catch (IOException e) {
             throw new IOException("Unable connect to " + host + ":" + port + ", reason: " + e.getMessage(), e);
         }
