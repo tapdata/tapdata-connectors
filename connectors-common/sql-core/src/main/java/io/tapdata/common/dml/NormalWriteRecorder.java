@@ -53,6 +53,7 @@ public abstract class NormalWriteRecorder {
     protected Map<String, PreparedStatement> preparedStatementMap = new HashMap<>();
     protected PreparedStatement preparedStatement = null;
     protected List<String> largeSqlValues;
+    protected LinkedHashMap<String, String> largeSqlValuesMap;
     protected boolean largeSql = false;
     protected DMLType dmlType;
 
@@ -91,6 +92,7 @@ public abstract class NormalWriteRecorder {
         this.largeSql = largeSql;
         if (largeSql) {
             largeSqlValues = new ArrayList<>();
+            largeSqlValuesMap = new LinkedHashMap<>();
         }
     }
 
@@ -122,6 +124,7 @@ public abstract class NormalWriteRecorder {
             try (Statement statement = connection.createStatement()) {
                 statement.execute(getLargeSql());
                 largeSqlValues.clear();
+                largeSqlValuesMap.clear();
                 batchCacheSize = 0;
             }
             atomicLong.addAndGet(succeed);
