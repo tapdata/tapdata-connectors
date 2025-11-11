@@ -13,6 +13,7 @@ import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
@@ -414,6 +415,9 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 }
             }
 
+        }
+        if (null != offsetEvent && offsetEvent.getEvent() instanceof TapRecordEvent) {
+            ((TapRecordEvent) offsetEvent.getEvent()).setExactlyOnceId(event.getResumeToken().toString());
         }
         return offsetEvent;
     }
