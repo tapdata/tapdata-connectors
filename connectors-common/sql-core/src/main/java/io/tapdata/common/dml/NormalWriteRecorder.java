@@ -534,7 +534,7 @@ public abstract class NormalWriteRecorder {
         if (null == obj) {
             result = "null";
         } else if (obj instanceof String) {
-            result = "'" + ((String) obj).replace("\\", "\\\\").replace("'", "\\'").replace("(", "\\(").replace(")", "\\)") + "'";
+            result = transferString((String) obj);
         } else if (obj instanceof Number) {
             result = obj.toString();
         } else if (obj instanceof Date) {
@@ -553,6 +553,10 @@ public abstract class NormalWriteRecorder {
             return "'" + obj + "'";
         }
         return result;
+    }
+
+    protected String transferString(String str) {
+        return "'" + str.replace("\\", "\\\\").replace("'", "''") + "'";
     }
 
     protected String byteArrayToHexString(byte[] bytes) {
