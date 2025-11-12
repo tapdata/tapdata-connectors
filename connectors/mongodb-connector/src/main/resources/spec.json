@@ -24,6 +24,9 @@
 			},
 			{
 				"id": "api_server_supported"
+			},
+			{
+				"id": "source_support_exactly_once"
 			}
 		],
 		"connection": {
