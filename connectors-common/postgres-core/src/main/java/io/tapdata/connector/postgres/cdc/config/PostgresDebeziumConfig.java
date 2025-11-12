@@ -125,13 +125,17 @@ public class PostgresDebeziumConfig {
         if ("pgoutput".equals(postgresConfig.getLogPluginName())) {
             if (postgresConfig.getPartPublication()) {
                 builder.with("publication.autocreate.mode", "filtered");
-                builder.with("publication.name", slotName);
+                if (EmptyKit.isNotBlank(postgresConfig.getCustomPublicationName())) {
+                    builder.with("publication.name", postgresConfig.getCustomPublicationName());
+                } else {
+                    builder.with("publication.name", slotName);
+                }
             } else {
                 builder.with("publication.autocreate.mode", "disabled");
                 if (postgresConfig.getPartitionRoot()) {
-                    builder.with("publication.name", "dbz_publication_root");
+                    builder.with("publication.name", postgresConfig.getGlobalPublicationName() + "_root");
                 } else {
-                    builder.with("publication.name", "dbz_publication");
+                    builder.with("publication.name", postgresConfig.getGlobalPublicationName());
                 }
             }
         }

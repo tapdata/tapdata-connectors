@@ -332,6 +332,28 @@
             }
           ]
         },
+        "globalPublicationName": {
+          "type": "string",
+          "title": "${globalPublicationName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${globalPublicationNameTooltip}"
+          },
+          "required": true,
+          "default": "dbz_publication",
+          "x-index": 120,
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName", "partPublication"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='pgoutput' && !$deps[2] ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
         "OPTIONAL_FIELDS": {
           "type": "void",
           "properties": {
@@ -764,11 +786,31 @@
             }
           ]
         },
+        "customPublicationName": {
+          "type": "string",
+          "title": "${customPublicationName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 19,
+          "x-decorator-props": {
+            "tooltip": "${customPublicationNameTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "splitUpdatePk": {
           "type": "boolean",
           "title": "${splitUpdatePk}",
           "default": true,
-          "x-index": 19,
+          "x-index": 20,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-reactions": [
@@ -815,6 +857,8 @@
       "pgtoPort": "Pgto Server Port",
       "partPublication": "Part publication",
       "partPublicationTooltip": "Turn on PGOUTPUT plugin to create corresponding publication according to different collection tables. The advantage is that there is no limit to the update and delete of no primary key table without collection requirements at the replica level. The disadvantage is that too many tasks will affect the database performance, and create publication permission is required",
+      "globalPublicationName": "Global publication name",
+      "globalPublicationNameTooltip": "When partial publication is turned off, a global publication is required. The default name is dbz_publication. If you need to customize the settings of the publication, it is recommended that customers create the publication themselves according to the name. The synchronization account does not need additional permissions",
       "timezone": "timezone",
       "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
       "allowReplication": "Allow setting up replication sessions",
@@ -842,6 +886,8 @@
       "enableFileInput": "Enable file input",
       "customSlotName": "Specifies the logical replication slot name",
       "customSlotNameTip": "You can manually specify a logical replication slot that is created in advance in the database, and if the logical replication slot does not exist, the delta may not work",
+      "customPublicationName": "Custom publication name",
+      "customPublicationNameTip": "Only effective when partial publication is turned on. If it is left blank, the synchronization task will automatically create and destroy, but needs create publication, table owner permission. If you need to customize the settings of the publication, it is recommended that customers create the publication themselves according to the name. The synchronization account does not need additional permissions and will not be automatically destroyed",
       "splitUpdatePk": "Split update unique key",
       "walLogSize": "Wal log total size(MB)",
       "clearIdleSlot": "Clear idle replication slot",
@@ -874,7 +920,9 @@
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
       "partPublication": "部分订阅",
-      "partPublicationTooltip": "打开后PGOUTPUT插件会根据不同的采集表创建对应的publication，优点是没有采集需求的无主键表不受replica级别限制更新删除，缺点是任务过多会影响数据库性能，且需要create publication权限",
+      "partPublicationTooltip": "打开后PGOUTPUT插件会根据不同的采集表创建对应的publication，优点是没有采集需求的无主键表不受replica级别限制更新删除，缺点是任务过多会影响数据库性能，且需要create publication，table owner权限",
+      "globalPublicationName": "自定义全库订阅名",
+      "globalPublicationNameTooltip": "部分订阅关闭时，全局会需要创建一个publication，默认名为dbz_publication，如果需要定制化设置该publication，推荐客户自行按该名称创建publication，同步账号不需要有额外权限",
       "timezone": "时区",
       "timezoneTip": "指定时区，否则不做时区处理",
       "allowReplication": "允许设置复制会话",
@@ -902,6 +950,8 @@
       "enableFileInput": "启用文件输入",
       "customSlotName": "指定逻辑复制槽名字",
       "customSlotNameTip": "可以手动指定在数据库提前创建好的逻辑复制槽，如果逻辑复制槽不存在，则可能会导致增量不工作",
+      "customPublicationName": "自定义订阅名",
+      "customPublicationNameTip": "仅部分订阅开启时生效，如果置空时，同步任务会自动创建、销毁，但需要create publication，table owner权限，如果需要定制化推荐客户自行按该名称创建publication，则同步账号不需要有额外权限，也不会自动销毁",
       "splitUpdatePk": "修改唯一键拆分",
       "walLogSize": "Wal日志总大小(MB)",
       "clearIdleSlot": "清理空闲复制槽",
@@ -934,7 +984,9 @@
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
       "partPublication": "部分訂閱",
-      "partPublicationTooltip": "打開後PGOUTPUT插件會根據不同的采集表創建對應的publication，優點是没有采集需求的无主键表不受replica级别限制更新删除，缺點是任务过多會影響數據庫性能，且需要create publication權限",
+      "partPublicationTooltip": "打開後PGOUTPUT插件會根據不同的采集表創建對應的publication，優點是没有采集需求的无主键表不受replica级别限制更新删除，缺點是任务过多會影響數據庫性能，且需要create publication，table owner權限",
+      "globalPublicationName": "自定義全庫訂閱名",
+      "globalPublicationNameTooltip": "部分訂閱關閉時，全局會需要創建一個publication，默认名為dbz_publication，如果需要定制化設定該publication，推薦客戶自行按該名稱創建publication，同步賬號不需要有額外權限",
       "timezone": "時區",
       "timezoneTip": "指定時區，否則不做時區處理",
       "allowReplication": "允許設定複製會話",
@@ -962,6 +1014,8 @@
       "enableFileInput": "啟用文件輸入",
       "customSlotName": "指定邏輯複製槽名字",
       "customSlotNameTip": "可以手動指定在數據庫提前創建好的邏輯複製槽，如果邏輯複製槽不存在，則可能會導致增量不工作",
+      "customPublicationName": "自定義訂閱名",
+      "customPublicationNameTip": "僅部分訂閱開啟時生效，如果置空時，同步任務會自動創建、銷毀，但需要create publication，table owner權限，如果需要定制化設定推薦客戶自行按該名稱創建publication，則同步賬號不需要有額外權限，也不會自動銷毀",
       "splitUpdatePk": "修改唯一鍵拆分",
       "walLogSize": "Wal日誌總大小(MB)",
       "clearIdleSlot": "清理空閒複製槽",
