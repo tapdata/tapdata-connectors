@@ -81,11 +81,11 @@ public class PostgresExceptionCollector extends AbstractExceptionCollector imple
         }
         //number length
         if (cause instanceof SQLException && "22003".equals(((SQLException) cause).getSQLState())) {
-            throw new TapPdkWriteLengthEx(pdkId, null, null, data, ErrorKit.getLastCause(cause));
+            throw new TapPdkWriteLengthEx(pdkId, targetFieldName, null, data, ErrorKit.getLastCause(cause));
         }
         //date length
         if (cause instanceof SQLException && "22008".equals(((SQLException) cause).getSQLState())) {
-            throw new TapPdkWriteLengthEx(pdkId, null, null, data, ErrorKit.getLastCause(cause));
+            throw new TapPdkWriteLengthEx(pdkId, targetFieldName, null, data, ErrorKit.getLastCause(cause));
         }
     }
 
