@@ -34,6 +34,7 @@ import org.bson.conversions.Bson;
 import org.bson.io.ByteBufferBsonInput;
 
 import java.nio.ByteBuffer;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -62,6 +63,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     private ConcurrentProcessor<ChangeStreamDocument<RawBsonDocument>, OffsetEvent> concurrentProcessor;
     private MongodbExceptionCollector mongodbExceptionCollector;
     private String dropTransactionId;
+    private Thread consumeStreamEventThread;
 
     public MongodbV4StreamReader setPreImage(boolean isPreImage) {
         this.isPreImage = isPreImage;
@@ -126,23 +128,33 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             consumer.streamReadStarted();
             AtomicReference<Exception> throwableAtomicReference = new AtomicReference<>();
             try (final MongoChangeStreamCursor<ChangeStreamDocument<RawBsonDocument>> streamCursor = changeStream.cursor()) {
-                Thread t = new Thread(() -> {
+                consumeStreamEventThread = new Thread(() -> {
                     List<TapEvent> events = list();
                     OffsetEvent lastOffsetEvent = null;
+                    long lastSendTime = System.currentTimeMillis();
+                    // Calculate time window based on batch size
+                    // If batch size <= 500, use fixed 50ms window
+                    // If batch size > 500, use dynamic window = batch size / 10 (ms)
+                    long timeWindowMs = eventBatchSize <= 500 ? 50 : eventBatchSize / 10;
                     while (running.get()) {
                         try {
-                            OffsetEvent event = concurrentProcessor.get(2, TimeUnit.SECONDS);
+                            OffsetEvent event = concurrentProcessor.get(10, TimeUnit.MILLISECONDS);
                             if (EmptyKit.isNotNull(event)) {
                                 lastOffsetEvent = event;
                                 events.add(event.getEvent());
-                                if (events.size() >= eventBatchSize) {
+                                // Check batch size OR time window
+                                if (events.size() >= eventBatchSize ||
+                                    (System.currentTimeMillis() - lastSendTime > timeWindowMs)) {
                                     consumer.accept(events, event.getOffset());
-                                    events = new ArrayList<>();
+                                    events.clear();
+                                    lastSendTime = System.currentTimeMillis();
                                 }
                             } else {
-                                if (events.size() > 0) {
+                                // Send remaining events when queue is empty
+                                if (!events.isEmpty() && lastOffsetEvent != null) {
                                     consumer.accept(events, lastOffsetEvent.getOffset());
-                                    events = new ArrayList<>();
+                                    events.clear();
+                                    lastSendTime = System.currentTimeMillis();
                                 }
                             }
                         } catch (Exception e) {
@@ -151,8 +163,8 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         }
                     }
                 });
-                t.setName("MongodbV4StreamReader-Consumer");
-                t.start();
+                consumeStreamEventThread.setName("MongodbV4StreamReader-Consumer");
+                consumeStreamEventThread.start();
                 while (running.get()) {
                     if (EmptyKit.isNotNull(throwableAtomicReference.get())) {
                         throw throwableAtomicReference.get();
@@ -433,6 +445,9 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     @Override
     public void onDestroy() {
         running.compareAndSet(true, false);
+        if (consumeStreamEventThread != null) {
+            consumeStreamEventThread.interrupt();
+        }
         if (mongoClient != null) {
             mongoClient.close();
             mongoClient = null;
