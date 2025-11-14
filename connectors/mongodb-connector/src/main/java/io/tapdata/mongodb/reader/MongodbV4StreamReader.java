@@ -106,7 +106,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 //        List<Bson> pipeline1 = asList(Aggregates.match(Filters.or(collList)));
         FullDocument fullDocumentOption = FullDocument.DEFAULT;
         FullDocumentBeforeChange fullDocumentBeforeChangeOption = FullDocumentBeforeChange.WHEN_AVAILABLE;
-        if (mongodbConfig.isEnableFillingModifiedData()) {
+        if (mongodbConfig.isEnableFillingModifiedData() || mongodbConfig.getPreImage()) {
             fullDocumentOption = FullDocument.UPDATE_LOOKUP;
         }
         while (running.get()) {
@@ -278,7 +278,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     // Queries take a long time and are disabled when not needed, QPS went down from 4000 to 400.
                     // If you need other field data in delete event can't be disabled.
                     TapDeleteRecordEvent recordEvent;
-                    if (mongodbConfig.isEnableFillingModifiedData()) {
+                    if (mongodbConfig.isEnableFillingModifiedData() && !mongodbConfig.getPreImage()) {
                         final Map lookupData = MongodbLookupUtil.findDeleteCacheByOid(connectionString, collectionName, documentKey.get("_id"), globalStateMap);
                         recordEvent = deleteDMLEvent(MapUtils.isNotEmpty(lookupData) && lookupData.containsKey("data") && lookupData.get("data") instanceof Map
                                 ? (Map<String, Object>) lookupData.get("data") : before, collectionName);
