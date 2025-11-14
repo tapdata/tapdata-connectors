@@ -292,6 +292,30 @@ public abstract class NormalWriteRecorder {
         throw new UnsupportedOperationException("upsert is not supported");
     }
 
+    public String getUpsertSql(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("upsert is not supported");
+    }
+
+    public String getDeleteSql(Map<String, Object> before) throws SQLException {
+        boolean containsNull = !hasPk && before.containsValue(null);
+        String sql = getDeleteSql(before, containsNull);
+        if (!containsNull) {
+            for (String key : before.keySet()) {
+                sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
+            }
+        } else {
+            for (String key : before.keySet()) {
+                sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
+                sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
+            }
+        }
+        return sql;
+    }
+
+    public String formatValueForSql(Object value, String dataType) throws SQLException {
+        return object2String(filterValue(value, dataType));
+    }
+
     //插入唯一键冲突时忽略
     protected void insertIgnore(Map<String, Object> after, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         throw new UnsupportedOperationException("insertIgnore is not supported");
@@ -337,8 +361,14 @@ public abstract class NormalWriteRecorder {
             return;
         }
         if (largeSql) {
-            largeInsert(after);
-            return;
+            if (after.size() < allColumn.size()) {
+                //有字段内容不全情况，不可使用
+                executeBatch(listResult);
+                largeSql = false;
+            } else {
+                largeInsert(after);
+                return;
+            }
         }
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
@@ -528,6 +558,6 @@ public abstract class NormalWriteRecorder {
         for (byte b : bytes) {
             sb.append(String.format("%02X", b));
         }
-        return "0x"+ sb;
+        return "0x" + sb;
     }
 }
