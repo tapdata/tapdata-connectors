@@ -313,12 +313,12 @@ public abstract class NormalWriteRecorder {
 
     public String getDeleteSql(Map<String, Object> before) throws SQLException {
         boolean containsNull = !hasPk && before.containsValue(null);
-        String sql = getDeleteSql(before,containsNull);
-        if(!containsNull){
+        String sql = getDeleteSql(before, containsNull);
+        if (!containsNull) {
             for (String key : before.keySet()) {
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
             }
-        }else{
+        } else {
             for (String key : before.keySet()) {
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
@@ -376,8 +376,14 @@ public abstract class NormalWriteRecorder {
             return;
         }
         if (largeSql) {
-            largeInsert(after);
-            return;
+            if (after.size() < allColumn.size()) {
+                //有字段内容不全情况，不可使用
+                executeBatch(listResult);
+                largeSql = false;
+            } else {
+                largeInsert(after);
+                return;
+            }
         }
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
@@ -567,6 +573,6 @@ public abstract class NormalWriteRecorder {
         for (byte b : bytes) {
             sb.append(String.format("%02X", b));
         }
-        return "0x"+ sb;
+        return "0x" + sb;
     }
 }
