@@ -208,7 +208,7 @@ public class DbKit {
         return lastBefore;
     }
 
-    public static Map<String, Object> getAfterForUpdate(Map<String, Object> after, Map<String, Object> before, Collection<String> allColumn, Collection<String> uniqueCondition) {
+    public static Map<String, Object> getAfterForUpdate(Map<String, Object> after, Map<String, Object> before, Collection<String> allColumn, Collection<String> uniqueCondition,List<String> autoIncFields) {
         Map<String, Object> lastBefore = getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         if (EmptyKit.isNotEmpty(before)) {
             for (Map.Entry<String, Object> entry : before.entrySet()) {
@@ -221,7 +221,9 @@ public class DbKit {
         Map<String, Object> lastAfter = new HashMap<>();
         for (Map.Entry<String, Object> entry : after.entrySet()) {
             if (EmptyKit.isNull(entry.getValue()) && lastBefore.containsKey(entry.getKey()) && EmptyKit.isNull(lastBefore.get(entry.getKey())) ||
-                    EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(lastBefore.get(entry.getKey())) || !allColumn.contains(entry.getKey())) {
+                    (EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(lastBefore.get(entry.getKey()))
+                            && (EmptyKit.isEmpty(autoIncFields) ||!autoIncFields.contains(entry.getKey())))
+                    || !allColumn.contains(entry.getKey())) {
                 continue;
             }
             lastAfter.put(entry.getKey(), entry.getValue());

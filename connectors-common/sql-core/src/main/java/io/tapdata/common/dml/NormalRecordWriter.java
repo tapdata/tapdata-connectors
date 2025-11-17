@@ -218,6 +218,9 @@ public class NormalRecordWriter {
     }
 
     public void setAutoIncFields(List<String> autoIncFields) {
+        insertRecorder.setAutoIncFields(autoIncFields);
+        updateRecorder.setAutoIncFields(autoIncFields);
+        deleteRecorder.setAutoIncFields(autoIncFields);
         this.autoIncFields = autoIncFields;
     }
 

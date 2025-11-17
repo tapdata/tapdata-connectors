@@ -20,7 +20,7 @@ class BeforeAndAfterTest {
 
     private static void assertBeforeAndAfter(List<String> allColumns, List<String> uniqueCondition, Map<String, Object> after, Map<String, Object> before, Map<String, Object> lastAfter, Map<String, Object> lastBefore) {
         Assertions.assertEquals(lastBefore, DbKit.getBeforeForUpdate(after, before, allColumns, uniqueCondition));
-        Assertions.assertEquals(lastAfter, DbKit.getAfterForUpdate(after, before, allColumns, uniqueCondition));
+        Assertions.assertEquals(lastAfter, DbKit.getAfterForUpdate(after, before, allColumns, uniqueCondition,null));
     }
 
     /**
