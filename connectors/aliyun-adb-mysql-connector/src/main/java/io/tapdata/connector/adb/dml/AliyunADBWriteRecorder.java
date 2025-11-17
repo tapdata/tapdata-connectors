@@ -58,7 +58,7 @@ public class AliyunADBWriteRecorder extends NormalWriteRecorder {
         }
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
-        Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
+        Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition,autoIncFields);
         if (EmptyKit.isEmpty(lastAfter)) {
             return;
         }
