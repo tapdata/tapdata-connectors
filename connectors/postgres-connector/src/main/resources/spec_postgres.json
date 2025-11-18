@@ -50,6 +50,22 @@
         "method": "execute",
         "args": ["{{connectionId}}", "method", "io.tapdata.connector.postgres.PostgresConnector#clearIdleSlot"],
         "title": "${clearIdleSlot}"
+      },
+      "walLogPercent": {
+        "title": "${walLogPercent}",
+        "type": "string",
+        "method": "io.tapdata.connector.postgres.PostgresConnector#showWalLogPercent",
+        "methodAfter": [
+          {
+            "max": 0.95,
+            "min": 0.75,
+            "action": ["sendMail"]
+          },
+          {
+            "min": 0.95,
+            "action": ["sendMail", "stopTask", "io.tapdata.connector.postgres.PostgresConnector#clearIdleSlot"]
+          }
+        ]
       }
     },
     "connection": {
@@ -290,6 +306,27 @@
               "fulfill": {
                 "schema": {
                   "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='walminer' ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "partPublication": {
+          "type": "boolean",
+          "title": "${partPublication}",
+          "default": false,
+          "x-index": 110,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${partPublicationTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='pgoutput' ? null:\"none\"}}"
                 }
               }
             }
@@ -726,6 +763,24 @@
               }
             }
           ]
+        },
+        "splitUpdatePk": {
+          "type": "boolean",
+          "title": "${splitUpdatePk}",
+          "default": true,
+          "x-index": 19,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -758,6 +813,8 @@
       "logPluginNameTip": "The higher version PG comes with the PGOUTPUT plugin, but the before data in the logs is not complete. \nThe author recommends using WAL2JSON, and the installation method can be found in the MD documentation",
       "pgtoHost": "Pgto Server Host",
       "pgtoPort": "Pgto Server Port",
+      "partPublication": "Part publication",
+      "partPublicationTooltip": "Turn on PGOUTPUT plugin to create corresponding publication according to different collection tables. The advantage is that there is no limit to the update and delete of no primary key table without collection requirements at the replica level. The disadvantage is that too many tasks will affect the database performance, and create publication permission is required",
       "timezone": "timezone",
       "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
       "allowReplication": "Allow setting up replication sessions",
@@ -785,8 +842,10 @@
       "enableFileInput": "Enable file input",
       "customSlotName": "Specifies the logical replication slot name",
       "customSlotNameTip": "You can manually specify a logical replication slot that is created in advance in the database, and if the logical replication slot does not exist, the delta may not work",
+      "splitUpdatePk": "Split update unique key",
       "walLogSize": "Wal log total size(MB)",
-      "clearIdleSlot": "Clear idle replication slot"
+      "clearIdleSlot": "Clear idle replication slot",
+      "walLogPercent": "Wal log usage rate"
     },
     "zh_CN": {
       "doc": "docs/postgres_zh_CN.md",
@@ -814,6 +873,8 @@
       "logPluginNameTip": "高版本PG自带PGOUTPUT插件，但是日志的before数据并不完整，笔者推荐使用WAL2JSON，安装方式见MD文档",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
+      "partPublication": "部分订阅",
+      "partPublicationTooltip": "打开后PGOUTPUT插件会根据不同的采集表创建对应的publication，优点是没有采集需求的无主键表不受replica级别限制更新删除，缺点是任务过多会影响数据库性能，且需要create publication权限",
       "timezone": "时区",
       "timezoneTip": "指定时区，否则不做时区处理",
       "allowReplication": "允许设置复制会话",
@@ -841,8 +902,10 @@
       "enableFileInput": "启用文件输入",
       "customSlotName": "指定逻辑复制槽名字",
       "customSlotNameTip": "可以手动指定在数据库提前创建好的逻辑复制槽，如果逻辑复制槽不存在，则可能会导致增量不工作",
+      "splitUpdatePk": "修改唯一键拆分",
       "walLogSize": "Wal日志总大小(MB)",
-      "clearIdleSlot": "清理空闲复制槽"
+      "clearIdleSlot": "清理空闲复制槽",
+      "walLogPercent": "Wal日志占用率"
     },
     "zh_TW": {
       "doc": "docs/postgres_zh_TW.md",
@@ -870,6 +933,8 @@
       "logPluginNameTip": "高版本PG自帶PGOUTPUT插件，但是日誌的before數據並不完整，筆者推薦使用WAL2JSON，安裝方式見MD文檔",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
+      "partPublication": "部分訂閱",
+      "partPublicationTooltip": "打開後PGOUTPUT插件會根據不同的采集表創建對應的publication，優點是没有采集需求的无主键表不受replica级别限制更新删除，缺點是任务过多會影響數據庫性能，且需要create publication權限",
       "timezone": "時區",
       "timezoneTip": "指定時區，否則不做時區處理",
       "allowReplication": "允許設定複製會話",
@@ -897,8 +962,10 @@
       "enableFileInput": "啟用文件輸入",
       "customSlotName": "指定邏輯複製槽名字",
       "customSlotNameTip": "可以手動指定在數據庫提前創建好的邏輯複製槽，如果邏輯複製槽不存在，則可能會導致增量不工作",
+      "splitUpdatePk": "修改唯一鍵拆分",
       "walLogSize": "Wal日誌總大小(MB)",
-      "clearIdleSlot": "清理空閒複製槽"
+      "clearIdleSlot": "清理空閒複製槽",
+      "walLogPercent": "Wal日志占用率"
     }
   },
   "dataTypes": {

@@ -118,7 +118,7 @@ public class MysqlConnectionTest extends CommonDbTest {
             return true;
         }
         consumer.accept(testItem(itemMark, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "Without table can " + mark));
-        return false;
+        return true;
     }
 
     public boolean testWriteOrReadPrivilege(String grantSql, List<String> tableList, String databaseName, String mark) {
