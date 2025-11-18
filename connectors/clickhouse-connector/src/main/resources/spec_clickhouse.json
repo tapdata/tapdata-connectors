@@ -224,6 +224,115 @@
     "node": {
       "type": "object",
       "properties": {
+        "supportPk": {
+          "type": "boolean",
+          "title": "${supportPk}",
+          "default": true,
+          "x-index": 1,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "engineExpr": {
+          "type": "string",
+          "title": "${engineExpr}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 2,
+          "x-decorator-props": {
+            "tooltip": "${engineExprTooltip}"
+          }
+        },
+        "partitionExpr": {
+          "type": "string",
+          "title": "${partitionExpr}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 3,
+          "x-decorator-props": {
+            "tooltip": "${partitionExprTooltip}"
+          }
+        },
+        "orderExpr": {
+          "type": "string",
+          "title": "${orderExpr}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 4,
+          "x-decorator-props": {
+            "tooltip": "${orderExprTooltip}"
+          }
+        },
+        "tableProperties": {
+          "type": "array",
+          "title": "${tableProperties}",
+          "x-decorator": "FormItem",
+          "x-component": "ArrayItems",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ],
+          "x-index": 5,
+          "items": {
+            "type": "object",
+            "properties": {
+              "space": {
+                "type": "void",
+                "x-component": "Space",
+                "properties": {
+                  "propKey": {
+                    "type": "string",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${propKey}"
+                    },
+                    "x-index": 1
+                  },
+                  "propValue": {
+                    "type": "number",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${propValue}"
+                    },
+                    "x-index": 2
+                  },
+                  "remove": {
+                    "type": "void",
+                    "x-decorator": "FormItem",
+                    "x-component": "ArrayItems.Remove"
+                  }
+                }
+              }
+            }
+          },
+          "properties": {
+            "add": {
+              "type": "void",
+              "title": "${prompt}",
+              "x-component": "ArrayItems.Addition",
+              "x-component-props": {
+                "defaultValue": { "propKey": "", "propValue": "" }
+              }
+            }
+          }
+        },
         "mergeMinutes": {
           "required": true,
           "type": "string",
@@ -231,7 +340,7 @@
           "default": 60,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
-          "x-index": 1,
+          "x-index": 11,
           "x-reactions": [
             {
               "dependencies": [
@@ -249,7 +358,7 @@
           "type": "boolean",
           "title": "${mixFastWrite}",
           "default": false,
-          "x-index": 2,
+          "x-index": 12,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-decorator-props": {
@@ -284,6 +393,17 @@
       "extParamsTip": "Additional connection parameters in URI, you can write according to personalized scenarios",
       "timezone": "timezone",
       "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
+      "supportPk": "Support Primary Key",
+      "engineExpr": "Engine Expression",
+      "engineExprTooltip": "The engine expression when creating a table, for example: ReplacingMergeTree(version)",
+      "partitionExpr": "Partition Expression",
+      "partitionExprTooltip": "The partition expression when creating a table, for example: toYYYYMMDD(date)",
+      "orderExpr": "Order Expression",
+      "orderExprTooltip": "The order expression when creating a table, for example: (id, name)",
+      "tableProperties": "Table Properties",
+      "propKey": "Property Key",
+      "propValue": "Property Value",
+      "prompt": "Add Property",
       "mergeMinutes": "Optimize Interval (Minutes)",
       "mixFastWrite": "Mix Fast Write",
       "mixFastWriteTooltip": "Enable mix fast write, but the target table will create is_deleted, delete_time columns, insert strategy is used for insert, update, delete, greatly improve performance",
@@ -302,6 +422,17 @@
       "extParamsTip": "URI额外的连接参数，可以根据个性化场景书写",
       "timezone": "时区",
       "timezoneTip": "指定时区，否则不做时区处理",
+      "supportPk": "建表类型是否支持主键",
+      "engineExpr": "引擎表达式",
+      "engineExprTooltip": "建表时的引擎表达式，例如：ReplacingMergeTree(version)",
+      "partitionExpr": "分区表达式",
+      "partitionExprTooltip": "建表时的分区表达式，例如：toYYYYMMDD(date)",
+      "orderExpr": "排序表达式",
+      "orderExprTooltip": "建表时的排序表达式，例如：(id, name)",
+      "tableProperties": "表属性",
+      "propKey": "属性键",
+      "propValue": "属性值",
+      "prompt": "添加属性",
       "mergeMinutes": "合并分区间隔(分钟)",
       "mixFastWrite": "混合快速写入",
       "mixFastWriteTooltip": "启用混合快速写入，但目标表会多创建is_deleted, delete_time列, 增删改统一使用插入策略大大提升性能",
@@ -320,6 +451,17 @@
       "extParamsTip": "URI額外的連接參數，可以根據個性化場景書寫",
       "timezone": "時區",
       "timezoneTip": "指定時區，否則不做時區處理",
+      "supportPk": "建表類型是否支持主鍵",
+      "engineExpr": "引擎表達式",
+      "engineExprTooltip": "建表時的引擎表達式，例如：ReplacingMergeTree(version)",
+      "partitionExpr": "分区表达式",
+      "partitionExprTooltip": "建表时的分区表达式，例如：toYYYYMMDD(date)",
+      "orderExpr": "排序表达式",
+      "orderExprTooltip": "建表时的排序表达式，例如：(id, name)",
+      "tableProperties": "表屬性",
+      "propKey": "屬性鍵",
+      "propValue": "屬性值",
+      "prompt": "添加屬性",
       "mergeMinutes": "合併分區間隔(分鐘)",
       "mixFastWrite": "混合快速寫入",
       "mixFastWriteTooltip": "啟用混合快速寫入，但目標表會多創建is_deleted, delete_time列, 增刪改統一使用插入策略大大提升性能",

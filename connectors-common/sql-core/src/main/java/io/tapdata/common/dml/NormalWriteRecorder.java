@@ -54,6 +54,7 @@ public abstract class NormalWriteRecorder {
     protected Map<String, PreparedStatement> preparedStatementMap = new HashMap<>();
     protected PreparedStatement preparedStatement = null;
     protected List<String> largeSqlValues;
+    protected LinkedHashMap<String, String> largeSqlValuesMap;
     protected boolean largeSql = false;
     protected DMLType dmlType;
 
@@ -92,6 +93,7 @@ public abstract class NormalWriteRecorder {
         this.largeSql = largeSql;
         if (largeSql) {
             largeSqlValues = new ArrayList<>();
+            largeSqlValuesMap = new LinkedHashMap<>();
         }
     }
 
@@ -123,6 +125,7 @@ public abstract class NormalWriteRecorder {
             try (Statement statement = connection.createStatement()) {
                 statement.execute(getLargeSql());
                 largeSqlValues.clear();
+                largeSqlValuesMap.clear();
                 batchCacheSize = 0;
             }
             atomicLong.addAndGet(succeed);
@@ -310,12 +313,12 @@ public abstract class NormalWriteRecorder {
 
     public String getDeleteSql(Map<String, Object> before) throws SQLException {
         boolean containsNull = !hasPk && before.containsValue(null);
-        String sql = getDeleteSql(before,containsNull);
-        if(!containsNull){
+        String sql = getDeleteSql(before, containsNull);
+        if (!containsNull) {
             for (String key : before.keySet()) {
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
             }
-        }else{
+        } else {
             for (String key : before.keySet()) {
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
@@ -373,8 +376,14 @@ public abstract class NormalWriteRecorder {
             return;
         }
         if (largeSql) {
-            largeInsert(after);
-            return;
+            if (after.size() < allColumn.size()) {
+                //有字段内容不全情况，不可使用
+                executeBatch(listResult);
+                largeSql = false;
+            } else {
+                largeInsert(after);
+                return;
+            }
         }
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
@@ -531,7 +540,7 @@ public abstract class NormalWriteRecorder {
         if (null == obj) {
             result = "null";
         } else if (obj instanceof String) {
-            result = "'" + ((String) obj).replace("\\", "\\\\").replace("'", "\\'").replace("(", "\\(").replace(")", "\\)") + "'";
+            result = transferString((String) obj);
         } else if (obj instanceof Number) {
             result = obj.toString();
         } else if (obj instanceof Date) {
@@ -552,6 +561,10 @@ public abstract class NormalWriteRecorder {
         return result;
     }
 
+    protected String transferString(String str) {
+        return "'" + str.replace("\\", "\\\\").replace("'", "''") + "'";
+    }
+
     protected String byteArrayToHexString(byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
             return "";
@@ -560,6 +573,6 @@ public abstract class NormalWriteRecorder {
         for (byte b : bytes) {
             sb.append(String.format("%02X", b));
         }
-        return "0x"+ sb;
+        return "0x" + sb;
     }
 }

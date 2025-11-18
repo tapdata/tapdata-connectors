@@ -31,6 +31,8 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private int pgtoPort = 9876;
     private Integer defaultWalLogSize = 102400;
     private Boolean partPublication = false;
+    private String globalPublicationName = "dbz_publication";
+    private String customPublicationName = "";
 
     private String deploymentMode;
     private ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress;
@@ -193,6 +195,22 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setPartPublication(Boolean partPublication) {
         this.partPublication = partPublication;
+    }
+
+    public String getGlobalPublicationName() {
+        return globalPublicationName;
+    }
+
+    public void setGlobalPublicationName(String globalPublicationName) {
+        this.globalPublicationName = globalPublicationName;
+    }
+
+    public String getCustomPublicationName() {
+        return customPublicationName;
+    }
+
+    public void setCustomPublicationName(String customPublicationName) {
+        this.customPublicationName = customPublicationName;
     }
 
     public String getDeploymentMode() {

@@ -272,7 +272,7 @@ public class PostgresConnector extends CommonDbConnector {
                     //取消订阅
                     HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format("DELSUB:%s all", firstConnectorId));
                 }
-            } else if ("pgoutput".equals(postgresConfig.getLogPluginName()) && postgresConfig.getPartPublication()) {
+            } else if ("pgoutput".equals(postgresConfig.getLogPluginName()) && postgresConfig.getPartPublication() && EmptyKit.isBlank(postgresConfig.getCustomPublicationName())) {
                 ErrorKit.ignoreAnyError(this::dropPublication);
             }
         } finally {
@@ -729,13 +729,20 @@ public class PostgresConnector extends CommonDbConnector {
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
         if (canCdc) {
+            testReplicateIdentity(connectorContext.getTableMap());
+            buildSlot(connectorContext, false);
             if ("pgoutput".equals(postgresConfig.getLogPluginName()) && Integer.parseInt(postgresVersion) > 100000) {
                 if (!postgresConfig.getPartPublication()) {
                     createAllPublicationIfNotExist();
+                } else if(EmptyKit.isBlank(postgresConfig.getCustomPublicationName())) {
+                    List<String> tableList = new ArrayList<>();
+                    Iterator<Entry<TapTable>> iterator = connectorContext.getTableMap().iterator();
+                    while (iterator.hasNext()) {
+                        tableList.add(iterator.next().getKey());
+                    }
+                    createCustomPublicationIfNotExist(tableList);
                 }
             }
-            testReplicateIdentity(connectorContext.getTableMap());
-            buildSlot(connectorContext, false);
         }
         return new PostgresOffset();
     }
@@ -831,7 +838,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void createAllPublicationIfNotExist() throws SQLException {
-        String publicationName = postgresConfig.getPartitionRoot() ? "dbz_publication_root" : "dbz_publication";
+        String publicationName = postgresConfig.getGlobalPublicationName() + (postgresConfig.getPartitionRoot() ? "_root" : "");
         AtomicBoolean needCreate = new AtomicBoolean(false);
         postgresJdbcContext.queryWithNext(String.format("SELECT COUNT(1) FROM pg_publication WHERE pubname = '%s'", publicationName), resultSet -> {
             if (resultSet.getInt(1) <= 0) {
@@ -845,6 +852,15 @@ public class PostgresConnector extends CommonDbConnector {
             } catch (SQLException e) {
                 throw new TapCodeException(PostgresErrorCode.CREATE_PUBLICATION_FAILED, "create publication for all tables failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
             }
+        }
+    }
+
+    private void createCustomPublicationIfNotExist(List<String> tableList) {
+        String sql = String.format("CREATE PUBLICATION %s FOR TABLE %s", slotName, tableList.stream().map(this::getSchemaAndTable).collect(Collectors.joining(", ")));
+        try {
+            postgresJdbcContext.execute(sql);
+        } catch (SQLException e) {
+            throw new TapCodeException(PostgresErrorCode.CREATE_PUBLICATION_FAILED, "create publication for custom tables failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
         }
     }
 
@@ -1212,7 +1228,7 @@ public class PostgresConnector extends CommonDbConnector {
             fieldList.add(field);
         });
         index.setUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isUnique")))));
-//        index.setCoreUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isCoreUnique")))));
+        index.setCoreUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isCoreUnique")))));
         index.setPrimary(value.stream().anyMatch(v -> ("1".equals(v.getString("isPk")))));
         index.setIndexFields(fieldList);
         return index;
