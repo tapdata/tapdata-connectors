@@ -61,6 +61,7 @@ public class PostgresChangeRecordEmitter extends RelationalChangeRecordEmitter {
         this.schema = schema;
         this.message = message;
         this.connectorConfig = connectorConfig;
+        this.splitUpdatePk = connectorConfig.getConfig().getBoolean("tap.split.update.pk", true);
         this.connection = connection;
 
         this.tableId = message.getTableId();

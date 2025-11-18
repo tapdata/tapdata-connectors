@@ -57,8 +57,9 @@ public class MongodbWriter {
 	private final Map<String,Set<String>> shardKeyMap;
 	private String insertPolicy;
 	private String updatePolicy;
+	private final Map<String, ClientSession> sessionMap;
 
-	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger, Map<String,Set<String>> shardKeyMap) {
+	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger, Map<String,Set<String>> shardKeyMap, Map<String, ClientSession> sessionMap) {
 		this.globalStateMap = globalStateMap;
 		this.mongoClient = mongoClient;
 		this.mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
@@ -67,6 +68,7 @@ public class MongodbWriter {
 		this.is_cloud = AppType.currentType().isCloud();
 		this.tapLogger = tapLogger;
 		this.shardKeyMap = shardKeyMap;
+		this.sessionMap = sessionMap;
 	}
 
 	/**
@@ -84,25 +86,37 @@ public class MongodbWriter {
 	 * @param tapRecordEvents
 	 * @param writeListResultConsumer
 	 */
-	public void writeRecord(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
-		if (CollectionUtils.isEmpty(tapRecordEvents)) {
-			return;
-		}
-		if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive())) {
-			try (ClientSession session = mongoClient.startSession()) {
-				session.startTransaction();
-				Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
-				UpdateOptions options = new UpdateOptions().upsert(true);
-				mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
-				write(table, tapRecordEvents, writeListResultConsumer, session);
-				session.commitTransaction();
-			}
-		} else {
-			write(table, tapRecordEvents, writeListResultConsumer, null);
-		}
-	}
+    public void writeRecord(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
+        if (CollectionUtils.isEmpty(tapRecordEvents)) {
+            return;
+        }
+        ClientSession clientSession = sessionMap.get(Thread.currentThread().getName());
+        if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive())) {
+            if (null != clientSession) {
+                doubleActiveWrite(tapRecordEvents, table, writeListResultConsumer, clientSession);
+            } else {
+                try (ClientSession session = mongoClient.startSession()) {
+                    doubleActiveWrite(tapRecordEvents, table, writeListResultConsumer, session);
+                    session.commitTransaction();
+                }
+            }
+        } else {
+            if (null != clientSession) {
+                clientSession.startTransaction();
+            }
+            write(table, tapRecordEvents, writeListResultConsumer, clientSession);
+        }
+    }
 
-	private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
+    private void doubleActiveWrite(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
+        session.startTransaction();
+        Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
+        UpdateOptions options = new UpdateOptions().upsert(true);
+        mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
+        write(table, tapRecordEvents, writeListResultConsumer, session);
+    }
+
+    private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
 		AtomicLong inserted = new AtomicLong(0); //insert count
 		AtomicLong updated = new AtomicLong(0); //update count
 		AtomicLong deleted = new AtomicLong(0); //delete count
@@ -199,7 +213,7 @@ public class MongodbWriter {
 		final Collection<String> pks = (Collection<String>) pksCache;
 		UpdateOptions options = new UpdateOptions().upsert(false);
 		MongoCollection<Document> collection = getMongoCollection(table.getId());
-		BulkWriteResult result = collection.bulkWrite(Collections.singletonList(normalWriteMode(inserted, updated, deleted, options, table, pks, tapRecordEvent)));
+		BulkWriteResult result = collection.bulkWrite(normalWriteMode(inserted, updated, deleted, options, table, pks, tapRecordEvent));
 		if (result.getMatchedCount() <= 0) {
 			tapLogger.info("update record ignored: {}", tapRecordEvent);
 		}
@@ -294,9 +308,9 @@ public class MongodbWriter {
 					mergeWriteModels.forEach(bulkWriteModel::addAnyOpModel);
 				}
 			} else {
-				WriteModel<Document> writeModel = normalWriteMode(inserted, updated, deleted, options, table, pks, recordEvent);
-				if (writeModel != null) {
-					bulkWriteModel.addAnyOpModel(writeModel);
+				List<WriteModel<Document>> writeModels = normalWriteMode(inserted, updated, deleted, options, table, pks, recordEvent);
+				if (writeModels != null && !writeModels.isEmpty()) {
+					writeModels.forEach(bulkWriteModel::addAnyOpModel);
 				}
 			}
 		}
@@ -313,9 +327,10 @@ public class MongodbWriter {
 		return bulkWriteOptions;
 	}
 
-	protected WriteModel<Document> normalWriteMode(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, UpdateOptions options, TapTable tapTable, Collection<String> pks, TapRecordEvent recordEvent) {
-		WriteModel<Document> writeModel = null;
+	protected List<WriteModel<Document>> normalWriteMode(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, UpdateOptions options, TapTable tapTable, Collection<String> pks, TapRecordEvent recordEvent) {
+		List<WriteModel<Document>> writeModels = new ArrayList<>();
 		if (recordEvent instanceof TapInsertRecordEvent) {
+			WriteModel<Document> writeModel;
 			TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) recordEvent;
 			Document unsetDoc = wrapUnset(recordEvent);
 
@@ -336,18 +351,20 @@ public class MongodbWriter {
 				}
 				MongodbUtil.removeIdIfNeed(pks, insertRecordEvent.getAfter());
 				Document update = new Document(operation, insertRecordEvent.getAfter());
+				writeModels.add(new UpdateManyModel<>(pkFilter, update, options));
 				if (MapUtils.isNotEmpty(unsetDoc)) {
-					update.append("$unset", unsetDoc);
+					writeModels.add(new UpdateManyModel<>(pkFilter, new Document("$unset", unsetDoc), options));
 				}
-				writeModel = new UpdateManyModel<>(pkFilter, update, options);
 			} else {
 				if (CollectionUtils.isNotEmpty(pks) && MapUtils.isNotEmpty(unsetDoc)) {
 					Document pkFilter = getPkFilter(pks, insertRecordEvent.getAfter());
-					Document update = new Document("$set", insertRecordEvent.getAfter())
-							.append("$unset", unsetDoc);
-					writeModel = new UpdateManyModel<>(pkFilter, update, options);
+					Document update = new Document("$set", insertRecordEvent.getAfter());
+					writeModels.add(new UpdateManyModel<>(pkFilter, update, options));
+					if (MapUtils.isNotEmpty(unsetDoc)) {
+						writeModels.add(new UpdateManyModel<>(pkFilter, new Document("$unset", unsetDoc), options));
+					}
 				} else {
-					writeModel = new InsertOneModel<>(new Document(insertRecordEvent.getAfter()));
+					writeModels.add(new InsertOneModel<>(new Document(insertRecordEvent.getAfter())));
 				}
 			}
 			inserted.incrementAndGet();
@@ -364,6 +381,7 @@ public class MongodbWriter {
 			Document pkFilter;
 			Document u = new Document();
 			if (info != null && info.get("$op") != null) {
+				WriteModel<Document> writeModel;
                 Object id = info.get("_id");
                 id = MongodbUtil.convertValue(id);
                 pkFilter = new Document("_id", id);
@@ -376,22 +394,23 @@ public class MongodbWriter {
 				} else {
 					writeModel = new ReplaceOneModel<>(pkFilter, u, new ReplaceOptions().upsert(false));
 				}
+				writeModels.add(writeModel);
 			} else {
-				pkFilter = getPkFilter(pks, before != null && !before.isEmpty() ? before : after);
-				if(updateRecordEvent.getIsReplaceEvent() != null && updateRecordEvent.getIsReplaceEvent()){
+				pkFilter = getPkFilter(pks, !before.isEmpty() ? before : after);
+				if (updateRecordEvent.getIsReplaceEvent() != null && updateRecordEvent.getIsReplaceEvent()) {
 					u.putAll(after);
-					writeModel = new ReplaceOneModel<>(pkFilter, u, new ReplaceOptions().upsert(false));
-				}else{
+					writeModels.add(new ReplaceOneModel<>(pkFilter, u, new ReplaceOptions().upsert(false)));
+				} else {
 					if (ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS.equals(updatePolicy)) {
 						options.upsert(false);
 					}
 					MongodbUtil.removeIdIfNeed(pks, after);
 					u.append("$set", after);
+					writeModels.add(new UpdateManyModel<>(pkFilter, u, options));
 					Document unsetDoc = wrapUnset(recordEvent);
 					if (MapUtils.isNotEmpty(unsetDoc)) {
-						u.append("$unset", unsetDoc);
+						writeModels.add(new UpdateManyModel<>(pkFilter, new Document("$unset", unsetDoc), options));
 					}
-					writeModel = new UpdateManyModel<>(pkFilter, u, options);
 				}
 			}
 			updated.incrementAndGet();
@@ -401,11 +420,11 @@ public class MongodbWriter {
 			Map<String, Object> before = deleteRecordEvent.getBefore();
 			final Document pkFilter = getPkFilter(pks, before);
 
-			writeModel = new DeleteOneModel<>(pkFilter);
+			writeModels.add(new DeleteOneModel<>(pkFilter));
 			deleted.incrementAndGet();
 		}
 
-		return writeModel;
+		return writeModels;
 	}
 
 	protected Document wrapUnset(TapRecordEvent tapRecordEvent) {
@@ -422,12 +441,76 @@ public class MongodbWriter {
 			return null;
 		}
 		Document unsetDoc = new Document();
-		for (String removeField : removedFields) {
-			if (after.keySet().stream().noneMatch(v -> v.equals(removeField) || v.startsWith(removeField + ".") || removeField.startsWith(v + "."))) {
+
+		// 过滤掉被更高层级字段覆盖的字段
+		List<String> filteredFields = filterHierarchicalFields(removedFields);
+
+		for (String removeField : filteredFields) {
+			// 检查after中是否存在该字段（只检查完全相同的字段，不检查父字段）
+			if (!after.containsKey(removeField)) {
 				unsetDoc.append(removeField, true);
 			}
 		}
 		return unsetDoc;
+	}
+
+	/**
+	 * 过滤层级字段，保留最高层级的字段
+	 * 例如：[a, a.b, a.c] -> [a]
+	 *      [a.b, a.c] -> [a.b, a.c]
+	 *      [a, a.b, a.b.c] -> [a]
+	 *      [a.b, a.b.c, a.b.e] -> [a.b]
+	 */
+	private List<String> filterHierarchicalFields(List<String> fields) {
+		if (CollectionUtils.isEmpty(fields)) {
+			return fields;
+		}
+
+		// 按字段名排序，确保父字段在子字段前面
+		List<String> sortedFields = new ArrayList<>(fields);
+		sortedFields.sort(String::compareTo);
+
+		List<String> result = new ArrayList<>();
+
+		for (String field : sortedFields) {
+			boolean shouldAdd = true;
+
+			// 检查是否已经有父字段存在
+			for (String existingField : result) {
+				if (isChildField(field, existingField)) {
+					shouldAdd = false;
+					break;
+				}
+			}
+
+			if (shouldAdd) {
+				// 移除所有是当前字段子字段的已存在字段
+				result.removeIf(existingField -> isChildField(existingField, field));
+				result.add(field);
+			}
+		}
+
+		return result;
+	}
+
+	/**
+	 * 判断field是否是parentField的子字段
+	 * 例如：isChildField("a.b", "a") -> true
+	 *      isChildField("a.b.c", "a.b") -> true
+	 *      isChildField("a", "a.b") -> false
+	 */
+	private boolean isChildField(String field, String parentField) {
+		return field.startsWith(parentField + ".");
+	}
+
+	/**
+	 * 判断parentField是否是field的父字段
+	 * 例如：isParentField("a", "a.b") -> true
+	 *      isParentField("a.b", "a.b.c") -> true
+	 *      isParentField("a.b", "a") -> false
+	 */
+	private boolean isParentField(String parentField, String field) {
+		return field.startsWith(parentField + ".");
 	}
 
 	public void onDestroy() {

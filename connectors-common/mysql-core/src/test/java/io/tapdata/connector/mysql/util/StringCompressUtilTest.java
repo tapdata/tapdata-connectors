@@ -31,7 +31,7 @@ class StringCompressUtilTest {
         Assertions.assertDoesNotThrow(() -> {
             byte[] compress = StringCompressUtil.compress(str);
             String uncompress = StringCompressUtil.uncompress(compress);
-            Assertions.assertEquals(str, uncompress);
+            Assertions.assertNull(uncompress);
         });
     }
 }

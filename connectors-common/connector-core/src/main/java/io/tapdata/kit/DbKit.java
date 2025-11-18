@@ -105,6 +105,9 @@ public class DbKit {
     }
 
     public static byte[] blobToBytes(Blob blob) {
+        if (blob == null) {
+            return null;
+        }
         BufferedInputStream bis = null;
         try {
             bis = new BufferedInputStream(blob.getBinaryStream());

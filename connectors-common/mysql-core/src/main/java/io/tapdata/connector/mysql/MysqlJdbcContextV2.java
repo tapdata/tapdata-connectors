@@ -135,22 +135,9 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     }
 
     public MysqlBinlogPosition readBinlogPosition() throws Throwable {
+        boolean lowVersion = isLowVersion();
         AtomicReference<MysqlBinlogPosition> mysqlBinlogPositionAtomicReference = new AtomicReference<>();
-        String binLogStatusSql = "SHOW MASTER STATUS";
-        try (
-                Connection connection = getConnection()
-        ) {
-            DatabaseMetaData databaseMetaData = connection.getMetaData();
-            String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
-            String[] versionNums = version.split("\\.");
-            if (versionNums.length >= 2) {
-                int majorVersion = Integer.parseInt(versionNums[0]);
-                int minorVersion = Integer.parseInt(versionNums[1]);
-                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
-                    binLogStatusSql = "SHOW BINARY LOG STATUS";
-                }
-            }
-        }
+        String binLogStatusSql = lowVersion ? "SHOW MASTER STATUS" : "SHOW BINARY LOG STATUS";
         normalQuery(binLogStatusSql, rs -> {
             if (rs.next()) {
                 String binlogFilename = rs.getString(1);
@@ -167,16 +154,36 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     }
 
     public Map<String, Object> querySlaveStatus() throws Throwable {
+        boolean lowVersion = isLowVersion();
         Map<String, Object> hostPortAndStatus = new HashMap<>();
-        normalQuery("SHOW SLAVE STATUS", rs -> {
+        normalQuery(lowVersion ? "SHOW SLAVE STATUS" : "SHOW REPLICA STATUS", rs -> {
             if (rs.next()) {
-                hostPortAndStatus.put("host", rs.getString("Master_Host"));
-                hostPortAndStatus.put("port", rs.getInt("Master_Port"));
-                hostPortAndStatus.put("slaveIoRunning", rs.getString("Slave_IO_Running"));
-                hostPortAndStatus.put("slaveSqlRunning", rs.getString("Slave_SQL_Running"));
+                hostPortAndStatus.put("host", lowVersion ? rs.getString("Master_Host") : rs.getString("Source_Host"));
+                hostPortAndStatus.put("port", lowVersion ? rs.getInt("Master_Port") : rs.getInt("Source_Port"));
+                hostPortAndStatus.put("slaveIoRunning", lowVersion ? rs.getString("Slave_IO_Running") : rs.getString("Replica_IO_Running"));
+                hostPortAndStatus.put("slaveSqlRunning", lowVersion ? rs.getString("Slave_SQL_Running") : rs.getString("Replica_SQL_Running"));
             }
         });
         return hostPortAndStatus;
+    }
+
+    private boolean isLowVersion() throws SQLException {
+        boolean lowVersion = true;
+        try (
+                Connection connection = getConnection()
+        ) {
+            DatabaseMetaData databaseMetaData = connection.getMetaData();
+            String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
+            String[] versionNums = version.split("\\.");
+            if (versionNums.length >= 2) {
+                int majorVersion = Integer.parseInt(versionNums[0]);
+                int minorVersion = Integer.parseInt(versionNums[1]);
+                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
+                    lowVersion = false;
+                }
+            }
+        }
+        return lowVersion;
     }
 
     public Timestamp queryCurrentTime() throws SQLException {
@@ -229,7 +236,8 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     private static final String MYSQL_ALL_TABLE =
             "SELECT\n" +
                     "\tTABLE_NAME `tableName`,\n" +
-                    "\tTABLE_COMMENT `tableComment`\n" +
+                    "\tTABLE_COMMENT `tableComment`,\n" +
+                    "\tTABLE_COLLATION `tableCollation`\n" +
                     "FROM\n" +
                     "\tINFORMATION_SCHEMA.TABLES\n" +
                     "WHERE\n" +

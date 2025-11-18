@@ -123,11 +123,20 @@ public class PostgresDebeziumConfig {
             builder.with("provide.transaction.metadata", true);
         }
         if ("pgoutput".equals(postgresConfig.getLogPluginName())) {
-            builder.with("publication.autocreate.mode", "disabled");
-            if (postgresConfig.getPartitionRoot()) {
-                builder.with("publication.name", "dbz_publication_root");
+            if (postgresConfig.getPartPublication()) {
+                builder.with("publication.autocreate.mode", "filtered");
+                if (EmptyKit.isNotBlank(postgresConfig.getCustomPublicationName())) {
+                    builder.with("publication.name", postgresConfig.getCustomPublicationName());
+                } else {
+                    builder.with("publication.name", slotName);
+                }
             } else {
-                builder.with("publication.name", "dbz_publication");
+                builder.with("publication.autocreate.mode", "disabled");
+                if (postgresConfig.getPartitionRoot()) {
+                    builder.with("publication.name", postgresConfig.getGlobalPublicationName() + "_root");
+                } else {
+                    builder.with("publication.name", postgresConfig.getGlobalPublicationName());
+                }
             }
         }
         if (EmptyKit.isNotEmpty(observedTableList)) {
@@ -140,6 +149,7 @@ public class PostgresDebeziumConfig {
             String tableWhiteList = schemaTableMap.entrySet().stream().map(v -> v.getValue().stream().map(l -> StringKit.escapeRegex(v.getKey()) + "." + StringKit.escapeRegex(l)).collect(Collectors.joining(", "))).collect(Collectors.joining(", "));
             builder.with("table.whitelist", tableWhiteList);
         }
+        builder.with("tap.split.update.pk", postgresConfig.getSplitUpdatePk());
         return builder.build();
     }
 

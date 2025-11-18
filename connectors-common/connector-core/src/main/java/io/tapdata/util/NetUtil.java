@@ -3,8 +3,13 @@ package io.tapdata.util;
 import io.tapdata.kit.EmptyKit;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.SocketChannel;
+import java.nio.file.Path;
 
 /**
  * @author samuel
@@ -26,12 +31,16 @@ public class NetUtil {
      */
     public static void validateHostPortWithSocket(String host, int port, int timeoutMs) throws IOException, IllegalArgumentException {
         if (EmptyKit.isEmpty(host)) throw new IllegalArgumentException("Host cannot be empty");
-        if (port <= 0 || port >= 65536)
+        if (port < 0 || port >= 65536)
             throw new IllegalArgumentException("Port must greater than 0 and smaller then 65536");
         timeoutMs = timeoutMs <= 1000 ? DEFAULT_SOCKET_TIMEOUT_MS : timeoutMs;
         try {
             Socket s = new Socket();
-            s.connect(new InetSocketAddress(host, port), timeoutMs);
+            if(port == 0) {
+                return;
+            } else {
+                s.connect(new InetSocketAddress(host, port), timeoutMs);
+            }
             s.close();
         } catch (IOException e) {
             throw new IOException("Unable connect to " + host + ":" + port + ", reason: " + e.getMessage(), e);

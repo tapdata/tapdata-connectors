@@ -54,6 +54,7 @@ public class CommonDbConfig implements Serializable {
     protected ZoneId zoneId;
     protected Integer zoneOffsetHour;
     protected ZoneId sysZoneId;
+    protected Boolean splitUpdatePk = true;
 
     protected Boolean enableFileInput = false;
     protected Long bufferCapacity = 10000000L;
@@ -374,6 +375,14 @@ public class CommonDbConfig implements Serializable {
 
     public void setSysZoneId(ZoneId sysZoneId) {
         this.sysZoneId = sysZoneId;
+    }
+
+    public Boolean getSplitUpdatePk() {
+        return splitUpdatePk;
+    }
+
+    public void setSplitUpdatePk(Boolean splitUpdatePk) {
+        this.splitUpdatePk = splitUpdatePk;
     }
 
     public Boolean getEnableFileInput() {

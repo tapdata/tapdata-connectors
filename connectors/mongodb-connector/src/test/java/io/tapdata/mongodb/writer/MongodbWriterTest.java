@@ -2,7 +2,6 @@ package io.tapdata.mongodb.writer;
 
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.model.UpdateManyModel;
-import com.mongodb.client.model.UpdateOneModel;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.WriteModel;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
@@ -17,7 +16,6 @@ import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.merge.MergeInfo;
 import org.bson.Document;
-import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -48,6 +46,9 @@ class MongodbWriterTest {
 
 	@BeforeEach
 	void setUp() {
+		// 设置app_type系统属性，避免AppType初始化失败
+		System.setProperty("app_type", "DAAS");
+
 		globalStateMap = new KVMap<Object>() {
 			Map<String, Object> map = new HashMap<>();
 
@@ -92,7 +93,7 @@ class MongodbWriterTest {
 		mongoClient = mock(MongoClient.class);
 		log = mock(Log.class);
 		shardKeyMap = new HashMap<>();
-		mongodbWriter = new MongodbWriter(globalStateMap, mongodbConfig, mongoClient, log, shardKeyMap);
+		mongodbWriter = new MongodbWriter(globalStateMap, mongodbConfig, mongoClient, log, shardKeyMap, new HashMap<>());
 	}
 
 	@Nested
@@ -201,42 +202,289 @@ class MongodbWriterTest {
 	@Nested
 	@DisplayName("Method wrapUnset test")
 	class wrapUnsetTest {
+
 		@Test
-		@DisplayName("test insert event")
-		void test1() {
-			TapInsertRecordEvent tapInsertRecordEvent = TapInsertRecordEvent.create()
-					.after(new Document("id", 1).append("f1", 1))
-					.removedFields(new ArrayList<String>() {{
-						add("f2");
-					}});
-			Document document = mongodbWriter.wrapUnset(tapInsertRecordEvent);
-			assertEquals(1, document.size());
-			assertInstanceOf(Boolean.class, document.get("f2"));
-			assertTrue((Boolean) document.get("f2"));
+		@DisplayName("test TapInsertRecordEvent with removedFields and after")
+		void testInsertEventWithRemovedFields() {
+			// 准备测试数据
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("name", "test");
+			after.put("address", "beijing");
+
+			List<String> removedFields = new ArrayList<>();
+			removedFields.add("age");
+			removedFields.add("email");
+
+			TapInsertRecordEvent insertEvent = TapInsertRecordEvent.create()
+					.after(after)
+					.removedFields(removedFields);
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(insertEvent);
+
+			// 验证结果
+			assertNotNull(result);
+			assertEquals(2, result.size());
+			assertTrue(result.containsKey("age"));
+			assertTrue(result.containsKey("email"));
+			assertEquals(true, result.get("age"));
+			assertEquals(true, result.get("email"));
 		}
 
 		@Test
-		@DisplayName("test update event")
-		void test2() {
-			TapUpdateRecordEvent tapUpdateRecordEvent = TapUpdateRecordEvent.create()
-					.before(new Document("id", 1).append("f1", 1))
-					.after(new Document("id", 1).append("f1", 2))
-					.removedFields(new ArrayList<String>() {{
-						add("f2");
-					}});
-			Document document = mongodbWriter.wrapUnset(tapUpdateRecordEvent);
-			assertEquals(1, document.size());
-			assertInstanceOf(Boolean.class, document.get("f2"));
-			assertTrue((Boolean) document.get("f2"));
+		@DisplayName("test TapUpdateRecordEvent with removedFields and after")
+		void testUpdateEventWithRemovedFields() {
+			// 准备测试数据
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("name", "updated");
+
+			List<String> removedFields = new ArrayList<>();
+			removedFields.add("age");
+			removedFields.add("phone");
+
+			TapUpdateRecordEvent updateEvent = TapUpdateRecordEvent.create()
+					.after(after)
+					.removedFields(removedFields);
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(updateEvent);
+
+			// 验证结果
+			assertNotNull(result);
+			assertEquals(2, result.size());
+			assertTrue(result.containsKey("age"));
+			assertTrue(result.containsKey("phone"));
 		}
 
 		@Test
-		@DisplayName("test delete event")
-		void test3() {
-			TapDeleteRecordEvent tapDeleteRecordEvent = TapDeleteRecordEvent.create()
-					.before(new Document("id", 1));
-			Document document = mongodbWriter.wrapUnset(tapDeleteRecordEvent);
-			assertNull(document);
+		@DisplayName("test with null removedFields")
+		void testNullRemovedFields() {
+			// 准备测试数据
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("name", "test");
+
+			TapInsertRecordEvent insertEvent = TapInsertRecordEvent.create()
+					.after(after)
+					.removedFields(null);
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(insertEvent);
+
+			// 验证结果
+			assertNull(result);
+		}
+
+		@Test
+		@DisplayName("test with empty removedFields")
+		void testEmptyRemovedFields() {
+			// 准备测试数据
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("name", "test");
+
+			TapInsertRecordEvent insertEvent = TapInsertRecordEvent.create()
+					.after(after)
+					.removedFields(new ArrayList<>());
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(insertEvent);
+
+			// 验证结果
+			assertNull(result);
+		}
+
+		@Test
+		@DisplayName("test with null after")
+		void testNullAfter() {
+			// 准备测试数据
+			List<String> removedFields = new ArrayList<>();
+			removedFields.add("age");
+			removedFields.add("email");
+
+			TapInsertRecordEvent insertEvent = TapInsertRecordEvent.create()
+					.after(null)
+					.removedFields(removedFields);
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(insertEvent);
+
+			// 验证结果
+			assertNull(result);
+		}
+
+		@Test
+		@DisplayName("test with empty after")
+		void testEmptyAfter() {
+			// 准备测试数据
+			List<String> removedFields = new ArrayList<>();
+			removedFields.add("age");
+			removedFields.add("email");
+
+			TapInsertRecordEvent insertEvent = TapInsertRecordEvent.create()
+					.after(new HashMap<>())
+					.removedFields(removedFields);
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(insertEvent);
+
+			// 验证结果
+			assertNull(result);
+		}
+
+		@Test
+		@DisplayName("test hierarchical fields filtering - parent field exists")
+		void testHierarchicalFieldsFilteringParentExists() {
+			// 准备测试数据
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("name", "test");
+
+			// removedFields包含层级字段，应该只保留最高层级的字段
+			List<String> removedFields = new ArrayList<>();
+			removedFields.add("user");
+			removedFields.add("user.name");
+			removedFields.add("user.age");
+			removedFields.add("user.profile.email");
+
+			TapInsertRecordEvent insertEvent = TapInsertRecordEvent.create()
+					.after(after)
+					.removedFields(removedFields);
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(insertEvent);
+
+			// 验证结果 - 应该只包含最高层级的字段 "user"
+			assertNotNull(result);
+			assertEquals(1, result.size());
+			assertTrue(result.containsKey("user"));
+			assertFalse(result.containsKey("user.name"));
+			assertFalse(result.containsKey("user.age"));
+			assertFalse(result.containsKey("user.profile.email"));
+		}
+
+		@Test
+		@DisplayName("test hierarchical fields filtering - no parent field")
+		void testHierarchicalFieldsFilteringNoParent() {
+			// 准备测试数据
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("name", "test");
+
+			// removedFields包含同级字段
+			List<String> removedFields = new ArrayList<>();
+			removedFields.add("user.name");
+			removedFields.add("user.age");
+			removedFields.add("profile.email");
+
+			TapInsertRecordEvent insertEvent = TapInsertRecordEvent.create()
+					.after(after)
+					.removedFields(removedFields);
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(insertEvent);
+
+			// 验证结果 - 应该包含所有字段，因为没有父字段覆盖
+			assertNotNull(result);
+			assertEquals(3, result.size());
+			assertTrue(result.containsKey("user.name"));
+			assertTrue(result.containsKey("user.age"));
+			assertTrue(result.containsKey("profile.email"));
+		}
+
+		@Test
+		@DisplayName("test field exists in after - should be excluded from unset")
+		void testFieldExistsInAfter() {
+			// 准备测试数据
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+			after.put("name", "test");
+			after.put("age", 25); // age字段在after中存在
+
+			List<String> removedFields = new ArrayList<>();
+			removedFields.add("age");
+			removedFields.add("email");
+			removedFields.add("phone");
+
+			TapInsertRecordEvent insertEvent = TapInsertRecordEvent.create()
+					.after(after)
+					.removedFields(removedFields);
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(insertEvent);
+
+			// 验证结果 - age字段在after中存在，不应该被unset
+			assertNotNull(result);
+			assertEquals(2, result.size());
+			assertFalse(result.containsKey("age")); // age不应该在unset中
+			assertTrue(result.containsKey("email"));
+			assertTrue(result.containsKey("phone"));
+		}
+
+		@Test
+		@DisplayName("test TapDeleteRecordEvent - should return null")
+		void testDeleteEvent() {
+			// 准备测试数据
+			Map<String, Object> before = new HashMap<>();
+			before.put("id", 1);
+			before.put("name", "test");
+
+			TapDeleteRecordEvent deleteEvent = TapDeleteRecordEvent.create()
+					.before(before);
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(deleteEvent);
+
+			// 验证结果 - delete事件不支持，应该返回null
+			assertNull(result);
+		}
+
+		@Test
+		@DisplayName("test unsupported event type")
+		void testUnsupportedEventType() {
+			// 创建一个不支持的事件类型
+			TapRecordEvent unsupportedEvent = new TapRecordEvent(999) {
+				@Override
+				public Map<String, Object> getFilter(Collection<String> primaryKeys) {
+					return null;
+				}
+			};
+
+			// 执行测试
+			Document result = mongodbWriter.wrapUnset(unsupportedEvent);
+
+			// 验证结果
+			assertNull(result);
+		}
+
+		@Test
+		@DisplayName("test single field scenarios")
+		void testSingleFieldScenarios() {
+			// 测试单个字段的各种情况
+			Map<String, Object> after = new HashMap<>();
+			after.put("id", 1);
+
+			// 情况1：单个字段不在after中
+			List<String> removedFields1 = new ArrayList<>();
+			removedFields1.add("name");
+			TapInsertRecordEvent event1 = TapInsertRecordEvent.create()
+					.after(after)
+					.removedFields(removedFields1);
+			Document result1 = mongodbWriter.wrapUnset(event1);
+			assertNotNull(result1);
+			assertEquals(1, result1.size());
+			assertTrue(result1.containsKey("name"));
+
+			// 情况2：单个字段在after中
+			after.put("name", "test");
+			TapInsertRecordEvent event2 = TapInsertRecordEvent.create()
+					.after(after)
+					.removedFields(removedFields1);
+			Document result2 = mongodbWriter.wrapUnset(event2);
+			assertNotNull(result2);
+			assertEquals(0, result2.size()); // name在after中，不应该unset
 		}
 	}
 
@@ -265,9 +513,14 @@ class MongodbWriterTest {
 			TapInsertRecordEvent tapInsertRecordEvent = TapInsertRecordEvent.create()
 					.after(new Document("id", 1).append("f1", 1))
 					.removedFields(removeFields);
-			WriteModel<Document> writeModel = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapInsertRecordEvent);
-			assertInstanceOf(UpdateManyModel.class, writeModel);
-			Document update = (Document) ((UpdateManyModel<Document>) writeModel).getUpdate();
+			List<WriteModel<Document>> writeModels = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapInsertRecordEvent);
+			assertNotNull(writeModels);
+			assertEquals(2, writeModels.size());
+			assertInstanceOf(UpdateManyModel.class, writeModels.get(0));
+			Document update = (Document) ((UpdateManyModel<Document>) (writeModels.get(0))).getUpdate();
+			assertTrue(update.containsKey("$set"));
+			assertInstanceOf(UpdateManyModel.class, writeModels.get(1));
+			update = (Document) ((UpdateManyModel<Document>) (writeModels.get(1))).getUpdate();
 			assertTrue(update.containsKey("$unset"));
 		}
 
@@ -282,9 +535,14 @@ class MongodbWriterTest {
 			TapInsertRecordEvent tapInsertRecordEvent = TapInsertRecordEvent.create()
 					.after(new Document("id", 1).append("f1", 1))
 					.removedFields(removeFields);
-			WriteModel<Document> writeModel = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapInsertRecordEvent);
-			assertInstanceOf(UpdateManyModel.class, writeModel);
-			Document update = (Document) ((UpdateManyModel<Document>) writeModel).getUpdate();
+			List<WriteModel<Document>> writeModels = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapInsertRecordEvent);
+			assertNotNull(writeModels);
+			assertEquals(2, writeModels.size());
+			assertInstanceOf(UpdateManyModel.class, writeModels.get(0));
+			Document update = (Document) ((UpdateManyModel<Document>) (writeModels.get(0))).getUpdate();
+			assertTrue(update.containsKey("$set"));
+			assertInstanceOf(UpdateManyModel.class, writeModels.get(1));
+			update = (Document) ((UpdateManyModel<Document>) (writeModels.get(1))).getUpdate();
 			assertTrue(update.containsKey("$unset"));
 		}
 
@@ -299,9 +557,14 @@ class MongodbWriterTest {
 					.before(new Document("id", 1).append("f1", 1))
 					.after(new Document("id", 1).append("f1", 2))
 					.removedFields(removeFields);
-			WriteModel<Document> writeModel = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapUpdateRecordEvent);
-			assertInstanceOf(UpdateManyModel.class, writeModel);
-			Document update = (Document) ((UpdateManyModel<Document>) writeModel).getUpdate();
+			List<WriteModel<Document>> writeModels = mongodbWriter.normalWriteMode(new AtomicLong(), new AtomicLong(), new AtomicLong(), new UpdateOptions().upsert(true), tapTable, pks, tapUpdateRecordEvent);
+			assertNotNull(writeModels);
+			assertEquals(2, writeModels.size());
+			assertInstanceOf(UpdateManyModel.class, writeModels.get(0));
+			Document update = (Document) ((UpdateManyModel<Document>) (writeModels.get(0))).getUpdate();
+			assertTrue(update.containsKey("$set"));
+			assertInstanceOf(UpdateManyModel.class, writeModels.get(1));
+			update = (Document) ((UpdateManyModel<Document>) (writeModels.get(1))).getUpdate();
 			assertTrue(update.containsKey("$unset"));
 		}
 	}
