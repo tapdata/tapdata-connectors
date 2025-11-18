@@ -14,6 +14,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.kit.DbKit;
@@ -33,6 +34,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.bson.Document;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -66,6 +68,12 @@ public class MongodbWriter {
 	private String insertPolicy;
 	private String updatePolicy;
 	private final Map<String, ClientSession> sessionMap;
+
+	// Error file cleanup configuration
+	private volatile long lastCleanupTime = 0;
+	private static final long CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+	private static final int ERROR_FILE_RETENTION_DAYS = 7; // Keep error files for 7 days
+	private static final int ERROR_FILE_MAX_COUNT = 100; // Keep at most 100 error files
 
 	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger, Map<String, Set<String>> shardKeyMap, Map<String, ClientSession> sessionMap) {
 		this.globalStateMap = globalStateMap;
@@ -168,7 +176,7 @@ public class MongodbWriter {
 					try {
 						String dumpPath = dumpBulkWriteErrorContext(e, bulkWriteModel, bulkWriteOptions, collection);
 						if (dumpPath != null) {
-							tapLogger.info("MongoDB bulk write error context saved to file: {}", dumpPath);
+							TapLogger.info("MongoDB bulk write context saved to file: ", dumpPath);
 						}
 					} catch (Throwable ignored) {
 						// Never affect main flow
@@ -346,6 +354,8 @@ public class MongodbWriter {
 				Files.createDirectories(dir);
 				Path filePath = dir.resolve(fileName);
 				Files.write(filePath, content.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+				// Trigger cleanup after successful write
+				cleanupErrorFilesIfNeeded(dir);
 				return filePath.toAbsolutePath().toString();
 			} catch (Throwable t1) {
 				// Fallback to current working directory
@@ -355,6 +365,8 @@ public class MongodbWriter {
 					Files.createDirectories(fallbackDir);
 					Path filePath = fallbackDir.resolve(fileName);
 					Files.write(filePath, content.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+					// Trigger cleanup after successful write
+					cleanupErrorFilesIfNeeded(fallbackDir);
 					return filePath.toAbsolutePath().toString();
 				} catch (Throwable ignored) {
 					return null;
@@ -730,6 +742,88 @@ public class MongodbWriter {
 		this.insertPolicy = insertPolicy;
 		this.updatePolicy = updatePolicy;
 		return this;
+	}
+
+	/**
+	 * Cleanup old error files if needed (with frequency limit)
+	 * This method is called after each error file write, but actual cleanup only happens once per hour
+	 *
+	 * @param errorDir The directory containing error files
+	 */
+	private void cleanupErrorFilesIfNeeded(Path errorDir) {
+		long now = System.currentTimeMillis();
+		if (now - lastCleanupTime < CLEANUP_INTERVAL_MS) {
+			return; // Skip cleanup to avoid frequent execution
+		}
+		lastCleanupTime = now;
+		cleanupErrorFiles(errorDir, ERROR_FILE_RETENTION_DAYS, ERROR_FILE_MAX_COUNT);
+	}
+
+	/**
+	 * Cleanup error files based on retention days and max file count
+	 * Strategy:
+	 * 1. First delete files older than retention days
+	 * 2. If remaining files still exceed max count, delete oldest files
+	 *
+	 * @param errorDir      The directory containing error files
+	 * @param retentionDays Keep files for this many days
+	 * @param maxFiles      Keep at most this many files
+	 */
+	private void cleanupErrorFiles(Path errorDir, int retentionDays, int maxFiles) {
+		try {
+			if (!Files.exists(errorDir) || !Files.isDirectory(errorDir)) {
+				return;
+			}
+
+			long cutoffTime = System.currentTimeMillis() - (retentionDays * 24L * 60 * 60 * 1000);
+
+			List<Path> allFiles = Files.list(errorDir)
+					.filter(Files::isRegularFile)
+					.filter(p -> p.getFileName().toString().startsWith("mongodb_bulk_write_error_"))
+					.collect(java.util.stream.Collectors.toList());
+
+			// Step 1: Delete files older than retention period
+			List<Path> validFiles = new ArrayList<>();
+			for (Path p : allFiles) {
+				try {
+					if (Files.getLastModifiedTime(p).toMillis() < cutoffTime) {
+						Files.delete(p);
+						tapLogger.debug("Deleted old error file (older than {} days): {}", retentionDays, p.getFileName());
+					} else {
+						validFiles.add(p);
+					}
+				} catch (IOException e) {
+					tapLogger.warn("Failed to delete old error file: {}, error: {}", p, e.getMessage());
+				}
+			}
+
+			// Step 2: If remaining files still exceed max count, delete oldest files
+			if (validFiles.size() > maxFiles) {
+				validFiles.sort(Comparator.comparingLong(p -> {
+					try {
+						return Files.getLastModifiedTime(p).toMillis();
+					} catch (IOException e) {
+						return 0L;
+					}
+				}));
+
+				int filesToDelete = validFiles.size() - maxFiles;
+				for (int i = 0; i < filesToDelete; i++) {
+					try {
+						Files.delete(validFiles.get(i));
+						tapLogger.debug("Deleted excess error file (exceeds max count {}): {}", maxFiles, validFiles.get(i).getFileName());
+					} catch (IOException e) {
+						tapLogger.warn("Failed to delete excess error file: {}, error: {}", validFiles.get(i), e.getMessage());
+					}
+				}
+			}
+
+			tapLogger.debug("Error file cleanup completed. Directory: {}, retention days: {}, max files: {}",
+					errorDir, retentionDays, maxFiles);
+		} catch (Throwable t) {
+			// Never affect main flow
+			tapLogger.warn("Error during error file cleanup: {}", t.getMessage());
+		}
 	}
 
 }
