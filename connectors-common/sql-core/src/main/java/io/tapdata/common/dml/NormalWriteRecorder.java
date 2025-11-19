@@ -47,6 +47,7 @@ public abstract class NormalWriteRecorder {
     protected Boolean fileInput = false;
     protected ByteBuf buffer;
     protected WritePolicyEnum updatePolicy;
+    protected boolean dataSaving = true;
     protected char escapeChar = '"';
 
     protected String preparedStatementKey;
@@ -198,6 +199,10 @@ public abstract class NormalWriteRecorder {
 
     public void setUpdatePolicy(String updatePolicy) {
         this.updatePolicy = WritePolicyEnum.valueOf(updatePolicy.toUpperCase());
+    }
+
+    public void setDataSaving(Boolean dataSaving) {
+        this.dataSaving = dataSaving;
     }
 
     public void setTapLogger(Log tapLogger) {
@@ -365,6 +370,10 @@ public abstract class NormalWriteRecorder {
                 //有字段内容不全情况，不可使用
                 executeBatch(listResult);
                 largeSql = false;
+            } else if (uniqueCondition.stream().anyMatch(v -> !Objects.equals(after.get(v), before.get(v)))) {
+                //更新关联条件，不可使用
+                executeBatch(listResult);
+                largeSql = false;
             } else {
                 largeInsert(after);
                 return;
@@ -377,11 +386,15 @@ public abstract class NormalWriteRecorder {
                 insertUpdate(after, lastBefore, listResult);
                 break;
             default:
-                Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
-                if (EmptyKit.isEmpty(lastAfter)) {
-                    return;
+                if (dataSaving) {
+                    Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
+                    if (EmptyKit.isEmpty(lastAfter)) {
+                        return;
+                    }
+                    justUpdate(lastAfter, lastBefore, listResult);
+                } else {
+                    justUpdate(after, lastBefore, listResult);
                 }
-                justUpdate(lastAfter, lastBefore, listResult);
                 break;
         }
         preparedStatement.addBatch();
