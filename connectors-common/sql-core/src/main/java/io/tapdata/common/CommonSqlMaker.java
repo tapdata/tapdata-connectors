@@ -120,7 +120,7 @@ public class CommonSqlMaker {
     }
 
     protected void buildNullDefinition(StringBuilder builder, TapField tapField) {
-        if ((EmptyKit.isNotNull(tapField.getNullable()) && !tapField.getNullable()) || (null != tapField.getPrimaryKeyPos() && tapField.getPrimaryKeyPos() > 0)) {
+        if ((EmptyKit.isNotNull(tapField.getNullable()) && !tapField.getNullable()) || tapField.getPrimaryKey()) {
             builder.append("NOT NULL").append(' ');
         }
     }

@@ -9,15 +9,22 @@ import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.type.TapBinary;
+import io.tapdata.entity.schema.type.TapBoolean;
+import io.tapdata.entity.schema.type.TapDateTime;
 import io.tapdata.entity.schema.type.TapNumber;
+import io.tapdata.entity.utils.DataMap;
+import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
 import io.tapdata.utils.UnitTestUtils;
@@ -29,6 +36,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.BiConsumer;
@@ -73,6 +81,65 @@ public class MysqlConnectorTest {
         ReflectionTestUtils.invokeMethod(postgresConnector, "queryTableHash", connectorContext, filter, table, consumer);
 
     }
+
+
+    @Test
+    void testBuildHashSql() {
+
+        MysqlConnector mysqlConnector = new MysqlConnector();
+        TapAdvanceFilter filter = new TapAdvanceFilter();
+        TapTable table = new TapTable();
+        LinkedHashMap<String, TapField> map = new LinkedHashMap<>();
+
+        buildNumberTapField("double", map);
+        buildNumberTapField("decimal", map);
+        buildNumberTapField("float", map);
+
+
+        TapField booleanTapField = new TapField();
+        booleanTapField.setTapType(new TapBoolean());
+        booleanTapField.setName("boolean");
+        booleanTapField.setDataType("bit");
+        map.put("boolean", booleanTapField);
+
+
+        TapField datetimeTapField = new TapField();
+        datetimeTapField.setTapType(new TapDateTime());
+        datetimeTapField.setName("timestamp");
+        datetimeTapField.setDataType("timestamp");
+        map.put("timestamp", datetimeTapField);
+
+        TapField binaryTapField = new TapField();
+        binaryTapField.setTapType(new TapBinary());
+        binaryTapField.setName("binary");
+        binaryTapField.setDataType("binary");
+        map.put("binary", binaryTapField);
+
+        TapField intTapField = new TapField();
+        intTapField.setTapType(new TapNumber());
+        intTapField.setName("bigint");
+        intTapField.setDataType("bigint");
+        map.put("int", intTapField);
+
+        table.setNameFieldMap(map);
+        JdbcContext jdbcContext = Mockito.mock(JdbcContext.class);
+        ReflectionTestUtils.setField(mysqlConnector, "jdbcContext", jdbcContext);
+        CommonSqlMaker commonSqlMaker = new CommonSqlMaker('`');
+        ;
+        ReflectionTestUtils.setField(mysqlConnector, "commonSqlMaker", commonSqlMaker);
+
+        String actualData = ReflectionTestUtils.invokeMethod(mysqlConnector, "buildHashSql", filter, table);
+
+        Assertions.assertTrue(actualData.contains("TRUNCATE(`double`,0)"));
+        Assertions.assertTrue(actualData.contains("TRUNCATE(`decimal`,0)"));
+        Assertions.assertTrue(actualData.contains("TRUNCATE(`float`,0)"));
+        Assertions.assertTrue(actualData.contains("CAST(`boolean` AS unsigned)"));
+        Assertions.assertTrue(actualData.contains("round(UNIX_TIMESTAMP( CAST(`timestamp` as char(19)) ))"));
+        Assertions.assertTrue(actualData.contains("int"));
+
+
+    }
+
 
     public void buildNumberTapField(String name, LinkedHashMap<String, TapField> map) {
         TapField numberTapField = new TapField();
@@ -266,6 +333,17 @@ public class MysqlConnectorTest {
             when(tapTable.getNameFieldMap()).thenReturn(generateFieldMap(fields));
             assertTrue(connector.getBatchReadSelectSql(tapTable).toLowerCase().startsWith("select *"));
         }
+
+        @Test
+        void testFieldSizeLessThen50() {
+            int fieldSize = 1;
+            TapField[] fields = new TapField[fieldSize];
+            for (int i = 0; i < fieldSize; i++) {
+                fields[i] = new TapField("f" + i, "INT");
+            }
+            when(tapTable.getNameFieldMap()).thenReturn(generateFieldMap(fields));
+            assertFalse(connector.getBatchReadSelectSql(tapTable).toLowerCase().startsWith("select *"));
+        }
     }
 
     @Nested
@@ -378,4 +456,28 @@ public class MysqlConnectorTest {
             Assertions.assertTrue(actualData.getPosition() == position);
         }
     }
+
+    @Nested
+    class ConnectionTest{
+        MysqlConfig mysqlConfig;
+        MysqlConnector connector;
+        @BeforeEach
+        void init(){
+            mysqlConfig = mock(MysqlConfig.class);
+            connector = mock(MysqlConnector.class);
+        }
+
+        @Test
+        void test_main(){
+            TapConnectionContext connectionContext = mock(TapConnectionContext.class);
+            when(connectionContext.getConnectionConfig()).thenReturn(new DataMap());
+            Consumer<TestItem> consumer = testItem -> {
+            };
+            doCallRealMethod().when(connector).connectionTest(any(),any());
+            Assertions.assertThrows(IllegalArgumentException.class,()->{
+                connector.connectionTest(connectionContext,consumer);
+            });
+        }
+    }
+
 }

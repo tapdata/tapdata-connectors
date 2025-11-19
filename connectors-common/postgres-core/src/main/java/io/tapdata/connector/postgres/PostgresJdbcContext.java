@@ -227,7 +227,6 @@ public class PostgresJdbcContext extends JdbcContext {
                     "    i.relname AS \"indexName\",\n" +
                     "    a.attname AS \"columnName\",\n" +
                     "    (CASE WHEN ix.indisunique THEN '1' ELSE '0' END) AS \"isUnique\",\n" +
-                    "    (CASE WHEN ix.indisreplident THEN '1' ELSE '0' END) AS \"isCoreUnique\",\n" +
                     "    (CASE WHEN ix.indisprimary THEN '1' ELSE '0' END) AS \"isPk\",\n" +
                     "    (CASE WHEN ix.indoption[row_number() over (partition by t.relname,i.relname order by a.attnum) - 1] & 1 = 0 THEN '1' ELSE '0' END) AS \"isAsc\"\n" +
                     "FROM\n" +

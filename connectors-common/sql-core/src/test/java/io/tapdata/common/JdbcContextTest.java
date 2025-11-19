@@ -110,7 +110,6 @@ public class JdbcContextTest {
                 ) {
                     hikariConnectionMockedStatic.when(JdbcContext.HikariConnection::create).thenReturn(hikariDataSource);
                     CommonDbConfig config = spy(CommonDbConfig.class);
-                    config.setDatabase("test");
                     doAnswer(invocationOnMock -> null).when(hikariDataSource).setDriverClassName(anyString());
                     hikariConnectionMockedStatic.when(() -> JdbcContext.HikariConnection.getHikariDataSource(config)).thenCallRealMethod();
                     JdbcContext.HikariConnection.getHikariDataSource(config);
@@ -139,7 +138,6 @@ public class JdbcContextTest {
                 ) {
                     hikariConnectionMockedStatic.when(JdbcContext.HikariConnection::create).thenReturn(hikariDataSource);
                     CommonDbConfig config = spy(CommonDbConfig.class);
-                    config.setDatabase("test");
                     Properties properties = new Properties();
                     properties.put("key", "value");
                     config.setProperties(properties);

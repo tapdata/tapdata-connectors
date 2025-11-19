@@ -3,13 +3,14 @@ package io.tapdata.connector.tidb.cdc.process.analyse;
 
 import io.tapdata.connector.tidb.cdc.process.ddl.convert.Convert;
 import io.tapdata.connector.tidb.cdc.process.dml.entity.DMLObject;
-import io.tapdata.constant.DMLType;
+import io.tapdata.connector.tidb.cdc.process.dml.entity.DMLType;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.Log;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;

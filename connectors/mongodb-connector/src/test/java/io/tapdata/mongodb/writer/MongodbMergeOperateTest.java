@@ -195,8 +195,7 @@ class MongodbMergeOperateTest {
 					null,
 					null,
 					mergeFilter,
-					1,
-					null
+					1
 			);
 			assertEquals(3, mergeResults.size());
 		}

@@ -193,31 +193,14 @@ public class KafkaService implements IKafkaService {
 
             // offset 设置
             KafkaTopicOffset endTopicOffsets;
-            KafkaTopicOffset startTopicOffsets;
+            List<Long> concurrentOffset;
             Queue<TapEntry<Integer, Long>> concurrentQueue = new ConcurrentLinkedQueue<>();
             try (KafkaConsumer<?, ?> kafkaConsumer = new KafkaConsumer<>(config.buildConsumerConfig(isEarliest))) {
                 Collection<TopicPartition> topicPartitions = getAdminService().getTopicPartitions(Collections.singleton(topic));
                 endTopicOffsets = KafkaBatchReadOffsetUtils.topicOffsetFromStateMap(topic, config, kafkaConsumer, topicPartitions);
-
-                // Get start offsets - use KafkaTopicOffset instead of List to maintain partition number mapping
-                if (offset instanceof KafkaTopicOffset) {
-                    startTopicOffsets = (KafkaTopicOffset) offset;
-                } else if (offset instanceof List) {
-                    // Legacy support for List offset - convert to KafkaTopicOffset
-                    List<Long> offsetList = (List<Long>) offset;
-                    startTopicOffsets = new KafkaTopicOffset();
-                    for (int i = 0; i < offsetList.size(); i++) {
-                        startTopicOffsets.setOffset(i, offsetList.get(i));
-                    }
-                } else {
-                    // Get begin offsets from Kafka
-                    KafkaOffset kafkaOffset = KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, topicPartitions, isEarliest);
-                    startTopicOffsets = kafkaOffset.get(topic);
-                }
-
-                // Build concurrent queue with actual partition numbers
-                for (Map.Entry<Integer, Long> entry : startTopicOffsets.entrySet()) {
-                    concurrentQueue.add(new TapEntry<>(entry.getKey(), entry.getValue()));
+                concurrentOffset = (offset instanceof List) ? (List<Long>) offset : KafkaOffsetUtils.beginOffsets(kafkaConsumer, topicPartitions);
+                for (int i = 0; i < concurrentOffset.size(); i++) {
+                    concurrentQueue.add(new TapEntry<>(i, concurrentOffset.get(i)));
                 }
             }
             List<TapEntry<String, Function<Object, Object>>> fieldTypeConverts = KafkaUtils.setFieldTypeConvert(table, new ArrayList<>());
@@ -242,7 +225,7 @@ public class KafkaService implements IKafkaService {
                         logger.warn("not found end offset with topic partition {}-{}", topic, concurrentItem.getKey());
                         return;
                     } else {
-                        logger.info("end offset with topic partition {}-{}: start={}, end={}", topic, concurrentItem.getKey(), concurrentItem.getValue(), endOffset);
+                        logger.info("end offset with topic partition {}-{}", topic, concurrentItem.getKey());
                     }
 
                     Properties properties = config.buildConsumerConfig(isEarliest);
@@ -252,11 +235,12 @@ public class KafkaService implements IKafkaService {
                         kafkaConsumer.assign(Collections.singleton(topicPartition));
                         kafkaConsumer.seek(topicPartition, concurrentItem.getValue());
 
-                        while (!stopping.get() && null == exception.get()) {
+                        while (!stopping.get()) {
                             ConsumerRecords<Object, Object> consumerRecords = kafkaConsumer.poll(timeout);
                             if (consumerRecords.isEmpty()) continue;
 
                             for (ConsumerRecord<Object, Object> consumerRecord : consumerRecords) {
+                                concurrentOffset.set(partition, consumerRecord.offset()); // offset 推进
                                 TapEvent event = schemaModeService.toTapEvent(consumerRecord);
                                 if (TapUnknownRecordEvent.TYPE == event.getType()) {
                                     TapUnknownRecordEvent unknownRecordEvent = (TapUnknownRecordEvent) event;
@@ -266,10 +250,7 @@ public class KafkaService implements IKafkaService {
                                 KafkaUtils.convertWithFieldType(fieldTypeConverts, event);
                                 batchPusher.add(consumerRecord, event);
 
-                                if (consumerRecord.offset() + 1 >= endOffset) {
-                                    logger.info("Partition {}-{} batch read completed at offset {}", topic, partition, consumerRecord.offset());
-                                    return; // 全量完成
-                                }
+                                if (consumerRecord.offset() + 1 >= endOffset) return; // 全量完成
                             }
                         }
                     }

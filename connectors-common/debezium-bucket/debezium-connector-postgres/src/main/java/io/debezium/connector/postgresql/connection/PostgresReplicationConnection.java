@@ -6,6 +6,34 @@
 
 package io.debezium.connector.postgresql.connection;
 
+import static java.lang.Math.toIntExact;
+
+import java.nio.ByteBuffer;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLWarning;
+import java.sql.Statement;
+import java.time.Duration;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import org.apache.kafka.connect.errors.ConnectException;
+import org.postgresql.core.BaseConnection;
+import org.postgresql.core.ServerVersion;
+import org.postgresql.replication.PGReplicationStream;
+import org.postgresql.replication.fluent.logical.ChainedLogicalStreamBuilder;
+import org.postgresql.util.PSQLException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.debezium.DebeziumException;
 import io.debezium.config.Configuration;
 import io.debezium.connector.postgresql.PostgresConnectorConfig;
@@ -18,29 +46,6 @@ import io.debezium.relational.RelationalTableFilters;
 import io.debezium.relational.TableId;
 import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
-import org.apache.kafka.connect.errors.ConnectException;
-import org.postgresql.core.BaseConnection;
-import org.postgresql.core.ServerVersion;
-import org.postgresql.replication.PGReplicationStream;
-import org.postgresql.replication.fluent.logical.ChainedLogicalStreamBuilder;
-import org.postgresql.util.PSQLException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.nio.ByteBuffer;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.SQLWarning;
-import java.sql.Statement;
-import java.time.Duration;
-import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-
-import static java.lang.Math.toIntExact;
 
 /**
  * Implementation of a {@link ReplicationConnection} for Postgresql. Note that replication connections in PG cannot execute
@@ -165,27 +170,6 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
                                                 e);
                                     }
                                     break;
-                            }
-                        } else if (publicationAutocreateMode == PostgresConnectorConfig.AutoCreateMode.FILTERED) {
-                            try {
-                                Set<TableId> tablesToCapture = determineCapturedTables();
-                                Set<TableId> existsTables = new HashSet<>();
-                                String catalog = connection().getCatalog();
-                                try (ResultSet resultSet = stmt.executeQuery(String.format("select * from pg_publication_tables where pubname='%s'", publicationName))) {
-                                    while (resultSet.next()) {
-                                        existsTables.add(new TableId(catalog, resultSet.getString("schemaname"), resultSet.getString("tablename")));
-                                    }
-                                }
-
-                                tableFilterString = tablesToCapture.stream().filter(v -> !existsTables.contains(v)).map(TableId::toDoubleQuotedString).collect(Collectors.joining(", "));
-                                if (!tableFilterString.isEmpty()) {
-                                    createPublicationStmt = String.format("ALTER PUBLICATION %s ADD TABLE %s;", publicationName, tableFilterString);
-                                    LOGGER.info("ALTER Publication with statement '{}'", createPublicationStmt);
-                                    stmt.execute(createPublicationStmt);
-                                }
-                            } catch (Exception e) {
-                                throw new ConnectException(String.format("Unable to alter filtered publication %s for %s", publicationName, tableFilterString),
-                                        e);
                             }
                         }
                         else {

@@ -269,41 +269,23 @@ public class ClickhouseConnector extends CommonDbConnector {
 
         // primary key
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
-        if (EmptyKit.isBlank(clickhouseConfig.getEngineExpr())) {
-            if (EmptyKit.isNotEmpty(primaryKeys)) {
-                sql.append(") ENGINE = ReplacingMergeTree");
-                if (clickhouseConfig.getMixFastWrite()) {
-                    sql.append("(`version`)");
-                }
-                sql.append(" PRIMARY KEY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
-            } else {
-                sql.append(") ENGINE = MergeTree");
+        if (EmptyKit.isNotEmpty(primaryKeys)) {
+            sql.append(") ENGINE = ReplacingMergeTree");
+            if (clickhouseConfig.getMixFastWrite()) {
+                sql.append("(`version`)");
             }
+            sql.append(" PRIMARY KEY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
         } else {
-            sql.append(") ENGINE = ").append(clickhouseConfig.getEngineExpr());
-            if (clickhouseConfig.getSupportPk() && EmptyKit.isNotEmpty(primaryKeys)) {
-                sql.append(" PRIMARY KEY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
-            }
+            sql.append(") ENGINE = MergeTree");
         }
-        if (EmptyKit.isNotBlank(clickhouseConfig.getPartitionExpr())) {
-            sql.append(" PARTITION BY ").append(clickhouseConfig.getPartitionExpr());
-        }
-        if (EmptyKit.isBlank(clickhouseConfig.getOrderExpr())) {
-            if (EmptyKit.isNotEmpty(primaryKeys)) {
-                sql.append(" ORDER BY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
-            } else {
-                sql.append(" ORDER BY tuple()");
-            }
+
+        // sorting key
+        if (EmptyKit.isNotEmpty(primaryKeys)) {
+            sql.append(" ORDER BY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
         } else {
-            sql.append(" ORDER BY ").append(clickhouseConfig.getOrderExpr());
+            sql.append(" ORDER BY tuple()");
         }
-        if (EmptyKit.isNotEmpty(clickhouseConfig.getTableProperties())) {
-            sql.append(" SETTINGS ");
-            for (Map<String, String> property : clickhouseConfig.getTableProperties()) {
-                sql.append(property.get("propKey")).append("=").append(property.get("propValue")).append(",");
-            }
-            sql.setLength(sql.length() - 1);
-        }
+
         if (clickhouseConfig.getMixFastWrite()) {
             sql.append(" TTL delete_time + INTERVAL 1 SECOND DELETE WHERE is_deleted = 1");
         }

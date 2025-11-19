@@ -98,11 +98,8 @@ public class MysqlAlterColumnAttrsDDLWrapper extends MysqlDDLWrapper {
                 //Mysql change column type may not change the attributes, just rename
                 TapField originField = Objects.requireNonNull(tapTable).getNameFieldMap().get(alterExpression.getColumnOldName());
                 if (null != originField && originField.getDataType().equals(dataType)) {
-                    if (EmptyKit.isNotNull(tapAlterFieldAttributesEvent.getNullableChange())
-                            && Objects.equals(originField.getNullable(), tapAlterFieldAttributesEvent.getNullableChange().getAfter()
-                            && EmptyKit.isNotNull(tapAlterFieldAttributesEvent.getDefaultChange())
+                    if (Objects.equals(originField.getNullable(), tapAlterFieldAttributesEvent.getNullableChange().getAfter()
                             && Objects.equals(originField.getDefaultValue(), tapAlterFieldAttributesEvent.getDefaultChange().getAfter())
-                            && EmptyKit.isNotNull(tapAlterFieldAttributesEvent.getCommentChange())
                             && Objects.equals(originField.getComment(), tapAlterFieldAttributesEvent.getCommentChange().getAfter()))) {
                         continue;
                     }

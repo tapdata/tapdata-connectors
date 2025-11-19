@@ -13,7 +13,6 @@ import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
-import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
@@ -34,8 +33,10 @@ import org.bson.conversions.Bson;
 import org.bson.io.ByteBufferBsonInput;
 
 import java.nio.ByteBuffer;
-import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -63,7 +64,6 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     private ConcurrentProcessor<ChangeStreamDocument<RawBsonDocument>, OffsetEvent> concurrentProcessor;
     private MongodbExceptionCollector mongodbExceptionCollector;
     private String dropTransactionId;
-    private Thread consumeStreamEventThread;
 
     public MongodbV4StreamReader setPreImage(boolean isPreImage) {
         this.isPreImage = isPreImage;
@@ -104,11 +104,8 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 //        pipeline = new ArrayList<>();
 //        List<Bson> collList = tableList.stream().map(t -> Filters.eq("ns.coll", t)).collect(Collectors.toList());
 //        List<Bson> pipeline1 = asList(Aggregates.match(Filters.or(collList)));
-        FullDocument fullDocumentOption = FullDocument.DEFAULT;
+        FullDocument fullDocumentOption = FullDocument.UPDATE_LOOKUP;
         FullDocumentBeforeChange fullDocumentBeforeChangeOption = FullDocumentBeforeChange.WHEN_AVAILABLE;
-        if (mongodbConfig.isEnableFillingModifiedData()) {
-            fullDocumentOption = FullDocument.UPDATE_LOOKUP;
-        }
         while (running.get()) {
             ChangeStreamIterable<RawBsonDocument> changeStream;
             if (offset != null) {
@@ -128,33 +125,23 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             consumer.streamReadStarted();
             AtomicReference<Exception> throwableAtomicReference = new AtomicReference<>();
             try (final MongoChangeStreamCursor<ChangeStreamDocument<RawBsonDocument>> streamCursor = changeStream.cursor()) {
-                consumeStreamEventThread = new Thread(() -> {
+                Thread t = new Thread(() -> {
                     List<TapEvent> events = list();
                     OffsetEvent lastOffsetEvent = null;
-                    long lastSendTime = System.currentTimeMillis();
-                    // Calculate time window based on batch size
-                    // If batch size <= 500, use fixed 50ms window
-                    // If batch size > 500, use dynamic window = batch size / 10 (ms)
-                    long timeWindowMs = eventBatchSize <= 500 ? 50 : eventBatchSize / 10;
                     while (running.get()) {
                         try {
-                            OffsetEvent event = concurrentProcessor.get(10, TimeUnit.MILLISECONDS);
+                            OffsetEvent event = concurrentProcessor.get(2, TimeUnit.SECONDS);
                             if (EmptyKit.isNotNull(event)) {
                                 lastOffsetEvent = event;
                                 events.add(event.getEvent());
-                                // Check batch size OR time window
-                                if (events.size() >= eventBatchSize ||
-                                    (System.currentTimeMillis() - lastSendTime > timeWindowMs)) {
+                                if (events.size() >= eventBatchSize) {
                                     consumer.accept(events, event.getOffset());
-                                    events.clear();
-                                    lastSendTime = System.currentTimeMillis();
+                                    events = new ArrayList<>();
                                 }
                             } else {
-                                // Send remaining events when queue is empty
-                                if (!events.isEmpty() && lastOffsetEvent != null) {
+                                if (events.size() > 0) {
                                     consumer.accept(events, lastOffsetEvent.getOffset());
-                                    events.clear();
-                                    lastSendTime = System.currentTimeMillis();
+                                    events = new ArrayList<>();
                                 }
                             }
                         } catch (Exception e) {
@@ -163,8 +150,8 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         }
                     }
                 });
-                consumeStreamEventThread.setName("MongodbV4StreamReader-Consumer");
-                consumeStreamEventThread.start();
+                t.setName("MongodbV4StreamReader-Consumer");
+                t.start();
                 while (running.get()) {
                     if (EmptyKit.isNotNull(throwableAtomicReference.get())) {
                         throw throwableAtomicReference.get();
@@ -291,60 +278,6 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                 } else {
                     TapLogger.warn(TAG, "Document key is null, failed to delete. {}", event);
                 }
-            } else if (operationType == OperationType.UPDATE) {
-                UpdateDescription updateDescription = event.getUpdateDescription();
-                if (null == event.getDocumentKey()) {
-                    throw new RuntimeException(String.format("Document key is null, failed to update. %s", event));
-                } else if (null == updateDescription) {
-                    throw new RuntimeException(String.format("UpdateDescription key is null, failed to update. %s", event));
-                }
-
-                DataMap before = new DataMap();
-                DataMap after = new DataMap();
-                if (isPreImage && MapUtils.isNotEmpty(fullDocumentBeforeChange)) {
-                    before.putAll(fullDocumentBeforeChange);
-                }
-                Document decodeDocument = new DocumentCodec().decode(new BsonDocumentReader(event.getDocumentKey()), DecoderContext.builder().build());
-                after.putAll(decodeDocument);
-
-                if (null != updateDescription.getUpdatedFields()) {
-                    Document decodeUpdateDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
-                    decodeUpdateDocument.forEach((k, v) -> {
-                        if (k.contains(".")) {
-                            return;
-                        }
-                        after.put(k, v);
-                    });
-                }
-
-                TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
-                Map<String, Object> info = new DataMap();
-
-                List<String> removedFields = new ArrayList<>();
-                if (null != updateDescription.getRemovedFields()) {
-                    for (String f : updateDescription.getRemovedFields()) {
-
-                        if (after.keySet().stream().noneMatch(v -> v.equals(f))) {
-                            removedFields.add(f);
-                        }
-                    }
-                }
-                if (!removedFields.isEmpty()) {
-                    recordEvent.removedFields(removedFields);
-                }
-
-                LinkedHashSet<String> updatedFields = new LinkedHashSet<>();
-                BsonDocument bsonUpdatedFields = updateDescription.getUpdatedFields();
-                if (null != bsonUpdatedFields) {
-                    updatedFields.addAll(bsonUpdatedFields.keySet());
-                }
-
-                // 双活场景依赖此属性，区分是否为业务数据修改
-                info.put("updatedFields", updatedFields);
-                recordEvent.setInfo(info);
-                recordEvent.setReferenceTime((long) (event.getClusterTime().getTime()) * 1000);
-                recordEvent.setIsReplaceEvent(false);
-                offsetEvent = new OffsetEvent(recordEvent, event.getResumeToken());
             }
         } else {
             ByteBuffer byteBuffer = event.getFullDocument().getByteBuffer().asNIO();
@@ -428,9 +361,6 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             }
 
         }
-        if (null != offsetEvent && offsetEvent.getEvent() instanceof TapRecordEvent) {
-            ((TapRecordEvent) offsetEvent.getEvent()).setExactlyOnceId(event.getResumeToken().toString());
-        }
         return offsetEvent;
     }
 
@@ -445,9 +375,6 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     @Override
     public void onDestroy() {
         running.compareAndSet(true, false);
-        if (consumeStreamEventThread != null) {
-            consumeStreamEventThread.interrupt();
-        }
         if (mongoClient != null) {
             mongoClient.close();
             mongoClient = null;

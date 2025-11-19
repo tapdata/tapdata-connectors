@@ -1,7 +1,6 @@
 package io.tapdata.common.dml;
 
 import io.netty.buffer.ByteBuf;
-import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
@@ -57,9 +56,7 @@ public abstract class NormalWriteRecorder {
     protected Map<String, PreparedStatement> preparedStatementMap = new HashMap<>();
     protected PreparedStatement preparedStatement = null;
     protected List<String> largeSqlValues;
-    protected LinkedHashMap<String, String> largeSqlValuesMap;
     protected boolean largeSql = false;
-    protected DMLType dmlType;
 
     protected final AtomicLong atomicLong = new AtomicLong(0); //record counter
     protected final List<TapRecordEvent> batchCache = TapSimplify.list(); //event cache
@@ -101,12 +98,7 @@ public abstract class NormalWriteRecorder {
         this.largeSql = largeSql;
         if (largeSql) {
             largeSqlValues = new ArrayList<>();
-            largeSqlValuesMap = new LinkedHashMap<>();
         }
-    }
-
-    public void setDmlType(DMLType dmlType) {
-        this.dmlType = dmlType;
     }
 
     public void setRemovedColumn(List<String> removedColumn) {
@@ -131,9 +123,8 @@ public abstract class NormalWriteRecorder {
         }
         if (largeSql) {
             try (Statement statement = connection.createStatement()) {
-                statement.execute(getLargeSql());
+                statement.execute(getLargeInsertSql());
                 largeSqlValues.clear();
-                largeSqlValuesMap.clear();
                 batchCacheSize = 0;
             }
             atomicLong.addAndGet(succeed);
@@ -321,12 +312,12 @@ public abstract class NormalWriteRecorder {
 
     public String getDeleteSql(Map<String, Object> before) throws SQLException {
         boolean containsNull = !hasPk && before.containsValue(null);
-        String sql = getDeleteSql(before, containsNull);
-        if (!containsNull) {
+        String sql = getDeleteSql(before,containsNull);
+        if(!containsNull){
             for (String key : before.keySet()) {
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
             }
-        } else {
+        }else{
             for (String key : before.keySet()) {
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
@@ -383,16 +374,6 @@ public abstract class NormalWriteRecorder {
         if (EmptyKit.isEmpty(after)) {
             return;
         }
-        if (largeSql) {
-            if (after.size() < allColumn.size()) {
-                //有字段内容不全情况，不可使用
-                executeBatch(listResult);
-                largeSql = false;
-            } else {
-                largeInsert(after);
-                return;
-            }
-        }
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
@@ -443,7 +424,7 @@ public abstract class NormalWriteRecorder {
         setBeforeValue(containsNull, before, pos);
     }
 
-    protected String getLargeSql() {
+    protected String getLargeInsertSql() {
         return "INSERT INTO " + getSchemaAndTable() + " ("
                 + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") VALUES "
                 + String.join(", ", largeSqlValues);
@@ -464,10 +445,6 @@ public abstract class NormalWriteRecorder {
 
     public void addDeleteBatch(Map<String, Object> before, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (EmptyKit.isEmpty(before)) {
-            return;
-        }
-        if (largeSql) {
-            largeInsert(before);
             return;
         }
         Map<String, Object> lastBefore = new HashMap<>();
@@ -559,7 +536,7 @@ public abstract class NormalWriteRecorder {
         if (null == obj) {
             result = "null";
         } else if (obj instanceof String) {
-            result = transferString((String) obj);
+            result = "'" + ((String) obj).replace("\\", "\\\\").replace("'", "\\'").replace("(", "\\(").replace(")", "\\)") + "'";
         } else if (obj instanceof Number) {
             result = obj.toString();
         } else if (obj instanceof Date) {
@@ -580,10 +557,6 @@ public abstract class NormalWriteRecorder {
         return result;
     }
 
-    protected String transferString(String str) {
-        return "'" + str.replace("\\", "\\\\").replace("'", "''") + "'";
-    }
-
     protected String byteArrayToHexString(byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
             return "";
@@ -592,6 +565,6 @@ public abstract class NormalWriteRecorder {
         for (byte b : bytes) {
             sb.append(String.format("%02X", b));
         }
-        return "0x" + sb;
+        return "0x"+ sb;
     }
 }

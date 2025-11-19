@@ -70,7 +70,6 @@
 		<module>vastbase-connector</module>
 		<module>highgo-connector</module>
 		<module>file-stream-connector</module>
-		<module>paimon-connector</module>
 	</modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
@@ -139,11 +138,6 @@
 			<dependency>
 				<groupId>io.tapdata</groupId>
 				<artifactId>tapdata-pdk-runner</artifactId>
-				<version>${tapdata.pdk.runner.version}</version>
-			</dependency>
-			<dependency>
-				<groupId>io.tapdata</groupId>
-				<artifactId>tapdata-common</artifactId>
 				<version>${tapdata.pdk.runner.version}</version>
 			</dependency>
 			<dependency>

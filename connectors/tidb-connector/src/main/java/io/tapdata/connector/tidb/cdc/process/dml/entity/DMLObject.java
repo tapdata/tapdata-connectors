@@ -3,7 +3,6 @@ package io.tapdata.connector.tidb.cdc.process.dml.entity;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.tapdata.connector.tidb.cdc.process.TiData;
 import io.tapdata.connector.tidb.cdc.process.ddl.convert.Convert;
-import io.tapdata.constant.DMLType;
 
 import java.util.List;
 import java.util.Map;

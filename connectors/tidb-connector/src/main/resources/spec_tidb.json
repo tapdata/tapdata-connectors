@@ -100,26 +100,6 @@
           "apiServerKey": "database_password",
           "x-index": 70
         },
-        "tiKvAddress": {
-          "type": "string",
-          "title": "${tiKvAddress}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "x-decorator-props": {
-            "tooltip": "${tiKvAddressTip}"
-          },
-          "x-index": 79,
-          "x-reactions": {
-            "dependencies": [
-              "__TAPDATA.connection_type"
-            ],
-            "fulfill": {
-              "schema": {
-                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
-              }
-            }
-          }
-        },
         "tiKvPort": {
           "type": "string",
           "title": "${tiKvPort}",
@@ -282,8 +262,6 @@
     "default": "en_US",
     "en_US": {
       "pdServer": "PDServer address",
-      "tiKvAddress": "TiKV address",
-      "tiKvAddressTip": "Fill in the TiKV-Server address to test the availability of Tidb, leave blank to use PD-Server address",
       "tiKvPort": "TiKV port",
       "tiKvPortTip": "TiKV port, default is 20160, used to check if TiKV can be connected",
       "pdServerTip": "Fill in the PD-Server address to test the availability of Tidb, should start with a protocol, such as: or https://{ip:port}",
@@ -303,8 +281,6 @@
     },
     "zh_CN": {
       "pdServer": "PDServer 地址",
-      "tiKvAddress": "TiKV 地址",
-      "tiKvAddressTip": "填写TiKV-Server地址，测试Tidb可用性，不填写时使用PD-Server地址",
       "tiKvPort": "TiKV端口",
       "tiKvPortTip": "TiKV 默认端口 20160，用于检查能否连通TiKV",
       "pdServerTip": "填写PD-Server地址，测试Tidb可用性，请指定对应的协议，如 http://{IP:端口} 或者 https://{IP:端口}",
@@ -324,8 +300,6 @@
     },
     "zh_TW": {
       "pdServer": "PDServer 地址",
-      "tiKvAddress": "TiKV 地址",
-      "tiKvAddressTip": "填寫TiKV-Server地址，測試Tidb可用性，不填寫時使用PD-Server地址",
       "tiKvPort": "TiKV端口",
       "tiKvPortTip": "TiKV默認埠 20160，用於檢查能否連通TiKV",
       "pdServerTip": "填寫PD-Server地址，測試Tidb可用性，請指定對應的協定，如 http://{IP:埠} 或者 https://{IP:埠}",

@@ -129,7 +129,7 @@ public class CommonDbTest implements AutoCloseable {
     protected Boolean testWritePrivilege() {
         try {
             List<String> sqls = new ArrayList<>();
-            String schemaPrefix = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? (commonDbConfig.getEscapeChar() + commonDbConfig.getSchema() + commonDbConfig.getEscapeChar() + ".") : "";
+            String schemaPrefix = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? ("\"" + commonDbConfig.getSchema() + "\".") : "";
             if (jdbcContext.queryAllTables(Arrays.asList(TEST_WRITE_TABLE, TEST_WRITE_TABLE.toUpperCase())).size() > 0) {
                 sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
             }
@@ -146,7 +146,7 @@ public class CommonDbTest implements AutoCloseable {
             jdbcContext.batchExecute(sqls);
             consumer.accept(testItem(TestItem.ITEM_WRITE, TestItem.RESULT_SUCCESSFULLY, TEST_WRITE_SUCCESS));
         } catch (Exception e) {
-            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
         }
         return true;
     }

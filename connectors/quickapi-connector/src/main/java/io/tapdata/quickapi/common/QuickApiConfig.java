@@ -50,24 +50,6 @@ public class QuickApiConfig {
         return this;
     }
 
-    String schemaTxt;
-    public String schemaTxt(){
-        return this.schemaTxt;
-    }
-    public QuickApiConfig schemaTxt(String schemaTxt){
-        this.schemaTxt = schemaTxt;
-        return this;
-    }
-
-    boolean autoLoadSchema;
-    public boolean autoLoadSchema(){
-        return this.autoLoadSchema;
-    }
-    public QuickApiConfig autoLoadSchema(boolean autoLoadSchema){
-        this.autoLoadSchema = autoLoadSchema;
-        return this;
-    }
-
     public static void main(String[] args) {
         String url = "http://127.0.0.1/api/post?key1=&key2=12,3,5,6&key3=";
         int indexOf = url.indexOf("key99=");

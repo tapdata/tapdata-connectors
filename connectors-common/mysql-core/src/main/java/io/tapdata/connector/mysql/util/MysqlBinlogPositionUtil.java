@@ -15,6 +15,8 @@ import java.util.Properties;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
+ *
+ *
  * @author <a href="mailto:harsen_lin@163.com">Harsen</a>
  * @version v1.0 2022/11/18 17:17 Create
  */
@@ -32,21 +34,10 @@ public class MysqlBinlogPositionUtil implements AutoCloseable {
 
     public MysqlBinlogPositionUtil(String host, int port, String username, String password) throws SQLException {
         try (Connection conn = getConnection(host, port, username, password)) {
-            boolean lowVersion = true;
-            DatabaseMetaData databaseMetaData = conn.getMetaData();
-            String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
-            String[] versionNums = version.split("\\.");
-            if (versionNums.length >= 2) {
-                int majorVersion = Integer.parseInt(versionNums[0]);
-                int minorVersion = Integer.parseInt(versionNums[1]);
-                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
-                    lowVersion = false;
-                }
-            }
             String firstBinlogFilename = queryOneString(conn, "show binlog events limit 1");
             if (null == firstBinlogFilename) throw new RuntimeException("not found first binlog filename.");
 
-            String lastBinlogFilename = queryOneString(conn, lowVersion ? "show master status" : "show binary log status");
+            String lastBinlogFilename = queryOneString(conn, "show master status");
             if (null == lastBinlogFilename) throw new RuntimeException("not found first binlog filename.");
 
             this.fileBegin = Integer.parseInt(firstBinlogFilename.substring(firstBinlogFilename.indexOf(".") + 1));
