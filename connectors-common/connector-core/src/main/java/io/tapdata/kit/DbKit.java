@@ -105,9 +105,6 @@ public class DbKit {
     }
 
     public static byte[] blobToBytes(Blob blob) {
-        if (blob == null) {
-            return null;
-        }
         BufferedInputStream bis = null;
         try {
             bis = new BufferedInputStream(blob.getBinaryStream());
@@ -211,15 +208,22 @@ public class DbKit {
         return lastBefore;
     }
 
-    public static Map<String, Object> getAfterForUpdate(Map<String, Object> after, Map<String, Object> before, Collection<String> allColumn, Collection<String> uniqueCondition) {
+    public static Map<String, Object> getAfterForUpdate(Map<String, Object> after, Map<String, Object> before, Collection<String> allColumn, Collection<String> uniqueCondition,List<String> autoIncFields) {
         Map<String, Object> lastBefore = getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         if (EmptyKit.isNotEmpty(before)) {
-            lastBefore.putAll(before);
+            for (Map.Entry<String, Object> entry : before.entrySet()) {
+                if (EmptyKit.isNull(entry.getValue()) && EmptyKit.isNull(after.get(entry.getKey()))) {
+                    continue;
+                }
+                lastBefore.put(entry.getKey(), entry.getValue());
+            }
         }
         Map<String, Object> lastAfter = new HashMap<>();
         for (Map.Entry<String, Object> entry : after.entrySet()) {
             if (EmptyKit.isNull(entry.getValue()) && lastBefore.containsKey(entry.getKey()) && EmptyKit.isNull(lastBefore.get(entry.getKey())) ||
-                    EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(lastBefore.get(entry.getKey())) || !allColumn.contains(entry.getKey())) {
+                    (EmptyKit.isNotNull(entry.getValue()) && entry.getValue().equals(lastBefore.get(entry.getKey()))
+                            && (EmptyKit.isEmpty(autoIncFields) ||!autoIncFields.contains(entry.getKey())))
+                    || !allColumn.contains(entry.getKey())) {
                 continue;
             }
             lastAfter.put(entry.getKey(), entry.getValue());

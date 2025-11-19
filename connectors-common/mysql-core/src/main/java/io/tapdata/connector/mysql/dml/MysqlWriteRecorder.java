@@ -28,7 +28,7 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
         largeSqlValues.add("(" + allColumn.stream().map(k -> object2String(after.get(k))).collect(Collectors.joining(", ")) + ")");
     }
 
-    protected String getLargeSql() {
+    protected String getLargeInsertSql() {
         if (WritePolicyEnum.UPDATE_ON_EXISTS == insertPolicy) {
             return "INSERT INTO " + getSchemaAndTable() + " ("
                     + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") VALUES "

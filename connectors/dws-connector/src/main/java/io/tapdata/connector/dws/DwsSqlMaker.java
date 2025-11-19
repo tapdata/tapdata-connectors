@@ -12,7 +12,7 @@ public class DwsSqlMaker extends CommonSqlMaker {
         if (closeNotNull && (dataType.contains("CHAR") || dataType.contains("TEXT"))) {
             nullable = true;
         }
-        if (!nullable || (null != tapField.getPrimaryKeyPos() && tapField.getPrimaryKeyPos() > 0)) {
+        if (!nullable || tapField.getPrimaryKey()) {
             builder.append("NOT NULL").append(' ');
         }
     }

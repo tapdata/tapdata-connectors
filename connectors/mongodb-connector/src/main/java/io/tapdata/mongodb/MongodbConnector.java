@@ -105,7 +105,6 @@ public class MongodbConnector extends ConnectorBase {
 	private final MongodbExecuteCommandFunction mongodbExecuteCommandFunction = new MongodbExecuteCommandFunction();
 	protected ThreadPoolExecutor sourceRunner;
 	protected Future<?> sourceRunnerFuture;
-	protected Map<String, ClientSession> transactionSessionMap = new ConcurrentHashMap<>();
 	/**
 	 * Reference：<a href="https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml">error_codes.yml</a>
 	 * connectors/mongodb-connector/src/main/resources/mongo-error-codes.yml
@@ -564,9 +563,6 @@ public class MongodbConnector extends ConnectorBase {
 		connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
 		connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
 		connectorFunctions.supportQueryIndexes(this::queryIndexes);
-		connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
-		connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
-		connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
 	}
 
 	protected void queryIndexes(TapConnectorContext tapConnectorContext, TapTable tapTable, Consumer<List<TapIndex>> listConsumer) {
@@ -665,8 +661,6 @@ public class MongodbConnector extends ConnectorBase {
 
 	protected void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
 		if (null == indexList || indexList.isEmpty()) return;
-		List<IndexModel> indexModels = new ArrayList<>();
-		MongoCollection<Document> targetCollection = mongoDatabase.getCollection(table.getName());
 		indexList.forEach(index -> {
 			log.info("find index: {}" + index.getName());
 			try {
@@ -680,6 +674,7 @@ public class MongodbConnector extends ConnectorBase {
 				if (dIndex == null) {
 					return;
 				}
+				MongoCollection<Document> targetCollection = mongoDatabase.getCollection(table.getName());
 				IndexOptions indexOptions = new IndexOptions();
 				// 1. 遍历 index, 生成 indexOptions
 				dIndex.forEach((key, value) -> {
@@ -721,37 +716,17 @@ public class MongodbConnector extends ConnectorBase {
 						indexOptions.version((Integer) value);
 					}
 				});
-				indexModels.add(new IndexModel(dIndex.get("key", Document.class), indexOptions));
+                try {
+                    targetCollection.createIndex(dIndex.get("key", Document.class), indexOptions);
+                } catch (Exception ignored) {
+                    log.warn("create index failed 1: " + ignored.getMessage());
+                }
             } catch (Exception ignored) {
                 log.warn("create index failed 2: " + ignored.getMessage());
                 // TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
             }
 		});
-		try {
-			if (isCommitQuorumSupported()) {
-				CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
-				targetCollection.createIndexes(indexModels, createIndexOptions);
-			} else {
-				targetCollection.createIndexes(indexModels);
-			}
-		} catch (Exception e) {
-			log.warn("create index failed 1: " + e.getMessage());
-		}
 	}
-
-		// Check if MongoDB server supports commitQuorum option (available since MongoDB 4.4)
-		private boolean isCommitQuorumSupported() {
-			try {
-				String versionStr = MongodbUtil.getVersionString(mongoClient, mongoConfig.getDatabase());
-				String[] parts = versionStr.split("\\.");
-				int major = Integer.parseInt(parts[0]);
-				int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
-				return major > 4 || (major == 4 && minor >= 4);
-			} catch (Throwable ignored) {
-				return false;
-			}
-		}
-
 
 	private boolean createSharedCollection(DataMap nodeConfig, TapTable table, Collection<String> pks, String database, Log log) {
 		Object shardCollection = nodeConfig.get("shardCollection");
@@ -1202,8 +1177,6 @@ public class MongodbConnector extends ConnectorBase {
 		final List<TapIndex> indexList = tapCreateIndexEvent.getIndexList();
 		if (CollectionUtils.isNotEmpty(indexList)) {
 			Document keys = new Document();
-			List<IndexModel> indexModels = new ArrayList<>();
-			MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
 			for (TapIndex tapIndex : indexList) {
 				try {
 					final List<TapIndexField> indexFields = tapIndex.getIndexFields();
@@ -1211,6 +1184,7 @@ public class MongodbConnector extends ConnectorBase {
 						if (indexFields.size() == 1 && "_id".equals(indexFields.stream().findFirst().get().getName())) {
 							continue;
 						}
+						final MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
 						keys = new Document();
 						for (TapIndexField indexField : indexFields) {
 							keys.append(indexField.getName(), 1);
@@ -1223,13 +1197,7 @@ public class MongodbConnector extends ConnectorBase {
 						if (EmptyKit.isNotEmpty(tapIndex.getName())) {
 							indexOptions.name(tapIndex.getName());
 						}
-						indexModels.add(new IndexModel(keys, indexOptions));
-					}
-					if (isCommitQuorumSupported()) {
-						CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
-						collection.createIndexes(indexModels, createIndexOptions);
-					} else {
-						collection.createIndexes(indexModels);
+						collection.createIndex(keys, indexOptions);
 					}
 				} catch (Exception e) {
 					if (e instanceof MongoCommandException) {
@@ -1340,7 +1308,7 @@ public class MongodbConnector extends ConnectorBase {
 		String threadName = Thread.currentThread().getName();
 		MongodbWriter mongodbWriter = writerMap.get(threadName);
 		if (EmptyKit.isNull(mongodbWriter)) {
-			mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap, transactionSessionMap);
+			mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
 			writerMap.put(threadName, mongodbWriter);
 		}
 		try {
@@ -1831,31 +1799,5 @@ public class MongodbConnector extends ConnectorBase {
 		Integer integer = config.getInteger("mongodbLoadSchemaSampleSize");
 		if (null == integer || integer <= 0) return SAMPLE_SIZE_BATCH_SIZE;
 		return integer;
-	}
-
-	protected void beginTransaction(TapConnectorContext connectorContext) {
-		transactionSessionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
-			v.abortTransaction();
-			v.close();
-			v = mongoClient.startSession();
-			return v;
-		});
-		transactionSessionMap.computeIfAbsent(Thread.currentThread().getName(), key -> mongoClient.startSession());
-	}
-
-	protected void commitTransaction(TapConnectorContext connectorContext) {
-		transactionSessionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
-			v.commitTransaction();
-			v.close();
-			return null;
-		});
-	}
-
-	protected void rollbackTransaction(TapConnectorContext connectorContext) {
-		transactionSessionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
-			v.abortTransaction();
-			v.close();
-			return null;
-		});
 	}
 }

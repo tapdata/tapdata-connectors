@@ -16,7 +16,6 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 import io.debezium.relational.*;
-import io.debezium.util.Collect;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.postgresql.core.BaseConnection;
 import org.postgresql.replication.LogSequenceNumber;
@@ -571,54 +570,6 @@ public class PostgresConnection extends JdbcConnection {
             tableIdsBefore.removeAll(columnsByTable.keySet());
             tableIdsBefore.forEach(tables::removeTable);
         }
-    }
-
-    public List<String> readTableUniqueIndices(DatabaseMetaData metadata, TableId id) throws SQLException {
-        String coreUniqueIndexName = null;
-        try (
-                Statement stmt = connection().createStatement();
-                ResultSet rs = stmt.executeQuery(String.format("select\n" +
-                        "(select relname from pg_class where oid = i.indexrelid),i.indisreplident\n" +
-                        "from pg_index i join pg_class c on i.indrelid=c.oid\n" +
-                        "where c.relnamespace = (select oid from pg_namespace where nspname='%s')\n" +
-                        "and c.relname = '%s'", id.schema().replace("'", "''"), id.table().replace("'", "''")))
-        ) {
-            while (rs.next()) {
-                if (rs.getBoolean(2)) {
-                    coreUniqueIndexName = rs.getString(1);
-                    break;
-                }
-            }
-        }
-        final List<String> uniqueIndexColumnNames = new ArrayList<>();
-        try (ResultSet rs = metadata.getIndexInfo(id.catalog(), id.schema(), id.table(), true, true)) {
-            String firstIndexName = null;
-            while (rs.next()) {
-                final String indexName = rs.getString(6);
-                if (coreUniqueIndexName != null && !coreUniqueIndexName.equals(indexName)) {
-                    continue;
-                }
-                final String columnName = rs.getString(9);
-                final int columnIndex = rs.getInt(8);
-                if (firstIndexName == null) {
-                    firstIndexName = indexName;
-                }
-                if (!isTableUniqueIndexIncluded(indexName, columnName)) {
-                    continue;
-                }
-                // Only first unique index is taken into consideration
-                if (indexName != null && !indexName.equals(firstIndexName)) {
-                    return uniqueIndexColumnNames;
-                }
-                if (columnName != null) {
-                    // The returned columnIndex is 0 when columnName is null. These are related
-                    // to table statistics that get returned as part of the index descriptors
-                    // and should be ignored.
-                    Collect.set(uniqueIndexColumnNames, columnIndex - 1, columnName, null);
-                }
-            }
-        }
-        return uniqueIndexColumnNames;
     }
 
     protected Map<TableId, List<Column>> getColumnsDetails(String databaseCatalog, String schemaNamePattern,

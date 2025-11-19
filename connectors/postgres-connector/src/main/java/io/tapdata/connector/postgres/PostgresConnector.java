@@ -2,7 +2,6 @@ package io.tapdata.connector.postgres;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.util.concurrent.AtomicDouble;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.dml.NormalRecordWriter;
@@ -27,17 +26,21 @@ import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.schema.*;
+import io.tapdata.entity.schema.TapConstraint;
+import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.exception.TapCodeException;
-import io.tapdata.kit.*;
+import io.tapdata.kit.DbKit;
+import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.ErrorKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -175,13 +178,11 @@ public class PostgresConnector extends CommonDbConnector {
         });
         codecRegistry.registerFromTapValue(TapArrayValue.class, "text", tapValue -> {
             if (tapValue != null && tapValue.getValue() != null) {
-                if (EmptyKit.isNotNull(tapValue.getOriginType())) {
-                    if (tapValue.getOriginType().endsWith(" array")) {
-                        if (tapValue.getOriginValue() instanceof PgArray) {
-                            return tapValue.getOriginValue();
-                        } else {
-                            return tapValue.getValue();
-                        }
+                if (tapValue.getOriginType().endsWith(" array")) {
+                    if (tapValue.getOriginValue() instanceof PgArray) {
+                        return tapValue.getOriginValue();
+                    } else {
+                        return tapValue.getValue();
                     }
                 }
                 return toJson(tapValue.getValue());
@@ -267,14 +268,6 @@ public class PostgresConnector extends CommonDbConnector {
             if (EmptyKit.isNotNull(slotName)) {
                 clearSlot();
             }
-            if ("walminer".equals(postgresConfig.getLogPluginName())) {
-                if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
-                    //取消订阅
-                    HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format("DELSUB:%s all", firstConnectorId));
-                }
-            } else if ("pgoutput".equals(postgresConfig.getLogPluginName()) && postgresConfig.getPartPublication() && EmptyKit.isBlank(postgresConfig.getCustomPublicationName())) {
-                ErrorKit.ignoreAnyError(this::dropPublication);
-            }
         } finally {
             onStop(connectorContext);
         }
@@ -287,10 +280,6 @@ public class PostgresConnector extends CommonDbConnector {
                 postgresJdbcContext.execute("SELECT pg_drop_replication_slot('" + slotName + "')");
             }
         });
-    }
-
-    private void dropPublication() throws Throwable {
-        postgresJdbcContext.execute("DROP PUBLICATION " + slotName);
     }
 
     private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
@@ -561,9 +550,11 @@ public class PostgresConnector extends CommonDbConnector {
                     } else {
                         AtomicReference<String> actualSequenceName = new AtomicReference<>();
                         try {
-                            jdbcContext.queryWithNext("select pg_get_serial_sequence('" + getSchemaAndTable(tapTable.getId()) + "', '\"" + k + "\"')", resultSet -> actualSequenceName.set(resultSet.getString(1)));
+                            String tableName = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? commonDbConfig.getSchema() + "." + tapTable.getId() : tapTable.getId();
+                            jdbcContext.queryWithNext("select pg_get_serial_sequence('" + tableName + "', '" + k + "')", resultSet -> actualSequenceName.set(resultSet.getString(1)));
                             jdbcContext.queryWithNext("select last_value from " + actualSequenceName.get(), resultSet -> actual.set(resultSet.getLong(1)));
                         } catch (SQLException ignore) {
+
                         }
                         if (actual.get() >= (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue())) {
                             return;
@@ -655,6 +646,9 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
+        cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
+        testReplicateIdentity(nodeContext.getTableMap());
+        buildSlot(nodeContext, true);
         Map<String, List<String>> schemaTableMap = new HashMap<>();
         for (ConnectionConfigWithTables withTables : connectionConfigWithTables) {
             if (null == withTables.getConnectionConfig())
@@ -678,20 +672,12 @@ public class PostgresConnector extends CommonDbConnector {
             });
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
-            if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
-                new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
-                        .watch(schemaTableMap, nodeContext.getTableMap())
-                        .offset(offsetState)
-                        .registerConsumer(consumer, batchSize)
-                        .startMiner(this::isAlive);
-            } else {
-                new WalLogMinerV2(postgresJdbcContext, tapLogger)
-                        .watch(schemaTableMap, nodeContext.getTableMap())
-                        .withWalLogDirectory(getWalDirectory())
-                        .offset(offsetState)
-                        .registerConsumer(consumer, batchSize)
-                        .startMiner(this::isAlive);
-            }
+            new WalLogMinerV2(postgresJdbcContext, tapLogger)
+                    .watch(schemaTableMap, nodeContext.getTableMap())
+                    .withWalLogDirectory(getWalDirectory())
+                    .offset(offsetState)
+                    .registerConsumer(consumer, batchSize)
+                    .startMiner(this::isAlive);
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
@@ -729,20 +715,11 @@ public class PostgresConnector extends CommonDbConnector {
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
         if (canCdc) {
+            if ("pgoutput".equals(postgresConfig.getLogPluginName()) && Integer.parseInt(postgresVersion) > 100000) {
+                createPublicationIfNotExist();
+            }
             testReplicateIdentity(connectorContext.getTableMap());
             buildSlot(connectorContext, false);
-            if ("pgoutput".equals(postgresConfig.getLogPluginName()) && Integer.parseInt(postgresVersion) > 100000) {
-                if (!postgresConfig.getPartPublication()) {
-                    createAllPublicationIfNotExist();
-                } else if(EmptyKit.isBlank(postgresConfig.getCustomPublicationName())) {
-                    List<String> tableList = new ArrayList<>();
-                    Iterator<Entry<TapTable>> iterator = connectorContext.getTableMap().iterator();
-                    while (iterator.hasNext()) {
-                        tableList.add(iterator.next().getKey());
-                    }
-                    createCustomPublicationIfNotExist(tableList);
-                }
-            }
         }
         return new PostgresOffset();
     }
@@ -837,8 +814,8 @@ public class PostgresConnector extends CommonDbConnector {
         return walDirectory.get();
     }
 
-    private void createAllPublicationIfNotExist() throws SQLException {
-        String publicationName = postgresConfig.getGlobalPublicationName() + (postgresConfig.getPartitionRoot() ? "_root" : "");
+    private void createPublicationIfNotExist() throws SQLException {
+        String publicationName = postgresConfig.getPartitionRoot() ? "dbz_publication_root" : "dbz_publication";
         AtomicBoolean needCreate = new AtomicBoolean(false);
         postgresJdbcContext.queryWithNext(String.format("SELECT COUNT(1) FROM pg_publication WHERE pubname = '%s'", publicationName), resultSet -> {
             if (resultSet.getInt(1) <= 0) {
@@ -852,15 +829,6 @@ public class PostgresConnector extends CommonDbConnector {
             } catch (SQLException e) {
                 throw new TapCodeException(PostgresErrorCode.CREATE_PUBLICATION_FAILED, "create publication for all tables failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
             }
-        }
-    }
-
-    private void createCustomPublicationIfNotExist(List<String> tableList) {
-        String sql = String.format("CREATE PUBLICATION %s FOR TABLE %s", slotName, tableList.stream().map(this::getSchemaAndTable).collect(Collectors.joining(", ")));
-        try {
-            postgresJdbcContext.execute(sql);
-        } catch (SQLException e) {
-            throw new TapCodeException(PostgresErrorCode.CREATE_PUBLICATION_FAILED, "create publication for custom tables failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
         }
     }
 
@@ -939,31 +907,44 @@ public class PostgresConnector extends CommonDbConnector {
     @Override
     protected void queryByAdvanceFilterWithOffset(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
         String sql = commonSqlMaker.buildSelectClause(table, filter, false) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilter(filter);
-        jdbcContext.query(sql, resultSet -> {
-            FilterResults filterResults = new FilterResults();
-            try {
-                Map<String, String> typeAndName = new HashMap<>();
-                table.getNameFieldMap().forEach((key, value) -> {
-                    typeAndName.put(key, value.getDataType());
-                });
-                List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
-                while (resultSet.next()) {
-                    filterResults.add(filterTimeForPG(resultSet, typeAndName, allColumn));
-                    if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
-                        consumer.accept(filterResults);
-                        filterResults = new FilterResults();
+        try(Connection connection = jdbcContext.getConnection()) {
+            if(EmptyKit.isEmpty(filter.getMatch()) && commonSqlMaker.checkOrderColumInPrimaryKey(table, filter)) {
+                String seqScan = "SET enable_seqscan = off;";
+                if (EmptyKit.isNotBlank(sql)) {
+                    try (Statement statement = connection.createStatement()) {
+                        statement.execute(seqScan);
+                    } catch (SQLException e) {
+                        tapLogger.warn("Failed to set enable_seqscan to off, error: {}", e.getMessage());
                     }
                 }
-            } catch (SQLException e) {
-                exceptionCollector.collectTerminateByServer(e);
-                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
-                exceptionCollector.revealException(e);
-                throw e;
             }
-            if (EmptyKit.isNotEmpty(filterResults.getResults())) {
-                consumer.accept(filterResults);
-            }
-        });
+            jdbcContext.query(connection,sql, resultSet -> {
+                FilterResults filterResults = new FilterResults();
+                try {
+                    Map<String, String> typeAndName = new HashMap<>();
+                    table.getNameFieldMap().forEach((key, value) -> {
+                        typeAndName.put(key, value.getDataType());
+                    });
+                    List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
+                    while (resultSet.next()) {
+                        filterResults.add(filterTimeForPG(resultSet, typeAndName, allColumn));
+                        if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
+                            consumer.accept(filterResults);
+                            filterResults = new FilterResults();
+                        }
+                    }
+                } catch (SQLException e) {
+                    exceptionCollector.collectTerminateByServer(e);
+                    exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+                    exceptionCollector.revealException(e);
+                    throw e;
+                }
+                if (EmptyKit.isNotEmpty(filterResults.getResults())) {
+                    consumer.accept(filterResults);
+                }
+            });
+        }
+
     }
 
     private Map<String, Object> filterTimeForPG(ResultSet resultSet, Map<String, String> typeAndName, List<String> allColumn) {
@@ -1217,23 +1198,6 @@ public class PostgresConnector extends CommonDbConnector {
         });
     }
 
-    protected TapIndex makeTapIndex(String key, List<DataMap> value) {
-        TapIndex index = new TapIndex();
-        index.setName(key);
-        List<TapIndexField> fieldList = TapSimplify.list();
-        value.forEach(v -> {
-            TapIndexField field = new TapIndexField();
-            field.setFieldAsc("1".equals(v.getString("isAsc")));
-            field.setName(v.getString("columnName"));
-            fieldList.add(field);
-        });
-        index.setUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isUnique")))));
-        index.setCoreUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isCoreUnique")))));
-        index.setPrimary(value.stream().anyMatch(v -> ("1".equals(v.getString("isPk")))));
-        index.setIndexFields(fieldList);
-        return index;
-    }
-
     protected void createConstraint(TapConnectorContext connectorContext, TapTable tapTable, TapCreateConstraintEvent createConstraintEvent, boolean create) {
         List<TapConstraint> constraintList = createConstraintEvent.getConstraintList();
         if (EmptyKit.isNotEmpty(constraintList)) {
@@ -1286,13 +1250,5 @@ public class PostgresConnector extends CommonDbConnector {
                 "from (\n" +
                 "select * from pg_replication_slots where active='false' and slot_name like 'tapdata_cdc_%') a", resultSet -> {
         });
-    }
-
-    protected double showWalLogPercent() throws SQLException {
-        AtomicDouble walLogPercent = new AtomicDouble(0);
-        postgresJdbcContext.queryWithNext("SELECT round(sum(size)/1024/1024) FROM pg_ls_waldir()", resultSet -> {
-            walLogPercent.set(Math.round(resultSet.getDouble(1) / postgresConfig.getDefaultWalLogSize() * 1000) / 1000.0);
-        });
-        return walLogPercent.get();
     }
 }

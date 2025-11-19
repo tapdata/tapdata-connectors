@@ -50,22 +50,6 @@
         "method": "execute",
         "args": ["{{connectionId}}", "method", "io.tapdata.connector.postgres.PostgresConnector#clearIdleSlot"],
         "title": "${clearIdleSlot}"
-      },
-      "walLogPercent": {
-        "title": "${walLogPercent}",
-        "type": "string",
-        "method": "io.tapdata.connector.postgres.PostgresConnector#showWalLogPercent",
-        "methodAfter": [
-          {
-            "max": 0.95,
-            "min": 0.75,
-            "action": ["sendMail"]
-          },
-          {
-            "min": 0.95,
-            "action": ["sendMail", "stopTask", "io.tapdata.connector.postgres.PostgresConnector#clearIdleSlot"]
-          }
-        ]
       }
     },
     "connection": {
@@ -311,49 +295,6 @@
             }
           ]
         },
-        "partPublication": {
-          "type": "boolean",
-          "title": "${partPublication}",
-          "default": false,
-          "x-index": 110,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-decorator-props": {
-            "tooltip": "${partPublicationTooltip}"
-          },
-          "x-reactions": [
-            {
-              "dependencies": ["__TAPDATA.connection_type", "logPluginName"],
-              "fulfill": {
-                "schema": {
-                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='pgoutput' ? null:\"none\"}}"
-                }
-              }
-            }
-          ]
-        },
-        "globalPublicationName": {
-          "type": "string",
-          "title": "${globalPublicationName}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "x-decorator-props": {
-            "tooltip": "${globalPublicationNameTooltip}"
-          },
-          "required": true,
-          "default": "dbz_publication",
-          "x-index": 120,
-          "x-reactions": [
-            {
-              "dependencies": ["__TAPDATA.connection_type", "logPluginName", "partPublication"],
-              "fulfill": {
-                "schema": {
-                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='pgoutput' && !$deps[2] ? null:\"none\"}}"
-                }
-              }
-            }
-          ]
-        },
         "OPTIONAL_FIELDS": {
           "type": "void",
           "properties": {
@@ -499,17 +440,6 @@
               "x-decorator-props": {
                 "tooltip": "${allowReplicationTooltip}"
               }
-            },
-            "defaultWalLogSize": {
-              "type": "string",
-              "title": "${defaultWalLogSize}",
-              "default": 102400,
-              "x-decorator": "FormItem",
-              "x-component": "InputNumber",
-              "x-decorator-props": {
-                "tooltip": "${defaultWalLogSizeTip}"
-              },
-              "x-index": 110
             }
           }
         }
@@ -785,44 +715,6 @@
               }
             }
           ]
-        },
-        "customPublicationName": {
-          "type": "string",
-          "title": "${customPublicationName}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "x-index": 19,
-          "x-decorator-props": {
-            "tooltip": "${customPublicationNameTip}"
-          },
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{!$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ]
-        },
-        "splitUpdatePk": {
-          "type": "boolean",
-          "title": "${splitUpdatePk}",
-          "default": true,
-          "x-index": 20,
-          "x-decorator": "FormItem",
-          "x-component": "Switch",
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ]
         }
       }
     }
@@ -853,18 +745,12 @@
       "password" : "password",
       "logPluginName" : "logPluginName",
       "logPluginNameTip": "The higher version PG comes with the PGOUTPUT plugin, but the before data in the logs is not complete. \nThe author recommends using WAL2JSON, and the installation method can be found in the MD documentation",
-      "pgtoHost": "Pgto Server Host",
-      "pgtoPort": "Pgto Server Port",
-      "partPublication": "Part publication",
-      "partPublicationTooltip": "Turn on PGOUTPUT plugin to create corresponding publication according to different collection tables. The advantage is that there is no limit to the update and delete of no primary key table without collection requirements at the replica level. The disadvantage is that too many tasks will affect the database performance, and create publication permission is required",
-      "globalPublicationName": "Global publication name",
-      "globalPublicationNameTooltip": "When partial publication is turned off, a global publication is required. The default name is dbz_publication. If you need to customize the settings of the publication, it is recommended that customers create the publication themselves according to the name. The synchronization account does not need additional permissions",
+      "PgtoHost": "Pgto Server Host",
+      "PgtoPort": "Pgto Server Port",
       "timezone": "timezone",
       "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
       "allowReplication": "Allow setting up replication sessions",
       "allowReplicationTooltip": "Enabled by default. If disabled, the writing to tables with foreign keys will be affected if no separate replication role is set.",
-      "defaultWalLogSize": "Default Wal log total size(MB)",
-      "defaultWalLogSizeTip": "This configuration takes effect when the data source monitoring is turned on. When the Wal log size reaches the default value of 75%, an email alarm will be started to automatically clean up the Wal log to avoid disk space being full",
       "closeNotNull": "Ignore NotNull",
       "closeNotNullTooltip": "When the switch is turned on, non empty restrictions are discarded",
       "tableOwner": "Specify table owner",
@@ -886,12 +772,8 @@
       "enableFileInput": "Enable file input",
       "customSlotName": "Specifies the logical replication slot name",
       "customSlotNameTip": "You can manually specify a logical replication slot that is created in advance in the database, and if the logical replication slot does not exist, the delta may not work",
-      "customPublicationName": "Custom publication name",
-      "customPublicationNameTip": "Only effective when partial publication is turned on. If it is left blank, the synchronization task will automatically create and destroy, but needs create publication, table owner permission. If you need to customize the settings of the publication, it is recommended that customers create the publication themselves according to the name. The synchronization account does not need additional permissions and will not be automatically destroyed",
-      "splitUpdatePk": "Split update unique key",
       "walLogSize": "Wal log total size(MB)",
-      "clearIdleSlot": "Clear idle replication slot",
-      "walLogPercent": "Wal log usage rate"
+      "clearIdleSlot": "Clear idle replication slot"
     },
     "zh_CN": {
       "doc": "docs/postgres_zh_CN.md",
@@ -919,16 +801,10 @@
       "logPluginNameTip": "高版本PG自带PGOUTPUT插件，但是日志的before数据并不完整，笔者推荐使用WAL2JSON，安装方式见MD文档",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
-      "partPublication": "部分订阅",
-      "partPublicationTooltip": "打开后PGOUTPUT插件会根据不同的采集表创建对应的publication，优点是没有采集需求的无主键表不受replica级别限制更新删除，缺点是任务过多会影响数据库性能，且需要create publication，table owner权限",
-      "globalPublicationName": "自定义全库订阅名",
-      "globalPublicationNameTooltip": "部分订阅关闭时，全局会需要创建一个publication，默认名为dbz_publication，如果需要定制化设置该publication，推荐客户自行按该名称创建publication，同步账号不需要有额外权限",
       "timezone": "时区",
       "timezoneTip": "指定时区，否则不做时区处理",
       "allowReplication": "允许设置复制会话",
       "allowReplicationTooltip": "默认开启，关闭后如果没有单独设置replication role会影响含外键表的写入",
-      "defaultWalLogSize": "预设Wal日志总大小(MB)",
-      "defaultWalLogSizeTip": "当打开数据源监控时，该配置才生效，Wal日志大小达到预设值75%时开始邮件告警，会自动清理Wal日志，避免磁盘空间被撑满",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "开关打开时会将非空限制丢弃",
       "tableOwner": "指定表所有者",
@@ -950,12 +826,8 @@
       "enableFileInput": "启用文件输入",
       "customSlotName": "指定逻辑复制槽名字",
       "customSlotNameTip": "可以手动指定在数据库提前创建好的逻辑复制槽，如果逻辑复制槽不存在，则可能会导致增量不工作",
-      "customPublicationName": "自定义订阅名",
-      "customPublicationNameTip": "仅部分订阅开启时生效，如果置空时，同步任务会自动创建、销毁，但需要create publication，table owner权限，如果需要定制化推荐客户自行按该名称创建publication，则同步账号不需要有额外权限，也不会自动销毁",
-      "splitUpdatePk": "修改唯一键拆分",
       "walLogSize": "Wal日志总大小(MB)",
-      "clearIdleSlot": "清理空闲复制槽",
-      "walLogPercent": "Wal日志占用率"
+      "clearIdleSlot": "清理空闲复制槽"
     },
     "zh_TW": {
       "doc": "docs/postgres_zh_TW.md",
@@ -983,16 +855,10 @@
       "logPluginNameTip": "高版本PG自帶PGOUTPUT插件，但是日誌的before數據並不完整，筆者推薦使用WAL2JSON，安裝方式見MD文檔",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
-      "partPublication": "部分訂閱",
-      "partPublicationTooltip": "打開後PGOUTPUT插件會根據不同的采集表創建對應的publication，優點是没有采集需求的无主键表不受replica级别限制更新删除，缺點是任务过多會影響數據庫性能，且需要create publication，table owner權限",
-      "globalPublicationName": "自定義全庫訂閱名",
-      "globalPublicationNameTooltip": "部分訂閱關閉時，全局會需要創建一個publication，默认名為dbz_publication，如果需要定制化設定該publication，推薦客戶自行按該名稱創建publication，同步賬號不需要有額外權限",
       "timezone": "時區",
       "timezoneTip": "指定時區，否則不做時區處理",
       "allowReplication": "允許設定複製會話",
       "allowReplicationTooltip": "默認開啟，關閉後如果沒有單獨設定replication role會影響含外鍵錶的寫入",
-      "defaultWalLogSize": "預設Wal日誌總大小(MB)",
-      "defaultWalLogSizeTip": "當打開數據源監控時，該配置才生效，Wal日誌大小達到預設值75%時開始郵件告警，會自動清理Wal日誌，避免磁盤空間被撐滿",
       "closeNotNull": "忽略NotNull",
       "closeNotNullTooltip": "開關打開時會將非空限制丟棄",
       "tableOwner": "指定表所有者",
@@ -1014,12 +880,8 @@
       "enableFileInput": "啟用文件輸入",
       "customSlotName": "指定邏輯複製槽名字",
       "customSlotNameTip": "可以手動指定在數據庫提前創建好的邏輯複製槽，如果邏輯複製槽不存在，則可能會導致增量不工作",
-      "customPublicationName": "自定義訂閱名",
-      "customPublicationNameTip": "僅部分訂閱開啟時生效，如果置空時，同步任務會自動創建、銷毀，但需要create publication，table owner權限，如果需要定制化設定推薦客戶自行按該名稱創建publication，則同步賬號不需要有額外權限，也不會自動銷毀",
-      "splitUpdatePk": "修改唯一鍵拆分",
       "walLogSize": "Wal日誌總大小(MB)",
-      "clearIdleSlot": "清理空閒複製槽",
-      "walLogPercent": "Wal日志占用率"
+      "clearIdleSlot": "清理空閒複製槽"
     }
   },
   "dataTypes": {

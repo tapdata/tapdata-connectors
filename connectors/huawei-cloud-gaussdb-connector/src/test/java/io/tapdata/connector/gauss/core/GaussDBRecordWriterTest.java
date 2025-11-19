@@ -4,7 +4,6 @@ import io.tapdata.common.JdbcContext;
 import io.tapdata.entity.schema.TapTable;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
@@ -30,7 +29,6 @@ public class GaussDBRecordWriterTest {
     }
 
     @Test
-    @Disabled
     void testInstanceWithConnection() {
         try (MockedStatic<GaussDBRecordWriter> gw = mockStatic(GaussDBRecordWriter.class);
              MockedConstruction<GaussDBRecordWriter> construction = mockConstruction(GaussDBRecordWriter.class)) {
@@ -40,7 +38,6 @@ public class GaussDBRecordWriterTest {
     }
 
     @Test
-    @Disabled
     void testInstanceWithoutConnection() {
         Connection connection = mock(Connection.class);
         try (MockedStatic<GaussDBRecordWriter> gw = mockStatic(GaussDBRecordWriter.class);

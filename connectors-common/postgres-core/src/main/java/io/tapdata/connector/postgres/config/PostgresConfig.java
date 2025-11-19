@@ -6,6 +6,7 @@ import io.tapdata.kit.EmptyKit;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.net.URLEncoder;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -29,10 +30,6 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String customSlotName;
     private String pgtoHost = "127.0.0.1";
     private int pgtoPort = 9876;
-    private Integer defaultWalLogSize = 102400;
-    private Boolean partPublication = false;
-    private String globalPublicationName = "dbz_publication";
-    private String customPublicationName = "";
 
     private String deploymentMode;
     private ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress;
@@ -83,6 +80,15 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
         if (EmptyKit.isNotBlank(getSslKeyPassword())) {
             properties.setProperty("sslpassword", getSslKeyPassword());
         }
+    }
+    public String getDatabaseUrl() {
+        if (EmptyKit.isBlank(this.getExtParams())) {
+            this.setExtParams("?stringtype=unspecified&prepareThreshold=0");
+        }
+        if (EmptyKit.isNotBlank(this.getExtParams()) && !this.getExtParams().startsWith("?") && !this.getExtParams().startsWith(":")) {
+            this.setExtParams("?" + this.getExtParams()+"&stringtype=unspecified&prepareThreshold=0");
+        }
+        return String.format(this.getDatabaseUrlPattern(), this.getHost(), this.getPort(), URLEncoder.encode(this.getDatabase()), this.getExtParams());
     }
 
     public String getLogPluginName() {
@@ -179,38 +185,6 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setPgtoPort(int pgtoPort) {
         this.pgtoPort = pgtoPort;
-    }
-
-    public Integer getDefaultWalLogSize() {
-        return defaultWalLogSize;
-    }
-
-    public void setDefaultWalLogSize(Integer defaultWalLogSize) {
-        this.defaultWalLogSize = defaultWalLogSize;
-    }
-
-    public Boolean getPartPublication() {
-        return partPublication;
-    }
-
-    public void setPartPublication(Boolean partPublication) {
-        this.partPublication = partPublication;
-    }
-
-    public String getGlobalPublicationName() {
-        return globalPublicationName;
-    }
-
-    public void setGlobalPublicationName(String globalPublicationName) {
-        this.globalPublicationName = globalPublicationName;
-    }
-
-    public String getCustomPublicationName() {
-        return customPublicationName;
-    }
-
-    public void setCustomPublicationName(String customPublicationName) {
-        this.customPublicationName = customPublicationName;
     }
 
     public String getDeploymentMode() {

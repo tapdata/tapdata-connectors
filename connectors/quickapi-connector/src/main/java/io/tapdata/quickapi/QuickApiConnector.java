@@ -20,14 +20,11 @@ import io.tapdata.quickapi.common.QuickApiConfig;
 import io.tapdata.quickapi.server.QuickAPIResponseInterceptor;
 import io.tapdata.quickapi.server.TestQuickApi;
 import io.tapdata.quickapi.server.enums.QuickApiTestItem;
-import io.tapdata.quickapi.utils.SchemaParser;
-import org.apache.commons.lang3.StringUtils;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 @TapConnectorClass("spec.json")
 public class QuickApiConnector extends ConnectorBase {
@@ -61,8 +58,6 @@ public class QuickApiConnector extends ConnectorBase {
 			String tokenParams = connectionConfig.getString("tokenParams");
 			config.apiConfig(apiType)
 					.jsonTxt(jsonTxt)
-					.autoLoadSchema(connectionConfig.getValue("autoLoadSchema", false))
-					.schemaTxt(connectionConfig.getString("schemaTxt"))
 					.expireStatus(expireStatus)
 					.tokenParams(tokenParams);
 			apiFactory = new APIFactoryImpl();
@@ -114,16 +109,10 @@ public class QuickApiConnector extends ConnectorBase {
 
 	@Override
 	public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
-		final List<String> schema = invoker.tables();
-		final List<TapTable> parse = SchemaParser.parse(config.schemaTxt(), connectionContext.getLog());
-		final Map<String, TapTable> tapTableMap = parse.stream()
-				.filter(Objects::nonNull)
-				.collect(Collectors.toMap(TapTable::getName, v -> v, (t1, t2) -> t2));
-		final List<TapTable> tableList = schema.stream()
-				.filter(StringUtils::isNotBlank)
-				.map(name -> Optional.ofNullable(tapTableMap.get(name)).orElse(table(name, name)))
-				.collect(Collectors.toList());
-		consumer.accept(tableList);
+		List<String> schema = invoker.tables();
+		List<TapTable> tableList = new ArrayList<>();
+		schema.stream().filter(Objects::nonNull).forEach(name->tableList.add(table(name,name)));
+		consumer.accept( tableList );
 	}
 
 	@Override

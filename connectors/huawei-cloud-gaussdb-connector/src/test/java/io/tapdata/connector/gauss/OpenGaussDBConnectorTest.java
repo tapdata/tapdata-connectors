@@ -1088,7 +1088,6 @@ public class OpenGaussDBConnectorTest {
     }
 
     @Nested
-    @Disabled
     class WriteRecordTest {
         GaussDBJdbcContext gaussJdbcContext;
         List<TapRecordEvent> tapRecordEvents;
@@ -1615,14 +1614,12 @@ public class OpenGaussDBConnectorTest {
         }
 
         @Test
-        @Disabled
         void testFlushLsnIsNull() throws Throwable {
             when(nodeConfig.getInteger("flushLsn")).thenReturn(null);
             assertVerify();
         }
 
         @Test
-        @Disabled
         void testFlushLsnNotNull() throws Throwable {
             when(nodeConfig.getInteger("flushLsn")).thenReturn(100);
             assertVerify();

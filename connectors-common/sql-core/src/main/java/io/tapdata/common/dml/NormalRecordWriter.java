@@ -46,6 +46,7 @@ public class NormalRecordWriter {
     protected boolean largeSql = false;
     protected CommonDbConfig commonDbConfig;
     protected boolean needCloseIdentity = false;
+    protected boolean needDisableTrigger = false;
 
     public NormalRecordWriter(JdbcContext jdbcContext, TapTable tapTable) throws SQLException {
         this.commonDbConfig = jdbcContext.getConfig();
@@ -104,6 +105,9 @@ public class NormalRecordWriter {
             if (!isTransaction) {
                 if (needCloseIdentity) {
                     openIdentity();
+                }
+                if(needDisableTrigger) {
+                    enableTrigger();
                 }
                 connection.close();
             }
@@ -171,7 +175,7 @@ public class NormalRecordWriter {
         }
     }
 
-    private void errorHandler(SQLException e, Object data) {
+    public void errorHandler(SQLException e, Object data) {
         if (null != data) {
             data = ErrorCodeUtils.truncateData(data);
         }
@@ -214,7 +218,14 @@ public class NormalRecordWriter {
     }
 
     public void setAutoIncFields(List<String> autoIncFields) {
+        insertRecorder.setAutoIncFields(autoIncFields);
+        updateRecorder.setAutoIncFields(autoIncFields);
+        deleteRecorder.setAutoIncFields(autoIncFields);
         this.autoIncFields = autoIncFields;
+    }
+
+    public void setInsertRecorderAutoIncFields(List<String> autoIncFields){
+        insertRecorder.setAutoIncFields(autoIncFields);
     }
 
     public Map<String, Object> getAutoIncMap() {
@@ -267,6 +278,51 @@ public class NormalRecordWriter {
     }
 
     protected String getOpenIdentitySql() {
+        return null;
+    }
+
+    public void disableTrigger() throws SQLException {
+        String sql = getDisableTriggerSql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+        needDisableTrigger = true;
+    }
+
+    public void enableTrigger() throws SQLException {
+        String sql = getEnableTriggerSql();
+        if (EmptyKit.isNotBlank(sql)) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute(sql);
+            }
+        }
+    }
+    public NormalRecordWriter setFromCharset(String fromCharset) {
+        insertRecorder.setFromCharset(fromCharset);
+        updateRecorder.setFromCharset(fromCharset);
+        deleteRecorder.setFromCharset(fromCharset);
+        return this;
+    }
+    public NormalRecordWriter setToCharset(String toCharset) {
+        insertRecorder.setToCharset(toCharset);
+        updateRecorder.setToCharset(toCharset);
+        deleteRecorder.setToCharset(toCharset);
+        return this;
+    }
+    public NormalRecordWriter setTargetNeedEncode(boolean targetNeedEncode) {
+        insertRecorder.setTargetNeedEncode(targetNeedEncode);
+        updateRecorder.setTargetNeedEncode(targetNeedEncode);
+        deleteRecorder.setTargetNeedEncode(targetNeedEncode);
+        return this;
+    }
+
+    protected String getDisableTriggerSql() {
+        return null;
+    }
+
+    protected String getEnableTriggerSql() {
         return null;
     }
 }

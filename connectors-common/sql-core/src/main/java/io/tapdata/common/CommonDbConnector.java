@@ -6,7 +6,6 @@ import io.tapdata.common.dml.NormalWriteRecorder;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.entity.TapConstraintException;
-import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.constraint.TapDropConstraintEvent;
@@ -30,7 +29,6 @@ import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TapFilter;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
-import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.sql.Connection;
@@ -112,11 +110,6 @@ public abstract class CommonDbConnector extends ConnectorBase {
             TapTable tapTable = table(table);
             tapTable.setTableAttr(getSpecificAttr(subTable));
             tapTable.setComment(subTable.getString("tableComment"));
-            String tableCollation = subTable.getString("tableCollation");
-            if (StringUtils.isNotBlank(tableCollation)) {
-                String charset = tableCollation.split("_")[0];
-                tapTable.setCharset(charset);
-            }
             //3、primary key and table index
             List<String> primaryKey = TapSimplify.list();
             List<TapIndex> tapIndexList = TapSimplify.list();
@@ -125,19 +118,15 @@ public abstract class CommonDbConnector extends ConnectorBase {
             AtomicInteger keyPos = new AtomicInteger(0);
             columnList.stream().filter(col -> table.equals(col.getString("tableName")))
                     .forEach(col -> {
-                        try {
-                            TapField tapField = makeTapField(col);
-                            if (null == tapField) return;
-                            tapField.setPos(keyPos.incrementAndGet());
-                            tapField.setPrimaryKey(primaryKey.contains(tapField.getName()));
-                            tapField.setPrimaryKeyPos(primaryKey.indexOf(tapField.getName()) + 1);
-                            if (tapField.getPrimaryKey()) {
-                                tapField.setNullable(false);
-                            }
-                            tapTable.add(tapField);
-                        } catch (Exception e) {
-                            throw new CoreException("Construct field failed, table: " + table + ", column: " + col + ", error: " + e.getMessage());
+                        TapField tapField = makeTapField(col);
+                        if (null == tapField) return;
+                        tapField.setPos(keyPos.incrementAndGet());
+                        tapField.setPrimaryKey(primaryKey.contains(tapField.getName()));
+                        tapField.setPrimaryKeyPos(primaryKey.indexOf(tapField.getName()) + 1);
+                        if (tapField.getPrimaryKey()) {
+                            tapField.setNullable(false);
                         }
+                        tapTable.add(tapField);
                     });
             tapTable.setIndexList(tapIndexList);
             tapTable.setConstraintList(makeForeignKey(fkList, table));
@@ -910,26 +899,26 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void commitTransaction(TapConnectorContext connectorContext) throws Throwable {
-        transactionConnectionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+        for (Map.Entry<String, Connection> entry : transactionConnectionMap.entrySet()) {
             try {
-                v.commit();
-            } catch (SQLException e) {
-                throw new RuntimeException(e);
+                entry.getValue().commit();
+            } finally {
+                EmptyKit.closeQuietly(entry.getValue());
             }
-            return null;
-        });
+        }
+        transactionConnectionMap.clear();
         isTransaction = false;
     }
 
     protected void rollbackTransaction(TapConnectorContext connectorContext) throws Throwable {
-        transactionConnectionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+        for (Map.Entry<String, Connection> entry : transactionConnectionMap.entrySet()) {
             try {
-                v.rollback();
-            } catch (SQLException e) {
-                throw new RuntimeException(e);
+                entry.getValue().rollback();
+            } finally {
+                EmptyKit.closeQuietly(entry.getValue());
             }
-            return null;
-        });
+        }
+        transactionConnectionMap.clear();
         isTransaction = false;
     }
 

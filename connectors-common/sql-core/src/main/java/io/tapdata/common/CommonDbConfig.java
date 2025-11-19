@@ -54,7 +54,6 @@ public class CommonDbConfig implements Serializable {
     protected ZoneId zoneId;
     protected Integer zoneOffsetHour;
     protected ZoneId sysZoneId;
-    protected Boolean splitUpdatePk = true;
 
     protected Boolean enableFileInput = false;
     protected Long bufferCapacity = 10000000L;
@@ -67,6 +66,8 @@ public class CommonDbConfig implements Serializable {
     protected String sslRandomPath;
 
     private int maxIndexNameLength = 30;
+
+    private Boolean disableTrigger = false;
 
     //pattern for jdbc-url
     public String getDatabaseUrlPattern() {
@@ -375,14 +376,6 @@ public class CommonDbConfig implements Serializable {
         this.sysZoneId = sysZoneId;
     }
 
-    public Boolean getSplitUpdatePk() {
-        return splitUpdatePk;
-    }
-
-    public void setSplitUpdatePk(Boolean splitUpdatePk) {
-        this.splitUpdatePk = splitUpdatePk;
-    }
-
     public Boolean getEnableFileInput() {
         return enableFileInput;
     }
@@ -453,5 +446,13 @@ public class CommonDbConfig implements Serializable {
 
     public void setMaxIndexNameLength(int maxIndexNameLength) {
         this.maxIndexNameLength = maxIndexNameLength;
+    }
+
+    public Boolean getDisableTrigger() {
+        return disableTrigger;
+    }
+
+    public void setDisableTrigger(Boolean disableTrigger) {
+        this.disableTrigger = disableTrigger;
     }
 }

@@ -42,22 +42,8 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
 
     @Override
     public void startMiner(Supplier<Boolean> isAlive) throws Throwable {
-        if (withSchema) {
-            for (Map.Entry<String, List<String>> entry : schemaTableMap.entrySet()) {
-                for (String table : entry.getValue()) {
-                    String response = HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format(WALMINER_ADD_SUB, connectorId, postgresConfig.getDatabase(), entry.getKey(), table));
-                    if (response.startsWith("Top many subs limit")) {
-                        throw new RuntimeException("Top many subs limit failed");
-                    }
-                }
-            }
-        } else {
-            for (String table : tableList) {
-                String response = HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format(WALMINER_ADD_SUB, connectorId, postgresConfig.getDatabase(), postgresConfig.getSchema(), table));
-                if (response.startsWith("Top many subs limit")) {
-                    throw new RuntimeException("Top many subs limit failed");
-                }
-            }
+        for (String table : tableList) {
+            HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format(WALMINER_ADD_SUB, connectorId, postgresConfig.getDatabase(), postgresConfig.getSchema(), table));
         }
         if (EmptyKit.isNotNull(lsn)) {
             HttpKit.sendHttp09Request(postgresConfig.getPgtoHost(), postgresConfig.getPgtoPort(), String.format(WALMINER_REV_SUB, connectorId, lsn));
@@ -125,12 +111,6 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
         }
         String schema = jsonObject.getString("schemaname");
         String tableName = jsonObject.getString("relname");
-        NormalRedo redo = new NormalRedo();
-        redo.setNameSpace(schema);
-        redo.setTableName(tableName);
-        if (withSchema) {
-            tableName = schema + "." + tableName;
-        }
         String op;
         switch (resultDO.getOp()) {
             case INSERT:
@@ -146,6 +126,7 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
             default:
                 op = null;
         }
+        NormalRedo redo = new NormalRedo();
         redo.setSqlRedo(sql);
         redo.setOperation(op);
         for (Map.Entry<String, Object> entry : resultDO.getData().entrySet()) {
@@ -158,6 +139,8 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
             }
             redo.setUndoRecord(resultDOBefore.getData());
         }
+        redo.setNameSpace(schema);
+        redo.setTableName(tableName);
         redo.setTimestamp(System.currentTimeMillis());
         redo.setTransactionId(jsonObject.getString("xid"));
         redo.setCdcSequenceStr(jsonObject.getString("lsn"));

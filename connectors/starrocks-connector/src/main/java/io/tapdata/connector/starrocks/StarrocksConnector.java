@@ -54,7 +54,7 @@ public class StarrocksConnector extends CommonDbConnector {
 
     private StarrocksJdbcContext starrocksJdbcContext;
     private StarrocksConfig starrocksConfig;
-    private final Map<String, StarrocksStreamLoader> starrocksStreamLoaderMap = new ConcurrentHashMap<>();
+    private final Map<String, StarrocksStreamLoader> StarrocksStreamLoaderMap = new ConcurrentHashMap<>();
 
 
     @Override
@@ -178,7 +178,7 @@ public class StarrocksConnector extends CommonDbConnector {
 
     public StarrocksStreamLoader getStarrocksStreamLoader() {
         String threadName = Thread.currentThread().getName();
-        if (!starrocksStreamLoaderMap.containsKey(threadName)) {
+        if (!StarrocksStreamLoaderMap.containsKey(threadName)) {
             StarrocksJdbcContext context = new StarrocksJdbcContext(starrocksConfig);
             CloseableHttpClient httpClient;
             if (Boolean.TRUE.equals(starrocksConfig.getUseHTTPS())) {
@@ -186,10 +186,10 @@ public class StarrocksConnector extends CommonDbConnector {
             } else {
                 httpClient = new HttpUtil().getHttpClient();
             }
-            StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, httpClient, tapLogger);
-            starrocksStreamLoaderMap.put(threadName, StarrocksStreamLoader);
+            StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, httpClient);
+            StarrocksStreamLoaderMap.put(threadName, StarrocksStreamLoader);
         }
-        return starrocksStreamLoaderMap.get(threadName);
+        return StarrocksStreamLoaderMap.get(threadName);
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
@@ -200,6 +200,10 @@ public class StarrocksConnector extends CommonDbConnector {
                 // TODO: 2023/4/28 jdbc writeRecord
             }
         } catch (Throwable t) {
+            StarrocksStreamLoaderMap.computeIfPresent(Thread.currentThread().getName(), (key, value) -> {
+                value.shutdown();
+                return null;
+            });
             exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
             throw t;
         }
@@ -341,7 +345,7 @@ public class StarrocksConnector extends CommonDbConnector {
     @Override
     public void onStop(TapConnectionContext connectionContext) {
         ErrorKit.ignoreAnyError(() -> {
-            for (StarrocksStreamLoader StarrocksStreamLoader : starrocksStreamLoaderMap.values()) {
+            for (StarrocksStreamLoader StarrocksStreamLoader : StarrocksStreamLoaderMap.values()) {
                 if (EmptyKit.isNotNull(StarrocksStreamLoader)) {
                     // 在停止前先刷新剩余数据
                     try {

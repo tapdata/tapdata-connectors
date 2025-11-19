@@ -54,11 +54,6 @@ public abstract class JdbcContext implements AutoCloseable {
         }
     }
 
-    public Connection getOriginConnection() throws Exception {
-        Class.forName(config.getJdbcDriver());
-        return DriverManager.getConnection(config.getDatabaseUrl(), config.getUser(), config.getPassword());
-    }
-
     /**
      * query version of database
      *
@@ -136,6 +131,21 @@ public abstract class JdbcContext implements AutoCloseable {
     public void query(String sql, ResultSetConsumer resultSetConsumer) throws SQLException {
         try (
                 Connection connection = getConnection();
+                Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)
+        ) {
+            statement.setFetchSize(2000); //protected from OM
+            try (
+                    ResultSet resultSet = statement.executeQuery(sql)
+            ) {
+                if (EmptyKit.isNotNull(resultSet)) {
+                    resultSetConsumer.accept(resultSet);
+                }
+            }
+        }
+    }
+
+    public void query(Connection connection,String sql, ResultSetConsumer resultSetConsumer) throws SQLException {
+        try (
                 Statement statement = connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)
         ) {
             statement.setFetchSize(2000); //protected from OM
