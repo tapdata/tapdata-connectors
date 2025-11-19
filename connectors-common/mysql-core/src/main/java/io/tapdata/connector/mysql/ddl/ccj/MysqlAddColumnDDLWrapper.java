@@ -36,9 +36,6 @@ public class MysqlAddColumnDDLWrapper extends MysqlDDLWrapper {
         verifyAlter(ddl);
         String tableName = getTableName(ddl);
         TapTable tapTable = null == tableMap ? null : tableMap.get(tableName);
-        if (tapTable == null) {
-            return;
-        }
         List<AlterExpression> alterExpressions = ddl.getAlterExpressions();
         for (AlterExpression alterExpression : alterExpressions) {
             if (alterExpression.getOperation() != AlterOperation.ADD) {

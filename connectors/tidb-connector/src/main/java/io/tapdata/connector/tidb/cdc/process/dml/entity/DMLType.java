@@ -1,4 +1,4 @@
-package io.tapdata.constant;
+package io.tapdata.connector.tidb.cdc.process.dml.entity;
 
 import org.apache.commons.lang3.StringUtils;
 

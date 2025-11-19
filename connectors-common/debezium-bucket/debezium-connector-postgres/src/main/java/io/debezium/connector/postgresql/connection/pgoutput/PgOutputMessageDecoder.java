@@ -117,9 +117,6 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
         // We need to reprocess all BEGIN/COMMIT messages regardless.
         int position = buffer.position();
         try {
-            if (!buffer.hasRemaining()) {
-                return true;
-            }
             MessageType type = MessageType.forType((char) buffer.get());
             LOGGER.trace("Message Type: {}", type);
             final boolean candidateForSkipping = super.shouldMessageBeSkipped(buffer, lastReceivedLsn, startLsn, walPosition);
@@ -143,9 +140,8 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
                     // These should be excluded based on the normal behavior, delegating to default method
                     return candidateForSkipping;
             }
-        } catch (Exception e) {
-            return true;
-        } finally {
+        }
+        finally {
             // Reset buffer position
             buffer.position(position);
         }

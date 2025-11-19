@@ -18,7 +18,7 @@ public class YashandbSqlMaker extends CommonSqlMaker {
         if (closeNotNull && (tapField.getDataType().contains("CHAR") || tapField.getDataType().contains("CLOB"))) {
             nullable = true;
         }
-        if (!nullable || (null != tapField.getPrimaryKeyPos() && tapField.getPrimaryKeyPos() > 0)) {
+        if (!nullable || tapField.getPrimaryKey()) {
             builder.append("NOT NULL").append(' ');
         }
     }

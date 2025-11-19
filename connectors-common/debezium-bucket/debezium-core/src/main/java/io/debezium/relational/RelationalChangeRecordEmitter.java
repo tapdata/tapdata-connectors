@@ -8,6 +8,7 @@ package io.debezium.relational;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 import io.debezium.data.Envelope;
 import org.apache.kafka.connect.data.Schema;
@@ -32,7 +33,6 @@ public abstract class RelationalChangeRecordEmitter extends AbstractChangeRecord
 
     public static final String PK_UPDATE_OLDKEY_FIELD = "__debezium.oldkey";
     public static final String PK_UPDATE_NEWKEY_FIELD = "__debezium.newkey";
-    protected boolean splitUpdatePk;
 
     protected final Logger logger = LoggerFactory.getLogger(getClass());
 
@@ -124,9 +124,9 @@ public abstract class RelationalChangeRecordEmitter extends AbstractChangeRecord
         }
         // some configurations does not provide old values in case of updates
         // in this case we handle all updates as regular ones
-        if (!splitUpdatePk || oldKey == null || Objects.equals(oldKey, newKey)) {
+        if (oldKey == null || Objects.equals(oldKey, newKey)) {
             Struct envelope = refactorEnvelopIfNeed(tableSchema, beforeInvalidValue, afterInvalidValue, oldValue, newValue, "update");
-            receiver.changeRecord(tableSchema, Operation.UPDATE, oldKey == null ? newKey : oldKey, envelope, getOffset(), null);
+            receiver.changeRecord(tableSchema, Operation.UPDATE, newKey, envelope, getOffset(), null);
         }
         // PK update -> emit as delete and re-insert with new key
         else {
