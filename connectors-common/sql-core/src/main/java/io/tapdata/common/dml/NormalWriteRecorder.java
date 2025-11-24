@@ -64,6 +64,7 @@ public abstract class NormalWriteRecorder {
     protected int batchCacheSize = 0;
     protected Log tapLogger;
     protected List<String> autoIncFields;
+    protected DMLType dmlType;
 
     public void setAutoIncFields(List<String> autoIncFields) {
         this.autoIncFields = autoIncFields;
@@ -319,6 +320,12 @@ public abstract class NormalWriteRecorder {
 
     public String getUpsertSql(Map<String, Object> after) throws SQLException {
         throw new UnsupportedOperationException("upsert is not supported");
+    }
+    public String getUpsertSqlByAfter(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("upsert is not supported");
+    }
+    public String getInsertIgnoreSqlByAfter(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("insertIgnore is not supported");
     }
 
     public String getDeleteSql(Map<String, Object> before) throws SQLException {
