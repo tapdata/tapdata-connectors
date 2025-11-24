@@ -17,7 +17,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.kit.EmptyKit;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
@@ -176,7 +176,7 @@ public class TidbConnectorTest {
             List<String> tableList;
             Object offsetState;
             int recordSize;
-            StreamReadConsumer consumer;
+            StreamReadOneByOneConsumer consumer;
             KVMap<Object> kvMap;
             ProcessHandler handler;
 
@@ -186,7 +186,7 @@ public class TidbConnectorTest {
                 tableList = mock(List.class);
                 offsetState = 0L;
                 recordSize =1;
-                consumer = mock(StreamReadConsumer.class);
+                consumer = mock(StreamReadOneByOneConsumer.class);
                 kvMap = mock(KVMap.class);
                 doNothing().when(handler).doActivity();
                 doNothing().when(handler).close();
@@ -197,13 +197,13 @@ public class TidbConnectorTest {
                 when(kvMap.get(ProcessHandler.CDC_SERVER)).thenReturn("");
                 doNothing().when(log).info(anyString(), anyString());
 
-                doCallRealMethod().when(connector).streamRead(nodeContext, tableList, offsetState, recordSize, consumer);
+                doCallRealMethod().when(connector).streamRead(nodeContext, tableList, offsetState, consumer);
             }
             @Test
             void testNormal() throws Exception {
                 try(MockedStatic<ProcessHandler> ph = mockStatic(ProcessHandler.class)) {
-                    ph.when(() -> ProcessHandler.of(any(ProcessHandler.ProcessInfo.class), any(StreamReadConsumer.class))).thenReturn(handler);
-                    Assertions.assertDoesNotThrow(() -> connector.streamRead(nodeContext, tableList, offsetState, recordSize, consumer));
+                    ph.when(() -> ProcessHandler.of(any(ProcessHandler.ProcessInfo.class), any(StreamReadOneByOneConsumer.class))).thenReturn(handler);
+                    Assertions.assertDoesNotThrow(() -> connector.streamRead(nodeContext, tableList, offsetState, consumer));
                     verify(connector).genericFeedId(kvMap);
                     verify(kvMap).get(ProcessHandler.CDC_SERVER);
                     verify(nodeContext, times(2)).getStateMap();

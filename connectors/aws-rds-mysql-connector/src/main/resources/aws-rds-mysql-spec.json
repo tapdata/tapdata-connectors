@@ -4,7 +4,17 @@
     "icon": "icons/aws_rds_mysql.png",
     "id": "aws-rds-mysql",
     "doc": "${doc}",
-    "tags": ["Database"]
+    "tags": ["Database"],
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "capabilities": [

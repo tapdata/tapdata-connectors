@@ -21,6 +21,7 @@ import io.tapdata.mongodb.reader.MongodbOpLogStreamV3Reader;
 import io.tapdata.mongodb.reader.MongodbStreamReader;
 import io.tapdata.mongodb.reader.StreamWithOpLogCollection;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ExecuteResult;
@@ -208,7 +209,7 @@ class MongodbConnectorTest {
         List<String> tableList;
         Object offset;
         int eventBatchSize;
-        StreamReadConsumer consumer;
+        StreamReadOneByOneConsumer consumer;
         MongoCdcOffset mongoCdcOffset;
 
         @BeforeEach
@@ -217,70 +218,70 @@ class MongodbConnectorTest {
             tableList = mock(List.class);
             offset = 0L;
             eventBatchSize = 100;
-            consumer = mock(StreamReadConsumer.class);
+            consumer = mock(StreamReadOneByOneConsumer.class);
             when(tableList.size()).thenReturn(1, 1);
 
-            doNothing().when(mongodbConnector).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), eventBatchSize, consumer);
+            doNothing().when(mongodbConnector).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), consumer);
             when(tableList.isEmpty()).thenReturn(false);
             when(mongodbConnector.createStreamReader()).thenReturn(mongodbStreamReader);
-            doNothing().when(mongodbConnector).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, eventBatchSize, consumer);
-            doCallRealMethod().when(mongodbConnector).streamRead(connectorContext, tableList, offset, eventBatchSize, consumer);
+            doNothing().when(mongodbConnector).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, consumer);
+            doCallRealMethod().when(mongodbConnector).streamRead(connectorContext, tableList, offset, consumer);
         }
         @Test
         void testNormal() {
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamRead(connectorContext, tableList, offset, eventBatchSize, consumer));
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamRead(connectorContext, tableList, offset, consumer));
             verify(tableList, times(2)).size();
-            verify(mongodbConnector).streamReadOpLog(connectorContext, tableList, null, eventBatchSize, consumer);
-            verify(mongodbConnector, times(0)).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), eventBatchSize, consumer);
+            verify(mongodbConnector).streamReadOpLog(connectorContext, tableList, null, consumer);
+            verify(mongodbConnector, times(0)).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), consumer);
             verify(tableList, times(0)).isEmpty();
             verify(mongodbConnector, times(0)).createStreamReader();
-            verify(mongodbConnector).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, eventBatchSize, consumer);
+            verify(mongodbConnector).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, consumer);
         }
         @Test
         void testAfterReadOpLog() {
             when(tableList.size()).thenReturn(1, 2);
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamRead(connectorContext, tableList, offset, eventBatchSize, consumer));
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamRead(connectorContext, tableList, offset, consumer));
             verify(tableList, times(2)).size();
-            verify(mongodbConnector).streamReadOpLog(connectorContext, tableList, null, eventBatchSize, consumer);
-            verify(mongodbConnector, times(0)).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), eventBatchSize, consumer);
+            verify(mongodbConnector).streamReadOpLog(connectorContext, tableList, null, consumer);
+            verify(mongodbConnector, times(0)).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), consumer);
             verify(tableList).isEmpty();
             verify(mongodbConnector, times(0)).createStreamReader();
-            verify(mongodbConnector).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, eventBatchSize, consumer);
+            verify(mongodbConnector).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, consumer);
         }
         @Test
         void testMongodbStreamReaderIsNull() {
             ReflectionTestUtils.setField(mongodbConnector, "mongodbStreamReader", null);
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamRead(connectorContext, tableList, offset, eventBatchSize, consumer));
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamRead(connectorContext, tableList, offset, consumer));
             verify(tableList, times(2)).size();
-            verify(mongodbConnector).streamReadOpLog(connectorContext, tableList, null, eventBatchSize, consumer);
-            verify(mongodbConnector, times(0)).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), eventBatchSize, consumer);
+            verify(mongodbConnector).streamReadOpLog(connectorContext, tableList, null, consumer);
+            verify(mongodbConnector, times(0)).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), consumer);
             verify(tableList, times(0)).isEmpty();
             verify(mongodbConnector, times(1)).createStreamReader();
-            verify(mongodbConnector).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, eventBatchSize, consumer);
+            verify(mongodbConnector).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, consumer);
         }
         @Test
         void testOffsetIsMongoOffset() {
             offset = mongoCdcOffset;
-            doCallRealMethod().when(mongodbConnector).streamRead(connectorContext, tableList, offset, eventBatchSize, consumer);
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamRead(connectorContext, tableList, offset, eventBatchSize, consumer));
+            doCallRealMethod().when(mongodbConnector).streamRead(connectorContext, tableList, offset, consumer);
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamRead(connectorContext, tableList, offset, consumer));
             verify(tableList, times(2)).size();
-            verify(mongodbConnector, times(0)).streamReadOpLog(connectorContext, tableList, null, eventBatchSize, consumer);
-            verify(mongodbConnector).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), eventBatchSize, consumer);
+            verify(mongodbConnector, times(0)).streamReadOpLog(connectorContext, tableList, null, consumer);
+            verify(mongodbConnector).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), consumer);
             verify(tableList, times(0)).isEmpty();
             verify(mongodbConnector, times(0)).createStreamReader();
-            verify(mongodbConnector).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, eventBatchSize, consumer);
+            verify(mongodbConnector).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, consumer);
         }
         @Test
         void testOnlyReadOpLogCollection() {
             when(tableList.size()).thenReturn(1, 2);
             when(tableList.isEmpty()).thenReturn(true);
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamRead(connectorContext, tableList, offset, eventBatchSize, consumer));
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamRead(connectorContext, tableList, offset, consumer));
             verify(tableList, times(2)).size();
-            verify(mongodbConnector).streamReadOpLog(connectorContext, tableList, null, eventBatchSize, consumer);
-            verify(mongodbConnector, times(0)).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), eventBatchSize, consumer);
+            verify(mongodbConnector).streamReadOpLog(connectorContext, tableList, null, consumer);
+            verify(mongodbConnector, times(0)).streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), consumer);
             verify(tableList).isEmpty();
             verify(mongodbConnector, times(0)).createStreamReader();
-            verify(mongodbConnector, times(0)).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, eventBatchSize, consumer);
+            verify(mongodbConnector, times(0)).doStreamRead(mongodbStreamReader, connectorContext, tableList, 0L, consumer);
         }
     }
 
@@ -289,7 +290,7 @@ class MongodbConnectorTest {
         List<String> tableList;
         Object offset;
         int eventBatchSize;
-        StreamReadConsumer consumer;
+        StreamReadOneByOneConsumer consumer;
         MongoCdcOffset mongoCdcOffset;
         MongodbStreamReader streamReader;
         @BeforeEach
@@ -299,20 +300,20 @@ class MongodbConnectorTest {
             tableList = mock(List.class);
             offset = 0L;
             eventBatchSize = 100;
-            consumer = mock(StreamReadConsumer.class);
+            consumer = mock(StreamReadOneByOneConsumer.class);
             when(tableList.size()).thenReturn(1, 1);
 
-            doNothing().when(streamReader).read(connectorContext, tableList, offset, eventBatchSize, consumer);
+            doNothing().when(streamReader).read(connectorContext, tableList, offset, consumer);
             doNothing().when(streamReader).onDestroy();
             doNothing().when(mongodbConnector).errorHandle(any(Exception.class), any(TapConnectorContext.class));
             doNothing().when(log).debug(anyString(), anyString());
 
-            doCallRealMethod().when(mongodbConnector).doStreamRead(streamReader, connectorContext, tableList, offset, eventBatchSize, consumer);
+            doCallRealMethod().when(mongodbConnector).doStreamRead(streamReader, connectorContext, tableList, offset, consumer);
         }
         @Test
         void testNormal() throws Exception {
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.doStreamRead(streamReader, connectorContext, tableList, offset, eventBatchSize, consumer));
-            verify(streamReader, times(1)).read(connectorContext, tableList, offset, eventBatchSize, consumer);
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.doStreamRead(streamReader, connectorContext, tableList, offset, consumer));
+            verify(streamReader, times(1)).read(connectorContext, tableList, offset, consumer);
             verify(streamReader, times(0)).onDestroy();
             verify(mongodbConnector, times(0)).errorHandle(any(Exception.class), any(TapConnectorContext.class));
             verify(log, times(0)).debug(anyString(), anyString());
@@ -321,9 +322,9 @@ class MongodbConnectorTest {
         void testException() throws Exception {
             doAnswer(a -> {
                 throw new Exception("error");
-            }).when(streamReader).read(connectorContext, tableList, offset, eventBatchSize, consumer);
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.doStreamRead(streamReader, connectorContext, tableList, offset, eventBatchSize, consumer));
-            verify(streamReader, times(1)).read(connectorContext, tableList, offset, eventBatchSize, consumer);
+            }).when(streamReader).read(connectorContext, tableList, offset, consumer);
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.doStreamRead(streamReader, connectorContext, tableList, offset, consumer));
+            verify(streamReader, times(1)).read(connectorContext, tableList, offset, consumer);
             verify(streamReader, times(1)).onDestroy();
             verify(mongodbConnector, times(1)).errorHandle(any(Exception.class), any(TapConnectorContext.class));
             verify(log, times(0)).debug(anyString(), anyString());
@@ -332,12 +333,12 @@ class MongodbConnectorTest {
         void testDestroyException() throws Exception {
             doAnswer(a -> {
                 throw new Exception("error");
-            }).when(streamReader).read(connectorContext, tableList, offset, eventBatchSize, consumer);
+            }).when(streamReader).read(connectorContext, tableList, offset, consumer);
             doAnswer(a -> {
                 throw new Exception("failed");
             }).when(streamReader).onDestroy();
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.doStreamRead(streamReader, connectorContext, tableList, offset, eventBatchSize, consumer));
-            verify(streamReader, times(1)).read(connectorContext, tableList, offset, eventBatchSize, consumer);
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.doStreamRead(streamReader, connectorContext, tableList, offset, consumer));
+            verify(streamReader, times(1)).read(connectorContext, tableList, offset, consumer);
             verify(streamReader, times(1)).onDestroy();
             verify(mongodbConnector, times(1)).errorHandle(any(Exception.class), any(TapConnectorContext.class));
             verify(log, times(1)).debug(anyString(), anyString());
@@ -349,7 +350,7 @@ class MongodbConnectorTest {
         List<String> tableList;
         Object offset;
         int eventBatchSize;
-        StreamReadConsumer consumer;
+        StreamReadOneByOneConsumer consumer;
         MongoCdcOffset mongoCdcOffset;
         @BeforeEach
         void init() {
@@ -357,7 +358,7 @@ class MongodbConnectorTest {
             tableList = mock(List.class);
             offset = 0L;
             eventBatchSize = 100;
-            consumer = mock(StreamReadConsumer.class);
+            consumer = mock(StreamReadOneByOneConsumer.class);
 
             when(mongoConfig.getDatabase()).thenReturn("test");
             when(tableList.contains(StreamWithOpLogCollection.OP_LOG_COLLECTION)).thenReturn(false);
@@ -369,14 +370,13 @@ class MongodbConnectorTest {
                     any(TapConnectorContext.class),
                     anyList(),
                     any(),
-                    anyInt(),
-                    any(StreamReadConsumer.class));
-            doCallRealMethod().when(mongodbConnector).streamReadOpLog(connectorContext, tableList, 0L, eventBatchSize, consumer);
+                    any(StreamReadOneByOneConsumer.class));
+            doCallRealMethod().when(mongodbConnector).streamReadOpLog(connectorContext, tableList, 0L, consumer);
         }
 
         @Test
         void testNotReadOpLog() {
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamReadOpLog(connectorContext, tableList, 0L, eventBatchSize, consumer));
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamReadOpLog(connectorContext, tableList, 0L, consumer));
             verify(mongoConfig).getDatabase();
             verify(tableList, times(0)).contains(StreamWithOpLogCollection.OP_LOG_COLLECTION);
             verify(connectorContext, times(0)).getLog();
@@ -388,13 +388,12 @@ class MongodbConnectorTest {
                     any(TapConnectorContext.class),
                     anyList(),
                     any(),
-                    anyInt(),
-                    any(StreamReadConsumer.class));
+                    any(StreamReadOneByOneConsumer.class));
         }
         @Test
         void testNotReadOpLog2() {
             when(mongoConfig.getDatabase()).thenReturn("local");
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamReadOpLog(connectorContext, tableList, 0L, eventBatchSize, consumer));
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamReadOpLog(connectorContext, tableList, 0L, consumer));
             verify(mongoConfig).getDatabase();
             verify(tableList, times(1)).contains(StreamWithOpLogCollection.OP_LOG_COLLECTION);
             verify(connectorContext, times(0)).getLog();
@@ -406,14 +405,13 @@ class MongodbConnectorTest {
                     any(TapConnectorContext.class),
                     anyList(),
                     any(),
-                    anyInt(),
-                    any(StreamReadConsumer.class));
+                    any(StreamReadOneByOneConsumer.class));
         }
         @Test
         void testReadOpLog() {
             when(mongoConfig.getDatabase()).thenReturn("local");
             when(tableList.contains(StreamWithOpLogCollection.OP_LOG_COLLECTION)).thenReturn(true);
-            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamReadOpLog(connectorContext, tableList, 0L, eventBatchSize, consumer));
+            Assertions.assertDoesNotThrow(() -> mongodbConnector.streamReadOpLog(connectorContext, tableList, 0L, consumer));
             verify(mongoConfig).getDatabase();
             verify(tableList, times(1)).contains(StreamWithOpLogCollection.OP_LOG_COLLECTION);
             verify(connectorContext, times(1)).getLog();
@@ -425,8 +423,7 @@ class MongodbConnectorTest {
                     any(TapConnectorContext.class),
                     anyList(),
                     any(),
-                    anyInt(),
-                    any(StreamReadConsumer.class));
+                    any(StreamReadOneByOneConsumer.class));
         }
         @Test
         void testReadOpLogWithNullMongodbOpLogStreamV3Reader() {
@@ -436,7 +433,7 @@ class MongodbConnectorTest {
                 ReflectionTestUtils.setField(mongodbConnector, "opLogStreamReader", null);
                 when(mongoConfig.getDatabase()).thenReturn("local");
                 when(tableList.contains(StreamWithOpLogCollection.OP_LOG_COLLECTION)).thenReturn(true);
-                Assertions.assertDoesNotThrow(() -> mongodbConnector.streamReadOpLog(connectorContext, tableList, 0L, eventBatchSize, consumer));
+                Assertions.assertDoesNotThrow(() -> mongodbConnector.streamReadOpLog(connectorContext, tableList, 0L, consumer));
                 verify(mongoConfig).getDatabase();
                 verify(tableList, times(1)).contains(StreamWithOpLogCollection.OP_LOG_COLLECTION);
                 verify(connectorContext, times(1)).getLog();
@@ -449,8 +446,7 @@ class MongodbConnectorTest {
                         any(TapConnectorContext.class),
                         anyList(),
                         any(),
-                        anyInt(),
-                        any(StreamReadConsumer.class));
+                        any(StreamReadOneByOneConsumer.class));
             }
         }
     }

@@ -29,6 +29,7 @@ import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -238,7 +239,15 @@ public class RabbitmqService extends AbstractMqService {
             String tableName = tapTable.getId();
             List<TapEvent> list = TapSimplify.list();
             AtomicLong time = new AtomicLong(System.currentTimeMillis());
-            DefaultConsumer consumer = mqConsumer(channel, list, tableName, eventBatchSize, time, eventsOffsetConsumer);
+            DefaultConsumer consumer = mqConsumer(channel, tableName, (e, o) -> list.add(e), () -> {
+                if (list.size() >= eventBatchSize) {
+                    List<TapEvent> subList = TapSimplify.list();
+                    subList.addAll(list);
+                    eventsOffsetConsumer.accept(subList, TapSimplify.list());
+                    time.set(System.currentTimeMillis());
+                    list.clear();
+                }
+            });
             channel.queueDeclare(tableName, true, false, false, null);
             channel.basicConsume(tableName, consumer);
             while (consuming.get() && System.currentTimeMillis() - time.get() < 10000) {
@@ -260,14 +269,13 @@ public class RabbitmqService extends AbstractMqService {
     }
 
     @Override
-    public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+    public void streamConsume(List<String> tableList, StreamReadOneByOneConsumer eventsOffsetConsumer) throws Throwable {
         consuming.set(true);
         atomicReference.set(null);
-        List<TapEvent> list = TapSimplify.list();
         try (Channel channel = rabbitmqConnection.createChannel()) {
             for (String tableName : tableList) {
                 AtomicLong time = new AtomicLong(System.currentTimeMillis());
-                DefaultConsumer consumer = mqConsumer(channel, list, tableName, eventBatchSize, time, eventsOffsetConsumer);
+                DefaultConsumer consumer = mqConsumer(channel, tableName, eventsOffsetConsumer::accept, () -> time.set(System.currentTimeMillis()));
                 channel.queueDeclare(tableName, true, false, false, null);
                 channel.basicConsume(tableName, consumer);
             }
@@ -277,14 +285,10 @@ public class RabbitmqService extends AbstractMqService {
             }
         } catch (Exception e) {
             throw new CoreException(e, e.getMessage());
-        } finally {
-            if (EmptyKit.isNotEmpty(list)) {
-                eventsOffsetConsumer.accept(list, TapSimplify.list());
-            }
         }
     }
 
-    protected DefaultConsumer mqConsumer(Channel channel, List<TapEvent> list, String tableName, int eventBatchSize, AtomicLong time, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+    protected DefaultConsumer mqConsumer(Channel channel, String tableName, BiConsumer<TapEvent, Object> consumer, Runnable after) {
         return new DefaultConsumer(channel) {
             @Override
             public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
@@ -294,22 +298,16 @@ public class RabbitmqService extends AbstractMqService {
                     Map<String, Object> data = parse(properties, body);
                     switch (mqOp) {
                         case UPDATE:
-                            list.add(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
+                            consumer.accept(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()), TapSimplify.list());
                             break;
                         case DELETE:
-                            list.add(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()));
+                            consumer.accept(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()), TapSimplify.list());
                             break;
                         default:
-                            list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
+                            consumer.accept(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()), TapSimplify.list());
                     }
                     channel.basicAck(envelope.getDeliveryTag(), false);
-                    if (list.size() >= eventBatchSize) {
-                        List<TapEvent> subList = TapSimplify.list();
-                        subList.addAll(list);
-                        eventsOffsetConsumer.accept(subList, TapSimplify.list());
-                        time.set(System.currentTimeMillis());
-                        list.clear();
-                    }
+                    after.run();
                 } catch (Exception e) {
                     atomicReference.set(e);
                     throw e;

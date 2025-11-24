@@ -39,7 +39,7 @@ import io.tapdata.mongodb.util.MongoShardUtil;
 import io.tapdata.mongodb.writer.MongodbWriter;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
@@ -553,7 +553,7 @@ public class MongodbConnector extends ConnectorBase {
 		connectorFunctions.supportBatchCount(this::batchCount);
 		connectorFunctions.supportCreateIndex(this::createIndex);
 		connectorFunctions.supportCreateTableV2(this::createTableV2);
-		connectorFunctions.supportStreamRead(this::streamRead);
+		connectorFunctions.supportOneByOneStreamRead(this::streamRead);
 		connectorFunctions.supportTimestampToStreamOffset(this::streamOffset);
 		connectorFunctions.supportErrorHandleFunction(this::errorHandle);
 
@@ -1619,22 +1619,22 @@ public class MongodbConnector extends ConnectorBase {
 	 * @param connectorContext //     * @param offset
 	 *                         //     * @param consumer
 	 */
-	protected void streamRead(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
+	protected void streamRead(TapConnectorContext connectorContext, List<String> tableList, Object offset, StreamReadOneByOneConsumer consumer) {
 		int size = tableList.size();
 		MongoCdcOffset mongoCdcOffset = MongoCdcOffset.fromOffset(offset);
-		streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), eventBatchSize, consumer);
+		streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), consumer);
 		if (size == tableList.size() || !tableList.isEmpty()) {
 			if (mongodbStreamReader == null) {
 				mongodbStreamReader = createStreamReader();
 			}
 			mongodbStreamReader.onStart(mongoConfig);
-			doStreamRead(mongodbStreamReader, connectorContext, tableList, mongoCdcOffset.getCdcOffset(), eventBatchSize, consumer);
+			doStreamRead(mongodbStreamReader, connectorContext, tableList, mongoCdcOffset.getCdcOffset(), consumer);
 		}
 	}
 
-	protected void doStreamRead(MongodbStreamReader streamReader, TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
+	protected void doStreamRead(MongodbStreamReader streamReader, TapConnectorContext connectorContext, List<String> tableList, Object offset, StreamReadOneByOneConsumer consumer) {
 		try {
-			streamReader.read(connectorContext, tableList, offset, eventBatchSize, consumer);
+			streamReader.read(connectorContext, tableList, offset, consumer);
 		} catch (Exception e) {
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectWritePrivileges(e);
@@ -1648,7 +1648,7 @@ public class MongodbConnector extends ConnectorBase {
 		}
 	}
 
-	protected void streamReadOpLog(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
+	protected void streamReadOpLog(TapConnectorContext connectorContext, List<String> tableList, Object offset, StreamReadOneByOneConsumer consumer) {
 		String database = mongoConfig.getDatabase();
 		if (StreamWithOpLogCollection.OP_LOG_DB.equals(database) && tableList.contains(StreamWithOpLogCollection.OP_LOG_COLLECTION)) {
 			connectorContext.getLog().info("Start read oplog collection, db: local");
@@ -1658,7 +1658,7 @@ public class MongodbConnector extends ConnectorBase {
 				opLogStreamReader.onStart(mongoConfig);
 			}
 			if (tableList.isEmpty()) {
-				doStreamRead(opLogStreamReader, connectorContext, list(StreamWithOpLogCollection.OP_LOG_COLLECTION), offset, eventBatchSize, consumer);
+				doStreamRead(opLogStreamReader, connectorContext, list(StreamWithOpLogCollection.OP_LOG_COLLECTION), offset, consumer);
 			} else {
 				if (null == sourceRunner) {
 					sourceRunner = new ThreadPoolExecutor(
@@ -1672,7 +1672,7 @@ public class MongodbConnector extends ConnectorBase {
 					//Don't waste core thread when idle.
 					sourceRunner.allowCoreThreadTimeOut(true);
 				}
-				sourceRunnerFuture = sourceRunner.submit(() -> doStreamRead(opLogStreamReader, connectorContext, list(StreamWithOpLogCollection.OP_LOG_COLLECTION), offset, eventBatchSize, consumer));
+				sourceRunnerFuture = sourceRunner.submit(() -> doStreamRead(opLogStreamReader, connectorContext, list(StreamWithOpLogCollection.OP_LOG_COLLECTION), offset, consumer));
 			}
 		}
 	}

@@ -9,7 +9,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -22,7 +22,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -45,7 +44,7 @@ class TapEventManagerTest {
     AnalyseTapEventFromDDLObject ddlEventParser;
     ProcessHandler handler;
     AtomicReference<Throwable> throwableCollector;
-    StreamReadConsumer consumer;
+    StreamReadOneByOneConsumer consumer;
     KVReadOnlyMap<TapTable> tableMap;
     @BeforeEach
     void setUp() {
@@ -54,7 +53,7 @@ class TapEventManagerTest {
         ddlEventParser = mock(AnalyseTapEventFromDDLObject.class);
         handler = mock(ProcessHandler.class);
         throwableCollector = new AtomicReference<>();
-        consumer = mock(StreamReadConsumer.class);
+        consumer = mock(StreamReadOneByOneConsumer.class);
         tableMap = mock(KVReadOnlyMap.class);
         log = mock(Log.class);
         manager = mock(TapEventManager.class);
@@ -188,7 +187,7 @@ class TapEventManagerTest {
             dmlObject.setTable("table");
             dmlObject.setTableVersion(1L);
             doNothing().when(log).debug(anyString(), anyString(), anyLong(), anyLong(), anyString());
-            doNothing().when(consumer).accept(anyList(), anyMap());
+            doNothing().when(consumer).accept(any(), anyMap());
             doCallRealMethod().when(manager).handleDML(dmlObject);
         }
         @Test
@@ -202,7 +201,7 @@ class TapEventManagerTest {
                 Assertions.assertDoesNotThrow(() -> manager.handleDML(dmlObject));
                 verify(log, times(0)).debug(anyString(), anyString(), anyLong(), anyLong(), anyString());
                 verify(dmlEventParser, times(1)).analyse(dmlObject, null, log);
-                verify(consumer, times(0)).accept(anyList(), anyMap());
+                verify(consumer, times(0)).accept(any(), anyMap());
             }
         }
         @Test
@@ -218,7 +217,7 @@ class TapEventManagerTest {
                 Assertions.assertDoesNotThrow(() -> manager.handleDML(dmlObject));
                 verify(log, times(0)).debug(anyString(), anyString(), anyLong(), anyLong(), anyString());
                 verify(dmlEventParser, times(1)).analyse(dmlObject, null, log);
-                verify(consumer, times(1)).accept(anyList(), anyMap());
+                verify(consumer, times(1)).accept(any(), anyMap());
             }
         }
         @Test
@@ -231,7 +230,7 @@ class TapEventManagerTest {
                 Assertions.assertDoesNotThrow(() -> manager.handleDML(dmlObject));
                 verify(log, times(1)).warn(anyString(), anyString(), anyLong(), anyLong(), anyString());
                 verify(dmlEventParser, times(0)).analyse(dmlObject, null, log);
-                verify(consumer, times(0)).accept(anyList(), anyMap());
+                verify(consumer, times(0)).accept(any(), anyMap());
             }
         }
         @Test
@@ -244,7 +243,7 @@ class TapEventManagerTest {
                 Assertions.assertDoesNotThrow(() -> manager.handleDML(dmlObject));
                 verify(log, times(0)).debug(anyString(), anyString(), anyLong(), anyLong(), anyString());
                 verify(dmlEventParser, times(1)).analyse(dmlObject, null, log);
-                verify(consumer, times(0)).accept(anyList(), anyMap());
+                verify(consumer, times(0)).accept(any(), anyMap());
             }
         }
     }

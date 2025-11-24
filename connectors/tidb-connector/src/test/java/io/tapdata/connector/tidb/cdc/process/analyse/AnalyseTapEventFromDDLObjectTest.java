@@ -11,7 +11,7 @@ import io.tapdata.entity.event.ddl.table.TapRenameTableEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -33,16 +33,16 @@ import static org.mockito.Mockito.mockStatic;
 class AnalyseTapEventFromDDLObjectTest {
     AnalyseTapEventFromDDLObject analyseTapEventFromDDLObject;
     KVReadOnlyMap<TapTable> tapTableMap;
-    StreamReadConsumer consumer;
+    StreamReadOneByOneConsumer consumer;
     Map<String, Map<String, Long>> offset;
 
     @BeforeEach
     void init() {
         tapTableMap = mock(KVReadOnlyMap.class);
-        consumer = mock(StreamReadConsumer.class);
+        consumer = mock(StreamReadOneByOneConsumer.class);
         offset = mock(Map.class);
         analyseTapEventFromDDLObject = new AnalyseTapEventFromDDLObject(tapTableMap).withConsumer(consumer, offset);
-        doNothing().when(consumer).accept(anyList(), anyMap());
+        doNothing().when(consumer).accept(any(), anyMap());
     }
 
     @Nested
