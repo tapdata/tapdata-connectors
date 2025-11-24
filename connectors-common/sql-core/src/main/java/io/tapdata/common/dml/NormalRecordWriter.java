@@ -163,6 +163,7 @@ public class NormalRecordWriter {
                 connection.rollback();
             } catch (Exception ignore) {
             }
+            tapLogger.trace("writeRecord failed, error message: {},tableId: {}", e.getMessage(), tapTable.getId());
             exceptionCollector.collectViolateUnique(toJson(tapTable.primaryKeys(true)), null, null, e);
             if (tapRecordEvents.size() == 1) {
                 errorHandler(e, tapRecordEvents.get(0));

@@ -1,6 +1,7 @@
 package io.tapdata.common.dml;
 
 import io.netty.buffer.ByteBuf;
+import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
@@ -56,6 +57,7 @@ public abstract class NormalWriteRecorder {
     protected Map<String, PreparedStatement> preparedStatementMap = new HashMap<>();
     protected PreparedStatement preparedStatement = null;
     protected List<String> largeSqlValues;
+    protected LinkedHashMap<String, String> largeSqlValuesMap;
     protected boolean largeSql = false;
 
     protected final AtomicLong atomicLong = new AtomicLong(0); //record counter
@@ -63,6 +65,7 @@ public abstract class NormalWriteRecorder {
     protected int batchCacheSize = 0;
     protected Log tapLogger;
     protected List<String> autoIncFields;
+    protected DMLType dmlType;
 
     public void setAutoIncFields(List<String> autoIncFields) {
         this.autoIncFields = autoIncFields;
@@ -98,7 +101,12 @@ public abstract class NormalWriteRecorder {
         this.largeSql = largeSql;
         if (largeSql) {
             largeSqlValues = new ArrayList<>();
+            largeSqlValuesMap = new LinkedHashMap<>();
         }
+    }
+
+    public void setDmlType(DMLType dmlType) {
+        this.dmlType = dmlType;
     }
 
     public void setRemovedColumn(List<String> removedColumn) {
@@ -125,6 +133,7 @@ public abstract class NormalWriteRecorder {
             try (Statement statement = connection.createStatement()) {
                 statement.execute(getLargeInsertSql());
                 largeSqlValues.clear();
+                largeSqlValuesMap.clear();
                 batchCacheSize = 0;
             }
             atomicLong.addAndGet(succeed);
@@ -308,6 +317,12 @@ public abstract class NormalWriteRecorder {
 
     public String getUpsertSql(Map<String, Object> after) throws SQLException {
         throw new UnsupportedOperationException("upsert is not supported");
+    }
+    public String getUpsertSqlByAfter(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("upsert is not supported");
+    }
+    public String getInsertIgnoreSqlByAfter(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("insertIgnore is not supported");
     }
 
     public String getDeleteSql(Map<String, Object> before) throws SQLException {
