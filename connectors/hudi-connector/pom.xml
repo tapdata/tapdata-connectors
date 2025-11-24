@@ -463,6 +463,28 @@
             <url>http://repo.hortonworks.com/content/groups/public</url>
         </repository>
         <repository>
+            <id>nexus-releases</id>
+            <name>nexus-maven-release</name>
+            <url>https://nexus.tapdata.net/repository/maven-releases/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>nexus-snapshots</id>
+            <name>nexus-maven-snapshot</name>
+            <url>https://nexus.tapdata.net/repository/maven-snapshots/</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+        <repository>
             <id>tapdata-tapdata-maven</id>
             <name>maven</name>
             <url>https://tapdata-maven.pkg.coding.net/repository/tapdata/maven/</url>
@@ -477,29 +499,6 @@
             <id>central</id>
             <name>Maven Central</name>
             <url>https://repo1.maven.org/maven2/</url>
-        </repository>
-        <repository>
-            <id>nexus-releases</id>
-            <name>nexus-maven-release</name>
-            <url>https://nexus.tapdata.net/repository/maven-releases/</url>
-            <releases>
-                <enabled>true</enabled>
-            </releases>
-            <snapshots>
-                <enabled>false</enabled>
-            </snapshots>
-        </repository>
-
-        <repository>
-            <id>nexus-snapshots</id>
-            <name>nexus-maven-snapshot</name>
-            <url>https://nexus.tapdata.net/repository/maven-snapshots/</url>
-            <releases>
-                <enabled>false</enabled>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
         </repository>
     </repositories>
 </project>
