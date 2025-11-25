@@ -129,6 +129,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 							readFromOplog(connectorContext, replicaSetName, intervalReport, mongodbURI, consumer);
 						} catch (Exception e) {
 							running.compareAndSet(true, false);
+							this.notifyAll();
 							TapLogger.error(TAG, "read oplog event from {} failed {}", replicaSetName, e.getMessage(), e);
 							error = e;
 						}
@@ -138,7 +139,11 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 		}
 
 		while (running.get()) {
-			//
+			try {
+				this.wait(500L);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
 		}
 
 		if (error != null) {
@@ -175,6 +180,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 	@Override
 	public void onDestroy() {
 		running.compareAndSet(true, false);
+		this.notifyAll();
 		if (mongoClient != null) {
 			mongoClient.close();
 		}
@@ -226,6 +232,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 				}
 			} catch (MongoInterruptedException e) {
 				running.compareAndSet(true, false);
+				this.notifyAll();
 				return;
 			}
 
@@ -261,6 +268,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 								);
 								if (!accept(tapEventOffset, consumer)) {
 									running.compareAndSet(true, false);
+									this.notifyAll();
 									break;
 								}
 							}
@@ -269,6 +277,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					}
 				} catch (InterruptedException | MongoInterruptedException e) {
 					running.compareAndSet(true, false);
+					this.notifyAll();
 				}
 			}
 		}
