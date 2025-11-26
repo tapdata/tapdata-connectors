@@ -849,7 +849,8 @@
       "byte": 255,
       "to": "TapString",
       "defaultByte": 1,
-      "fixed": true
+      "fixed": true,
+      "pkEnablement": false
     },
     "varchar[($byte)]": {
       "byte": "65533",
