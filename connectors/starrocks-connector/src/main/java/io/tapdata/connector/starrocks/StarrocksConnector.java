@@ -5,7 +5,6 @@ import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.starrocks.bean.StarrocksConfig;
 import io.tapdata.connector.starrocks.ddl.StarrocksDDLSqlGenerator;
-import io.tapdata.connector.starrocks.streamload.HttpUtil;
 import io.tapdata.connector.starrocks.streamload.StarrocksStreamLoader;
 import io.tapdata.connector.starrocks.streamload.StarrocksTableType;
 import io.tapdata.connector.starrocks.streamload.exception.StarrocksRetryableException;
@@ -31,7 +30,6 @@ import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
-import org.apache.http.impl.client.CloseableHttpClient;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -54,7 +52,7 @@ public class StarrocksConnector extends CommonDbConnector {
 
     private StarrocksJdbcContext starrocksJdbcContext;
     private StarrocksConfig starrocksConfig;
-    private final Map<String, StarrocksStreamLoader> StarrocksStreamLoaderMap = new ConcurrentHashMap<>();
+    private final Map<String, StarrocksStreamLoader> starrocksStreamLoaderMap = new ConcurrentHashMap<>();
 
 
     @Override
@@ -178,18 +176,12 @@ public class StarrocksConnector extends CommonDbConnector {
 
     public StarrocksStreamLoader getStarrocksStreamLoader() {
         String threadName = Thread.currentThread().getName();
-        if (!StarrocksStreamLoaderMap.containsKey(threadName)) {
+        if (!starrocksStreamLoaderMap.containsKey(threadName)) {
             StarrocksJdbcContext context = new StarrocksJdbcContext(starrocksConfig);
-            CloseableHttpClient httpClient;
-            if (Boolean.TRUE.equals(starrocksConfig.getUseHTTPS())) {
-                httpClient = HttpUtil.generationHttpClient();
-            } else {
-                httpClient = new HttpUtil().getHttpClient();
-            }
-            StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, httpClient);
-            StarrocksStreamLoaderMap.put(threadName, StarrocksStreamLoader);
+            StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, new HashMap<>(), starrocksConfig.getUseHTTPS(), tapLogger);
+            starrocksStreamLoaderMap.put(threadName, StarrocksStreamLoader);
         }
-        return StarrocksStreamLoaderMap.get(threadName);
+        return starrocksStreamLoaderMap.get(threadName);
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
@@ -200,10 +192,6 @@ public class StarrocksConnector extends CommonDbConnector {
                 // TODO: 2023/4/28 jdbc writeRecord
             }
         } catch (Throwable t) {
-            StarrocksStreamLoaderMap.computeIfPresent(Thread.currentThread().getName(), (key, value) -> {
-                value.shutdown();
-                return null;
-            });
             exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
             throw t;
         }
@@ -345,7 +333,7 @@ public class StarrocksConnector extends CommonDbConnector {
     @Override
     public void onStop(TapConnectionContext connectionContext) {
         ErrorKit.ignoreAnyError(() -> {
-            for (StarrocksStreamLoader StarrocksStreamLoader : StarrocksStreamLoaderMap.values()) {
+            for (StarrocksStreamLoader StarrocksStreamLoader : starrocksStreamLoaderMap.values()) {
                 if (EmptyKit.isNotNull(StarrocksStreamLoader)) {
                     // 在停止前先刷新剩余数据
                     try {

@@ -160,7 +160,7 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
             String constraintStr = "duplicate key error " + targetFieldName;
             if (null != data && data instanceof List) {
                 int index = ((MongoBulkWriteException) cause).getWriteErrors().get(0).getIndex();
-                List<TapRecordEvent> dataList = (List<TapRecordEvent>) data;
+                List<?> dataList = (List<?>) data;
                 if (index > dataList.size()) {
                     index = dataList.size() - 1;
                 }
