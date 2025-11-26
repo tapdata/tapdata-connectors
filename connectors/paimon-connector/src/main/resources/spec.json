@@ -233,7 +233,7 @@
     "en_US": {
       "doc": "docs/paimon_en_US.md",
       "warehouse": "Warehouse Path",
-      "warehouse_placeholder": "e.g., /path/to/warehouse or s3://bucket/warehouse",
+      "warehouse_placeholder": "e.g., /path/to/warehouse or s3://bucket/warehouse or s3a://bucket/warehouse",
       "storageType": "Storage Type",
       "s3Endpoint": "S3 Endpoint",
       "s3Endpoint_placeholder": "e.g., https://s3.amazonaws.com",
@@ -260,7 +260,7 @@
     "zh_CN": {
       "doc": "docs/paimon_zh_CN.md",
       "warehouse": "仓库路径",
-      "warehouse_placeholder": "例如：/path/to/warehouse 或 s3://bucket/warehouse",
+      "warehouse_placeholder": "例如：/path/to/warehouse 或 s3://bucket/warehouse 或 s3a://bucket/warehouse",
       "storageType": "存储类型",
       "s3Endpoint": "S3 端点",
       "s3Endpoint_placeholder": "例如：https://s3.amazonaws.com",
@@ -287,7 +287,7 @@
     "zh_TW": {
       "doc": "docs/paimon_zh_TW.md",
       "warehouse": "倉庫路徑",
-      "warehouse_placeholder": "例如：/path/to/warehouse 或 s3://bucket/warehouse",
+      "warehouse_placeholder": "例如：/path/to/warehouse 或 s3://bucket/warehouse 或 s3a://bucket/warehouse",
       "storageType": "存儲類型",
       "s3Endpoint": "S3 端點",
       "s3Endpoint_placeholder": "例如：https://s3.amazonaws.com",

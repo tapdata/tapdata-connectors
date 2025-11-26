@@ -101,7 +101,6 @@ public class PaimonConnector extends ConnectorBase {
             onStart(connectionContext);
             
             // Test warehouse accessibility
-            
             boolean warehouseAccessible = paimonService.testWarehouseAccess();
             if (warehouseAccessible) {
                 consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_SUCCESSFULLY, 
