@@ -15,6 +15,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.options.Options;
@@ -32,6 +33,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
 import java.io.Closeable;
+import java.math.BigDecimal;
 import java.util.*;
 
 /**
@@ -982,6 +984,40 @@ public class PaimonService implements Closeable {
         if (typeString.contains("DOUBLE")) {
             if (value instanceof Number) {
                 return ((Number) value).doubleValue();
+            }
+        }
+
+        // Handle DECIMAL type
+        if (typeString.contains("DECIMAL")) {
+            if (value instanceof BigDecimal) {
+                java.math.BigDecimal bigDecimal = (BigDecimal) value;
+                // Extract precision and scale from the type string
+                // Format: DECIMAL(precision, scale)
+                int precision = 38; // default precision
+                int scale = 10; // default scale
+
+                try {
+                    int startIdx = typeString.indexOf("(");
+                    int commaIdx = typeString.indexOf(",");
+                    int endIdx = typeString.indexOf(")");
+
+                    if (startIdx > 0 && commaIdx > 0 && endIdx > 0) {
+                        precision = Integer.parseInt(typeString.substring(startIdx + 1, commaIdx).trim());
+                        scale = Integer.parseInt(typeString.substring(commaIdx + 1, endIdx).trim());
+                    }
+                } catch (Exception e) {
+                    // Use default values if parsing fails
+                }
+
+                return Decimal.fromBigDecimal(bigDecimal, precision, scale);
+            } else if (value instanceof Number) {
+                // Convert other numeric types to BigDecimal first
+                BigDecimal bigDecimal = new BigDecimal(value.toString());
+                return Decimal.fromBigDecimal(bigDecimal, 38, 10);
+            } else if (value instanceof String) {
+                // Convert string to BigDecimal
+                BigDecimal bigDecimal = new BigDecimal((String) value);
+                return Decimal.fromBigDecimal(bigDecimal, 38, 10);
             }
         }
 
