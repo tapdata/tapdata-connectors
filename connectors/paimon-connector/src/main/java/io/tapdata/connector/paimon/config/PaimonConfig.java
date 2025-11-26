@@ -191,7 +191,30 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     }
 
     /**
+     * Check if Paimon S3 FileIO is available on the classpath
+     *
+     * @return true if paimon-s3 is available, false otherwise
+     */
+    private static boolean isPaimonS3Available() {
+        try {
+            Class.forName("org.apache.paimon.s3.S3FileIO");
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
+
+    /**
      * Get the full warehouse path based on storage type
+     *
+     * Normalization rules:
+     * - If a scheme is already present (e.g. s3a://, s3://, hdfs://), respect user's choice:
+     *   - For s3://, check if paimon-s3 is available; if not, fall back to s3a://
+     *   - For other schemes, keep as-is
+     * - If no scheme and storage type is S3:
+     *   - Prefer s3:// if paimon-s3 is available
+     *   - Otherwise use s3a:// (Hadoop S3A)
+     * - If storage type is not S3 and no scheme present, apply the corresponding default
      *
      * @return full warehouse path
      */
@@ -199,23 +222,43 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         if (warehouse == null || warehouse.trim().isEmpty()) {
             throw new IllegalArgumentException("Warehouse path cannot be empty");
         }
-        
-        // If warehouse already contains protocol, return as is
-        if (warehouse.contains("://")) {
-            return warehouse;
+
+        String w = warehouse.trim();
+        String st = storageType == null ? "" : storageType.trim().toLowerCase();
+
+        // Normalize explicit scheme when present
+        int schemeIdx = w.indexOf("://");
+        if (schemeIdx > 0) {
+            // If user explicitly provided s3://, check if paimon-s3 is available
+            if (w.startsWith("s3://")) {
+                if (isPaimonS3Available()) {
+                    // paimon-s3 is available, use native s3:// support
+                    return w;
+                } else {
+                    // Fall back to Hadoop S3A
+                    return "s3a://" + w.substring("s3://".length());
+                }
+            }
+            // For other schemes (s3a://, s3n://, hdfs://, oss://, file://), keep as-is
+            return w;
         }
-        
+
         // Add protocol based on storage type
-        switch (storageType.toLowerCase()) {
+        switch (st) {
             case "s3":
-                return "s3://" + warehouse;
+                // Prefer native s3:// if paimon-s3 is available, otherwise use Hadoop S3A
+                if (isPaimonS3Available()) {
+                    return "s3://" + w;
+                } else {
+                    return "s3a://" + w;
+                }
             case "hdfs":
-                return "hdfs://" + hdfsHost + ":" + hdfsPort + warehouse;
+                return "hdfs://" + hdfsHost + ":" + hdfsPort + w;
             case "oss":
-                return "oss://" + warehouse;
+                return "oss://" + w;
             case "local":
             default:
-                return "file://" + warehouse;
+                return "file://" + w;
         }
     }
 

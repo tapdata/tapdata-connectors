@@ -147,6 +147,13 @@ public class PaimonService implements Closeable {
             conf.setBoolean("fs.s3a.path.style.access", true);
             // Use simple static credentials to avoid picking up instance profiles accidentally
             conf.set("fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider");
+            // Do NOT force-map s3 scheme to S3A here. Paimon S3 plugin shades Hadoop classes
+            // and handles scheme registration internally. Forcing mappings can cause
+            // NoClassDefFoundError due to classloader/version conflicts.
+            // Ensure S3A filesystem is used when scheme is s3a
+            conf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+            conf.set("fs.AbstractFileSystem.s3a.impl", "org.apache.hadoop.fs.s3a.S3A");
+
         }
         return conf;
     }
