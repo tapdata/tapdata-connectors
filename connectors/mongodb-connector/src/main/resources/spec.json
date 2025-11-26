@@ -337,7 +337,6 @@
 					"x-decorator-props": {
 						"layout": "horizontal"
 					},
-					"default": true,
 					"x-reactions": [
 						{
 							"dependencies": [
@@ -345,7 +344,8 @@
 							],
 							"fulfill": {
 								"state": {
-									"visible": "{{!$deps[0].length}}"
+									"visible": "{{!$deps[0].length}}",
+									"value": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 ? false: true}}"
 								}
 							}
 						},
