@@ -19,7 +19,7 @@ import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.Capability;
@@ -143,7 +143,7 @@ public class KafkaConnector extends ConnectorBase {
         connectorFunctions.supportConnectionCheckFunction(this::checkConnection);
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportBatchRead(this::batchRead);
-        connectorFunctions.supportStreamRead(this::streamRead);
+        connectorFunctions.supportOneByOneStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
 
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
@@ -310,9 +310,9 @@ public class KafkaConnector extends ConnectorBase {
         }
     }
 
-    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
+    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, StreamReadOneByOneConsumer consumer) {
         try {
-            kafkaService.streamConsume(tableList, offsetState, recordSize, consumer);
+            kafkaService.streamConsume(tableList, offsetState, consumer);
         } catch (Throwable e) {
             kafkaExceptionCollector.collectTerminateByServer(e);
             kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), e);

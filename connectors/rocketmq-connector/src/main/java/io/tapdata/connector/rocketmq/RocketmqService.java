@@ -33,6 +33,7 @@ import org.apache.rocketmq.common.message.MessageExt;
 import org.apache.rocketmq.common.message.MessageQueue;
 import org.apache.rocketmq.remoting.RPCHook;
 import org.apache.rocketmq.tools.admin.DefaultMQAdminExt;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -357,7 +358,7 @@ public class RocketmqService extends AbstractMqService {
                     break;
                 }
                 for (MessageExt message : messageList) {
-                    makeMessage(message, list, tableName);
+                    Optional.ofNullable(makeMessage(message, tableName)).ifPresent(list::add);
                     if (list.size() >= eventBatchSize) {
                         eventsOffsetConsumer.accept(list, TapSimplify.list());
                         list = TapSimplify.list();
@@ -372,29 +373,26 @@ public class RocketmqService extends AbstractMqService {
         }
     }
 
-    private void makeMessage(MessageExt message, List<TapEvent> list, String tableName) {
+    private TapRecordEvent makeMessage(MessageExt message, String tableName) {
         Map<String, Object> data = jsonParser.fromJsonBytes(message.getBody(), Map.class);
         switch (MqOp.fromValue(message.getUserProperty("mqOp"))) {
             case INSERT:
-                list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
-                break;
+                return new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis());
             case UPDATE:
-                list.add(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
-                break;
+                return new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis());
             case DELETE:
-                list.add(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()));
-                break;
+                return new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis());
         }
+        return null;
     }
 
     @Override
-    public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+    public void streamConsume(List<String> tableList, StreamReadOneByOneConsumer eventsOffsetConsumer) {
         consuming.set(true);
         List<List<String>> tablesList = Lists.partition(tableList, (tableList.size() - 1) / concurrency + 1);
         executorService = Executors.newFixedThreadPool(tablesList.size());
         CountDownLatch countDownLatch = new CountDownLatch(tablesList.size());
         tablesList.forEach(tables -> executorService.submit(() -> {
-            List<TapEvent> list = TapSimplify.list();
             Map<String, DefaultLitePullConsumer> consumerMap = new HashMap<>();
             int err = 0;
             while (consuming.get() && err < 10) {
@@ -422,11 +420,8 @@ public class RocketmqService extends AbstractMqService {
                             continue;
                         }
                         for (MessageExt message : messageList) {
-                            makeMessage(message, list, tableName);
-                            if (list.size() >= eventBatchSize) {
-                                eventsOffsetConsumer.accept(list, TapSimplify.list());
-                                list = TapSimplify.list();
-                            }
+                            TapRecordEvent e = makeMessage(message, tableName);
+                            eventsOffsetConsumer.accept(e, TapSimplify.list());
                         }
                     } catch (Exception e) {
                         TapLogger.error(TAG, "error occur when consume queue: {}", tableName, e);
@@ -434,9 +429,6 @@ public class RocketmqService extends AbstractMqService {
                     }
                 }
                 TapSimplify.sleep(50);
-            }
-            if (EmptyKit.isNotEmpty(list)) {
-                eventsOffsetConsumer.accept(list, TapSimplify.list());
             }
             consumerMap.forEach((key, value) -> {
                 try {

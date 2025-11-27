@@ -47,6 +47,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.header.internals.RecordHeaders;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 
 import javax.script.Invocable;
 import javax.script.ScriptEngine;
@@ -641,13 +642,13 @@ public class KafkaService extends AbstractMqService {
                             for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
                                 makeMessage(consumerRecord, tableName, list::add);
                                 if (list.size() >= eventBatchSize) {
-                                    syncEventSubmit(list, eventsOffsetConsumer);
+                                    eventsOffsetConsumer.accept(list, TapSimplify.list());
                                     list = TapSimplify.list();
                                 }
                             }
                         }
                         if (EmptyKit.isNotEmpty(list)) {
-                            syncEventSubmit(list, eventsOffsetConsumer);
+                            eventsOffsetConsumer.accept(list, TapSimplify.list());
                         }
                     } catch (Exception e) {
                         throwable.set(e);
@@ -669,37 +670,27 @@ public class KafkaService extends AbstractMqService {
         }
     }
 
-    private synchronized void syncEventSubmit(List<TapEvent> eventList, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
-        eventsOffsetConsumer.accept(eventList, TapSimplify.list());
-    }
-
     @Override
-    public void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+    public void streamConsume(List<String> tableList, Object offset, StreamReadOneByOneConsumer eventsOffsetConsumer) {
         consuming.set(true);
         int maxDelay = 500;
         KafkaConfig kafkaConfig = (KafkaConfig) mqConfig;
         ConsumerConfiguration consumerConfiguration = new ConsumerConfiguration((kafkaConfig), connectorId, true);
         try (KafkaConsumer<byte[], byte[]> kafkaConsumer = new KafkaConsumer<>(consumerConfiguration.build())) {
             KafkaOffset streamOffset = KafkaOffsetUtils.setConsumerByOffset(kafkaConsumer, tableList, offset, consuming);
-            try (BatchPusher<TapEvent> batchPusher = new BatchPusher<TapEvent>(
-                    tapEvents -> eventsOffsetConsumer.accept(tapEvents, streamOffset.clone())
-            ).batchSize(eventBatchSize).maxDelay(maxDelay)) {
-                // 将初始化的 offset 推送到目标，让指定时间的增量任务下次启动时拿到 offset
-                Optional.of(new HeartbeatEvent()).ifPresent(event -> {
-                    event.setTime(System.currentTimeMillis());
-                    batchPusher.add(event);
-                });
+            // 将初始化的 offset 推送到目标，让指定时间的增量任务下次启动时拿到 offset
+            Optional.of(new HeartbeatEvent()).ifPresent(event -> {
+                event.setTime(System.currentTimeMillis());
+                eventsOffsetConsumer.accept(event, streamOffset.clone());
+            });
 
-                // 消费数据
-                while (consuming.get()) {
-                    ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
-                    if (consumerRecords.isEmpty()) {
-                        batchPusher.checkAndSummit();
-                    } else {
-                        for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
-                            streamOffset.addTopicOffset(consumerRecord); // 推进 offset
-                            makeMessage(consumerRecord, consumerRecord.topic(), batchPusher::add);
-                        }
+            // 消费数据
+            while (consuming.get()) {
+                ConsumerRecords<byte[], byte[]> consumerRecords = kafkaConsumer.poll(Duration.ofSeconds(2L));
+                if (!consumerRecords.isEmpty()) {
+                    for (ConsumerRecord<byte[], byte[]> consumerRecord : consumerRecords) {
+                        streamOffset.addTopicOffset(consumerRecord); // 推进 offset
+                        makeMessage(consumerRecord, consumerRecord.topic(), e -> eventsOffsetConsumer.accept(e, streamOffset.clone()));
                     }
                 }
             }

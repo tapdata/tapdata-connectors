@@ -4,7 +4,17 @@
     "icon": "icons/mysql.png",
     "id": "mysql",
     "doc": "${doc}",
-    "tags": ["Database", "ssl", "doubleActive", "disableForeignKey"]
+    "tags": ["Database", "ssl", "doubleActive", "disableForeignKey"],
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "capabilities": [

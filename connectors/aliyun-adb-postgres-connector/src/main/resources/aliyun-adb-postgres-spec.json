@@ -4,7 +4,17 @@
     "icon": "icons/aliyun_adb_postgres.png",
     "doc" : "${doc}",
     "id": "aliyun-adb-postgres",
-    "tags": ["Database"]
+    "tags": ["Database"],
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "capabilities":[

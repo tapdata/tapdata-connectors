@@ -4,7 +4,17 @@
     "icon": "icons/highgo.svg",
     "doc" : "${doc}",
     "id": "highgo",
-    "tags": ["Database", "ssl", "doubleActive"]
+    "tags": ["Database", "ssl", "doubleActive"],
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "capabilities":[

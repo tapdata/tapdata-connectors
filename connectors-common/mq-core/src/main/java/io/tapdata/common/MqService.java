@@ -8,6 +8,7 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.connection.ConnectionCheckItem;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -43,11 +44,11 @@ public interface MqService extends AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
-    default void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+    default void streamConsume(List<String> tableList, StreamReadOneByOneConsumer eventsOffsetConsumer) throws Throwable {
         throw new UnsupportedOperationException();
     }
 
-    default void streamConsume(List<String> tableList, Object offset, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+    default void streamConsume(List<String> tableList, Object offset, StreamReadOneByOneConsumer eventsOffsetConsumer) {
         throw new UnsupportedOperationException();
     }
 }

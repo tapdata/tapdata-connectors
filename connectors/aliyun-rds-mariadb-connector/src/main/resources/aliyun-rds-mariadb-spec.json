@@ -4,7 +4,17 @@
     "icon": "icons/aliyun_rds_mariadb.png",
     "id": "aliyun-rds-mariadb",
     "doc": "${doc}",
-    "tags": ["Database"]
+    "tags": ["Database"],
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "capabilities": [

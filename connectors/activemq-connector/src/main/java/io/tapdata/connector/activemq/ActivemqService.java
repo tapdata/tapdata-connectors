@@ -23,6 +23,7 @@ import org.apache.activemq.ActiveMQConnection;
 import org.apache.activemq.ActiveMQConnectionFactory;
 import org.apache.activemq.command.ActiveMQQueue;
 import org.apache.activemq.command.ActiveMQTextMessage;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 
 import javax.jms.Queue;
 import javax.jms.*;
@@ -221,7 +222,7 @@ public class ActivemqService extends AbstractMqService {
             if (EmptyKit.isNull(message)) {
                 break;
             }
-            makeMessage(message, list, tableName);
+            Optional.ofNullable(makeMessage(message, tableName)).ifPresent(list::add);
             if (list.size() >= eventBatchSize) {
                 eventsOffsetConsumer.accept(list, TapSimplify.list());
                 list = TapSimplify.list();
@@ -234,18 +235,17 @@ public class ActivemqService extends AbstractMqService {
     }
 
     @Override
-    public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+    public void streamConsume(List<String> tableList, StreamReadOneByOneConsumer eventsOffsetConsumer) throws Throwable {
         consuming.set(true);
         Session session = activemqConnection.createSession(false, Session.AUTO_ACKNOWLEDGE);
         List<List<String>> tablesList = Lists.partition(tableList, (tableList.size() - 1) / concurrency + 1);
         executorService = Executors.newFixedThreadPool(tablesList.size());
         CountDownLatch countDownLatch = new CountDownLatch(tablesList.size());
         tablesList.forEach(tables -> executorService.submit(() -> {
-            List<TapEvent> list = TapSimplify.list();
             Map<String, MessageConsumer> consumerMap = new HashMap<>();
             int err = 0;
             while (consuming.get() && err < 10) {
-                for (String tableName : tables) {
+                for (final String tableName : tables) {
                     try {
                         MessageConsumer messageConsumer = consumerMap.get(tableName);
                         if (EmptyKit.isNull(messageConsumer)) {
@@ -257,20 +257,13 @@ public class ActivemqService extends AbstractMqService {
                         if (EmptyKit.isNull(message)) {
                             continue;
                         }
-                        makeMessage(message, list, tableName);
-                        if (list.size() >= eventBatchSize) {
-                            eventsOffsetConsumer.accept(list, TapSimplify.list());
-                            list = TapSimplify.list();
-                        }
+                        Optional.ofNullable(makeMessage(message, tableName)).ifPresent(e -> eventsOffsetConsumer.accept(e, TapSimplify.list()));
                     } catch (Exception e) {
                         TapLogger.error(TAG, "error occur when consume queue: {}", tableName, e);
                         err++;
                     }
                 }
                 TapSimplify.sleep(50);
-            }
-            if (EmptyKit.isNotEmpty(list)) {
-                eventsOffsetConsumer.accept(list, TapSimplify.list());
             }
             consumerMap.forEach((key, value) -> {
                 try {
@@ -293,19 +286,17 @@ public class ActivemqService extends AbstractMqService {
         session.close();
     }
 
-    private void makeMessage(Message message, List<TapEvent> list, String tableName) throws JMSException {
+    private TapRecordEvent makeMessage(Message message, String tableName) throws JMSException {
         TextMessage textMessage = (TextMessage) message;
         Map<String, Object> data = jsonParser.fromJson(textMessage.getText(), Map.class);
         switch (MqOp.fromValue(textMessage.getStringProperty("mqOp"))) {
             case INSERT:
-                list.add(new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
-                break;
+                return new TapInsertRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis());
             case UPDATE:
-                list.add(new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis()));
-                break;
+                return new TapUpdateRecordEvent().init().table(tableName).after(data).referenceTime(System.currentTimeMillis());
             case DELETE:
-                list.add(new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis()));
-                break;
+                return new TapDeleteRecordEvent().init().table(tableName).before(data).referenceTime(System.currentTimeMillis());
         }
+        return null;
     }
 }

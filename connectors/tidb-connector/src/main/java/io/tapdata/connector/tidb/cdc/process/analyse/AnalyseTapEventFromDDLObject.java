@@ -10,7 +10,7 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,14 +19,14 @@ import java.util.Map;
 public class AnalyseTapEventFromDDLObject implements AnalyseRecord<DDLObject, List<TapEvent>> {
     private final KVReadOnlyMap<TapTable> tapTableMap;
     private static final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("`");
-    StreamReadConsumer consumer;
+    StreamReadOneByOneConsumer consumer;
     Map<String, Map<String, Long>> offset;
 
     public AnalyseTapEventFromDDLObject(KVReadOnlyMap<TapTable> tapTableMap) {
         this.tapTableMap = tapTableMap;
     }
 
-    public AnalyseTapEventFromDDLObject withConsumer(StreamReadConsumer consumer, Map<String, Map<String, Long>> offset) {
+    public AnalyseTapEventFromDDLObject withConsumer(StreamReadOneByOneConsumer consumer, Map<String, Map<String, Long>> offset) {
         this.consumer = consumer;
         this.offset = offset;
         return this;
@@ -44,9 +44,7 @@ public class AnalyseTapEventFromDDLObject implements AnalyseRecord<DDLObject, Li
                     tapTableMap,
                     tapDDLEvent -> {
                         tapDDLEvent.setTime(System.currentTimeMillis());
-                        List<TapEvent> l = new ArrayList<>();
-                        l.add(tapDDLEvent);
-                        this.consumer.accept(l, offset);
+                        this.consumer.accept(tapDDLEvent, offset);
                         log.debug("Read DDL: {}, about to be packaged as some event(s)", ddlSql);
                     }
             );

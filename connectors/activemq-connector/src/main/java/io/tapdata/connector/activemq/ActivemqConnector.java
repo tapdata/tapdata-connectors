@@ -12,7 +12,7 @@ import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
@@ -61,7 +61,7 @@ public class ActivemqConnector extends ConnectorBase {
         connectorFunctions.supportConnectionCheckFunction(this::checkConnection);
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportBatchRead(this::batchRead);
-        connectorFunctions.supportStreamRead(this::streamRead);
+        connectorFunctions.supportOneByOneStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
     }
 
@@ -102,8 +102,8 @@ public class ActivemqConnector extends ConnectorBase {
         activemqService.consumeOne(tapTable, eventBatchSize, eventsOffsetConsumer);
     }
 
-    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        activemqService.streamConsume(tableList, recordSize, consumer);
+    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, StreamReadOneByOneConsumer consumer) throws Throwable {
+        activemqService.streamConsume(tableList, consumer);
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {

@@ -43,7 +43,7 @@ import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.kit.StringKit;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import org.apache.commons.collections4.CollectionUtils;
@@ -88,7 +88,7 @@ public class MysqlReader implements Closeable {
     private final Supplier<Boolean> isAlive;
     protected final MysqlJdbcContextV2 mysqlJdbcContext;
     private EmbeddedEngine embeddedEngine;
-    protected StreamReadConsumer streamReadConsumer;
+    protected StreamReadOneByOneConsumer streamReadConsumer;
     private LinkedBlockingQueue<MysqlStreamEvent> eventQueue;
     private ScheduledExecutorService mysqlSchemaHistoryMonitor;
     protected KVReadOnlyMap<TapTable> tapTableMap;
@@ -221,9 +221,8 @@ public class MysqlReader implements Closeable {
     }
 
     public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
-                           Object offset, int batchSize, DDLParserType ddlParserType, LinkedBlockingQueue<MysqlStreamEvent> eventQueue, Map<String, Object> extraConfig) throws Throwable {
+                           Object offset, DDLParserType ddlParserType, LinkedBlockingQueue<MysqlStreamEvent> eventQueue, Map<String, Object> extraConfig) throws Throwable {
         try {
-            batchSize = Math.max(batchSize, MIN_BATCH_SIZE);
             initDebeziumServerName(tapConnectorContext);
             this.tapTableMap = tapConnectorContext.getTableMap();
             this.ddlParserType = ddlParserType;
@@ -275,8 +274,8 @@ public class MysqlReader implements Closeable {
                     .with("database.history.store.only.monitored.tables.ddl", true)
                     .with("database.history.store.only.captured.tables.ddl", true)
                     .with(MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE, MySqlConnectorConfig.SnapshotLockingMode.NONE)
-                    .with("max.queue.size", batchSize * 8)
-                    .with("max.batch.size", batchSize)
+                    .with("max.queue.size", mysqlConfig.getMaximumQueueSize())
+                    .with("max.batch.size", mysqlConfig.getMaximumQueueSize() / 8)
                     .with(MySqlConnectorConfig.SERVER_ID, randomServerId())
                     .with("time.precision.mode", "adaptive_time_microseconds")
 //					.with("converters", "time")
@@ -369,7 +368,7 @@ public class MysqlReader implements Closeable {
     }
 
     public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
-                           Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) throws Throwable {
+                           Object offset, DDLParserType ddlParserType, StreamReadOneByOneConsumer consumer, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) throws Throwable {
         MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         try {
             initDebeziumServerName(tapConnectorContext);
@@ -513,7 +512,7 @@ public class MysqlReader implements Closeable {
                         }
                     })
                     .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
-                            numberOfMessagesSinceLastCommit >= batchSize || timeSinceLastCommit.getSeconds() >= 5)
+                            timeSinceLastCommit.getSeconds() >= 5)
                     .using((result, message, throwable) -> {
                         tapConnectorContext.configContext();
                         if (result) {
@@ -672,13 +671,11 @@ public class MysqlReader implements Closeable {
             }
         }
         if (CollectionUtils.isNotEmpty(mysqlStreamEvents)) {
-            List<TapEvent> tapEvents = new ArrayList<>();
             MysqlStreamOffset mysqlStreamOffset = null;
             for (MysqlStreamEvent mysqlStreamEvent : mysqlStreamEvents) {
-                tapEvents.add(mysqlStreamEvent.getTapEvent());
                 mysqlStreamOffset = mysqlStreamEvent.getMysqlStreamOffset();
+                streamReadConsumer.accept(mysqlStreamEvent.getTapEvent(), mysqlStreamOffset);
             }
-            streamReadConsumer.accept(tapEvents, mysqlStreamOffset);
         }
     }
 
@@ -688,27 +685,18 @@ public class MysqlReader implements Closeable {
         }
         if (null == record || null == record.value()) return;
         Schema valueSchema = record.valueSchema();
-        List<MysqlStreamEvent> mysqlStreamEvents = new ArrayList<>();
         if (null != valueSchema.field("op")) {
             MysqlStreamEvent mysqlStreamEvent = wrapDML(record);
-            Optional.ofNullable(mysqlStreamEvent).ifPresent(mysqlStreamEvents::add);
+            Optional.ofNullable(mysqlStreamEvent).ifPresent(e -> streamReadConsumer.accept(e.getTapEvent(), e.getMysqlStreamOffset()));
         } else if (null != valueSchema.field("ddl")) {
-            mysqlStreamEvents = wrapDDL(record);
+            List<MysqlStreamEvent> mysqlStreamEvents = wrapDDL(record);
+            mysqlStreamEvents.forEach(e -> streamReadConsumer.accept(e.getTapEvent(), e.getMysqlStreamOffset()));
         } else if ("io.debezium.connector.common.Heartbeat".equals(valueSchema.name())) {
             Optional.ofNullable((Struct) record.value())
                     .map(value -> value.getInt64("ts_ms"))
                     .map(TapSimplify::heartbeatEvent)
                     .map(heartbeatEvent -> new MysqlStreamEvent(heartbeatEvent, getMysqlStreamOffset(record)))
-                    .ifPresent(mysqlStreamEvents::add);
-        }
-        if (CollectionUtils.isNotEmpty(mysqlStreamEvents)) {
-            List<TapEvent> tapEvents = new ArrayList<>();
-            MysqlStreamOffset mysqlStreamOffset = null;
-            for (MysqlStreamEvent mysqlStreamEvent : mysqlStreamEvents) {
-                tapEvents.add(mysqlStreamEvent.getTapEvent());
-                mysqlStreamOffset = mysqlStreamEvent.getMysqlStreamOffset();
-            }
-            streamReadConsumer.accept(tapEvents, mysqlStreamOffset);
+                    .ifPresent(e -> streamReadConsumer.accept(e.getTapEvent(), e.getMysqlStreamOffset()));
         }
     }
 

@@ -17,7 +17,7 @@ import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 
 import java.math.BigDecimal;
 import java.sql.ResultSet;
@@ -35,8 +35,7 @@ public abstract class AbstractWalLogMiner {
 
     protected final PostgresJdbcContext postgresJdbcContext;
     protected final Log tapLogger;
-    protected StreamReadConsumer consumer;
-    protected int recordSize;
+    protected StreamReadOneByOneConsumer consumer;
     protected List<String> tableList;
     protected boolean filterSchema;
     private Map<String, String> dataTypeMap;
@@ -95,9 +94,8 @@ public abstract class AbstractWalLogMiner {
 
     public abstract void startMiner(Supplier<Boolean> isAlive) throws Throwable;
 
-    public AbstractWalLogMiner registerConsumer(StreamReadConsumer consumer, int recordSize) {
+    public AbstractWalLogMiner registerConsumer(StreamReadOneByOneConsumer consumer) {
         this.consumer = consumer;
-        this.recordSize = recordSize;
         return this;
     }
 
