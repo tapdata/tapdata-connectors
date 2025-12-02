@@ -1,7 +1,6 @@
 package io.tapdata.connector.clickhouse.dml;
 
 import io.tapdata.common.dml.NormalWriteRecorder;
-import io.tapdata.connector.clickhouse.config.ClickhouseConfig;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
@@ -44,7 +43,7 @@ public class ClickhouseWriteRecorder extends NormalWriteRecorder {
         }
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
-        Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
+        Map<String, Object> lastAfter = dataSaving ? DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition) : after;
         if (EmptyKit.isEmpty(lastAfter)) {
             return;
         }

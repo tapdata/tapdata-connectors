@@ -285,6 +285,9 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         }
         struct.schema().fields().forEach(field -> {
             Object obj = struct.getWithoutDefault(field.name());
+            if (isDebeziumUnavailableValue(obj)) {
+                return;
+            }
             if (obj instanceof ByteBuffer) {
                 obj = struct.getBytes(field.name());
             } else if (obj instanceof Struct) {
@@ -301,6 +304,34 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         return dataMap;
     }
 
+    private static final byte[] DEBEZIUM_UNAVAILABLE_BYTES = {
+            95, 95, 100, 101, 98, 101, 122, 105, 117, 109, 95, 117, 110, 97,
+            118, 97, 105, 108, 97, 98, 108, 101, 95, 118, 97, 108, 117, 101
+    };
+
+    private static final String DEBEZIUM_UNAVAILABLE_HEX = "5F5F646562657A69756D5F756E617661696C61626C655F76616C7565";
+
+    public static boolean isDebeziumUnavailableValue(Object obj) {
+        if (obj == null) {
+            return false;
+        }
+
+        if (obj instanceof byte[]) {
+            return Arrays.equals((byte[]) obj, DEBEZIUM_UNAVAILABLE_BYTES);
+        }
+
+        if (obj instanceof String) {
+            String str = (String) obj;
+            if ("__debezium_unavailable_value".equals(str)) {
+                return true;
+            }
+            if (DEBEZIUM_UNAVAILABLE_HEX.equalsIgnoreCase(str)) {
+                return true;
+            }
+        }
+
+        return "__debezium_unavailable_value".equals(obj.toString());
+    }
     /**
      * Append sub partition tables for master tables
      *
