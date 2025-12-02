@@ -248,6 +248,7 @@ public class ClickhouseConnector extends CommonDbConnector {
             sqlList = new ArrayList<>(sqlList);
         }
         sqlList.add("OPTIMIZE TABLE `" + clickhouseConfig.getDatabase() + "`.`" + tapFieldBaseEvent.getTableId() + "` FINAL");
+        tapLogger.info("Field ddl sqls: {}", sqlList);
         jdbcContext.batchExecute(sqlList);
     }
 
