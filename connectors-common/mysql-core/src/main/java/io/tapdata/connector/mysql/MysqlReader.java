@@ -502,6 +502,8 @@ public class MysqlReader implements Closeable {
                     .append("\n"));
             configStr.append("}");
             tapLogger.info(configStr.toString());
+            final int commitBatchSize = mysqlConfig.fixValue(mysqlConfig.getCdcAcceptBatch(), 100, 1000);
+            final int commitDelaySeconds = mysqlConfig.fixValue(mysqlConfig.getCdcAcceptDelaySeconds(), 1, 60);
             embeddedEngine = (EmbeddedEngine) new EmbeddedEngine.BuilderImpl()
                     .using(configuration)
                     .notifying(this::consumeRecords)
@@ -512,7 +514,7 @@ public class MysqlReader implements Closeable {
                         }
                     })
                     .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
-                            timeSinceLastCommit.getSeconds() >= 5)
+                            numberOfMessagesSinceLastCommit >= commitBatchSize || timeSinceLastCommit.getSeconds() >= commitDelaySeconds)
                     .using((result, message, throwable) -> {
                         tapConnectorContext.configContext();
                         if (result) {
