@@ -237,18 +237,31 @@ public class KafkaService implements IKafkaService {
                 // 并发消费数据
                 ConcurrentUtils.runWithQueue(getExecutorService(), exception, executorGroup, concurrentQueue, concurrentSize, stopping::get, concurrentItem -> {
                     int partition = concurrentItem.getKey();
-                    Long endOffset = endTopicOffsets.get(concurrentItem.getKey());
+                    Long endOffset = endTopicOffsets.get(partition);
                     if (null == endOffset) {
-                        logger.warn("not found end offset with topic partition {}-{}", topic, concurrentItem.getKey());
+                        logger.warn("not found end offset with topic partition {}-{}", topic, partition);
                         return;
                     } else {
-                        logger.info("end offset with topic partition {}-{}: start={}, end={}", topic, concurrentItem.getKey(), concurrentItem.getValue(), endOffset);
+                        logger.info("end offset with topic partition {}-{}: start={}, end={}", topic, partition, concurrentItem.getValue(), endOffset);
                     }
 
                     Properties properties = config.buildConsumerConfig(isEarliest);
                     properties.put(ConsumerConfig.GROUP_ID_CONFIG, String.format("%s-%s", executorGroup, index.incrementAndGet()));
                     try (KafkaConsumer<Object, Object> kafkaConsumer = new KafkaConsumer<>(properties)) {
-                        TopicPartition topicPartition = new TopicPartition(topic, concurrentItem.getKey());
+                        TopicPartition topicPartition = new TopicPartition(topic, partition);
+
+                        // 如果没有数据，则跳过
+                        KafkaOffset currEndOffset = KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, List.of(topicPartition), true);
+                        if (Optional.of(currEndOffset)
+                            .map(m -> m.get(topic))
+                            .map(o -> o.get(partition))
+                            .map(l -> endOffset <= l)
+                            .orElse(true)
+                        ) {
+                            logger.warn("not found any data with topic partition {}-{}, earliest offset {}", topic, partition, currEndOffset);
+                            return;
+                        }
+
                         kafkaConsumer.assign(Collections.singleton(topicPartition));
                         kafkaConsumer.seek(topicPartition, concurrentItem.getValue());
 
