@@ -396,7 +396,7 @@ public abstract class NormalWriteRecorder {
                 insertUpdate(after, lastBefore, listResult);
                 break;
             default:
-                Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition,autoIncFields);
+                Map<String, Object> lastAfter = DbKit.getAfterForUpdate(after, before, allColumn, uniqueCondition);
                 if (EmptyKit.isEmpty(lastAfter)) {
                     return;
                 }

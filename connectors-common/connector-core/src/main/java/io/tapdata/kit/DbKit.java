@@ -208,6 +208,10 @@ public class DbKit {
         return lastBefore;
     }
 
+    public static Map<String, Object> getAfterForUpdate(Map<String, Object> after, Map<String, Object> before, Collection<String> allColumn, Collection<String> uniqueCondition) {
+        return getAfterForUpdate(after, before, allColumn, uniqueCondition,null);
+    }
+
     public static Map<String, Object> getAfterForUpdate(Map<String, Object> after, Map<String, Object> before, Collection<String> allColumn, Collection<String> uniqueCondition,List<String> autoIncFields) {
         Map<String, Object> lastBefore = getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         if (EmptyKit.isNotEmpty(before)) {
