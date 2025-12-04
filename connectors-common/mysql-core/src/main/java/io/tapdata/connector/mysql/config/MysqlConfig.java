@@ -202,33 +202,4 @@ public class MysqlConfig extends CommonDbConfig {
     public void setMaximumQueueSize(Integer maximumQueueSize) {
         this.maximumQueueSize = maximumQueueSize;
     }
-
-    int cdcAcceptBatch = 100; //使用io.debezium.embedded.EmbeddedEngine默认的commit批数100
-    int cdcAcceptDelaySeconds = 1; //使用io.debezium.embedded.EmbeddedEngine默认的commit延迟1秒
-
-    public int getCdcAcceptBatch() {
-        return cdcAcceptBatch;
-    }
-
-    public void setCdcAcceptBatch(int cdcAcceptBatch) {
-        this.cdcAcceptBatch = cdcAcceptBatch;
-    }
-
-    public int getCdcAcceptDelaySeconds() {
-        return cdcAcceptDelaySeconds;
-    }
-
-    public void setCdcAcceptDelaySeconds(int cdcAcceptDelaySeconds) {
-        this.cdcAcceptDelaySeconds = cdcAcceptDelaySeconds;
-    }
-
-    public int fixValue(int val, int min, int max) {
-        if (val <= 0) {
-            val = min;
-        }
-        if (val > max) {
-            val = max;
-        }
-        return val;
-    }
 }

@@ -10,7 +10,7 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
-import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import org.apache.commons.collections4.CollectionUtils;
 
 import java.util.*;
@@ -21,13 +21,13 @@ class TapEventManager {
     final AnalyseTapEventFromDDLObject ddlEventParser;
     final ProcessHandler handler;
     final AtomicReference<Throwable> throwableCollector;
-    final StreamReadOneByOneConsumer consumer;
+    final StreamReadConsumer consumer;
     final Log log;
     final KVReadOnlyMap<TapTable> tableMap;
     Map<String, Map<String, Long>> offset;
 
 
-    protected TapEventManager(ProcessHandler handler, StreamReadOneByOneConsumer consumer) {
+    protected TapEventManager(ProcessHandler handler, StreamReadConsumer consumer) {
         this.handler = handler;
         this.throwableCollector = handler.processInfo.throwableCollector;
         this.consumer = consumer;
@@ -90,7 +90,7 @@ class TapEventManager {
         List<TapEvent> tapRecordEvents = dmlEventParser.analyse(dmlObject, null, log);
         if (CollectionUtils.isNotEmpty(tapRecordEvents)) {
             TiOffset.updateNotNull(offset, table, es, tableVersion);
-            tapRecordEvents.forEach(event -> consumer.accept(event, this.offset));
+            consumer.accept(tapRecordEvents, this.offset);
         }
     }
 

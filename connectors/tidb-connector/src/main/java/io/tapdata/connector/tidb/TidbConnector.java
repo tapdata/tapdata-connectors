@@ -35,7 +35,7 @@ import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
-import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
@@ -133,7 +133,7 @@ public class TidbConnector extends CommonDbConnector {
         // source functions
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
-        connectorFunctions.supportOneByOneStreamRead(this::streamRead);
+        connectorFunctions.supportStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
@@ -152,7 +152,7 @@ public class TidbConnector extends CommonDbConnector {
         codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
     }
 
-    protected void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, StreamReadOneByOneConsumer consumer) {
+    protected void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) {
         String feedId = genericFeedId(nodeContext.getStateMap());
         String cdcServer = String.valueOf(Optional.ofNullable(nodeContext.getStateMap().get(ProcessHandler.CDC_SERVER)).orElse("127.0.0.1:8300"));
         nodeContext.getLog().info("Source timezone: {}", timezone.toZoneId().toString());

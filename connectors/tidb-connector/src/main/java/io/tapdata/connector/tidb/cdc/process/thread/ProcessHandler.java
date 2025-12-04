@@ -10,7 +10,7 @@ import io.tapdata.connector.tidb.util.pojo.ReplicaConfig;
 import io.tapdata.connector.tidb.util.pojo.Sink;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.commons.collections4.CollectionUtils;
 
@@ -44,11 +44,11 @@ public final class ProcessHandler implements Activity {
     final Log log;
     final String basePath;
 
-    public static ProcessHandler of(ProcessInfo processInfo, StreamReadOneByOneConsumer consumer) {
+    public static ProcessHandler of(ProcessInfo processInfo, StreamReadConsumer consumer) {
         return new ProcessHandler(processInfo, consumer);
     }
 
-    public ProcessHandler(ProcessInfo processInfo, StreamReadOneByOneConsumer consumer) {
+    public ProcessHandler(ProcessInfo processInfo, StreamReadConsumer consumer) {
         this.processInfo = processInfo;
         this.tableVersionMap = new ConcurrentHashMap<>();
         this.log = processInfo.nodeContext.getLog();

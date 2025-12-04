@@ -6,17 +6,7 @@
     "doc": "${doc}",
     "tags": [
       "Database", "ssl"
-    ],
-    "autoAccumulateBatch": {
-      "batchRead": {
-        "open": false,
-        "maxDelayMs": "1000"
-      },
-      "increaseRead": {
-        "open": true,
-        "maxDelayMs": "1000"
-      }
-    }
+    ]
   },
   "configOptions": {
     "capabilities":[

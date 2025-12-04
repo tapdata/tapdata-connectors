@@ -146,6 +146,8 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 
     public void registerConsumer(StreamReadOneByOneConsumer consumer) {
         this.consumer = consumer;
+        final int commitBatchSize = postgresConfig.fixValue(postgresConfig.getCdcAcceptBatch(), 100, 1000);
+        final int commitDelaySeconds = postgresConfig.fixValue(postgresConfig.getCdcAcceptDelaySeconds(), 1, 60);
         //build debezium engine
         this.engine = (EmbeddedEngine) EmbeddedEngine.create()
                 .using(postgresDebeziumConfig.create())
@@ -166,7 +168,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 //                .using(Clock.SYSTEM)
 //                .notifying(this::consumeRecord)
                 .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
-                        timeSinceLastCommit.getSeconds() >= 5)
+                        numberOfMessagesSinceLastCommit >= commitBatchSize || timeSinceLastCommit.getSeconds() >= commitDelaySeconds)
                 .notifying(this::consumeRecords).using((result, message, throwable) -> {
                     if (result) {
                         if (StringUtils.isNotBlank(message)) {
