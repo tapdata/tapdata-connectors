@@ -13,7 +13,6 @@ import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
@@ -76,6 +75,7 @@ public class SelectDbConnector extends CommonDbConnector {
         },copyIntoUtils).initContext();
         selectDbJdbcContext = new SelectDbJdbcContext(selectDbConfig);
         this.jdbcContext = this.selectDbJdbcContext;
+        tapLogger = connectorContext.getLog();
         this.selectDbVersion = selectDbJdbcContext.queryVersion();
         this.selectDbStreamLoader = new SelectDbStreamLoader(new HttpUtil().getHttpClient(), selectDbConfig)
                 .selectDbJdbcContext(selectDbJdbcContext);
@@ -86,7 +86,7 @@ public class SelectDbConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
-        TapLogger.info(TAG, "SelectDB connector started");
+        tapLogger.info(TAG, "SelectDB connector started");
     }
 
     @Override
@@ -194,7 +194,7 @@ public class SelectDbConnector extends CommonDbConnector {
         }
         for (String sql : sqls) {
             try {
-                TapLogger.info(TAG, "Execute ddl sql: " + sql);
+                tapLogger.info(TAG, "Execute ddl sql: " + sql);
                 selectDbJdbcContext.execute(sql);
             } catch (Throwable e) {
                 throw new RuntimeException("Execute ddl sql failed: " + sql + ", error: " + e.getMessage(), e);
@@ -362,12 +362,12 @@ public class SelectDbConnector extends CommonDbConnector {
                     if (catchCount <= selectDbConfig.getRetryCount()) {
                         connectorContext.getLog().warn("Data source upload retry: {}", catchCount);
                     } else {
-                        TapLogger.error(TAG, "Data write failure" + e.getMessage());
+                        tapLogger.error(TAG, "Data write failure" + e.getMessage());
                         throw new RuntimeException(e);
                     }
                     Thread.sleep(15000);
                 }else{
-                    TapLogger.error(TAG, "Data write failure" + e.getMessage());
+                    tapLogger.error(TAG, "Data write failure" + e.getMessage());
                     throw new RuntimeException(e);
                 }
 

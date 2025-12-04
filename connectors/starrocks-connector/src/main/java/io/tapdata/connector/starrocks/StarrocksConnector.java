@@ -259,6 +259,7 @@ public class StarrocksConnector extends CommonDbConnector {
         stringBuilder.append(")");
         createTableOptions.setTableExists(false);
         try {
+            tapLogger.info("Create table sql: {}" + stringBuilder);
             starrocksJdbcContext.execute(stringBuilder.toString());
             return createTableOptions;
         } catch (Exception e) {
@@ -368,6 +369,7 @@ public class StarrocksConnector extends CommonDbConnector {
             return;
         }
         try {
+            tapLogger.info("Field ddl sql: {}", sqlList);
             jdbcContext.batchExecute(sqlList);
         } catch (SQLException e) {
             if (e.getErrorCode() == 1105 && e.getMessage().contains("Nothing is changed")) {

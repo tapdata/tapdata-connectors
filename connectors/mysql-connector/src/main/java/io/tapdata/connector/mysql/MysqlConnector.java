@@ -930,6 +930,7 @@ public class MysqlConnector extends CommonDbConnector {
             List<String> sqls = new ArrayList<>();
             sqls.add("SET FOREIGN_KEY_CHECKS=0");
             sqls.add("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
+            tapLogger.info("truncate table sql: {}", sqls);
             jdbcContext.batchExecute(sqls);
         } else {
             tapLogger.warn("Table {} not exists, skip truncate", tapClearTableEvent.getTableId());
@@ -941,6 +942,7 @@ public class MysqlConnector extends CommonDbConnector {
             List<String> sqls = new ArrayList<>();
             sqls.add("SET FOREIGN_KEY_CHECKS=0");
             sqls.add("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
+            tapLogger.info("drop table sql: {}", sqls);
             jdbcContext.batchExecute(sqls);
         } else {
             tapLogger.warn("Table {} not exists, skip drop", tapDropTableEvent.getTableId());
