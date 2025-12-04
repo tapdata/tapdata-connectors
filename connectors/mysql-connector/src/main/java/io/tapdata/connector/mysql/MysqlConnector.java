@@ -470,6 +470,7 @@ public class MysqlConnector extends CommonDbConnector {
                     return createTableOptions;
                 }
                 String[] createTableSqls = sqlMaker.createTable(tapConnectorContext, tapCreateTableEvent, mysqlVersion);
+                tapLogger.info("Create table sqls: " + Arrays.toString(createTableSqls));
                 mysqlJdbcContext.batchExecute(Arrays.asList(createTableSqls));
                 createTableOptions.setTableExists(false);
             }
@@ -478,49 +479,49 @@ public class MysqlConnector extends CommonDbConnector {
             exceptionCollector.collectWritePrivileges("createTable :" + tapCreateTableEvent.getTableId(), Collections.emptyList(), t);
             throw new RuntimeException("Create table failed, message: " + t.getMessage(), t);
         }
-        List<TapIndex> indexList = tapCreateTableEvent.getTable().getIndexList();
-        if (EmptyKit.isNotEmpty(indexList) && tapConnectorContext.getNodeConfig() != null && tapConnectorContext.getNodeConfig().getValue("syncIndex", false)) {
-            List<String> sqlList = TapSimplify.list();
-            List<TapIndex> createIndexList = new ArrayList<>();
-            List<TapIndex> existsIndexList = discoverIndex(tapCreateTableEvent.getTable().getId());
-            // 如果索引已经存在，就不再创建; 名字相同视为存在; 字段以及顺序相同, 也视为存在
-            if (EmptyKit.isNotEmpty(existsIndexList)) {
-                for (TapIndex tapIndex : indexList) {
-                    boolean exists = false;
-                    for (TapIndex existsIndex : existsIndexList) {
-                        if (tapIndex.getName().equals(existsIndex.getName())) {
-                            exists = true;
-                            break;
-                        }
-                        if (tapIndex.getIndexFields().size() == existsIndex.getIndexFields().size()) {
-                            boolean same = true;
-                            for (int i = 0; i < tapIndex.getIndexFields().size(); i++) {
-                                if (!tapIndex.getIndexFields().get(i).getName().equals(existsIndex.getIndexFields().get(i).getName())
-                                        || tapIndex.getIndexFields().get(i).getFieldAsc() != existsIndex.getIndexFields().get(i).getFieldAsc()) {
-                                    same = false;
-                                    break;
-                                }
-                            }
-                            if (same) {
-                                exists = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (!exists) {
-                        createIndexList.add(tapIndex);
-                    }
-                }
-            } else {
-                createIndexList.addAll(indexList);
-            }
-            tapLogger.info("Table: {} will create Index list: {}", tapCreateTableEvent.getTable().getName(), createIndexList);
-            if (EmptyKit.isNotEmpty(createIndexList)) {
-                createIndexList.stream().filter(i -> !i.isPrimary()).forEach(i ->
-                        sqlList.add(getCreateIndexSql(tapCreateTableEvent.getTable(), i)));
-            }
-            jdbcContext.batchExecute(sqlList);
-        }
+//        List<TapIndex> indexList = tapCreateTableEvent.getTable().getIndexList();
+//        if (EmptyKit.isNotEmpty(indexList) && tapConnectorContext.getNodeConfig() != null && tapConnectorContext.getNodeConfig().getValue("syncIndex", false)) {
+//            List<String> sqlList = TapSimplify.list();
+//            List<TapIndex> createIndexList = new ArrayList<>();
+//            List<TapIndex> existsIndexList = discoverIndex(tapCreateTableEvent.getTable().getId());
+//            // 如果索引已经存在，就不再创建; 名字相同视为存在; 字段以及顺序相同, 也视为存在
+//            if (EmptyKit.isNotEmpty(existsIndexList)) {
+//                for (TapIndex tapIndex : indexList) {
+//                    boolean exists = false;
+//                    for (TapIndex existsIndex : existsIndexList) {
+//                        if (tapIndex.getName().equals(existsIndex.getName())) {
+//                            exists = true;
+//                            break;
+//                        }
+//                        if (tapIndex.getIndexFields().size() == existsIndex.getIndexFields().size()) {
+//                            boolean same = true;
+//                            for (int i = 0; i < tapIndex.getIndexFields().size(); i++) {
+//                                if (!tapIndex.getIndexFields().get(i).getName().equals(existsIndex.getIndexFields().get(i).getName())
+//                                        || tapIndex.getIndexFields().get(i).getFieldAsc() != existsIndex.getIndexFields().get(i).getFieldAsc()) {
+//                                    same = false;
+//                                    break;
+//                                }
+//                            }
+//                            if (same) {
+//                                exists = true;
+//                                break;
+//                            }
+//                        }
+//                    }
+//                    if (!exists) {
+//                        createIndexList.add(tapIndex);
+//                    }
+//                }
+//            } else {
+//                createIndexList.addAll(indexList);
+//            }
+//            tapLogger.info("Table: {} will create Index list: {}", tapCreateTableEvent.getTable().getName(), createIndexList);
+//            if (EmptyKit.isNotEmpty(createIndexList)) {
+//                createIndexList.stream().filter(i -> !i.isPrimary()).forEach(i ->
+//                        sqlList.add(getCreateIndexSql(tapCreateTableEvent.getTable(), i)));
+//            }
+//            jdbcContext.batchExecute(sqlList);
+//        }
         return createTableOptions;
     }
 
@@ -929,6 +930,7 @@ public class MysqlConnector extends CommonDbConnector {
             List<String> sqls = new ArrayList<>();
             sqls.add("SET FOREIGN_KEY_CHECKS=0");
             sqls.add("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
+            tapLogger.info("truncate table sql: {}", sqls);
             jdbcContext.batchExecute(sqls);
         } else {
             tapLogger.warn("Table {} not exists, skip truncate", tapClearTableEvent.getTableId());
@@ -940,6 +942,7 @@ public class MysqlConnector extends CommonDbConnector {
             List<String> sqls = new ArrayList<>();
             sqls.add("SET FOREIGN_KEY_CHECKS=0");
             sqls.add("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
+            tapLogger.info("drop table sql: {}", sqls);
             jdbcContext.batchExecute(sqls);
         } else {
             tapLogger.warn("Table {} not exists, skip drop", tapDropTableEvent.getTableId());

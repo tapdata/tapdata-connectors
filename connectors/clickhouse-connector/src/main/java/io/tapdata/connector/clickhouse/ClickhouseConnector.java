@@ -248,6 +248,7 @@ public class ClickhouseConnector extends CommonDbConnector {
             sqlList = new ArrayList<>(sqlList);
         }
         sqlList.add("OPTIMIZE TABLE `" + clickhouseConfig.getDatabase() + "`.`" + tapFieldBaseEvent.getTableId() + "` FINAL");
+        tapLogger.info("Field ddl sqls: {}", sqlList);
         jdbcContext.batchExecute(sqlList);
     }
 
@@ -311,7 +312,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         try {
             List<String> sqlList = TapSimplify.list();
             sqlList.add(sql.toString());
-            TapLogger.info("table :", "table -> {}", tapTable.getId());
+            tapLogger.info("Create table sqls: {}", sqlList);
             clickhouseJdbcContext.batchExecute(sqlList);
         } catch (Throwable e) {
             exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
@@ -387,6 +388,7 @@ public class ClickhouseConnector extends CommonDbConnector {
                                 (EmptyKit.isNotNull(i.getName()) ? "IF NOT EXISTS " + TapTableWriter.sqlQuota(i.getName()) : "") + " ON " + TapTableWriter.sqlQuota(".", clickhouseConfig.getDatabase(), tapTable.getId()) + "(" +
                                 i.getIndexFields().stream().map(f -> TapTableWriter.sqlQuota(f.getName()) + " " + (f.getFieldAsc() ? "ASC" : "DESC"))
                                         .collect(Collectors.joining(",")) + ')'));
+                tapLogger.info("Create index sql: {}", sqls);
             }
             clickhouseJdbcContext.batchExecute(sqls);
         } catch (Throwable e) {
