@@ -1838,9 +1838,14 @@ public class MongodbConnector extends ConnectorBase {
 			v.abortTransaction();
 			v.close();
 			v = mongoClient.startSession();
+			v.startTransaction();
 			return v;
 		});
-		transactionSessionMap.computeIfAbsent(Thread.currentThread().getName(), key -> mongoClient.startSession());
+		transactionSessionMap.computeIfAbsent(Thread.currentThread().getName(), key -> {
+			ClientSession v = mongoClient.startSession();
+			v.startTransaction();
+			return v;
+		});
 	}
 
 	protected void commitTransaction(TapConnectorContext connectorContext) {
