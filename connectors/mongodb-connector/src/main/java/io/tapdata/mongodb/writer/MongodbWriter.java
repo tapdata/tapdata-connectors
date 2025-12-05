@@ -86,30 +86,33 @@ public class MongodbWriter {
 	 * @param tapRecordEvents
 	 * @param writeListResultConsumer
 	 */
-    public void writeRecord(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
-        if (CollectionUtils.isEmpty(tapRecordEvents)) {
-            return;
-        }
-        ClientSession clientSession = sessionMap.get(Thread.currentThread().getName());
-        if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive())) {
-            if (null != clientSession) {
-                doubleActiveWrite(tapRecordEvents, table, writeListResultConsumer, clientSession);
-            } else {
-                try (ClientSession session = mongoClient.startSession()) {
-                    doubleActiveWrite(tapRecordEvents, table, writeListResultConsumer, session);
-                    session.commitTransaction();
-                }
-            }
-        } else {
-            if (null != clientSession) {
-                clientSession.startTransaction();
-            }
-            write(table, tapRecordEvents, writeListResultConsumer, clientSession);
-        }
-    }
+	public void writeRecord(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
+		if (CollectionUtils.isEmpty(tapRecordEvents)) {
+			return;
+		}
+		ClientSession clientSession = sessionMap.get(Thread.currentThread().getName());
+		if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive())) {
+			if (null != clientSession) {
+				doubleActiveWrite(tapRecordEvents, table, writeListResultConsumer, clientSession);
+			} else {
+				ClientSession session = null;
+				try {
+					session = mongoClient.startSession();
+					session.startTransaction();
+					doubleActiveWrite(tapRecordEvents, table, writeListResultConsumer, session);
+					session.commitTransaction();
+				} catch (Exception e) {
+					Optional.ofNullable(session).ifPresent(ClientSession::abortTransaction);
+				} finally {
+					Optional.ofNullable(session).ifPresent(ClientSession::close);
+				}
+			}
+		} else {
+			write(table, tapRecordEvents, writeListResultConsumer, clientSession);
+		}
+	}
 
     private void doubleActiveWrite(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
-        session.startTransaction();
         Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
         UpdateOptions options = new UpdateOptions().upsert(true);
         mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
