@@ -111,21 +111,24 @@ public class MongodbWriter {
 			if (null != clientSession) {
 				doubleActiveWrite(tapRecordEvents, table, writeListResultConsumer, clientSession);
 			} else {
-				try (ClientSession session = mongoClient.startSession()) {
+				ClientSession session = null;
+				try {
+					session = mongoClient.startSession();
+					session.startTransaction();
 					doubleActiveWrite(tapRecordEvents, table, writeListResultConsumer, session);
 					session.commitTransaction();
+				} catch (Exception e) {
+					Optional.ofNullable(session).ifPresent(ClientSession::abortTransaction);
+				} finally {
+					Optional.ofNullable(session).ifPresent(ClientSession::close);
 				}
 			}
 		} else {
-			if (null != clientSession) {
-				clientSession.startTransaction();
-			}
 			write(table, tapRecordEvents, writeListResultConsumer, clientSession);
 		}
 	}
 
 	private void doubleActiveWrite(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
-		session.startTransaction();
 		Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
 		UpdateOptions options = new UpdateOptions().upsert(true);
 		mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
