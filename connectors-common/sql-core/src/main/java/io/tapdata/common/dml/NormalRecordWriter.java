@@ -221,6 +221,13 @@ public class NormalRecordWriter {
         this.autoIncFields = autoIncFields;
     }
 
+    public void setLargeSql(boolean largeSql) {
+        this.largeSql = largeSql;
+        insertRecorder.setLargeSql(largeSql);
+        updateRecorder.setLargeSql(largeSql);
+        deleteRecorder.setLargeSql(largeSql);
+    }
+
     public Map<String, Object> getAutoIncMap() {
         return autoIncMap;
     }
