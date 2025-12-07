@@ -20,6 +20,7 @@ import io.tapdata.exception.TapPdkTerminateByServerEx;
 import io.tapdata.exception.TapRuntimeException;
 import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
 import io.tapdata.kafka.*;
+import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.constants.ProducerRecordWrapper;
 import io.tapdata.kafka.data.KafkaOffset;
 import io.tapdata.kafka.data.KafkaTopicOffset;
@@ -76,7 +77,11 @@ public class KafkaService implements IKafkaService {
             thread.setName(String.format("%s-executor-%s", KafkaEnhancedConnector.PDK_ID, thread.getId()));
             return thread;
         });
-        this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
+        if (config.getConnectionSchemaRegister()) {
+            this.schemaModeService = AbsSchemaMode.create(KafkaSchemaMode.fromString("REGISTRY_" + config.getConnectionRegistrySchemaType()), this);
+        } else {
+            this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
+        }
     }
 
     @Override

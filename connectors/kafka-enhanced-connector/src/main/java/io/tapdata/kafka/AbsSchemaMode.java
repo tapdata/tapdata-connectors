@@ -67,6 +67,10 @@ public abstract class AbsSchemaMode {
                 return new DebeziumSchemaMode(kafkaService);
             case FLINK_CDC:
                 return new FlinkSchemaMode(kafkaService);
+            case REGISTRY_AVRO:
+                return new RegistryAvroMode(kafkaService);
+            case REGISTRY_PROTOBUF:
+                return new RegistryProtobufMode(kafkaService);
             default:
                 throw new NotSupportedException(String.format("schema mode '%s'", schemaMode));
         }

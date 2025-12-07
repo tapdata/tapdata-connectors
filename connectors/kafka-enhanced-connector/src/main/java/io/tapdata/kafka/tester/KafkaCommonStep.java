@@ -61,6 +61,11 @@ public class KafkaCommonStep extends AbsStep<KafkaConfig, KafkaTester> implement
         return IStep.CHECK_ITEM_APPLY;
     }
 
+    public boolean testRegistryConnection(TestItem testItem) {
+        getAdminService().testRegistryConnect(testItem);
+        return CHECK_ITEM_APPLY;
+    }
+
     @Override
     public boolean testInstanceUniqueId(TestItem testItem) {
         options().setInstanceUniqueId(StringKit.md5(String.join("|"

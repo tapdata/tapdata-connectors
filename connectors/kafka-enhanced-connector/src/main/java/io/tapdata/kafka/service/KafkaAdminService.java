@@ -1,8 +1,12 @@
 package io.tapdata.kafka.service;
 
+import io.tapdata.constant.MqTestItem;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.kafka.KafkaConfig;
 import io.tapdata.kafka.IKafkaAdminService;
+import io.tapdata.kafka.KafkaConfig;
+import io.tapdata.kafka.utils.SchemaRegisterUtil;
+import io.tapdata.pdk.apis.entity.TestItem;
+import okhttp3.Response;
 import org.apache.kafka.clients.admin.*;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.TopicPartition;
@@ -163,6 +167,43 @@ public class KafkaAdminService implements IKafkaAdminService {
             }
         }
         return partitionInfos;
+    }
+
+    public void testRegistryConnect(TestItem testItem) {
+        testItem.setItem(MqTestItem.KAFKA_SCHEMA_REGISTER_CONNECTION.getContent());
+        String[] schemaRegisterUrls = config.getConnectionSchemaRegisterUrl().split(",");
+        try {
+            if (config.getConnectionBasicAuth()) {
+                for (String schemaRegisterUrl : schemaRegisterUrls) {
+                    try (Response reschemaRegisterResponse = SchemaRegisterUtil.sendBasicAuthRequest("http://" + schemaRegisterUrl + "/subjects",
+                            config.getConnectionAuthUserName(),
+                            config.getConnectionAuthPassword())) {
+                        if (reschemaRegisterResponse.code() != 200) {
+                            testItem.setResult(TestItem.RESULT_FAILED);
+                            testItem.setInformation(reschemaRegisterResponse.toString());
+                            return;
+                        }
+                    }
+                }
+            } else {
+                for (String schemaRegisterUrl : schemaRegisterUrls) {
+                    try (Response reschemaRegisterResponse = SchemaRegisterUtil.sendBasicAuthRequest("http://" + schemaRegisterUrl + "/subjects",
+                            null,
+                            null)) {
+                        if (reschemaRegisterResponse.code() != 200) {
+                            testItem.setResult(TestItem.RESULT_FAILED);
+                            testItem.setInformation(reschemaRegisterResponse.toString());
+                            return;
+                        }
+                    }
+                }
+            }
+            testItem.setResult(TestItem.RESULT_SUCCESSFULLY);
+            testItem.setInformation("Schema register connection successfully");
+        } catch (Exception e) {
+            testItem.setResult(TestItem.RESULT_FAILED);
+            testItem.setInformation("Please check the service address. " + e.getMessage());
+        }
     }
 
     @Override
