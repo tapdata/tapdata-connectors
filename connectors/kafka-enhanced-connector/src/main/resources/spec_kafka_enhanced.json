@@ -964,18 +964,23 @@
         0,
         10
       ],
-      "defaultScale": 1
+      "defaultScale": 1,
+      "fixed": true,
+      "preferPrecision": 12,
+      "preferScale": 4
     },
     "CHAR[($byte)]": {
+      "byte": 65535,
       "to": "TapString",
       "byteRatio": 3,
       "defaultByte": 1,
       "fixed": true
     },
     "VARCHAR[($byte)]": {
-      "to": "TapString",
+      "byte": 65535,
+      "defaultByte": 65535,
       "byteRatio": 3,
-      "defaultByte": 1
+      "to": "TapString"
     },
     "STRING[($byte)]": {
       "to": "TapString",
@@ -983,9 +988,10 @@
     },
     "TEXT": {
       "to": "TapString",
+      "byte": "4g",
       "pkEnablement": false
     },
-    "BINARY[($byte)]": {
+    "BINARY": {
       "to": "TapBinary",
       "pkEnablement": false
     },

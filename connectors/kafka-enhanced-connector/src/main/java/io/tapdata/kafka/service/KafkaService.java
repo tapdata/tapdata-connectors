@@ -39,6 +39,7 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
+import org.apache.kafka.common.errors.SerializationException;
 
 import java.time.Duration;
 import java.util.*;
@@ -362,6 +363,8 @@ public class KafkaService implements IKafkaService {
             }
         } catch (InterruptedException | org.apache.kafka.common.errors.InterruptException e) {
             Thread.currentThread().interrupt();
+        } catch (SerializationException e) {
+            logger.warn(e.getMessage(), e);
         } catch (TapRuntimeException e) {
             throw e;
         } catch (Exception e) {

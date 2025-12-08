@@ -245,7 +245,13 @@ public class KafkaConfig extends BasicConfig implements
     public Properties buildConsumerConfig(boolean isEarliest) {
         String type = "Consumer";
         Properties props = buildProperties(type);
-        getConnectionSchemaMode().setDeserializer(this, props);
+        KafkaSchemaMode mode;
+        if (getConnectionSchemaRegister()) {
+            mode = KafkaSchemaMode.valueOf("REGISTRY_" + getConnectionRegistrySchemaType());
+        } else {
+            mode = getConnectionSchemaMode();
+        }
+        mode.setDeserializer(this, props);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, isEarliest ? "earliest" : "latest");
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         eachConnectionExtParams(props::put, "All", type);
@@ -255,7 +261,13 @@ public class KafkaConfig extends BasicConfig implements
     public Properties buildDiscoverSchemaConfig(boolean isEarliest) {
         String type = "Consumer";
         Properties props = buildProperties(type);
-        getConnectionSchemaMode().setDeserializer(this, props);
+        KafkaSchemaMode mode;
+        if (getConnectionSchemaRegister()) {
+            mode = KafkaSchemaMode.valueOf("REGISTRY_" + getConnectionRegistrySchemaType());
+        } else {
+            mode = getConnectionSchemaMode();
+        }
+        mode.setDeserializer(this, props);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, isEarliest ? "earliest" : "latest");
         props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 0);
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10);
