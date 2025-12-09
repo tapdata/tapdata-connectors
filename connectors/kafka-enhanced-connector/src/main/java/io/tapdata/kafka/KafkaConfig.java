@@ -227,10 +227,15 @@ public class KafkaConfig extends BasicConfig implements
                     props.put("value.serializer", org.apache.kafka.common.serialization.StringSerializer.class);
                     break;
             }
-            props.put("schema.registry.url", "http://" + getConnectionSchemaRegisterUrl());
+            props.put("schema.registry.url", getConnectionSchemaRegisterUrl());
             if (getConnectionBasicAuth()) {
-                props.put("basic.auth.credentials.source", getConnectionAuthCredentialsSource());
-                props.put("basic.auth.user.info", getConnectionAuthUserName() + ":" + getConnectionAuthPassword());
+                String authCredentialsSource = getConnectionAuthCredentialsSource();
+                props.put("basic.auth.credentials.source", authCredentialsSource);
+                if ("USER_INFO".equals(authCredentialsSource)) {
+                    props.put("basic.auth.user.info", getConnectionAuthUserName() + ":" + getConnectionAuthPassword());
+                } else if ("SASL_INHERIT".equals(authCredentialsSource)) {
+                    props.put("sasl.jaas.config", String.format("org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";", getConnectionAuthUserName(), getConnectionAuthPassword()));
+                }
             }
         }
     }

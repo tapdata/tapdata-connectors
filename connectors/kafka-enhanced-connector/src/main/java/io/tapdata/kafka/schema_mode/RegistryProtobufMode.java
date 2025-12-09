@@ -11,6 +11,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kafka.AbsSchemaMode;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
@@ -44,41 +45,34 @@ public class RegistryProtobufMode extends AbsSchemaMode {
     }
 
     @Override
-    public void discoverSchema(IKafkaService kafkaService, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) {
-        List<TapTable> results = new LinkedList<>();
-        tables.forEach(table -> {
-            TapTable sampleTable = new TapTable(table);
-            kafkaService.<Long, Object>sampleValue(Collections.singletonList(table), null, record -> {
-                if (null != record) {
-                    if (record.value() instanceof DynamicMessage) {
-                        DynamicMessage message = (DynamicMessage) record.value();
-                        dynamicMessageToTapTable(sampleTable, message);
-                        return false;
+    public void sampleOneSchema(String table, TapTable sampleTable) {
+        kafkaService.<String, Object>sampleValue(Collections.singletonList(table), null, record -> {
+            if (null != record) {
+                if (record.value() instanceof DynamicMessage) {
+                    DynamicMessage message = (DynamicMessage) record.value();
+                    List<String> primaryKeys = new ArrayList<>();
+                    if (record.key() != null) {
+                        primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
                     }
+                    dynamicMessageToTapTable(sampleTable, message, primaryKeys);
+                    return false;
                 }
-                return true;
-            });
-            results.add(sampleTable);
+            }
+            return true;
         });
-        consumer.accept(results);
     }
 
-    private void dynamicMessageToTapTable(TapTable sampleTable, DynamicMessage message) {
+
+    private void dynamicMessageToTapTable(TapTable sampleTable, DynamicMessage message, List<String> primaryKeys) {
         message.getAllFields().keySet().forEach(key -> {
             TapField field = new TapField(key.getName(), toTapType(key.getType().getJavaType().name()));
             field.setDefaultValue(key.getDefaultValue());
+            if (primaryKeys.contains(key.getName())) {
+                field.setPrimaryKey(true);
+                field.setPrimaryKeyPos(primaryKeys.indexOf(key.getName()) + 1);
+            }
             sampleTable.add(field);
         });
-    }
-
-    private String toTapType(String dataType) {
-        // todo protobuf协议类型范围映射，Kafka的日期时间格式是否需要重新处理
-        switch (dataType) {
-            case "INT":
-                return "INTEGER";
-            default:
-                return dataType;
-        }
     }
 
     @Override
@@ -137,25 +131,6 @@ public class RegistryProtobufMode extends AbsSchemaMode {
         }
     }
 
-    /**
-     * 从 ConsumerRecord 的 header 中获取操作类型
-     */
-    private DMLType getOperationType(ConsumerRecord<?, ?> consumerRecord) {
-        if (consumerRecord.headers() != null) {
-            org.apache.kafka.common.header.Header opHeader = consumerRecord.headers().lastHeader("op");
-            if (opHeader != null && opHeader.value() != null) {
-                String opValue = new String(opHeader.value());
-                try {
-                    return DMLType.valueOf(opValue.toUpperCase());
-                } catch (IllegalArgumentException e) {
-                    // 如果无法解析，返回默认值
-                }
-            }
-        }
-        // 默认为 INSERT
-        return DMLType.INSERT;
-    }
-
     @Override
     public List<ProducerRecord<Object, Object>> fromTapEvent(TapTable tapTable, TapEvent tapEvent) {
         // 提取数据
@@ -202,12 +177,11 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
             // 创建 Kafka 主键
             //todo key的规范
-            byte[] key = createKafkaKey(data, tapTable);
-            String keyString = key != null ? new String(key) : null;
+            String keyValue = createKafkaKeyValueMap(data, tapTable);
 
             // 创建 ProducerRecord
             ProducerRecord<Object, Object> producerRecord = new ProducerRecord<>(topic(tapTable, tapEvent), null,
-                    tapEvent.getTime(), keyString, message, new RecordHeaders().add("op", op.name().getBytes()));
+                    tapEvent.getTime(), keyValue, message, new RecordHeaders().add("op", op.name().getBytes()));
 
             return Collections.singletonList(producerRecord);
         } catch (Exception e) {
