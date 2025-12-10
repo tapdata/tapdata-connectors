@@ -1733,7 +1733,7 @@ public class MongodbConnector extends ConnectorBase {
 			if (mongodbStreamReader == null) {
 				mongodbStreamReader = createStreamReader();
 			}
-			mongodbStreamReader.initAcceptor(1, consumer)
+			mongodbStreamReader.initAcceptor(consumer.getBatchSize(), consumer)
 					.onStart(mongoConfig);
 			doStreamRead(mongodbStreamReader, connectorContext, tableList, mongoCdcOffset.getCdcOffset());
 		}

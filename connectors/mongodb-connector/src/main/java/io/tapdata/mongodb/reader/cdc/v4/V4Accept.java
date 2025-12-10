@@ -1,6 +1,6 @@
 package io.tapdata.mongodb.reader.cdc.v4;
 
-import io.tapdata.mongodb.reader.cdc.Acceptor;
+import io.tapdata.cdc.CustomAbstractAccepter;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
 import io.tapdata.pdk.apis.consumer.TapStreamReadConsumer;
 
@@ -10,5 +10,6 @@ import io.tapdata.pdk.apis.consumer.TapStreamReadConsumer;
  * @version v1.0 2025/12/9 11:07 Create
  * @description
  */
-public abstract class V4Accept<T extends V4Accept<T, Consumer>, Consumer extends TapStreamReadConsumer<?, Object>> implements Acceptor<T, MongodbV4StreamReader.OffsetEvent, Consumer> {
+public abstract class V4Accept<T extends V4Accept<T, Consumer>, Consumer extends TapStreamReadConsumer<?, Object>>
+        extends CustomAbstractAccepter<MongodbV4StreamReader.OffsetEvent, T, Consumer> {
 }
