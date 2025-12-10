@@ -98,6 +98,8 @@ public abstract class AbsSchemaMode {
                 return new RegistryAvroMode(kafkaService);
             case REGISTRY_PROTOBUF:
                 return new RegistryProtobufMode(kafkaService);
+            case REGISTRY_JSON:
+                return new RegistryJsonMode(kafkaService);
             default:
                 throw new NotSupportedException(String.format("schema mode '%s'", schemaMode));
         }
