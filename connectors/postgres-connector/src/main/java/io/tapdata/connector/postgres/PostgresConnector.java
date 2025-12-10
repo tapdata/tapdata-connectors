@@ -40,6 +40,8 @@ import io.tapdata.exception.TapCodeException;
 import io.tapdata.kit.*;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
+import io.tapdata.pdk.apis.consumer.TapStreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
@@ -148,6 +150,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
         connectorFunctions.supportStreamRead(this::streamRead);
+        connectorFunctions.supportOneByOneStreamRead(this::streamReadOneByOne);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         // query
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
@@ -604,7 +607,11 @@ public class PostgresConnector extends CommonDbConnector {
         });
     }
 
-    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+    private void streamReadOneByOne(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, StreamReadOneByOneConsumer consumer) throws Throwable {
+        streamRead(nodeContext, tableList, offsetState, consumer.getBatchSize(), consumer);
+    }
+
+    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, TapStreamReadConsumer<?, Object> consumer) throws Throwable {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
                 new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)

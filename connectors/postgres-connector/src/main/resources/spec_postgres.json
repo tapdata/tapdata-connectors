@@ -4,7 +4,17 @@
     "icon": "icons/postgres.png",
     "doc" : "${doc}",
     "id": "postgres",
-    "tags": ["Database", "ssl", "doubleActive", "disableForeignKey","NullsLast"]
+    "tags": ["Database", "ssl", "doubleActive", "disableForeignKey","NullsLast"],
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "capabilities":[

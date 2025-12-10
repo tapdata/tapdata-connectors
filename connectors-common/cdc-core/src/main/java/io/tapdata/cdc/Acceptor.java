@@ -1,4 +1,4 @@
-package io.tapdata.mongodb.reader.cdc;
+package io.tapdata.cdc;
 
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.pdk.apis.consumer.TapStreamReadConsumer;

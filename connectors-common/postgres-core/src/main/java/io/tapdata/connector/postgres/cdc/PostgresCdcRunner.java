@@ -6,11 +6,12 @@ import io.debezium.embedded.StopConnectorException;
 import io.debezium.engine.DebeziumEngine;
 import io.debezium.engine.StopEngineException;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
+import io.tapdata.connector.postgres.cdc.accept.DebeziumBatchAccepter;
+import io.tapdata.connector.postgres.cdc.accept.DebeziumOneByOneAccepter;
+import io.tapdata.connector.postgres.cdc.accept.PGEventAbstractAccepter;
 import io.tapdata.connector.postgres.cdc.config.PostgresDebeziumConfig;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
-import io.tapdata.connector.postgres.cdc.offset.PostgresOffsetStorage;
 import io.tapdata.connector.postgres.config.PostgresConfig;
-import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -19,7 +20,6 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.partition.TapSubPartitionTableInfo;
-import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
@@ -27,6 +27,8 @@ import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.NumberKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
+import io.tapdata.pdk.apis.consumer.TapStreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -39,7 +41,14 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -57,8 +66,8 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private final TapConnectorContext connectorContext;
     private PostgresDebeziumConfig postgresDebeziumConfig;
     private PostgresOffset postgresOffset;
-    private int recordSize;
-    private StreamReadConsumer consumer;
+    //private StreamReadConsumer consumer;
+    protected PGEventAbstractAccepter<?, ?> consumer;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     protected TimeZone timeZone;
     private String dropTransactionId = null;
@@ -145,9 +154,18 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         return throwableAtomicReference;
     }
 
-    public void registerConsumer(StreamReadConsumer consumer, int recordSize) {
-        this.recordSize = recordSize;
-        this.consumer = consumer;
+    public void registerConsumer(TapStreamReadConsumer<?, Object> consumer, int recordSize) {
+        if (consumer instanceof StreamReadConsumer) {
+            this.consumer = new DebeziumBatchAccepter()
+                    .setConsumer((StreamReadConsumer) consumer)
+                    .setBatchSize(recordSize);
+        } else if (consumer instanceof StreamReadOneByOneConsumer) {
+            this.consumer = new DebeziumOneByOneAccepter()
+                    .setConsumer((StreamReadOneByOneConsumer) consumer);
+        } else {
+            throw new IllegalArgumentException("Unsupported consumer type: " + consumer.getClass().getName());
+        }
+
         //build debezium engine
         this.engine = (EmbeddedEngine) EmbeddedEngine.create()
                 .using(postgresDebeziumConfig.create())
@@ -195,7 +213,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     @Override
     public void consumeRecords(List<SourceRecord> sourceRecords, DebeziumEngine.RecordCommitter<SourceRecord> committer) throws InterruptedException {
         super.consumeRecords(sourceRecords, committer);
-        List<TapEvent> eventList = TapSimplify.list();
+        //List<TapEvent> eventList = TapSimplify.list();
         Map<String, ?> offset = null;
         for (SourceRecord sr : sourceRecords) {
             try {
@@ -207,7 +225,8 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                     continue;
                 }
                 if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
-                    eventList.add(new HeartbeatEvent().init().referenceTime(((Struct) sr.value()).getInt64("ts_ms")));
+                    consumer.updateOffset(offset)
+                            .accept(new HeartbeatEvent().init().referenceTime(((Struct) sr.value()).getInt64("ts_ms")));
                     continue;
                 } else if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
                     continue;
@@ -260,22 +279,12 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                         event.setNamespaces(Lists.newArrayList(schema, table));
                     }
                 }
-                eventList.add(event);
-                if (eventList.size() >= recordSize) {
-                    PostgresOffset postgresOffset = new PostgresOffset();
-                    postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
-                    consumer.accept(eventList, postgresOffset);
-                    eventList = TapSimplify.list();
-                }
+                consumer.updateOffset(offset).accept(event);
             } catch (StopConnectorException | StopEngineException ex) {
                 throw ex;
             }
         }
-        if (EmptyKit.isNotEmpty(eventList)) {
-            PostgresOffset postgresOffset = new PostgresOffset();
-            postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
-            consumer.accept(eventList, postgresOffset);
-        }
+        consumer.updateOffset(offset).accept(null);
     }
 
     private DataMap getMapFromStruct(Struct struct) {
