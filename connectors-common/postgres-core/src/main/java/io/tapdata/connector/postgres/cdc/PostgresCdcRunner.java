@@ -50,6 +50,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -155,17 +156,19 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     }
 
     public void registerConsumer(TapStreamReadConsumer<?, Object> consumer, int recordSize) {
+        Supplier<Integer> batchSizeGetter;
         if (consumer instanceof StreamReadConsumer) {
             this.consumer = new DebeziumBatchAccepter()
                     .setConsumer((StreamReadConsumer) consumer)
                     .setBatchSize(recordSize);
+            batchSizeGetter = () -> recordSize;
         } else if (consumer instanceof StreamReadOneByOneConsumer) {
             this.consumer = new DebeziumOneByOneAccepter()
                     .setConsumer((StreamReadOneByOneConsumer) consumer);
+            batchSizeGetter = () -> ((StreamReadOneByOneConsumer) consumer).getBatchSize();
         } else {
             throw new IllegalArgumentException("Unsupported consumer type: " + consumer.getClass().getName());
         }
-
         //build debezium engine
         this.engine = (EmbeddedEngine) EmbeddedEngine.create()
                 .using(postgresDebeziumConfig.create())
@@ -185,8 +188,12 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 //                .using(this.getClass().getClassLoader())
 //                .using(Clock.SYSTEM)
 //                .notifying(this::consumeRecord)
-                .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
-                        numberOfMessagesSinceLastCommit >= recordSize || timeSinceLastCommit.getSeconds() >= 5)
+                .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) -> {
+                    int size = Math.min(Math.max(1, batchSizeGetter.get()), 10000);
+                    //超时时间最小1秒，最大10秒
+                    int timeout =  Math.min(Math.max(1, size / 100), 5);
+                    return numberOfMessagesSinceLastCommit >= size || timeSinceLastCommit.getSeconds() >= timeout;
+                })
                 .notifying(this::consumeRecords).using((result, message, throwable) -> {
                     if (result) {
                         if (StringUtils.isNotBlank(message)) {
