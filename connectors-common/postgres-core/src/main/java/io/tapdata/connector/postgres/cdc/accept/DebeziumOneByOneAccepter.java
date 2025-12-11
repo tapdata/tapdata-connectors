@@ -16,6 +16,7 @@ import java.util.List;
 public class DebeziumOneByOneAccepter
         extends PGEventAbstractAccepter<DebeziumOneByOneAccepter, StreamReadOneByOneConsumer> {
     int acceptCount = 0;
+    boolean first = true;
     StreamReadOneByOneConsumer consumer;
     int batchSize = 1;
     long batchSizeTimeout = 1000L;
@@ -26,12 +27,15 @@ public class DebeziumOneByOneAccepter
             return;
         }
         acceptCount++;
-        boolean calcOffset = acceptCount >= getBatchSize();
+        boolean calcOffset = first || acceptCount >= getBatchSize();
         PostgresOffset postgresOffset = null;
         if (calcOffset) {
             postgresOffset = new PostgresOffset();
             postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
             acceptCount = 0;
+        }
+        if (first) {
+            first = false;
         }
         getConsumer().accept(e, postgresOffset);
     }
