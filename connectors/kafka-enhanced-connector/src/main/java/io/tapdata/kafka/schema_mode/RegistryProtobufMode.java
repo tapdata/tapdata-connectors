@@ -52,7 +52,11 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                     DynamicMessage message = (DynamicMessage) record.value();
                     List<String> primaryKeys = new ArrayList<>();
                     if (record.key() != null) {
-                        primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
+                        try {
+                            primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
+                        } catch (Exception e) {
+                            tapLogger.warn("Failed to parse primary keys: {}", record.key(), e);
+                        }
                     }
                     dynamicMessageToTapTable(sampleTable, message, primaryKeys);
                     return false;
