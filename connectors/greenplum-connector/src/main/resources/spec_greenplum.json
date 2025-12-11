@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "GreenPlum",
+    "realName": "Greenplum",
     "icon": "icons/greenplum.png",
     "doc" : "${doc}",
     "id": "greenplum",

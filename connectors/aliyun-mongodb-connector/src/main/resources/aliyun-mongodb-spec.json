@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Aliyun MongoDB",
+    "realName": "ApsaraDB for MongoDB",
     "icon": "icons/aliyun-mongodb.png",
     "doc" : "${doc}",
     "tags" : ["schema-free","Database"],

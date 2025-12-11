@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Dummy",
+    "realName": "Dummy",
     "icon": "icons/dummy.png",
     "doc" : "${doc}",
     "id": "dummy",

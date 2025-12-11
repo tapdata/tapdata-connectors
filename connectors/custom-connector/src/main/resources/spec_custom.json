@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Custom Connection",
+    "realName": "Custom Connection",
     "icon": "icons/custom.png",
     "doc": "${doc}",
     "id": "custom",

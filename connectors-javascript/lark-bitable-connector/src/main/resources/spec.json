@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Feishu-Bitable",
+    "realName": "Lark Bitable",
     "icon": "icon/bitable.png",
     "doc" : "${doc}",
     "id": "feishu-bitable",

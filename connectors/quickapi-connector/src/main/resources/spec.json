@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "QuickAPI",
+    "realName": "QuickAPI",
     "icon": "icons/quickapi.png",
     "doc" : "${doc}",
     "id": "quickapi",

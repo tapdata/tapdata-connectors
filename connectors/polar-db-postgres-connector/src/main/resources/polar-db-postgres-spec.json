@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "PolarDB PostgreSQL",
+    "realName": "ApsaraDB PolarDB for PostgreSQL",
     "icon": "icons/polar_db_postgres.png",
     "doc" : "${doc}",
     "id": "polar-db-postgres",

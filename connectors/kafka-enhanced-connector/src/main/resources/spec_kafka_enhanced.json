@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Kafka-Enhanced",
+    "realName": "Kafka Enhanced",
     "icon": "icons/kafka_enhanced.png",
     "doc": "${doc}",
     "id": "kafka_enhanced",

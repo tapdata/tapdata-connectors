@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Mock Source",
+    "realName": "Mock Source",
     "icon": "icons/mock-source.png",
     "doc" : "${doc}",
     "id": "mock-source",

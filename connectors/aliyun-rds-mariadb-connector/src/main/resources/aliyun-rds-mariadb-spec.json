@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Aliyun RDS Mariadb",
+    "realName": "ApsaraDB RDS for MariaDB",
     "icon": "icons/aliyun_rds_mariadb.png",
     "id": "aliyun-rds-mariadb",
     "doc": "${doc}",

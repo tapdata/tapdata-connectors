@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Aliyun ADB MySQL",
+    "realName": "ApsaraDB AnalyticDB for MySQL",
     "icon": "icons/aliyun_adb_mysql.png",
     "id": "aliyun-adb-mysql",
     "doc": "${doc}",

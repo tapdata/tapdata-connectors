@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Kafka",
+    "realName": "Kafka",
     "icon": "icons/kafka.png",
     "doc": "${doc}",
     "id": "kafka",

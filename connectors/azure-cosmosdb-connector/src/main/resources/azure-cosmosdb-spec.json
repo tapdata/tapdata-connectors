@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Azure CosmosDB",
+    "realName": "Azure Cosmos DB",
     "icon": "icons/azure-cosmosdb.png",
     "doc": "${doc}",
     "tags": [

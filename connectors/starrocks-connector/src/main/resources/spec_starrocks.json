@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Starrocks",
+    "realName": "StarRocks",
     "icon": "icons/starrocks.png",
     "id": "starrocks",
     "docs": "${docs}",
