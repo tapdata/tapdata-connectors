@@ -1,7 +1,7 @@
 {
   "properties": {
     "name": "Kafka",
-    "realName": "Kafka",
+    "realName": "Apache Kafka(Deprecated)",
     "icon": "icons/kafka.png",
     "doc": "${doc}",
     "id": "kafka",
