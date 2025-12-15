@@ -107,7 +107,14 @@ public abstract class AbstractWalLogMiner {
 
     public abstract void startMiner(Supplier<Boolean> isAlive) throws Throwable;
 
-    public AbstractWalLogMiner registerConsumer(TapStreamReadConsumer<?, Object> consumer, int recordSize) {
+    /**
+     * @deprecated
+     * */
+    public AbstractWalLogMiner registerConsumer(StreamReadConsumer consumer, int recordSize) {
+        return registerCdcConsumer(consumer, recordSize);
+    }
+
+    public AbstractWalLogMiner registerCdcConsumer(TapStreamReadConsumer<?, Object> consumer, int recordSize) {
         if (consumer instanceof StreamReadConsumer) {
             this.consumer = new LogMinerProBatchAccepter()
                     .setConsumer((StreamReadConsumer) consumer)

@@ -32,7 +32,7 @@ public class WalLogMiner extends AbstractWalLogMiner {
         super(postgresJdbcContext, tapLogger);
     }
 
-    public AbstractWalLogMiner registerConsumer(TapStreamReadConsumer<?, Object> consumer, int recordSize) {
+    public AbstractWalLogMiner registerCdcConsumer(TapStreamReadConsumer<?, Object> consumer, int recordSize) {
         if (consumer instanceof StreamReadConsumer) {
             this.consumer = new LogMinerBatchAccepter()
                     .setConsumer((StreamReadConsumer) consumer)

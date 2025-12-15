@@ -617,14 +617,14 @@ public class PostgresConnector extends CommonDbConnector {
                 new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
                         .watch(tableList, nodeContext.getTableMap())
                         .offset(offsetState)
-                        .registerConsumer(consumer, recordSize)
+                        .registerCdcConsumer(consumer, recordSize)
                         .startMiner(this::isAlive);
             } else {
                 new WalLogMinerV2(postgresJdbcContext, tapLogger)
                         .watch(tableList, nodeContext.getTableMap())
                         .withWalLogDirectory(getWalDirectory())
                         .offset(offsetState)
-                        .registerConsumer(consumer, recordSize)
+                        .registerCdcConsumer(consumer, recordSize)
                         .startMiner(this::isAlive);
             }
         } else {
@@ -691,14 +691,14 @@ public class PostgresConnector extends CommonDbConnector {
                 new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
                         .watch(schemaTableMap, nodeContext.getTableMap())
                         .offset(offsetState)
-                        .registerConsumer(consumer, batchSize)
+                        .registerCdcConsumer(consumer, batchSize)
                         .startMiner(this::isAlive);
             } else {
                 new WalLogMinerV2(postgresJdbcContext, tapLogger)
                         .watch(schemaTableMap, nodeContext.getTableMap())
                         .withWalLogDirectory(getWalDirectory())
                         .offset(offsetState)
-                        .registerConsumer(consumer, batchSize)
+                        .registerCdcConsumer(consumer, batchSize)
                         .startMiner(this::isAlive);
             }
         } else {
