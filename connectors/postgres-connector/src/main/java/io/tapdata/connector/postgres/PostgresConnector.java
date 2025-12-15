@@ -631,7 +631,7 @@ public class PostgresConnector extends CommonDbConnector {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
+            cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerCdcConsumer(consumer, recordSize);
             cdcRunner.startCdcRunner();
             if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
                 Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
@@ -705,7 +705,7 @@ public class PostgresConnector extends CommonDbConnector {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerConsumer(consumer, batchSize);
+            cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerCdcConsumer(consumer, batchSize);
             cdcRunner.startCdcRunner();
             if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
                 Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());

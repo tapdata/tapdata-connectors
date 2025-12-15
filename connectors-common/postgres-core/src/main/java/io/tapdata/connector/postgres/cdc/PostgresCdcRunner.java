@@ -155,7 +155,14 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         return throwableAtomicReference;
     }
 
-    public void registerConsumer(TapStreamReadConsumer<?, Object> consumer, int recordSize) {
+    /**
+     * @deprecated
+     * */
+    public void registerConsumer(StreamReadConsumer consumer, int recordSize) {
+        registerCdcConsumer(consumer, recordSize);
+    }
+
+    public void registerCdcConsumer(TapStreamReadConsumer<?, Object> consumer, int recordSize) {
         Supplier<Integer> batchSizeGetter;
         if (consumer instanceof StreamReadConsumer) {
             this.consumer = new DebeziumBatchAccepter()
