@@ -37,31 +37,18 @@ public class StandardSchemaMode extends AbsSchemaMode {
         super(KafkaSchemaMode.STANDARD, kafkaService);
     }
 
-    @Override
-    public void discoverSchema(IKafkaService kafkaService, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) {
-        Queue<String> toBeLoadTables = tables.stream().filter(Objects::nonNull).distinct().collect(Collectors.toCollection(ConcurrentLinkedQueue::new));
-        List<TapTable> results = new LinkedList<>();
-        try {
-            String executorGroup = String.format("%s-discoverSchema", KafkaEnhancedConnector.PDK_ID);
-            ConcurrentUtils.runWithQueue(kafkaService.getExecutorService(), executorGroup, toBeLoadTables, 20, table -> {
-                TapTable sampleTable = new TapTable(table);
-                kafkaService.<Long, Object>sampleValue(Collections.singletonList(table), null, record -> {
-                    if (null != record) {
-                        if (record.value() instanceof TapInsertRecordEvent) {
-                            TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) record.value();
-                            Map<String, Object> data = insertRecordEvent.getAfter();
-                            KafkaUtils.data2TapTableFields(sampleTable, data);
-                            return false;
-                        }
-                    }
-                    return true;
-                });
-                results.add(sampleTable);
-            });
-            consumer.accept(results);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+    public void sampleOneSchema(String table, TapTable sampleTable) {
+        kafkaService.<Long, Object>sampleValue(Collections.singletonList(table), null, record -> {
+            if (null != record) {
+                if (record.value() instanceof TapInsertRecordEvent) {
+                    TapInsertRecordEvent insertRecordEvent = (TapInsertRecordEvent) record.value();
+                    Map<String, Object> data = insertRecordEvent.getAfter();
+                    KafkaUtils.data2TapTableFields(sampleTable, data);
+                    return false;
+                }
+            }
+            return true;
+        });
     }
 
     @Override
