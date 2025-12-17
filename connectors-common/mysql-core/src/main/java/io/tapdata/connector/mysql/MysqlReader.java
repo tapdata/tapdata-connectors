@@ -10,6 +10,9 @@ import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
 import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.common.ddl.wrapper.DDLWrapperConfig;
 import io.tapdata.common.exception.ExceptionCollector;
+import io.tapdata.connector.mysql.accept.MysqlAbstractAcceptor;
+import io.tapdata.connector.mysql.accept.MysqlBatchAcceptor;
+import io.tapdata.connector.mysql.accept.MysqlOneByOneAcceptor;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
@@ -44,9 +47,10 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
+import io.tapdata.pdk.apis.consumer.TapStreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
-import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
@@ -88,7 +92,7 @@ public class MysqlReader implements Closeable {
     private final Supplier<Boolean> isAlive;
     protected final MysqlJdbcContextV2 mysqlJdbcContext;
     private EmbeddedEngine embeddedEngine;
-    protected StreamReadConsumer streamReadConsumer;
+    protected MysqlAbstractAcceptor<?, ?> streamReadConsumer;
     private LinkedBlockingQueue<MysqlStreamEvent> eventQueue;
     private ScheduledExecutorService mysqlSchemaHistoryMonitor;
     protected KVReadOnlyMap<TapTable> tapTableMap;
@@ -368,8 +372,21 @@ public class MysqlReader implements Closeable {
         }
     }
 
+    protected MysqlAbstractAcceptor<?, ?> createAcceptor(int batchSize, TapStreamReadConsumer<?, Object> consumer) {
+        if (consumer instanceof StreamReadOneByOneConsumer) {
+            return new MysqlOneByOneAcceptor()
+                    .setConsumer((StreamReadOneByOneConsumer) consumer);
+        } else if (consumer instanceof StreamReadConsumer) {
+            return new MysqlBatchAcceptor()
+                    .setConsumer((StreamReadConsumer) consumer)
+                    .setBatchSize(batchSize);
+        } else {
+            throw new IllegalArgumentException("Unsupported consumer type: " + consumer.getClass().getName());
+        }
+    }
+
     public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
-                           Object offset, int batchSize, DDLParserType ddlParserType, StreamReadConsumer consumer, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) throws Throwable {
+                           Object offset, int batchSize, DDLParserType ddlParserType, TapStreamReadConsumer<?, Object> consumer, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) throws Throwable {
         MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         try {
             initDebeziumServerName(tapConnectorContext);
@@ -414,7 +431,7 @@ public class MysqlReader implements Closeable {
                 offsetStr = jsonParser.toJson(mysqlStreamOffset);
             }
             tapLogger.info("Starting mysql cdc, server name: " + serverName);
-            this.streamReadConsumer = consumer;
+            this.streamReadConsumer = createAcceptor(batchSize, consumer);
             LockManager.mysqlSchemaHistoryTransferManager.computeIfAbsent(serverName, key -> {
                 this.schemaHistoryTransfer = new MysqlSchemaHistoryTransfer();
                 return this.schemaHistoryTransfer;
@@ -512,8 +529,14 @@ public class MysqlReader implements Closeable {
                             streamReadConsumer.streamReadStarted();
                         }
                     })
-                    .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
-                            numberOfMessagesSinceLastCommit >= batchSize || timeSinceLastCommit.getSeconds() >= 5)
+                    .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) -> {
+                        int size = Math.min(Math.max(1, streamReadConsumer.getBatchSize()), 10000);
+                        //超时时间最小1秒，最大5秒
+                        int timeout =  Math.min(Math.max(1, size / 100), 5);
+                        return numberOfMessagesSinceLastCommit >= size || timeSinceLastCommit.getSeconds() >= timeout;
+                    })
+//                    .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
+//                            numberOfMessagesSinceLastCommit >= batchSize || timeSinceLastCommit.getSeconds() >= 5)
                     .using((result, message, throwable) -> {
                         tapConnectorContext.configContext();
                         if (result) {
@@ -654,32 +677,25 @@ public class MysqlReader implements Closeable {
         if (null != throwableAtomicReference.get()) {
             throw new RuntimeException(throwableAtomicReference.get());
         }
-        List<MysqlStreamEvent> mysqlStreamEvents = new ArrayList<>();
-        for (SourceRecord record : sourceRecords) {
+        for (int i = 0; i < sourceRecords.size(); i++) {
+            SourceRecord record = sourceRecords.get(i);
+            boolean lastOne = (i == sourceRecords.size() - 1);
             if (null == record || null == record.value()) continue;
             Schema valueSchema = record.valueSchema();
             if (null != valueSchema.field("op")) {
-                MysqlStreamEvent mysqlStreamEvent = wrapDML(record);
-                Optional.ofNullable(mysqlStreamEvent).ifPresent(mysqlStreamEvents::add);
+                MysqlStreamEvent mysqlStreamEvent = wrapDML(record, lastOne);
+                Optional.ofNullable(mysqlStreamEvent).ifPresent(streamReadConsumer::accept);
             } else if (null != valueSchema.field("ddl")) {
-                mysqlStreamEvents.addAll(Objects.requireNonNull(wrapDDL(record)));
+                wrapDDLWithConsumer(record, lastOne, streamReadConsumer::accept);
             } else if ("io.debezium.connector.common.Heartbeat".equals(valueSchema.name())) {
                 Optional.ofNullable((Struct) record.value())
                         .map(value -> value.getInt64("ts_ms"))
                         .map(TapSimplify::heartbeatEvent)
-                        .map(heartbeatEvent -> new MysqlStreamEvent(heartbeatEvent, getMysqlStreamOffset(record)))
-                        .ifPresent(mysqlStreamEvents::add);
+                        .map(heartbeatEvent -> new MysqlStreamEvent(heartbeatEvent, lastOne ? getMysqlStreamOffset(record) : null))
+                        .ifPresent(streamReadConsumer::accept);
             }
         }
-        if (CollectionUtils.isNotEmpty(mysqlStreamEvents)) {
-            List<TapEvent> tapEvents = new ArrayList<>();
-            MysqlStreamOffset mysqlStreamOffset = null;
-            for (MysqlStreamEvent mysqlStreamEvent : mysqlStreamEvents) {
-                tapEvents.add(mysqlStreamEvent.getTapEvent());
-                mysqlStreamOffset = mysqlStreamEvent.getMysqlStreamOffset();
-            }
-            streamReadConsumer.accept(tapEvents, mysqlStreamOffset);
-        }
+        streamReadConsumer.complete();
     }
 
     protected void sourceRecordConsumer(SourceRecord record) {
@@ -688,31 +704,26 @@ public class MysqlReader implements Closeable {
         }
         if (null == record || null == record.value()) return;
         Schema valueSchema = record.valueSchema();
-        List<MysqlStreamEvent> mysqlStreamEvents = new ArrayList<>();
         if (null != valueSchema.field("op")) {
             MysqlStreamEvent mysqlStreamEvent = wrapDML(record);
-            Optional.ofNullable(mysqlStreamEvent).ifPresent(mysqlStreamEvents::add);
+            Optional.ofNullable(mysqlStreamEvent).ifPresent(streamReadConsumer::accept);
         } else if (null != valueSchema.field("ddl")) {
-            mysqlStreamEvents = wrapDDL(record);
+            wrapDDLWithConsumer(record, false, streamReadConsumer::accept);
         } else if ("io.debezium.connector.common.Heartbeat".equals(valueSchema.name())) {
             Optional.ofNullable((Struct) record.value())
                     .map(value -> value.getInt64("ts_ms"))
                     .map(TapSimplify::heartbeatEvent)
                     .map(heartbeatEvent -> new MysqlStreamEvent(heartbeatEvent, getMysqlStreamOffset(record)))
-                    .ifPresent(mysqlStreamEvents::add);
+                    .ifPresent(streamReadConsumer::accept);
         }
-        if (CollectionUtils.isNotEmpty(mysqlStreamEvents)) {
-            List<TapEvent> tapEvents = new ArrayList<>();
-            MysqlStreamOffset mysqlStreamOffset = null;
-            for (MysqlStreamEvent mysqlStreamEvent : mysqlStreamEvents) {
-                tapEvents.add(mysqlStreamEvent.getTapEvent());
-                mysqlStreamOffset = mysqlStreamEvent.getMysqlStreamOffset();
-            }
-            streamReadConsumer.accept(tapEvents, mysqlStreamOffset);
-        }
+        streamReadConsumer.complete();
     }
 
     protected MysqlStreamEvent wrapDML(SourceRecord record) {
+        return wrapDML(record, false);
+    }
+
+    protected MysqlStreamEvent wrapDML(SourceRecord record, boolean lastOne) {
         TapRecordEvent tapRecordEvent = null;
         Schema valueSchema = record.valueSchema();
         Struct value = (Struct) record.value();
@@ -830,7 +841,10 @@ public class MysqlReader implements Closeable {
         tapRecordEvent.setTableId(table);
         tapRecordEvent.setReferenceTime(eventTime);
         tapRecordEvent.setExactlyOnceId(getExactlyOnceId(record));
-        return wrapOffsetEvent(tapRecordEvent, record);
+        if (lastOne) {
+            return wrapOffsetEvent(tapRecordEvent, record);
+        }
+        return new MysqlStreamEvent(tapRecordEvent, null);
     }
 
     protected MysqlStreamEvent wrapOffsetEvent(TapEvent tapEvent, SourceRecord sourceRecord) {
@@ -838,17 +852,16 @@ public class MysqlReader implements Closeable {
         return new MysqlStreamEvent(tapEvent, mysqlStreamOffset);
     }
 
-    protected List<MysqlStreamEvent> wrapDDL(SourceRecord record) {
-        List<MysqlStreamEvent> mysqlStreamEvents = new ArrayList<>();
+    protected void wrapDDLWithConsumer(SourceRecord record, boolean lastOne, Consumer<MysqlStreamEvent> consumer) {
         Object value = record.value();
         if (!(value instanceof Struct)) {
-            return null;
+            return;
         }
         Struct structValue = (Struct) value;
         Struct source = structValue.getStruct("source");
         Long eventTime = source.getInt64("ts_ms");
         String ddlStr = structValue.getString(SOURCE_RECORD_DDL_KEY);
-        MysqlStreamOffset mysqlStreamOffset = getMysqlStreamOffset(record);
+        MysqlStreamOffset mysqlStreamOffset = lastOne ? getMysqlStreamOffset(record) : null;
         if (StringUtils.isNotBlank(ddlStr)) {
             try {
                 DDLFactory.ddlToTapDDLEvent(
@@ -862,7 +875,7 @@ public class MysqlReader implements Closeable {
                             tapDDLEvent.setReferenceTime(eventTime);
                             tapDDLEvent.setOriginDDL(ddlStr);
                             tapDDLEvent.setExactlyOnceId(getExactlyOnceId(record));
-                            mysqlStreamEvents.add(mysqlStreamEvent);
+                            consumer.accept(mysqlStreamEvent);
                             tapLogger.info("Read DDL: " + ddlStr + ", about to be packaged as some event(s)");
                         }
                 );
@@ -873,10 +886,17 @@ public class MysqlReader implements Closeable {
                 tapDDLEvent.setReferenceTime(eventTime);
                 tapDDLEvent.setOriginDDL(ddlStr);
                 tapDDLEvent.setExactlyOnceId(getExactlyOnceId(record));
-                mysqlStreamEvents.add(mysqlStreamEvent);
-//                throw new RuntimeException("Handle ddl failed: " + ddlStr + ", error: " + e.getMessage(), e);
+                consumer.accept(mysqlStreamEvent);
             }
         }
+    }
+
+    /**
+     * @deprecated
+     * */
+    protected List<MysqlStreamEvent> wrapDDL(SourceRecord record) {
+        List<MysqlStreamEvent> mysqlStreamEvents = new ArrayList<>();
+        wrapDDLWithConsumer(record, false, mysqlStreamEvents::add);
         return mysqlStreamEvents;
     }
 
