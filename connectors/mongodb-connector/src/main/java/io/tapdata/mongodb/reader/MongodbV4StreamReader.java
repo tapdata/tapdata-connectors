@@ -106,7 +106,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 //        List<Bson> pipeline1 = asList(Aggregates.match(Filters.or(collList)));
         FullDocument fullDocumentOption = FullDocument.DEFAULT;
         FullDocumentBeforeChange fullDocumentBeforeChangeOption = FullDocumentBeforeChange.WHEN_AVAILABLE;
-        if (mongodbConfig.isEnableFillingModifiedData() && !isPreImage ) {
+        if (mongodbConfig.isEnableFillingModifiedData() || isPreImage) {
             fullDocumentOption = FullDocument.UPDATE_LOOKUP;
         }
         while (running.get()) {
@@ -315,6 +315,11 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         }
                         after.put(k, v);
                     });
+					before.forEach((k, v) -> {
+						if (!after.containsKey(k)) {
+							after.put(k, v);
+						}
+					});
                 }
 
                 TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
