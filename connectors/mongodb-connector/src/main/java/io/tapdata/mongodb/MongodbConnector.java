@@ -754,7 +754,25 @@ public class MongodbConnector extends ConnectorBase {
 		//created capped collection
 		createCappedCollection(table, isShardCollection, log);
 
+		// open pre image
+		openPreImage(table, nodeConfig);
+
 		return createTableOptions;
+	}
+
+	private void openPreImage(TapTable table, DataMap nodeConfig) {
+		if (null == nodeConfig) {
+			return;
+		}
+		Object preImage4SinkObj = nodeConfig.get("preImage4Sink");
+		if(preImage4SinkObj instanceof Boolean && !Boolean.TRUE.equals(preImage4SinkObj)){
+			return;
+		}
+		String tableName = table.getId();
+		BsonDocument bsonDocument = new BsonDocument();
+		bsonDocument.put("collMod", new BsonString(tableName));
+		bsonDocument.put("changeStreamPreAndPostImages", new BsonDocument("enabled", new BsonBoolean(true)));
+		mongoDatabase.runCommand(bsonDocument);
 	}
 
 	protected void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
