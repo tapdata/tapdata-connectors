@@ -315,6 +315,11 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                         }
                         after.put(k, v);
                     });
+					before.forEach((k, v) -> {
+						if (!after.containsKey(k)) {
+							after.put(k, v);
+						}
+					});
                 }
 
                 TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
