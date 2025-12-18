@@ -48,7 +48,9 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Must be > 0 when using fixed mode
     private Integer bucketCount = 4;
 
-    private String fileFormat = "parquet";
+    private String fileFormat = "";
+
+    private String compression = "";
 
     public String getWarehouse() {
         return warehouse;
@@ -187,6 +189,14 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     public void setFileFormat(String fileFormat) {
         this.fileFormat = fileFormat;
+    }
+
+    public String getCompression() {
+        return compression;
+    }
+
+    public void setCompression(String compression) {
+        this.compression = compression;
     }
 
     /**

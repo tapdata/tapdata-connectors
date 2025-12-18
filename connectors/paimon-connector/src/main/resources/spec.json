@@ -228,11 +228,15 @@
         "fileFormat": {
           "type": "string",
           "title": "${fileFormat}",
-          "default": "parquet",
+          "default": "",
           "x-decorator": "FormItem",
           "x-component": "Select",
           "x-index": 40,
           "enum": [
+            {
+              "label": "",
+              "value": ""
+            },
             {
               "label": "ORC",
               "value": "orc"
@@ -260,6 +264,54 @@
             {
               "label": "BLOB",
               "value": "blob"
+            }
+          ],
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "compression": {
+          "type": "string",
+          "title": "${compression}",
+          "default": "",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 50,
+          "enum": [
+            {
+              "label": "",
+              "value": ""
+            },
+            {
+              "label": "NONE",
+              "value": "none"
+            },
+            {
+              "label": "SNAPPY",
+              "value": "snappy"
+            },
+            {
+              "label": "LZ4",
+              "value": "lz4"
+            },
+            {
+              "label": "ZSTD",
+              "value": "zstd"
+            },
+            {
+              "label": "GZIP",
+              "value": "gzip"
+            },
+            {
+              "label": "BZIP2",
+              "value": "bzip2"
             }
           ],
           "x-reactions": [
@@ -304,7 +356,8 @@
       "bucketMode_fixed": "Fixed (Better performance)",
       "bucketCount": "Bucket Count",
       "bucketCount_placeholder": "Number of buckets for fixed mode (must be > 0)",
-      "fileFormat": "File Format"
+      "fileFormat": "File Format",
+      "compression": "Compression Format"
     },
     "zh_CN": {
       "doc": "docs/paimon_zh_CN.md",
@@ -332,7 +385,8 @@
       "bucketMode_fixed": "固定模式（更好的性能）",
       "bucketCount": "分桶数量",
       "bucketCount_placeholder": "固定模式下的桶数量（必须大于 0）",
-      "fileFormat": "文件格式"
+      "fileFormat": "文件格式",
+      "compression": "压缩格式"
     },
     "zh_TW": {
       "doc": "docs/paimon_zh_TW.md",
@@ -360,7 +414,8 @@
       "bucketMode_fixed": "固定模式（更好的性能）",
       "bucketCount": "分桶數量",
       "bucketCount_placeholder": "固定模式下的桶數量（必須大於 0）",
-      "fileFormat": "文件格式"
+      "fileFormat": "文件格式",
+      "compression": "壓縮格式"
     }
   },
   "dataTypes": {
