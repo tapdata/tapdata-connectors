@@ -9,6 +9,7 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.paimon.catalog.Catalog;
@@ -408,6 +409,12 @@ public class PaimonService implements Closeable {
                 bucketCount = 4; // Default to 4 buckets if not configured
             }
             schemaBuilder.option("bucket", String.valueOf(bucketCount));
+        }
+        if (EmptyKit.isNotBlank(config.getFileFormat())) {
+            schemaBuilder.option("file.format", config.getFileFormat());
+        }
+        if (EmptyKit.isNotBlank(config.getCompression())) {
+            schemaBuilder.option("compression", config.getCompression());
         }
 
 		// Create table
