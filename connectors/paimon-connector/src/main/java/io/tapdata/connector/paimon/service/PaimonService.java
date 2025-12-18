@@ -5,6 +5,7 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
@@ -333,93 +334,94 @@ public class PaimonService implements Closeable {
         }
     }
 
-    /**
-     * Create table in Paimon
-     *
-     * @param tapTable table definition
-     * @return true if created, false if already exists
-     * @throws Exception if creation fails
-     */
-    public boolean createTable(TapTable tapTable) throws Exception {
-        String database = config.getDatabase();
-        String tableName = tapTable.getName();
+	/**
+	 * Create table in Paimon
+	 *
+	 * @param tapTable table definition
+	 * @return true if created, false if already exists
+	 * @throws Exception if creation fails
+	 */
+	public boolean createTable(TapTable tapTable, Log log) throws Exception {
+		String database = config.getDatabase();
+		String tableName = tapTable.getName();
 
-        // Ensure database exists
-        try {
-            catalog.getDatabase(database);
-        } catch (Catalog.DatabaseNotExistException e) {
-            // Database does not exist, create it
-            catalog.createDatabase(database, true);
-        }
+		// Ensure database exists
+		try {
+			catalog.getDatabase(database);
+		} catch (Catalog.DatabaseNotExistException e) {
+			// Database does not exist, create it
+			catalog.createDatabase(database, true);
+		}
 
-        Identifier identifier = Identifier.create(database, tableName);
+		Identifier identifier = Identifier.create(database, tableName);
 
-        // Check if table already exists
-        try {
-            catalog.getTable(identifier);
-            // Table exists, check if bucket mode matches
-            boolean existingIsDynamic = isTableDynamicBucket(identifier);
-            boolean configIsDynamic = config.isDynamicBucketMode();
+		// Check if table already exists
+		try {
+			catalog.getTable(identifier);
+			// Table exists, check if bucket mode matches
+			boolean existingIsDynamic = isTableDynamicBucket(identifier);
+			boolean configIsDynamic = config.isDynamicBucketMode();
 
-            if (existingIsDynamic != configIsDynamic) {
-                // Bucket mode mismatch, need to recreate table
-                // WARNING: This will delete all existing data
-                catalog.dropTable(identifier, true);
-                // Continue to create table with new bucket mode
-            } else {
-                // Table exists and bucket mode matches, no need to recreate
-                return false;
-            }
-        } catch (Catalog.TableNotExistException e) {
-            // Table does not exist, continue to create
-        }
+			if (existingIsDynamic != configIsDynamic) {
+				// Bucket mode mismatch, log warning and continue with existing table
+				String existingMode = existingIsDynamic ? "dynamic" : "fixed";
+				String configMode = configIsDynamic ? "dynamic" : "fixed";
+				log.warn("Table {} already exists with {} bucket mode, but config specifies {} bucket mode. " +
+								"Cannot switch bucket mode for existing table. Using existing table configuration.",
+						tableName, existingMode, configMode);
+			}
+			// Table exists, no need to recreate
+			return false;
+		} catch (Catalog.TableNotExistException e) {
+			// Table does not exist, continue to create
+		}
 
-        // Build schema
-        Schema.Builder schemaBuilder = Schema.newBuilder();
+		// Build schema
+		Schema.Builder schemaBuilder = Schema.newBuilder();
 
-        // Add fields
-        Map<String, TapField> fields = tapTable.getNameFieldMap();
-        if (fields != null) {
-            for (Map.Entry<String, TapField> entry : fields.entrySet()) {
-                String fieldName = entry.getKey();
-                TapField tapField = entry.getValue();
-                DataType dataType = convertToPaimonDataType(tapField);
-                schemaBuilder.column(fieldName, dataType);
-            }
-        }
+		// Add fields
+		Map<String, TapField> fields = tapTable.getNameFieldMap();
+		if (fields != null) {
+			for (Map.Entry<String, TapField> entry : fields.entrySet()) {
+				String fieldName = entry.getKey();
+				TapField tapField = entry.getValue();
+				DataType dataType = convertToPaimonDataType(tapField);
+				schemaBuilder.column(fieldName, dataType);
+			}
+		}
 
-        // Set primary keys
-        Collection<String> primaryKeys = tapTable.primaryKeys();
-        if (primaryKeys != null && !primaryKeys.isEmpty()) {
-            schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
-        }
+		// Set primary keys
+		Collection<String> primaryKeys = tapTable.primaryKeys();
+		if (primaryKeys != null && !primaryKeys.isEmpty()) {
+			schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
+		}
 
-        // Set bucket configuration based on bucket mode
-        if (config.isDynamicBucketMode()) {
-            // Dynamic bucket mode: set bucket to -1
-            // This mode uses StreamTableWrite and provides better flexibility
-            schemaBuilder.option("bucket", "-1");
-        } else {
-            // Fixed bucket mode: set specific bucket count
-            // This mode uses BatchTableWrite and provides better performance
-            Integer bucketCount = config.getBucketCount();
-            if (bucketCount == null || bucketCount <= 0) {
-                bucketCount = 4; // Default to 4 buckets if not configured
-            }
-            schemaBuilder.option("bucket", String.valueOf(bucketCount));
-        }
-        if (EmptyKit.isNotBlank(config.getFileFormat())) {
+		// Set bucket configuration based on bucket mode
+		if (config.isDynamicBucketMode()) {
+			// Dynamic bucket mode: set bucket to -1
+			// This mode uses StreamTableWrite and provides better flexibility
+			schemaBuilder.option("bucket", "-1");
+		} else {
+			// Fixed bucket mode: set specific bucket count
+			// This mode uses BatchTableWrite and provides better performance
+			Integer bucketCount = config.getBucketCount();
+			if (bucketCount == null || bucketCount <= 0) {
+				bucketCount = 4; // Default to 4 buckets if not configured
+			}
+			schemaBuilder.option("bucket", String.valueOf(bucketCount));
+		}
+		if (EmptyKit.isNotBlank(config.getFileFormat())) {
             schemaBuilder.option("file.format", config.getFileFormat());
         }
         if (EmptyKit.isNotBlank(config.getCompression())) {
             schemaBuilder.option("compression", config.getCompression());
         }
 
-        // Create table
-        catalog.createTable(identifier, schemaBuilder.build(), false);
+		// Create table
+		catalog.createTable(identifier, schemaBuilder.build(), false);
 
-        return true;
-    }
+		return true;
+	}
 
     /**
      * Convert TapField to Paimon DataType
