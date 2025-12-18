@@ -224,6 +224,54 @@
           },
           "default": 4,
           "x-index": 30
+        },
+        "fileFormat": {
+          "type": "string",
+          "title": "${fileFormat}",
+          "default": "parquet",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 40,
+          "enum": [
+            {
+              "label": "ORC",
+              "value": "orc"
+            },
+            {
+              "label": "PARQUET",
+              "value": "parquet"
+            },
+            {
+              "label": "AVRO",
+              "value": "avro"
+            },
+            {
+              "label": "CSV",
+              "value": "csv"
+            },
+            {
+              "label": "JSON",
+              "value": "json"
+            },
+            {
+              "label": "LANCE",
+              "value": "lance"
+            },
+            {
+              "label": "BLOB",
+              "value": "blob"
+            }
+          ],
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -255,7 +303,8 @@
       "bucketMode_dynamic": "Dynamic (Recommended for general use)",
       "bucketMode_fixed": "Fixed (Better performance)",
       "bucketCount": "Bucket Count",
-      "bucketCount_placeholder": "Number of buckets for fixed mode (must be > 0)"
+      "bucketCount_placeholder": "Number of buckets for fixed mode (must be > 0)",
+      "fileFormat": "File Format"
     },
     "zh_CN": {
       "doc": "docs/paimon_zh_CN.md",
@@ -282,7 +331,8 @@
       "bucketMode_dynamic": "动态模式（推荐通用场景）",
       "bucketMode_fixed": "固定模式（更好的性能）",
       "bucketCount": "分桶数量",
-      "bucketCount_placeholder": "固定模式下的桶数量（必须大于 0）"
+      "bucketCount_placeholder": "固定模式下的桶数量（必须大于 0）",
+      "fileFormat": "文件格式"
     },
     "zh_TW": {
       "doc": "docs/paimon_zh_TW.md",
@@ -309,7 +359,8 @@
       "bucketMode_dynamic": "動態模式（推薦通用場景）",
       "bucketMode_fixed": "固定模式（更好的性能）",
       "bucketCount": "分桶數量",
-      "bucketCount_placeholder": "固定模式下的桶數量（必須大於 0）"
+      "bucketCount_placeholder": "固定模式下的桶數量（必須大於 0）",
+      "fileFormat": "文件格式"
     }
   },
   "dataTypes": {

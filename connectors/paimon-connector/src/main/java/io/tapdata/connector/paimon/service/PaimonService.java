@@ -407,6 +407,7 @@ public class PaimonService implements Closeable {
             }
             schemaBuilder.option("bucket", String.valueOf(bucketCount));
         }
+        schemaBuilder.option("file.format", config.getFileFormat());
 
         // Create table
         catalog.createTable(identifier, schemaBuilder.build(), false);
