@@ -220,7 +220,7 @@ public class PaimonConnector extends ConnectorBase {
         TapTable table = createTableEvent.getTable();
         log.info("Creating Paimon table: " + table.getName());
         
-        boolean created = paimonService.createTable(table);
+        boolean created = paimonService.createTable(table, log);
         if (created) {
             log.info("Table created successfully: " + table.getName());
         } else {
