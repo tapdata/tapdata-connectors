@@ -142,6 +142,16 @@ public class StarrocksStreamLoader {
         return httpClient;
     }
 
+    private CloseableHttpClient getHttpClient() {
+        CloseableHttpClient httpClient;
+        if (useHttps) {
+            httpClient = HttpUtil.generationHttpClient();
+        } else {
+            httpClient = new HttpUtil().getHttpClient();
+        }
+        return httpClient;
+    }
+
     private void initMessageSerializer() {
         StarrocksConfig.WriteFormat writeFormat = StarrocksConfig.getWriteFormatEnum();
         taplogger.info("Starrocks stream load run with {} format", writeFormat);
@@ -650,7 +660,8 @@ public class StarrocksStreamLoader {
                 }
             }
             HttpPut httpPut = putBuilder.build();
-            try (CloseableHttpResponse execute = getHttpClient(tableName).execute(httpPut)) {
+            try (CloseableHttpClient httpClient = getHttpClient();
+                 CloseableHttpResponse execute = httpClient.execute(httpPut)) {
                 return handlePreCommitResponse(execute);
             }
         } catch (StarrocksRetryableException e) {
@@ -750,8 +761,11 @@ public class StarrocksStreamLoader {
             taplogger.info("=====================================");
 
             long requestStartTime = System.currentTimeMillis();
-            try (CloseableHttpResponse execute = getHttpClient(tableName).execute(httpPut)) {
+            taplogger.info("---requestStartTime: {}", requestStartTime);
+            try (CloseableHttpClient httpClient = getHttpClient();
+                 CloseableHttpResponse execute = httpClient.execute(httpPut)) {
                 long requestEndTime = System.currentTimeMillis();
+                taplogger.info("---requestEndTime: {}", requestEndTime);
                 long requestDuration = requestEndTime - requestStartTime;
 
                 RespContent respContent = handlePreCommitResponse(execute);
@@ -794,6 +808,7 @@ public class StarrocksStreamLoader {
             throw new StarrocksRetryableException("Stream load error: " + response.getStatusLine().toString());
         }
         String loadResult = EntityUtils.toString(response.getEntity());
+        taplogger.info("---loadResult: {}", loadResult);
 
         RespContent respContent = OBJECT_MAPPER.readValue(loadResult, RespContent.class);
         if (!respContent.isSuccess() && !"Publish Timeout".equals(respContent.getStatus())) {
@@ -803,6 +818,7 @@ public class StarrocksStreamLoader {
             }
             throw new StarrocksRetryableException(loadResult);
         }
+        taplogger.info("---respContent: {}", respContent);
         return respContent;
     }
 
