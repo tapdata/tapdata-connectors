@@ -678,7 +678,17 @@ public class MongodbConnector extends ConnectorBase {
 		BsonDocument bsonDocument = new BsonDocument();
 		bsonDocument.put("collMod", new BsonString(tableName));
 		bsonDocument.put("changeStreamPreAndPostImages", new BsonDocument("enabled", new BsonBoolean(true)));
-		mongoDatabase.runCommand(bsonDocument);
+		try {
+			mongoDatabase.runCommand(bsonDocument);
+		} catch (MongoException e) {
+			if (e.getCode() == 26) {
+				// Collection doesn't exist (NamespaceNotFound), create it and try again
+				mongoDatabase.createCollection(tableName);
+				mongoDatabase.runCommand(bsonDocument);
+			} else {
+				throw e;
+			}
+		}
 	}
 
 	protected void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
