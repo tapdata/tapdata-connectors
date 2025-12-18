@@ -114,8 +114,13 @@ public class DorisConnector extends CommonDbConnector {
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> dorisJdbcContext.getConnection(), this::isAlive, c));
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
-            if (tapRawValue != null && tapRawValue.getValue() != null)
-                return toJson(tapRawValue.getValue());
+            if (tapRawValue != null && tapRawValue.getValue() != null) {
+                if (tapRawValue.getValue() instanceof String) {
+                    return tapRawValue.getValue();
+                } else {
+                    return toJson(tapRawValue.getValue());
+                }
+            }
             return "null";
         });
         codecRegistry.registerFromTapValue(TapMapValue.class, "text", tapMapValue -> {
