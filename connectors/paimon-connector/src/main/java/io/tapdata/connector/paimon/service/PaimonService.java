@@ -628,6 +628,25 @@ public class PaimonService implements Closeable {
                                                                         TapTable table,
                                                                         String insertPolicy,
                                                                         String updatePolicy) throws Exception {
+        return writeRecordsWithBatchWriteInternal(recordEvents, table, insertPolicy, updatePolicy, true);
+    }
+
+    /**
+     * Internal implementation of batch write with retry support
+     *
+     * @param recordEvents list of record events
+     * @param table target table
+     * @param insertPolicy insert policy
+     * @param updatePolicy update policy
+     * @param allowRetry whether to allow retry on ThreadGroup destroyed error
+     * @return write result
+     * @throws Exception if write fails
+     */
+    private WriteListResult<TapRecordEvent> writeRecordsWithBatchWriteInternal(List<TapRecordEvent> recordEvents,
+                                                                                TapTable table,
+                                                                                String insertPolicy,
+                                                                                String updatePolicy,
+                                                                                boolean allowRetry) throws Exception {
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         String database = config.getDatabase();
         String tableName = table.getName();
@@ -656,6 +675,11 @@ public class PaimonService implements Closeable {
             commit.commit(writer.prepareCommit());
 
         } catch (Exception e) {
+            // Check if it's ThreadGroup destroyed error, retry after reinitializing catalog
+            if (allowRetry && isThreadGroupDestroyedError(e)) {
+                reinitCatalog();
+                return writeRecordsWithBatchWriteInternal(recordEvents, table, insertPolicy, updatePolicy, false);
+            }
             throw new RuntimeException("Failed to write records to table " + tableName, e);
         } finally {
             // Close writer and commit after use since they only support one-time committing
@@ -688,6 +712,25 @@ public class PaimonService implements Closeable {
                                                                          TapTable table,
                                                                          String insertPolicy,
                                                                          String updatePolicy) throws Exception {
+        return writeRecordsWithStreamWriteInternal(recordEvents, table, insertPolicy, updatePolicy, true);
+    }
+
+    /**
+     * Internal implementation of stream write with retry support
+     *
+     * @param recordEvents list of record events
+     * @param table target table
+     * @param insertPolicy insert policy
+     * @param updatePolicy update policy
+     * @param allowRetry whether to allow retry on ThreadGroup destroyed error
+     * @return write result
+     * @throws Exception if write fails
+     */
+    private WriteListResult<TapRecordEvent> writeRecordsWithStreamWriteInternal(List<TapRecordEvent> recordEvents,
+                                                                                  TapTable table,
+                                                                                  String insertPolicy,
+                                                                                  String updatePolicy,
+                                                                                  boolean allowRetry) throws Exception {
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         String database = config.getDatabase();
         String tableName = table.getName();
@@ -720,6 +763,11 @@ public class PaimonService implements Closeable {
             commit.commit(commitIdentifier, messages);
 
         } catch (Exception e) {
+            // Check if it's ThreadGroup destroyed error, retry after reinitializing catalog
+            if (allowRetry && isThreadGroupDestroyedError(e)) {
+                reinitCatalog();
+                return writeRecordsWithStreamWriteInternal(recordEvents, table, insertPolicy, updatePolicy, false);
+            }
             throw new RuntimeException("Failed to write records to table " + tableName, e);
         } finally {
             // Close writer and commit after use
@@ -736,6 +784,44 @@ public class PaimonService implements Closeable {
         }
 
         return result;
+    }
+
+    /**
+     * Reinitialize the Paimon catalog.
+     * This is used to recover from ThreadGroup destroyed errors caused by classloader unloading.
+     *
+     * @throws Exception if reinitialization fails
+     */
+    private synchronized void reinitCatalog() throws Exception {
+        // Close old catalog if exists
+        if (catalog != null) {
+            try {
+                catalog.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
+        }
+        // Reinitialize catalog
+        init();
+    }
+
+    /**
+     * Check if the exception is caused by ThreadGroup being destroyed.
+     * This typically happens when the classloader that created Paimon's thread factory
+     * has been unloaded, causing the captured ThreadGroup to be destroyed.
+     *
+     * @param e the exception to check
+     * @return true if it's a ThreadGroup destroyed error
+     */
+    private boolean isThreadGroupDestroyedError(Throwable e) {
+        Throwable cause = e;
+        while (cause != null) {
+            if (cause instanceof IllegalThreadStateException) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
     }
 
     /**
