@@ -13,6 +13,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.TapArrayValue;
 import io.tapdata.entity.schema.value.TapMapValue;
 import io.tapdata.entity.schema.value.TapRawValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -201,6 +202,7 @@ public class PaimonConnector extends ConnectorBase {
             }
             return null;
         });
+        codecRegistry.registerFromTapValue(TapTimeValue.class, "CHAR(8)", tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss"));
     }
 
     /**
