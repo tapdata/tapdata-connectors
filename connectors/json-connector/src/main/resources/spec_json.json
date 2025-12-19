@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "JSON",
+    "realName": "JSON",
     "icon": "icons/json.png",
     "doc": "${doc}",
     "id": "json",

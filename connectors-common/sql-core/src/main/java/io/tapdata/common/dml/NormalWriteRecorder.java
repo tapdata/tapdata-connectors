@@ -385,7 +385,7 @@ public abstract class NormalWriteRecorder {
                 //有字段内容不全情况，不可使用
                 executeBatch(listResult);
                 largeSql = false;
-            } else if (uniqueCondition.stream().anyMatch(v -> !Objects.equals(after.get(v), before.get(v)))) {
+            } else if (EmptyKit.isNotEmpty(before) && uniqueCondition.stream().anyMatch(v -> !Objects.equals(after.get(v), before.get(v)))) {
                 //更新关联条件，不可使用
                 executeBatch(listResult);
                 largeSql = false;

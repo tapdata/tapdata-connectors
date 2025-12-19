@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "EXCEL",
+    "realName": "Excel",
     "icon": "icons/excel.png",
     "doc": "${doc}",
     "id": "excel",

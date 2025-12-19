@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Tidb",
+    "realName": "TiDB",
     "icon": "icons/tidb.svg",
     "id": "tidb",
     "doc": "${doc}",

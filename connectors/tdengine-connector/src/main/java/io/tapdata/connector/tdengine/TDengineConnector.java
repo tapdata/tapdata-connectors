@@ -217,6 +217,7 @@ public class TDengineConnector extends CommonDbConnector {
             if (EmptyKit.isNotNull(tapTable.getComment())) {
                 sqls.add(" COMMENT '" + tapTable.getComment() + "'");
             }
+            tapLogger.info("Create table sql: {}", sqls);
             tdengineJdbcContext.batchExecute(sqls);
         } catch (Throwable e) {
             e.printStackTrace();
@@ -228,6 +229,7 @@ public class TDengineConnector extends CommonDbConnector {
 
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() == 1) {
+            tapLogger.info("Clear table sql: DELETE FROM " + getSchemaAndTable(tapClearTableEvent.getTableId()));
             jdbcContext.execute("DELETE FROM " + getSchemaAndTable(tapClearTableEvent.getTableId()));
         }
     }
@@ -237,6 +239,7 @@ public class TDengineConnector extends CommonDbConnector {
         List<String> dropSqls = new ArrayList<>();
         dropSqls.add(String.format("DROP TABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId));
         dropSqls.add(String.format("DROP STABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId));
+        tapLogger.info("Drop table sql: {}", dropSqls);
         tdengineJdbcContext.batchExecute(dropSqls);
     }
 
@@ -303,6 +306,7 @@ public class TDengineConnector extends CommonDbConnector {
             }
             createSqls.add(String.format("create topic if not exists `%s` as select * from `%s`", topic, tableName));
         }
+        tapLogger.info("Create topic sql: {}", createSqls);
         tdengineJdbcContext.batchExecute(createSqls);
     }
 
@@ -315,6 +319,7 @@ public class TDengineConnector extends CommonDbConnector {
             String topic = "tap_topic_" + tableName;
             dropSqls.add(String.format("drop topic if exists `%s`", topic));
         }
+        tapLogger.info("Drop topic sql: {}", dropSqls);
         tdengineJdbcContext.batchExecute(dropSqls);
     }
 

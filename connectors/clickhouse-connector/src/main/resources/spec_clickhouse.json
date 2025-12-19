@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Clickhouse",
+    "realName": "ClickHouse",
     "icon": "icons/clickhouse.png",
     "id": "clickhouse",
     "doc": "${doc}",

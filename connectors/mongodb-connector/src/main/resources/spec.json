@@ -1,6 +1,7 @@
 {
 	"properties": {
 		"name": "MongoDB",
+		"realName": "MongoDB",
 		"icon": "icons/mongodb.png",
 		"doc" : "${doc}",
 		"tags" : ["schema-free","Database","doubleActive"],
@@ -337,17 +338,29 @@
 					"x-decorator-props": {
 						"layout": "horizontal"
 					},
-					"default": true,
-					"x-reactions": {
-						"dependencies": [
-							"$inputs"
-						],
-						"fulfill": {
-							"state": {
-								"visible": "{{!$deps[0].length}}"
+					"x-reactions": [
+						{
+							"dependencies": [
+								"$inputs"
+							],
+							"fulfill": {
+								"state": {
+									"visible": "{{!$deps[0].length}}",
+									"value": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 ? false: true}}"
+								}
+							}
+						},
+						{
+							"dependencies": [
+								".preImage"
+							],
+							"fulfill": {
+								"state": {
+									"value": "{{$deps[0] === true ? false: $self.value}}"
+								}
 							}
 						}
-					}, "x-index": 3
+					], "x-index": 3
 				},
 				"noCursorTimeout": {
 					"title": "${noCursorTimeout}",
@@ -400,17 +413,29 @@
 						"layout": "horizontal",
 						"tooltip": "${preImageTips}"
 					},
-					"x-reactions": {
-						"dependencies": [
-							"$outputs"
-						],
-						"fulfill": {
-							"state": {
-								"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0}}",
-								"value": "{{$self.visible && $self.value === undefined ? true : $self.value}}"
+					"x-reactions": [
+						{
+							"dependencies": [
+								"$outputs"
+							],
+							"fulfill": {
+								"state": {
+									"visible": "{{$values.attrs.db_version !== undefined && parseInt($values.attrs.db_version.match(/\\d+/)[0]) >= 6 && $deps[0].length>0}}",
+									"value": "{{$self.visible && $self.value === undefined ? true : $self.value}}"
+								}
+							}
+						},
+						{
+							"dependencies": [
+								".enableFillingModifiedData"
+							],
+							"fulfill": {
+								"state": {
+									"value": "{{$deps[0] === true? false: $self.value}}"
+						         }
 							}
 						}
-					},
+					],
 					"x-index": 6
 				},
                 "preImage4Sink": {

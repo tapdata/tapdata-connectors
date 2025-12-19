@@ -130,10 +130,10 @@ public class MongodbWriter {
 
 	private void doubleActiveWrite(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
 		Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
-		UpdateOptions options = new UpdateOptions().upsert(true);
-		mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
-		write(table, tapRecordEvents, writeListResultConsumer, session);
-	}
+        UpdateOptions options = new UpdateOptions().upsert(true);
+        mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
+        write(table, tapRecordEvents, writeListResultConsumer, session);
+    }
 
 	private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
 		AtomicLong inserted = new AtomicLong(0); //insert count

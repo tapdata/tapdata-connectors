@@ -46,12 +46,6 @@ public class CanalSchemaMode extends AbsSchemaMode {
 	}
 
 	@Override
-	public void discoverSchema(IKafkaService kafkaService, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) {
-		// todo
-		throw new UnsupportedOperationException();
-	}
-
-	@Override
 	public TapEvent toTapEvent(ConsumerRecord<?, ?> consumerRecord) {
 		// todo
 		throw new UnsupportedOperationException();

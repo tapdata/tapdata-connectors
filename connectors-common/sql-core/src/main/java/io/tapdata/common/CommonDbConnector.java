@@ -216,6 +216,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             }
         }
         try {
+            tapLogger.info("Create table sqls: {}", sqlList);
             jdbcContext.batchExecute(sqlList);
         } catch (SQLException e) {
             exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
@@ -237,9 +238,13 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected void createDoubleActiveTempTable() throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList("_tap_double_active")).size() < 1) {
-            jdbcContext.execute(String.format("create table %s (%s int primary key, %s varchar(50))", getSchemaAndTable("_tap_double_active"),
-                    commonDbConfig.getEscapeChar() + "c1" + commonDbConfig.getEscapeChar(), commonDbConfig.getEscapeChar() + "c2" + commonDbConfig.getEscapeChar()));
-            jdbcContext.execute(String.format("insert into %s values (1, null)", getSchemaAndTable("_tap_double_active")));
+            String create = String.format("create table %s (%s int primary key, %s varchar(50))", getSchemaAndTable("_tap_double_active"),
+                    commonDbConfig.getEscapeChar() + "c1" + commonDbConfig.getEscapeChar(), commonDbConfig.getEscapeChar() + "c2" + commonDbConfig.getEscapeChar());
+            tapLogger.info("Create double active table sql: {}", create);
+            jdbcContext.execute(create);
+            String insert = String.format("insert into %s values (1, null)", getSchemaAndTable("_tap_double_active"));
+            tapLogger.info("Insert one initial record into double active table: {}", insert);
+            jdbcContext.execute(insert);
         }
     }
 
@@ -385,7 +390,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
-            jdbcContext.execute("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
+            String clear = "truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId());
+            tapLogger.info("Truncate table sql: {}", clear);
+            jdbcContext.execute(clear);
         } else {
             tapLogger.warn("Table {} not exists, skip truncate", tapClearTableEvent.getTableId());
         }
@@ -393,7 +400,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
-            jdbcContext.execute("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
+            String drop = "drop table " + getSchemaAndTable(tapDropTableEvent.getTableId());
+            tapLogger.info("Drop table sql: {}", drop);
+            jdbcContext.execute(drop);
         } else {
             tapLogger.warn("Table {} not exists, skip drop", tapDropTableEvent.getTableId());
         }
@@ -446,6 +455,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             indexList.stream().filter(i -> !i.isPrimary()).forEach(i -> {
                 String sql = getCreateIndexSql(tapTable, i);
                 try {
+                    tapLogger.info("Create index sql: {}", sql);
                     jdbcContext.execute(sql);
                 } catch (SQLException e) {
                     if (!exceptionCollector.violateIndexName(e)) {
@@ -456,6 +466,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                         i.setName(rename);
                         sql = getCreateIndexSql(tapTable, i);
                         try {
+                            tapLogger.info("Recreate index sql: {}", sql);
                             jdbcContext.execute(sql);
                         } catch (SQLException e1) {
                             tapLogger.warn("Create index failed again {}, please execute it manually [{}]", e1.getMessage(), sql);
@@ -467,6 +478,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             if (EmptyKit.isNotEmpty(afterUniqueAutoIncrementSql)) {
                 afterUniqueAutoIncrementSql.forEach(sql -> {
                     try {
+                        tapLogger.info("Update auto-increment column sql: {}", sql);
                         jdbcContext.execute(sql);
                     } catch (SQLException e) {
                         tapLogger.warn("Failed to update auto-increment column {}, please execute it manually [{}]", e.getMessage(), sql);
@@ -489,6 +501,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 String sql = getCreateConstraintSql(tapTable, c);
                 if (create) {
                     try {
+                        tapLogger.info("Create constraint sql: {}", sql);
                         jdbcContext.execute(sql);
                     } catch (Exception e) {
                         if (!exceptionCollector.violateConstraintName(e)) {
@@ -498,6 +511,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                             c.setName(rename);
                             sql = getCreateConstraintSql(tapTable, c);
                             try {
+                                tapLogger.info("Recreate constraint sql: {}", sql);
                                 jdbcContext.execute(sql);
                             } catch (Exception e1) {
                                 exception.addException(c, sql, e1);
@@ -586,6 +600,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             return;
         }
         try {
+            tapLogger.info("Field ddl sqls: {}", sqlList);
             jdbcContext.batchExecute(sqlList);
         } catch (SQLException e) {
             exceptionCollector.collectWritePrivileges("execute sqls: " + TapSimplify.toJson(sqlList), Collections.emptyList(), e);
@@ -945,6 +960,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         char escapeChar = commonDbConfig.getEscapeChar();
         List<String> dropIndexesSql = new ArrayList<>();
         deleteIndexEvent.getIndexNames().forEach(idx -> dropIndexesSql.add("drop index " + getSchemaAndTable(table.getId()) + "." + escapeChar + idx + escapeChar));
+        if (EmptyKit.isNotEmpty(dropIndexesSql)) {
+            tapLogger.info("Drop indexes sql: {}", dropIndexesSql);
+        }
         jdbcContext.batchExecute(dropIndexesSql);
     }
 
@@ -952,6 +970,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         char escapeChar = commonDbConfig.getEscapeChar();
         List<String> dropConstraintsSql = new ArrayList<>();
         tapDropConstraintEvent.getConstraintList().forEach(fk -> dropConstraintsSql.add("alter table " + getSchemaAndTable(table.getId()) + " drop constraint " + escapeChar + fk.getName() + escapeChar));
+        if (EmptyKit.isNotEmpty(dropConstraintsSql)) {
+            tapLogger.info("Drop constraints sql: {}", dropConstraintsSql);
+        }
         jdbcContext.batchExecute(dropConstraintsSql);
     }
 

@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "PostgreSQL",
+    "realName": "PostgreSQL",
     "icon": "icons/postgres.png",
     "doc" : "${doc}",
     "id": "postgres",

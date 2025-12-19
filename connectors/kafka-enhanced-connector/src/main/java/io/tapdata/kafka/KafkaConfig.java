@@ -29,11 +29,11 @@ import java.util.concurrent.TimeUnit;
  * @version v1.0 2024/8/27 14:36 Create
  */
 public class KafkaConfig extends BasicConfig implements
-    IConnectionSecurity,
-    ConnectionClusterURI,
-    ConnectionDatasourceInstanceInfo,
-    IConnectionACL,
-    ConnectionExtParams {
+        IConnectionSecurity,
+        ConnectionClusterURI,
+        ConnectionDatasourceInstanceInfo,
+        IConnectionACL,
+        ConnectionExtParams {
 
     public KafkaConfig(TapConnectionContext context) {
         super(context);
@@ -128,6 +128,34 @@ public class KafkaConfig extends BasicConfig implements
         return partitionSize > 0 ? partitionSize : 1;
     }
 
+    public boolean getConnectionSchemaRegister() {
+        return connectionConfigGet("schemaRegister", Boolean.FALSE);
+    }
+
+    public String getConnectionSchemaRegisterUrl() {
+        return connectionConfigGet("schemaRegisterUrl", "");
+    }
+
+    public String getConnectionRegistrySchemaType() {
+        return connectionConfigGet("registrySchemaType", "JSON");
+    }
+
+    public String getConnectionAuthCredentialsSource() {
+        return connectionConfigGet("authCredentialsSource", "");
+    }
+
+    public String getConnectionAuthUserName() {
+        return connectionConfigGet("authUserName", "");
+    }
+
+    public String getConnectionAuthPassword() {
+        return connectionConfigGet("authPassword", "");
+    }
+
+    public boolean getConnectionBasicAuth() {
+        return connectionConfigGet("basicAuth", Boolean.FALSE);
+    }
+
     // ---------- 生成配置 ----------
 
     private Properties buildProperties(String type) {
@@ -167,9 +195,9 @@ public class KafkaConfig extends BasicConfig implements
                     throw new IllegalArgumentException("Un-supported mechanism: " + mechanism.getValue());
             }
             props.put(SaslConfigs.SASL_JAAS_CONFIG, model +
-                " required" +
-                " username='" + getSaslUsername() +
-                "' password='" + getSaslPassword() + "';");
+                    " required" +
+                    " username='" + getSaslUsername() +
+                    "' password='" + getSaslPassword() + "';");
         }
         if (useSsl()) {
 //            ssl.truststore.location=/path/to/kafka.client.truststore.jks
@@ -178,8 +206,38 @@ public class KafkaConfig extends BasicConfig implements
 //            ssl.keystore.password=keystore_password
 //            ssl.key.password=key_password
         }
-
+        addRegistryConfig(props);
         return props;
+    }
+
+    public void addRegistryConfig(Properties props) {
+        if (this.getConnectionSchemaRegister()) {
+            props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+            switch (getConnectionRegistrySchemaType()) {
+                case "JSON":
+                    props.put("value.serializer", io.confluent.kafka.serializers.KafkaJsonSerializer.class);
+                    break;
+                case "AVRO":
+                    props.put("value.serializer", io.confluent.kafka.serializers.KafkaAvroSerializer.class);
+                    break;
+                case "PROTOBUF":
+                    props.put("value.serializer", io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer.class);
+                    break;
+                default:
+                    props.put("value.serializer", org.apache.kafka.common.serialization.StringSerializer.class);
+                    break;
+            }
+            props.put("schema.registry.url", getConnectionSchemaRegisterUrl());
+            if (getConnectionBasicAuth()) {
+                String authCredentialsSource = getConnectionAuthCredentialsSource();
+                props.put("basic.auth.credentials.source", authCredentialsSource);
+                if ("USER_INFO".equals(authCredentialsSource)) {
+                    props.put("basic.auth.user.info", getConnectionAuthUserName() + ":" + getConnectionAuthPassword());
+                } else if ("SASL_INHERIT".equals(authCredentialsSource)) {
+                    props.put("sasl.jaas.config", String.format("org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";", getConnectionAuthUserName(), getConnectionAuthPassword()));
+                }
+            }
+        }
     }
 
     public Properties buildAdminConfig() {
@@ -192,7 +250,13 @@ public class KafkaConfig extends BasicConfig implements
     public Properties buildConsumerConfig(boolean isEarliest) {
         String type = "Consumer";
         Properties props = buildProperties(type);
-        getConnectionSchemaMode().setDeserializer(this, props);
+        KafkaSchemaMode mode;
+        if (getConnectionSchemaRegister()) {
+            mode = KafkaSchemaMode.valueOf("REGISTRY_" + getConnectionRegistrySchemaType());
+        } else {
+            mode = getConnectionSchemaMode();
+        }
+        mode.setDeserializer(this, props);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, isEarliest ? "earliest" : "latest");
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         eachConnectionExtParams(props::put, "All", type);
@@ -202,7 +266,13 @@ public class KafkaConfig extends BasicConfig implements
     public Properties buildDiscoverSchemaConfig(boolean isEarliest) {
         String type = "Consumer";
         Properties props = buildProperties(type);
-        getConnectionSchemaMode().setDeserializer(this, props);
+        KafkaSchemaMode mode;
+        if (getConnectionSchemaRegister()) {
+            mode = KafkaSchemaMode.valueOf("REGISTRY_" + getConnectionRegistrySchemaType());
+        } else {
+            mode = getConnectionSchemaMode();
+        }
+        mode.setDeserializer(this, props);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, isEarliest ? "earliest" : "latest");
         props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 0);
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10);
@@ -214,7 +284,13 @@ public class KafkaConfig extends BasicConfig implements
     public Properties buildProducerConfig() {
         String type = "Producer";
         Properties props = buildProperties(type);
-        getNodeSchemaMode().setSerializer(this, props);
+        KafkaSchemaMode mode;
+        if (getConnectionSchemaRegister()) {
+            mode = KafkaSchemaMode.valueOf("REGISTRY_" + getConnectionRegistrySchemaType());
+        } else {
+            mode = getNodeSchemaMode();
+        }
+        mode.setSerializer(this, props);
 
         KafkaAcksType ackType = getConnectionAcksType();
         switch (ackType) {

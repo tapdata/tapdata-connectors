@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "HuaWei'Cloud GaussDB",
+    "realName": "Huawei Cloud GaussDB",
     "icon": "icons/gauss.png",
     "doc": "${doc}",
     "id": "huawei-gauss-db",

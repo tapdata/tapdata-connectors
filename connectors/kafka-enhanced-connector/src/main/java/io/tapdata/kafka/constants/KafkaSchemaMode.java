@@ -1,5 +1,11 @@
 package io.tapdata.kafka.constants;
 
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+import io.confluent.kafka.serializers.KafkaAvroSerializer;
+import io.confluent.kafka.serializers.json.KafkaJsonSchemaDeserializer;
+import io.confluent.kafka.serializers.json.KafkaJsonSchemaSerializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import io.tapdata.kafka.KafkaConfig;
 import io.tapdata.kafka.serialization.JsonDeserializer;
 import io.tapdata.kafka.serialization.JsonSerializer;
@@ -9,6 +15,8 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 
 import java.util.Properties;
 
@@ -83,7 +91,46 @@ public enum KafkaSchemaMode {
             props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
             props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class.getName());
         }
-    }
+    },
+    REGISTRY_AVRO() {
+        @Override
+        public void setSerializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaAvroSerializer.class.getName());
+        }
+
+        @Override
+        public void setDeserializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaAvroDeserializer.class.getName());
+        }
+    },
+    REGISTRY_PROTOBUF() {
+        @Override
+        public void setSerializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class.getName());
+        }
+
+        @Override
+        public void setDeserializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaProtobufDeserializer.class.getName());
+        }
+    },
+    REGISTRY_JSON() {
+        @Override
+        public void setSerializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaJsonSchemaSerializer.class.getName());
+        }
+
+        @Override
+        public void setDeserializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaJsonSchemaDeserializer.class.getName());
+        }
+    },
     ;
 
     public abstract void setSerializer(KafkaConfig kafkaConfig, Properties props);

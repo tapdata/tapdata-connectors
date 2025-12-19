@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "File Stream",
+    "realName": "File Stream",
     "icon": "icons/filestream.png",
     "doc": "${doc}",
     "id": "file-stream",

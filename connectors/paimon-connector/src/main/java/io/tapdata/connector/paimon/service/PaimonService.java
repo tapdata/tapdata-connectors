@@ -396,19 +396,22 @@ public class PaimonService implements Closeable {
 			schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
 		}
 
-        // Set bucket configuration based on bucket mode
-        if (config.isDynamicBucketMode()) {
-            // Dynamic bucket mode: set bucket to -1
-            // This mode uses StreamTableWrite and provides better flexibility
-            schemaBuilder.option("bucket", "-1");
-        } else {
-            // Fixed bucket mode: set specific bucket count
-            // This mode uses BatchTableWrite and provides better performance
-            Integer bucketCount = config.getBucketCount();
-            if (bucketCount == null || bucketCount <= 0) {
-                bucketCount = 4; // Default to 4 buckets if not configured
-            }
-            schemaBuilder.option("bucket", String.valueOf(bucketCount));
+		// Set bucket configuration based on bucket mode
+		if (config.isDynamicBucketMode()) {
+			// Dynamic bucket mode: set bucket to -1
+			// This mode uses StreamTableWrite and provides better flexibility
+			schemaBuilder.option("bucket", "-1");
+		} else {
+			// Fixed bucket mode: set specific bucket count
+			// This mode uses BatchTableWrite and provides better performance
+			Integer bucketCount = config.getBucketCount();
+			if (bucketCount == null || bucketCount <= 0) {
+				bucketCount = 4; // Default to 4 buckets if not configured
+			}
+			schemaBuilder.option("bucket", String.valueOf(bucketCount));
+		}
+		if (EmptyKit.isNotBlank(config.getFileFormat())) {
+            schemaBuilder.option("file.format", config.getFileFormat());
         }
         if (EmptyKit.isNotBlank(config.getFileFormat())) {
             schemaBuilder.option("file.format", config.getFileFormat());
