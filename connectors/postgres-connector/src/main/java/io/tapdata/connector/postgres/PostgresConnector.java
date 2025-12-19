@@ -462,6 +462,7 @@ public class PostgresConnector extends CommonDbConnector {
                     sequenceSql.append(" INCREMENT ").append(entry.getValue().getAutoIncrementValue());
                 }
                 try {
+                    tapLogger.info("Create sequence sql: {}", sequenceSql.toString());
                     postgresJdbcContext.execute(sequenceSql.toString());
                 } catch (SQLException e) {
                     tapLogger.warn("Failed to create sequence for table {} field {}", createTableEvent.getTable().getId(), entry.getKey(), e);
@@ -470,6 +471,7 @@ public class PostgresConnector extends CommonDbConnector {
         }
         CreateTableOptions options = super.createTableV2(connectorContext, createTableEvent);
         if (EmptyKit.isNotBlank(postgresConfig.getTableOwner())) {
+            tapLogger.info("Change table {} owner to {}", createTableEvent.getTableId(), postgresConfig.getTableOwner());
             jdbcContext.execute(String.format("alter table %s owner to %s", getSchemaAndTable(createTableEvent.getTableId()), postgresConfig.getTableOwner()));
         }
         return options;
@@ -858,6 +860,7 @@ public class PostgresConnector extends CommonDbConnector {
     private void createCustomPublicationIfNotExist(List<String> tableList) {
         String sql = String.format("CREATE PUBLICATION %s FOR TABLE %s", slotName, tableList.stream().map(this::getSchemaAndTable).collect(Collectors.joining(", ")));
         try {
+            tapLogger.info("Create publication sql: {}", sql);
             postgresJdbcContext.execute(sql);
         } catch (SQLException e) {
             throw new TapCodeException(PostgresErrorCode.CREATE_PUBLICATION_FAILED, "create publication for custom tables failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
@@ -1192,7 +1195,9 @@ public class PostgresConnector extends CommonDbConnector {
 
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
-            jdbcContext.execute("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()) + " cascade");
+            String clearSQL = "truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()) + " cascade";
+            tapLogger.info("truncate table sql: {}", clearSQL);
+            jdbcContext.execute(clearSQL);
         } else {
             tapLogger.warn("Table {} not exists, skip truncate", tapClearTableEvent.getTableId());
         }
@@ -1200,7 +1205,9 @@ public class PostgresConnector extends CommonDbConnector {
 
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
-            jdbcContext.execute("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()) + " cascade");
+            String dropSQL = "drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()) + " cascade";
+            tapLogger.info("drop table sql: {}", dropSQL);
+            jdbcContext.execute(dropSQL);
         } else {
             tapLogger.warn("Table {} not exists, skip drop", tapDropTableEvent.getTableId());
         }
@@ -1243,18 +1250,22 @@ public class PostgresConnector extends CommonDbConnector {
                 String sql = getCreateConstraintSql(tapTable, c);
                 if (create) {
                     try {
+                        tapLogger.info("Create constraint sql: {}", sql);
                         jdbcContext.execute(sql);
                     } catch (Exception e) {
                         if (e instanceof SQLException && ((SQLException) e).getSQLState().equals("42804")) {
                             TapTable referenceTable = connectorContext.getTableMap().get(c.getReferencesTableName());
                             c.getMappingFields().stream().filter(m -> Boolean.TRUE.equals(referenceTable.getNameFieldMap().get(m.getReferenceKey()).getAutoInc()) && referenceTable.getNameFieldMap().get(m.getReferenceKey()).getDataType().startsWith("numeric")).forEach(m -> {
                                 try {
-                                    jdbcContext.execute("alter table " + getSchemaAndTable(tapTable.getId()) + " alter column \"" + m.getForeignKey() + "\" type bigint");
+                                    String alterSQL = "alter table " + getSchemaAndTable(tapTable.getId()) + " alter column \"" + m.getForeignKey() + "\" type bigint";
+                                    tapLogger.info(alterSQL);
+                                    jdbcContext.execute(alterSQL);
                                 } catch (SQLException e1) {
                                     exception.addException(c, "alter table alter column failed", e1);
                                 }
                             });
                             try {
+                                tapLogger.info("Recreate constraint sql: {}", sql);
                                 jdbcContext.execute(sql);
                             } catch (Exception e1) {
                                 exception.addException(c, sql, e1);

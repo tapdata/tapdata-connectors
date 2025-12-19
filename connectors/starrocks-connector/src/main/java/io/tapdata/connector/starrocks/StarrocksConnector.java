@@ -5,7 +5,6 @@ import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.starrocks.bean.StarrocksConfig;
 import io.tapdata.connector.starrocks.ddl.StarrocksDDLSqlGenerator;
-import io.tapdata.connector.starrocks.streamload.HttpUtil;
 import io.tapdata.connector.starrocks.streamload.StarrocksStreamLoader;
 import io.tapdata.connector.starrocks.streamload.StarrocksTableType;
 import io.tapdata.connector.starrocks.streamload.exception.StarrocksRetryableException;
@@ -31,7 +30,6 @@ import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
-import org.apache.http.impl.client.CloseableHttpClient;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -180,13 +178,7 @@ public class StarrocksConnector extends CommonDbConnector {
         String threadName = Thread.currentThread().getName();
         if (!starrocksStreamLoaderMap.containsKey(threadName)) {
             StarrocksJdbcContext context = new StarrocksJdbcContext(starrocksConfig);
-            CloseableHttpClient httpClient;
-            if (Boolean.TRUE.equals(starrocksConfig.getUseHTTPS())) {
-                httpClient = HttpUtil.generationHttpClient();
-            } else {
-                httpClient = new HttpUtil().getHttpClient();
-            }
-            StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, httpClient, tapLogger);
+            StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, new HashMap<>(), starrocksConfig.getUseHTTPS(), tapLogger);
             starrocksStreamLoaderMap.put(threadName, StarrocksStreamLoader);
         }
         return starrocksStreamLoaderMap.get(threadName);
@@ -267,6 +259,7 @@ public class StarrocksConnector extends CommonDbConnector {
         stringBuilder.append(")");
         createTableOptions.setTableExists(false);
         try {
+            tapLogger.info("Create table sql: {}" + stringBuilder);
             starrocksJdbcContext.execute(stringBuilder.toString());
             return createTableOptions;
         } catch (Exception e) {
@@ -376,6 +369,7 @@ public class StarrocksConnector extends CommonDbConnector {
             return;
         }
         try {
+            tapLogger.info("Field ddl sql: {}", sqlList);
             jdbcContext.batchExecute(sqlList);
         } catch (SQLException e) {
             if (e.getErrorCode() == 1105 && e.getMessage().contains("Nothing is changed")) {

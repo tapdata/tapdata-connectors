@@ -1,8 +1,11 @@
 package io.tapdata.kafka.service;
 
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import io.tapdata.constant.MqTestItem;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.kafka.KafkaConfig;
 import io.tapdata.kafka.IKafkaAdminService;
+import io.tapdata.kafka.KafkaConfig;
+import io.tapdata.pdk.apis.entity.TestItem;
 import org.apache.kafka.clients.admin.*;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.TopicPartition;
@@ -163,6 +166,39 @@ public class KafkaAdminService implements IKafkaAdminService {
             }
         }
         return partitionInfos;
+    }
+
+    public void testRegistryConnect(TestItem testItem) {
+        testItem.setItem(MqTestItem.KAFKA_SCHEMA_REGISTER_CONNECTION.getContent());
+        try {
+            Map<String, String> schemaRegistryConfigs = new HashMap<>();
+            if (config.getConnectionBasicAuth()) {
+                String authCredentialsSource = config.getConnectionAuthCredentialsSource();
+                schemaRegistryConfigs.put("basic.auth.credentials.source", authCredentialsSource);
+                if ("USER_INFO".equals(authCredentialsSource)) {
+                    schemaRegistryConfigs.put("basic.auth.user.info", config.getConnectionAuthUserName() + ":" + config.getConnectionAuthPassword());
+                } else if ("SASL_INHERIT".equals(authCredentialsSource)) {
+                    schemaRegistryConfigs.put("sasl.jaas.config", String.format("org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";", config.getConnectionAuthUserName(), config.getConnectionAuthPassword()));
+                }
+            }
+            config.getConnectionExtParams().forEach(param -> {
+                if (param.get("key").startsWith("schema.registry.")) {
+                    schemaRegistryConfigs.put(param.get("key"), param.get("val"));
+                }
+            });
+            // SSL/TLS Truststore configuration for HTTPS connection
+//            schemaRegistryConfigs.put("schema.registry.ssl.truststore.location", "SCHEMA_REGISTRY_SSL_TRUSTSTORE_LOCATION");
+//            schemaRegistryConfigs.put("schema.registry.ssl.truststore.password", "SCHEMA_REGISTRY_SSL_TRUSTSTORE_PASSWORD");
+//            schemaRegistryConfigs.put("schema.registry.ssl.keystore.location", "SCHEMA_REGISTRY_SSL_KEYSTORE_LOCATION");
+//            schemaRegistryConfigs.put("schema.registry.ssl.keystore.password", "SCHEMA_REGISTRY_SSL_KEYSTORE_PASSWORD");
+            CachedSchemaRegistryClient schemaRegistryClient = new CachedSchemaRegistryClient(config.getConnectionSchemaRegisterUrl(), 100, schemaRegistryConfigs);
+            schemaRegistryClient.getAllSubjects();
+            testItem.setResult(TestItem.RESULT_SUCCESSFULLY);
+            testItem.setInformation("Schema register connection successfully");
+        } catch (Exception e) {
+            testItem.setResult(TestItem.RESULT_FAILED);
+            testItem.setInformation("Please check the service address. " + e.getMessage());
+        }
     }
 
     @Override

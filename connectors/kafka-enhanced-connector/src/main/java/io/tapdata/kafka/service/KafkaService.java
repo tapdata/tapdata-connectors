@@ -20,6 +20,7 @@ import io.tapdata.exception.TapPdkTerminateByServerEx;
 import io.tapdata.exception.TapRuntimeException;
 import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
 import io.tapdata.kafka.*;
+import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.constants.ProducerRecordWrapper;
 import io.tapdata.kafka.data.KafkaOffset;
 import io.tapdata.kafka.data.KafkaTopicOffset;
@@ -38,6 +39,7 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
+import org.apache.kafka.common.errors.SerializationException;
 
 import java.time.Duration;
 import java.util.*;
@@ -76,7 +78,11 @@ public class KafkaService implements IKafkaService {
             thread.setName(String.format("%s-executor-%s", KafkaEnhancedConnector.PDK_ID, thread.getId()));
             return thread;
         });
-        this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
+        if (config.getConnectionSchemaRegister()) {
+            this.schemaModeService = AbsSchemaMode.create(KafkaSchemaMode.fromString("REGISTRY_" + config.getConnectionRegistrySchemaType()), this);
+        } else {
+            this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
+        }
     }
 
     @Override
@@ -237,18 +243,31 @@ public class KafkaService implements IKafkaService {
                 // 并发消费数据
                 ConcurrentUtils.runWithQueue(getExecutorService(), exception, executorGroup, concurrentQueue, concurrentSize, stopping::get, concurrentItem -> {
                     int partition = concurrentItem.getKey();
-                    Long endOffset = endTopicOffsets.get(concurrentItem.getKey());
+                    Long endOffset = endTopicOffsets.get(partition);
                     if (null == endOffset) {
-                        logger.warn("not found end offset with topic partition {}-{}", topic, concurrentItem.getKey());
+                        logger.warn("not found end offset with topic partition {}-{}", topic, partition);
                         return;
                     } else {
-                        logger.info("end offset with topic partition {}-{}: start={}, end={}", topic, concurrentItem.getKey(), concurrentItem.getValue(), endOffset);
+                        logger.info("end offset with topic partition {}-{}: start={}, end={}", topic, partition, concurrentItem.getValue(), endOffset);
                     }
 
                     Properties properties = config.buildConsumerConfig(isEarliest);
                     properties.put(ConsumerConfig.GROUP_ID_CONFIG, String.format("%s-%s", executorGroup, index.incrementAndGet()));
                     try (KafkaConsumer<Object, Object> kafkaConsumer = new KafkaConsumer<>(properties)) {
-                        TopicPartition topicPartition = new TopicPartition(topic, concurrentItem.getKey());
+                        TopicPartition topicPartition = new TopicPartition(topic, partition);
+
+                        // 如果没有数据，则跳过
+                        KafkaOffset currEndOffset = KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, List.of(topicPartition), true);
+                        if (Optional.of(currEndOffset)
+                            .map(m -> m.get(topic))
+                            .map(o -> o.get(partition))
+                            .map(l -> endOffset <= l)
+                            .orElse(true)
+                        ) {
+                            logger.warn("not found any data with topic partition {}-{}, earliest offset {}", topic, partition, currEndOffset);
+                            return;
+                        }
+
                         kafkaConsumer.assign(Collections.singleton(topicPartition));
                         kafkaConsumer.seek(topicPartition, concurrentItem.getValue());
 
@@ -344,6 +363,8 @@ public class KafkaService implements IKafkaService {
             }
         } catch (InterruptedException | org.apache.kafka.common.errors.InterruptException e) {
             Thread.currentThread().interrupt();
+        } catch (SerializationException e) {
+            logger.warn(e.getMessage(), e);
         } catch (TapRuntimeException e) {
             throw e;
         } catch (Exception e) {

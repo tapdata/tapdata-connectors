@@ -93,6 +93,7 @@ public class MongodbConnector extends ConnectorBase {
 	protected MongodbConfig mongoConfig;
 	protected MongoClient mongoClient;
 	protected MongoDatabase mongoDatabase;
+	protected int mongoVersion;
 	private MongoBatchOffset batchOffset = null;
 	protected MongodbExceptionCollector exceptionCollector;
 	private MongodbStreamReader mongodbStreamReader;
@@ -660,7 +661,39 @@ public class MongodbConnector extends ConnectorBase {
 		//created capped collection
 		createCappedCollection(table, isShardCollection, log);
 
+		// open pre image
+		openPreImage(table, nodeConfig);
+
 		return createTableOptions;
+	}
+
+	private void openPreImage(TapTable table, DataMap nodeConfig) {
+		if (null == nodeConfig) {
+			return;
+		}
+		Object preImage4SinkObj = nodeConfig.get("preImage4Sink");
+		if(preImage4SinkObj instanceof Boolean && !Boolean.TRUE.equals(preImage4SinkObj)){
+			return;
+		}
+		// changeStreamPreAndPostImages is only supported in MongoDB 6.0+
+		if (mongoVersion < 6) {
+			return;
+		}
+		String tableName = table.getId();
+		BsonDocument bsonDocument = new BsonDocument();
+		bsonDocument.put("collMod", new BsonString(tableName));
+		bsonDocument.put("changeStreamPreAndPostImages", new BsonDocument("enabled", new BsonBoolean(true)));
+		try {
+			mongoDatabase.runCommand(bsonDocument);
+		} catch (MongoException e) {
+			if (e.getCode() == 26) {
+				// Collection doesn't exist (NamespaceNotFound), create it and try again
+				mongoDatabase.createCollection(tableName);
+				mongoDatabase.runCommand(bsonDocument);
+			} else {
+				throw e;
+			}
+		}
 	}
 
 	protected void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
@@ -1276,6 +1309,7 @@ public class MongodbConnector extends ConnectorBase {
 		if (mongoClient == null) {
 			mongoClient = MongodbUtil.createMongoClient(mongoConfig);
 			mongoDatabase = mongoClient.getDatabase(mongoConfig.getDatabase());
+			mongoVersion = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
 		}
 		mongodbExecuteCommandFunction.setLog(connectionContext.getLog());
 	}
@@ -1691,8 +1725,7 @@ public class MongodbConnector extends ConnectorBase {
 	protected MongodbStreamReader createStreamReader() {
 		MongodbStreamReader mongodbStreamReader = null;
 		try {
-			final int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
-			if (version >= 4) {
+			if (mongoVersion >= 4) {
 				mongodbStreamReader = new MongodbV4StreamReader().setPreImage(mongoConfig.getPreImage());
 			} else {
 				mongodbStreamReader = new MongodbV3StreamReader();
@@ -1838,9 +1871,14 @@ public class MongodbConnector extends ConnectorBase {
 			v.abortTransaction();
 			v.close();
 			v = mongoClient.startSession();
+			v.startTransaction();
 			return v;
 		});
-		transactionSessionMap.computeIfAbsent(Thread.currentThread().getName(), key -> mongoClient.startSession());
+		transactionSessionMap.computeIfAbsent(Thread.currentThread().getName(), key -> {
+			ClientSession v = mongoClient.startSession();
+			v.startTransaction();
+			return v;
+		});
 	}
 
 	protected void commitTransaction(TapConnectorContext connectorContext) {

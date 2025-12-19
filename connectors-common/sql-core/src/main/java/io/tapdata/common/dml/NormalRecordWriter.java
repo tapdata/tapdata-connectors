@@ -89,6 +89,10 @@ public class NormalRecordWriter {
                     statement.execute(upsertDoubleActive());
                 }
             }
+            //dataSaving
+            if (Boolean.FALSE.equals(commonDbConfig.getDataSaving())) {
+                updateRecorder.setDataSaving(false);
+            }
             //insert,update,delete events must consecutive, so execute the other two first
             writePart(tapRecordEvents, listResult, isAlive);
             //release resource

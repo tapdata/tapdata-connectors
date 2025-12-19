@@ -251,6 +251,144 @@
         "OPTIONAL_FIELDS": {
           "type": "void",
           "properties": {
+            "schemaRegister": {
+              "type": "boolean",
+              "title": "${schemaRegister}",
+              "default": false,
+              "x-decorator": "FormItem",
+              "x-decorator-props": {
+                "tooltip": "${schemaRegisterTip}"
+              },
+              "x-component": "Switch",
+              "apiServerKey": "schemaRegister",
+              "x-reactions": [
+                {
+                  "target": "*(schemaRegisterUrl,registrySchemaType,basicAuth)",
+                  "fulfill": {
+                    "state": {
+                      "visible": "{{$self.value===true}}"
+                    }
+                  }
+                }
+              ],
+              "x-index": 1
+            },
+            "schemaRegisterUrl": {
+              "required": true,
+              "type": "string",
+              "title": "${schemaRegisterUrl}",
+              "x-decorator": "FormItem",
+              "x-decorator-props": {
+                "tooltip": "${schemaRegisterUrlTip}"
+              },
+              "x-component": "Input",
+              "apiServerKey": "schemaRegisterUrl",
+              "x-index": 2
+            },
+            "registrySchemaType": {
+              "type": "string",
+              "title": "${registrySchemaType}",
+              "default": "JSON",
+              "x-decorator": "FormItem",
+              "x-component": "Select",
+              "apiServerKey": "registrySchemaType",
+              "x-index": 3,
+              "enum": [
+                {
+                  "label": "JSON",
+                  "value": "JSON"
+                },
+                {
+                  "label": "AVRO",
+                  "value": "AVRO"
+                },
+                {
+                  "label": "PROTOBUF",
+                  "value": "PROTOBUF"
+                }
+              ]
+            },
+            "basicAuth": {
+              "type": "boolean",
+              "title": "${basicAuth}",
+              "default": false,
+              "x-decorator": "FormItem",
+              "x-component": "Switch",
+              "apiServerKey": "basicAuth",
+              "x-reactions": [
+                {
+                  "target": "*(authCredentialsSource,authUserName,authPassword)",
+                  "fulfill": {
+                    "state": {
+                      "visible": "{{$self.value===true}}"
+                    }
+                  }
+                }
+              ],
+              "x-index": 4
+            },
+            "authCredentialsSource": {
+              "type": "string",
+              "title": "${authCredentialsSource}",
+              "default": "USER_INFO",
+              "x-decorator": "FormItem",
+              "x-component": "Radio.Group",
+              "x-component-props": {
+                "optionType": "button"
+              },
+              "x-index": 5,
+              "enum": [
+                {
+                  "label": "USER_INFO",
+                  "value": "USER_INFO"
+                },
+                {
+                  "label": "SASL_INHERIT",
+                  "value": "SASL_INHERIT"
+                }
+              ]
+            },
+            "authUserName": {
+              "required": true,
+              "type": "string",
+              "title": "${authUserName}",
+              "x-decorator": "FormItem",
+              "x-component": "Input",
+              "apiServerKey": "database_username",
+              "x-index": 6
+            },
+            "authPassword": {
+              "required": true,
+              "type": "string",
+              "title": "${authPassword}",
+              "x-decorator": "FormItem",
+              "x-component": "Password",
+              "apiServerKey": "database_password",
+              "x-index": 7
+            },
+            "kafkaSaslMechanism": {
+              "type": "string",
+              "title": "${kafkaSaslMechanism}",
+              "default": "PLAIN",
+              "x-decorator": "FormItem",
+              "x-component": "Select",
+              "apiServerKey": "kafkaSaslMechanism",
+              "x-index": 8,
+              "enum": [
+                {
+                  "label": "PLAIN",
+                  "value": "PLAIN"
+                },
+                {
+                  "label": "SHA256",
+                  "value": "SHA256"
+                },
+                {
+                  "label": "SHA512",
+                  "value": "SHA512"
+                }
+              ]
+            },
             "clientId": {
               "type": "string",
               "title": "${clientId}",
@@ -260,7 +398,7 @@
               "x-decorator-props": {
                 "tooltip": "${clientIdTip}"
               },
-              "x-index": 1,
+              "x-index": 9,
               "x-reactions": {
                 "fulfill": {
                   "state": {
@@ -606,6 +744,16 @@
       "saslUsername": "Username",
       "saslPassword": "Password",
       "useSsl": "Enable SSL",
+      "schemaRegister": "Schema Registry",
+      "schemaRegisterTip": "To register a center using third-party mode, an additional address is required. If basic authentication is enabled, authentication information is also required",
+      "schemaRegisterUrl": "Schema Registry Url",
+      "schemaRegisterUrlTip": "Registry Url with http or https prefix, if bootstrap split with comma, such as: http://localhost:8081,localhost:8082",
+      "registrySchemaType": "Schema Type",
+      "authCredentialsSource": "Auth Credentials Source",
+      "authUserName": "Auth UserName",
+      "authPassword": "Auth Password",
+      "basicAuth": "Basic Auth",
+      "kafkaSaslMechanism": "SASL Mechanism",
       "acksType": "ACK confirmation mechanism",
       "acksTypeNotSure": "No confirmation",
       "acksTypeJustWriteMaster": "Write only Master partition",
@@ -664,6 +812,16 @@
       "saslUsername": "用户",
       "saslPassword": "密码",
       "useSsl": "启用 SSL",
+      "schemaRegister": "模式注册",
+      "schemaRegisterTip": "使用第三方模式注册中心，需要额外提供地址，若打开基本认证还需要提供认证信息等",
+      "schemaRegisterUrl": "模式注册地址",
+      "schemaRegisterUrlTip": "注册地址，需要 http或https 前缀，如集群地址使用逗号间隔，如：http://localhost:8081,localhost:8082",
+      "registrySchemaType": "模式类型",
+      "authCredentialsSource": "认证凭据来源",
+      "authUserName": "认证用户名",
+      "authPassword": "认证密码",
+      "basicAuth": "基本认证",
+      "kafkaSaslMechanism": "加密方式",
       "acksType": "ACK 确认机制",
       "acksTypeNotSure": "不确认",
       "acksTypeJustWriteMaster": "仅写入 Master 分区",
@@ -722,6 +880,16 @@
       "saslUsername": "用戶",
       "saslPassword": "密碼",
       "useSsl": "啟用 SSL",
+      "schemaRegister": "模式註冊",
+      "schemaRegisterTip": "使用第三方模式註冊中心，需要額外提供地址，若打開基本認證還需要提供認證信息等",
+      "schemaRegisterUrl": "模式註冊地址",
+      "schemaRegisterUrlTip": "註冊地址，需要 http或https 前綴，如集群地址使用逗號間隔，如：http://localhost:8081,localhost:8082",
+      "registrySchemaType": "模式類型",
+      "authCredentialsSource": "認證憑據來源",
+      "authUserName": "認證用戶名",
+      "authPassword": "認證密碼",
+      "basicAuth": "基本認證",
+      "kafkaSaslMechanism": "加密方式",
       "acksType": "ACK 確認機制",
       "acksTypeNotSure": "不確認",
       "acksTypeJustWriteMaster": "僅寫入 Master 分割區",
@@ -808,18 +976,23 @@
         0,
         10
       ],
-      "defaultScale": 1
+      "defaultScale": 1,
+      "fixed": true,
+      "preferPrecision": 12,
+      "preferScale": 4
     },
     "CHAR[($byte)]": {
+      "byte": 65535,
       "to": "TapString",
       "byteRatio": 3,
       "defaultByte": 1,
       "fixed": true
     },
     "VARCHAR[($byte)]": {
-      "to": "TapString",
+      "byte": 65535,
+      "defaultByte": 65535,
       "byteRatio": 3,
-      "defaultByte": 1
+      "to": "TapString"
     },
     "STRING[($byte)]": {
       "to": "TapString",
@@ -827,9 +1000,10 @@
     },
     "TEXT": {
       "to": "TapString",
+      "byte": "4g",
       "pkEnablement": false
     },
-    "BINARY[($byte)]": {
+    "BINARY": {
       "to": "TapBinary",
       "pkEnablement": false
     },

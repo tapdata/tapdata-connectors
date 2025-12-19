@@ -33,6 +33,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import static io.tapdata.base.ConnectorBase.writeListResult;
 
@@ -48,7 +49,8 @@ public class StarrocksStreamLoader {
     private static final String LABEL_PREFIX_PATTERN = "tapdata_%s_%s";
 
     private final StarrocksConfig StarrocksConfig;
-    private final CloseableHttpClient httpClient;
+    private final Map<String, CloseableHttpClient> httpClientMap;
+    private final boolean useHttps;
     private final RecordStream recordStream;
 
     private boolean loadBatchFirstRecord;
@@ -90,9 +92,10 @@ public class StarrocksStreamLoader {
     private boolean cannotClean;
     private AtomicReference<Exception> globalException = new AtomicReference<>();
 
-    public StarrocksStreamLoader(StarrocksJdbcContext StarrocksJdbcContext, CloseableHttpClient httpClient, Log taplogger) {
+    public StarrocksStreamLoader(StarrocksJdbcContext StarrocksJdbcContext, Map<String, CloseableHttpClient> httpClientMap, boolean useHttps, Log taplogger) {
         this.StarrocksConfig = (StarrocksConfig) StarrocksJdbcContext.getConfig();
-        this.httpClient = httpClient;
+        this.httpClientMap = httpClientMap;
+        this.useHttps = useHttps;
         this.taplogger = taplogger;
         Integer writeByteBufferCapacity = StarrocksConfig.getWriteByteBufferCapacity();
         if (null == writeByteBufferCapacity) {
@@ -123,6 +126,20 @@ public class StarrocksStreamLoader {
 
         // 初始化定时刷新
         initializeFlushScheduler();
+    }
+
+    private CloseableHttpClient getHttpClient(String tableName) {
+        if (httpClientMap.containsKey(tableName)) {
+            return httpClientMap.get(tableName);
+        }
+        CloseableHttpClient httpClient;
+        if (useHttps) {
+            httpClient = HttpUtil.generationHttpClient();
+        } else {
+            httpClient = new HttpUtil().getHttpClient();
+        }
+        httpClientMap.put(tableName, httpClient);
+        return httpClient;
     }
 
     private void initMessageSerializer() {
@@ -633,7 +650,7 @@ public class StarrocksStreamLoader {
                 }
             }
             HttpPut httpPut = putBuilder.build();
-            try (CloseableHttpResponse execute = httpClient.execute(httpPut)) {
+            try (CloseableHttpResponse execute = getHttpClient(tableName).execute(httpPut)) {
                 return handlePreCommitResponse(execute);
             }
         } catch (StarrocksRetryableException e) {
@@ -733,7 +750,7 @@ public class StarrocksStreamLoader {
             taplogger.info("=====================================");
 
             long requestStartTime = System.currentTimeMillis();
-            try (CloseableHttpResponse execute = httpClient.execute(httpPut)) {
+            try (CloseableHttpResponse execute = getHttpClient(tableName).execute(httpPut)) {
                 long requestEndTime = System.currentTimeMillis();
                 long requestDuration = requestEndTime - requestStartTime;
 
@@ -765,6 +782,8 @@ public class StarrocksStreamLoader {
         } catch (StarrocksRetryableException e) {
             throw e;
         } catch (Exception e) {
+            taplogger.warn("Failed to load table, error: {}", e);
+            taplogger.warn(Arrays.stream(e.getStackTrace()).map(StackTraceElement::toString).collect(Collectors.joining(",")));
             throw new StreamLoadException(String.format("Call stream load from file error: %s", e.getMessage()), e);
         }
     }
@@ -923,8 +942,14 @@ public class StarrocksStreamLoader {
             }
 
             // 关闭HTTP客户端
-            if (this.httpClient != null) {
-                this.httpClient.close();
+            if (this.httpClientMap != null) {
+                httpClientMap.forEach((k, v) -> {
+                    try {
+                        v.close();
+                    } catch (IOException e) {
+                        taplogger.warn("Failed to close http client", e);
+                    }
+                });
             }
 
             // 清理所有Map，释放内存

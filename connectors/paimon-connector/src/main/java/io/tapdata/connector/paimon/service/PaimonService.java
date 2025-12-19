@@ -5,9 +5,11 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.paimon.catalog.Catalog;
@@ -332,87 +334,94 @@ public class PaimonService implements Closeable {
         }
     }
 
-    /**
-     * Create table in Paimon
-     *
-     * @param tapTable table definition
-     * @return true if created, false if already exists
-     * @throws Exception if creation fails
-     */
-    public boolean createTable(TapTable tapTable) throws Exception {
-        String database = config.getDatabase();
-        String tableName = tapTable.getName();
+	/**
+	 * Create table in Paimon
+	 *
+	 * @param tapTable table definition
+	 * @return true if created, false if already exists
+	 * @throws Exception if creation fails
+	 */
+	public boolean createTable(TapTable tapTable, Log log) throws Exception {
+		String database = config.getDatabase();
+		String tableName = tapTable.getName();
 
-        // Ensure database exists
-        try {
-            catalog.getDatabase(database);
-        } catch (Catalog.DatabaseNotExistException e) {
-            // Database does not exist, create it
-            catalog.createDatabase(database, true);
+		// Ensure database exists
+		try {
+			catalog.getDatabase(database);
+		} catch (Catalog.DatabaseNotExistException e) {
+			// Database does not exist, create it
+			catalog.createDatabase(database, true);
+		}
+
+		Identifier identifier = Identifier.create(database, tableName);
+
+		// Check if table already exists
+		try {
+			catalog.getTable(identifier);
+			// Table exists, check if bucket mode matches
+			boolean existingIsDynamic = isTableDynamicBucket(identifier);
+			boolean configIsDynamic = config.isDynamicBucketMode();
+
+			if (existingIsDynamic != configIsDynamic) {
+				// Bucket mode mismatch, log warning and continue with existing table
+				String existingMode = existingIsDynamic ? "dynamic" : "fixed";
+				String configMode = configIsDynamic ? "dynamic" : "fixed";
+				log.warn("Table {} already exists with {} bucket mode, but config specifies {} bucket mode. " +
+								"Cannot switch bucket mode for existing table. Using existing table configuration.",
+						tableName, existingMode, configMode);
+			}
+			// Table exists, no need to recreate
+			return false;
+		} catch (Catalog.TableNotExistException e) {
+			// Table does not exist, continue to create
+		}
+
+		// Build schema
+		Schema.Builder schemaBuilder = Schema.newBuilder();
+
+		// Add fields
+		Map<String, TapField> fields = tapTable.getNameFieldMap();
+		if (fields != null) {
+			for (Map.Entry<String, TapField> entry : fields.entrySet()) {
+				String fieldName = entry.getKey();
+				TapField tapField = entry.getValue();
+				DataType dataType = convertToPaimonDataType(tapField);
+				schemaBuilder.column(fieldName, dataType);
+			}
+		}
+
+		// Set primary keys
+		Collection<String> primaryKeys = tapTable.primaryKeys();
+		if (primaryKeys != null && !primaryKeys.isEmpty()) {
+			schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
+		}
+
+		// Set bucket configuration based on bucket mode
+		if (config.isDynamicBucketMode()) {
+			// Dynamic bucket mode: set bucket to -1
+			// This mode uses StreamTableWrite and provides better flexibility
+			schemaBuilder.option("bucket", "-1");
+		} else {
+			// Fixed bucket mode: set specific bucket count
+			// This mode uses BatchTableWrite and provides better performance
+			Integer bucketCount = config.getBucketCount();
+			if (bucketCount == null || bucketCount <= 0) {
+				bucketCount = 4; // Default to 4 buckets if not configured
+			}
+			schemaBuilder.option("bucket", String.valueOf(bucketCount));
+		}
+		if (EmptyKit.isNotBlank(config.getFileFormat())) {
+            schemaBuilder.option("file.format", config.getFileFormat());
+        }
+        if (EmptyKit.isNotBlank(config.getCompression())) {
+            schemaBuilder.option("compression", config.getCompression());
         }
 
-        Identifier identifier = Identifier.create(database, tableName);
+		// Create table
+		catalog.createTable(identifier, schemaBuilder.build(), false);
 
-        // Check if table already exists
-        try {
-            catalog.getTable(identifier);
-            // Table exists, check if bucket mode matches
-            boolean existingIsDynamic = isTableDynamicBucket(identifier);
-            boolean configIsDynamic = config.isDynamicBucketMode();
-
-            if (existingIsDynamic != configIsDynamic) {
-                // Bucket mode mismatch, need to recreate table
-                // WARNING: This will delete all existing data
-                catalog.dropTable(identifier, true);
-                // Continue to create table with new bucket mode
-            } else {
-                // Table exists and bucket mode matches, no need to recreate
-                return false;
-            }
-        } catch (Catalog.TableNotExistException e) {
-            // Table does not exist, continue to create
-        }
-
-        // Build schema
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-
-        // Add fields
-        Map<String, TapField> fields = tapTable.getNameFieldMap();
-        if (fields != null) {
-            for (Map.Entry<String, TapField> entry : fields.entrySet()) {
-                String fieldName = entry.getKey();
-                TapField tapField = entry.getValue();
-                DataType dataType = convertToPaimonDataType(tapField);
-                schemaBuilder.column(fieldName, dataType);
-            }
-        }
-
-        // Set primary keys
-        Collection<String> primaryKeys = tapTable.primaryKeys();
-        if (primaryKeys != null && !primaryKeys.isEmpty()) {
-            schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
-        }
-
-        // Set bucket configuration based on bucket mode
-        if (config.isDynamicBucketMode()) {
-            // Dynamic bucket mode: set bucket to -1
-            // This mode uses StreamTableWrite and provides better flexibility
-            schemaBuilder.option("bucket", "-1");
-        } else {
-            // Fixed bucket mode: set specific bucket count
-            // This mode uses BatchTableWrite and provides better performance
-            Integer bucketCount = config.getBucketCount();
-            if (bucketCount == null || bucketCount <= 0) {
-                bucketCount = 4; // Default to 4 buckets if not configured
-            }
-            schemaBuilder.option("bucket", String.valueOf(bucketCount));
-        }
-
-        // Create table
-        catalog.createTable(identifier, schemaBuilder.build(), false);
-
-        return true;
-    }
+		return true;
+	}
 
     /**
      * Convert TapField to Paimon DataType
@@ -619,6 +628,25 @@ public class PaimonService implements Closeable {
                                                                         TapTable table,
                                                                         String insertPolicy,
                                                                         String updatePolicy) throws Exception {
+        return writeRecordsWithBatchWriteInternal(recordEvents, table, insertPolicy, updatePolicy, true);
+    }
+
+    /**
+     * Internal implementation of batch write with retry support
+     *
+     * @param recordEvents list of record events
+     * @param table target table
+     * @param insertPolicy insert policy
+     * @param updatePolicy update policy
+     * @param allowRetry whether to allow retry on ThreadGroup destroyed error
+     * @return write result
+     * @throws Exception if write fails
+     */
+    private WriteListResult<TapRecordEvent> writeRecordsWithBatchWriteInternal(List<TapRecordEvent> recordEvents,
+                                                                                TapTable table,
+                                                                                String insertPolicy,
+                                                                                String updatePolicy,
+                                                                                boolean allowRetry) throws Exception {
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         String database = config.getDatabase();
         String tableName = table.getName();
@@ -647,6 +675,11 @@ public class PaimonService implements Closeable {
             commit.commit(writer.prepareCommit());
 
         } catch (Exception e) {
+            // Check if it's ThreadGroup destroyed error, retry after reinitializing catalog
+            if (allowRetry && isThreadGroupDestroyedError(e)) {
+                reinitCatalog();
+                return writeRecordsWithBatchWriteInternal(recordEvents, table, insertPolicy, updatePolicy, false);
+            }
             throw new RuntimeException("Failed to write records to table " + tableName, e);
         } finally {
             // Close writer and commit after use since they only support one-time committing
@@ -679,6 +712,25 @@ public class PaimonService implements Closeable {
                                                                          TapTable table,
                                                                          String insertPolicy,
                                                                          String updatePolicy) throws Exception {
+        return writeRecordsWithStreamWriteInternal(recordEvents, table, insertPolicy, updatePolicy, true);
+    }
+
+    /**
+     * Internal implementation of stream write with retry support
+     *
+     * @param recordEvents list of record events
+     * @param table target table
+     * @param insertPolicy insert policy
+     * @param updatePolicy update policy
+     * @param allowRetry whether to allow retry on ThreadGroup destroyed error
+     * @return write result
+     * @throws Exception if write fails
+     */
+    private WriteListResult<TapRecordEvent> writeRecordsWithStreamWriteInternal(List<TapRecordEvent> recordEvents,
+                                                                                  TapTable table,
+                                                                                  String insertPolicy,
+                                                                                  String updatePolicy,
+                                                                                  boolean allowRetry) throws Exception {
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         String database = config.getDatabase();
         String tableName = table.getName();
@@ -711,6 +763,11 @@ public class PaimonService implements Closeable {
             commit.commit(commitIdentifier, messages);
 
         } catch (Exception e) {
+            // Check if it's ThreadGroup destroyed error, retry after reinitializing catalog
+            if (allowRetry && isThreadGroupDestroyedError(e)) {
+                reinitCatalog();
+                return writeRecordsWithStreamWriteInternal(recordEvents, table, insertPolicy, updatePolicy, false);
+            }
             throw new RuntimeException("Failed to write records to table " + tableName, e);
         } finally {
             // Close writer and commit after use
@@ -727,6 +784,44 @@ public class PaimonService implements Closeable {
         }
 
         return result;
+    }
+
+    /**
+     * Reinitialize the Paimon catalog.
+     * This is used to recover from ThreadGroup destroyed errors caused by classloader unloading.
+     *
+     * @throws Exception if reinitialization fails
+     */
+    private synchronized void reinitCatalog() throws Exception {
+        // Close old catalog if exists
+        if (catalog != null) {
+            try {
+                catalog.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
+        }
+        // Reinitialize catalog
+        init();
+    }
+
+    /**
+     * Check if the exception is caused by ThreadGroup being destroyed.
+     * This typically happens when the classloader that created Paimon's thread factory
+     * has been unloaded, causing the captured ThreadGroup to be destroyed.
+     *
+     * @param e the exception to check
+     * @return true if it's a ThreadGroup destroyed error
+     */
+    private boolean isThreadGroupDestroyedError(Throwable e) {
+        Throwable cause = e;
+        while (cause != null) {
+            if (cause instanceof IllegalThreadStateException) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
     }
 
     /**
