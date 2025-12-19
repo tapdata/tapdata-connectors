@@ -14,6 +14,7 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.kit.DbKit;
@@ -23,6 +24,7 @@ import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbV4StreamReader;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.mongodb.writer.error.BulkWriteErrorCodeHandlerEnum;
+import io.tapdata.mongodb.writer.error.IgnoreWriteModel;
 import io.tapdata.mongodb.writer.error.TapMongoBulkWriteException;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -32,6 +34,14 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.bson.Document;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -54,12 +64,18 @@ public class MongodbWriter {
 	private final Log tapLogger;
 
 	private boolean is_cloud;
-	private final Map<String,Set<String>> shardKeyMap;
+	private final Map<String, Set<String>> shardKeyMap;
 	private String insertPolicy;
 	private String updatePolicy;
 	private final Map<String, ClientSession> sessionMap;
 
-	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger, Map<String,Set<String>> shardKeyMap, Map<String, ClientSession> sessionMap) {
+	// Error file cleanup configuration
+	private volatile long lastCleanupTime = 0;
+	private static final long CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+	private static final int ERROR_FILE_RETENTION_DAYS = 7; // Keep error files for 7 days
+	private static final int ERROR_FILE_MAX_COUNT = 100; // Keep at most 100 error files
+
+	public MongodbWriter(KVMap<Object> globalStateMap, MongodbConfig mongodbConfig, MongoClient mongoClient, Log tapLogger, Map<String, Set<String>> shardKeyMap, Map<String, ClientSession> sessionMap) {
 		this.globalStateMap = globalStateMap;
 		this.mongoClient = mongoClient;
 		this.mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
@@ -112,14 +128,14 @@ public class MongodbWriter {
 		}
 	}
 
-    private void doubleActiveWrite(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
-        Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
+	private void doubleActiveWrite(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
+		Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
         UpdateOptions options = new UpdateOptions().upsert(true);
         mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
         write(table, tapRecordEvents, writeListResultConsumer, session);
     }
 
-    private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
+	private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
 		AtomicLong inserted = new AtomicLong(0); //insert count
 		AtomicLong updated = new AtomicLong(0); //update count
 		AtomicLong deleted = new AtomicLong(0); //delete count
@@ -145,6 +161,8 @@ public class MongodbWriter {
 
 		BulkWriteOptions bulkWriteOptions;
 		AtomicReference<RuntimeException> mongoBulkWriteException = new AtomicReference<>();
+		boolean errorContextDumped = false;
+
 		while (!bulkWriteModel.isEmpty()) {
 			bulkWriteOptions = buildBulkWriteOptions(bulkWriteModel);
 			try {
@@ -156,6 +174,18 @@ public class MongodbWriter {
 				}
 				bulkWriteModel.clearAll();
 			} catch (MongoBulkWriteException e) {
+				// Dump error context only once per batch to avoid duplicate files across retries.
+				if (!errorContextDumped) {
+					try {
+						String dumpPath = dumpBulkWriteErrorContext(e, bulkWriteModel, bulkWriteOptions, collection);
+						if (dumpPath != null) {
+							TapLogger.info("MongoDB bulk write context saved to file: ", dumpPath);
+						}
+					} catch (Throwable ignored) {
+						// Never affect main flow
+					}
+					errorContextDumped = true;
+				}
 				Consumer<RuntimeException> errorConsumer = mongoBulkWriteException::set;
 				if (!handleBulkWriteError(e, bulkWriteModel, bulkWriteOptions, collection, errorConsumer)) {
 					if (null != mongoBulkWriteException.get()) {
@@ -221,22 +251,24 @@ public class MongodbWriter {
 			tapLogger.info("update record ignored: {}", tapRecordEvent);
 		}
 		writeListResultConsumer.accept(writeListResult
-			.insertedCount(0)
-			.modifiedCount(1)
-			.removedCount(0));
+				.insertedCount(0)
+				.modifiedCount(1)
+				.removedCount(0));
 	}
 
 	private boolean handleBulkWriteError(
-		MongoBulkWriteException originMongoBulkWriteException,
-		BulkWriteModel bulkWriteModel,
-		BulkWriteOptions bulkWriteOptions,
-		MongoCollection<Document> collection,
-		Consumer<RuntimeException> errorConsumer
+			MongoBulkWriteException originMongoBulkWriteException,
+			BulkWriteModel bulkWriteModel,
+			BulkWriteOptions bulkWriteOptions,
+			MongoCollection<Document> collection,
+			Consumer<RuntimeException> errorConsumer
 	) {
 		List<BulkWriteError> writeErrors = originMongoBulkWriteException.getWriteErrors();
 		List<BulkWriteError> cantHandleErrors = new ArrayList<>();
 		List<WriteModel<Document>> retryWriteModels = new ArrayList<>();
 		List<Integer> handledIndexes = new ArrayList<>();
+		List<Integer> ignoredIndexes = new ArrayList<>();
+
 		for (BulkWriteError writeError : writeErrors) {
 			int code = writeError.getCode();
 			int index = writeError.getIndex();
@@ -249,8 +281,12 @@ public class MongodbWriter {
 				} catch (Exception ignored) {
 				}
 				if (null != retryWriteModel) {
-					retryWriteModels.add(retryWriteModel);
 					handledIndexes.add(index);
+					if (retryWriteModel == IgnoreWriteModel.INSTANCE) {
+						ignoredIndexes.add(index);
+					} else {
+						retryWriteModels.add(retryWriteModel);
+					}
 				} else {
 					cantHandleErrors.add(writeError);
 				}
@@ -261,11 +297,11 @@ public class MongodbWriter {
 		if (CollectionUtils.isNotEmpty(cantHandleErrors)) {
 			// Keep errors that cannot handle
 			MongoBulkWriteException mongoBulkWriteException = new MongoBulkWriteException(
-				originMongoBulkWriteException.getWriteResult(),
-				cantHandleErrors,
-				originMongoBulkWriteException.getWriteConcernError(),
-				originMongoBulkWriteException.getServerAddress(),
-				originMongoBulkWriteException.getErrorLabels()
+					originMongoBulkWriteException.getWriteResult(),
+					cantHandleErrors,
+					originMongoBulkWriteException.getWriteConcernError(),
+					originMongoBulkWriteException.getServerAddress(),
+					originMongoBulkWriteException.getErrorLabels()
 			);
 			List<WriteModel<Document>> errorWriteModels = new ArrayList<>();
 			cantHandleErrors.forEach(writeError -> errorWriteModels.add(bulkWriteModel.getWriteModels().get(writeError.getIndex())));
@@ -280,8 +316,13 @@ public class MongodbWriter {
 						continue;
 					}
 					if (handledIndexes.contains(i)) {
-						newWriteModelList.add(retryWriteModels.get(0));
-						retryWriteModels.remove(0);
+						if (ignoredIndexes.contains(i)) {
+							// skip ignored index
+							continue;
+						} else {
+							newWriteModelList.add(retryWriteModels.get(0));
+							retryWriteModels.remove(0);
+						}
 					} else {
 						newWriteModelList.add(bulkWriteModel.getAllOpWriteModels().get(i));
 					}
@@ -293,6 +334,163 @@ public class MongodbWriter {
 				retryWriteModels.forEach(bulkWriteModel::addAnyOpModel);
 			}
 			return true;
+		}
+	}
+
+	protected String dumpBulkWriteErrorContext(MongoBulkWriteException ex,
+											   BulkWriteModel bulkWriteModel,
+											   BulkWriteOptions bulkWriteOptions,
+											   MongoCollection<Document> collection) {
+		try {
+			String thread = Thread.currentThread().getName();
+			String ns = collection != null ? collection.getNamespace().getFullName() : "unknown";
+			String database = collection != null ? collection.getNamespace().getDatabaseName() : "unknown";
+			String collectionName = collection != null ? collection.getNamespace().getCollectionName() : "unknown";
+			String sanitizedThread = thread.replaceAll("[^a-zA-Z0-9_.-]", "_");
+			String dateMinute = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm").format(LocalDateTime.now());
+
+			String fileName = "mongodb_bulk_write_error_" + dateMinute + "_" + sanitizedThread + ".log";
+			String baseTmp = System.getProperty("java.io.tmpdir", ".");
+			Path dir = Paths.get(baseTmp, "tapdata-mongodb-errors");
+			String content = buildBulkWriteErrorContent(ex, bulkWriteModel, bulkWriteOptions, ns, database, collectionName, thread, dateMinute);
+			try {
+				Files.createDirectories(dir);
+				Path filePath = dir.resolve(fileName);
+				Files.write(filePath, content.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+				// Trigger cleanup after successful write
+				cleanupErrorFilesIfNeeded(dir);
+				return filePath.toAbsolutePath().toString();
+			} catch (Throwable t1) {
+				// Fallback to current working directory
+				String userDir = System.getProperty("user.dir", ".");
+				Path fallbackDir = Paths.get(userDir, "tapdata-mongodb-errors");
+				try {
+					Files.createDirectories(fallbackDir);
+					Path filePath = fallbackDir.resolve(fileName);
+					Files.write(filePath, content.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+					// Trigger cleanup after successful write
+					cleanupErrorFilesIfNeeded(fallbackDir);
+					return filePath.toAbsolutePath().toString();
+				} catch (Throwable ignored) {
+					return null;
+				}
+			}
+		} catch (Throwable ignored) {
+			return null;
+		}
+	}
+
+	private String buildBulkWriteErrorContent(MongoBulkWriteException ex,
+											  BulkWriteModel bulkWriteModel,
+											  BulkWriteOptions bulkWriteOptions,
+											  String namespace,
+											  String database,
+											  String collectionName,
+											  String thread,
+											  String dateMinute) {
+		StringBuilder sb = new StringBuilder(8192);
+		sb.append("==== MongoDB Bulk Write Error Dump ====")
+				.append('\n');
+		sb.append("dateMinute=").append(dateMinute).append(" thread=").append(thread).append('\n');
+		sb.append("database=").append(database).append(" collection=").append(collectionName).append('\n');
+		sb.append("namespace=").append(namespace).append('\n');
+		sb.append("bulkWriteOptions.ordered=").append(bulkWriteOptions != null && bulkWriteOptions.isOrdered()).append('\n');
+		sb.append("bulkWriteOptions.toString=").append(bulkWriteOptions).append('\n');
+		Map<Integer, List<BulkWriteError>> errorByIndex = new HashMap<>();
+
+		if (ex != null) {
+			sb.append("exceptionClass=").append(ex.getClass().getName()).append('\n');
+			sb.append("exceptionMessage=").append(ex.getMessage()).append('\n');
+			sb.append("serverAddress=").append(ex.getServerAddress()).append('\n');
+			sb.append("writeConcernError=").append(ex.getWriteConcernError()).append('\n');
+			List<BulkWriteError> errs = ex.getWriteErrors();
+			if (errs != null && !errs.isEmpty()) {
+				for (BulkWriteError we : errs) {
+					errorByIndex.computeIfAbsent(we.getIndex(), k -> new ArrayList<>()).add(we);
+				}
+			}
+			if (!errs.isEmpty()) {
+				sb.append("writeErrors(size=").append(errs.size()).append("):").append('\n');
+				for (int i = 0; i < errs.size(); i++) {
+					BulkWriteError we = errs.get(i);
+					sb.append("  [").append(i).append("] index=").append(we.getIndex())
+							.append(" code=").append(we.getCode())
+							.append(" message=").append(we.getMessage())
+							.append(" details=").append(we.getDetails())
+							.append('\n');
+				}
+			}
+		}
+		// Dump write models
+		try {
+			List<WriteModel<Document>> allOps = bulkWriteModel != null ? bulkWriteModel.getAllOpWriteModels() : null;
+			List<WriteModel<Document>> onlyInserts = bulkWriteModel != null ? bulkWriteModel.getOnlyInsertWriteModels() : null;
+			if (allOps != null) {
+				sb.append("allOpWriteModels(size=").append(allOps.size()).append("):").append('\n');
+				for (int i = 0; i < allOps.size(); i++) {
+					sb.append("  [").append(i).append("] ").append(describeWriteModel(allOps.get(i))).append('\n');
+					List<BulkWriteError> idxErrs = errorByIndex.get(i);
+					if (idxErrs != null && !idxErrs.isEmpty()) {
+						for (BulkWriteError we : idxErrs) {
+							sb.append("    -> error index=").append(we.getIndex())
+									.append(" code=").append(we.getCode())
+									.append(" message=").append(we.getMessage())
+									.append(" details=").append(we.getDetails())
+									.append('\n');
+						}
+					}
+				}
+			}
+			if (onlyInserts != null) {
+				sb.append("onlyInsertWriteModels(size=").append(onlyInserts.size()).append("):").append('\n');
+				for (int i = 0; i < onlyInserts.size(); i++) {
+					sb.append("  [").append(i).append("] ").append(describeWriteModel(onlyInserts.get(i))).append('\n');
+				}
+			}
+		} catch (Throwable ignored) {
+			// ignore model rendering errors
+		}
+		sb.append("==== END ====").append('\n');
+		return sb.toString();
+	}
+
+
+	private String describeWriteModel(WriteModel<Document> model) {
+		if (model == null) return "null";
+		try {
+			if (model instanceof InsertOneModel) {
+				InsertOneModel<Document> m = (InsertOneModel<Document>) model;
+				return "InsertOneModel document=" + safeToJson(m.getDocument());
+			} else if (model instanceof UpdateOneModel) {
+				UpdateOneModel<Document> m = (UpdateOneModel<Document>) model;
+				return "UpdateOneModel filter=" + safeToJson(m.getFilter()) + " update=" + safeToJson(m.getUpdate()) + " options=" + m.getOptions();
+			} else if (model instanceof UpdateManyModel) {
+				UpdateManyModel<Document> m = (UpdateManyModel<Document>) model;
+				return "UpdateManyModel filter=" + safeToJson(m.getFilter()) + " update=" + safeToJson(m.getUpdate()) + " options=" + m.getOptions();
+			} else if (model instanceof ReplaceOneModel) {
+				ReplaceOneModel<Document> m = (ReplaceOneModel<Document>) model;
+				return "ReplaceOneModel filter=" + safeToJson(m.getFilter()) + " replacement=" + safeToJson(m.getReplacement()) + " options=" + m.getReplaceOptions();
+			} else if (model instanceof DeleteOneModel) {
+				DeleteOneModel<Document> m = (DeleteOneModel<Document>) model;
+				return "DeleteOneModel filter=" + safeToJson(m.getFilter());
+			} else if (model instanceof DeleteManyModel) {
+				DeleteManyModel<Document> m = (DeleteManyModel<Document>) model;
+				return "DeleteManyModel filter=" + safeToJson(m.getFilter());
+			} else {
+				return String.valueOf(model);
+			}
+		} catch (Throwable t) {
+			return String.valueOf(model);
+		}
+	}
+
+	private String safeToJson(Object obj) {
+		try {
+			if (obj == null) return "null";
+			if (obj instanceof Document) return ((Document) obj).toJson();
+			return String.valueOf(obj);
+		} catch (Throwable ignored) {
+			return String.valueOf(obj);
 		}
 	}
 
@@ -375,20 +573,20 @@ public class MongodbWriter {
 			Collection<String> allColumn = tapTable.getNameFieldMap().keySet();
 			TapUpdateRecordEvent updateRecordEvent = (TapUpdateRecordEvent) recordEvent;
 			Map<String, Object> after = updateRecordEvent.getAfter();
-            Map<String, Object> before = updateRecordEvent.getBefore();
-            before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
-            if (!((TapUpdateRecordEvent) recordEvent).getIsReplaceEvent()) {
-                after = DbKit.getAfterForUpdateMongo(after, before, allColumn, pks);
-            }
+			Map<String, Object> before = updateRecordEvent.getBefore();
+			before = DbKit.getBeforeForUpdate(after, before, allColumn, pks);
+			if (!((TapUpdateRecordEvent) recordEvent).getIsReplaceEvent()) {
+				after = DbKit.getAfterForUpdateMongo(after, before, allColumn, pks);
+			}
 			Map<String, Object> info = recordEvent.getInfo();
 			Document pkFilter;
 			Document u = new Document();
 			if (info != null && info.get("$op") != null) {
 				WriteModel<Document> writeModel;
-                Object id = info.get("_id");
-                id = MongodbUtil.convertValue(id);
-                pkFilter = new Document("_id", id);
-                ((Map<String, Object>) info.get("$op")).forEach((k, v) -> u.put(k, MongodbUtil.convertValue(v)));
+				Object id = info.get("_id");
+				id = MongodbUtil.convertValue(id);
+				pkFilter = new Document("_id", id);
+				((Map<String, Object>) info.get("$op")).forEach((k, v) -> u.put(k, MongodbUtil.convertValue(v)));
 				u.remove("$v"); // Exists '$v' in update operation of MongoDB(v3.6), remove it because can't apply in write model.
 				boolean isUpdate = u.keySet().stream().anyMatch(k -> k.startsWith("$"));
 				if (isUpdate) {
@@ -460,9 +658,9 @@ public class MongodbWriter {
 	/**
 	 * 过滤层级字段，保留最高层级的字段
 	 * 例如：[a, a.b, a.c] -> [a]
-	 *      [a.b, a.c] -> [a.b, a.c]
-	 *      [a, a.b, a.b.c] -> [a]
-	 *      [a.b, a.b.c, a.b.e] -> [a.b]
+	 * [a.b, a.c] -> [a.b, a.c]
+	 * [a, a.b, a.b.c] -> [a]
+	 * [a.b, a.b.c, a.b.e] -> [a.b]
 	 */
 	private List<String> filterHierarchicalFields(List<String> fields) {
 		if (CollectionUtils.isEmpty(fields)) {
@@ -499,8 +697,8 @@ public class MongodbWriter {
 	/**
 	 * 判断field是否是parentField的子字段
 	 * 例如：isChildField("a.b", "a") -> true
-	 *      isChildField("a.b.c", "a.b") -> true
-	 *      isChildField("a", "a.b") -> false
+	 * isChildField("a.b.c", "a.b") -> true
+	 * isChildField("a", "a.b") -> false
 	 */
 	private boolean isChildField(String field, String parentField) {
 		return field.startsWith(parentField + ".");
@@ -509,8 +707,8 @@ public class MongodbWriter {
 	/**
 	 * 判断parentField是否是field的父字段
 	 * 例如：isParentField("a", "a.b") -> true
-	 *      isParentField("a.b", "a.b.c") -> true
-	 *      isParentField("a.b", "a") -> false
+	 * isParentField("a.b", "a.b.c") -> true
+	 * isParentField("a.b", "a") -> false
 	 */
 	private boolean isParentField(String parentField, String field) {
 		return field.startsWith(parentField + ".");
@@ -547,6 +745,88 @@ public class MongodbWriter {
 		this.insertPolicy = insertPolicy;
 		this.updatePolicy = updatePolicy;
 		return this;
+	}
+
+	/**
+	 * Cleanup old error files if needed (with frequency limit)
+	 * This method is called after each error file write, but actual cleanup only happens once per hour
+	 *
+	 * @param errorDir The directory containing error files
+	 */
+	private void cleanupErrorFilesIfNeeded(Path errorDir) {
+		long now = System.currentTimeMillis();
+		if (now - lastCleanupTime < CLEANUP_INTERVAL_MS) {
+			return; // Skip cleanup to avoid frequent execution
+		}
+		lastCleanupTime = now;
+		cleanupErrorFiles(errorDir, ERROR_FILE_RETENTION_DAYS, ERROR_FILE_MAX_COUNT);
+	}
+
+	/**
+	 * Cleanup error files based on retention days and max file count
+	 * Strategy:
+	 * 1. First delete files older than retention days
+	 * 2. If remaining files still exceed max count, delete oldest files
+	 *
+	 * @param errorDir      The directory containing error files
+	 * @param retentionDays Keep files for this many days
+	 * @param maxFiles      Keep at most this many files
+	 */
+	private void cleanupErrorFiles(Path errorDir, int retentionDays, int maxFiles) {
+		try {
+			if (!Files.exists(errorDir) || !Files.isDirectory(errorDir)) {
+				return;
+			}
+
+			long cutoffTime = System.currentTimeMillis() - (retentionDays * 24L * 60 * 60 * 1000);
+
+			List<Path> allFiles = Files.list(errorDir)
+					.filter(Files::isRegularFile)
+					.filter(p -> p.getFileName().toString().startsWith("mongodb_bulk_write_error_"))
+					.collect(java.util.stream.Collectors.toList());
+
+			// Step 1: Delete files older than retention period
+			List<Path> validFiles = new ArrayList<>();
+			for (Path p : allFiles) {
+				try {
+					if (Files.getLastModifiedTime(p).toMillis() < cutoffTime) {
+						Files.delete(p);
+						tapLogger.debug("Deleted old error file (older than {} days): {}", retentionDays, p.getFileName());
+					} else {
+						validFiles.add(p);
+					}
+				} catch (IOException e) {
+					tapLogger.warn("Failed to delete old error file: {}, error: {}", p, e.getMessage());
+				}
+			}
+
+			// Step 2: If remaining files still exceed max count, delete oldest files
+			if (validFiles.size() > maxFiles) {
+				validFiles.sort(Comparator.comparingLong(p -> {
+					try {
+						return Files.getLastModifiedTime(p).toMillis();
+					} catch (IOException e) {
+						return 0L;
+					}
+				}));
+
+				int filesToDelete = validFiles.size() - maxFiles;
+				for (int i = 0; i < filesToDelete; i++) {
+					try {
+						Files.delete(validFiles.get(i));
+						tapLogger.debug("Deleted excess error file (exceeds max count {}): {}", maxFiles, validFiles.get(i).getFileName());
+					} catch (IOException e) {
+						tapLogger.warn("Failed to delete excess error file: {}, error: {}", validFiles.get(i), e.getMessage());
+					}
+				}
+			}
+
+			tapLogger.debug("Error file cleanup completed. Directory: {}, retention days: {}, max files: {}",
+					errorDir, retentionDays, maxFiles);
+		} catch (Throwable t) {
+			// Never affect main flow
+			tapLogger.warn("Error during error file cleanup: {}", t.getMessage());
+		}
 	}
 
 }

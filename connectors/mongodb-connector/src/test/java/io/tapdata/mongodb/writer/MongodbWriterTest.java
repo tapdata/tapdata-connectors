@@ -97,6 +97,102 @@ class MongodbWriterTest {
 	}
 
 	@Nested
+	@DisplayName("Method dumpBulkWriteErrorContext test")
+	class dumpBulkWriteErrorContextTest {
+		@Test
+		@DisplayName("should write dump file with thread/database/collection/namespace and minute-level filename")
+		void testDumpToFileIncludesMetadata() throws Exception {
+			// Prepare
+			com.mongodb.client.MongoCollection<Document> collection = org.mockito.Mockito.mock(com.mongodb.client.MongoCollection.class);
+			org.mockito.Mockito.when(collection.getNamespace()).thenReturn(new com.mongodb.MongoNamespace("ut_db", "ut_col"));
+			BulkWriteModel bulkWriteModel = new BulkWriteModel(false);
+			// mock 100 mixed write models: insert / update / upsert / delete
+			for (int i = 0; i < 100; i++) {
+				if (i < 30) {
+					org.bson.Document doc = new org.bson.Document("_id", i).append("k", "v" + i);
+					com.mongodb.client.model.InsertOneModel<org.bson.Document> insert = new com.mongodb.client.model.InsertOneModel<>(doc);
+					bulkWriteModel.addAnyOpModel(insert);
+				} else if (i < 60) {
+					// update without upsert
+					com.mongodb.client.model.UpdateOneModel<org.bson.Document> update =
+							new com.mongodb.client.model.UpdateOneModel<>(
+									com.mongodb.client.model.Filters.eq("_id", i),
+									new org.bson.Document("$set", new org.bson.Document("k", "upd" + i)));
+					bulkWriteModel.addAnyOpModel(update);
+				} else if (i < 90) {
+					// update with upsert
+					com.mongodb.client.model.UpdateOneModel<org.bson.Document> upsert =
+							new com.mongodb.client.model.UpdateOneModel<>(
+									com.mongodb.client.model.Filters.eq("_id", i),
+									new org.bson.Document("$set", new org.bson.Document("k", "upsert" + i)),
+									new com.mongodb.client.model.UpdateOptions().upsert(true));
+					bulkWriteModel.addAnyOpModel(upsert);
+				} else {
+					// delete
+					com.mongodb.client.model.DeleteOneModel<org.bson.Document> delete =
+							new com.mongodb.client.model.DeleteOneModel<>(
+									com.mongodb.client.model.Filters.eq("_id", i));
+					bulkWriteModel.addAnyOpModel(delete);
+				}
+			}
+			com.mongodb.client.model.BulkWriteOptions bulkWriteOptions = new com.mongodb.client.model.BulkWriteOptions();
+			String threadName = Thread.currentThread().getName();
+			String sanitizedThread = threadName.replaceAll("[^a-zA-Z0-9_.-]", "_");
+
+				// fabricate a MongoBulkWriteException with random index errors
+				java.util.Random rnd = new java.util.Random();
+				java.util.List<com.mongodb.bulk.BulkWriteError> errors = new java.util.ArrayList<>();
+				int opsSize = bulkWriteModel.getAllOpWriteModels() != null ? bulkWriteModel.getAllOpWriteModels().size() : 0;
+				if (opsSize > 0) {
+					int maxErr = Math.min(5, opsSize);
+					int errCount = 1 + rnd.nextInt(maxErr);
+					java.util.Set<java.lang.Integer> usedIdx = new java.util.HashSet<>();
+					for (int i = 0; i < errCount; i++) {
+						int idx;
+						do {
+							idx = rnd.nextInt(opsSize);
+						} while (!usedIdx.add(idx));
+						int[] codes = new int[]{28, 2, 11000};
+						int code = codes[rnd.nextInt(codes.length)];
+						org.bson.BsonDocument details = new org.bson.BsonDocument("reason", new org.bson.BsonString("ut-error"));
+						errors.add(new com.mongodb.bulk.BulkWriteError(code, "ut error at " + idx, details, idx));
+					}
+				}
+				com.mongodb.MongoBulkWriteException ex = org.mockito.Mockito.mock(com.mongodb.MongoBulkWriteException.class);
+				org.mockito.Mockito.when(ex.getWriteErrors()).thenReturn(errors);
+				org.mockito.Mockito.when(ex.getServerAddress()).thenReturn(new com.mongodb.ServerAddress("localhost", 27017));
+				org.mockito.Mockito.when(ex.getWriteConcernError()).thenReturn(null);
+
+			String pathObj = mongodbWriter.dumpBulkWriteErrorContext(ex, bulkWriteModel, bulkWriteOptions, collection);
+
+			assertNotNull(pathObj, "dumpBulkWriteErrorContext should return file path");
+			String filePath = String.valueOf(pathObj);
+			java.nio.file.Path path = java.nio.file.Paths.get(filePath);
+			assertTrue(java.nio.file.Files.exists(path), "dump file should exist");
+
+			try {
+				String content = new String(java.nio.file.Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8);
+				// Verify filename pattern
+				String fileName = path.getFileName().toString();
+				assertTrue(fileName.startsWith("mongodb_bulk_write_error_"));
+				assertTrue(fileName.endsWith("_" + sanitizedThread + ".log"));
+
+				// Verify content contains metadata
+				assertTrue(content.contains("thread=" + threadName));
+				assertTrue(content.contains("database=ut_db collection=ut_col"));
+				assertTrue(content.contains("namespace=ut_db.ut_col"));
+			} finally {
+				// Clean up test artifact file
+				try {
+					java.nio.file.Files.deleteIfExists(path);
+				} catch (Throwable ignored) {
+				}
+			}
+		}
+	}
+
+
+	@Nested
 	@DisplayName("Method removeOidIfNeed test")
 	class removeOidIfNeedTest {
 		@Test
