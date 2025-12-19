@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "OpenGauss",
+    "realName": "openGauss",
     "icon": "icons/open-gauss.png",
     "doc" : "${doc}",
     "id": "open-gauss",

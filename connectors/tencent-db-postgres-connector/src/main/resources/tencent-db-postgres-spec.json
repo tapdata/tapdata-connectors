@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Tencent DB PostgreSQL",
+    "realName": "TencentDB for PostgreSQL",
     "icon": "icons/tencent_db_postgres.png",
     "doc" : "${doc}",
     "id": "tencent-db-postgres",

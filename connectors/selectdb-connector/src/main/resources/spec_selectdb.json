@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "SelectDB",
+    "realName": "SelectDB",
     "icon": "icons/selectdb.png",
     "doc": "${doc}",
     "id": "selectdb",

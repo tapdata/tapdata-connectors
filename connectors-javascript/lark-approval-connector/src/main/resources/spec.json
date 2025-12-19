@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Lark Approval",
+    "realName": "Lark Approval",
     "icon": "icon/task.png",
     "doc": "${doc}",
     "id": "lark-approval",

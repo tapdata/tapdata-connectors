@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "AIChat",
+    "realName": "AI Chat",
     "icon": "icon/chat.png",
     "doc" : "${doc}",
     "id": "ai-chat",

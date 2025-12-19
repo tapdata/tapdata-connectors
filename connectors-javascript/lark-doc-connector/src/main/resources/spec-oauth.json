@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Lark Doc",
+    "realName": "Lark Doc",
     "icon": "icon/lark-doc.png",
     "doc" : "${doc}",
     "id": "lark-doc",

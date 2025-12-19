@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Tablestore",
+    "realName": "Tablestore",
     "icon": "icons/tablestore.png",
     "doc" : "${doc}",
     "id": "tablestore",

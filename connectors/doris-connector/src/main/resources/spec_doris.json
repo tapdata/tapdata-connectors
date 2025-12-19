@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Doris",
+    "realName": "Apache Doris",
     "icon": "icons/doris.png",
     "id": "doris",
     "docs": "${docs}",
