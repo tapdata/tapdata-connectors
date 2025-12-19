@@ -13,6 +13,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.TapArrayValue;
 import io.tapdata.entity.schema.value.TapMapValue;
 import io.tapdata.entity.schema.value.TapRawValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -79,6 +80,7 @@ public class PaimonConnector extends ConnectorBase {
         if (paimonService != null) {
             try {
                 paimonService.close();
+                paimonService = null;
             } catch (Exception e) {
                 connectionContext.getLog().warn("Error closing Paimon service: " + e.getMessage(), e);
             }
@@ -201,6 +203,7 @@ public class PaimonConnector extends ConnectorBase {
             }
             return null;
         });
+        codecRegistry.registerFromTapValue(TapTimeValue.class, "CHAR(8)", tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss"));
     }
 
     /**
@@ -296,25 +299,12 @@ public class PaimonConnector extends ConnectorBase {
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents,
                             TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
         final Log log = connectorContext.getLog();
-        
+
         try {
-            // Get DML policies
-            String insertPolicy = connectorContext.getConnectorCapabilities()
-                .getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
-            if (insertPolicy == null) {
-                insertPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
-            }
-            
-            String updatePolicy = connectorContext.getConnectorCapabilities()
-                .getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
-            if (updatePolicy == null) {
-                updatePolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
-            }
-            
             // Write records using Paimon service
             WriteListResult<TapRecordEvent> result = paimonService.writeRecords(
-                tapRecordEvents, table, insertPolicy, updatePolicy);
-            
+                tapRecordEvents, table, connectorContext);
+
             writeListResultConsumer.accept(result);
             
         } catch (Exception e) {
