@@ -37,6 +37,7 @@ import org.apache.paimon.types.DataTypes;
 import java.io.Closeable;
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Service class for Paimon operations
@@ -47,8 +48,16 @@ public class PaimonService implements Closeable {
 
     private final PaimonConfig config;
     private Catalog catalog;
-    // Note: Both BatchTableWrite and BatchTableCommit only support one-time committing
-    // We don't cache them and create new instances for each write operation
+
+    // Cache writers and commits per table for long lifecycle
+    // Key: database.tableName
+    private final Map<String, StreamTableWrite> streamWriterCache = new ConcurrentHashMap<>();
+    private final Map<String, StreamTableCommit> streamCommitCache = new ConcurrentHashMap<>();
+    private final Map<String, BatchTableWrite> batchWriterCache = new ConcurrentHashMap<>();
+    private final Map<String, BatchTableCommit> batchCommitCache = new ConcurrentHashMap<>();
+
+    // Lock for writer/commit creation to avoid concurrent creation
+    private final Object writerLock = new Object();
 
     public PaimonService(PaimonConfig config) {
         this.config = config;
@@ -647,55 +656,60 @@ public class PaimonService implements Closeable {
                                                                                 String insertPolicy,
                                                                                 String updatePolicy,
                                                                                 boolean allowRetry) throws Exception {
-        WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         String database = config.getDatabase();
         String tableName = table.getName();
-        Identifier identifier = Identifier.create(database, tableName);
+        String tableKey = database + "." + tableName;
 
-        // Create new writer and commit for each batch
-        // Note: Both BatchTableWrite and BatchTableCommit only support one-time committing
-        BatchTableWrite writer = createBatchWriter(identifier);
-        BatchTableCommit commit = createBatchCommit(identifier);
+        // Use loop instead of recursion for retry
+        int maxRetries = allowRetry ? 1 : 0;
+        int retryCount = 0;
 
-        try {
-            for (TapRecordEvent event : recordEvents) {
-                if (event instanceof TapInsertRecordEvent) {
-                    handleBatchInsert((TapInsertRecordEvent) event, writer, table);
-                    result.incrementInserted(1);
-                } else if (event instanceof TapUpdateRecordEvent) {
-                    handleBatchUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy);
-                    result.incrementModified(1);
-                } else if (event instanceof TapDeleteRecordEvent) {
-                    handleBatchDelete((TapDeleteRecordEvent) event, writer, table);
-                    result.incrementRemove(1);
+        while (true) {
+            WriteListResult<TapRecordEvent> result = new WriteListResult<>();
+            Identifier identifier = Identifier.create(database, tableName);
+
+            // Get or create cached writer and commit
+            BatchTableWrite writer = getOrCreateBatchWriter(tableKey, identifier);
+            BatchTableCommit commit = getOrCreateBatchCommit(tableKey, identifier);
+
+            try {
+                for (TapRecordEvent event : recordEvents) {
+                    if (event instanceof TapInsertRecordEvent) {
+                        handleBatchInsert((TapInsertRecordEvent) event, writer, table);
+                        result.incrementInserted(1);
+                    } else if (event instanceof TapUpdateRecordEvent) {
+                        handleBatchUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy);
+                        result.incrementModified(1);
+                    } else if (event instanceof TapDeleteRecordEvent) {
+                        handleBatchDelete((TapDeleteRecordEvent) event, writer, table);
+                        result.incrementRemove(1);
+                    }
                 }
-            }
 
-            // Commit the batch
-            commit.commit(writer.prepareCommit());
+                // Commit the batch
+                commit.commit(writer.prepareCommit());
 
-        } catch (Exception e) {
-            // Check if it's ThreadGroup destroyed error, retry after reinitializing catalog
-            if (allowRetry && isThreadGroupDestroyedError(e)) {
-                reinitCatalog();
-                return writeRecordsWithBatchWriteInternal(recordEvents, table, insertPolicy, updatePolicy, false);
-            }
-            throw new RuntimeException("Failed to write records to table " + tableName, e);
-        } finally {
-            // Close writer and commit after use since they only support one-time committing
-            try {
-                writer.close();
+                // Note: BatchTableWrite and BatchTableCommit only support one-time committing
+                // Remove from cache after commit so next batch gets fresh instances
+                cleanupTableResources(tableKey);
+
+                return result;
+
             } catch (Exception e) {
-                // Ignore close errors
-            }
-            try {
-                commit.close();
-            } catch (Exception e) {
-                // Ignore close errors
+                // Check if it's ThreadGroup destroyed error and we can retry
+                if (retryCount < maxRetries && isThreadGroupDestroyedError(e)) {
+                    retryCount++;
+                    // Completely rebuild all resources
+                    cleanupTableResources(tableKey);
+                    reinitCatalog();
+                    // Continue to next iteration for retry
+                    continue;
+                }
+                // Clean up on error
+                cleanupTableResources(tableKey);
+                throw new RuntimeException("Failed to write records to table " + tableName, e);
             }
         }
-
-        return result;
     }
 
     /**
@@ -731,68 +745,83 @@ public class PaimonService implements Closeable {
                                                                                   String insertPolicy,
                                                                                   String updatePolicy,
                                                                                   boolean allowRetry) throws Exception {
-        WriteListResult<TapRecordEvent> result = new WriteListResult<>();
         String database = config.getDatabase();
         String tableName = table.getName();
-        Identifier identifier = Identifier.create(database, tableName);
+        String tableKey = database + "." + tableName;
 
-        // Create stream writer and commit
-        StreamTableWrite writer = createStreamWriter(identifier);
-        StreamTableCommit commit = createStreamCommit(identifier);
+        // Use loop instead of recursion for retry
+        int maxRetries = allowRetry ? 1 : 0;
+        int retryCount = 0;
 
-        try {
-            for (TapRecordEvent event : recordEvents) {
-                if (event instanceof TapInsertRecordEvent) {
-                    handleStreamInsert((TapInsertRecordEvent) event, writer, table);
-                    result.incrementInserted(1);
-                } else if (event instanceof TapUpdateRecordEvent) {
-                    handleStreamUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy);
-                    result.incrementModified(1);
-                } else if (event instanceof TapDeleteRecordEvent) {
-                    handleStreamDelete((TapDeleteRecordEvent) event, writer, table);
-                    result.incrementRemove(1);
+        while (true) {
+            WriteListResult<TapRecordEvent> result = new WriteListResult<>();
+            Identifier identifier = Identifier.create(database, tableName);
+
+            // Get or create cached writer and commit
+            StreamTableWrite writer = getOrCreateStreamWriter(tableKey, identifier);
+            StreamTableCommit commit = getOrCreateStreamCommit(tableKey, identifier);
+
+            try {
+                for (TapRecordEvent event : recordEvents) {
+                    if (event instanceof TapInsertRecordEvent) {
+                        handleStreamInsert((TapInsertRecordEvent) event, writer, table);
+                        result.incrementInserted(1);
+                    } else if (event instanceof TapUpdateRecordEvent) {
+                        handleStreamUpdate((TapUpdateRecordEvent) event, writer, table, updatePolicy);
+                        result.incrementModified(1);
+                    } else if (event instanceof TapDeleteRecordEvent) {
+                        handleStreamDelete((TapDeleteRecordEvent) event, writer, table);
+                        result.incrementRemove(1);
+                    }
                 }
-            }
 
-            // Prepare commit with commitIdentifier
-            // Use current timestamp as commitIdentifier for simplicity
-            long commitIdentifier = System.currentTimeMillis();
-            List<org.apache.paimon.table.sink.CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+                // Prepare commit with commitIdentifier
+                // Use current timestamp as commitIdentifier for simplicity
+                long commitIdentifier = System.currentTimeMillis();
+                List<org.apache.paimon.table.sink.CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
 
-            // Commit the batch
-            commit.commit(commitIdentifier, messages);
+                // Commit the batch
+                commit.commit(commitIdentifier, messages);
 
-        } catch (Exception e) {
-            // Check if it's ThreadGroup destroyed error, retry after reinitializing catalog
-            if (allowRetry && isThreadGroupDestroyedError(e)) {
-                reinitCatalog();
-                return writeRecordsWithStreamWriteInternal(recordEvents, table, insertPolicy, updatePolicy, false);
-            }
-            throw new RuntimeException("Failed to write records to table " + tableName, e);
-        } finally {
-            // Close writer and commit after use
-            try {
-                writer.close();
+                return result;
+
             } catch (Exception e) {
-                // Ignore close errors
-            }
-            try {
-                commit.close();
-            } catch (Exception e) {
-                // Ignore close errors
+                // Check if it's ThreadGroup destroyed error and we can retry
+                if (retryCount < maxRetries && isThreadGroupDestroyedError(e)) {
+                    retryCount++;
+                    // Completely rebuild all resources
+                    cleanupTableResources(tableKey);
+                    reinitCatalog();
+                    // Continue to next iteration for retry
+                    continue;
+                }
+                throw new RuntimeException("Failed to write records to table " + tableName, e);
             }
         }
-
-        return result;
     }
 
     /**
      * Reinitialize the Paimon catalog.
      * This is used to recover from ThreadGroup destroyed errors caused by classloader unloading.
+     * This method completely rebuilds all resources including catalog and all cached writers/commits.
      *
      * @throws Exception if reinitialization fails
      */
     private synchronized void reinitCatalog() throws Exception {
+        // Close all cached writers and commits first
+        for (String tableKey : new ArrayList<>(streamWriterCache.keySet())) {
+            cleanupTableResources(tableKey);
+        }
+        for (String tableKey : new ArrayList<>(batchWriterCache.keySet())) {
+            cleanupTableResources(tableKey);
+        }
+
+        // Clear all caches
+        streamWriterCache.clear();
+        streamCommitCache.clear();
+        batchWriterCache.clear();
+        batchCommitCache.clear();
+
         // Close old catalog if exists
         if (catalog != null) {
             try {
@@ -801,6 +830,7 @@ public class PaimonService implements Closeable {
                 // Ignore close errors
             }
         }
+
         // Reinitialize catalog
         init();
     }
@@ -876,6 +906,133 @@ public class PaimonService implements Closeable {
         Table table = catalog.getTable(identifier);
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
         return writeBuilder.newCommit();
+    }
+
+    /**
+     * Get or create cached stream writer for table
+     *
+     * @param tableKey table key (database.tableName)
+     * @param identifier table identifier
+     * @return stream table writer
+     * @throws Exception if creation fails
+     */
+    private StreamTableWrite getOrCreateStreamWriter(String tableKey, Identifier identifier) throws Exception {
+        return streamWriterCache.computeIfAbsent(tableKey, k -> {
+            synchronized (writerLock) {
+                try {
+                    return createStreamWriter(identifier);
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to create stream writer for table " + tableKey, e);
+                }
+            }
+        });
+    }
+
+    /**
+     * Get or create cached stream commit for table
+     *
+     * @param tableKey table key (database.tableName)
+     * @param identifier table identifier
+     * @return stream table commit
+     * @throws Exception if creation fails
+     */
+    private StreamTableCommit getOrCreateStreamCommit(String tableKey, Identifier identifier) throws Exception {
+        return streamCommitCache.computeIfAbsent(tableKey, k -> {
+            synchronized (writerLock) {
+                try {
+                    return createStreamCommit(identifier);
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to create stream commit for table " + tableKey, e);
+                }
+            }
+        });
+    }
+
+    /**
+     * Get or create cached batch writer for table
+     *
+     * @param tableKey table key (database.tableName)
+     * @param identifier table identifier
+     * @return batch table writer
+     * @throws Exception if creation fails
+     */
+    private BatchTableWrite getOrCreateBatchWriter(String tableKey, Identifier identifier) throws Exception {
+        return batchWriterCache.computeIfAbsent(tableKey, k -> {
+            synchronized (writerLock) {
+                try {
+                    return createBatchWriter(identifier);
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to create batch writer for table " + tableKey, e);
+                }
+            }
+        });
+    }
+
+    /**
+     * Get or create cached batch commit for table
+     *
+     * @param tableKey table key (database.tableName)
+     * @param identifier table identifier
+     * @return batch table commit
+     * @throws Exception if creation fails
+     */
+    private BatchTableCommit getOrCreateBatchCommit(String tableKey, Identifier identifier) throws Exception {
+        return batchCommitCache.computeIfAbsent(tableKey, k -> {
+            synchronized (writerLock) {
+                try {
+                    return createBatchCommit(identifier);
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to create batch commit for table " + tableKey, e);
+                }
+            }
+        });
+    }
+
+    /**
+     * Clean up all cached resources for a specific table
+     *
+     * @param tableKey table key (database.tableName)
+     */
+    private void cleanupTableResources(String tableKey) {
+        // Close and remove stream writer
+        StreamTableWrite streamWriter = streamWriterCache.remove(tableKey);
+        if (streamWriter != null) {
+            try {
+                streamWriter.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
+        }
+
+        // Close and remove stream commit
+        StreamTableCommit streamCommit = streamCommitCache.remove(tableKey);
+        if (streamCommit != null) {
+            try {
+                streamCommit.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
+        }
+
+        // Close and remove batch writer
+        BatchTableWrite batchWriter = batchWriterCache.remove(tableKey);
+        if (batchWriter != null) {
+            try {
+                batchWriter.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
+        }
+
+        // Close and remove batch commit
+        BatchTableCommit batchCommit = batchCommitCache.remove(tableKey);
+        if (batchCommit != null) {
+            try {
+                batchCommit.close();
+            } catch (Exception e) {
+                // Ignore close errors
+            }
+        }
     }
 
     /**
@@ -1217,6 +1374,20 @@ public class PaimonService implements Closeable {
 
     @Override
     public void close() {
+        // Close all cached writers and commits
+        for (String tableKey : new ArrayList<>(streamWriterCache.keySet())) {
+            cleanupTableResources(tableKey);
+        }
+        for (String tableKey : new ArrayList<>(batchWriterCache.keySet())) {
+            cleanupTableResources(tableKey);
+        }
+
+        // Clear all caches
+        streamWriterCache.clear();
+        streamCommitCache.clear();
+        batchWriterCache.clear();
+        batchCommitCache.clear();
+
         // Close catalog
         if (catalog != null) {
             try {
