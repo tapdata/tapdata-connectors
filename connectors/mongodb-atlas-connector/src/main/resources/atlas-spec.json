@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "MongoDB Atlas",
+    "realName": "MongoDB Atlas",
     "icon": "icons/atlas.png",
     "doc" : "${doc}",
     "tags" : ["schema-free","Database"],

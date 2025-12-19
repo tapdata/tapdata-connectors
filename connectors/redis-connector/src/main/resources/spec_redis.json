@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Redis",
+    "realName": "Redis",
     "icon": "icons/redis.png",
     "doc": "${doc}",
     "id": "redis",

@@ -417,7 +417,7 @@ public class PaimonService implements Closeable {
 		}
 		if (EmptyKit.isNotBlank(config.getFileFormat())) {
 			schemaBuilder.option("file.format", config.getFileFormat());
-		}
+        }
 		if (EmptyKit.isNotBlank(config.getCompression())) {
 			schemaBuilder.option("compression", config.getCompression());
 		}

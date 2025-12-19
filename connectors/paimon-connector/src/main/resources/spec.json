@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Paimon",
+    "realName": "Apache Paimon",
     "icon": "icons/paimon.png",
     "doc": "${doc}",
     "tags": ["Database", "schema-free"],
@@ -496,15 +497,15 @@
     },
     "TIMESTAMP[($fraction)]": {
       "to": "TapDateTime",
-      "range": ["1970-01-01 00:00:00.000000", "2038-01-19 03:14:07.999999"],
-      "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS",
+      "range": ["1970-01-01 00:00:00", "2038-01-19 03:14:07"],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
       "fraction": [0, 6],
       "defaultFraction": 6
     },
     "TIMESTAMP_LTZ[($fraction)]": {
       "to": "TapDateTime",
-      "range": ["1970-01-01 00:00:00.000000", "2038-01-19 03:14:07.999999"],
-      "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS",
+      "range": ["1970-01-01 00:00:00", "2038-01-19 03:14:07"],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
       "fraction": [0, 6],
       "defaultFraction": 6,
       "withTimeZone": true

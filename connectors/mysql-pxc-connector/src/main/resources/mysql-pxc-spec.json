@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "MySQL PXC",
+    "realName": "MySQL Percona XtraDB Cluster",
     "icon": "icons/mysql_pxc.png",
     "id": "mysql-pxc",
     "doc": "${doc}",
