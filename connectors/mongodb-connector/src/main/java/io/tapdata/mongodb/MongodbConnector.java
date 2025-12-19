@@ -672,7 +672,7 @@ public class MongodbConnector extends ConnectorBase {
 			return;
 		}
 		Object preImage4SinkObj = nodeConfig.get("preImage4Sink");
-		if(preImage4SinkObj instanceof Boolean && !Boolean.TRUE.equals(preImage4SinkObj)){
+		if (!Boolean.TRUE.equals(preImage4SinkObj)) {
 			return;
 		}
 		// changeStreamPreAndPostImages is only supported in MongoDB 6.0+
