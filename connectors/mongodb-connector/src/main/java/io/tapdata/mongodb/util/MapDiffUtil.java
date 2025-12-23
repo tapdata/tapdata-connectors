@@ -97,6 +97,7 @@ public class MapDiffUtil {
             // Check if the key exists in after
             if (!afterMap.containsKey(key)) {
                 // Key does not exist in after, record difference (without path types)
+                if(key.equals("_id"))continue;
                 KeyDiffInfo diffInfo = new KeyDiffInfo(key, fullPath, null);
                 result.add(diffInfo);
             } else {
