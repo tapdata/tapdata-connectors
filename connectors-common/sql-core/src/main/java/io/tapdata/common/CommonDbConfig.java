@@ -44,6 +44,7 @@ public class CommonDbConfig implements Serializable {
     private int batchReadThreadSize = 4;
     private Boolean doubleActive = false;
     private Boolean dataSaving = true;
+    private Boolean fileLog = false;
     private Boolean oldVersionTimezone = false;
     private Boolean createAutoInc = false;
     private long autoIncJumpValue = 1000000L;
@@ -294,6 +295,14 @@ public class CommonDbConfig implements Serializable {
 
     public void setDataSaving(Boolean dataSaving) {
         this.dataSaving = dataSaving;
+    }
+
+    public Boolean getFileLog() {
+        return fileLog;
+    }
+
+    public void setFileLog(Boolean fileLog) {
+        this.fileLog = fileLog;
     }
 
     public Boolean getOldVersionTimezone() {
