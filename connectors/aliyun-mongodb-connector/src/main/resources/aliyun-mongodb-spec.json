@@ -5,7 +5,17 @@
     "icon": "icons/aliyun-mongodb.png",
     "doc" : "${doc}",
     "tags" : ["schema-free","Database"],
-    "id": "aliyun-db-mongodb"
+    "id": "aliyun-db-mongodb",
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "capabilities": [

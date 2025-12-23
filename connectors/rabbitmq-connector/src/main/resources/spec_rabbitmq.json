@@ -5,7 +5,17 @@
     "icon": "icons/rabbitmq.png",
     "doc": "${doc}",
     "id": "rabbitmq",
-    "tags": ["Database"]
+    "tags": ["Database"],
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "connection": {

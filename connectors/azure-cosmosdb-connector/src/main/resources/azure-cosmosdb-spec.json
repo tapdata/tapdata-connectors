@@ -8,7 +8,17 @@
       "schema-free",
       "Database"
     ],
-    "id": "azure-cosmosdb"
+    "id": "azure-cosmosdb",
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "capabilities": [

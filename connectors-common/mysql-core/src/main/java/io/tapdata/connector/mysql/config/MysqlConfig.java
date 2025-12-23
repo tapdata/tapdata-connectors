@@ -202,5 +202,4 @@ public class MysqlConfig extends CommonDbConfig {
     public void setMaximumQueueSize(Integer maximumQueueSize) {
         this.maximumQueueSize = maximumQueueSize;
     }
-
 }

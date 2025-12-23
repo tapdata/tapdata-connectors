@@ -41,7 +41,7 @@ import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.*;
@@ -271,7 +271,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
-        connectorFunctions.supportStreamRead(this::streamRead);
+        connectorFunctions.supportOneByOneStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
         connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
@@ -835,9 +835,9 @@ public class MysqlConnector extends CommonDbConnector {
     }
 
 
-    private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
+    private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, StreamReadOneByOneConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
-        mysqlReader.readBinlog(tapConnectorContext, tables, offset, batchSize, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, contextMapForMasterSlave);
+        mysqlReader.readBinlog(tapConnectorContext, tables, offset, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, contextMapForMasterSlave);
     }
 
 

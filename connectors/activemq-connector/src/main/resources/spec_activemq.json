@@ -5,7 +5,17 @@
     "icon": "icons/activemq.png",
     "doc": "${doc}",
     "id": "activemq",
-    "tags": ["Database"]
+    "tags": ["Database"],
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "connection": {
