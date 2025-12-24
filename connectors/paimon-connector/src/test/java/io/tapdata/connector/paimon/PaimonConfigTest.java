@@ -27,7 +27,7 @@ public class PaimonConfigTest {
         config.setStorageType("s3");
         
         String fullPath = config.getFullWarehousePath();
-        assertEquals("s3://bucket/warehouse", fullPath);
+        assertEquals("s3a://bucket/warehouse", fullPath);
     }
 
     @Test
