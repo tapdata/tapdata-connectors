@@ -1,5 +1,6 @@
 package io.tapdata.common;
 
+import io.tapdata.common.log.CustomLogDelegator;
 import io.tapdata.common.util.FileUtil;
 import io.tapdata.entity.utils.BeanUtils;
 import io.tapdata.entity.utils.InstanceFactory;
@@ -159,6 +160,13 @@ public class CommonDbConfig implements Serializable {
                 ErrorKit.ignoreAnyError(() -> FileUtils.deleteDirectory(cacheDir));
             }
         }
+    }
+
+    public void startJdbcLog(String loggerName) {
+        setDbType("log4jdbc:" + getDbType());
+        setJdbcDriver("net.sf.log4jdbc.sql.jdbcapi.DriverSpy");
+        System.setProperty("log4jdbc.spylogdelegator.name", "io.tapdata.common.log.CustomLogDelegator");
+        CustomLogDelegator.setLoggerName(loggerName);
     }
 
     public String get__connectionType() {

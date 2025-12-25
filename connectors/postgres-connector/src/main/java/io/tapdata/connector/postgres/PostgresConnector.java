@@ -290,7 +290,9 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void dropPublication() throws Throwable {
-        postgresJdbcContext.execute("DROP PUBLICATION " + slotName);
+        if (EmptyKit.isNotNull(slotName)) {
+            postgresJdbcContext.execute("DROP PUBLICATION " + slotName);
+        }
     }
 
     private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
@@ -388,11 +390,7 @@ public class PostgresConnector extends CommonDbConnector {
     //initialize jdbc context, slot name, version
     private void initConnection(TapConnectionContext connectionContext) {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
-        postgresTest = new PostgresTest(postgresConfig, testItem -> {
-        }, null).initContext();
-        postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
-        commonDbConfig = postgresConfig;
-        jdbcContext = postgresJdbcContext;
+        postgresConfig.load(connectionContext.getNodeConfig());
         isConnectorStarted(connectionContext, tapConnectorContext -> {
             firstConnectorId = (String) tapConnectorContext.getStateMap().get("firstConnectorId");
             if (EmptyKit.isNull(firstConnectorId)) {
@@ -400,11 +398,18 @@ public class PostgresConnector extends CommonDbConnector {
                 tapConnectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
             slotName = tapConnectorContext.getStateMap().get("tapdata_pg_slot");
-            postgresConfig.load(tapConnectorContext.getNodeConfig());
             if (EmptyKit.isNull(slotName) && StringUtils.isNotBlank(postgresConfig.getCustomSlotName())) {
                 slotName = postgresConfig.getCustomSlotName();
             }
         });
+        if (true) {
+            postgresConfig.startJdbcLog(firstConnectorId);
+        }
+        postgresTest = new PostgresTest(postgresConfig, testItem -> {
+        }, null).initContext();
+        postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
+        commonDbConfig = postgresConfig;
+        jdbcContext = postgresJdbcContext;
         postgresVersion = postgresJdbcContext.queryVersion();
         commonSqlMaker = new PostgresSqlMaker()
                 .dbVersion(postgresVersion)
@@ -736,7 +741,7 @@ public class PostgresConnector extends CommonDbConnector {
             if ("pgoutput".equals(postgresConfig.getLogPluginName()) && Integer.parseInt(postgresVersion) > 100000) {
                 if (!postgresConfig.getPartPublication()) {
                     createAllPublicationIfNotExist();
-                } else if(EmptyKit.isBlank(postgresConfig.getCustomPublicationName())) {
+                } else if (EmptyKit.isBlank(postgresConfig.getCustomPublicationName())) {
                     List<String> tableList = new ArrayList<>();
                     Iterator<Entry<TapTable>> iterator = connectorContext.getTableMap().iterator();
                     while (iterator.hasNext()) {
