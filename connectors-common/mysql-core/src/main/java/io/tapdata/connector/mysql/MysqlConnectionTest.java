@@ -162,7 +162,7 @@ public class MysqlConnectionTest extends CommonDbTest {
     }
 
     public boolean testWriteOrReadPrivilegeV2(String grantSql, List<String> tableList, String databaseName, String mark) {
-        Pattern pattern = Pattern.compile(("GRANT (.*) ON (.*)\\.\\* TO (.*)@`%`"));
+        Pattern pattern = Pattern.compile(("GRANT (.*) ON (.*)\\.\\* TO (.*)@[`']%[`']"));
         Matcher matcher = pattern.matcher(grantSql);
         if (matcher.find()) {
             String privilege = matcher.group(1);
