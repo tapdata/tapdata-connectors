@@ -402,7 +402,7 @@ public class PostgresConnector extends CommonDbConnector {
                 slotName = postgresConfig.getCustomSlotName();
             }
         });
-        if (true) {
+        if (postgresConfig.getFileLog()) {
             postgresConfig.startJdbcLog(firstConnectorId);
         }
         postgresTest = new PostgresTest(postgresConfig, testItem -> {
