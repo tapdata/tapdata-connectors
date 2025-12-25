@@ -17,6 +17,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
@@ -88,6 +89,8 @@ public abstract class AbsSchemaMode {
                 return new OriginalSchemaMode(kafkaService);
             case STANDARD:
                 return new StandardSchemaMode(kafkaService);
+            case CUSTOM:
+                return new CustomSchemaMode(kafkaService);
             case CANAL:
                 return new CanalSchemaMode(kafkaService);
             case DEBEZIUM:
@@ -158,6 +161,37 @@ public abstract class AbsSchemaMode {
                 return "INTEGER";
             default:
                 return dataType;
+        }
+    }
+
+    /**
+     * 根据值推断 TapData 类型
+     */
+    protected String inferTapType(Object value) {
+        if (value == null) {
+            return "STRING";
+        }
+
+        if (value instanceof Boolean) {
+            return "BOOLEAN";
+        } else if (value instanceof Integer || value instanceof Short || value instanceof Byte) {
+            return "INTEGER";
+        } else if (value instanceof Long) {
+            return "BIGINT";
+        } else if (value instanceof Float) {
+            return "FLOAT";
+        } else if (value instanceof Double) {
+            return "DOUBLE";
+        } else if (value instanceof BigDecimal) {
+            return "DOUBLE";
+        } else if (value instanceof String) {
+            return "STRING";
+        } else if (value instanceof List) {
+            return "ARRAY";
+        } else if (value instanceof Map) {
+            return "MAP";
+        } else {
+            return "STRING";
         }
     }
 }

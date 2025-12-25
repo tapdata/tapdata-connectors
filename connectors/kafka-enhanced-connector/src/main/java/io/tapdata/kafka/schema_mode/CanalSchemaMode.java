@@ -12,7 +12,6 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kafka.AbsSchemaMode;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
-import io.tapdata.kafka.utils.KafkaUtils;
 import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import org.apache.commons.lang3.StringUtils;

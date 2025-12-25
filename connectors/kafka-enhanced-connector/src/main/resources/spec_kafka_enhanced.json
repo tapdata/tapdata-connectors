@@ -53,8 +53,38 @@
             {
               "label": "${schemaModeOriginal}",
               "value": "ORIGINAL"
+            },
+            {
+              "label": "${schemaModeCustom}",
+              "value": "CUSTOM"
             }
           ]
+        },
+        "analyzeScript": {
+          "type": "string",
+          "required": false,
+          "default": "function analyze(head, key, value){\n\n\t\/\/ Enter your code at here\n\t return value;\n}",
+          "x-decorator": "FormItem",
+          "x-component": "JsEditor",
+          "x-component-props": {
+            "options": { "showPrintMargin": false, "useWrapMode": true },
+            "includeBeforeAndAfter": true,
+            "before": "function analyze(head, key, value){",
+            "beforeRegexp": "^[^]*function\\s+analyze\\s*\\(head, key, value\\)\\{",
+            "afterRegexp": "}[^}]*$",
+            "after": "}"
+          },
+          "x-index": 15,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]==='CUSTOM'}}"
+              }
+            },
+            "dependencies": [
+              "schemaMode"
+            ]
+          }
         },
         "serialization": {
           "type": "void",
@@ -717,6 +747,7 @@
       "schemaMode": "Structural mode",
       "schemaModeTapStandard": "Standard structure",
       "schemaModeOriginal": "Original structure",
+      "schemaModeCustom": "Custom structure",
       "schemaModeCanal": "Canal",
       "schemaModeDebezium": "Debezium",
       "schemaModeFlinkCDC": "Flink CDC",
@@ -785,6 +816,7 @@
       "schemaMode": "结构模式",
       "schemaModeTapStandard": "标准结构",
       "schemaModeOriginal": "原生结构",
+      "schemaModeCustom": "自定义结构",
       "schemaModeCanal": "Canal",
       "schemaModeDebezium": "Debezium",
       "schemaModeFlinkCDC": "Flink CDC",
@@ -853,6 +885,7 @@
       "schemaMode": "結構模式",
       "schemaModeTapStandard": "標準結構",
       "schemaModeOriginal": "原生結構",
+      "schemaModeCustom": "自定義結構",
       "schemaModeCanal": "Canal",
       "schemaModeDebezium": "Debezium",
       "schemaModeFlinkCDC": "Flink CDC",

@@ -59,6 +59,10 @@ public class KafkaConfig extends BasicConfig implements
         return KafkaSchemaMode.fromString(schemaMode);
     }
 
+    public String getConnectionScript() {
+        return connectionConfigGet("analyzeScript", "");
+    }
+
     public KafkaSchemaMode getNodeSchemaMode() {
         String schemaMode = nodeConfigGet("schemaMode", null);
         return StringUtils.isEmpty(schemaMode) ? null : KafkaSchemaMode.fromString(schemaMode);
