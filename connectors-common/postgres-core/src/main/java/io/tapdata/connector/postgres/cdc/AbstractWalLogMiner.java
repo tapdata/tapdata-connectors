@@ -1,8 +1,11 @@
 package io.tapdata.connector.postgres.cdc;
 
 import com.google.common.collect.Lists;
+import io.tapdata.cdc.CustomAbstractAccepter;
 import io.tapdata.common.sqlparser.ResultDO;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
+import io.tapdata.connector.postgres.cdc.accept.LogMinerProBatchAccepter;
+import io.tapdata.connector.postgres.cdc.accept.LogMinerProOneByOneAccepter;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
@@ -18,6 +21,8 @@ import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
+import io.tapdata.pdk.apis.consumer.TapStreamReadConsumer;
 
 import java.math.BigDecimal;
 import java.sql.ResultSet;
@@ -25,7 +30,14 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -35,8 +47,8 @@ public abstract class AbstractWalLogMiner {
 
     protected final PostgresJdbcContext postgresJdbcContext;
     protected final Log tapLogger;
-    protected StreamReadConsumer consumer;
-    protected int recordSize;
+    //protected StreamReadConsumer consumer;
+    protected CustomAbstractAccepter<NormalRedo, ?, ?> consumer;
     protected List<String> tableList;
     protected boolean filterSchema;
     private Map<String, String> dataTypeMap;
@@ -95,9 +107,26 @@ public abstract class AbstractWalLogMiner {
 
     public abstract void startMiner(Supplier<Boolean> isAlive) throws Throwable;
 
+    /**
+     * @deprecated
+     * */
     public AbstractWalLogMiner registerConsumer(StreamReadConsumer consumer, int recordSize) {
-        this.consumer = consumer;
-        this.recordSize = recordSize;
+        return registerCdcConsumer(consumer, recordSize);
+    }
+
+    public AbstractWalLogMiner registerCdcConsumer(TapStreamReadConsumer<?, Object> consumer, int recordSize) {
+        if (consumer instanceof StreamReadConsumer) {
+            this.consumer = new LogMinerProBatchAccepter()
+                    .setConsumer((StreamReadConsumer) consumer)
+                    .setBatchSize(recordSize)
+                    .setEventCreator(this::createEvent);
+        } else if (consumer instanceof StreamReadOneByOneConsumer) {
+            this.consumer = new LogMinerProOneByOneAccepter()
+                    .setConsumer((StreamReadOneByOneConsumer) consumer)
+                    .setEventCreator(this::createEvent);
+        } else {
+            throw new IllegalArgumentException("Unsupported consumer type: " + consumer.getClass().getName());
+        }
         return this;
     }
 

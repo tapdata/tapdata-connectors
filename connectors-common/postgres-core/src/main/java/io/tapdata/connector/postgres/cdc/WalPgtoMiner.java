@@ -1,24 +1,19 @@
 package io.tapdata.connector.postgres.cdc;
 
 import com.alibaba.fastjson.JSONObject;
-import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.concurrent.ConcurrentProcessor;
 import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.common.sqlparser.ResultDO;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
-import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.HttpKit;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 public class WalPgtoMiner extends AbstractWalLogMiner {
@@ -65,28 +60,10 @@ public class WalPgtoMiner extends AbstractWalLogMiner {
         try (ConcurrentProcessor<String, NormalRedo> concurrentProcessor = TapExecutors.createSimple(8, 32, "wal-miner")) {
             Thread t = new Thread(() -> {
                 consumer.streamReadStarted();
-                NormalRedo lastRedo = null;
-                AtomicReference<List<TapEvent>> events = new AtomicReference<>(ConnectorBase.list());
                 while (isAlive.get()) {
                     try {
                         NormalRedo redo = concurrentProcessor.get(2, TimeUnit.SECONDS);
-                        if (EmptyKit.isNotNull(redo)) {
-                            if (EmptyKit.isNotNull(redo.getOperation())) {
-                                lastRedo = redo;
-                                events.get().add(createEvent(redo));
-                                if (events.get().size() >= recordSize) {
-                                    consumer.accept(events.get(), redo.getCdcSequenceStr());
-                                    events.set(new ArrayList<>());
-                                }
-                            } else {
-                                consumer.accept(Collections.singletonList(new HeartbeatEvent().init().referenceTime(System.currentTimeMillis())), redo.getCdcSequenceStr());
-                            }
-                        } else {
-                            if (!events.get().isEmpty()) {
-                                consumer.accept(events.get(), lastRedo.getCdcSequenceStr());
-                                events.set(new ArrayList<>());
-                            }
-                        }
+                        consumer.accept(redo);
                     } catch (Exception e) {
                         threadException.set(e);
                         return;
