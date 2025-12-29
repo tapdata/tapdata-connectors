@@ -543,7 +543,7 @@ public class PostgresConnector extends CommonDbConnector {
                             jdbcContext.queryWithNext("select pg_get_serial_sequence('" + tableName + "', '" + k + "')", resultSet -> actualSequenceName.set(resultSet.getString(1)));
                             jdbcContext.queryWithNext("select last_value from " + actualSequenceName.get(), resultSet -> actual.set(resultSet.getLong(1)));
                         } catch (SQLException ignore) {
-                            tapLogger.warn("Failed get auto increment value for table {} field {}", tapTable.getId(), k, ignore);
+                            tapLogger.warn("Failed get auto increment value for table {} errormessage:{}", tapTable.getId(),ignore.getMessage());
                         }
                         if (actual.get() >= (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue())) {
                             return;
