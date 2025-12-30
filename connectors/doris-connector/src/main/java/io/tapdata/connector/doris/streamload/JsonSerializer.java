@@ -6,7 +6,9 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.type.TapDateTime;
 
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -73,6 +75,15 @@ public class JsonSerializer implements MessageSerializer {
 				if (null == value) {
 					linkedRecord.put(field, null);
 				} else {
+					// Check if field is TapDateTime type and value is ISO 8601 format string
+					TapField tapField = tapTable.getNameFieldMap().get(field);
+					if (tapField != null && tapField.getTapType() instanceof TapDateTime && value instanceof String) {
+						String dateTimeStr = (String) value;
+						if (dateTimeStr.contains("T") && dateTimeStr.endsWith("Z")) {
+							dateTimeStr = dateTimeStr.replace("T", " ").substring(0, 19);
+							value = dateTimeStr;
+						}
+					}
 					linkedRecord.put(field, value.toString());
 				}
 			}
