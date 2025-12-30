@@ -60,7 +60,7 @@
             }
           ]
         },
-        "analyzeScript": {
+        "script": {
           "type": "string",
           "required": false,
           "default": "function analyze(head, key, value){\n\n\t\/\/ Enter your code at here\n\t return value;\n}",
@@ -716,7 +716,18 @@
           "x-decorator-props": {
             "tooltip": "${combinePushTopicTip}"
           },
-          "x-index": 2
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]!=='source' && $deps[1].length}}"
+              }
+            },
+            "dependencies": [
+              "__TAPDATA.connection_type",
+              "$inputs"
+            ]
+          },
+          "x-index": 50
         },
         "schemaMode": {
           "type": "string",
@@ -729,8 +740,47 @@
             {"label": "${schemaModeOriginal}", "value": "ORIGINAL"},
             {"label": "${schemaModeCanal}", "value": "CANAL"},
             {"label": "${schemaModeDebezium}", "value": "DEBEZIUM"},
-            {"label": "${schemaModeFlinkCDC}", "value": "FLINK_CDC"}
-          ]
+            {"label": "${schemaModeFlinkCDC}", "value": "FLINK_CDC"},
+            {"label": "${schemaModeCustom}", "value": "CUSTOM"}
+          ],
+          "x-index": 60,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]!=='source' && $deps[1].length}}"
+              }
+            },
+            "dependencies": [
+              "__TAPDATA.connection_type",
+              "$inputs"
+            ]
+          }
+        },
+        "script": {
+          "type": "string",
+          "required": false,
+          "default": "function process(record, op, conditionKeys){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
+          "x-decorator": "FormItem",
+          "x-component": "JsEditor",
+          "x-component-props": {
+            "options": { "showPrintMargin": false, "useWrapMode": true },
+            "includeBeforeAndAfter": true,
+            "before": "function process(record, op, conditionKeys){",
+            "beforeRegexp": "^[^]*function\\s+process\\s*\\(record, op, conditionKeys\\)\\{",
+            "afterRegexp": "}[^}]*$",
+            "after": "}"
+          },
+          "x-index": 70,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]==='CUSTOM'}}"
+              }
+            },
+            "dependencies": [
+              ".schemaMode"
+            ]
+          }
         }
       }
     }

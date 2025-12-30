@@ -60,7 +60,11 @@ public class KafkaConfig extends BasicConfig implements
     }
 
     public String getConnectionScript() {
-        return connectionConfigGet("analyzeScript", "");
+        return connectionConfigGet("script", "");
+    }
+
+    public String getNodeScript() {
+        return nodeConfigGet("script", "");
     }
 
     public KafkaSchemaMode getNodeSchemaMode() {
