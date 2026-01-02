@@ -63,7 +63,18 @@ public class TDengineConnector extends CommonDbConnector {
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Exception {
         tdengineConfig = (TDengineConfig) new TDengineConfig().load(connectionContext.getConnectionConfig());
-        isConnectorStarted(connectionContext, connectorContext -> tdengineConfig.load(connectorContext.getNodeConfig()));
+        isConnectorStarted(connectionContext, connectorContext -> {
+            tdengineConfig.load(connectorContext.getNodeConfig());
+            firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
+        });
+        if (tdengineConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            tdengineConfig.startJdbcLog(firstConnectorId);
+        }
         tdengineJdbcContext = new TDengineJdbcContext(tdengineConfig);
         this.connectionTimezone = connectionContext.getConnectionConfig().getString("timezone");
         if ("Database Timezone".equals(this.connectionTimezone) || StringUtils.isBlank(this.connectionTimezone)) {

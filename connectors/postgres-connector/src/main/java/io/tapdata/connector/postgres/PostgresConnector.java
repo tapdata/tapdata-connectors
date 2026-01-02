@@ -403,6 +403,7 @@ public class PostgresConnector extends CommonDbConnector {
             }
         });
         if (postgresConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
             postgresConfig.startJdbcLog(firstConnectorId);
         }
         postgresTest = new PostgresTest(postgresConfig, testItem -> {

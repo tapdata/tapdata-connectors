@@ -199,8 +199,6 @@ public class OceanbaseConnector extends MysqlConnector {
 
         mysqlConfig = new OceanbaseConfig().load(tapConnectionContext.getConnectionConfig());
         mysqlConfig.load(tapConnectionContext.getNodeConfig());
-        mysqlJdbcContext = new OceanbaseJdbcContext(mysqlConfig);
-        commonDbConfig = mysqlConfig;
         isConnectorStarted(tapConnectionContext, connectorContext -> {
             firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
             if (EmptyKit.isNull(firstConnectorId)) {
@@ -208,6 +206,12 @@ public class OceanbaseConnector extends MysqlConnector {
                 connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
         });
+        if (mysqlConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            mysqlConfig.startJdbcLog(firstConnectorId);
+        }
+        mysqlJdbcContext = new OceanbaseJdbcContext(mysqlConfig);
+        commonDbConfig = mysqlConfig;
         jdbcContext = mysqlJdbcContext;
         tapLogger = tapConnectionContext.getLog();
         commonSqlMaker = new CommonSqlMaker('`');

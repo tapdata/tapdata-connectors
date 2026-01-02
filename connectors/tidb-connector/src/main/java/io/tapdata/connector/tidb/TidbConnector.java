@@ -83,6 +83,18 @@ public class TidbConnector extends CommonDbConnector {
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws SQLException {
         this.tidbConfig = new TidbConfig().load(tapConnectionContext.getConnectionConfig());
+        isConnectorStarted(tapConnectionContext, connectorContext -> {
+            tidbConfig.load(connectorContext.getNodeConfig());
+            firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
+        });
+        if (tidbConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            tidbConfig.startJdbcLog(firstConnectorId);
+        }
         tidbJdbcContext = new TidbJdbcContext(tidbConfig);
         commonDbConfig = tidbConfig;
         jdbcContext = tidbJdbcContext;
@@ -105,7 +117,7 @@ public class TidbConnector extends CommonDbConnector {
         RetryOptions retryOptions = super.errorHandle(tapConnectionContext, pdkMethod, throwable);
         retryOptions.setNeedRetry(
                 !(throwable instanceof CoreException && ((CoreException) throwable).getCode() == TiCDCShellManager.CDC_TOOL_NOT_EXISTS)
-                && !(throwable instanceof CoreException && ((CoreException) throwable).getCode() == HttpUtil.ERROR_START_TS_BEFORE_GC)
+                        && !(throwable instanceof CoreException && ((CoreException) throwable).getCode() == HttpUtil.ERROR_START_TS_BEFORE_GC)
         );
         return retryOptions;
     }
@@ -367,7 +379,7 @@ public class TidbConnector extends CommonDbConnector {
                 } else {
                     entry.setValue(((LocalDateTime) value).minusHours(tidbConfig.getZoneOffsetHour()));
                 }
-            }  else if (value instanceof java.sql.Date) {
+            } else if (value instanceof java.sql.Date) {
                 if (dataType.startsWith("year")) {
                     entry.setValue(((Date) value).toLocalDate().getYear());
                 } else {

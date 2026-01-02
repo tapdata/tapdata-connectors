@@ -57,6 +57,7 @@ import io.tapdata.pdk.apis.partition.ReadPartition;
 import io.tapdata.pdk.apis.partition.TapPartitionFilter;
 import io.tapdata.pdk.apis.partition.splitter.StringCaseInsensitiveSplitter;
 import io.tapdata.pdk.apis.partition.splitter.TypeSplitterMap;
+import org.apache.commons.lang3.StringUtils;
 
 import java.sql.*;
 import java.time.LocalDateTime;
@@ -104,6 +105,16 @@ public class MysqlConnector extends CommonDbConnector {
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
         mysqlConfig = new MysqlConfig().load(tapConnectionContext.getConnectionConfig());
         mysqlConfig.load(tapConnectionContext.getNodeConfig());
+        isConnectorStarted(tapConnectionContext, tapConnectorContext -> {
+            firstConnectorId = (String) tapConnectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                tapConnectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
+        });
+        if(true) {
+            mysqlConfig.startJdbcLog(firstConnectorId);
+        }
         contextMapForMasterSlave = MysqlUtil.buildContextMapForMasterSlave(mysqlConfig);
         MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         MysqlJdbcContextV2 contextV2 = contextMapForMasterSlave.get(mysqlConfig.getHost() + mysqlConfig.getPort());
