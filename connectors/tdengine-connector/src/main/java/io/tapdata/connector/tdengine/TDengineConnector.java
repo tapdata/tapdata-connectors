@@ -71,6 +71,7 @@ public class TDengineConnector extends CommonDbConnector {
                 connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
         });
+        tapLogger = connectionContext.getLog();
         if (tdengineConfig.getFileLog()) {
             tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
             tdengineConfig.startJdbcLog(firstConnectorId);
@@ -85,7 +86,6 @@ public class TDengineConnector extends CommonDbConnector {
         jdbcContext = tdengineJdbcContext;
         commonSqlMaker = new CommonSqlMaker(tdengineConfig.getEscapeChar());
         ddlSqlGenerator = new TDengineDDLSqlGenerator();
-        tapLogger = connectionContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();
         fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);

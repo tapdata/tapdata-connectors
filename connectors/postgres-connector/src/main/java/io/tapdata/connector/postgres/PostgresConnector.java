@@ -402,6 +402,7 @@ public class PostgresConnector extends CommonDbConnector {
                 slotName = postgresConfig.getCustomSlotName();
             }
         });
+        tapLogger = connectionContext.getLog();
         if (postgresConfig.getFileLog()) {
             tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
             postgresConfig.startJdbcLog(firstConnectorId);
@@ -426,7 +427,6 @@ public class PostgresConnector extends CommonDbConnector {
         postgresJdbcContext.withPostgresVersion(postgresVersion);
         postgresTest.withPostgresVersion(postgresVersion);
         ddlSqlGenerator = new PostgresDDLSqlGenerator();
-        tapLogger = connectionContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();
         fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);

@@ -92,6 +92,7 @@ public class ClickhouseConnector extends CommonDbConnector {
                 connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
         });
+        tapLogger = connectionContext.getLog();
         if (clickhouseConfig.getFileLog()) {
             tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
             clickhouseConfig.startJdbcLog(firstConnectorId);
@@ -102,7 +103,6 @@ public class ClickhouseConnector extends CommonDbConnector {
         clickhouseVersion = clickhouseJdbcContext.queryVersion();
         dbTimeZone = TimeZone.getTimeZone(clickhouseJdbcContext.queryTimeZone());
         commonSqlMaker = new ClickhouseSqlMaker().withVersion(clickhouseVersion);
-        tapLogger = connectionContext.getLog();
         exceptionCollector = new ClickhouseExceptionCollector();
     }
 

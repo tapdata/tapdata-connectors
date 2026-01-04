@@ -91,6 +91,7 @@ public class TidbConnector extends CommonDbConnector {
                 connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
         });
+        tapLogger = tapConnectionContext.getLog();
         if (tidbConfig.getFileLog()) {
             tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
             tidbConfig.startJdbcLog(firstConnectorId);
@@ -99,7 +100,6 @@ public class TidbConnector extends CommonDbConnector {
         commonDbConfig = tidbConfig;
         jdbcContext = tidbJdbcContext;
         initTimeZone();
-        tapLogger = tapConnectionContext.getLog();
         started.set(true);
         exceptionCollector = new TidbExceptionCollector();
         commonSqlMaker = new CommonSqlMaker('`');

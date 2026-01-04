@@ -57,7 +57,6 @@ import io.tapdata.pdk.apis.partition.ReadPartition;
 import io.tapdata.pdk.apis.partition.TapPartitionFilter;
 import io.tapdata.pdk.apis.partition.splitter.StringCaseInsensitiveSplitter;
 import io.tapdata.pdk.apis.partition.splitter.TypeSplitterMap;
-import org.apache.commons.lang3.StringUtils;
 
 import java.sql.*;
 import java.time.LocalDateTime;
@@ -112,7 +111,9 @@ public class MysqlConnector extends CommonDbConnector {
                 tapConnectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
         });
-        if(true) {
+        tapLogger = tapConnectionContext.getLog();
+        if (mysqlConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
             mysqlConfig.startJdbcLog(firstConnectorId);
         }
         contextMapForMasterSlave = MysqlUtil.buildContextMapForMasterSlave(mysqlConfig);
@@ -132,7 +133,6 @@ public class MysqlConnector extends CommonDbConnector {
         if (Boolean.TRUE.equals(mysqlConfig.getApplyDefault())) {
             commonSqlMaker.applyDefault(true);
         }
-        tapLogger = tapConnectionContext.getLog();
         exceptionCollector = new MysqlExceptionCollector();
         ((MysqlExceptionCollector) exceptionCollector).setMysqlConfig(mysqlConfig);
         this.version = mysqlJdbcContext.queryVersion();
@@ -1066,7 +1066,7 @@ public class MysqlConnector extends CommonDbConnector {
     protected int getLowerCaseTableNames() throws SQLException {
         AtomicInteger res = new AtomicInteger(0);
         mysqlJdbcContext.normalQuery("show variables like 'lower_case_table_names'", resultSet -> {
-            if(resultSet.next()) {
+            if (resultSet.next()) {
                 res.set(resultSet.getInt("Value"));
             }
         });
