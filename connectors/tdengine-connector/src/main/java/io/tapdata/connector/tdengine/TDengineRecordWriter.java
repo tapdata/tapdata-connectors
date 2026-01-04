@@ -34,6 +34,10 @@ public class TDengineRecordWriter extends NormalRecordWriter {
             insertRecorder.setTapLogger(tapLogger);
             deleteRecorder.setVersion(version);
             deleteRecorder.setTapLogger(tapLogger);
+            //dataSaving
+            if (Boolean.TRUE.equals(commonDbConfig.getDataSaving())) {
+                updateRecorder.setDataSaving(true);
+            }
             //insert,update,delete events must consecutive, so execute the other two first
             for (TapRecordEvent recordEvent : tapRecordEvents) {
                 if (null != isAlive && !isAlive.get()) {
