@@ -162,20 +162,20 @@ public class CustomSchemaMode extends AbsSchemaMode {
         if (null == eventObj) {
         } else {
             Map<String, Object> res = (Map<String, Object>) eventObj;
-            if (null == res.get("data")) {
-                throw new RuntimeException("data cannot be null");
+            if (null == res.get("value")) {
+                throw new RuntimeException("value cannot be null");
             } else {
-                Object obj = res.get("data");
+                Object obj = res.get("value");
                 if (obj instanceof Map) {
-                    Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("data");
+                    Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("value");
                     if (map.containsKey("before") && map.get("before").isEmpty()) {
                         map.remove("before");
                     }
                     if (map.containsKey("after") && map.get("after").isEmpty()) {
                         map.remove("after");
                     }
-                    res.put("data", map);
-                    body = TapSimplify.toJson(res.get("data"), JsonParser.ToJsonFeature.WriteMapNullValue);
+                    res.put("value", map);
+                    body = TapSimplify.toJson(res.get("value"), JsonParser.ToJsonFeature.WriteMapNullValue);
                 } else {
                     body = obj.toString();
                 }
