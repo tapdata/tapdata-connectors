@@ -13,6 +13,8 @@ import java.util.Date;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * High-performance file logger for string messages with multi-threaded write support.
@@ -46,7 +48,10 @@ public class FileLogger implements AutoCloseable {
     private static final int DEFAULT_FLUSH_INTERVAL_MS = 1000;
     private static final int DEFAULT_MAX_FILE_SIZE_MB = 100;
     private static final String LOG_FILE_EXTENSION = ".log";
+    private static final String COMPRESSED_EXTENSION = ".gz";
     private static final String DATE_PATTERN = "yyyy-MM-dd HH:mm:ss.SSS";
+    private static final long DEFAULT_COMPRESS_INTERVAL_MS = 24 * 60 * 60 * 1000L; // 24 hours
+    private static final int DEFAULT_RETAIN_DAYS = 7; // Keep compressed files for 7 days
 
     // Instance fields
     private final String logDirectory;
@@ -56,6 +61,9 @@ public class FileLogger implements AutoCloseable {
     private final int flushIntervalMs;
     private final long maxFileSizeBytes;
     private final boolean autoTimestamp;
+    private final boolean enableCompression;
+    private final long compressIntervalMs;
+    private final int retainDays;
 
     // Runtime state
     private final BlockingQueue<LogEntry> logQueue;
@@ -63,7 +71,9 @@ public class FileLogger implements AutoCloseable {
     private final AtomicBoolean closed;
     private final AtomicLong totalLinesLogged;
     private final AtomicLong totalLinesDropped;
+    private final AtomicLong totalFilesCompressed;
     private final Thread writerThread;
+    private final ScheduledExecutorService compressExecutor;
     private final ThreadLocal<SimpleDateFormat> dateFormat;
 
     // File handling
@@ -96,6 +106,9 @@ public class FileLogger implements AutoCloseable {
         private int flushIntervalMs = DEFAULT_FLUSH_INTERVAL_MS;
         private int maxFileSizeMB = DEFAULT_MAX_FILE_SIZE_MB;
         private boolean autoTimestamp = true;
+        private boolean enableCompression = false;
+        private long compressIntervalMs = DEFAULT_COMPRESS_INTERVAL_MS;
+        private int retainDays = DEFAULT_RETAIN_DAYS;
 
         public Builder logDirectory(String logDirectory) {
             this.logDirectory = logDirectory;
@@ -132,6 +145,46 @@ public class FileLogger implements AutoCloseable {
             return this;
         }
 
+        /**
+         * Enable automatic compression of old log files
+         * @param enable true to enable compression
+         * @return this builder
+         */
+        public Builder enableCompression(boolean enable) {
+            this.enableCompression = enable;
+            return this;
+        }
+
+        /**
+         * Set compression interval in milliseconds
+         * @param intervalMs interval in milliseconds (default: 24 hours)
+         * @return this builder
+         */
+        public Builder compressIntervalMs(long intervalMs) {
+            this.compressIntervalMs = intervalMs;
+            return this;
+        }
+
+        /**
+         * Set compression interval in hours
+         * @param hours interval in hours
+         * @return this builder
+         */
+        public Builder compressIntervalHours(int hours) {
+            this.compressIntervalMs = hours * 60 * 60 * 1000L;
+            return this;
+        }
+
+        /**
+         * Set how many days to retain compressed files
+         * @param days number of days to retain (default: 7)
+         * @return this builder
+         */
+        public Builder retainDays(int days) {
+            this.retainDays = days;
+            return this;
+        }
+
         public FileLogger build() throws IOException {
             return new FileLogger(this);
         }
@@ -155,12 +208,16 @@ public class FileLogger implements AutoCloseable {
         this.flushIntervalMs = builder.flushIntervalMs;
         this.maxFileSizeBytes = builder.maxFileSizeMB * 1024L * 1024L;
         this.autoTimestamp = builder.autoTimestamp;
+        this.enableCompression = builder.enableCompression;
+        this.compressIntervalMs = builder.compressIntervalMs;
+        this.retainDays = builder.retainDays;
 
         this.logQueue = new LinkedBlockingQueue<>(queueCapacity);
         this.running = new AtomicBoolean(false);
         this.closed = new AtomicBoolean(false);
         this.totalLinesLogged = new AtomicLong(0);
         this.totalLinesDropped = new AtomicLong(0);
+        this.totalFilesCompressed = new AtomicLong(0);
         this.fileSequence = 0;
 
         this.dateFormat = ThreadLocal.withInitial(() -> new SimpleDateFormat(DATE_PATTERN));
@@ -180,8 +237,27 @@ public class FileLogger implements AutoCloseable {
         this.running.set(true);
         this.writerThread.start();
 
-        TapLogger.info(TAG, "FileLogger initialized: directory={}, prefix={}, queueCapacity={}, batchSize={}, flushIntervalMs={}, maxFileSizeMB={}",
-            logDirectory, logFilePrefix, queueCapacity, batchSize, flushIntervalMs, builder.maxFileSizeMB);
+        // Start compression scheduler if enabled
+        if (enableCompression) {
+            this.compressExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "FileLogger-Compressor-" + logFilePrefix);
+                t.setDaemon(true);
+                return t;
+            });
+            this.compressExecutor.scheduleAtFixedRate(
+                this::compressOldLogs,
+                compressIntervalMs,
+                compressIntervalMs,
+                TimeUnit.MILLISECONDS
+            );
+            TapLogger.info(TAG, "FileLogger compression enabled: interval={}ms, retainDays={}",
+                compressIntervalMs, retainDays);
+        } else {
+            this.compressExecutor = null;
+        }
+
+        TapLogger.info(TAG, "FileLogger initialized: directory={}, prefix={}, queueCapacity={}, batchSize={}, flushIntervalMs={}, maxFileSizeMB={}, compression={}",
+            logDirectory, logFilePrefix, queueCapacity, batchSize, flushIntervalMs, builder.maxFileSizeMB, enableCompression);
     }
 
     /**
@@ -372,6 +448,158 @@ public class FileLogger implements AutoCloseable {
     }
 
     /**
+     * Compress old log files and delete expired compressed files
+     * This method is called periodically by the compression scheduler
+     */
+    private void compressOldLogs() {
+        compressOldLogs(false);
+    }
+
+    /**
+     * Compress old log files and delete expired compressed files
+     * @param forceAll if true, compress all non-current log files regardless of age
+     */
+    private void compressOldLogs(boolean forceAll) {
+        try {
+            Path logDir = Paths.get(logDirectory);
+            if (!Files.exists(logDir)) {
+                return;
+            }
+
+            long now = System.currentTimeMillis();
+            long compressThreshold = now - compressIntervalMs;
+            long deleteThreshold = now - (retainDays * 24L * 60L * 60L * 1000L);
+
+            try (Stream<Path> files = Files.list(logDir)) {
+                files.filter(path -> {
+                    String fileName = path.getFileName().toString();
+                    // Only process log files with our prefix
+                    return fileName.startsWith(logFilePrefix) &&
+                           fileName.endsWith(LOG_FILE_EXTENSION) &&
+                           !path.equals(currentLogFile); // Don't compress current file
+                })
+                .forEach(logFile -> {
+                    try {
+                        long lastModified = Files.getLastModifiedTime(logFile).toMillis();
+
+                        // Compress old log files
+                        if (forceAll || lastModified < compressThreshold) {
+                            compressLogFile(logFile);
+                        }
+                    } catch (Exception e) {
+                        TapLogger.error(TAG, "Error processing log file {}: {}",
+                            logFile.getFileName(), e.getMessage(), e);
+                    }
+                });
+            }
+
+            // Delete expired compressed files
+            try (Stream<Path> files = Files.list(logDir)) {
+                files.filter(path -> {
+                    String fileName = path.getFileName().toString();
+                    return fileName.startsWith(logFilePrefix) &&
+                           fileName.endsWith(COMPRESSED_EXTENSION);
+                })
+                .forEach(compressedFile -> {
+                    try {
+                        long lastModified = Files.getLastModifiedTime(compressedFile).toMillis();
+
+                        if (lastModified < deleteThreshold) {
+                            Files.delete(compressedFile);
+                            TapLogger.info(TAG, "Deleted expired compressed file: {}",
+                                compressedFile.getFileName());
+                        }
+                    } catch (Exception e) {
+                        TapLogger.error(TAG, "Error deleting compressed file {}: {}",
+                            compressedFile.getFileName(), e.getMessage(), e);
+                    }
+                });
+            }
+
+        } catch (Exception e) {
+            TapLogger.error(TAG, "Error in compressOldLogs: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Compress a single log file using GZIP
+     */
+    private void compressLogFile(Path logFile) {
+        Path compressedFile = Paths.get(logFile.toString() + COMPRESSED_EXTENSION);
+
+        try {
+            // Skip if already compressed
+            if (Files.exists(compressedFile)) {
+                TapLogger.debug(TAG, "Compressed file already exists: {}", compressedFile.getFileName());
+                return;
+            }
+
+            long originalSize = Files.size(logFile);
+
+            // Compress the file
+            try (InputStream in = Files.newInputStream(logFile);
+                 OutputStream out = Files.newOutputStream(compressedFile);
+                 GZIPOutputStream gzipOut = new GZIPOutputStream(out)) {
+
+                byte[] buffer = new byte[8192];
+                int len;
+                while ((len = in.read(buffer)) > 0) {
+                    gzipOut.write(buffer, 0, len);
+                }
+            }
+
+            long compressedSize = Files.size(compressedFile);
+            double ratio = (1.0 - (double) compressedSize / originalSize) * 100;
+
+            // Delete original file after successful compression
+            Files.delete(logFile);
+
+            totalFilesCompressed.incrementAndGet();
+
+            TapLogger.info(TAG, "Compressed log file: {} -> {} (saved {:.1f}%, {} -> {} bytes)",
+                logFile.getFileName(), compressedFile.getFileName(),
+                String.format("%.1f", ratio), originalSize, compressedSize);
+
+        } catch (Exception e) {
+            TapLogger.error(TAG, "Error compressing log file {}: {}",
+                logFile.getFileName(), e.getMessage(), e);
+
+            // Clean up partial compressed file on error
+            try {
+                if (Files.exists(compressedFile)) {
+                    Files.delete(compressedFile);
+                }
+            } catch (IOException cleanupError) {
+                TapLogger.error(TAG, "Error cleaning up partial compressed file: {}",
+                    cleanupError.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Manually trigger compression of old log files
+     * This can be called by users to compress logs on demand
+     * Only compresses files older than the compression interval
+     */
+    public void compressNow() {
+        compressNow(false);
+    }
+
+    /**
+     * Manually trigger compression of log files
+     * @param forceAll if true, compress all non-current log files regardless of age
+     */
+    public void compressNow(boolean forceAll) {
+        if (!enableCompression) {
+            TapLogger.warn(TAG, "Compression is not enabled");
+            return;
+        }
+
+        TapLogger.info(TAG, "Manual compression triggered (forceAll={})", forceAll);
+        compressOldLogs(forceAll);
+    }
+
+    /**
      * Rotate to a new log file
      */
     private void rotateLogFile() throws IOException {
@@ -411,6 +639,7 @@ public class FileLogger implements AutoCloseable {
         return new LoggerStats(
             totalLinesLogged.get(),
             totalLinesDropped.get(),
+            totalFilesCompressed.get(),
             logQueue.size(),
             currentFileSize,
             currentLogFile != null ? currentLogFile.toString() : null
@@ -423,14 +652,16 @@ public class FileLogger implements AutoCloseable {
     public static class LoggerStats {
         private final long totalLinesLogged;
         private final long totalLinesDropped;
+        private final long totalFilesCompressed;
         private final int queueSize;
         private final long currentFileSize;
         private final String currentLogFile;
 
-        public LoggerStats(long totalLinesLogged, long totalLinesDropped, int queueSize,
-                          long currentFileSize, String currentLogFile) {
+        public LoggerStats(long totalLinesLogged, long totalLinesDropped, long totalFilesCompressed,
+                          int queueSize, long currentFileSize, String currentLogFile) {
             this.totalLinesLogged = totalLinesLogged;
             this.totalLinesDropped = totalLinesDropped;
+            this.totalFilesCompressed = totalFilesCompressed;
             this.queueSize = queueSize;
             this.currentFileSize = currentFileSize;
             this.currentLogFile = currentLogFile;
@@ -442,6 +673,10 @@ public class FileLogger implements AutoCloseable {
 
         public long getTotalLinesDropped() {
             return totalLinesDropped;
+        }
+
+        public long getTotalFilesCompressed() {
+            return totalFilesCompressed;
         }
 
         public int getQueueSize() {
@@ -458,8 +693,8 @@ public class FileLogger implements AutoCloseable {
 
         @Override
         public String toString() {
-            return String.format("LoggerStats{logged=%d, dropped=%d, queueSize=%d, fileSize=%d, file=%s}",
-                totalLinesLogged, totalLinesDropped, queueSize, currentFileSize, currentLogFile);
+            return String.format("LoggerStats{logged=%d, dropped=%d, compressed=%d, queueSize=%d, fileSize=%d, file=%s}",
+                totalLinesLogged, totalLinesDropped, totalFilesCompressed, queueSize, currentFileSize, currentLogFile);
         }
     }
 
@@ -470,6 +705,20 @@ public class FileLogger implements AutoCloseable {
     public void close() {
         if (closed.compareAndSet(false, true)) {
             TapLogger.info(TAG, "Closing FileLogger...");
+
+            // Stop the compression executor if enabled
+            if (compressExecutor != null) {
+                try {
+                    compressExecutor.shutdown();
+                    if (!compressExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        compressExecutor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    compressExecutor.shutdownNow();
+                    TapLogger.warn(TAG, "Interrupted while waiting for compression executor to finish");
+                }
+            }
 
             // Stop the writer thread
             running.set(false);
