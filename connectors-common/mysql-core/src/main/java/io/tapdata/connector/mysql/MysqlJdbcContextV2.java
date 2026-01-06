@@ -17,6 +17,7 @@ import java.sql.*;
 import java.text.DecimalFormat;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -173,6 +174,39 @@ public class MysqlJdbcContextV2 extends JdbcContext {
             }
         });
         return hostPortAndStatus;
+    }
+
+    public boolean queryIsPrimary() {
+        AtomicBoolean atomicBoolean = new AtomicBoolean(false);
+        try {
+            normalQuery("select count(*) from performance_schema.replication_group_members where MEMBER_ROLE='PRIMARY' and MEMBER_ID=@@server_uuid;", rs -> {
+                if (rs.next()) {
+                    atomicBoolean.set(rs.getInt(1) > 0);
+                }
+            });
+        } catch (SQLException e) {
+            TapLogger.warn(TAG, "Query is primary failed, error: " + e.getMessage(), e);
+        }
+        return atomicBoolean.get();
+    }
+
+    private boolean isLowVersion() throws SQLException {
+        boolean lowVersion = true;
+        try (
+                Connection connection = getConnection()
+        ) {
+            DatabaseMetaData databaseMetaData = connection.getMetaData();
+            String version = databaseMetaData.getDatabaseMajorVersion() + "." + databaseMetaData.getDatabaseMinorVersion();
+            String[] versionNums = version.split("\\.");
+            if (versionNums.length >= 2) {
+                int majorVersion = Integer.parseInt(versionNums[0]);
+                int minorVersion = Integer.parseInt(versionNums[1]);
+                if (majorVersion == 8 && minorVersion >= 4 || majorVersion > 8) {
+                    lowVersion = false;
+                }
+            }
+        }
+        return lowVersion;
     }
 
     public Timestamp queryCurrentTime() throws SQLException {
