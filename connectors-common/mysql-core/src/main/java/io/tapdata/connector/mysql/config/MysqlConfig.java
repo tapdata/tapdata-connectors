@@ -19,7 +19,7 @@ public class MysqlConfig extends CommonDbConfig {
         setMaxIndexNameLength(64);
     }
 
-    private static final Map<String, String> DEFAULT_PROPERTIES = new HashMap<String, String>() {{
+    private static final Map<String, Object> DEFAULT_PROPERTIES = new HashMap<String, Object>() {{
         put("rewriteBatchedStatements", "true");
         put("useCursorFetch", "true");
         put("useSSL", Boolean.FALSE.toString());
@@ -45,11 +45,11 @@ public class MysqlConfig extends CommonDbConfig {
             config.setDeploymentMode(deploymentMode);
         }
         if (DeployModeEnum.fromString(deploymentMode) == DeployModeEnum.MASTER_SLAVE) {
-            ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress = config.getMasterSlaveAddress();
+            ArrayList<LinkedHashMap<String, Object>> masterSlaveAddress = config.getMasterSlaveAddress();
             if (EmptyKit.isEmpty(masterSlaveAddress)) {
                 throw new RuntimeException("host cannot be empty");
             }
-            for (LinkedHashMap<String, Integer> hostPort : masterSlaveAddress) {
+            for (LinkedHashMap<String, Object> hostPort : masterSlaveAddress) {
                 if (EmptyKit.isEmpty(hostPort)) {
                     continue;
                 } else {
@@ -76,7 +76,7 @@ public class MysqlConfig extends CommonDbConfig {
         }
         StringBuilder sbURL = new StringBuilder("jdbc:").append(getDbType()).append("://").append(getHost()).append(":").append(getPort()).append("/").append(URLEncoder.encode(getDatabase()));
 
-        Map<String, String> properties = new HashMap<>();
+        Map<String, Object> properties = new HashMap<>();
         if (StringUtils.isNotBlank(additionalString)) {
             String[] additionalStringSplit = additionalString.split("&");
             for (String s : additionalStringSplit) {
@@ -158,9 +158,9 @@ public class MysqlConfig extends CommonDbConfig {
     }
 
     private String deploymentMode;
-    private ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress;
-    private ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress;
-    private LinkedHashMap<String, Integer> masterNode;
+    private ArrayList<LinkedHashMap<String, Object>> masterSlaveAddress;
+    private ArrayList<LinkedHashMap<String, Object>> availableMasterSlaveAddress;
+    private LinkedHashMap<String, Object> masterNode;
     private Integer maximumQueueSize = 800;
 
     public String getDeploymentMode() {
@@ -171,27 +171,27 @@ public class MysqlConfig extends CommonDbConfig {
         this.deploymentMode = deploymentMode;
     }
 
-    public ArrayList<LinkedHashMap<String, Integer>> getMasterSlaveAddress() {
+    public ArrayList<LinkedHashMap<String, Object>> getMasterSlaveAddress() {
         return masterSlaveAddress;
     }
 
-    public void setMasterSlaveAddress(ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress) {
+    public void setMasterSlaveAddress(ArrayList<LinkedHashMap<String, Object>> masterSlaveAddress) {
         this.masterSlaveAddress = masterSlaveAddress;
     }
 
-    public ArrayList<LinkedHashMap<String, Integer>> getAvailableMasterSlaveAddress() {
+    public ArrayList<LinkedHashMap<String, Object>> getAvailableMasterSlaveAddress() {
         return availableMasterSlaveAddress;
     }
 
-    public void setAvailableMasterSlaveAddress(ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress) {
+    public void setAvailableMasterSlaveAddress(ArrayList<LinkedHashMap<String, Object>> availableMasterSlaveAddress) {
         this.availableMasterSlaveAddress = availableMasterSlaveAddress;
     }
 
-    public LinkedHashMap<String, Integer> getMasterNode() {
+    public LinkedHashMap<String, Object> getMasterNode() {
         return masterNode;
     }
 
-    public void setMasterNode(LinkedHashMap<String, Integer> masterNode) {
+    public void setMasterNode(LinkedHashMap<String, Object> masterNode) {
         this.masterNode = masterNode;
     }
 
