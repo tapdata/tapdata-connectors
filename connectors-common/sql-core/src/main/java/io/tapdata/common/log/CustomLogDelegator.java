@@ -188,6 +188,9 @@ public class CustomLogDelegator implements SpyLogDelegator {
                         .flushIntervalMs(1000)     // Flush every 1 second
                         .maxFileSizeMB(100)        // Max file size 100MB
                         .autoTimestamp(true)       // Auto add timestamp
+                        .enableCompression(true)
+                        .compressIntervalMs(1000 * 60 * 30)
+                        .maxFileSizeMB(100)
                         .build();
 
                 System.out.println("[CustomLogDelegator] Created FileLogger for: " + name + " -> " + LOG_DIR + "/" + filePrefix);

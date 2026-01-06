@@ -30,7 +30,6 @@ import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.TapFilter;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
-import io.tapdata.write.FileLogger;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
@@ -70,7 +69,6 @@ public abstract class CommonDbConnector extends ConnectorBase {
     protected DDLSqlGenerator ddlSqlGenerator;
     //Once the task is started, this ID is a unique identifier and stored in the stateMap
     protected String firstConnectorId;
-    protected FileLogger fileLogger;
     //jdbc context for each relation datasource
     protected JdbcContext jdbcContext;
     //db config for each relation datasource (load properties from TapConnectionContext)
