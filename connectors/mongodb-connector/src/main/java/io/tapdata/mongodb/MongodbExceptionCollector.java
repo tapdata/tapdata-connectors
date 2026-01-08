@@ -15,6 +15,7 @@ import io.tapdata.mongodb.error.MongodbErrorCode;
 import io.tapdata.mongodb.writer.error.TapMongoBulkWriteException;
 import org.bson.BsonMaximumSizeExceededException;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -43,6 +44,9 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
         if (cause instanceof MongoException) {
             throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause))
                     .withServerErrorCode(String.valueOf(((MongoException) cause).getCode()));
+        }
+        if (cause instanceof IOException) {
+            throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause));
         }
     }
 
