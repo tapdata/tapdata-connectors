@@ -481,8 +481,6 @@ public class MongodbMergeOperate {
 		MergeBundle.EventOperation operation = mergeBundle.getOperation();
 		Map<String, Object> before = mergeBundle.getBefore();
 		Map<String, Object> after = mergeBundle.getAfter();
-		String targetPath = MergeUtils.dynamicKey(currentProperty.getTargetPath(), after);
-		removeIdIfNeed(after, currentProperty);
 		Map<String, Object> filterMap = buildFilterMap(operation, after, before);
 		Document filter = filter(
 				filterMap,
@@ -510,8 +508,10 @@ public class MongodbMergeOperate {
 		appendAllParentMergeFilters(mergeResult, mergeFilter);
 
 		Map<String, Object> value = MapUtils.isNotEmpty(after) ? after : before;
+		removeIdIfNeed(value, currentProperty);
 		Map<String, Object> removeFields = mergeBundle.getRemovefields();
 
+		String targetPath = MergeUtils.dynamicKey(currentProperty.getTargetPath(), value);
 		String updatePatch = targetPath;
 		if (array) {
 			if (targetPath.contains(".")) {
