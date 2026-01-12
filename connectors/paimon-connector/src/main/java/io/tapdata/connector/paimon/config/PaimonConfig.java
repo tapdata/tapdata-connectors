@@ -52,6 +52,39 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     private String compression = "";
 
+    // ===== Performance Optimization Settings =====
+
+    // Write buffer size in MB (default: 256MB)
+    // Larger buffer = better performance but more memory usage
+    private Integer writeBufferSize = 256;
+
+    // Batch accumulation size before commit (default: 10000 records)
+    // 0 = commit immediately (no batching)
+    private Integer batchAccumulationSize = 10000;
+
+    // Commit interval in milliseconds (default: 30000ms = 30s)
+    // 0 = no time-based commit, only size-based
+    private Integer commitIntervalMs = 30000;
+
+    // Enable async commit (default: true)
+    // Async commit improves throughput by not blocking writes
+    private Boolean enableAsyncCommit = true;
+
+    // Number of write threads for parallel writing (default: 4)
+    // More threads = better parallelism but more resource usage
+    private Integer writeThreads = 4;
+
+    // Enable auto compaction (default: true)
+    // Compaction merges small files for better query performance
+    private Boolean enableAutoCompaction = true;
+
+    // Compaction interval in minutes (default: 30 minutes)
+    private Integer compactionIntervalMinutes = 30;
+
+    // Target file size in MB (default: 128MB)
+    // Paimon will try to create files of this size
+    private Integer targetFileSize = 128;
+
     public String getWarehouse() {
         return warehouse;
     }
@@ -197,6 +230,70 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     public void setCompression(String compression) {
         this.compression = compression;
+    }
+
+    public Integer getWriteBufferSize() {
+        return writeBufferSize;
+    }
+
+    public void setWriteBufferSize(Integer writeBufferSize) {
+        this.writeBufferSize = writeBufferSize;
+    }
+
+    public Integer getBatchAccumulationSize() {
+        return batchAccumulationSize;
+    }
+
+    public void setBatchAccumulationSize(Integer batchAccumulationSize) {
+        this.batchAccumulationSize = batchAccumulationSize;
+    }
+
+    public Integer getCommitIntervalMs() {
+        return commitIntervalMs;
+    }
+
+    public void setCommitIntervalMs(Integer commitIntervalMs) {
+        this.commitIntervalMs = commitIntervalMs;
+    }
+
+    public Boolean getEnableAsyncCommit() {
+        return enableAsyncCommit;
+    }
+
+    public void setEnableAsyncCommit(Boolean enableAsyncCommit) {
+        this.enableAsyncCommit = enableAsyncCommit;
+    }
+
+    public Integer getWriteThreads() {
+        return writeThreads;
+    }
+
+    public void setWriteThreads(Integer writeThreads) {
+        this.writeThreads = writeThreads;
+    }
+
+    public Boolean getEnableAutoCompaction() {
+        return enableAutoCompaction;
+    }
+
+    public void setEnableAutoCompaction(Boolean enableAutoCompaction) {
+        this.enableAutoCompaction = enableAutoCompaction;
+    }
+
+    public Integer getCompactionIntervalMinutes() {
+        return compactionIntervalMinutes;
+    }
+
+    public void setCompactionIntervalMinutes(Integer compactionIntervalMinutes) {
+        this.compactionIntervalMinutes = compactionIntervalMinutes;
+    }
+
+    public Integer getTargetFileSize() {
+        return targetFileSize;
+    }
+
+    public void setTargetFileSize(Integer targetFileSize) {
+        this.targetFileSize = targetFileSize;
     }
 
     /**

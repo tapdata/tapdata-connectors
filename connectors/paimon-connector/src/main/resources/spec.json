@@ -325,6 +325,180 @@
               }
             }
           ]
+        },
+        "writeBufferSize": {
+          "type": "number",
+          "title": "${writeBufferSize}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 64,
+            "max": 2048,
+            "placeholder": "${writeBufferSize_placeholder}"
+          },
+          "default": 256,
+          "x-index": 60,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "batchAccumulationSize": {
+          "type": "number",
+          "title": "${batchAccumulationSize}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 0,
+            "max": 100000,
+            "placeholder": "${batchAccumulationSize_placeholder}"
+          },
+          "default": 10000,
+          "x-index": 70,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "commitIntervalMs": {
+          "type": "number",
+          "title": "${commitIntervalMs}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 0,
+            "max": 300000,
+            "placeholder": "${commitIntervalMs_placeholder}"
+          },
+          "default": 30000,
+          "x-index": 80,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "enableAsyncCommit": {
+          "type": "boolean",
+          "title": "${enableAsyncCommit}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "default": true,
+          "x-index": 90,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "writeThreads": {
+          "type": "number",
+          "title": "${writeThreads}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 1,
+            "max": 32,
+            "placeholder": "${writeThreads_placeholder}"
+          },
+          "default": 4,
+          "x-index": 100,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "enableAutoCompaction": {
+          "type": "boolean",
+          "title": "${enableAutoCompaction}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "default": true,
+          "x-index": 110,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "compactionIntervalMinutes": {
+          "type": "number",
+          "title": "${compactionIntervalMinutes}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 1,
+            "max": 1440,
+            "placeholder": "${compactionIntervalMinutes_placeholder}"
+          },
+          "default": 30,
+          "x-index": 120,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "targetFileSize": {
+          "type": "number",
+          "title": "${targetFileSize}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 32,
+            "max": 1024,
+            "placeholder": "${targetFileSize_placeholder}"
+          },
+          "default": 128,
+          "x-index": 130,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -358,7 +532,21 @@
       "bucketCount": "Bucket Count",
       "bucketCount_placeholder": "Number of buckets for fixed mode (must be > 0)",
       "fileFormat": "File Format",
-      "compression": "Compression Format"
+      "compression": "Compression Format",
+      "writeBufferSize": "Write Buffer Size (MB)",
+      "writeBufferSize_placeholder": "Memory buffer for writes (64-2048 MB, default: 256)",
+      "batchAccumulationSize": "Batch Accumulation Size",
+      "batchAccumulationSize_placeholder": "Records to accumulate before commit (0=immediate, default: 10000)",
+      "commitIntervalMs": "Commit Interval (ms)",
+      "commitIntervalMs_placeholder": "Time interval for commits in milliseconds (default: 30000)",
+      "enableAsyncCommit": "Enable Async Commit",
+      "writeThreads": "Write Threads",
+      "writeThreads_placeholder": "Number of parallel write threads (1-32, default: 4)",
+      "enableAutoCompaction": "Enable Auto Compaction",
+      "compactionIntervalMinutes": "Compaction Interval (minutes)",
+      "compactionIntervalMinutes_placeholder": "Interval for auto compaction (1-1440, default: 30)",
+      "targetFileSize": "Target File Size (MB)",
+      "targetFileSize_placeholder": "Target size for data files (32-1024 MB, default: 128)"
     },
     "zh_CN": {
       "doc": "docs/paimon_zh_CN.md",
@@ -387,7 +575,21 @@
       "bucketCount": "分桶数量",
       "bucketCount_placeholder": "固定模式下的桶数量（必须大于 0）",
       "fileFormat": "文件格式",
-      "compression": "压缩格式"
+      "compression": "压缩格式",
+      "writeBufferSize": "写入缓冲区大小（MB）",
+      "writeBufferSize_placeholder": "写入内存缓冲区大小（64-2048 MB，默认：256）",
+      "batchAccumulationSize": "批量累积大小",
+      "batchAccumulationSize_placeholder": "提交前累积的记录数（0=立即提交，默认：10000）",
+      "commitIntervalMs": "提交间隔（毫秒）",
+      "commitIntervalMs_placeholder": "提交的时间间隔（毫秒，默认：30000）",
+      "enableAsyncCommit": "启用异步提交",
+      "writeThreads": "写入线程数",
+      "writeThreads_placeholder": "并行写入线程数（1-32，默认：4）",
+      "enableAutoCompaction": "启用自动压缩",
+      "compactionIntervalMinutes": "压缩间隔（分钟）",
+      "compactionIntervalMinutes_placeholder": "自动压缩的时间间隔（1-1440，默认：30）",
+      "targetFileSize": "目标文件大小（MB）",
+      "targetFileSize_placeholder": "数据文件的目标大小（32-1024 MB，默认：128）"
     },
     "zh_TW": {
       "doc": "docs/paimon_zh_TW.md",
@@ -416,7 +618,21 @@
       "bucketCount": "分桶數量",
       "bucketCount_placeholder": "固定模式下的桶數量（必須大於 0）",
       "fileFormat": "文件格式",
-      "compression": "壓縮格式"
+      "compression": "壓縮格式",
+      "writeBufferSize": "寫入緩衝區大小（MB）",
+      "writeBufferSize_placeholder": "寫入內存緩衝區大小（64-2048 MB，默認：256）",
+      "batchAccumulationSize": "批量累積大小",
+      "batchAccumulationSize_placeholder": "提交前累積的記錄數（0=立即提交，默認：10000）",
+      "commitIntervalMs": "提交間隔（毫秒）",
+      "commitIntervalMs_placeholder": "提交的時間間隔（毫秒，默認：30000）",
+      "enableAsyncCommit": "啟用異步提交",
+      "writeThreads": "寫入線程數",
+      "writeThreads_placeholder": "並行寫入線程數（1-32，默認：4）",
+      "enableAutoCompaction": "啟用自動壓縮",
+      "compactionIntervalMinutes": "壓縮間隔（分鐘）",
+      "compactionIntervalMinutes_placeholder": "自動壓縮的時間間隔（1-1440，默認：30）",
+      "targetFileSize": "目標文件大小（MB）",
+      "targetFileSize_placeholder": "數據文件的目標大小（32-1024 MB，默認：128）"
     }
   },
   "dataTypes": {
