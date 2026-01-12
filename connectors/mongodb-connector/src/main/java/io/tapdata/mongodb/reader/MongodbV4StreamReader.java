@@ -296,12 +296,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
                 if (null != updateDescription.getUpdatedFields()) {
                     Document decodeUpdateDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
-                    decodeUpdateDocument.forEach((k, v) -> {
-                        if (k.contains(".")) {
-                            return;
-                        }
-                        after.put(k, v);
-                    });
+                    after.putAll(decodeUpdateDocument);
                 }
 
                 TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);
