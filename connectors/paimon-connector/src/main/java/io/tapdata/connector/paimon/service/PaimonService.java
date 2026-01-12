@@ -33,8 +33,8 @@ import org.apache.paimon.types.DataTypes;
 import java.io.Closeable;
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -55,6 +55,20 @@ public class PaimonService implements Closeable {
 	// Atomic counter for generating unique, incrementing commit identifiers
 	// This ensures no duplicate commit identifiers even in high-concurrency scenarios
 	private final AtomicLong commitIdentifierGenerator = new AtomicLong(0);
+
+	// ===== Batch Accumulation for Performance =====
+	// Track accumulated records per table before commit
+	private final Map<String, AtomicInteger> accumulatedRecordCount = new ConcurrentHashMap<>();
+	// Track last commit time per table
+	private final Map<String, AtomicLong> lastCommitTime = new ConcurrentHashMap<>();
+	// Lock for commit operations per table
+	private final Map<String, Object> commitLocks = new ConcurrentHashMap<>();
+
+	// ===== Async Commit Support =====
+	// Background thread for async commits
+	private ScheduledExecutorService asyncCommitExecutor;
+	// Flag to track if async commit is enabled
+	private volatile boolean asyncCommitEnabled = false;
 
 	public PaimonService(PaimonConfig config) {
 		this.config = config;
@@ -80,6 +94,51 @@ public class PaimonService implements Closeable {
 
 		// Create catalog
 		catalog = CatalogFactory.createCatalog(context);
+
+		// Initialize async commit if enabled
+		initAsyncCommit();
+	}
+
+	/**
+	 * Initialize async commit executor if enabled in config
+	 */
+	private void initAsyncCommit() {
+		Boolean enableAsync = config.getEnableAsyncCommit();
+		Integer commitInterval = config.getCommitIntervalMs();
+
+		if (enableAsync != null && enableAsync && commitInterval != null && commitInterval > 0) {
+			asyncCommitEnabled = true;
+
+			// Create scheduled executor with single thread
+			asyncCommitExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+				Thread t = new Thread(r, "paimon-async-commit");
+				t.setDaemon(true); // Daemon thread won't prevent JVM shutdown
+				return t;
+			});
+
+			// Schedule periodic commit task
+			asyncCommitExecutor.scheduleAtFixedRate(() -> {
+				try {
+					// Commit all tables that have accumulated data
+					for (String tableKey : new ArrayList<>(accumulatedRecordCount.keySet())) {
+						AtomicInteger count = accumulatedRecordCount.get(tableKey);
+						if (count != null && count.get() > 0) {
+							// Check if enough time has passed since last commit
+							AtomicLong lastCommit = lastCommitTime.get(tableKey);
+							if (lastCommit != null) {
+								long timeSinceLastCommit = System.currentTimeMillis() - lastCommit.get();
+								if (timeSinceLastCommit >= commitInterval) {
+									flushTable(tableKey);
+								}
+							}
+						}
+					}
+				} catch (Exception e) {
+					// Log error but don't stop the scheduler
+					System.err.println("Error in async commit: " + e.getMessage());
+				}
+			}, commitInterval, commitInterval, TimeUnit.MILLISECONDS);
+		}
 	}
 
 	/**
@@ -99,6 +158,10 @@ public class PaimonService implements Closeable {
 					options.set("s3.region", config.getS3Region());
 				}
 				options.set("s3.path.style.access", "true");
+				options.set("s3.upload.max-concurrency", "20");
+				options.set("s3.upload.part-size", "16mb");
+				options.set("s3.fast-upload", "true");
+				options.set("s3.accelerate-mode", "true");
 				break;
 			case "hdfs":
 				options.set("fs.defaultFS", "hdfs://" + config.getHdfsHost() + ":" + config.getHdfsPort());
@@ -422,6 +485,58 @@ public class PaimonService implements Closeable {
 			schemaBuilder.option("compression", config.getCompression());
 		}
 
+		// ===== Performance Optimization Options =====
+
+		// 1. Write buffer size - controls memory buffer for writes
+		// Larger buffer = better performance but more memory usage
+		if (config.getWriteBufferSize() != null && config.getWriteBufferSize() > 0) {
+			schemaBuilder.option("write-buffer-size", config.getWriteBufferSize() + "mb");
+		}
+
+		// 2. Target file size - Paimon will try to create files of this size
+		// Larger files = fewer files but slower compaction
+		if (config.getTargetFileSize() != null && config.getTargetFileSize() > 0) {
+			schemaBuilder.option("target-file-size", config.getTargetFileSize() + "mb");
+		}
+
+		// 3. Compaction settings
+		if (config.getEnableAutoCompaction() != null) {
+			if (config.getEnableAutoCompaction()) {
+				// Enable full compaction for better query performance
+				schemaBuilder.option("compaction.optimization-interval",
+					config.getCompactionIntervalMinutes() + "min");
+
+				// Set compaction strategy
+				schemaBuilder.option("changelog-producer", "full-compaction");
+
+				// Compact small files more aggressively
+				schemaBuilder.option("num-sorted-run.compaction-trigger", "3");
+				schemaBuilder.option("num-sorted-run.stop-trigger", "5");
+			} else {
+				// Disable auto compaction
+				schemaBuilder.option("compaction.optimization-interval", "0");
+			}
+		}
+
+		// 4. Snapshot settings for better performance
+		// Keep more snapshots in memory for faster access
+		schemaBuilder.option("snapshot.num-retained.min", "10");
+		schemaBuilder.option("snapshot.num-retained.max", "100");
+		schemaBuilder.option("snapshot.time-retained", "1h");
+
+		// 5. Commit settings
+		// Force compact on commit for better read performance
+		schemaBuilder.option("commit.force-compact", "false"); // Don't force compact on every commit
+
+		// 6. Scan settings for better read performance
+		schemaBuilder.option("scan.plan-sort-partition", "true");
+
+		// 7. Changelog settings for CDC scenarios
+		schemaBuilder.option("changelog-producer.lookup-wait", "false"); // Don't wait for lookup
+
+		// 8. Memory settings
+		schemaBuilder.option("sink.parallelism", String.valueOf(config.getWriteThreads()));
+
 		// Create table
 		catalog.createTable(identifier, schemaBuilder.build(), false);
 
@@ -632,6 +747,7 @@ public class PaimonService implements Closeable {
 			StreamTableCommit commit = getOrCreateStreamCommit(tableKey, identifier);
 
 			try {
+				// Write all records to the writer
 				for (TapRecordEvent event : recordEvents) {
 					if (event instanceof TapInsertRecordEvent) {
 						handleStreamInsert((TapInsertRecordEvent) event, writer, table);
@@ -645,14 +761,60 @@ public class PaimonService implements Closeable {
 					}
 				}
 
-				// Prepare commit with commitIdentifier
-				// Use atomic counter to generate unique, incrementing commit identifier
-				// This prevents duplicate identifiers in high-concurrency scenarios
-				long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
-				List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+				// Update accumulated record count
+				AtomicInteger recordCount = accumulatedRecordCount.computeIfAbsent(tableKey, k -> new AtomicInteger(0));
+				int currentCount = recordCount.addAndGet(recordEvents.size());
 
-				// Commit the batch
-				commit.commit(commitIdentifier, messages);
+				// Initialize last commit time if not exists
+				AtomicLong lastCommit = lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong(System.currentTimeMillis()));
+
+				// Determine if we should commit based on:
+				// 1. Accumulated record count exceeds threshold
+				// 2. Time since last commit exceeds interval
+				// 3. Batch accumulation is disabled (size = 0)
+				boolean shouldCommit = false;
+				Integer batchSize = config.getBatchAccumulationSize();
+				Integer commitInterval = config.getCommitIntervalMs();
+
+				if (batchSize == null || batchSize <= 0) {
+					// Batch accumulation disabled, commit immediately
+					shouldCommit = true;
+				} else if (currentCount >= batchSize) {
+					// Record count threshold reached
+					shouldCommit = true;
+				} else if (commitInterval != null && commitInterval > 0) {
+					// Check time-based commit
+					long timeSinceLastCommit = System.currentTimeMillis() - lastCommit.get();
+					if (timeSinceLastCommit >= commitInterval) {
+						shouldCommit = true;
+					}
+				}
+
+				// Perform commit if needed
+				if (shouldCommit) {
+					// Use lock to ensure only one thread commits at a time for this table
+					Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
+					synchronized (lock) {
+						// Double-check if we still need to commit (another thread might have committed)
+						int finalCount = recordCount.get();
+						if (finalCount > 0) {
+							// Prepare commit with commitIdentifier
+							// Use atomic counter to generate unique, incrementing commit identifier
+							long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
+							List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+
+							// Commit the batch
+							commit.commit(commitIdentifier, messages);
+
+							// Reset counters after successful commit
+							recordCount.set(0);
+							lastCommit.set(System.currentTimeMillis());
+
+							connectorContext.getLog().debug("Committed {} accumulated records for table {}",
+								finalCount, tableKey);
+						}
+					}
+				}
 
 				// StreamTableWrite can be reused, so we don't clean up here
 				return result;
@@ -694,6 +856,21 @@ public class PaimonService implements Closeable {
 	 * This method ensures proper cleanup with delays to allow internal threads to terminate.
 	 */
 	private void cleanupAllResources() {
+		// Shutdown async commit executor first
+		if (asyncCommitExecutor != null) {
+			asyncCommitEnabled = false;
+			asyncCommitExecutor.shutdown();
+			try {
+				if (!asyncCommitExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+					asyncCommitExecutor.shutdownNow();
+				}
+			} catch (InterruptedException e) {
+				asyncCommitExecutor.shutdownNow();
+				Thread.currentThread().interrupt();
+			}
+			asyncCommitExecutor = null;
+		}
+
 		// Close all cached writers and commits first
 		for (String tableKey : new ArrayList<>(streamWriterCache.keySet())) {
 			cleanupTableResources(tableKey);
@@ -702,6 +879,11 @@ public class PaimonService implements Closeable {
 		// Clear all caches
 		streamWriterCache.clear();
 		streamCommitCache.clear();
+
+		// Clear batch accumulation tracking
+		accumulatedRecordCount.clear();
+		lastCommitTime.clear();
+		commitLocks.clear();
 
 		// Close old catalog if exists
 		if (catalog != null) {
@@ -1128,8 +1310,64 @@ public class PaimonService implements Closeable {
 		return value;
 	}
 
+	/**
+	 * Flush all accumulated records for all tables
+	 * This should be called before closing the connector to ensure all data is committed
+	 */
+	public void flushAll() throws Exception {
+		for (String tableKey : new ArrayList<>(streamWriterCache.keySet())) {
+			flushTable(tableKey);
+		}
+	}
+
+	/**
+	 * Flush accumulated records for a specific table
+	 *
+	 * @param tableKey table key (database.tableName)
+	 */
+	public void flushTable(String tableKey) throws Exception {
+		AtomicInteger recordCount = accumulatedRecordCount.get(tableKey);
+		if (recordCount == null || recordCount.get() <= 0) {
+			return; // Nothing to flush
+		}
+
+		StreamTableWrite writer = streamWriterCache.get(tableKey);
+		StreamTableCommit commit = streamCommitCache.get(tableKey);
+
+		if (writer == null || commit == null) {
+			return; // Writer or commit not initialized
+		}
+
+		// Use lock to ensure thread safety
+		Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
+		synchronized (lock) {
+			int finalCount = recordCount.get();
+			if (finalCount > 0) {
+				// Prepare and commit
+				long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
+				List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+				commit.commit(commitIdentifier, messages);
+
+				// Reset counters
+				recordCount.set(0);
+				AtomicLong lastCommit = lastCommitTime.get(tableKey);
+				if (lastCommit != null) {
+					lastCommit.set(System.currentTimeMillis());
+				}
+			}
+		}
+	}
+
 	@Override
 	public void close() {
+		// Flush all accumulated data before closing
+		try {
+			flushAll();
+		} catch (Exception e) {
+			// Log error but continue with cleanup
+			System.err.println("Error flushing accumulated data: " + e.getMessage());
+		}
+
 		cleanupAllResources();
 	}
 }
