@@ -136,7 +136,7 @@ public class StarrocksDDLSqlGenerator implements DDLSqlGenerator {
             throw new RuntimeException("Append alter column name ddl sql failed, new column name is blank");
         }
         String sql = String.format(ALTER_TABLE_PREFIX, config.getDatabase(), tableId);
-        return Collections.singletonList(sql + " rename column `" + before + "` `" + after + "`");
+        return Collections.singletonList(sql + " rename column `" + before + "` to `" + after + "`");
     }
 
     @Override
