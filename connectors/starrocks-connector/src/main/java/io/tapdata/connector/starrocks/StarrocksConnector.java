@@ -19,6 +19,7 @@ import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -392,8 +393,13 @@ public class StarrocksConnector extends CommonDbConnector {
                     entry.setValue(((LocalDateTime) value).minusHours(starrocksConfig.getZoneOffsetHour()));
                 } else if (value instanceof java.sql.Date) {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
-                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().equals("largeint")) {
-                    entry.setValue(new BigDecimal((String) value));
+                } else if (value instanceof String) {
+                    String dataType = StringKit.removeParentheses(tapTable.getNameFieldMap().get(entry.getKey()).getDataType());
+                    if(dataType.equals("largeint")) {
+                        entry.setValue(new BigDecimal((String) value));
+                    } else if(dataType.contains("binary")) {
+                        entry.setValue(((String) value).getBytes());
+                    }
                 }
             }
         }
