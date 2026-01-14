@@ -103,7 +103,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 //        List<Bson> pipeline1 = asList(Aggregates.match(Filters.or(collList)));
         FullDocument fullDocumentOption = FullDocument.DEFAULT;
         FullDocumentBeforeChange fullDocumentBeforeChangeOption = FullDocumentBeforeChange.WHEN_AVAILABLE;
-        if (mongodbConfig.isEnableFillingModifiedData()) {
+        if (mongodbConfig.isEnableFillingModifiedData() || isPreImage) {
             fullDocumentOption = FullDocument.UPDATE_LOOKUP;
         }
         while (running.get()) {
