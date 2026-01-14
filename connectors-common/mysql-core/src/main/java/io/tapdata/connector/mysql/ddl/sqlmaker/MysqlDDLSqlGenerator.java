@@ -2,6 +2,7 @@ package io.tapdata.connector.mysql.ddl.sqlmaker;
 
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.common.ddl.DDLSqlGenerator;
+import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.entity.event.ddl.entity.ValueChange;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
@@ -12,8 +13,10 @@ import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
+import io.tapdata.kit.EmptyKit;
 import org.apache.commons.lang3.StringUtils;
 
+import java.math.BigDecimal;
 import java.util.*;
 
 /**
@@ -48,6 +51,16 @@ public class MysqlDDLSqlGenerator implements DDLSqlGenerator {
             throw new RuntimeException("Append add column ddl sql failed, table name is blank");
         }
         for (TapField newField : newFields) {
+            String columnDefaultValue = newField.getDefaultValue().toString();
+            Object defaultValueObj = columnDefaultValue;
+            String tapDefaultFunction = null;
+            if (EmptyKit.isNotNull(columnDefaultValue)) {
+                tapDefaultFunction = MysqlColumn.MysqlDefaultFunction.parseFunction(columnDefaultValue);;
+                if (columnDefaultValue.matches("-?\\d+(\\.\\d+)?")) {
+                    defaultValueObj = new BigDecimal(columnDefaultValue);
+                }
+            }
+            newField.defaultValue(defaultValueObj).defaultFunction(tapDefaultFunction);
             StringBuilder sql = new StringBuilder(String.format(ALTER_TABLE_PREFIX, config.getDatabase(), tableId)).append(" add");
             String fieldName = newField.getName();
             if (StringUtils.isNotBlank(fieldName)) {
@@ -74,9 +87,15 @@ public class MysqlDDLSqlGenerator implements DDLSqlGenerator {
                     sql.append(" not null");
                 }
             }
-            Object defaultValue = newField.getDefaultValue();
-            if (null != defaultValue) {
-                sql.append(" default '").append(defaultValue).append("'");
+            if (EmptyKit.isNotNull(newField.getDefaultValue())) {
+                sql.append(" default ");
+                if (EmptyKit.isNotNull(newField.getDefaultFunction())) {
+                    sql.append(newField.getDefaultValue());
+                } else if (newField.getDefaultValue() instanceof Number || Boolean.TRUE.equals(newField.getAutoInc())) {
+                    sql.append(newField.getDefaultValue());
+                } else {
+                    sql.append("'").append(newField.getDefaultValue()).append("'");
+                }
             }
             String comment = newField.getComment();
             if (StringUtils.isNotBlank(comment)) {
