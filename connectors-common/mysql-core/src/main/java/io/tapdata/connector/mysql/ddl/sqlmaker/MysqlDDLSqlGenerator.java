@@ -51,16 +51,18 @@ public class MysqlDDLSqlGenerator implements DDLSqlGenerator {
             throw new RuntimeException("Append add column ddl sql failed, table name is blank");
         }
         for (TapField newField : newFields) {
-            String columnDefaultValue = newField.getDefaultValue().toString();
-            Object defaultValueObj = columnDefaultValue;
-            String tapDefaultFunction = null;
-            if (EmptyKit.isNotNull(columnDefaultValue)) {
-                tapDefaultFunction = MysqlColumn.MysqlDefaultFunction.parseFunction(columnDefaultValue);;
-                if (columnDefaultValue.matches("-?\\d+(\\.\\d+)?")) {
-                    defaultValueObj = new BigDecimal(columnDefaultValue);
+            if (EmptyKit.isNotNull(newField.getDefaultValue())) {
+                String columnDefaultValue = newField.getDefaultValue().toString();
+                Object defaultValueObj = columnDefaultValue;
+                String tapDefaultFunction = null;
+                if (EmptyKit.isNotNull(columnDefaultValue)) {
+                    tapDefaultFunction = MysqlColumn.MysqlDefaultFunction.parseFunction(columnDefaultValue);;
+                    if (columnDefaultValue.matches("-?\\d+(\\.\\d+)?")) {
+                        defaultValueObj = new BigDecimal(columnDefaultValue);
+                    }
                 }
+                newField.defaultValue(defaultValueObj).defaultFunction(tapDefaultFunction);
             }
-            newField.defaultValue(defaultValueObj).defaultFunction(tapDefaultFunction);
             StringBuilder sql = new StringBuilder(String.format(ALTER_TABLE_PREFIX, config.getDatabase(), tableId)).append(" add");
             String fieldName = newField.getName();
             if (StringUtils.isNotBlank(fieldName)) {
