@@ -15,6 +15,7 @@ import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
 import io.tapdata.connector.mysql.dml.MysqlWriteRecorder;
 import io.tapdata.connector.mysql.dml.sqlmaker.MysqlSqlMaker;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
+import io.tapdata.connector.mysql.util.MysqlBinlogPositionUtil;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
@@ -848,7 +849,13 @@ public class MysqlConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
-        mysqlReader.readBinlog(tapConnectorContext, tables, offset, batchSize, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, contextMapForMasterSlave);
+        if (mysqlConfig.getHighPerformance()) {
+            MysqlReaderV2 mysqlReaderV2 = new MysqlReaderV2(mysqlJdbcContext, firstConnectorId, tapLogger);
+            mysqlReaderV2.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
+            mysqlReaderV2.startMiner(this::isAlive);
+        } else {
+            mysqlReader.readBinlog(tapConnectorContext, tables, offset, batchSize, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, contextMapForMasterSlave);
+        }
     }
 
 
@@ -877,7 +884,21 @@ public class MysqlConnector extends CommonDbConnector {
             }
             return this.mysqlJdbcContext.readBinlogPosition();
         }
-        return startTime;
+        if (mysqlConfig.getHighPerformance()) {
+            try (MysqlBinlogPositionUtil ins = new MysqlBinlogPositionUtil(
+                    mysqlConfig.getHost(),
+                    mysqlConfig.getPort(),
+                    mysqlConfig.getUser(),
+                    mysqlConfig.getPassword())) {
+                MysqlBinlogPosition mysqlBinlogPosition = ins.findByLessTimestamp(startTime, true);
+                if (null == mysqlBinlogPosition) {
+                    throw new RuntimeException("Not found binlog of sync time: " + startTime);
+                }
+                return mysqlBinlogPosition;
+            }
+        } else {
+            return startTime;
+        }
     }
 
 
