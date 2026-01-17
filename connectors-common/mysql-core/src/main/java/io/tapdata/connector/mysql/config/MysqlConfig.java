@@ -162,6 +162,7 @@ public class MysqlConfig extends CommonDbConfig {
     private ArrayList<LinkedHashMap<String, Integer>> availableMasterSlaveAddress;
     private LinkedHashMap<String, Integer> masterNode;
     private Integer maximumQueueSize = 800;
+    private Boolean highPerformance;
 
     public String getDeploymentMode() {
         return deploymentMode;
@@ -201,6 +202,14 @@ public class MysqlConfig extends CommonDbConfig {
 
     public void setMaximumQueueSize(Integer maximumQueueSize) {
         this.maximumQueueSize = maximumQueueSize;
+    }
+
+    public Boolean getHighPerformance() {
+        return highPerformance;
+    }
+
+    public void setHighPerformance(Boolean highPerformance) {
+        this.highPerformance = highPerformance;
     }
 
 }

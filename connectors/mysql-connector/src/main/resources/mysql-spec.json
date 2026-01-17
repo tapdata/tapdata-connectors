@@ -338,6 +338,24 @@
     "node": {
       "type": "object",
       "properties": {
+        "highPerformance": {
+          "type": "boolean",
+          "title": "${highPerformance}",
+          "default": false,
+          "x-index": 4,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "createAutoInc": {
           "type": "boolean",
           "title": "${createAutoInc}",
@@ -527,7 +545,8 @@
       "batchReadThreadSize": "Batch read thread size",
       "maximumQueueSize": "Maximum queue size",
       "maximumQueueSizeTip": "The queue size for reading incremental data in MySQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting.",
-      "lowerCaseTableNames": "Lower Case TableNames"
+      "lowerCaseTableNames": "Lower Case TableNames",
+      "highPerformance": "High Performance Mode"
     },
     "zh_CN": {
       "host": "地址",
@@ -564,7 +583,8 @@
       "batchReadThreadSize": "批量读取线程数",
       "maximumQueueSize": "最大队列大小",
       "maximumQueueSizeTip": "MySql读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置。",
-      "lowerCaseTableNames": "大小写敏感"
+      "lowerCaseTableNames": "大小写敏感",
+      "highPerformance": "高性能模式"
     },
     "zh_TW": {
       "host": "地址",
@@ -601,7 +621,8 @@
       "batchReadThreadSize": "批量讀取線程數",
       "maximumQueueSize": "最大隊列大小",
       "maximumQueueSizeTip": "MySql 讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置。",
-      "lowerCaseTableNames": "大小寫敏感"
+      "lowerCaseTableNames": "大小寫敏感",
+      "highPerformance": "高性能模式"
     }
   },
   "dataTypes": {
