@@ -70,6 +70,33 @@ public class PaimonService implements Closeable {
 	// Flag to track if async commit is enabled
 	private volatile boolean asyncCommitEnabled = false;
 
+	// ===== Paimon Field Cache for Performance =====
+	// LRU cache for Paimon field mappings: Key = "database.tableName", Value = Map<fieldName, DataType>
+	// Limit to 5 tables to avoid excessive memory usage
+	private final Map<String, Map<String, DataType>> paimonFieldCache = Collections.synchronizedMap(
+			new LinkedHashMap<String, Map<String, DataType>>(5, 0.75f, true) {
+				private static final long serialVersionUID = 1L;
+
+				@Override
+				protected boolean removeEldestEntry(Map.Entry<String, Map<String, DataType>> eldest) {
+					return size() > 5;
+				}
+			}
+	);
+
+	// LRU cache for field index mappings: Key = "database.tableName", Value = Map<fieldName, index>
+	// Limit to 5 tables to avoid excessive memory usage
+	private final Map<String, Map<String, Integer>> fieldIndexCache = Collections.synchronizedMap(
+			new LinkedHashMap<String, Map<String, Integer>>(5, 0.75f, true) {
+				private static final long serialVersionUID = 1L;
+
+				@Override
+				protected boolean removeEldestEntry(Map.Entry<String, Map<String, Integer>> eldest) {
+					return size() > 5;
+				}
+			}
+	);
+
 	public PaimonService(PaimonConfig config) {
 		this.config = config;
 	}
@@ -885,6 +912,10 @@ public class PaimonService implements Closeable {
 		lastCommitTime.clear();
 		commitLocks.clear();
 
+		// Clear Paimon field cache
+		paimonFieldCache.clear();
+		fieldIndexCache.clear();
+
 		// Close old catalog if exists
 		if (catalog != null) {
 			try {
@@ -1040,7 +1071,7 @@ public class PaimonService implements Closeable {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
-		int bucket = selectBucketForDynamic(after, table);
+		int bucket = selectBucketForDynamic(row, table);
 		writer.write(row, bucket);
 	}
 
@@ -1057,7 +1088,7 @@ public class PaimonService implements Closeable {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
-		int bucket = selectBucketForDynamic(after, table);
+		int bucket = selectBucketForDynamic(row, table);
 		writer.write(row, bucket);
 	}
 
@@ -1076,40 +1107,107 @@ public class PaimonService implements Closeable {
 		GenericRow row = convertToGenericRow(before, table, identifier);
 		// Set row kind to DELETE
 		row.setRowKind(org.apache.paimon.types.RowKind.DELETE);
-		int bucket = selectBucketForDynamic(before, table);
+		int bucket = selectBucketForDynamic(row, table);
 		writer.write(row, bucket);
 	}
 
 	/**
 	 * Select deterministic bucket for dynamic-bucket tables.
 	 * Use primary keys if present; otherwise hash all fields (sorted by name).
+	 *
+	 * Note: This method uses the converted GenericRow values to ensure consistent
+	 * bucket selection across insert/update/delete operations, especially for
+	 * Date/DateTime types that are converted to int/long values.
+	 *
+	 * @param row converted GenericRow with Paimon-compatible values
+	 * @param table table definition
+	 * @return bucket number
 	 */
-	private int selectBucketForDynamic(Map<String, Object> data, TapTable table) {
+	private int selectBucketForDynamic(GenericRow row, TapTable table) {
 		int hint = (config.getBucketCount() != null && config.getBucketCount() > 0) ? config.getBucketCount() : 4;
 		int hash = 0;
-		Collection<String> pks = table.primaryKeys();
+		Collection<String> pks = table.primaryKeys(true);
+		Map<String, TapField> fields = table.getNameFieldMap();
+
+		// Get or build field index mapping from cache
+		String cacheKey = table.getId();
+		Map<String, Integer> indexMap = getFieldIndexMap(cacheKey, fields);
+
 		if (pks != null && !pks.isEmpty()) {
+			// Use primary key fields for hashing
 			for (String key : pks) {
-				Object v = data.get(key);
-				hash = 31 * hash + (v == null ? 0 : v.hashCode());
+				Integer fieldIndex = indexMap.get(key);
+				if (fieldIndex != null && fieldIndex >= 0 && fieldIndex < row.getFieldCount()) {
+					Object v = row.getField(fieldIndex);
+					hash = 31 * hash + (v == null ? 0 : v.hashCode());
+				}
 			}
 		} else {
-			Map<String, TapField> fields = table.getNameFieldMap();
+			// Use all fields for hashing (sorted by name)
 			if (fields != null && !fields.isEmpty()) {
 				List<String> names = new ArrayList<>(fields.keySet());
 				Collections.sort(names);
 				for (String name : names) {
-					Object v = data.get(name);
-					hash = 31 * hash + (v == null ? 0 : v.hashCode());
+					Integer fieldIndex = indexMap.get(name);
+					if (fieldIndex != null && fieldIndex >= 0 && fieldIndex < row.getFieldCount()) {
+						Object v = row.getField(fieldIndex);
+						hash = 31 * hash + (v == null ? 0 : v.hashCode());
+					}
 				}
 			} else {
-				for (Map.Entry<String, Object> e : data.entrySet()) {
-					Object v = e.getValue();
+				// Fallback: hash all fields in order
+				for (int i = 0; i < row.getFieldCount(); i++) {
+					Object v = row.getField(i);
 					hash = 31 * hash + (v == null ? 0 : v.hashCode());
 				}
 			}
 		}
 		return Math.floorMod(hash, hint);
+	}
+
+	/**
+	 * Get or build field index mapping from cache
+	 *
+	 * @param cacheKey cache key (table ID)
+	 * @param fields field map
+	 * @return map of field name to index
+	 */
+	private Map<String, Integer> getFieldIndexMap(String cacheKey, Map<String, TapField> fields) {
+		Map<String, Integer> indexMap = fieldIndexCache.get(cacheKey);
+
+		if (indexMap == null) {
+			// Cache miss - build field index mapping
+			indexMap = new HashMap<>(fields.size());
+			int index = 0;
+			for (String name : fields.keySet()) {
+				indexMap.put(name, index++);
+			}
+
+			// Store in cache
+			fieldIndexCache.put(cacheKey, indexMap);
+		}
+
+		return indexMap;
+	}
+
+	/**
+	 * Get field index by field name (deprecated - use getFieldIndexMap instead)
+	 *
+	 * @param fieldName field name
+	 * @param fields field map
+	 * @return field index, or -1 if not found
+	 * @deprecated Use getFieldIndexMap for better performance with caching
+	 */
+	@Deprecated
+	private int getFieldIndex(String fieldName, Map<String, TapField> fields) {
+		int index = 0;
+		for (String name : fields.keySet()) {
+			if (name.equals(fieldName)) {
+				return index;
+			}
+			index++;
+		}
+		return -1;
 	}
 
 	/**
@@ -1122,9 +1220,23 @@ public class PaimonService implements Closeable {
 	 * @throws Exception if conversion fails
 	 */
 	private GenericRow convertToGenericRow(Map<String, Object> data, TapTable table, Identifier identifier) throws Exception {
-		// Get Paimon table to access actual field types
-		Table paimonTable = catalog.getTable(identifier);
-		List<DataField> paimonFields = paimonTable.rowType().getFields();
+		// Get or build field type mapping from cache
+		String cacheKey = identifier.getFullName();
+		Map<String, DataType> fieldTypeMap = paimonFieldCache.get(cacheKey);
+
+		if (fieldTypeMap == null) {
+			// Cache miss - build field type mapping
+			Table paimonTable = catalog.getTable(identifier);
+			List<DataField> paimonFields = paimonTable.rowType().getFields();
+
+			fieldTypeMap = new HashMap<>(paimonFields.size());
+			for (DataField paimonField : paimonFields) {
+				fieldTypeMap.put(paimonField.name(), paimonField.type());
+			}
+
+			// Store in cache
+			paimonFieldCache.put(cacheKey, fieldTypeMap);
+		}
 
 		Map<String, TapField> tapFields = table.getNameFieldMap();
 		int fieldCount = tapFields.size();
@@ -1135,14 +1247,8 @@ public class PaimonService implements Closeable {
 			String fieldName = entry.getKey();
 			Object value = data.get(fieldName);
 
-			// Get corresponding Paimon field type
-			DataType paimonType = null;
-			for (DataField paimonField : paimonFields) {
-				if (paimonField.name().equals(fieldName)) {
-					paimonType = paimonField.type();
-					break;
-				}
-			}
+			// Get corresponding Paimon field type from cache
+			DataType paimonType = fieldTypeMap.get(fieldName);
 
 			// Convert value to Paimon-compatible type
 			values[index++] = convertValueToPaimonType(value, paimonType);
