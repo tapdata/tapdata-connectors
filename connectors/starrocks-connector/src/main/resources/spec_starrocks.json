@@ -866,7 +866,7 @@
     },
     "varbinary[($byte)]": {
       "to": "TapBinary",
-      "byte": "2g",
+      "byte": "1m",
       "defaultByte": 1
     },
     "string": {

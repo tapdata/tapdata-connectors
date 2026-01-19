@@ -1,17 +1,14 @@
 package io.tapdata.kafka.schema_mode;
 
-import io.tapdata.connector.utils.ConcurrentUtils;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.kafka.KafkaEnhancedConnector;
-import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.AbsSchemaMode;
 import io.tapdata.kafka.IKafkaService;
+import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.utils.KafkaUtils;
-import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.exception.NotSupportedException;
@@ -21,10 +18,8 @@ import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 /**
  * Kafka 标准结构模式服务接口

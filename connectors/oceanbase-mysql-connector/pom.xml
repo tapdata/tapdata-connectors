@@ -24,6 +24,7 @@
         <tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
         <protoc.version>3.19.1</protoc.version>
         <grpc.version>1.43.0</grpc.version>
+        <origin.driver.class>com.oceanbase.jdbc.Driver</origin.driver.class>
     </properties>
 
     <artifactId>oceanbase-mysql-connector</artifactId>
@@ -235,6 +236,27 @@
                     <injectAllReactorProjects>true</injectAllReactorProjects>
                     <dotGitDirectory>${project.basedir}/../../.git</dotGitDirectory>
                 </configuration>
+            </plugin>
+            <!-- Generate log4jdbc.log4j2.properties file directly -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>1.8</version>
+                <executions>
+                    <execution>
+                        <id>generate-log4jdbc-properties</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <echo message="Generating log4jdbc.log4j2.properties with driver: ${origin.driver.class}"/>
+                                <echo file="${project.build.outputDirectory}/log4jdbc.log4j2.properties">log4jdbc.drivers = ${origin.driver.class}</echo>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <artifactId>maven-resources-plugin</artifactId>

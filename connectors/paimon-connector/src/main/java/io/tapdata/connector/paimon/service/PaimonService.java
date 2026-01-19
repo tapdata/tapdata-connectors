@@ -33,8 +33,8 @@ import org.apache.paimon.types.DataTypes;
 import java.io.Closeable;
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -55,6 +55,47 @@ public class PaimonService implements Closeable {
 	// Atomic counter for generating unique, incrementing commit identifiers
 	// This ensures no duplicate commit identifiers even in high-concurrency scenarios
 	private final AtomicLong commitIdentifierGenerator = new AtomicLong(0);
+
+	// ===== Batch Accumulation for Performance =====
+	// Track accumulated records per table before commit
+	private final Map<String, AtomicInteger> accumulatedRecordCount = new ConcurrentHashMap<>();
+	// Track last commit time per table
+	private final Map<String, AtomicLong> lastCommitTime = new ConcurrentHashMap<>();
+	// Lock for commit operations per table
+	private final Map<String, Object> commitLocks = new ConcurrentHashMap<>();
+
+	// ===== Async Commit Support =====
+	// Background thread for async commits
+	private ScheduledExecutorService asyncCommitExecutor;
+	// Flag to track if async commit is enabled
+	private volatile boolean asyncCommitEnabled = false;
+
+	// ===== Paimon Field Cache for Performance =====
+	// LRU cache for Paimon field mappings: Key = "database.tableName", Value = Map<fieldName, DataType>
+	// Limit to 5 tables to avoid excessive memory usage
+	private final Map<String, Map<String, DataType>> paimonFieldCache = Collections.synchronizedMap(
+			new LinkedHashMap<String, Map<String, DataType>>(5, 0.75f, true) {
+				private static final long serialVersionUID = 1L;
+
+				@Override
+				protected boolean removeEldestEntry(Map.Entry<String, Map<String, DataType>> eldest) {
+					return size() > 5;
+				}
+			}
+	);
+
+	// LRU cache for field index mappings: Key = "database.tableName", Value = Map<fieldName, index>
+	// Limit to 5 tables to avoid excessive memory usage
+	private final Map<String, Map<String, Integer>> fieldIndexCache = Collections.synchronizedMap(
+			new LinkedHashMap<String, Map<String, Integer>>(5, 0.75f, true) {
+				private static final long serialVersionUID = 1L;
+
+				@Override
+				protected boolean removeEldestEntry(Map.Entry<String, Map<String, Integer>> eldest) {
+					return size() > 5;
+				}
+			}
+	);
 
 	public PaimonService(PaimonConfig config) {
 		this.config = config;
@@ -80,6 +121,51 @@ public class PaimonService implements Closeable {
 
 		// Create catalog
 		catalog = CatalogFactory.createCatalog(context);
+
+		// Initialize async commit if enabled
+		initAsyncCommit();
+	}
+
+	/**
+	 * Initialize async commit executor if enabled in config
+	 */
+	private void initAsyncCommit() {
+		Boolean enableAsync = config.getEnableAsyncCommit();
+		Integer commitInterval = config.getCommitIntervalMs();
+
+		if (enableAsync != null && enableAsync && commitInterval != null && commitInterval > 0) {
+			asyncCommitEnabled = true;
+
+			// Create scheduled executor with single thread
+			asyncCommitExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+				Thread t = new Thread(r, "paimon-async-commit");
+				t.setDaemon(true); // Daemon thread won't prevent JVM shutdown
+				return t;
+			});
+
+			// Schedule periodic commit task
+			asyncCommitExecutor.scheduleAtFixedRate(() -> {
+				try {
+					// Commit all tables that have accumulated data
+					for (String tableKey : new ArrayList<>(accumulatedRecordCount.keySet())) {
+						AtomicInteger count = accumulatedRecordCount.get(tableKey);
+						if (count != null && count.get() > 0) {
+							// Check if enough time has passed since last commit
+							AtomicLong lastCommit = lastCommitTime.get(tableKey);
+							if (lastCommit != null) {
+								long timeSinceLastCommit = System.currentTimeMillis() - lastCommit.get();
+								if (timeSinceLastCommit >= commitInterval) {
+									flushTable(tableKey);
+								}
+							}
+						}
+					}
+				} catch (Exception e) {
+					// Log error but don't stop the scheduler
+					System.err.println("Error in async commit: " + e.getMessage());
+				}
+			}, commitInterval, commitInterval, TimeUnit.MILLISECONDS);
+		}
 	}
 
 	/**
@@ -99,6 +185,10 @@ public class PaimonService implements Closeable {
 					options.set("s3.region", config.getS3Region());
 				}
 				options.set("s3.path.style.access", "true");
+				options.set("s3.upload.max-concurrency", "20");
+				options.set("s3.upload.part-size", "16mb");
+				options.set("s3.fast-upload", "true");
+				options.set("s3.accelerate-mode", "true");
 				break;
 			case "hdfs":
 				options.set("fs.defaultFS", "hdfs://" + config.getHdfsHost() + ":" + config.getHdfsPort());
@@ -397,7 +487,7 @@ public class PaimonService implements Closeable {
 		}
 
 		// Set primary keys
-		Collection<String> primaryKeys = tapTable.primaryKeys();
+		Collection<String> primaryKeys = tapTable.primaryKeys(true);
 		if (primaryKeys != null && !primaryKeys.isEmpty()) {
 			schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
 		}
@@ -418,9 +508,61 @@ public class PaimonService implements Closeable {
 		if (EmptyKit.isNotBlank(config.getFileFormat())) {
 			schemaBuilder.option("file.format", config.getFileFormat());
         }
-        if (EmptyKit.isNotBlank(config.getCompression())) {
-            schemaBuilder.option("compression", config.getCompression());
-        }
+		if (EmptyKit.isNotBlank(config.getCompression())) {
+			schemaBuilder.option("compression", config.getCompression());
+		}
+
+		// ===== Performance Optimization Options =====
+
+		// 1. Write buffer size - controls memory buffer for writes
+		// Larger buffer = better performance but more memory usage
+		if (config.getWriteBufferSize() != null && config.getWriteBufferSize() > 0) {
+			schemaBuilder.option("write-buffer-size", config.getWriteBufferSize() + "mb");
+		}
+
+		// 2. Target file size - Paimon will try to create files of this size
+		// Larger files = fewer files but slower compaction
+		if (config.getTargetFileSize() != null && config.getTargetFileSize() > 0) {
+			schemaBuilder.option("target-file-size", config.getTargetFileSize() + "mb");
+		}
+
+		// 3. Compaction settings
+		if (config.getEnableAutoCompaction() != null) {
+			if (config.getEnableAutoCompaction()) {
+				// Enable full compaction for better query performance
+				schemaBuilder.option("compaction.optimization-interval",
+					config.getCompactionIntervalMinutes() + "min");
+
+				// Set compaction strategy
+				schemaBuilder.option("changelog-producer", "full-compaction");
+
+				// Compact small files more aggressively
+				schemaBuilder.option("num-sorted-run.compaction-trigger", "3");
+				schemaBuilder.option("num-sorted-run.stop-trigger", "5");
+			} else {
+				// Disable auto compaction
+				schemaBuilder.option("compaction.optimization-interval", "0");
+			}
+		}
+
+		// 4. Snapshot settings for better performance
+		// Keep more snapshots in memory for faster access
+		schemaBuilder.option("snapshot.num-retained.min", "10");
+		schemaBuilder.option("snapshot.num-retained.max", "100");
+		schemaBuilder.option("snapshot.time-retained", "1h");
+
+		// 5. Commit settings
+		// Force compact on commit for better read performance
+		schemaBuilder.option("commit.force-compact", "false"); // Don't force compact on every commit
+
+		// 6. Scan settings for better read performance
+		schemaBuilder.option("scan.plan-sort-partition", "true");
+
+		// 7. Changelog settings for CDC scenarios
+		schemaBuilder.option("changelog-producer.lookup-wait", "false"); // Don't wait for lookup
+
+		// 8. Memory settings
+		schemaBuilder.option("sink.parallelism", String.valueOf(config.getWriteThreads()));
 
 		// Create table
 		catalog.createTable(identifier, schemaBuilder.build(), false);
@@ -632,6 +774,7 @@ public class PaimonService implements Closeable {
 			StreamTableCommit commit = getOrCreateStreamCommit(tableKey, identifier);
 
 			try {
+				// Write all records to the writer
 				for (TapRecordEvent event : recordEvents) {
 					if (event instanceof TapInsertRecordEvent) {
 						handleStreamInsert((TapInsertRecordEvent) event, writer, table);
@@ -645,14 +788,60 @@ public class PaimonService implements Closeable {
 					}
 				}
 
-				// Prepare commit with commitIdentifier
-				// Use atomic counter to generate unique, incrementing commit identifier
-				// This prevents duplicate identifiers in high-concurrency scenarios
-				long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
-				List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+				// Update accumulated record count
+				AtomicInteger recordCount = accumulatedRecordCount.computeIfAbsent(tableKey, k -> new AtomicInteger(0));
+				int currentCount = recordCount.addAndGet(recordEvents.size());
 
-				// Commit the batch
-				commit.commit(commitIdentifier, messages);
+				// Initialize last commit time if not exists
+				AtomicLong lastCommit = lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong(System.currentTimeMillis()));
+
+				// Determine if we should commit based on:
+				// 1. Accumulated record count exceeds threshold
+				// 2. Time since last commit exceeds interval
+				// 3. Batch accumulation is disabled (size = 0)
+				boolean shouldCommit = false;
+				Integer batchSize = config.getBatchAccumulationSize();
+				Integer commitInterval = config.getCommitIntervalMs();
+
+				if (batchSize == null || batchSize <= 0) {
+					// Batch accumulation disabled, commit immediately
+					shouldCommit = true;
+				} else if (currentCount >= batchSize) {
+					// Record count threshold reached
+					shouldCommit = true;
+				} else if (commitInterval != null && commitInterval > 0) {
+					// Check time-based commit
+					long timeSinceLastCommit = System.currentTimeMillis() - lastCommit.get();
+					if (timeSinceLastCommit >= commitInterval) {
+						shouldCommit = true;
+					}
+				}
+
+				// Perform commit if needed
+				if (shouldCommit) {
+					// Use lock to ensure only one thread commits at a time for this table
+					Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
+					synchronized (lock) {
+						// Double-check if we still need to commit (another thread might have committed)
+						int finalCount = recordCount.get();
+						if (finalCount > 0) {
+							// Prepare commit with commitIdentifier
+							// Use atomic counter to generate unique, incrementing commit identifier
+							long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
+							List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+
+							// Commit the batch
+							commit.commit(commitIdentifier, messages);
+
+							// Reset counters after successful commit
+							recordCount.set(0);
+							lastCommit.set(System.currentTimeMillis());
+
+							connectorContext.getLog().debug("Committed {} accumulated records for table {}",
+								finalCount, tableKey);
+						}
+					}
+				}
 
 				// StreamTableWrite can be reused, so we don't clean up here
 				return result;
@@ -694,6 +883,21 @@ public class PaimonService implements Closeable {
 	 * This method ensures proper cleanup with delays to allow internal threads to terminate.
 	 */
 	private void cleanupAllResources() {
+		// Shutdown async commit executor first
+		if (asyncCommitExecutor != null) {
+			asyncCommitEnabled = false;
+			asyncCommitExecutor.shutdown();
+			try {
+				if (!asyncCommitExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+					asyncCommitExecutor.shutdownNow();
+				}
+			} catch (InterruptedException e) {
+				asyncCommitExecutor.shutdownNow();
+				Thread.currentThread().interrupt();
+			}
+			asyncCommitExecutor = null;
+		}
+
 		// Close all cached writers and commits first
 		for (String tableKey : new ArrayList<>(streamWriterCache.keySet())) {
 			cleanupTableResources(tableKey);
@@ -702,6 +906,15 @@ public class PaimonService implements Closeable {
 		// Clear all caches
 		streamWriterCache.clear();
 		streamCommitCache.clear();
+
+		// Clear batch accumulation tracking
+		accumulatedRecordCount.clear();
+		lastCommitTime.clear();
+		commitLocks.clear();
+
+		// Clear Paimon field cache
+		paimonFieldCache.clear();
+		fieldIndexCache.clear();
 
 		// Close old catalog if exists
 		if (catalog != null) {
@@ -858,7 +1071,7 @@ public class PaimonService implements Closeable {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
-		int bucket = selectBucketForDynamic(after, table);
+		int bucket = selectBucketForDynamic(row, table);
 		writer.write(row, bucket);
 	}
 
@@ -875,7 +1088,7 @@ public class PaimonService implements Closeable {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
-		int bucket = selectBucketForDynamic(after, table);
+		int bucket = selectBucketForDynamic(row, table);
 		writer.write(row, bucket);
 	}
 
@@ -894,40 +1107,107 @@ public class PaimonService implements Closeable {
 		GenericRow row = convertToGenericRow(before, table, identifier);
 		// Set row kind to DELETE
 		row.setRowKind(org.apache.paimon.types.RowKind.DELETE);
-		int bucket = selectBucketForDynamic(before, table);
+		int bucket = selectBucketForDynamic(row, table);
 		writer.write(row, bucket);
 	}
 
 	/**
 	 * Select deterministic bucket for dynamic-bucket tables.
 	 * Use primary keys if present; otherwise hash all fields (sorted by name).
+	 *
+	 * Note: This method uses the converted GenericRow values to ensure consistent
+	 * bucket selection across insert/update/delete operations, especially for
+	 * Date/DateTime types that are converted to int/long values.
+	 *
+	 * @param row converted GenericRow with Paimon-compatible values
+	 * @param table table definition
+	 * @return bucket number
 	 */
-	private int selectBucketForDynamic(Map<String, Object> data, TapTable table) {
+	private int selectBucketForDynamic(GenericRow row, TapTable table) {
 		int hint = (config.getBucketCount() != null && config.getBucketCount() > 0) ? config.getBucketCount() : 4;
 		int hash = 0;
-		Collection<String> pks = table.primaryKeys();
+		Collection<String> pks = table.primaryKeys(true);
+		Map<String, TapField> fields = table.getNameFieldMap();
+
+		// Get or build field index mapping from cache
+		String cacheKey = table.getId();
+		Map<String, Integer> indexMap = getFieldIndexMap(cacheKey, fields);
+
 		if (pks != null && !pks.isEmpty()) {
+			// Use primary key fields for hashing
 			for (String key : pks) {
-				Object v = data.get(key);
-				hash = 31 * hash + (v == null ? 0 : v.hashCode());
+				Integer fieldIndex = indexMap.get(key);
+				if (fieldIndex != null && fieldIndex >= 0 && fieldIndex < row.getFieldCount()) {
+					Object v = row.getField(fieldIndex);
+					hash = 31 * hash + (v == null ? 0 : v.hashCode());
+				}
 			}
 		} else {
-			Map<String, TapField> fields = table.getNameFieldMap();
+			// Use all fields for hashing (sorted by name)
 			if (fields != null && !fields.isEmpty()) {
 				List<String> names = new ArrayList<>(fields.keySet());
 				Collections.sort(names);
 				for (String name : names) {
-					Object v = data.get(name);
-					hash = 31 * hash + (v == null ? 0 : v.hashCode());
+					Integer fieldIndex = indexMap.get(name);
+					if (fieldIndex != null && fieldIndex >= 0 && fieldIndex < row.getFieldCount()) {
+						Object v = row.getField(fieldIndex);
+						hash = 31 * hash + (v == null ? 0 : v.hashCode());
+					}
 				}
 			} else {
-				for (Map.Entry<String, Object> e : data.entrySet()) {
-					Object v = e.getValue();
+				// Fallback: hash all fields in order
+				for (int i = 0; i < row.getFieldCount(); i++) {
+					Object v = row.getField(i);
 					hash = 31 * hash + (v == null ? 0 : v.hashCode());
 				}
 			}
 		}
 		return Math.floorMod(hash, hint);
+	}
+
+	/**
+	 * Get or build field index mapping from cache
+	 *
+	 * @param cacheKey cache key (table ID)
+	 * @param fields field map
+	 * @return map of field name to index
+	 */
+	private Map<String, Integer> getFieldIndexMap(String cacheKey, Map<String, TapField> fields) {
+		Map<String, Integer> indexMap = fieldIndexCache.get(cacheKey);
+
+		if (indexMap == null) {
+			// Cache miss - build field index mapping
+			indexMap = new HashMap<>(fields.size());
+			int index = 0;
+			for (String name : fields.keySet()) {
+				indexMap.put(name, index++);
+			}
+
+			// Store in cache
+			fieldIndexCache.put(cacheKey, indexMap);
+		}
+
+		return indexMap;
+	}
+
+	/**
+	 * Get field index by field name (deprecated - use getFieldIndexMap instead)
+	 *
+	 * @param fieldName field name
+	 * @param fields field map
+	 * @return field index, or -1 if not found
+	 * @deprecated Use getFieldIndexMap for better performance with caching
+	 */
+	@Deprecated
+	private int getFieldIndex(String fieldName, Map<String, TapField> fields) {
+		int index = 0;
+		for (String name : fields.keySet()) {
+			if (name.equals(fieldName)) {
+				return index;
+			}
+			index++;
+		}
+		return -1;
 	}
 
 	/**
@@ -940,9 +1220,23 @@ public class PaimonService implements Closeable {
 	 * @throws Exception if conversion fails
 	 */
 	private GenericRow convertToGenericRow(Map<String, Object> data, TapTable table, Identifier identifier) throws Exception {
-		// Get Paimon table to access actual field types
-		Table paimonTable = catalog.getTable(identifier);
-		List<DataField> paimonFields = paimonTable.rowType().getFields();
+		// Get or build field type mapping from cache
+		String cacheKey = identifier.getFullName();
+		Map<String, DataType> fieldTypeMap = paimonFieldCache.get(cacheKey);
+
+		if (fieldTypeMap == null) {
+			// Cache miss - build field type mapping
+			Table paimonTable = catalog.getTable(identifier);
+			List<DataField> paimonFields = paimonTable.rowType().getFields();
+
+			fieldTypeMap = new HashMap<>(paimonFields.size());
+			for (DataField paimonField : paimonFields) {
+				fieldTypeMap.put(paimonField.name(), paimonField.type());
+			}
+
+			// Store in cache
+			paimonFieldCache.put(cacheKey, fieldTypeMap);
+		}
 
 		Map<String, TapField> tapFields = table.getNameFieldMap();
 		int fieldCount = tapFields.size();
@@ -953,14 +1247,8 @@ public class PaimonService implements Closeable {
 			String fieldName = entry.getKey();
 			Object value = data.get(fieldName);
 
-			// Get corresponding Paimon field type
-			DataType paimonType = null;
-			for (DataField paimonField : paimonFields) {
-				if (paimonField.name().equals(fieldName)) {
-					paimonType = paimonField.type();
-					break;
-				}
-			}
+			// Get corresponding Paimon field type from cache
+			DataType paimonType = fieldTypeMap.get(fieldName);
 
 			// Convert value to Paimon-compatible type
 			values[index++] = convertValueToPaimonType(value, paimonType);
@@ -1128,8 +1416,64 @@ public class PaimonService implements Closeable {
 		return value;
 	}
 
+	/**
+	 * Flush all accumulated records for all tables
+	 * This should be called before closing the connector to ensure all data is committed
+	 */
+	public void flushAll() throws Exception {
+		for (String tableKey : new ArrayList<>(streamWriterCache.keySet())) {
+			flushTable(tableKey);
+		}
+	}
+
+	/**
+	 * Flush accumulated records for a specific table
+	 *
+	 * @param tableKey table key (database.tableName)
+	 */
+	public void flushTable(String tableKey) throws Exception {
+		AtomicInteger recordCount = accumulatedRecordCount.get(tableKey);
+		if (recordCount == null || recordCount.get() <= 0) {
+			return; // Nothing to flush
+		}
+
+		StreamTableWrite writer = streamWriterCache.get(tableKey);
+		StreamTableCommit commit = streamCommitCache.get(tableKey);
+
+		if (writer == null || commit == null) {
+			return; // Writer or commit not initialized
+		}
+
+		// Use lock to ensure thread safety
+		Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
+		synchronized (lock) {
+			int finalCount = recordCount.get();
+			if (finalCount > 0) {
+				// Prepare and commit
+				long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
+				List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+				commit.commit(commitIdentifier, messages);
+
+				// Reset counters
+				recordCount.set(0);
+				AtomicLong lastCommit = lastCommitTime.get(tableKey);
+				if (lastCommit != null) {
+					lastCommit.set(System.currentTimeMillis());
+				}
+			}
+		}
+	}
+
 	@Override
 	public void close() {
+		// Flush all accumulated data before closing
+		try {
+			flushAll();
+		} catch (Exception e) {
+			// Log error but continue with cleanup
+			System.err.println("Error flushing accumulated data: " + e.getMessage());
+		}
+
 		cleanupAllResources();
 	}
 }

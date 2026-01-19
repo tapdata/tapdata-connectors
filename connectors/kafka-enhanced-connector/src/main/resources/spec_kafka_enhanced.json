@@ -33,28 +33,175 @@
           "x-decorator-props": {
             "tooltip": "${clusterURITip}"
           },
+          "x-index": 1
+        },
+        "schemaRegister": {
+          "type": "boolean",
+          "title": "${schemaRegister}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${schemaRegisterTip}"
+          },
+          "x-component": "Switch",
+          "apiServerKey": "schemaRegister",
+          "x-reactions": [
+            {
+              "target": "*(schemaRegisterUrl,registrySchemaType,basicAuth)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===true}}"
+                }
+              }
+            },
+            {
+              "target": "*(schemaMode)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===false}}"
+                }
+              }
+            }
+          ],
           "x-index": 2
         },
-        "schemaMode": {
+        "schemaRegisterUrl": {
+          "required": true,
           "type": "string",
-          "title": "${schemaMode}",
-          "default": "TAP_STANDARD",
+          "title": "${schemaRegisterUrl}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${schemaRegisterUrlTip}"
+          },
+          "x-component": "Input",
+          "apiServerKey": "schemaRegisterUrl",
+          "x-index": 3
+        },
+        "registrySchemaType": {
+          "type": "string",
+          "title": "${registrySchemaType}",
+          "default": "JSON",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "apiServerKey": "registrySchemaType",
+          "x-index": 4,
+          "enum": [
+            {
+              "label": "JSON",
+              "value": "JSON"
+            },
+            {
+              "label": "AVRO",
+              "value": "AVRO"
+            },
+            {
+              "label": "PROTOBUF",
+              "value": "PROTOBUF"
+            }
+          ]
+        },
+        "basicAuth": {
+          "type": "boolean",
+          "title": "${basicAuth}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "apiServerKey": "basicAuth",
+          "x-reactions": [
+            {
+              "target": "*(authCredentialsSource,authUserName,authPassword)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===true}}"
+                }
+              }
+            }
+          ],
+          "x-index": 5
+        },
+        "authCredentialsSource": {
+          "type": "string",
+          "title": "${authCredentialsSource}",
+          "default": "USER_INFO",
           "x-decorator": "FormItem",
           "x-component": "Radio.Group",
           "x-component-props": {
             "optionType": "button"
           },
-          "x-index": 10,
+          "x-index": 6,
           "enum": [
             {
-              "label": "${schemaModeTapStandard}",
-              "value": "TAP_STANDARD"
+              "label": "USER_INFO",
+              "value": "USER_INFO"
             },
             {
-              "label": "${schemaModeOriginal}",
-              "value": "ORIGINAL"
+              "label": "SASL_INHERIT",
+              "value": "SASL_INHERIT"
             }
           ]
+        },
+        "authUserName": {
+          "required": true,
+          "type": "string",
+          "title": "${authUserName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_username",
+          "x-index": 7
+        },
+        "authPassword": {
+          "required": true,
+          "type": "string",
+          "title": "${authPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "database_password",
+          "x-index": 8
+        },
+        "schemaMode": {
+          "type": "string",
+          "title": "${schemaMode}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "default": "TAP_STANDARD",
+          "enum": [
+            {"label": "${schemaModeTapStandard}", "value": "TAP_STANDARD"},
+            {"label": "${schemaModeOriginal}", "value": "ORIGINAL"},
+            {"label": "${schemaModeCanal}", "value": "CANAL"},
+            {"label": "${schemaModeDebezium}", "value": "DEBEZIUM"},
+            {"label": "${schemaModeFlinkCDC}", "value": "FLINK_CDC"},
+            {"label": "${schemaModeCustom}", "value": "CUSTOM"}
+          ],
+          "x-index": 9
+        },
+        "analyzeScript": {
+          "type": "string",
+          "required": false,
+          "default": "function analyze(header, key, value){\n\n\t\/\/ Enter your code at here\n\t return value;\n}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${analyzeScriptTip}"
+          },
+          "x-component": "JsEditor",
+          "x-component-props": {
+            "options": { "showPrintMargin": false, "useWrapMode": true },
+            "includeBeforeAndAfter": true,
+            "before": "function analyze(header, key, value){",
+            "beforeRegexp": "^[^]*function\\s+analyze\\s*\\(header, key, value\\)\\{",
+            "afterRegexp": "}[^}]*$",
+            "after": "}"
+          },
+          "x-index": 15,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]==='CUSTOM'}}"
+              }
+            },
+            "dependencies": [
+              "schemaMode"
+            ]
+          }
         },
         "serialization": {
           "type": "void",
@@ -252,121 +399,6 @@
         "OPTIONAL_FIELDS": {
           "type": "void",
           "properties": {
-            "schemaRegister": {
-              "type": "boolean",
-              "title": "${schemaRegister}",
-              "default": false,
-              "x-decorator": "FormItem",
-              "x-decorator-props": {
-                "tooltip": "${schemaRegisterTip}"
-              },
-              "x-component": "Switch",
-              "apiServerKey": "schemaRegister",
-              "x-reactions": [
-                {
-                  "target": "*(schemaRegisterUrl,registrySchemaType,basicAuth)",
-                  "fulfill": {
-                    "state": {
-                      "visible": "{{$self.value===true}}"
-                    }
-                  }
-                }
-              ],
-              "x-index": 1
-            },
-            "schemaRegisterUrl": {
-              "required": true,
-              "type": "string",
-              "title": "${schemaRegisterUrl}",
-              "x-decorator": "FormItem",
-              "x-decorator-props": {
-                "tooltip": "${schemaRegisterUrlTip}"
-              },
-              "x-component": "Input",
-              "apiServerKey": "schemaRegisterUrl",
-              "x-index": 2
-            },
-            "registrySchemaType": {
-              "type": "string",
-              "title": "${registrySchemaType}",
-              "default": "JSON",
-              "x-decorator": "FormItem",
-              "x-component": "Select",
-              "apiServerKey": "registrySchemaType",
-              "x-index": 3,
-              "enum": [
-                {
-                  "label": "JSON",
-                  "value": "JSON"
-                },
-                {
-                  "label": "AVRO",
-                  "value": "AVRO"
-                },
-                {
-                  "label": "PROTOBUF",
-                  "value": "PROTOBUF"
-                }
-              ]
-            },
-            "basicAuth": {
-              "type": "boolean",
-              "title": "${basicAuth}",
-              "default": false,
-              "x-decorator": "FormItem",
-              "x-component": "Switch",
-              "apiServerKey": "basicAuth",
-              "x-reactions": [
-                {
-                  "target": "*(authCredentialsSource,authUserName,authPassword)",
-                  "fulfill": {
-                    "state": {
-                      "visible": "{{$self.value===true}}"
-                    }
-                  }
-                }
-              ],
-              "x-index": 4
-            },
-            "authCredentialsSource": {
-              "type": "string",
-              "title": "${authCredentialsSource}",
-              "default": "USER_INFO",
-              "x-decorator": "FormItem",
-              "x-component": "Radio.Group",
-              "x-component-props": {
-                "optionType": "button"
-              },
-              "x-index": 5,
-              "enum": [
-                {
-                  "label": "USER_INFO",
-                  "value": "USER_INFO"
-                },
-                {
-                  "label": "SASL_INHERIT",
-                  "value": "SASL_INHERIT"
-                }
-              ]
-            },
-            "authUserName": {
-              "required": true,
-              "type": "string",
-              "title": "${authUserName}",
-              "x-decorator": "FormItem",
-              "x-component": "Input",
-              "apiServerKey": "database_username",
-              "x-index": 6
-            },
-            "authPassword": {
-              "required": true,
-              "type": "string",
-              "title": "${authPassword}",
-              "x-decorator": "FormItem",
-              "x-component": "Password",
-              "apiServerKey": "database_password",
-              "x-index": 7
-            },
             "kafkaSaslMechanism": {
               "type": "string",
               "title": "${kafkaSaslMechanism}",
@@ -686,7 +718,18 @@
           "x-decorator-props": {
             "tooltip": "${combinePushTopicTip}"
           },
-          "x-index": 2
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]!=='source' && $deps[1].length}}"
+              }
+            },
+            "dependencies": [
+              "__TAPDATA.connection_type",
+              "$inputs"
+            ]
+          },
+          "x-index": 50
         },
         "schemaMode": {
           "type": "string",
@@ -699,8 +742,50 @@
             {"label": "${schemaModeOriginal}", "value": "ORIGINAL"},
             {"label": "${schemaModeCanal}", "value": "CANAL"},
             {"label": "${schemaModeDebezium}", "value": "DEBEZIUM"},
-            {"label": "${schemaModeFlinkCDC}", "value": "FLINK_CDC"}
-          ]
+            {"label": "${schemaModeFlinkCDC}", "value": "FLINK_CDC"},
+            {"label": "${schemaModeCustom}", "value": "CUSTOM"}
+          ],
+          "x-index": 60,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]!=='source' && $deps[1].length}}"
+              }
+            },
+            "dependencies": [
+              "__TAPDATA.connection_type",
+              "$inputs"
+            ]
+          }
+        },
+        "processScript": {
+          "type": "string",
+          "required": false,
+          "default": "function process(record, op, conditionKeys){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${processScriptTip}"
+          },
+          "x-component": "JsEditor",
+          "x-component-props": {
+            "options": { "showPrintMargin": false, "useWrapMode": true },
+            "includeBeforeAndAfter": true,
+            "before": "function process(record, op, conditionKeys){",
+            "beforeRegexp": "^[^]*function\\s+process\\s*\\(record, op, conditionKeys\\)\\{",
+            "afterRegexp": "}[^}]*$",
+            "after": "}"
+          },
+          "x-index": 70,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]==='CUSTOM'}}"
+              }
+            },
+            "dependencies": [
+              ".schemaMode"
+            ]
+          }
         }
       }
     }
@@ -717,6 +802,7 @@
       "schemaMode": "Structural mode",
       "schemaModeTapStandard": "Standard structure",
       "schemaModeOriginal": "Original structure",
+      "schemaModeCustom": "Custom structure",
       "schemaModeCanal": "Canal",
       "schemaModeDebezium": "Debezium",
       "schemaModeFlinkCDC": "Flink CDC",
@@ -785,6 +871,7 @@
       "schemaMode": "结构模式",
       "schemaModeTapStandard": "标准结构",
       "schemaModeOriginal": "原生结构",
+      "schemaModeCustom": "自定义结构",
       "schemaModeCanal": "Canal",
       "schemaModeDebezium": "Debezium",
       "schemaModeFlinkCDC": "Flink CDC",
@@ -853,6 +940,7 @@
       "schemaMode": "結構模式",
       "schemaModeTapStandard": "標準結構",
       "schemaModeOriginal": "原生結構",
+      "schemaModeCustom": "自定義結構",
       "schemaModeCanal": "Canal",
       "schemaModeDebezium": "Debezium",
       "schemaModeFlinkCDC": "Flink CDC",

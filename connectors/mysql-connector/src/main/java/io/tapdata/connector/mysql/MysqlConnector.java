@@ -15,6 +15,7 @@ import io.tapdata.connector.mysql.dml.MysqlRecordWriter;
 import io.tapdata.connector.mysql.dml.MysqlWriteRecorder;
 import io.tapdata.connector.mysql.dml.sqlmaker.MysqlSqlMaker;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
+import io.tapdata.connector.mysql.util.MysqlBinlogPositionUtil;
 import io.tapdata.connector.mysql.util.MysqlUtil;
 import io.tapdata.connector.mysql.writer.MysqlSqlBatchWriter;
 import io.tapdata.connector.mysql.writer.MysqlWriter;
@@ -104,6 +105,18 @@ public class MysqlConnector extends CommonDbConnector {
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
         mysqlConfig = new MysqlConfig().load(tapConnectionContext.getConnectionConfig());
         mysqlConfig.load(tapConnectionContext.getNodeConfig());
+        isConnectorStarted(tapConnectionContext, tapConnectorContext -> {
+            firstConnectorId = (String) tapConnectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                tapConnectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
+        });
+        tapLogger = tapConnectionContext.getLog();
+        if (mysqlConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            mysqlConfig.startJdbcLog(firstConnectorId);
+        }
         contextMapForMasterSlave = MysqlUtil.buildContextMapForMasterSlave(mysqlConfig);
         MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         MysqlJdbcContextV2 contextV2 = contextMapForMasterSlave.get(mysqlConfig.getHost() + mysqlConfig.getPort());
@@ -121,7 +134,6 @@ public class MysqlConnector extends CommonDbConnector {
         if (Boolean.TRUE.equals(mysqlConfig.getApplyDefault())) {
             commonSqlMaker.applyDefault(true);
         }
-        tapLogger = tapConnectionContext.getLog();
         exceptionCollector = new MysqlExceptionCollector();
         ((MysqlExceptionCollector) exceptionCollector).setMysqlConfig(mysqlConfig);
         this.version = mysqlJdbcContext.queryVersion();
@@ -837,7 +849,13 @@ public class MysqlConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
-        mysqlReader.readBinlog(tapConnectorContext, tables, offset, batchSize, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, contextMapForMasterSlave);
+        if (mysqlConfig.getHighPerformance()) {
+            MysqlReaderV2 mysqlReaderV2 = new MysqlReaderV2(mysqlJdbcContext, tapLogger);
+            mysqlReaderV2.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
+            mysqlReaderV2.startMiner(this::isAlive);
+        } else {
+            mysqlReader.readBinlog(tapConnectorContext, tables, offset, batchSize, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, contextMapForMasterSlave);
+        }
     }
 
 
@@ -866,7 +884,21 @@ public class MysqlConnector extends CommonDbConnector {
             }
             return this.mysqlJdbcContext.readBinlogPosition();
         }
-        return startTime;
+        if (mysqlConfig.getHighPerformance()) {
+            try (MysqlBinlogPositionUtil ins = new MysqlBinlogPositionUtil(
+                    mysqlConfig.getHost(),
+                    mysqlConfig.getPort(),
+                    mysqlConfig.getUser(),
+                    mysqlConfig.getPassword())) {
+                MysqlBinlogPosition mysqlBinlogPosition = ins.findByLessTimestamp(startTime, true);
+                if (null == mysqlBinlogPosition) {
+                    throw new RuntimeException("Not found binlog of sync time: " + startTime);
+                }
+                return mysqlBinlogPosition;
+            }
+        } else {
+            return startTime;
+        }
     }
 
 
@@ -1055,7 +1087,7 @@ public class MysqlConnector extends CommonDbConnector {
     protected int getLowerCaseTableNames() throws SQLException {
         AtomicInteger res = new AtomicInteger(0);
         mysqlJdbcContext.normalQuery("show variables like 'lower_case_table_names'", resultSet -> {
-            if(resultSet.next()) {
+            if (resultSet.next()) {
                 res.set(resultSet.getInt("Value"));
             }
         });

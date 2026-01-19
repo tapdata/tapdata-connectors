@@ -270,7 +270,7 @@ public class CommonSqlMaker {
 
     public void buildOrderClause(StringBuilder builder, TapAdvanceFilter filter) {
         if (EmptyKit.isNotEmpty(filter.getSortOnList())) {
-            builder.append("ORDER BY ");
+            builder.append(" ORDER BY ");
             builder.append(filter.getSortOnList().stream().map(v -> v.toString(String.valueOf(escapeChar))).collect(Collectors.joining(", "))).append(' ');
         }
     }
@@ -278,10 +278,10 @@ public class CommonSqlMaker {
 
     public void buildLimitOffsetClause(StringBuilder builder, TapAdvanceFilter filter) {
         if (EmptyKit.isNotNull(filter.getLimit())) {
-            builder.append("LIMIT ").append(filter.getLimit()).append(' ');
+            builder.append(" LIMIT ").append(filter.getLimit()).append(' ');
         }
         if (EmptyKit.isNotNull(filter.getSkip())) {
-            builder.append("OFFSET ").append(filter.getSkip()).append(' ');
+            builder.append(" OFFSET ").append(filter.getSkip()).append(' ');
         }
     }
 

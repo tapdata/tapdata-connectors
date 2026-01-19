@@ -13,7 +13,6 @@ import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
@@ -85,14 +84,25 @@ public class ClickhouseConnector extends CommonDbConnector {
 
     protected void initConnection(TapConnectionContext connectionContext) throws SQLException {
         clickhouseConfig = new ClickhouseConfig().load(connectionContext.getConnectionConfig());
-        isConnectorStarted(connectionContext, connectorContext -> clickhouseConfig.load(connectorContext.getNodeConfig()));
+        isConnectorStarted(connectionContext, connectorContext -> {
+            clickhouseConfig.load(connectorContext.getNodeConfig());
+            firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
+        });
+        tapLogger = connectionContext.getLog();
+        if (clickhouseConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            clickhouseConfig.startJdbcLog(firstConnectorId);
+        }
         clickhouseJdbcContext = new ClickhouseJdbcContext(clickhouseConfig);
         commonDbConfig = clickhouseConfig;
         jdbcContext = clickhouseJdbcContext;
         clickhouseVersion = clickhouseJdbcContext.queryVersion();
         dbTimeZone = TimeZone.getTimeZone(clickhouseJdbcContext.queryTimeZone());
         commonSqlMaker = new ClickhouseSqlMaker().withVersion(clickhouseVersion);
-        tapLogger = connectionContext.getLog();
         exceptionCollector = new ClickhouseExceptionCollector();
     }
 

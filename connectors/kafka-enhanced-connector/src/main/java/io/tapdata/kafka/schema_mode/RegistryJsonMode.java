@@ -199,36 +199,4 @@ public class RegistryJsonMode extends AbsSchemaMode {
             return new HashMap<>();
         }
     }
-
-    /**
-     * 根据值推断 TapData 类型
-     */
-    private String inferTapType(Object value) {
-        if (value == null) {
-            return "STRING";
-        }
-
-        if (value instanceof Boolean) {
-            return "BOOLEAN";
-        } else if (value instanceof Integer || value instanceof Short || value instanceof Byte) {
-            return "INTEGER";
-        } else if (value instanceof Long) {
-            return "BIGINT";
-        } else if (value instanceof Float) {
-            return "FLOAT";
-        } else if (value instanceof Double) {
-            return "DOUBLE";
-        } else if (value instanceof BigDecimal) {
-            return "DOUBLE";
-        } else if (value instanceof String) {
-            return "STRING";
-        } else if (value instanceof List) {
-            return "ARRAY";
-        } else if (value instanceof Map) {
-            return "MAP";
-        } else {
-            return "STRING";
-        }
-    }
-
 }

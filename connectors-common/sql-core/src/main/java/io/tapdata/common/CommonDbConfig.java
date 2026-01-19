@@ -1,5 +1,6 @@
 package io.tapdata.common;
 
+import io.tapdata.common.log.CustomLogDelegator;
 import io.tapdata.common.util.FileUtil;
 import io.tapdata.entity.utils.BeanUtils;
 import io.tapdata.entity.utils.InstanceFactory;
@@ -44,6 +45,7 @@ public class CommonDbConfig implements Serializable {
     private int batchReadThreadSize = 4;
     private Boolean doubleActive = false;
     private Boolean dataSaving = true;
+    private Boolean fileLog = false;
     private Boolean oldVersionTimezone = false;
     private Boolean createAutoInc = false;
     private long autoIncJumpValue = 1000000L;
@@ -158,6 +160,13 @@ public class CommonDbConfig implements Serializable {
                 ErrorKit.ignoreAnyError(() -> FileUtils.deleteDirectory(cacheDir));
             }
         }
+    }
+
+    public void startJdbcLog(String loggerName) {
+        setDbType("log4jdbc:" + getDbType());
+        setJdbcDriver("net.sf.log4jdbc.sql.jdbcapi.DriverSpy");
+        System.setProperty("log4jdbc.spylogdelegator.name", "io.tapdata.common.log.CustomLogDelegator");
+        CustomLogDelegator.setLoggerName(loggerName);
     }
 
     public String get__connectionType() {
@@ -294,6 +303,14 @@ public class CommonDbConfig implements Serializable {
 
     public void setDataSaving(Boolean dataSaving) {
         this.dataSaving = dataSaving;
+    }
+
+    public Boolean getFileLog() {
+        return fileLog;
+    }
+
+    public void setFileLog(Boolean fileLog) {
+        this.fileLog = fileLog;
     }
 
     public Boolean getOldVersionTimezone() {

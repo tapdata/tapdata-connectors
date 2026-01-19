@@ -115,8 +115,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					@Override
 					protected void report(BsonTimestamp bsonTimestamp) throws InterruptedException {
 						while (running.get()) {
-							HeartbeatEvent heartbeatEvent = new HeartbeatEvent().referenceTime(bsonTimestamp.getTime() * 1000L);
-							heartbeatEvent.setTime(heartbeatEvent.getReferenceTime());
+							HeartbeatEvent heartbeatEvent = new HeartbeatEvent().init().referenceTime(bsonTimestamp.getTime() * 1000L);
 							if (tapEventQueue.offer(
 								new TapEventOffset(
 									heartbeatEvent,
