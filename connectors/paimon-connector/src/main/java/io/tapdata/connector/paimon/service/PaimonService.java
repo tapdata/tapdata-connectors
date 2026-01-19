@@ -460,7 +460,7 @@ public class PaimonService implements Closeable {
 		}
 
 		// Set primary keys
-		Collection<String> primaryKeys = tapTable.primaryKeys();
+		Collection<String> primaryKeys = tapTable.primaryKeys(true);
 		if (primaryKeys != null && !primaryKeys.isEmpty()) {
 			schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
 		}
