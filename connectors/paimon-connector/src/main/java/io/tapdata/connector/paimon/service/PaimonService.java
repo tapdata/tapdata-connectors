@@ -1097,8 +1097,12 @@ public class PaimonService implements Closeable {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
-		int bucket = selectBucketForDynamic(row, table);
-		writer.write(row, bucket);
+		if (config.getBucketMode().equals("fixed")) {
+			writer.write(row);
+		} else {
+			int bucket = selectBucketForDynamic(row, table);
+			writer.write(row, bucket);
+		}
 	}
 
 	/**
@@ -1114,8 +1118,12 @@ public class PaimonService implements Closeable {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
-		int bucket = selectBucketForDynamic(row, table);
-		writer.write(row, bucket);
+		if (config.getBucketMode().equals("fixed")) {
+			writer.write(row);
+		} else {
+			int bucket = selectBucketForDynamic(row, table);
+			writer.write(row, bucket);
+		}
 	}
 
 	/**
@@ -1133,8 +1141,12 @@ public class PaimonService implements Closeable {
 		GenericRow row = convertToGenericRow(before, table, identifier);
 		// Set row kind to DELETE
 		row.setRowKind(org.apache.paimon.types.RowKind.DELETE);
-		int bucket = selectBucketForDynamic(row, table);
-		writer.write(row, bucket);
+		if (config.getBucketMode().equals("fixed")) {
+			writer.write(row);
+		} else {
+			int bucket = selectBucketForDynamic(row, table);
+			writer.write(row, bucket);
+		}
 	}
 
 	/**
