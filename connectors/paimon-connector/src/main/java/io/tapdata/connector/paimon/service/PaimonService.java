@@ -1,5 +1,7 @@
 package io.tapdata.connector.paimon.service;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
@@ -474,6 +476,7 @@ public class PaimonService implements Closeable {
 
 		// Build schema
 		Schema.Builder schemaBuilder = Schema.newBuilder();
+		Map<String, Object> schemaBuilderVariableMap = new HashMap<>();
 
 		// Add fields
 		Map<String, TapField> fields = tapTable.getNameFieldMap();
@@ -497,6 +500,7 @@ public class PaimonService implements Closeable {
 			// Dynamic bucket mode: set bucket to -1
 			// This mode provides better flexibility
 			schemaBuilder.option("bucket", "-1");
+			schemaBuilderVariableMap.put("bucket", -1);
 		} else {
 			// Fixed bucket mode: set specific bucket count
 			Integer bucketCount = config.getBucketCount();
@@ -504,12 +508,15 @@ public class PaimonService implements Closeable {
 				bucketCount = 4; // Default to 4 buckets if not configured
 			}
 			schemaBuilder.option("bucket", String.valueOf(bucketCount));
+			schemaBuilderVariableMap.put("bucket", String.valueOf(bucketCount));
 		}
 		if (EmptyKit.isNotBlank(config.getFileFormat())) {
 			schemaBuilder.option("file.format", config.getFileFormat());
+			schemaBuilderVariableMap.put("file.format", config.getFileFormat());
         }
 		if (EmptyKit.isNotBlank(config.getCompression())) {
 			schemaBuilder.option("compression", config.getCompression());
+			schemaBuilderVariableMap.put("compression", config.getCompression());
 		}
 
 		// ===== Performance Optimization Options =====
@@ -518,54 +525,73 @@ public class PaimonService implements Closeable {
 		// Larger buffer = better performance but more memory usage
 		if (config.getWriteBufferSize() != null && config.getWriteBufferSize() > 0) {
 			schemaBuilder.option("write-buffer-size", config.getWriteBufferSize() + "mb");
+			schemaBuilderVariableMap.put("write-buffer-size", config.getWriteBufferSize() + "mb");
 		}
 
 		// 2. Target file size - Paimon will try to create files of this size
 		// Larger files = fewer files but slower compaction
 		if (config.getTargetFileSize() != null && config.getTargetFileSize() > 0) {
 			schemaBuilder.option("target-file-size", config.getTargetFileSize() + "mb");
+			schemaBuilderVariableMap.put("target-file-size", config.getTargetFileSize() + "mb");
 		}
 
 		// 3. Compaction settings
 		if (config.getEnableAutoCompaction() != null) {
 			if (config.getEnableAutoCompaction()) {
 				// Enable full compaction for better query performance
-				schemaBuilder.option("compaction.optimization-interval",
-					config.getCompactionIntervalMinutes() + "min");
+				schemaBuilder.option("compaction.async.enabled", "true");
+				schemaBuilder.option("compaction.optimization-interval", config.getCompactionIntervalMinutes() + "min");
+				schemaBuilderVariableMap.put("compaction.async.enabled", "true");
+				schemaBuilderVariableMap.put("compaction.optimization-interval", config.getCompactionIntervalMinutes() + "min");
 
 				// Set compaction strategy
-				schemaBuilder.option("changelog-producer", "full-compaction");
+				schemaBuilder.option("changelog-producer", "input");
+				schemaBuilderVariableMap.put("changelog-producer", "input");
 
 				// Compact small files more aggressively
 				schemaBuilder.option("num-sorted-run.compaction-trigger", "3");
+				schemaBuilderVariableMap.put("num-sorted-run.compaction-trigger", "3");
 				schemaBuilder.option("num-sorted-run.stop-trigger", "5");
+				schemaBuilderVariableMap.put("num-sorted-run.stop-trigger", "5");
 			} else {
 				// Disable auto compaction
 				schemaBuilder.option("compaction.optimization-interval", "0");
+				schemaBuilderVariableMap.put("compaction.optimization-interval", "0");
 			}
 		}
 
 		// 4. Snapshot settings for better performance
 		// Keep more snapshots in memory for faster access
-		schemaBuilder.option("snapshot.num-retained.min", "10");
-		schemaBuilder.option("snapshot.num-retained.max", "100");
-		schemaBuilder.option("snapshot.time-retained", "1h");
+		schemaBuilder.option("snapshot.num-retained.min", "5");
+		schemaBuilder.option("snapshot.num-retained.max", "50");
+		schemaBuilder.option("snapshot.time-retained", "30min");
+		schemaBuilderVariableMap.put("snapshot.num-retained.min", "5");
+		schemaBuilderVariableMap.put("snapshot.num-retained.max", "50");
+		schemaBuilderVariableMap.put("snapshot.time-retained", "30min");
 
 		// 5. Commit settings
 		// Force compact on commit for better read performance
 		schemaBuilder.option("commit.force-compact", "false"); // Don't force compact on every commit
+		schemaBuilderVariableMap.put("commit.force-compact", "false");
 
 		// 6. Scan settings for better read performance
 		schemaBuilder.option("scan.plan-sort-partition", "true");
+		schemaBuilderVariableMap.put("scan.plan-sort-partition", "true");
 
 		// 7. Changelog settings for CDC scenarios
 		schemaBuilder.option("changelog-producer.lookup-wait", "false"); // Don't wait for lookup
+		schemaBuilderVariableMap.put("changelog-producer.lookup-wait", "false");
 
 		// 8. Memory settings
 		schemaBuilder.option("sink.parallelism", String.valueOf(config.getWriteThreads()));
+		schemaBuilderVariableMap.put("sink.parallelism", String.valueOf(config.getWriteThreads()));
 
 		// Create table
 		catalog.createTable(identifier, schemaBuilder.build(), false);
+
+		// log schema builder variables
+		Gson gson = new GsonBuilder().setPrettyPrinting().create();
+		log.info("Created table {} with schema: {}", identifier.getFullName(), gson.toJson(schemaBuilder.build()));
 
 		return true;
 	}
