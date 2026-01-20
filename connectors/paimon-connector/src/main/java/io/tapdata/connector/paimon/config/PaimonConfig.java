@@ -85,6 +85,11 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Paimon will try to create files of this size
     private Integer targetFileSize = 128;
 
+    // Enable primary key update detection (default: false)
+    // When enabled, automatically detects primary key changes and converts update operations to delete+insert
+    // Requires source database to provide before-update data
+    private Boolean enablePrimaryKeyUpdate = false;
+
     public String getWarehouse() {
         return warehouse;
     }
@@ -294,6 +299,14 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     public void setTargetFileSize(Integer targetFileSize) {
         this.targetFileSize = targetFileSize;
+    }
+
+    public Boolean getEnablePrimaryKeyUpdate() {
+        return enablePrimaryKeyUpdate;
+    }
+
+    public void setEnablePrimaryKeyUpdate(Boolean enablePrimaryKeyUpdate) {
+        this.enablePrimaryKeyUpdate = enablePrimaryKeyUpdate;
     }
 
     /**
