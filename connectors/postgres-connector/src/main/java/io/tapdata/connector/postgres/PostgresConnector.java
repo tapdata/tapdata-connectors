@@ -966,6 +966,13 @@ public class PostgresConnector extends CommonDbConnector {
                     } else {
                         dataMap.put(colName, null);
                     }
+                } else if (dataType.equals("money")) {
+                    String money = resultSet.getString(colName);
+                    if ("null".equals(money)) {
+                        dataMap.put(colName, null);
+                    } else {
+                        dataMap.put(colName, new BigDecimal(money.substring(1).replace(",", "")));
+                    }
                 } else {
                     dataMap.put(colName, processData(resultSet.getObject(colName), dataType));
                 }
