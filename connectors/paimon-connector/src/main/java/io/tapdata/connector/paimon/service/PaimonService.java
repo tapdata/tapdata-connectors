@@ -31,6 +31,7 @@ import org.apache.paimon.table.sink.*;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 
 import java.io.Closeable;
 import java.math.BigDecimal;
@@ -1097,12 +1098,17 @@ public class PaimonService implements Closeable {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
-		int bucket = selectBucketForDynamic(row, table);
-		writer.write(row, bucket);
+		if (config.getBucketMode().equals("fixed")) {
+			writer.write(row);
+		} else {
+			int bucket = selectBucketForDynamic(row, table);
+			writer.write(row, bucket);
+		}
 	}
 
 	/**
 	 * Handle update event with stream writer
+	 * Uses RowKind.UPDATE_BEFORE (U-) and RowKind.UPDATE_AFTER (U+) to implement update
 	 *
 	 * @param event  update event
 	 * @param writer stream writer
@@ -1110,12 +1116,120 @@ public class PaimonService implements Closeable {
 	 * @throws Exception if update fails
 	 */
 	private void handleStreamUpdate(TapUpdateRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
-		Map<String, Object> after = event.getAfter();
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
-		GenericRow row = convertToGenericRow(after, table, identifier);
-		int bucket = selectBucketForDynamic(row, table);
-		writer.write(row, bucket);
+
+		Map<String, Object> before = event.getBefore();
+		Map<String, Object> after = event.getAfter();
+
+		// Convert before and after data to GenericRow first to avoid duplicate conversion
+		GenericRow beforeRow = null;
+		if (before != null && !before.isEmpty()) {
+			beforeRow = convertToGenericRow(before, table, identifier);
+		}
+		GenericRow afterRow = convertToGenericRow(after, table, identifier);
+
+		// Check if primary key update detection is enabled
+		Boolean enablePkUpdate = config.getEnablePrimaryKeyUpdate();
+		if (enablePkUpdate != null && enablePkUpdate) {
+			// Validate that before data is available when primary key update detection is enabled
+			if (beforeRow == null) {
+				throw new RuntimeException("Primary key update detection is enabled but before data is not available. " +
+						"Please ensure the source database can provide before-update data or disable this feature.");
+			}
+
+			// Check if primary key has changed
+			if (isPrimaryKeyChanged(beforeRow, afterRow, table)) {
+				// Convert update to delete + insert
+				// First, write DELETE using before data
+				beforeRow.setRowKind(RowKind.DELETE);
+				if (config.getBucketMode().equals("fixed")) {
+					writer.write(beforeRow);
+				} else {
+					int bucket = selectBucketForDynamic(beforeRow, table);
+					writer.write(beforeRow, bucket);
+				}
+
+				// Then, write INSERT using after data
+				afterRow.setRowKind(RowKind.INSERT);
+				if (config.getBucketMode().equals("fixed")) {
+					writer.write(afterRow);
+				} else {
+					int bucket = selectBucketForDynamic(afterRow, table);
+					writer.write(afterRow, bucket);
+				}
+				return;
+			}
+		}
+
+		// Normal update logic: Write U- (UPDATE_BEFORE) if before data exists
+		if (beforeRow != null) {
+			beforeRow.setRowKind(RowKind.UPDATE_BEFORE);
+			if (config.getBucketMode().equals("fixed")) {
+				writer.write(beforeRow);
+			} else {
+				int bucket = selectBucketForDynamic(beforeRow, table);
+				writer.write(beforeRow, bucket);
+			}
+		}
+
+		// Write U+ (UPDATE_AFTER) using after data
+		afterRow.setRowKind(RowKind.UPDATE_AFTER);
+		if (config.getBucketMode().equals("fixed")) {
+			writer.write(afterRow);
+		} else {
+			int bucket = selectBucketForDynamic(afterRow, table);
+			writer.write(afterRow, bucket);
+		}
+	}
+
+	/**
+	 * Check if primary key values have changed between before and after GenericRow
+	 * Uses converted GenericRow values to ensure consistent comparison
+	 *
+	 * @param beforeRow  before GenericRow (must not be null)
+	 * @param afterRow   after GenericRow (must not be null)
+	 * @param table      table definition
+	 * @return true if primary key has changed, false otherwise
+	 */
+	private boolean isPrimaryKeyChanged(GenericRow beforeRow, GenericRow afterRow, TapTable table) {
+		// Get primary key fields
+		Collection<String> primaryKeys = table.primaryKeys(true);
+		if (primaryKeys == null || primaryKeys.isEmpty()) {
+			// No primary key defined, no change detection needed
+			return false;
+		}
+
+		// Get field index mapping
+		Map<String, TapField> fields = table.getNameFieldMap();
+		String cacheKey = table.getId();
+		Map<String, Integer> indexMap = getFieldIndexMap(cacheKey, fields);
+
+		// Build concatenated string of primary key values from before and after
+		// Use same order for comparison
+		List<String> pkList = new ArrayList<>(primaryKeys);
+		StringBuilder beforePkStr = new StringBuilder();
+		StringBuilder afterPkStr = new StringBuilder();
+
+		for (String pkField : pkList) {
+			Integer fieldIndex = indexMap.get(pkField);
+			if (fieldIndex == null || fieldIndex < 0 || fieldIndex >= beforeRow.getFieldCount()) {
+				continue;
+			}
+
+			Object beforeValue = beforeRow.getField(fieldIndex);
+			Object afterValue = afterRow.getField(fieldIndex);
+
+			// Convert to string for comparison
+			String beforeStr = beforeValue == null ? "NULL" : String.valueOf(beforeValue);
+			String afterStr = afterValue == null ? "NULL" : String.valueOf(afterValue);
+
+			beforePkStr.append(beforeStr).append("|");
+			afterPkStr.append(afterStr).append("|");
+		}
+
+		// Compare concatenated primary key strings
+		return !beforePkStr.toString().contentEquals(afterPkStr);
 	}
 
 	/**
@@ -1132,9 +1246,13 @@ public class PaimonService implements Closeable {
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(before, table, identifier);
 		// Set row kind to DELETE
-		row.setRowKind(org.apache.paimon.types.RowKind.DELETE);
-		int bucket = selectBucketForDynamic(row, table);
-		writer.write(row, bucket);
+		row.setRowKind(RowKind.DELETE);
+		if (config.getBucketMode().equals("fixed")) {
+			writer.write(row);
+		} else {
+			int bucket = selectBucketForDynamic(row, table);
+			writer.write(row, bucket);
+		}
 	}
 
 	/**
