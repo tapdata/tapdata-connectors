@@ -176,6 +176,7 @@ public abstract class AbstractWalLogMiner {
             case "integer":
             case "bigint":
             case "numeric":
+            case "money":
             case "real":
             case "double precision":
                 stringObjectEntry.setValue(new BigDecimal((String) value));
