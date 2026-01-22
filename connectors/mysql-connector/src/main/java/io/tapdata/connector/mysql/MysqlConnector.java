@@ -839,7 +839,7 @@ public class MysqlConnector extends CommonDbConnector {
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
         if (mysqlConfig.getHighPerformance()) {
-            MysqlReaderV2 mysqlReaderV2 = new MysqlReaderV2(mysqlJdbcContext, tapLogger);
+            MysqlReaderV2 mysqlReaderV2 = new MysqlReaderV2(mysqlJdbcContext, tapLogger, dbTimeZone);
             mysqlReaderV2.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
             mysqlReaderV2.startMiner(this::isAlive);
         } else {
