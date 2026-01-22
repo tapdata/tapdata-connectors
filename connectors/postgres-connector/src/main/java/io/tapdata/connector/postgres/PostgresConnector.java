@@ -61,10 +61,7 @@ import java.math.BigDecimal;
 import java.sql.*;
 import java.sql.Date;
 import java.text.SimpleDateFormat;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
+import java.time.*;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.CountDownLatch;
@@ -983,14 +980,29 @@ public class PostgresConnector extends CommonDbConnector {
             try {
                 if (null == dataType) {
                     dataMap.put(colName, resultSet.getObject(colName));
-                } else if (dataType.endsWith("without time zone") && "timestamp".equals(resultSet.getMetaData().getColumnTypeName(columnIndex))) {
-                    String tiemstampString = resultSet.getString(colName);
-                    if (StringUtils.isNotEmpty(tiemstampString)) {
-                        LocalDateTime localDateTime = LocalDateTime.parse(tiemstampString.replace(" ", "T"));
-                        dataMap.put(colName, localDateTime.minusHours(postgresConfig.getZoneOffsetHour()));
-                    } else {
-                        dataMap.put(colName, null);
+                } else if (dataType.endsWith("without time zone")) {
+                    switch (resultSet.getMetaData().getColumnTypeName(columnIndex)) {
+                        case "timestamp": {
+                            String timestampString = resultSet.getString(colName);
+                            if (StringUtils.isNotEmpty(timestampString)) {
+                                LocalDateTime localDateTime = LocalDateTime.parse(timestampString.replace(" ", "T"));
+                                dataMap.put(colName, localDateTime.minusHours(postgresConfig.getZoneOffsetHour()));
+                            } else {
+                                dataMap.put(colName, null);
+                            }
+                            break;
+                        }
+                        case "time": {
+                            LocalTime localTime = resultSet.getObject(colName, LocalTime.class);
+                            if (localTime != null) {
+                                dataMap.put(colName, localTime.atDate(LocalDate.ofYearDay(1970, 1)).minusHours(postgresConfig.getZoneOffsetHour()));
+                            } else {
+                                dataMap.put(colName, null);
+                            }
+                            break;
+                        }
                     }
+
                 } else if (dataType.equals("money")) {
                     String money = resultSet.getString(colName);
                     if ("null".equals(money)) {
