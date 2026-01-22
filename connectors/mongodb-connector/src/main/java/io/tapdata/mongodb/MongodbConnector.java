@@ -1,10 +1,44 @@
 package io.tapdata.mongodb;
 
 import com.alibaba.fastjson.JSONObject;
-import com.mongodb.*;
+import com.mongodb.CreateIndexCommitQuorum;
+import com.mongodb.MongoBulkWriteException;
+import com.mongodb.MongoClientException;
+import com.mongodb.MongoCommandException;
+import com.mongodb.MongoConfigurationException;
+import com.mongodb.MongoConnectionPoolClearedException;
+import com.mongodb.MongoCursorNotFoundException;
+import com.mongodb.MongoException;
+import com.mongodb.MongoInterruptedException;
+import com.mongodb.MongoNodeIsRecoveringException;
+import com.mongodb.MongoNotPrimaryException;
+import com.mongodb.MongoQueryException;
+import com.mongodb.MongoSecurityException;
+import com.mongodb.MongoServerUnavailableException;
+import com.mongodb.MongoSocketClosedException;
+import com.mongodb.MongoSocketException;
+import com.mongodb.MongoSocketOpenException;
+import com.mongodb.MongoSocketReadException;
+import com.mongodb.MongoSocketReadTimeoutException;
+import com.mongodb.MongoSocketWriteException;
+import com.mongodb.MongoTimeoutException;
+import com.mongodb.MongoWriteConcernException;
+import com.mongodb.MongoWriteException;
 import com.mongodb.bulk.BulkWriteError;
-import com.mongodb.client.*;
-import com.mongodb.client.model.*;
+import com.mongodb.client.ClientSession;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.MongoIterable;
+import com.mongodb.client.model.CreateCollectionOptions;
+import com.mongodb.client.model.CreateIndexOptions;
+import com.mongodb.client.model.IndexModel;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.TimeSeriesGranularity;
+import com.mongodb.client.model.TimeSeriesOptions;
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.entity.codec.TapCodecsRegistry;
@@ -18,8 +52,21 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.logger.TapLogger;
-import io.tapdata.entity.schema.*;
-import io.tapdata.entity.schema.value.*;
+import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.schema.TapIndex;
+import io.tapdata.entity.schema.TapIndexEx;
+import io.tapdata.entity.schema.TapIndexField;
+import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.value.ByteData;
+import io.tapdata.entity.schema.value.DateTime;
+import io.tapdata.entity.schema.value.TapBinaryValue;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapNumberValue;
+import io.tapdata.entity.schema.value.TapStringValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
+import io.tapdata.entity.schema.value.TapValue;
+import io.tapdata.entity.schema.value.TapYearValue;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.InstanceFactory;
@@ -40,9 +87,20 @@ import io.tapdata.mongodb.writer.MongodbWriter;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import io.tapdata.pdk.apis.entity.*;
+import io.tapdata.pdk.apis.entity.Capability;
+import io.tapdata.pdk.apis.entity.ConnectionOptions;
+import io.tapdata.pdk.apis.entity.ExecuteResult;
+import io.tapdata.pdk.apis.entity.FilterResults;
+import io.tapdata.pdk.apis.entity.Projection;
+import io.tapdata.pdk.apis.entity.QueryOperator;
+import io.tapdata.pdk.apis.entity.SortOn;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.TapExecuteCommand;
+import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.exception.NotSupportedException;
 import io.tapdata.pdk.apis.exception.TapTestItemException;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
@@ -57,16 +115,46 @@ import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.bson.*;
+import org.bson.BsonArray;
+import org.bson.BsonBoolean;
+import org.bson.BsonDocument;
+import org.bson.BsonInt64;
+import org.bson.BsonString;
+import org.bson.BsonType;
+import org.bson.BsonValue;
+import org.bson.Document;
+import org.bson.RawBsonDocument;
 import org.bson.conversions.Bson;
-import org.bson.types.*;
+import org.bson.types.Binary;
+import org.bson.types.Code;
+import org.bson.types.Decimal128;
+import org.bson.types.ObjectId;
+import org.bson.types.Symbol;
 
 import java.io.Closeable;
 import java.math.BigDecimal;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
@@ -75,7 +163,12 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import static com.mongodb.client.model.Filters.*;
+import static com.mongodb.client.model.Filters.and;
+import static com.mongodb.client.model.Filters.eq;
+import static com.mongodb.client.model.Filters.gt;
+import static com.mongodb.client.model.Filters.gte;
+import static com.mongodb.client.model.Filters.lt;
+import static com.mongodb.client.model.Filters.lte;
 import static java.util.Collections.singletonList;
 
 /**
@@ -555,6 +648,7 @@ public class MongodbConnector extends ConnectorBase {
 		connectorFunctions.supportCreateIndex(this::createIndex);
 		connectorFunctions.supportCreateTableV2(this::createTableV2);
 		connectorFunctions.supportStreamRead(this::streamRead);
+		connectorFunctions.supportOneByOneStreamRead(this::streamReadOneByOne);
 		connectorFunctions.supportTimestampToStreamOffset(this::streamOffset);
 		connectorFunctions.supportErrorHandleFunction(this::errorHandle);
 
@@ -1656,19 +1750,32 @@ public class MongodbConnector extends ConnectorBase {
 	protected void streamRead(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
 		int size = tableList.size();
 		MongoCdcOffset mongoCdcOffset = MongoCdcOffset.fromOffset(offset);
-		streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset(), eventBatchSize, consumer);
+		streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset());
 		if (size == tableList.size() || !tableList.isEmpty()) {
 			if (mongodbStreamReader == null) {
 				mongodbStreamReader = createStreamReader();
 			}
-			mongodbStreamReader.onStart(mongoConfig);
-			doStreamRead(mongodbStreamReader, connectorContext, tableList, mongoCdcOffset.getCdcOffset(), eventBatchSize, consumer);
+			mongodbStreamReader.initAcceptor(eventBatchSize, consumer).onStart(mongoConfig);
+			doStreamRead(mongodbStreamReader, connectorContext, tableList, mongoCdcOffset.getCdcOffset());
+		}
+	}
+	protected void streamReadOneByOne(TapConnectorContext connectorContext, List<String> tableList, Object offset, StreamReadOneByOneConsumer consumer) {
+		int size = tableList.size();
+		MongoCdcOffset mongoCdcOffset = MongoCdcOffset.fromOffset(offset);
+		streamReadOpLog(connectorContext, tableList, mongoCdcOffset.getOpLogOffset());
+		if (size == tableList.size() || !tableList.isEmpty()) {
+			if (mongodbStreamReader == null) {
+				mongodbStreamReader = createStreamReader();
+			}
+			mongodbStreamReader.initAcceptor(consumer.getBatchSize(), consumer)
+					.onStart(mongoConfig);
+			doStreamRead(mongodbStreamReader, connectorContext, tableList, mongoCdcOffset.getCdcOffset());
 		}
 	}
 
-	protected void doStreamRead(MongodbStreamReader streamReader, TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
+	protected void doStreamRead(MongodbStreamReader streamReader, TapConnectorContext connectorContext, List<String> tableList, Object offset) {
 		try {
-			streamReader.read(connectorContext, tableList, offset, eventBatchSize, consumer);
+			streamReader.read(connectorContext, tableList, offset);
 		} catch (Exception e) {
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectWritePrivileges(e);
@@ -1682,7 +1789,7 @@ public class MongodbConnector extends ConnectorBase {
 		}
 	}
 
-	protected void streamReadOpLog(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) {
+	protected void streamReadOpLog(TapConnectorContext connectorContext, List<String> tableList, Object offset) {
 		String database = mongoConfig.getDatabase();
 		if (StreamWithOpLogCollection.OP_LOG_DB.equals(database) && tableList.contains(StreamWithOpLogCollection.OP_LOG_COLLECTION)) {
 			connectorContext.getLog().info("Start read oplog collection, db: local");
@@ -1692,7 +1799,7 @@ public class MongodbConnector extends ConnectorBase {
 				opLogStreamReader.onStart(mongoConfig);
 			}
 			if (tableList.isEmpty()) {
-				doStreamRead(opLogStreamReader, connectorContext, list(StreamWithOpLogCollection.OP_LOG_COLLECTION), offset, eventBatchSize, consumer);
+				doStreamRead(opLogStreamReader, connectorContext, list(StreamWithOpLogCollection.OP_LOG_COLLECTION), offset);
 			} else {
 				if (null == sourceRunner) {
 					sourceRunner = new ThreadPoolExecutor(
@@ -1706,7 +1813,7 @@ public class MongodbConnector extends ConnectorBase {
 					//Don't waste core thread when idle.
 					sourceRunner.allowCoreThreadTimeOut(true);
 				}
-				sourceRunnerFuture = sourceRunner.submit(() -> doStreamRead(opLogStreamReader, connectorContext, list(StreamWithOpLogCollection.OP_LOG_COLLECTION), offset, eventBatchSize, consumer));
+				sourceRunnerFuture = sourceRunner.submit(() -> doStreamRead(opLogStreamReader, connectorContext, list(StreamWithOpLogCollection.OP_LOG_COLLECTION), offset));
 			}
 		}
 	}

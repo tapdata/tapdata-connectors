@@ -9,9 +9,8 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.Filters;
 import io.tapdata.entity.event.TapBaseEvent;
-import io.tapdata.entity.event.TapEvent;
-import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
+import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
@@ -19,9 +18,14 @@ import io.tapdata.mongodb.MongodbConnector;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
 import io.tapdata.mongodb.reader.MongodbStreamReader;
+import io.tapdata.mongodb.reader.cdc.v3.NormalV3Acceptor;
+import io.tapdata.mongodb.reader.cdc.v3.OneByOneV3Acceptor;
+import io.tapdata.mongodb.reader.cdc.v3.V3Accept;
 import io.tapdata.mongodb.util.IntervalReport;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
+import io.tapdata.pdk.apis.consumer.TapStreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
@@ -30,14 +34,21 @@ import org.bson.Document;
 import org.bson.conversions.Bson;
 
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static io.tapdata.base.ConnectorBase.*;
+import static io.tapdata.base.ConnectorBase.deleteDMLEvent;
+import static io.tapdata.base.ConnectorBase.insertRecordEvent;
+import static io.tapdata.base.ConnectorBase.updateDMLEvent;
 
 /**
  * @author jackin
@@ -49,7 +60,6 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 
 	private final static String LOCAL_DATABASE = "local";
 	private final static String OPLOG_COLLECTION = "oplog.rs";
-	public static final long CONSUME_TIME_OUT = TimeUnit.SECONDS.toMillis(1L);
 
 	private MongodbConfig mongodbConfig;
 
@@ -73,6 +83,8 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 
 	private ConnectionString connectionString;
 
+	V3Accept<?, ?> acceptor;
+
 	@Override
 	public void onStart(MongodbConfig mongodbConfig) {
 		this.mongodbConfig = mongodbConfig;
@@ -84,8 +96,25 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 		replicaSetReadThreadPool = new ThreadPoolExecutor(nodesURI.size(), nodesURI.size(), 60L, TimeUnit.SECONDS, new LinkedBlockingDeque<>());
 	}
 
+
 	@Override
-	public void read(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) throws Exception {
+	public  MongodbV3StreamReader initAcceptor(int eventBatchSize, TapStreamReadConsumer<?, Object> consumer) {
+		if (consumer instanceof StreamReadConsumer) {
+			this.acceptor = new NormalV3Acceptor()
+					.setConsumer((StreamReadConsumer) consumer)
+					.setBatchSize(eventBatchSize)
+					.setBatchSizeTimeout(eventBatchSize <= 500 ? 50 : eventBatchSize / 10);
+		} else if (consumer instanceof StreamReadOneByOneConsumer) {
+			this.acceptor = new OneByOneV3Acceptor()
+					.setConsumer((StreamReadOneByOneConsumer) consumer);
+		} else {
+			throw new IllegalArgumentException("Unsupported consumer type: " + consumer.getClass().getName());
+		}
+		return this;
+	}
+
+	@Override
+	public void read(TapConnectorContext connectorContext, List<String> tableList, Object offset) throws Exception {
 		if (CollectionUtils.isNotEmpty(tableList)) {
 			for (String tableName : tableList) {
 				namespaces.add(new StringBuilder(mongodbConfig.getDatabase()).append(".").append(tableName).toString());
@@ -93,7 +122,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 		}
 
 		if (tapEventQueue == null) {
-			tapEventQueue = new LinkedBlockingDeque<>(eventBatchSize);
+			tapEventQueue = new LinkedBlockingDeque<>(this.acceptor.getBatchSize());
 		}
 
 		if (this.globalStateMap == null) {
@@ -105,6 +134,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 		} else {
 			this.offset = new ConcurrentHashMap<>();
 		}
+		this.acceptor.setOffset(this.offset);
 
 		if (MapUtils.isNotEmpty(nodesURI)) {
 			int intervalReportMillis = 3000; // interval report offset if no match any table event
@@ -135,7 +165,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					if (running.get()) {
 						try {
 							Thread.currentThread().setName("replicaSet-read-thread-" + replicaSetName);
-							readFromOplog(connectorContext, replicaSetName, intervalReport, mongodbURI, eventBatchSize, consumer);
+							readFromOplog(connectorContext, replicaSetName, intervalReport, mongodbURI);
 						} catch (Exception e) {
 							running.compareAndSet(true, false);
 							TapLogger.error(TAG, "read oplog event from {} failed {}", replicaSetName, e.getMessage(), e);
@@ -145,25 +175,10 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 				});
 			}
 		}
-
-		List<TapEvent> tapEvents = new ArrayList<>(eventBatchSize);
-		long lastConsumeTs = 0L;
 		while (running.get()) {
 			try {
 				final TapEventOffset tapEventOffset = tapEventQueue.poll(3, TimeUnit.SECONDS);
-				if (tapEventOffset != null) {
-					tapEvents.add(tapEventOffset.getTapEvent());
-					this.offset.put(tapEventOffset.getReplicaSetName(), tapEventOffset.getOffset());
-				}
-
-				long consumeInterval = System.currentTimeMillis() - lastConsumeTs;
-				if (tapEvents.size() >= eventBatchSize
-						|| consumeInterval > CONSUME_TIME_OUT) {
-					Map<String, MongoV3StreamOffset> newOffset = new ConcurrentHashMap<>(this.offset);
-					consumer.accept(tapEvents, newOffset);
-					tapEvents = new ArrayList<>(eventBatchSize);
-					lastConsumeTs = System.currentTimeMillis();
-				}
+				this.acceptor.accept(tapEventOffset);
 			} catch (InterruptedException e) {
 				TapLogger.info("Stream polling failed: {}", e.getMessage(), e);
 				break;
@@ -208,7 +223,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 		}
 	}
 
-	private void readFromOplog(TapConnectorContext connectorContext, String replicaSetName, IntervalReport<BsonTimestamp, InterruptedException> intervalReport, String mongodbURI, int eventBatchSize, StreamReadConsumer consumer) {
+	private void readFromOplog(TapConnectorContext connectorContext, String replicaSetName, IntervalReport<BsonTimestamp, InterruptedException> intervalReport, String mongodbURI) {
 		Bson filter = null;
 
 		BsonTimestamp startTs = null;
@@ -254,7 +269,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					.cursorType(CursorType.TailableAwait)
 					.noCursorTimeout(true).iterator()) {
 
-					consumer.streamReadStarted();
+					this.acceptor.streamReadStarted();
 					while (running.get()) {
 						if (mongoCursor.hasNext()) {
 							final Document event = mongoCursor.next();
