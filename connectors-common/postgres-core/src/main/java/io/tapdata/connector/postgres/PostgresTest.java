@@ -245,7 +245,7 @@ public class PostgresTest extends CommonDbTest {
             process = processBuilder.start();
             process.waitFor(60, TimeUnit.SECONDS);
             new File(FileUtil.paths(toolPath, ctlDir)).mkdir();
-            processBuilder.command("/bin/sh", "-c", String.format("walminer pgto -i -c %s -s '%s' -e %s -t 4 --source-connstr1='host=%s port=%s username=%s dbanme=%s password=%s'", toolDir.getAbsolutePath() + "/" + ctlDir, slotName, ((PostgresConfig) commonDbConfig).getPgtoPort(), commonDbConfig.getHost(), commonDbConfig.getPort(), commonDbConfig.getUser(), commonDbConfig.getDatabase(), commonDbConfig.getPassword()));
+            processBuilder.command("/bin/sh", "-c", String.format("walminer pgto init -c %s -s '%s' -e %s -t 4 --source-connstr1='host=%s port=%s username=%s dbanme=%s password=%s'", toolDir.getAbsolutePath() + "/" + ctlDir, slotName, ((PostgresConfig) commonDbConfig).getPgtoPort(), commonDbConfig.getHost(), commonDbConfig.getPort(), commonDbConfig.getUser(), commonDbConfig.getDatabase(), commonDbConfig.getPassword()));
             process = processBuilder.start();
             process.waitFor(60, TimeUnit.SECONDS);
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
@@ -256,7 +256,7 @@ public class PostgresTest extends CommonDbTest {
             }
             int exitCode = process.waitFor();
             System.out.println("exit code: " + exitCode);
-            processBuilder.command("/bin/sh", "-c", String.format("walminer pgto -m -c %s", toolDir.getAbsolutePath() + "/" + ctlDir));
+            processBuilder.command("/bin/sh", "-c", String.format("walminer pgto run -m -c %s", toolDir.getAbsolutePath() + "/" + ctlDir));
             processBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
             process = processBuilder.start();
             process.waitFor(60, TimeUnit.SECONDS);
