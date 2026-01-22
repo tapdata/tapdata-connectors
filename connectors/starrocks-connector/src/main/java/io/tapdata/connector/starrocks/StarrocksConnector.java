@@ -333,16 +333,16 @@ public class StarrocksConnector extends CommonDbConnector {
     @Override
     public void onStop(TapConnectionContext connectionContext) {
         ErrorKit.ignoreAnyError(() -> {
-            for (StarrocksStreamLoader StarrocksStreamLoader : starrocksStreamLoaderMap.values()) {
-                if (EmptyKit.isNotNull(StarrocksStreamLoader)) {
+            for (StarrocksStreamLoader starrocksStreamLoader : starrocksStreamLoaderMap.values()) {
+                if (EmptyKit.isNotNull(starrocksStreamLoader)) {
                     // 在停止前先刷新剩余数据
                     try {
-                        StarrocksStreamLoader.flushOnStop();
+                        starrocksStreamLoader.flushOnStop();
                         tapLogger.info("StarrocksConnector", "Flushed remaining data before stopping StarrocksStreamLoader");
                     } catch (Exception e) {
                         tapLogger.warn("StarrocksConnector", "Failed to flush data before stopping: {}", e.getMessage());
                     }
-                    StarrocksStreamLoader.shutdown();
+                    starrocksStreamLoader.shutdown();
                 }
             }
         });
@@ -367,6 +367,22 @@ public class StarrocksConnector extends CommonDbConnector {
         if (null == sqlList) {
             return;
         }
+        //执行ddl前需要将缓存的数据先flush，清空StarrocksStreamLoaderMap对象
+        ErrorKit.ignoreAnyError(() -> {
+            for (StarrocksStreamLoader starrocksStreamLoader : starrocksStreamLoaderMap.values()) {
+                if (EmptyKit.isNotNull(starrocksStreamLoader)) {
+                    // 在停止前先刷新剩余数据
+                    try {
+                        starrocksStreamLoader.flushOnStop();
+                        tapLogger.info("StarrocksConnector", "Flushed remaining data before stopping StarrocksStreamLoader");
+                    } catch (Exception e) {
+                        tapLogger.warn("StarrocksConnector", "Failed to flush data before stopping: {}", e.getMessage());
+                    }
+                    starrocksStreamLoader.shutdown();
+                }
+            }
+            starrocksStreamLoaderMap.clear();
+        });
         try {
             tapLogger.info("Field ddl sql: {}", sqlList);
             jdbcContext.batchExecute(sqlList);
