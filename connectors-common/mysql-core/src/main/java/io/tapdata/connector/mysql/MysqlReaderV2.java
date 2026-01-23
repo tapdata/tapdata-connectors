@@ -5,10 +5,16 @@ import com.github.shyiko.mysql.binlog.event.*;
 import com.github.shyiko.mysql.binlog.event.deserialization.EventDeserializer;
 import io.tapdata.common.concurrent.ConcurrentProcessor;
 import io.tapdata.common.concurrent.TapExecutors;
+import io.tapdata.common.ddl.DDLFactory;
+import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
+import io.tapdata.common.ddl.type.DDLParserType;
+import io.tapdata.common.ddl.wrapper.DDLWrapperConfig;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.mysql.util.MySQLJsonParser;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
+import io.tapdata.entity.event.ddl.TapDDLUnknownEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
@@ -46,6 +52,8 @@ public class MysqlReaderV2 {
     private final Map<String, LinkedHashMap<String, String>> dataTypeMap = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object[]>> enumDataTypeMap = new ConcurrentHashMap<>();
     private final TimeZone timeZone;
+    private final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("`");
+    private final DDLParserType ddlParserType = DDLParserType.MYSQL_CCJ_SQL_PARSER;
 
     public MysqlReaderV2(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, TimeZone timeZone) {
         this.tapLogger = tapLogger;
@@ -94,6 +102,8 @@ public class MysqlReaderV2 {
                     tapLogger.info("Binlog rotated to: {}/{}", rotateEventData.getBinlogFilename(), rotateEventData.getBinlogPosition());
                 } else if (eventType == EventType.TABLE_MAP) {
                     handleTableMapEvent(event);
+                } else if (eventType == EventType.QUERY) {
+                    concurrentProcessor.runAsyncWithBlocking(new ScanEvent(event, currentBinlogFile.get()), this::emit);
                 }
 
                 // 异步处理事件
@@ -153,6 +163,39 @@ public class MysqlReaderV2 {
                 return null;
             }
 
+            if (eventType == EventType.QUERY) {
+                QueryEventData queryEventData = event.getData();
+                long eventTime = header.getTimestamp();
+                String ddl = StringKit.removeSqlNote(queryEventData.getSql());
+                OffsetEvent offsetEvent = new OffsetEvent();
+                List<TapEvent> ddlEvents = new ArrayList<>();
+                try {
+                    DDLFactory.ddlToTapDDLEvent(
+                            ddlParserType,
+                            ddl,
+                            DDL_WRAPPER_CONFIG,
+                            tableMap,
+                            tapDDLEvent -> {
+                                tapDDLEvent.setTime(System.currentTimeMillis());
+                                tapDDLEvent.setReferenceTime(eventTime);
+                                tapDDLEvent.setOriginDDL(ddl);
+                                ddlEvents.add(tapDDLEvent);
+                                tapLogger.info("Read DDL: " + ddl + ", about to be packaged as some event(s)");
+                            }
+                    );
+                } catch (Throwable e) {
+                    TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
+                    tapDDLEvent.setTime(System.currentTimeMillis());
+                    tapDDLEvent.setReferenceTime(eventTime);
+                    tapDDLEvent.setOriginDDL(ddl);
+                    ddlEvents.add(tapDDLEvent);
+                }
+                offsetEvent.setTapEvent(ddlEvents);
+                offsetEvent.setMysqlBinlogPosition(extractBinlogPosition(event, scanEvent.getFileName()));
+                ddlEvents.forEach(e -> ddlFlush(((TapDDLEvent) e).getTableId()));
+                return offsetEvent;
+            }
+
             // 处理数据变更事件
             List<TapEvent> tapEvents;
             MysqlBinlogPosition position;
@@ -198,7 +241,14 @@ public class MysqlReaderV2 {
 
         // 保存映射关系
         tableMapEventByTableId.put(tableId, tableMapEventData);
+        ddlFlush(table);
+        tapLogger.debug("Table map event: tableId={}, database={}, table={}", tableId, database, table);
+    }
 
+    private void ddlFlush(String table) {
+        if (EmptyKit.isBlank(table)) {
+            return;
+        }
         LinkedHashMap<String, String> dataTypes = tableMap.get(table).getNameFieldMap().entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getKey, e -> StringKit.removeParentheses(e.getValue().getDataType()),
                         (existing, replacement) -> existing, LinkedHashMap::new));
@@ -218,7 +268,6 @@ public class MysqlReaderV2 {
                     return enumValues;
                 }));
         enumDataTypeMap.put(table, enumMap);
-        tapLogger.debug("Table map event: tableId={}, database={}, table={}", tableId, database, table);
     }
 
     /**
@@ -458,6 +507,9 @@ public class MysqlReaderV2 {
 
         private List<TapEvent> tapEvents;
         private MysqlBinlogPosition mysqlBinlogPosition;
+
+        public OffsetEvent() {
+        }
 
         public OffsetEvent(List<TapEvent> tapEvents, MysqlBinlogPosition mysqlBinlogPosition) {
             this.tapEvents = tapEvents;
