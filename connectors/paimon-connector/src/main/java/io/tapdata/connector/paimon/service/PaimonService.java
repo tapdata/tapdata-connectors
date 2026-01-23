@@ -796,11 +796,11 @@ public class PaimonService implements Closeable {
 			WriteListResult<TapRecordEvent> result = new WriteListResult<>();
 			Identifier identifier = Identifier.create(database, tableName);
 
-			// Get or create cached writer and commit
-			StreamTableWrite writer = getOrCreateStreamWriter(tableKey, identifier);
-			StreamTableCommit commit = getOrCreateStreamCommit(tableKey, identifier);
-
 			try {
+				// Get or create cached writer and commit
+				StreamTableWrite writer = getOrCreateStreamWriter(tableKey, identifier);
+				StreamTableCommit commit = getOrCreateStreamCommit(tableKey, identifier);
+
 				// Write all records to the writer
 				for (TapRecordEvent event : recordEvents) {
 					if (event instanceof TapInsertRecordEvent) {
