@@ -104,6 +104,7 @@ public class MysqlReaderV2 {
                     handleTableMapEvent(event);
                 } else if (eventType == EventType.QUERY) {
                     concurrentProcessor.runAsyncWithBlocking(new ScanEvent(event, currentBinlogFile.get()), this::emit);
+                    return;
                 }
 
                 // 异步处理事件
