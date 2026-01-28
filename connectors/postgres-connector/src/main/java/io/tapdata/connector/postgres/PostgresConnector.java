@@ -861,7 +861,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void createCustomPublicationIfNotExist(List<String> tableList) {
-        String sql = String.format("CREATE PUBLICATION %s FOR TABLE %s", slotName, tableList.stream().map(this::getSchemaAndTable).collect(Collectors.joining(", ")));
+        String sql = String.format("CREATE PUBLICATION %s FOR TABLE %s %s", slotName, tableList.stream().map(this::getSchemaAndTable).collect(Collectors.joining(", ")), postgresConfig.getPartitionRoot() ? "WITH (publish_via_partition_root = true)" : "");
         try {
             tapLogger.info("Create publication sql: {}", sql);
             postgresJdbcContext.execute(sql);
