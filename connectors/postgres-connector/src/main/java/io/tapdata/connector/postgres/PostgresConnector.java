@@ -1008,7 +1008,7 @@ public class PostgresConnector extends CommonDbConnector {
                     if ("null".equals(money)) {
                         dataMap.put(colName, null);
                     } else {
-                        dataMap.put(colName, new BigDecimal(money.replace("$", "").replace(",", "")));
+                        dataMap.put(colName, new BigDecimal(money.replaceAll("[^\\d.-]", "")));
                     }
                 } else {
                     dataMap.put(colName, processData(resultSet.getObject(colName), dataType));
