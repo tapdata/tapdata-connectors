@@ -15,6 +15,7 @@ import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.WriteListResult;
+import io.tapdata.pdk.core.utils.CommonUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.paimon.catalog.*;
@@ -27,7 +28,10 @@ import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.*;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -37,7 +41,10 @@ import java.io.Closeable;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -77,13 +84,13 @@ public class PaimonService implements Closeable {
 	// ===== Paimon Field Cache for Performance =====
 	// LRU cache for Paimon field mappings: Key = "database.tableName", Value = Map<fieldName, DataType>
 	// Limit to 5 tables to avoid excessive memory usage
-	private final Map<String, Map<String, DataType>> paimonFieldCache = Collections.synchronizedMap(
-			new LinkedHashMap<String, Map<String, DataType>>(5, 0.75f, true) {
+	private final Map<String, List<DataField>> paimonFieldCache = Collections.synchronizedMap(
+			new LinkedHashMap<String, List<DataField>>(5, 0.75f, true) {
 				private static final long serialVersionUID = 1L;
 
 				@Override
-				protected boolean removeEldestEntry(Map.Entry<String, Map<String, DataType>> eldest) {
-					return size() > 5;
+				protected boolean removeEldestEntry(Map.Entry<String, List<DataField>> eldest) {
+					return size() > 10;
 				}
 			}
 	);
@@ -96,7 +103,7 @@ public class PaimonService implements Closeable {
 
 				@Override
 				protected boolean removeEldestEntry(Map.Entry<String, Map<String, Integer>> eldest) {
-					return size() > 5;
+					return size() > 10;
 				}
 			}
 	);
@@ -516,7 +523,7 @@ public class PaimonService implements Closeable {
 		if (EmptyKit.isNotBlank(config.getFileFormat())) {
 			schemaBuilder.option("file.format", config.getFileFormat());
 			schemaBuilderVariableMap.put("file.format", config.getFileFormat());
-        }
+		}
 		if (EmptyKit.isNotBlank(config.getCompression())) {
 			schemaBuilder.option("compression", config.getCompression());
 			schemaBuilderVariableMap.put("compression", config.getCompression());
@@ -867,7 +874,7 @@ public class PaimonService implements Closeable {
 							lastCommit.set(System.currentTimeMillis());
 
 							connectorContext.getLog().debug("Committed {} accumulated records for table {}",
-								finalCount, tableKey);
+									finalCount, tableKey);
 						}
 					}
 				}
@@ -886,8 +893,14 @@ public class PaimonService implements Closeable {
 					TimeUnit.SECONDS.sleep(1L);
 					continue;
 				}
-				// Don't clean up on error for stream write, let it be reused or cleaned up on close
-				throw new RuntimeException("Failed to write records to table " + tableName, e);
+				Throwable illegalThreadStateException = CommonUtils.matchThrowable(e, IllegalThreadStateException.class);
+				if (null != illegalThreadStateException) {
+					String message = String.format("Failed to write records to table %s occurred illegal thread state exception, current thread name: %s, thread group: %s",
+							tableName, Thread.currentThread().getName(), Thread.currentThread().getThreadGroup() != null ? Thread.currentThread().getThreadGroup().getName() : "null");
+					throw new RuntimeException(message, e);
+				} else {
+					throw new RuntimeException("Failed to write records to table " + tableName, e);
+				}
 			}
 		}
 	}
@@ -1054,14 +1067,14 @@ public class PaimonService implements Closeable {
 	private boolean isThreadGroupDestroyedError(Throwable e) {
 		Throwable cause = e;
 		while (cause != null) {
-			if (cause instanceof IllegalThreadStateException) {
+			Throwable illegalThreadStateException = CommonUtils.matchThrowable(e, IllegalThreadStateException.class);
+			if (illegalThreadStateException != null) {
 				return true;
 			}
 			cause = cause.getCause();
 		}
 		return false;
 	}
-
 
 
 	/**
@@ -1129,7 +1142,6 @@ public class PaimonService implements Closeable {
 	}
 
 
-
 	/**
 	 * Clean up all cached resources for a specific table
 	 *
@@ -1163,7 +1175,6 @@ public class PaimonService implements Closeable {
 			}
 		}
 	}
-
 
 
 	/**
@@ -1268,9 +1279,9 @@ public class PaimonService implements Closeable {
 	 * Check if primary key values have changed between before and after GenericRow
 	 * Uses converted GenericRow values to ensure consistent comparison
 	 *
-	 * @param beforeRow  before GenericRow (must not be null)
-	 * @param afterRow   after GenericRow (must not be null)
-	 * @param table      table definition
+	 * @param beforeRow before GenericRow (must not be null)
+	 * @param afterRow  after GenericRow (must not be null)
+	 * @param table     table definition
 	 * @return true if primary key has changed, false otherwise
 	 */
 	private boolean isPrimaryKeyChanged(GenericRow beforeRow, GenericRow afterRow, TapTable table) {
@@ -1339,12 +1350,12 @@ public class PaimonService implements Closeable {
 	/**
 	 * Select deterministic bucket for dynamic-bucket tables.
 	 * Use primary keys if present; otherwise hash all fields (sorted by name).
-	 *
+	 * <p>
 	 * Note: This method uses the converted GenericRow values to ensure consistent
 	 * bucket selection across insert/update/delete operations, especially for
 	 * Date/DateTime types that are converted to int/long values.
 	 *
-	 * @param row converted GenericRow with Paimon-compatible values
+	 * @param row   converted GenericRow with Paimon-compatible values
 	 * @param table table definition
 	 * @return bucket number
 	 */
@@ -1394,7 +1405,7 @@ public class PaimonService implements Closeable {
 	 * Get or build field index mapping from cache
 	 *
 	 * @param cacheKey cache key (table ID)
-	 * @param fields field map
+	 * @param fields   field map
 	 * @return map of field name to index
 	 */
 	private Map<String, Integer> getFieldIndexMap(String cacheKey, Map<String, TapField> fields) {
@@ -1419,7 +1430,7 @@ public class PaimonService implements Closeable {
 	 * Get field index by field name (deprecated - use getFieldIndexMap instead)
 	 *
 	 * @param fieldName field name
-	 * @param fields field map
+	 * @param fields    field map
 	 * @return field index, or -1 if not found
 	 * @deprecated Use getFieldIndexMap for better performance with caching
 	 */
@@ -1447,39 +1458,30 @@ public class PaimonService implements Closeable {
 	private GenericRow convertToGenericRow(Map<String, Object> data, TapTable table, Identifier identifier) throws Exception {
 		// Get or build field type mapping from cache
 		String cacheKey = identifier.getFullName();
-		Map<String, DataType> fieldTypeMap = paimonFieldCache.get(cacheKey);
+		List<DataField> paimonFields = paimonFieldCache.get(cacheKey);
 
-		if (fieldTypeMap == null) {
+		if (paimonFields == null) {
 			// Cache miss - build field type mapping
 			Table paimonTable = catalog.getTable(identifier);
-			List<DataField> paimonFields = paimonTable.rowType().getFields();
-
-			fieldTypeMap = new HashMap<>(paimonFields.size());
-			for (DataField paimonField : paimonFields) {
-				fieldTypeMap.put(paimonField.name(), paimonField.type());
-			}
+			paimonFields = paimonTable.rowType().getFields();
 
 			// Store in cache
-			paimonFieldCache.put(cacheKey, fieldTypeMap);
+			paimonFieldCache.put(cacheKey, paimonFields);
 		}
 
-		Map<String, TapField> tapFields = table.getNameFieldMap();
-		int fieldCount = tapFields.size();
-		Object[] values = new Object[fieldCount];
-
-		int index = 0;
-		for (Map.Entry<String, TapField> entry : tapFields.entrySet()) {
-			String fieldName = entry.getKey();
+		GenericRow genericRow = new GenericRow(paimonFields.size());
+		for (int i = 0; i < paimonFields.size(); i++) {
+			DataField dataField = paimonFields.get(i);
+			String fieldName = dataField.name();
 			Object value = data.get(fieldName);
 
 			// Get corresponding Paimon field type from cache
-			DataType paimonType = fieldTypeMap.get(fieldName);
+			DataType paimonType = dataField.type();
 
-			// Convert value to Paimon-compatible type
-			values[index++] = convertValueToPaimonType(value, paimonType);
+			genericRow.setField(i, convertValueToPaimonType(value, paimonType));
 		}
 
-		return GenericRow.of(values);
+		return genericRow;
 	}
 
 	/**
