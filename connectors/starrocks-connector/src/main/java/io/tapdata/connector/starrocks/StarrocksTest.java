@@ -127,9 +127,9 @@ public class StarrocksTest extends CommonDbTest {
                 HttpGet httpGet = new HttpGet();
                 httpGet.setURI(new URI("https://" + ((StarrocksConfig) commonDbConfig).getStarrocksHttp()));
                 httpGet.setHeader("Authorization", authHeader);
-                testResult = EntityUtils.toString(client.execute(httpGet).getEntity()).contains("starrocks");
+                testResult = EntityUtils.toString(client.execute(httpGet).getEntity()).toLowerCase().contains("starrocks");
             } else {
-                testResult = HttpRequest.get("http://" + ((StarrocksConfig) commonDbConfig).getStarrocksHttp()).header("Authorization", authHeader).execute().body().contains("starrocks");
+                testResult = HttpRequest.get("http://" + ((StarrocksConfig) commonDbConfig).getStarrocksHttp()).header("Authorization", authHeader).execute().body().toLowerCase().contains("starrocks");
             }
 
             if (testResult) {
