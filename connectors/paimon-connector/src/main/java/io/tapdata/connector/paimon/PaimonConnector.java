@@ -4,6 +4,7 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.connector.paimon.service.PaimonService;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
@@ -26,6 +27,7 @@ import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.collections4.MapUtils;
 
 import java.util.List;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -163,13 +165,17 @@ public class PaimonConnector extends ConnectorBase {
      */
     @Override
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
+        // Source capabilities
+        connectorFunctions.supportBatchRead(this::batchRead);
+        connectorFunctions.supportStreamRead(this::streamRead);
+
         // Target capabilities
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportCreateTableV2(this::createTable);
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportCreateIndex(this::createIndex);
         connectorFunctions.supportClearTable(this::clearTable);
-        
+
         // Register codec for data type conversions
         registerCodecs(codecRegistry);
     }
@@ -288,6 +294,62 @@ public class PaimonConnector extends ConnectorBase {
     }
 
     /**
+     * Batch read records from Paimon table
+     *
+     * @param connectorContext connector context
+     * @param table table to read from
+     * @param offsetState offset state for resuming read
+     * @param eventBatchSize batch size for events
+     * @param eventsOffsetConsumer consumer for events and offset
+     * @throws Throwable if read fails
+     */
+    private void batchRead(TapConnectorContext connectorContext, TapTable table, Object offsetState,
+                          int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        final Log log = connectorContext.getLog();
+
+        try {
+            log.info("Starting batch read from table: " + table.getName());
+
+            // Read records using Paimon service
+            paimonService.batchRead(table, offsetState, eventBatchSize, eventsOffsetConsumer, connectorContext);
+
+            log.info("Batch read completed for table: " + table.getName());
+
+        } catch (Exception e) {
+            log.error("Error reading records from table " + table.getName() + ": " + e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    /**
+     * Stream read records from Paimon table (CDC mode)
+     *
+     * @param connectorContext connector context
+     * @param tables list of tables to read from
+     * @param offsetState offset state for resuming read
+     * @param eventBatchSize batch size for events
+     * @param eventsOffsetConsumer consumer for events and offset
+     * @throws Throwable if read fails
+     */
+    private void streamRead(TapConnectorContext connectorContext, List<String> tables, Object offsetState,
+                           int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        final Log log = connectorContext.getLog();
+
+        try {
+            log.info("Starting stream read from tables: " + tables);
+
+            // Stream read records using Paimon service
+            paimonService.streamRead(tables, offsetState, eventBatchSize, eventsOffsetConsumer, connectorContext);
+
+            log.info("Stream read completed for tables: " + tables);
+
+        } catch (Exception e) {
+            log.error("Error in stream read from tables " + tables + ": " + e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    /**
      * Write records to Paimon table
      *
      * @param connectorContext connector context
@@ -306,7 +368,7 @@ public class PaimonConnector extends ConnectorBase {
                 tapRecordEvents, table, connectorContext);
 
             writeListResultConsumer.accept(result);
-            
+
         } catch (Exception e) {
             log.error("Error writing records to table " + table.getName() + ": " + e.getMessage(), e);
             throw e;

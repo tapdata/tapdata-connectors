@@ -19,19 +19,19 @@ import io.tapdata.pdk.core.utils.CommonUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.paimon.catalog.*;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Decimal;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.*;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.source.*;
+import org.apache.paimon.table.source.TableScan.Plan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -1688,6 +1688,444 @@ public class PaimonService implements Closeable {
 					lastCommit.set(System.currentTimeMillis());
 				}
 			}
+		}
+	}
+
+	/**
+	 * Stream read records from Paimon table (CDC mode)
+	 *
+	 * @param tables            list of tables to read from
+	 * @param offsetState       offset state for resuming read
+	 * @param eventBatchSize    batch size for events
+	 * @param eventsOffsetConsumer consumer for events and offset
+	 * @param connectorContext  connector context
+	 * @throws Exception if read fails
+	 */
+	public void streamRead(List<String> tables, Object offsetState, int eventBatchSize,
+						   java.util.function.BiConsumer<List<io.tapdata.entity.event.TapEvent>, Object> eventsOffsetConsumer,
+						   TapConnectorContext connectorContext) throws Exception {
+		Log log = connectorContext.getLog();
+		log.info("Starting stream read from tables: {}", tables);
+
+		String database = config.getDatabase();
+
+		// Parse offset state - each table has its own snapshot ID
+		Map<String, Long> tableSnapshots = new HashMap<>();
+		if (offsetState instanceof Map) {
+			Map<String, Object> offsetMap = (Map<String, Object>) offsetState;
+			for (Map.Entry<String, Object> entry : offsetMap.entrySet()) {
+				if (entry.getValue() != null) {
+					tableSnapshots.put(entry.getKey(), Long.parseLong(entry.getValue().toString()));
+				}
+			}
+			log.info("Resuming stream read from snapshots: {}", tableSnapshots);
+		}
+
+		// Initialize stream scans for all tables
+		Map<String, StreamTableScan> streamScans = new HashMap<>();
+		Map<String, TableRead> tableReads = new HashMap<>();
+		Map<String, List<DataField>> paimonFieldsMap = new HashMap<>();
+		Map<String, Map<String, TapField>> tapFieldsMap = new HashMap<>();
+
+		for (String tableName : tables) {
+			Identifier identifier = Identifier.create(database, tableName);
+
+			// Get Paimon table
+			Table paimonTable;
+			try {
+				paimonTable = catalog.getTable(identifier);
+			} catch (Catalog.TableNotExistException e) {
+				log.warn("Table {} does not exist, skipping stream read", tableName);
+				continue;
+			}
+
+			// Get TapTable definition
+			TapTable tapTable = connectorContext.getTableMap().get(tableName);
+			if (tapTable == null) {
+				log.warn("TapTable definition not found for table: {}, skipping", tableName);
+				continue;
+			}
+
+			// Create read builder
+			ReadBuilder readBuilder = paimonTable.newReadBuilder();
+
+			// Create stream scan
+			StreamTableScan streamScan = readBuilder.newStreamScan();
+
+			// Restore from offset if available
+			Long startSnapshotId = tableSnapshots.get(tableName);
+			if (startSnapshotId != null) {
+				streamScan.restore(startSnapshotId);
+				log.info("Restored table {} from snapshot: {}", tableName, startSnapshotId);
+			}
+
+			// Get field names and types for conversion
+			List<DataField> paimonFields = paimonTable.rowType().getFields();
+			Map<String, TapField> tapFields = tapTable.getNameFieldMap();
+
+			// Create table read
+			TableRead tableRead = readBuilder.newRead();
+
+			// Store in maps
+			streamScans.put(tableName, streamScan);
+			tableReads.put(tableName, tableRead);
+			paimonFieldsMap.put(tableName, paimonFields);
+			tapFieldsMap.put(tableName, tapFields);
+
+			log.info("Initialized stream scan for table: {}", tableName);
+		}
+
+		if (streamScans.isEmpty()) {
+			log.warn("No valid tables to stream read");
+			return;
+		}
+
+		log.info("Starting continuous stream read for {} tables", streamScans.size());
+
+		// Continuous stream reading loop for all tables
+		while (true) {
+			boolean hasData = false;
+			List<io.tapdata.entity.event.TapEvent> allEvents = new ArrayList<>();
+			Map<String, Object> newOffsets = new HashMap<>();
+
+			// Scan all tables in each iteration
+			for (String tableName : streamScans.keySet()) {
+				StreamTableScan streamScan = streamScans.get(tableName);
+				TableRead tableRead = tableReads.get(tableName);
+				List<DataField> paimonFields = paimonFieldsMap.get(tableName);
+				Map<String, TapField> tapFields = tapFieldsMap.get(tableName);
+
+				try {
+					// Plan next batch of splits
+					Plan plan = streamScan.plan();
+					List<Split> splits = plan.splits();
+
+					if (splits.isEmpty()) {
+						// No new data for this table, save current checkpoint
+						Long currentSnapshot = streamScan.checkpoint();
+						newOffsets.put(tableName, currentSnapshot);
+						continue;
+					}
+
+					hasData = true;
+					log.debug("Table {} has {} new splits to read", tableName, splits.size());
+
+					// Read data from each split
+					long totalRecords = 0;
+					for (Split split : splits) {
+						// Create record reader for this split
+						RecordReader<InternalRow> reader = tableRead.createReader(split);
+
+						try {
+							// Read records from this split using RecordReader.RecordIterator
+							RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
+
+							while (iterator != null) {
+								InternalRow row;
+								while ((row = iterator.next()) != null) {
+									// Convert InternalRow to Map
+									Map<String, Object> data = convertInternalRowToMap(row, paimonFields, tapFields);
+
+									// Determine event type based on RowKind
+									io.tapdata.entity.event.TapEvent event = createEventFromRowKind(row, data, tableName);
+
+									if (event != null) {
+										allEvents.add(event);
+										totalRecords++;
+
+										// Send batch when size reached
+										if (allEvents.size() >= eventBatchSize) {
+											// Save current snapshots for all tables
+											for (String tn : streamScans.keySet()) {
+												Long currentSnapshot = streamScans.get(tn).checkpoint();
+												newOffsets.put(tn, currentSnapshot);
+											}
+
+											eventsOffsetConsumer.accept(allEvents, newOffsets);
+											allEvents = new ArrayList<>();
+											newOffsets = new HashMap<>();
+										}
+									}
+								}
+
+								// Release current batch
+								iterator.releaseBatch();
+
+								// Read next batch
+								iterator = reader.readBatch();
+							}
+
+						} finally {
+							// Close reader
+							try {
+								reader.close();
+							} catch (Exception e) {
+								log.warn("Error closing reader for table {}: {}", tableName, e.getMessage());
+							}
+						}
+					}
+
+					// Save checkpoint for this table
+					Long currentSnapshot = streamScan.checkpoint();
+					newOffsets.put(tableName, currentSnapshot);
+
+					log.debug("Stream read batch completed for table: {}, records: {}", tableName, totalRecords);
+
+				} catch (Exception e) {
+					log.error("Error reading from table {}: {}", tableName, e.getMessage(), e);
+					// Continue with other tables
+				}
+			}
+
+			// Send remaining events
+			if (!allEvents.isEmpty()) {
+				// Save current snapshots for all tables
+				for (String tn : streamScans.keySet()) {
+					if (!newOffsets.containsKey(tn)) {
+						Long currentSnapshot = streamScans.get(tn).checkpoint();
+						newOffsets.put(tn, currentSnapshot);
+					}
+				}
+
+				eventsOffsetConsumer.accept(allEvents, newOffsets);
+			}
+
+			// If no data from any table, wait a bit before next scan
+			if (!hasData) {
+				try {
+					Thread.sleep(1000); // Wait 1 second
+				} catch (InterruptedException e) {
+					log.warn("Stream read interrupted");
+					Thread.currentThread().interrupt();
+					break;
+				}
+			}
+		}
+
+		log.info("Stream read completed for all tables");
+	}
+
+	/**
+	 * Create TapEvent from InternalRow based on RowKind
+	 *
+	 * @param row       internal row
+	 * @param data      converted data map
+	 * @param tableName table name
+	 * @return TapEvent (Insert, Update, or Delete)
+	 */
+	private io.tapdata.entity.event.TapEvent createEventFromRowKind(InternalRow row, Map<String, Object> data, String tableName) {
+		RowKind rowKind = row.getRowKind();
+
+		switch (rowKind) {
+			case INSERT:
+			case UPDATE_AFTER:
+				// For INSERT and UPDATE_AFTER, create insert event
+				io.tapdata.entity.event.dml.TapInsertRecordEvent insertEvent =
+						new io.tapdata.entity.event.dml.TapInsertRecordEvent().init();
+				insertEvent.setTableId(tableName);
+				insertEvent.setAfter(data);
+				return insertEvent;
+
+			case DELETE:
+			case UPDATE_BEFORE:
+				// For DELETE and UPDATE_BEFORE, create delete event
+				io.tapdata.entity.event.dml.TapDeleteRecordEvent deleteEvent =
+						new io.tapdata.entity.event.dml.TapDeleteRecordEvent().init();
+				deleteEvent.setTableId(tableName);
+				deleteEvent.setBefore(data);
+				return deleteEvent;
+
+			default:
+				// Unknown row kind, skip
+				return null;
+		}
+	}
+
+	/**
+	 * Batch read records from Paimon table
+	 *
+	 * @param table             table definition
+	 * @param offsetState       offset state for resuming read (not used for now)
+	 * @param eventBatchSize    batch size for events
+	 * @param eventsOffsetConsumer consumer for events and offset
+	 * @param connectorContext  connector context
+	 * @throws Exception if read fails
+	 */
+	public void batchRead(TapTable table, Object offsetState, int eventBatchSize,
+						  java.util.function.BiConsumer<List<io.tapdata.entity.event.TapEvent>, Object> eventsOffsetConsumer,
+						  TapConnectorContext connectorContext) throws Exception {
+		String database = config.getDatabase();
+		String tableName = table.getName();
+		Identifier identifier = Identifier.create(database, tableName);
+
+		Log log = connectorContext.getLog();
+		log.info("Starting batch read from table: {}", tableName);
+
+		// Get Paimon table
+		Table paimonTable;
+		try {
+			paimonTable = catalog.getTable(identifier);
+		} catch (Catalog.TableNotExistException e) {
+			log.warn("Table {} does not exist, skipping batch read", tableName);
+			return;
+		}
+
+		// Create read builder
+		ReadBuilder readBuilder = paimonTable.newReadBuilder();
+
+		// Create table scan to get splits
+		TableScan tableScan = readBuilder.newScan();
+		TableScan.Plan plan = tableScan.plan();
+		List<Split> splits = plan.splits();
+
+		log.info("Table {} has {} splits to read", tableName, splits.size());
+
+		// Get field names and types for conversion
+		List<DataField> paimonFields = paimonTable.rowType().getFields();
+		Map<String, TapField> tapFields = table.getNameFieldMap();
+
+		// Read data from each split
+		long totalRecords = 0;
+		for (Split split : splits) {
+			// Create record reader for this split
+			RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split);
+
+			List<io.tapdata.entity.event.TapEvent> events = new ArrayList<>();
+
+			try {
+				// Read records from this split using RecordReader.RecordIterator
+				RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
+
+				while (iterator != null) {
+					InternalRow row;
+					while ((row = iterator.next()) != null) {
+						// Convert InternalRow to Map
+						Map<String, Object> data = convertInternalRowToMap(row, paimonFields, tapFields);
+
+						// Create TapInsertRecordEvent
+						io.tapdata.entity.event.dml.TapInsertRecordEvent event =
+								new io.tapdata.entity.event.dml.TapInsertRecordEvent().init();
+						event.setTableId(tableName);
+						event.setAfter(data);
+
+						events.add(event);
+						totalRecords++;
+
+						// Send batch when size reached
+						if (events.size() >= eventBatchSize) {
+							eventsOffsetConsumer.accept(events, null);
+							events = new ArrayList<>();
+						}
+					}
+
+					// Release current batch
+					iterator.releaseBatch();
+
+					// Read next batch
+					iterator = reader.readBatch();
+				}
+
+				// Send remaining events
+				if (!events.isEmpty()) {
+					eventsOffsetConsumer.accept(events, null);
+				}
+
+			} finally {
+				// Close reader
+				try {
+					reader.close();
+				} catch (Exception e) {
+					log.warn("Error closing reader: {}", e.getMessage());
+				}
+			}
+		}
+
+		log.info("Batch read completed for table: {}, total records: {}", tableName, totalRecords);
+	}
+
+	/**
+	 * Convert Paimon InternalRow to Map
+	 *
+	 * @param row          Paimon internal row
+	 * @param paimonFields Paimon field definitions
+	 * @param tapFields    TapData field definitions
+	 * @return data map
+	 */
+	private Map<String, Object> convertInternalRowToMap(InternalRow row, List<DataField> paimonFields,
+														 Map<String, TapField> tapFields) {
+		Map<String, Object> data = new LinkedHashMap<>();
+
+		for (int i = 0; i < paimonFields.size(); i++) {
+			DataField paimonField = paimonFields.get(i);
+			String fieldName = paimonField.name();
+			DataType dataType = paimonField.type();
+
+			// Check if field is null
+			if (row.isNullAt(i)) {
+				data.put(fieldName, null);
+				continue;
+			}
+
+			// Convert value based on data type
+			Object value = convertPaimonValueToJava(row, i, dataType);
+			data.put(fieldName, value);
+		}
+
+		return data;
+	}
+
+	/**
+	 * Convert Paimon value to Java object
+	 *
+	 * @param row      internal row
+	 * @param pos      field position
+	 * @param dataType Paimon data type
+	 * @return Java object
+	 */
+	private Object convertPaimonValueToJava(InternalRow row, int pos, DataType dataType) {
+		String typeString = dataType.toString().toUpperCase();
+
+		if (typeString.contains("BOOLEAN")) {
+			return row.getBoolean(pos);
+		} else if (typeString.contains("TINYINT")) {
+			return row.getByte(pos);
+		} else if (typeString.contains("SMALLINT")) {
+			return row.getShort(pos);
+		} else if (typeString.contains("INT") && !typeString.contains("BIGINT")) {
+			return row.getInt(pos);
+		} else if (typeString.contains("BIGINT")) {
+			return row.getLong(pos);
+		} else if (typeString.contains("FLOAT")) {
+			return row.getFloat(pos);
+		} else if (typeString.contains("DOUBLE")) {
+			return row.getDouble(pos);
+		} else if (typeString.contains("DECIMAL")) {
+			Decimal decimal = row.getDecimal(pos, dataType.asSQLString().length(), 10);
+			return decimal != null ? decimal.toBigDecimal() : null;
+		} else if (typeString.contains("STRING") || typeString.contains("VARCHAR") || typeString.contains("CHAR")) {
+			BinaryString binaryString = row.getString(pos);
+			return binaryString != null ? binaryString.toString() : null;
+		} else if (typeString.contains("DATE")) {
+			int days = row.getInt(pos);
+			// Convert days since epoch to java.sql.Date
+			return new java.sql.Date(days * 86400000L);
+		} else if (typeString.contains("TIMESTAMP")) {
+			Timestamp timestamp = row.getTimestamp(pos, 6);
+			if (timestamp != null) {
+				// Convert Paimon Timestamp to java.sql.Timestamp
+				long millis = timestamp.getMillisecond();
+				int nanos = timestamp.getNanoOfMillisecond();
+				java.sql.Timestamp sqlTimestamp = new java.sql.Timestamp(millis);
+				sqlTimestamp.setNanos(nanos);
+				return sqlTimestamp;
+			}
+			return null;
+		} else if (typeString.contains("BINARY") || typeString.contains("BYTES")) {
+			return row.getBinary(pos);
+		} else {
+			// For unknown types, try to get as string
+			BinaryString binaryString = row.getString(pos);
+			return binaryString != null ? binaryString.toString() : null;
 		}
 	}
 
