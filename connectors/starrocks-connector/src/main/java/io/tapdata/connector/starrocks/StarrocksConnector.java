@@ -161,6 +161,7 @@ public class StarrocksConnector extends CommonDbConnector {
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
+        connectorFunctions.supportWriteRecordCallback(this::writeRecordCallback);
 
     }
 
@@ -194,6 +195,12 @@ public class StarrocksConnector extends CommonDbConnector {
         } catch (Throwable t) {
             exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
             throw t;
+        }
+    }
+
+    private void writeRecordCallback(TapConnectorContext connectorContext, Consumer<Boolean> writeResultConsumer) throws Throwable {
+        if (checkStreamLoad()) {
+            getStarrocksStreamLoader().writeRecordCallback(writeResultConsumer);
         }
     }
 
