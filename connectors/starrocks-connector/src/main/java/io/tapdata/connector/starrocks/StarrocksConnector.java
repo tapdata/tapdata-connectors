@@ -54,6 +54,7 @@ public class StarrocksConnector extends CommonDbConnector {
     private StarrocksJdbcContext starrocksJdbcContext;
     private StarrocksConfig starrocksConfig;
     private final Map<String, StarrocksStreamLoader> starrocksStreamLoaderMap = new ConcurrentHashMap<>();
+    private Consumer<Object> flushOffsetCallback;
 
 
     @Override
@@ -77,6 +78,12 @@ public class StarrocksConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
+
+        // 保存 flush offset callback
+        this.flushOffsetCallback = tapConnectionContext.getFlushOffsetCallback();
+        if (this.flushOffsetCallback != null) {
+            tapLogger.info("Flush offset callback registered for StarRocks connector");
+        }
     }
 
 
@@ -178,6 +185,7 @@ public class StarrocksConnector extends CommonDbConnector {
         if (!starrocksStreamLoaderMap.containsKey(threadName)) {
             StarrocksJdbcContext context = new StarrocksJdbcContext(starrocksConfig);
             StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, new HashMap<>(), starrocksConfig.getUseHTTPS(), tapLogger);
+            StarrocksStreamLoader.setFlushOffsetCallback(flushOffsetCallback);
             starrocksStreamLoaderMap.put(threadName, StarrocksStreamLoader);
         }
         return starrocksStreamLoaderMap.get(threadName);
