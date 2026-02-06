@@ -596,7 +596,9 @@ public class StarrocksStreamLoader {
             final String prefix = buildPrefix(table.getId());
             String tableName = table.getId();
 
-            String label = prefix + "-" + UUID.randomUUID();
+            // StarRocks label naming rules: only digits, letters, and underscores are allowed
+            String label = prefix + "_" + UUID.randomUUID().toString().replace("-", "_");
+
             List<String> columns = new ArrayList<>();
 
             // 获取该表的dataColumns
@@ -670,7 +672,8 @@ public class StarrocksStreamLoader {
             final String prefix = buildPrefix(table.getId());
             String tableName = table.getId();
 
-            String label = prefix + "-" + UUID.randomUUID();
+            // StarRocks label naming rules: only digits, letters, and underscores are allowed
+            String label = prefix + "_" + UUID.randomUUID().toString().replace("-", "_");
             List<String> columns = new ArrayList<>();
 
             // 获取该表的dataColumns
@@ -984,7 +987,26 @@ public class StarrocksStreamLoader {
     }
 
     private String buildPrefix(final String tableName) {
-        return String.format(LABEL_PREFIX_PATTERN, Thread.currentThread().getId(), tableName);
+        // Sanitize table name to comply with StarRocks label naming rules
+        // Only digits, letters, and underscores are allowed
+        String sanitizedTableName = sanitizeLabelComponent(tableName);
+        return String.format(LABEL_PREFIX_PATTERN, Thread.currentThread().getId(), sanitizedTableName);
+    }
+
+    /**
+     * Sanitize a string to comply with StarRocks label naming rules.
+     * Only digits (0-9), letters (a-z, A-Z), and underscores (_) are allowed.
+     * All other characters are replaced with underscores.
+     *
+     * @param input the input string
+     * @return sanitized string
+     */
+    private String sanitizeLabelComponent(final String input) {
+        if (input == null || input.isEmpty()) {
+            return "unknown";
+        }
+        // Replace all characters that are not digits, letters, or underscores with underscores
+        return input.replaceAll("[^a-zA-Z0-9_]", "_");
     }
 
     /**
