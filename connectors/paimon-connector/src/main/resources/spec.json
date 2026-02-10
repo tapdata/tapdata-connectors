@@ -679,7 +679,7 @@
       "precision": 5,
       "value": [-32768, 32767]
     },
-    "INT": {
+    "INTEGER": {
       "to": "TapNumber",
       "bit": 32,
       "precision": 10,

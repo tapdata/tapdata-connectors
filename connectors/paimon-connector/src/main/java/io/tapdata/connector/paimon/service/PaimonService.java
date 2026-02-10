@@ -10,9 +10,11 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
+import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.core.utils.CommonUtils;
@@ -36,17 +38,20 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.Closeable;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Service class for Paimon operations
@@ -385,7 +390,7 @@ public class PaimonService implements Closeable {
 		// Convert fields
 		List<DataField> fields = paimonTable.rowType().getFields();
 		for (DataField field : fields) {
-			TapField tapField = new TapField(field.name(), convertDataType(field.type()));
+			TapField tapField = new TapField(field.name(), field.type().getTypeRoot().name());
 			tapField.setNullable(field.type().isNullable());
 			tapTable.add(tapField);
 		}
@@ -393,10 +398,11 @@ public class PaimonService implements Closeable {
 		// Set primary keys
 		List<String> primaryKeys = paimonTable.primaryKeys();
 		if (primaryKeys != null && !primaryKeys.isEmpty()) {
-			tapTable.add(new io.tapdata.entity.schema.TapIndex()
-					.name("PRIMARY")
+			TapIndex tapIndex = new TapIndex().name("PRIMARY")
 					.unique(true)
-					.primary(true));
+					.primary(true);
+			tapIndex.setIndexFields(primaryKeys.stream().map(key -> new TapIndexField().name(key).fieldAsc(true)).collect(Collectors.toList()));
+			tapTable.add(tapIndex);
 		}
 
 		return tapTable;
@@ -619,39 +625,52 @@ public class PaimonService implements Closeable {
 		}
 
 		dataType = dataType.toUpperCase();
-
-		if (dataType.contains("BOOLEAN") || dataType.contains("BOOL")) {
-			return DataTypes.BOOLEAN();
-		} else if (dataType.contains("TINYINT") || dataType.contains("INT8")) {
-			return DataTypes.TINYINT();
-		} else if (dataType.contains("SMALLINT") || dataType.contains("INT16")) {
-			return DataTypes.SMALLINT();
-		} else if (dataType.contains("BIGINT") || dataType.contains("INT64") || dataType.contains("LONG")) {
-			return DataTypes.BIGINT();
-		} else if (dataType.contains("INT") || dataType.contains("INT32") || dataType.contains("INTEGER")) {
-			return DataTypes.INT();
-		} else if (dataType.contains("FLOAT")) {
-			return DataTypes.FLOAT();
-		} else if (dataType.contains("DOUBLE") || dataType.contains("NUMBER")) {
-			return DataTypes.DOUBLE();
-		} else if (dataType.contains("DECIMAL")) {
-			return DataTypes.DECIMAL(38, 10);
-		} else if (dataType.contains("DATE")) {
-			return DataTypes.DATE();
-		} else if (dataType.contains("TIMESTAMP") || dataType.contains("DATETIME")) {
-			return DataTypes.TIMESTAMP();
-		} else if (dataType.contains("BINARY") || dataType.contains("BYTES")) {
-			return DataTypes.BYTES();
-		} else if (dataType.contains("ARRAY")) {
-			// For ARRAY type, use STRING to store JSON representation
-			// Paimon ARRAY requires element type specification which we don't have here
-			return DataTypes.STRING();
-		} else if (dataType.contains("MAP") || dataType.contains("ROW")) {
-			// For MAP/ROW type, use STRING to store JSON representation
-			// Paimon MAP requires key/value type specification which we don't have here
-			return DataTypes.STRING();
-		} else {
-			return DataTypes.STRING();
+		String pureDataType = StringKit.removeParentheses(dataType);
+		switch (pureDataType) {
+			case "BOOLEAN":
+				return DataTypes.BOOLEAN();
+			case "TINYINT":
+				return DataTypes.TINYINT();
+			case "SMALLINT":
+				return DataTypes.SMALLINT();
+			case "INT":
+				return DataTypes.INT();
+			case "BIGINT":
+				return DataTypes.BIGINT();
+			case "FLOAT":
+				return DataTypes.FLOAT();
+			case "DOUBLE":
+				return DataTypes.DOUBLE();
+			case "DECIMAL":
+				return DataTypes.DECIMAL(tapField.getPrecision(), tapField.getScale());
+			case "DATE":
+				return DataTypes.DATE();
+			case "TIME":
+				return DataTypes.TIME(tapField.getScale());
+			case "TIMESTAMP":
+				return DataTypes.TIMESTAMP(tapField.getScale());
+			case "TIMESTAMP_LTZ":
+				return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(tapField.getScale());
+			case "BINARY":
+				return DataTypes.BINARY(tapField.getLength());
+			case "VARBINARY":
+				return DataTypes.VARBINARY(tapField.getLength());
+			case "CHAR":
+				return DataTypes.CHAR(tapField.getLength());
+			case "VARCHAR":
+				return DataTypes.VARCHAR(tapField.getLength());
+			case "ARRAY":
+				return DataTypes.ARRAY(DataTypes.STRING());
+			case "MAP":
+				return DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING());
+			case "ROW":
+				return DataTypes.ROW(DataTypes.STRING());
+			case "MULTISET":
+				return DataTypes.MULTISET(DataTypes.STRING());
+			case "VARIANT":
+				return DataTypes.VARIANT();
+			default:
+				return DataTypes.STRING();
 		}
 	}
 
@@ -1692,6 +1711,65 @@ public class PaimonService implements Closeable {
 	}
 
 	/**
+	 * Convert timestamp to stream offset (snapshot IDs) for specified tables
+	 *
+	 * This method finds the snapshot ID that is earlier than or equal to the given timestamp
+	 * for each table. The snapshot ID can be used to resume stream reading from that point.
+	 *
+	 * @param tables    list of table names to get offset for
+	 * @param timestamp timestamp in milliseconds
+	 * @param log       logger
+	 * @return map of table name to snapshot ID
+	 * @throws Exception if conversion fails
+	 */
+	public Object timestampToStreamOffset(List<String> tables, Long timestamp, Log log) throws Exception {
+		log.info("Converting timestamp {} to stream offset for {} tables", timestamp, tables.size());
+
+		Map<String, Object> offsetMap = new HashMap<>();
+		String database = config.getDatabase();
+
+		// For each table, find the snapshot ID at or before the given timestamp
+		for (String tableName : tables) {
+			try {
+				Identifier identifier = Identifier.create(database, tableName);
+				Table paimonTable = catalog.getTable(identifier);
+
+				// Use reflection to access snapshotManager() method
+				// AbstractFileStoreTable is not public, so we need to use reflection
+				try {
+					java.lang.reflect.Method snapshotManagerMethod = paimonTable.getClass().getMethod("snapshotManager");
+					SnapshotManager snapshotManager = (SnapshotManager) snapshotManagerMethod.invoke(paimonTable);
+
+					// Find snapshot at or before the given timestamp
+					Snapshot snapshot = snapshotManager.earlierOrEqualTimeMills(timestamp);
+
+					if (snapshot != null) {
+						long snapshotId = snapshot.id();
+						offsetMap.put(tableName, snapshotId);
+						log.info("Table {} - found snapshot {} at timestamp {}", tableName, snapshotId, snapshot.timeMillis());
+					} else {
+						// No snapshot found at or before the timestamp, use null (will start from beginning)
+						offsetMap.put(tableName, null);
+						log.warn("Table {} - no snapshot found at or before timestamp {}, will start from beginning", tableName, timestamp);
+					}
+				} catch (NoSuchMethodException e) {
+					log.warn("Table {} does not have snapshotManager() method, cannot find snapshot by timestamp", tableName);
+					offsetMap.put(tableName, null);
+				}
+			} catch (Catalog.TableNotExistException e) {
+				log.warn("Table {} does not exist, skipping", tableName);
+			} catch (Exception e) {
+				log.error("Error finding snapshot for table {}: {}", tableName, e.getMessage(), e);
+				// Put null to start from beginning for this table
+				offsetMap.put(tableName, null);
+			}
+		}
+
+		log.info("Timestamp to offset conversion result: {}", offsetMap);
+		return offsetMap;
+	}
+
+	/**
 	 * Stream read records from Paimon table (CDC mode)
 	 *
 	 * @param tables            list of tables to read from
@@ -1703,7 +1781,7 @@ public class PaimonService implements Closeable {
 	 */
 	public void streamRead(List<String> tables, Object offsetState, int eventBatchSize,
 						   java.util.function.BiConsumer<List<io.tapdata.entity.event.TapEvent>, Object> eventsOffsetConsumer,
-						   TapConnectorContext connectorContext) throws Exception {
+						   TapConnectorContext connectorContext, Supplier<Boolean> running) throws Exception {
 		Log log = connectorContext.getLog();
 		log.info("Starting stream read from tables: {}", tables);
 
@@ -1715,10 +1793,53 @@ public class PaimonService implements Closeable {
 			Map<String, Object> offsetMap = (Map<String, Object>) offsetState;
 			for (Map.Entry<String, Object> entry : offsetMap.entrySet()) {
 				if (entry.getValue() != null) {
-					tableSnapshots.put(entry.getKey(), Long.parseLong(entry.getValue().toString()));
+					tableSnapshots.put(entry.getKey(), Long.parseLong(entry.getValue().toString()) + 1);
 				}
 			}
 			log.info("Resuming stream read from snapshots: {}", tableSnapshots);
+		} else if (offsetState == null) {
+			// First time stream read - start from AFTER latest snapshot to avoid reading historical data
+			log.info("No offset state found, initializing stream read from after latest snapshots");
+
+			// For each table, get the latest snapshot ID
+			for (String tableName : tables) {
+				try {
+					Identifier identifier = Identifier.create(database, tableName);
+					Table paimonTable = catalog.getTable(identifier);
+
+					// Use reflection to access snapshotManager() method
+					try {
+						java.lang.reflect.Method snapshotManagerMethod = paimonTable.getClass().getMethod("snapshotManager");
+						SnapshotManager snapshotManager = (SnapshotManager) snapshotManagerMethod.invoke(paimonTable);
+
+						// Get the latest snapshot
+						Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+
+						if (latestSnapshot != null) {
+							long snapshotId = latestSnapshot.id();
+							// IMPORTANT: restore(snapshotId) will INCLUDE that snapshot's data
+							// To start from AFTER the latest snapshot, we need to use snapshotId + 1
+							// This way, only NEW data after current snapshot will be read
+							long nextSnapshotId = snapshotId + 1;
+							tableSnapshots.put(tableName, nextSnapshotId);
+							log.info("Table {} - initialized to start AFTER latest snapshot {} (will start from snapshot {})",
+									tableName, snapshotId, nextSnapshotId);
+						} else {
+							// No snapshot exists yet, stream read will start from the first snapshot when it's created
+							log.info("Table {} - no snapshots exist yet, will start from first snapshot", tableName);
+							// Don't put anything in tableSnapshots, let it start naturally
+						}
+					} catch (NoSuchMethodException e) {
+						log.warn("Table {} does not have snapshotManager() method", tableName);
+					}
+				} catch (Catalog.TableNotExistException e) {
+					log.warn("Table {} does not exist, skipping", tableName);
+				} catch (Exception e) {
+					log.error("Error getting latest snapshot for table {}: {}", tableName, e.getMessage(), e);
+				}
+			}
+
+			log.info("Initialized stream read to start after latest snapshots: {}", tableSnapshots);
 		}
 
 		// Initialize stream scans for all tables
@@ -1780,125 +1901,195 @@ public class PaimonService implements Closeable {
 			return;
 		}
 
-		log.info("Starting continuous stream read for {} tables", streamScans.size());
+		log.info("Starting continuous stream read for {} tables with multi-threading", streamScans.size());
 
-		// Continuous stream reading loop for all tables
-		while (true) {
-			boolean hasData = false;
-			List<io.tapdata.entity.event.TapEvent> allEvents = new ArrayList<>();
-			Map<String, Object> newOffsets = new HashMap<>();
+		// Create thread pool for table scanning - one thread per table
+		int threadCount = Math.min(streamScans.size(), Runtime.getRuntime().availableProcessors());
+		ExecutorService executorService = new ThreadPoolExecutor(
+				threadCount,
+				threadCount,
+				60L,
+				TimeUnit.SECONDS,
+				new LinkedBlockingQueue<>(),
+				r -> {
+					Thread t = new Thread(r);
+					t.setName("Paimon-StreamRead-" + t.getId());
+					t.setDaemon(true);
+					return t;
+				}
+		);
 
-			// Scan all tables in each iteration
-			for (String tableName : streamScans.keySet()) {
-				StreamTableScan streamScan = streamScans.get(tableName);
-				TableRead tableRead = tableReads.get(tableName);
-				List<DataField> paimonFields = paimonFieldsMap.get(tableName);
-				Map<String, TapField> tapFields = tapFieldsMap.get(tableName);
+		AtomicReference<Throwable> threadException = new AtomicReference<>();
+		BlockingQueue<io.tapdata.entity.event.TapEvent> eventQueue = new LinkedBlockingQueue<>(eventBatchSize * 10);
+		Map<String, Long> currentOffsets = new ConcurrentHashMap<>();
 
-				try {
-					// Plan next batch of splits
-					Plan plan = streamScan.plan();
-					List<Split> splits = plan.splits();
+		// Initialize offsets
+		for (String tableName : streamScans.keySet()) {
+			Long snapshot = tableSnapshots.get(tableName);
+			if (snapshot != null) {
+				currentOffsets.put(tableName, snapshot);
+			}
+		}
 
-					if (splits.isEmpty()) {
-						// No new data for this table, save current checkpoint
-						Long currentSnapshot = streamScan.checkpoint();
-						newOffsets.put(tableName, currentSnapshot);
-						continue;
-					}
+		// Start consumer thread to collect events and send to downstream
+		Thread consumerThread = new Thread(() -> {
+			List<io.tapdata.entity.event.TapEvent> batch = new ArrayList<>();
+			try {
+				while (running.get() || !eventQueue.isEmpty()) {
+					io.tapdata.entity.event.TapEvent event = eventQueue.poll(100, TimeUnit.MILLISECONDS);
+					if (event != null) {
+						batch.add(event);
 
-					hasData = true;
-					log.debug("Table {} has {} new splits to read", tableName, splits.size());
-
-					// Read data from each split
-					long totalRecords = 0;
-					for (Split split : splits) {
-						// Create record reader for this split
-						RecordReader<InternalRow> reader = tableRead.createReader(split);
-
-						try {
-							// Read records from this split using RecordReader.RecordIterator
-							RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
-
-							while (iterator != null) {
-								InternalRow row;
-								while ((row = iterator.next()) != null) {
-									// Convert InternalRow to Map
-									Map<String, Object> data = convertInternalRowToMap(row, paimonFields, tapFields);
-
-									// Determine event type based on RowKind
-									io.tapdata.entity.event.TapEvent event = createEventFromRowKind(row, data, tableName);
-
-									if (event != null) {
-										allEvents.add(event);
-										totalRecords++;
-
-										// Send batch when size reached
-										if (allEvents.size() >= eventBatchSize) {
-											// Save current snapshots for all tables
-											for (String tn : streamScans.keySet()) {
-												Long currentSnapshot = streamScans.get(tn).checkpoint();
-												newOffsets.put(tn, currentSnapshot);
-											}
-
-											eventsOffsetConsumer.accept(allEvents, newOffsets);
-											allEvents = new ArrayList<>();
-											newOffsets = new HashMap<>();
-										}
-									}
-								}
-
-								// Release current batch
-								iterator.releaseBatch();
-
-								// Read next batch
-								iterator = reader.readBatch();
-							}
-
-						} finally {
-							// Close reader
-							try {
-								reader.close();
-							} catch (Exception e) {
-								log.warn("Error closing reader for table {}: {}", tableName, e.getMessage());
-							}
+						// Send batch when size reached
+						if (batch.size() >= eventBatchSize) {
+							Map<String, Object> offsets = new HashMap<>(currentOffsets);
+							eventsOffsetConsumer.accept(batch, offsets);
+							batch = new ArrayList<>();
 						}
 					}
 
-					// Save checkpoint for this table
-					Long currentSnapshot = streamScan.checkpoint();
-					newOffsets.put(tableName, currentSnapshot);
-
-					log.debug("Stream read batch completed for table: {}, records: {}", tableName, totalRecords);
-
-				} catch (Exception e) {
-					log.error("Error reading from table {}: {}", tableName, e.getMessage(), e);
-					// Continue with other tables
-				}
-			}
-
-			// Send remaining events
-			if (!allEvents.isEmpty()) {
-				// Save current snapshots for all tables
-				for (String tn : streamScans.keySet()) {
-					if (!newOffsets.containsKey(tn)) {
-						Long currentSnapshot = streamScans.get(tn).checkpoint();
-						newOffsets.put(tn, currentSnapshot);
+					// When stopping, send remaining batch even if not full
+					// This ensures no data loss when running becomes false
+					if (!running.get() && !batch.isEmpty()) {
+						Map<String, Object> offsets = new HashMap<>(currentOffsets);
+						eventsOffsetConsumer.accept(batch, offsets);
+						batch = new ArrayList<>();
 					}
 				}
 
-				eventsOffsetConsumer.accept(allEvents, newOffsets);
+				// Send any remaining events (final safety check)
+				if (!batch.isEmpty()) {
+					Map<String, Object> offsets = new HashMap<>(currentOffsets);
+					eventsOffsetConsumer.accept(batch, offsets);
+				}
+			} catch (Exception e) {
+				log.error("Error in consumer thread: {}", e.getMessage(), e);
+				threadException.set(e);
+            }
+		});
+		consumerThread.setName("Paimon-StreamRead-Consumer");
+		consumerThread.setDaemon(true);
+		consumerThread.start();
+
+		// Submit scanning tasks for each table
+		for (String tableName : streamScans.keySet()) {
+			StreamTableScan streamScan = streamScans.get(tableName);
+			TableRead tableRead = tableReads.get(tableName);
+			List<DataField> paimonFields = paimonFieldsMap.get(tableName);
+			Map<String, TapField> tapFields = tapFieldsMap.get(tableName);
+
+			executorService.submit(() -> {
+				log.info("Started stream read thread for table: {}", tableName);
+				try {
+					while (running.get()) {
+						// Check for exceptions in other threads
+						if (threadException.get() != null) {
+							break;
+						}
+
+						// Plan next batch of splits
+						Plan plan = streamScan.plan();
+						List<Split> splits = plan.splits();
+
+						if (splits.isEmpty()) {
+							// No new data, update checkpoint and wait
+							Long currentSnapshot = streamScan.checkpoint();
+							currentOffsets.put(tableName, currentSnapshot);
+							Thread.sleep(1000);
+							continue;
+						}
+
+						log.debug("Table {} has {} new splits to read", tableName, splits.size());
+
+						// Read data from each split
+						long totalRecords = 0;
+						for (Split split : splits) {
+							if (!running.get()) {
+								break;
+							}
+
+							// Create record reader for this split
+							RecordReader<InternalRow> reader = tableRead.createReader(split);
+
+							try {
+								// Read records from this split
+								RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
+
+								while (iterator != null && running.get()) {
+									InternalRow row;
+									while ((row = iterator.next()) != null) {
+										// Convert InternalRow to Map
+										Map<String, Object> data = convertInternalRowToMap(row, paimonFields, tapFields);
+
+										// Determine event type based on RowKind
+										io.tapdata.entity.event.TapEvent event = createEventFromRowKind(row, data, tableName);
+
+										if (event != null) {
+											// Add to queue, block if queue is full
+											eventQueue.put(event);
+											totalRecords++;
+										}
+									}
+
+									// Release current batch
+									iterator.releaseBatch();
+
+									// Read next batch
+									iterator = reader.readBatch();
+								}
+
+							} finally {
+								// Close reader
+								try {
+									reader.close();
+								} catch (Exception e) {
+									log.warn("Error closing reader for table {}: {}", tableName, e.getMessage());
+								}
+							}
+						}
+
+						// Save checkpoint for this table
+						Long currentSnapshot = streamScan.checkpoint();
+						currentOffsets.put(tableName, currentSnapshot);
+
+						log.debug("Stream read batch completed for table: {}, records: {}", tableName, totalRecords);
+					}
+				} catch (InterruptedException e) {
+					log.warn("Stream read thread interrupted for table: {}", tableName);
+					Thread.currentThread().interrupt();
+				} catch (Exception e) {
+					log.error("Error in stream read thread for table {}: {}", tableName, e.getMessage(), e);
+					threadException.set(e);
+					return;
+				}
+				log.info("Stream read thread stopped for table: {}", tableName);
+			});
+		}
+
+		// Wait for threads to complete or exception to occur
+		try {
+			while (running.get()) {
+				if (threadException.get() != null) {
+					throw new RuntimeException("Stream read failed", threadException.get());
+				}
+				Thread.sleep(1000);
+			}
+		} finally {
+			executorService.shutdown();
+			try {
+				if (!executorService.awaitTermination(30, TimeUnit.SECONDS)) {
+					executorService.shutdownNow();
+				}
+			} catch (InterruptedException e) {
+				executorService.shutdownNow();
+				Thread.currentThread().interrupt();
 			}
 
-			// If no data from any table, wait a bit before next scan
-			if (!hasData) {
-				try {
-					Thread.sleep(1000); // Wait 1 second
-				} catch (InterruptedException e) {
-					log.warn("Stream read interrupted");
-					Thread.currentThread().interrupt();
-					break;
-				}
+			// Wait for consumer thread
+			try {
+				consumerThread.join(5000);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
 			}
 		}
 
@@ -1924,6 +2115,7 @@ public class PaimonService implements Closeable {
 						new io.tapdata.entity.event.dml.TapInsertRecordEvent().init();
 				insertEvent.setTableId(tableName);
 				insertEvent.setAfter(data);
+				insertEvent.setReferenceTime(System.currentTimeMillis());
 				return insertEvent;
 
 			case DELETE:
@@ -1933,6 +2125,7 @@ public class PaimonService implements Closeable {
 						new io.tapdata.entity.event.dml.TapDeleteRecordEvent().init();
 				deleteEvent.setTableId(tableName);
 				deleteEvent.setBefore(data);
+				deleteEvent.setReferenceTime(System.currentTimeMillis());
 				return deleteEvent;
 
 			default:
@@ -1999,6 +2192,15 @@ public class PaimonService implements Closeable {
 				while (iterator != null) {
 					InternalRow row;
 					while ((row = iterator.next()) != null) {
+						// Check RowKind to filter out intermediate states
+						// Only read final state data (INSERT and UPDATE_AFTER)
+						RowKind rowKind = row.getRowKind();
+						if (rowKind == RowKind.UPDATE_BEFORE || rowKind == RowKind.DELETE) {
+							// Skip intermediate states (UPDATE_BEFORE and DELETE)
+							// These are not final state data
+							continue;
+						}
+
 						// Convert InternalRow to Map
 						Map<String, Object> data = convertInternalRowToMap(row, paimonFields, tapFields);
 
@@ -2127,6 +2329,227 @@ public class PaimonService implements Closeable {
 			BinaryString binaryString = row.getString(pos);
 			return binaryString != null ? binaryString.toString() : null;
 		}
+	}
+
+	/**
+	 * Count records in Paimon table
+	 *
+	 * @param table table definition
+	 * @param log   logger
+	 * @return record count
+	 * @throws Exception if count fails
+	 */
+	public long batchCount(TapTable table, Log log) throws Exception {
+		String database = config.getDatabase();
+		String tableName = table.getName();
+		Identifier identifier = Identifier.create(database, tableName);
+
+		log.info("Counting records in table: {}", tableName);
+
+		// Get Paimon table
+		Table paimonTable;
+		try {
+			paimonTable = catalog.getTable(identifier);
+		} catch (Catalog.TableNotExistException e) {
+			log.warn("Table {} does not exist, returning count 0", tableName);
+			return 0;
+		}
+
+		// Create read builder
+		ReadBuilder readBuilder = paimonTable.newReadBuilder();
+
+		// Create table scan to get splits
+		TableScan tableScan = readBuilder.newScan();
+		TableScan.Plan plan = tableScan.plan();
+		List<Split> splits = plan.splits();
+
+		log.debug("Table {} has {} splits to count", tableName, splits.size());
+
+		// Count records from all splits
+		long totalCount = 0;
+		for (Split split : splits) {
+			// Create record reader for this split
+			RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split);
+
+			try {
+				// Read records from this split
+				RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
+
+				while (iterator != null) {
+					InternalRow row;
+					while ((row = iterator.next()) != null) {
+						// Check RowKind to filter out intermediate states
+						// Only count final state data (INSERT and UPDATE_AFTER)
+						RowKind rowKind = row.getRowKind();
+						if (rowKind == RowKind.INSERT || rowKind == RowKind.UPDATE_AFTER) {
+							totalCount++;
+						}
+					}
+
+					// Release current batch
+					iterator.releaseBatch();
+
+					// Read next batch
+					iterator = reader.readBatch();
+				}
+
+			} finally {
+				// Close reader
+				try {
+					reader.close();
+				} catch (Exception e) {
+					log.warn("Error closing reader: {}", e.getMessage());
+				}
+			}
+		}
+
+		log.info("Table {} has {} records", tableName, totalCount);
+		return totalCount;
+	}
+
+	/**
+	 * Query records by advance filter
+	 *
+	 * @param table    table definition
+	 * @param filter   advance filter with conditions
+	 * @param consumer consumer for filter results
+	 * @param log      logger
+	 * @throws Exception if query fails
+	 */
+	public void queryByAdvanceFilter(TapTable table, io.tapdata.pdk.apis.entity.TapAdvanceFilter filter,
+									 java.util.function.Consumer<io.tapdata.pdk.apis.entity.FilterResults> consumer,
+									 Log log) throws Exception {
+		String database = config.getDatabase();
+		String tableName = table.getName();
+		Identifier identifier = Identifier.create(database, tableName);
+
+		log.info("Querying table {} with advance filter", tableName);
+
+		// Get Paimon table
+		Table paimonTable;
+		try {
+			paimonTable = catalog.getTable(identifier);
+		} catch (Catalog.TableNotExistException e) {
+			log.warn("Table {} does not exist, skipping query", tableName);
+			return;
+		}
+
+		// Get field names and types for conversion
+		List<DataField> paimonFields = paimonTable.rowType().getFields();
+		Map<String, TapField> tapFields = table.getNameFieldMap();
+
+		// Create read builder
+		ReadBuilder readBuilder = paimonTable.newReadBuilder();
+
+		// Create batch scan
+		TableScan tableScan = readBuilder.newScan();
+		TableRead tableRead = readBuilder.newRead();
+
+		// Plan all splits
+		Plan plan = tableScan.plan();
+		List<Split> splits = plan.splits();
+
+		log.debug("Table {} has {} splits to query", tableName, splits.size());
+
+		// Determine batch size
+		int batchSize = filter != null && filter.getBatchSize() != null && filter.getBatchSize() > 0
+			? filter.getBatchSize() : 1000;
+
+		// Determine limit and skip
+		int limit = filter != null && filter.getLimit() != null ? filter.getLimit() : Integer.MAX_VALUE;
+		int skip = filter != null && filter.getSkip() != null ? filter.getSkip() : 0;
+
+		io.tapdata.pdk.apis.entity.FilterResults filterResults = new io.tapdata.pdk.apis.entity.FilterResults();
+		int skippedCount = 0;
+		int returnedCount = 0;
+
+		// Read records from all splits
+		outerLoop:
+		for (Split split : splits) {
+			// Create record reader for this split
+			RecordReader<InternalRow> reader = tableRead.createReader(split);
+
+			try {
+				// Read records from this split
+				RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
+
+				while (iterator != null) {
+					InternalRow row;
+					while ((row = iterator.next()) != null) {
+						// Check if we've returned enough records
+						if (returnedCount >= limit) {
+							break outerLoop;
+						}
+
+						// Check RowKind to filter out intermediate states
+						// Only read final state data (INSERT and UPDATE_AFTER)
+						RowKind rowKind = row.getRowKind();
+						if (rowKind == RowKind.UPDATE_BEFORE || rowKind == RowKind.DELETE) {
+							// Skip intermediate states
+							continue;
+						}
+
+						// Convert InternalRow to Map
+						Map<String, Object> data = convertInternalRowToMap(row, paimonFields, tapFields);
+
+						// Apply filter conditions
+						if (matchesFilter(data, filter)) {
+							// Handle skip
+							if (skippedCount < skip) {
+								skippedCount++;
+								continue;
+							}
+
+							// Add to results
+							filterResults.add(data);
+							returnedCount++;
+
+							// Send batch when size reached
+							if (filterResults.resultSize() >= batchSize) {
+								consumer.accept(filterResults);
+								filterResults = new io.tapdata.pdk.apis.entity.FilterResults();
+							}
+						}
+					}
+
+					// Release current batch
+					iterator.releaseBatch();
+
+					// Read next batch
+					iterator = reader.readBatch();
+				}
+
+			} finally {
+				// Close reader
+				try {
+					reader.close();
+				} catch (Exception e) {
+					log.warn("Error closing reader: {}", e.getMessage());
+				}
+			}
+		}
+
+		// Send remaining results
+		if (filterResults.resultSize() > 0) {
+			consumer.accept(filterResults);
+		}
+
+		log.info("Query completed for table: {}, returned {} records", tableName, returnedCount);
+	}
+
+	/**
+	 * Check if data matches filter conditions
+	 * For now, we only support basic filtering (skip/limit)
+	 * Advanced filtering (where conditions) can be added later
+	 *
+	 * @param data   data map
+	 * @param filter advance filter
+	 * @return true if matches
+	 */
+	private boolean matchesFilter(Map<String, Object> data, io.tapdata.pdk.apis.entity.TapAdvanceFilter filter) {
+		// For now, we don't support where conditions in Paimon
+		// All records match (filtering is done by skip/limit)
+		return true;
 	}
 
 	@Override

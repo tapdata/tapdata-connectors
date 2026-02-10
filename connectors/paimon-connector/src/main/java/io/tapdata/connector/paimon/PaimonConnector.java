@@ -16,16 +16,21 @@ import io.tapdata.entity.schema.value.TapMapValue;
 import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.entity.utils.cache.Entry;
+import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import org.apache.commons.collections4.MapUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -167,7 +172,10 @@ public class PaimonConnector extends ConnectorBase {
     public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
         // Source capabilities
         connectorFunctions.supportBatchRead(this::batchRead);
+        connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportStreamRead(this::streamRead);
+        connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
+        connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilter);
 
         // Target capabilities
         connectorFunctions.supportWriteRecord(this::writeRecord);
@@ -339,7 +347,7 @@ public class PaimonConnector extends ConnectorBase {
             log.info("Starting stream read from tables: " + tables);
 
             // Stream read records using Paimon service
-            paimonService.streamRead(tables, offsetState, eventBatchSize, eventsOffsetConsumer, connectorContext);
+            paimonService.streamRead(tables, offsetState, eventBatchSize, eventsOffsetConsumer, connectorContext, this::isAlive);
 
             log.info("Stream read completed for tables: " + tables);
 
@@ -371,6 +379,92 @@ public class PaimonConnector extends ConnectorBase {
 
         } catch (Exception e) {
             log.error("Error writing records to table " + table.getName() + ": " + e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    /**
+     * Convert timestamp to stream offset (snapshot ID) for each table
+     * This allows resuming stream read from a specific point in time
+     *
+     * @param connectorContext connector context
+     * @param timestamp timestamp in milliseconds (null for current time)
+     * @return offset object containing snapshot IDs for each table
+     * @throws Throwable if conversion fails
+     */
+    private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long timestamp) throws Throwable {
+        final Log log = connectorContext.getLog();
+
+        // Build table list from context
+        List<String> tableList = new ArrayList<>();
+        Iterator<Entry<TapTable>> iterator = connectorContext.getTableMap().iterator();
+        while (iterator.hasNext()) {
+            tableList.add(iterator.next().getKey());
+        }
+
+        try {
+            // Use current time if timestamp is null
+            Long effectiveTimestamp = timestamp != null ? timestamp : System.currentTimeMillis();
+            log.info("Converting timestamp {} to stream offset for {} tables", effectiveTimestamp, tableList.size());
+
+            // Get snapshot IDs for specified tables at the given timestamp
+            return paimonService.timestampToStreamOffset(tableList, effectiveTimestamp, log);
+
+        } catch (Exception e) {
+            log.error("Error converting timestamp to stream offset: " + e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    /**
+     * Count records in a table
+     *
+     * @param connectorContext connector context
+     * @param table table to count
+     * @return record count
+     * @throws Throwable if count fails
+     */
+    private long batchCount(TapConnectorContext connectorContext, TapTable table) throws Throwable {
+        final Log log = connectorContext.getLog();
+
+        try {
+            log.info("Counting records in table: " + table.getName());
+
+            // Count records using Paimon service
+            long count = paimonService.batchCount(table, log);
+
+            log.info("Table {} has {} records", table.getName(), count);
+            return count;
+
+        } catch (Exception e) {
+            log.error("Error counting records in table " + table.getName() + ": " + e.getMessage(), e);
+            throw e;
+        }
+    }
+
+    /**
+     * Query records by advance filter
+     *
+     * @param connectorContext connector context
+     * @param filter advance filter with conditions
+     * @param table table to query
+     * @param consumer consumer for filter results
+     * @throws Throwable if query fails
+     */
+    private void queryByAdvanceFilter(TapConnectorContext connectorContext, TapAdvanceFilter filter,
+                                     TapTable table, Consumer<FilterResults> consumer) throws Throwable {
+        final Log log = connectorContext.getLog();
+
+        try {
+            log.info("Querying table {} with advance filter", table.getName());
+
+            // Query records using Paimon service
+            paimonService.queryByAdvanceFilter(table, filter, consumer, log);
+
+            log.info("Query completed for table: " + table.getName());
+
+        } catch (Exception e) {
+            log.error("Error querying table " + table.getName() + ": " + e.getMessage(), e);
             throw e;
         }
     }
