@@ -1823,6 +1823,8 @@ public class MongodbConnector extends ConnectorBase {
 			tableInfo.setNumOfRows(numOfRows.longValue());
 			BigDecimal storageSize = new BigDecimal(String.valueOf(collStats.get("size")));
 			tableInfo.setStorageSize(storageSize.longValue());
+			BigDecimal avgObjSize = new BigDecimal(String.valueOf(collStats.get("avgObjSize")));
+			tableInfo.setAvgObjSize(avgObjSize.longValue());
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
