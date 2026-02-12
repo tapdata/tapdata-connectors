@@ -679,6 +679,12 @@
       "precision": 5,
       "value": [-32768, 32767]
     },
+    "INT": {
+      "to": "TapNumber",
+      "bit": 32,
+      "precision": 10,
+      "value": [-2147483648, 2147483647]
+    },
     "INTEGER": {
       "to": "TapNumber",
       "bit": 32,
@@ -728,9 +734,14 @@
     },
     "BINARY[($byte)]": {
       "to": "TapBinary",
-      "byte": "2147483647"
+      "byte": "255",
+      "fixed": true
     },
     "VARBINARY[($byte)]": {
+      "to": "TapBinary",
+      "byte": "65535"
+    },
+    "BYTES": {
       "to": "TapBinary",
       "byte": "2147483647"
     },
@@ -746,9 +757,9 @@
       "fraction": [0, 6],
       "defaultFraction": 6
     },
-    "TIMESTAMP_LTZ[($fraction)]": {
+    "TIMESTAMP[($fraction)] WITH LOCAL TIME ZONE": {
       "to": "TapDateTime",
-      "range": ["1970-01-01 00:00:00", "2038-01-19 03:14:07"],
+      "range": ["1970-01-01 00:00:01", "2038-01-19 03:14:07"],
       "pattern": "yyyy-MM-dd HH:mm:ss",
       "fraction": [0, 6],
       "defaultFraction": 6,

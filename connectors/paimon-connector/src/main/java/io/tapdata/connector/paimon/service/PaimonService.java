@@ -12,7 +12,6 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -20,6 +19,7 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.core.utils.CommonUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.*;
 import org.apache.paimon.data.*;
 import org.apache.paimon.fs.FileIO;
@@ -34,23 +34,22 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.*;
 import org.apache.paimon.table.source.TableScan.Plan;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowKind;
-import org.apache.paimon.Snapshot;
+import org.apache.paimon.types.*;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.Closeable;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -389,18 +388,20 @@ public class PaimonService implements Closeable {
 
 		// Convert fields
 		List<DataField> fields = paimonTable.rowType().getFields();
+		List<String> primaryKeys = paimonTable.primaryKeys();
 		for (DataField field : fields) {
-			TapField tapField = new TapField(field.name(), field.type().getTypeRoot().name());
+			TapField tapField = new TapField(field.name(), field.type().asSQLString().replace("NOT NULL", "").trim());
 			tapField.setNullable(field.type().isNullable());
+			if (primaryKeys.contains(field.name())) {
+				tapField.setPrimaryKey(true);
+				tapField.setPrimaryKeyPos(primaryKeys.indexOf(field.name()) + 1);
+			}
 			tapTable.add(tapField);
 		}
 
 		// Set primary keys
-		List<String> primaryKeys = paimonTable.primaryKeys();
 		if (primaryKeys != null && !primaryKeys.isEmpty()) {
-			TapIndex tapIndex = new TapIndex().name("PRIMARY")
-					.unique(true)
-					.primary(true);
+			TapIndex tapIndex = new TapIndex().name("PRIMARY").unique(true).coreUnique(true).primary(true);
 			tapIndex.setIndexFields(primaryKeys.stream().map(key -> new TapIndexField().name(key).fieldAsc(true)).collect(Collectors.toList()));
 			tapTable.add(tapIndex);
 		}
@@ -633,7 +634,7 @@ public class PaimonService implements Closeable {
 				return DataTypes.TINYINT();
 			case "SMALLINT":
 				return DataTypes.SMALLINT();
-			case "INT":
+			case "INTEGER":
 				return DataTypes.INT();
 			case "BIGINT":
 				return DataTypes.BIGINT();
@@ -642,23 +643,25 @@ public class PaimonService implements Closeable {
 			case "DOUBLE":
 				return DataTypes.DOUBLE();
 			case "DECIMAL":
-				return DataTypes.DECIMAL(tapField.getPrecision(), tapField.getScale());
+				return DataTypes.DECIMAL(getFieldPrecisionAndScale(dataType).getLeft(), getFieldPrecisionAndScale(dataType).getRight());
 			case "DATE":
 				return DataTypes.DATE();
 			case "TIME":
-				return DataTypes.TIME(tapField.getScale());
+				return DataTypes.TIME(getFieldFraction(dataType));
 			case "TIMESTAMP":
-				return DataTypes.TIMESTAMP(tapField.getScale());
+				return DataTypes.TIMESTAMP(getFieldFraction(dataType));
 			case "TIMESTAMP_LTZ":
-				return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(tapField.getScale());
+				return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(getFieldFraction(dataType));
 			case "BINARY":
-				return DataTypes.BINARY(tapField.getLength());
+				return DataTypes.BINARY(getFieldLength(dataType));
 			case "VARBINARY":
-				return DataTypes.VARBINARY(tapField.getLength());
+				return DataTypes.VARBINARY(getFieldLength(dataType));
+			case "BYTES":
+				return DataTypes.BYTES();
 			case "CHAR":
-				return DataTypes.CHAR(tapField.getLength());
+				return DataTypes.CHAR(getFieldLength(dataType));
 			case "VARCHAR":
-				return DataTypes.VARCHAR(tapField.getLength());
+				return DataTypes.VARCHAR(getFieldLength(dataType));
 			case "ARRAY":
 				return DataTypes.ARRAY(DataTypes.STRING());
 			case "MAP":
@@ -672,6 +675,41 @@ public class PaimonService implements Closeable {
 			default:
 				return DataTypes.STRING();
 		}
+	}
+
+	public Integer getFieldLength(String dataType) {
+		//提取括号里的值
+		Pattern pattern = Pattern.compile("\\(([^)]+)\\)");
+		Matcher matcher = pattern.matcher(dataType);
+		if (matcher.find()) {
+			long length = Long.parseLong(matcher.group(1));
+			if (length > Integer.MAX_VALUE) {
+				return Integer.MAX_VALUE;
+			} else {
+				return (int) length;
+			}
+		}
+		return Integer.MAX_VALUE;
+	}
+
+	public Integer getFieldFraction(String dataType) {
+		//提取括号里的值
+		Pattern pattern = Pattern.compile("\\(([^)]+)\\)");
+		Matcher matcher = pattern.matcher(dataType);
+		if (matcher.find()) {
+			return Integer.parseInt(matcher.group(1));
+		}
+		return 6;
+	}
+
+	public Pair<Integer, Integer> getFieldPrecisionAndScale(String dataType) {
+		//提取括号里的值,逗号的前一个和后一个
+		Pattern pattern = Pattern.compile("\\(([^,]+),([^)]+)\\)");
+		Matcher matcher = pattern.matcher(dataType);
+		if (matcher.find()) {
+			return Pair.of(Integer.parseInt(matcher.group(1).trim()), Integer.parseInt(matcher.group(2).trim()));
+		}
+		return Pair.of(38, 10);
 	}
 
 	/**
@@ -1516,149 +1554,30 @@ public class PaimonService implements Closeable {
 		}
 
 		// Get the type root for comparison (ignores nullable attribute)
-		String typeString = paimonType.toString().toUpperCase();
-
-		// Handle STRING type - convert to BinaryString
-		if (typeString.contains("STRING") || typeString.contains("VARCHAR") || typeString.contains("CHAR")) {
-			if (value instanceof String) {
-				return BinaryString.fromString((String) value);
-			} else {
+		String rooType = paimonType.getTypeRoot().name();
+		switch (rooType) {
+			case "CHAR":
+			case "VARCHAR":
+			case "STRING":
 				return BinaryString.fromString(String.valueOf(value));
-			}
-		}
-
-		// Handle TIMESTAMP type
-		if (typeString.contains("TIMESTAMP")) {
-			if (value instanceof DateTime) {
-				DateTime dateTime = (DateTime) value;
-				// Convert DateTime to Paimon Timestamp
-				// DateTime.getSeconds() returns seconds since epoch (can be negative for dates before 1970)
-				// DateTime.getNano() returns nanoseconds part
-				long epochSecond = dateTime.getSeconds();
-				int nanoSecond = dateTime.getNano();
-
-				// Convert to milliseconds and nanos-of-millisecond
-				// Similar to Timestamp.fromInstant() implementation
-				long millisecond = epochSecond * 1000L + nanoSecond / 1_000_000;
-				int nanoOfMillisecond = nanoSecond % 1_000_000;
-
-				// Ensure nanoOfMillisecond is always positive (0-999,999)
-				if (nanoOfMillisecond < 0) {
-					millisecond -= 1;
-					nanoOfMillisecond += 1_000_000;
-				}
-
-				return Timestamp.fromEpochMillis(millisecond, nanoOfMillisecond);
-			} else if (value instanceof java.sql.Timestamp) {
-				java.sql.Timestamp ts = (java.sql.Timestamp) value;
-				return Timestamp.fromEpochMillis(ts.getTime());
-			} else if (value instanceof java.util.Date) {
-				java.util.Date date = (java.util.Date) value;
-				return Timestamp.fromEpochMillis(date.getTime());
-			} else if (value instanceof Long) {
-				return Timestamp.fromEpochMillis((Long) value);
-			}
-		}
-
-		// Handle DATE type
-		if (typeString.contains("DATE") && !typeString.contains("TIMESTAMP")) {
-			if (value instanceof DateTime) {
-				DateTime dateTime = (DateTime) value;
-				// Convert to days since epoch (1970-01-01)
-				long millis = dateTime.getSeconds() * 1000L;
-				return (int) (millis / (1000 * 60 * 60 * 24));
-			} else if (value instanceof java.sql.Date) {
-				java.sql.Date date = (java.sql.Date) value;
-				// Convert to days since epoch (1970-01-01)
-				return (int) (date.getTime() / (1000 * 60 * 60 * 24));
-			} else if (value instanceof java.util.Date) {
-				java.util.Date date = (java.util.Date) value;
-				return (int) (date.getTime() / (1000 * 60 * 60 * 24));
-			}
-		}
-
-		// Handle numeric types - ensure correct Java type
-		if (typeString.contains("TINYINT")) {
-			if (value instanceof Number) {
+			case "TINYINT":
 				return ((Number) value).byteValue();
-			}
-		}
-
-		if (typeString.contains("SMALLINT")) {
-			if (value instanceof Number) {
+			case "SMALLINT":
 				return ((Number) value).shortValue();
-			}
-		}
-
-		if (typeString.contains("INT") && !typeString.contains("BIGINT") && !typeString.contains("SMALLINT") && !typeString.contains("TINYINT")) {
-			if (value instanceof Number) {
-				return ((Number) value).intValue();
-			}
-		}
-
-		if (typeString.contains("BIGINT")) {
-			if (value instanceof Number) {
+			case "BIGINT":
 				return ((Number) value).longValue();
-			}
-		}
-
-		if (typeString.contains("FLOAT")) {
-			if (value instanceof Number) {
-				return ((Number) value).floatValue();
-			}
-		}
-
-		if (typeString.contains("DOUBLE")) {
-			if (value instanceof Number) {
+			case "DOUBLE":
 				return ((Number) value).doubleValue();
-			}
+			case "FLOAT":
+				return ((Number) value).floatValue();
+			case "DECIMAL":
+				Pair<Integer, Integer> fieldPrecisionAndScale = getFieldPrecisionAndScale(paimonType.asSQLString());
+				return Decimal.fromBigDecimal((BigDecimal) value, fieldPrecisionAndScale.getLeft(), fieldPrecisionAndScale.getRight());
+			case "TIMESTAMP_WITHOUT_TIME_ZONE":
+			case "TIMESTAMP_WITH_LOCAL_TIME_ZONE":
+				java.sql.Timestamp sqlTimestamp = (java.sql.Timestamp) value;
+				return Timestamp.fromEpochMillis(sqlTimestamp.getTime(), sqlTimestamp.getNanos());
 		}
-
-		// Handle DECIMAL type
-		if (typeString.contains("DECIMAL")) {
-			if (value instanceof BigDecimal) {
-				java.math.BigDecimal bigDecimal = (BigDecimal) value;
-				// Extract precision and scale from the type string
-				// Format: DECIMAL(precision, scale)
-				int precision = 38; // default precision
-				int scale = 10; // default scale
-
-				try {
-					int startIdx = typeString.indexOf("(");
-					int commaIdx = typeString.indexOf(",");
-					int endIdx = typeString.indexOf(")");
-
-					if (startIdx > 0 && commaIdx > 0 && endIdx > 0) {
-						precision = Integer.parseInt(typeString.substring(startIdx + 1, commaIdx).trim());
-						scale = Integer.parseInt(typeString.substring(commaIdx + 1, endIdx).trim());
-					}
-				} catch (Exception e) {
-					// Use default values if parsing fails
-				}
-
-				return Decimal.fromBigDecimal(bigDecimal, precision, scale);
-			} else if (value instanceof Number) {
-				// Convert other numeric types to BigDecimal first
-				BigDecimal bigDecimal = new BigDecimal(value.toString());
-				return Decimal.fromBigDecimal(bigDecimal, 38, 10);
-			} else if (value instanceof String) {
-				// Convert string to BigDecimal
-				BigDecimal bigDecimal = new BigDecimal((String) value);
-				return Decimal.fromBigDecimal(bigDecimal, 38, 10);
-			}
-		}
-
-		if (typeString.contains("BOOLEAN")) {
-			if (value instanceof Boolean) {
-				return value;
-			} else if (value instanceof Number) {
-				return ((Number) value).intValue() != 0;
-			} else if (value instanceof String) {
-				return Boolean.parseBoolean((String) value);
-			}
-		}
-
-		// For other types, return as-is
 		return value;
 	}
 
@@ -2285,49 +2204,67 @@ public class PaimonService implements Closeable {
 	 * @return Java object
 	 */
 	private Object convertPaimonValueToJava(InternalRow row, int pos, DataType dataType) {
-		String typeString = dataType.toString().toUpperCase();
-
-		if (typeString.contains("BOOLEAN")) {
-			return row.getBoolean(pos);
-		} else if (typeString.contains("TINYINT")) {
-			return row.getByte(pos);
-		} else if (typeString.contains("SMALLINT")) {
-			return row.getShort(pos);
-		} else if (typeString.contains("INT") && !typeString.contains("BIGINT")) {
-			return row.getInt(pos);
-		} else if (typeString.contains("BIGINT")) {
-			return row.getLong(pos);
-		} else if (typeString.contains("FLOAT")) {
-			return row.getFloat(pos);
-		} else if (typeString.contains("DOUBLE")) {
-			return row.getDouble(pos);
-		} else if (typeString.contains("DECIMAL")) {
-			Decimal decimal = row.getDecimal(pos, dataType.asSQLString().length(), 10);
-			return decimal != null ? decimal.toBigDecimal() : null;
-		} else if (typeString.contains("STRING") || typeString.contains("VARCHAR") || typeString.contains("CHAR")) {
-			BinaryString binaryString = row.getString(pos);
-			return binaryString != null ? binaryString.toString() : null;
-		} else if (typeString.contains("DATE")) {
-			int days = row.getInt(pos);
-			// Convert days since epoch to java.sql.Date
-			return new java.sql.Date(days * 86400000L);
-		} else if (typeString.contains("TIMESTAMP")) {
-			Timestamp timestamp = row.getTimestamp(pos, 6);
-			if (timestamp != null) {
-				// Convert Paimon Timestamp to java.sql.Timestamp
-				long millis = timestamp.getMillisecond();
-				int nanos = timestamp.getNanoOfMillisecond();
-				java.sql.Timestamp sqlTimestamp = new java.sql.Timestamp(millis);
-				sqlTimestamp.setNanos(nanos);
-				return sqlTimestamp;
+		String typeRoot = dataType.getTypeRoot().name();
+		switch (typeRoot) {
+			case "BOOLEAN":
+				return row.getBoolean(pos);
+			case "TINYINT":
+				return row.getByte(pos);
+			case "SMALLINT":
+				return row.getShort(pos);
+			case "INTEGER":
+				return row.getInt(pos);
+			case "BIGINT":
+				return row.getLong(pos);
+			case "FLOAT":
+				return row.getFloat(pos);
+			case "DOUBLE":
+				return row.getDouble(pos);
+			case "DECIMAL":
+				Decimal decimal;
+				if (dataType instanceof DecimalType) {
+					decimal = row.getDecimal(pos, ((DecimalType) dataType).getPrecision(), ((DecimalType) dataType).getScale());
+				} else {
+					Pair<Integer, Integer> fieldPrecisionAndScale = getFieldPrecisionAndScale(dataType.asSQLString());
+					decimal = row.getDecimal(pos, fieldPrecisionAndScale.getLeft(), fieldPrecisionAndScale.getRight());
+				}
+				return decimal != null ? decimal.toBigDecimal() : null;
+			case "DATE":
+				int days = row.getInt(pos);
+				return new java.sql.Date(days * 86400000L);
+			case "TIMESTAMP_WITHOUT_TIME_ZONE": {
+				Timestamp timestamp;
+				if (dataType instanceof TimestampType) {
+					timestamp = row.getTimestamp(pos, ((TimestampType) dataType).getPrecision());
+				} else {
+					Integer fraction = getFieldFraction(dataType.asSQLString());
+					timestamp = row.getTimestamp(pos, fraction);
+				}
+				if (timestamp != null) {
+					return timestamp.toLocalDateTime();
+				}
+				return null;
 			}
-			return null;
-		} else if (typeString.contains("BINARY") || typeString.contains("BYTES")) {
-			return row.getBinary(pos);
-		} else {
-			// For unknown types, try to get as string
-			BinaryString binaryString = row.getString(pos);
-			return binaryString != null ? binaryString.toString() : null;
+			case "TIMESTAMP_WITH_LOCAL_TIME_ZONE": {
+				Timestamp timestamp;
+				if (dataType instanceof TimestampType) {
+					timestamp = row.getTimestamp(pos, ((TimestampType) dataType).getPrecision());
+				} else {
+					Integer fraction = getFieldFraction(dataType.asSQLString());
+					timestamp = row.getTimestamp(pos, fraction);
+				}
+				if (timestamp != null) {
+					return timestamp.toLocalDateTime().atZone(ZoneOffset.UTC);
+				}
+				return null;
+			}
+			case "BINARY":
+			case "VARBINARY":
+			case "BYTES":
+				return row.getBinary(pos);
+			default:
+				BinaryString binaryString = row.getString(pos);
+				return binaryString != null ? binaryString.toString() : null;
 		}
 	}
 
