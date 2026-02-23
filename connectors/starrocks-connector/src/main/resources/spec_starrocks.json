@@ -15,6 +15,9 @@
           "update_on_exists",
           "just_insert"
         ]
+      },
+      {
+        "id": "flush_offset_callback"
       }
     ],
     "connection": {
