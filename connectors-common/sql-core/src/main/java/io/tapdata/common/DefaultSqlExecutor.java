@@ -126,12 +126,7 @@ public class DefaultSqlExecutor implements SqlExecutor {
                 throw new RuntimeException("create callableStatement error");
             }
             boolean hasResult = callableStatement.execute();
-
-            if (outList.isEmpty()) {
-                executeResult = new ExecuteResult<>().result(true);
-            } else {
-                executeResult = new ExecuteResult<>().result(getOutputFromCall(outList, callableStatement, hasResult));
-            }
+            executeResult = new ExecuteResult<>().result(getOutputFromCall(outList, callableStatement, hasResult));
         } catch (Throwable e) {
             executeResult = new ExecuteResult<>().error(new RuntimeException(String.format("Execute database procedure/function %s error, message: %s", funcName, e.getMessage()), e));
         }
@@ -219,7 +214,7 @@ public class DefaultSqlExecutor implements SqlExecutor {
     }
 
     private Object getOutputFromCall(List<JdbcProcedureParam> outList, CallableStatement callableStatement, boolean hasResult) throws Exception {
-        if (outList == null || outList.isEmpty() || callableStatement == null) {
+        if (outList == null || callableStatement == null) {
             return null;
         }
         Map<String, Object> res = new HashMap<>();
