@@ -602,6 +602,7 @@ public class PostgresConnector extends CommonDbConnector {
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
             cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
+            beforeCdc(tableList,nodeContext.getTableMap());
             cdcRunner.startCdcRunner();
             if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
                 Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
@@ -611,6 +612,17 @@ public class PostgresConnector extends CommonDbConnector {
                     exceptionCollector.revealException(throwable);
                 }
                 throw throwable;
+            }
+        }
+    }
+
+    private void beforeCdc(List<String> tableList, KVReadOnlyMap<TapTable> tableMap) {
+        if (EmptyKit.isNotEmpty(tableList)) {
+            for (String tableName : tableList) {
+                TapTable tapTable = tableMap.get(tableName);
+                if (null != tapTable) {
+                    openIdentity(tapTable);
+                }
             }
         }
     }
