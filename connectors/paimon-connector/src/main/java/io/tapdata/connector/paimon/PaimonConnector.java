@@ -102,10 +102,9 @@ public class PaimonConnector extends ConnectorBase {
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws Throwable {
         ConnectionOptions connectionOptions = ConnectionOptions.create();
-        
         try {
             onStart(connectionContext);
-            
+            connectionOptions.connectionString(paimonConfig.getConnectionString());
             // Test warehouse accessibility
             boolean warehouseAccessible = paimonService.testWarehouseAccess();
             if (warehouseAccessible) {

@@ -1,6 +1,7 @@
 package io.tapdata.connector.paimon.config;
 
 import io.tapdata.common.CommonDbConfig;
+import io.tapdata.kit.EmptyKit;
 
 import java.io.Serializable;
 import java.util.Map;
@@ -392,6 +393,33 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         }
     }
 
+
+    public String getConnectionString() {
+        String st = storageType == null ? "" : storageType.trim().toLowerCase();
+        switch (st) {
+            case "s3":
+                // Prefer native s3:// if paimon-s3 is available, otherwise use Hadoop S3A
+                if (isPaimonS3Available()) {
+                    return "s3://" + removeProtocol(s3Endpoint) + "/" + removeProtocol(warehouse.trim());
+                } else {
+                    return "s3a://" + removeProtocol(s3Endpoint) + "/" + removeProtocol(warehouse.trim());
+                }
+            case "hdfs":
+                return "hdfs://" + hdfsHost + ":" + hdfsPort + "/" + removeProtocol(warehouse.trim());
+            case "oss":
+                return "oss://" + removeProtocol(ossEndpoint) + "/" + removeProtocol(warehouse.trim());
+            case "local":
+            default:
+                return "file://" + warehouse.trim();
+        }
+    }
+
+    private String removeProtocol(String str) {
+        if(EmptyKit.isEmpty(str)) {
+            return "";
+        }
+        return str.substring(str.indexOf("://") + 3);
+    }
     /**
      * Validate configuration
      *
