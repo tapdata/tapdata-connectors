@@ -311,7 +311,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     Document decodeUpdateDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
                     after.putAll(decodeUpdateDocument);
 					before.forEach((k, v) -> {
-						if (!after.containsKey(k)) {
+						if (!after.containsKey(k) && after.keySet().stream().noneMatch(ak -> ak.startsWith(k + "."))) {
 							after.put(k, v);
 						}
 					});
