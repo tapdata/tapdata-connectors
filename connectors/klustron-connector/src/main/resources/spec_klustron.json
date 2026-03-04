@@ -1,0 +1,1052 @@
+{
+  "properties": {
+    "name": "KlustronDB",
+    "realName": "KlustronDB",
+    "icon": "icons/klustron.png",
+    "doc": "${doc}",
+    "id": "klustron",
+    "tags": [
+      "Database",
+      "ssl",
+      "doubleActive",
+      "disableForeignKey",
+      "NullsLast"
+    ]
+  },
+  "configOptions": {
+    "capabilities": [
+      {
+        "id": "dml_insert_policy",
+        "alternatives": [
+          "update_on_exists",
+          "ignore_on_exists",
+          "just_insert"
+        ]
+      },
+      {
+        "id": "dml_update_policy",
+        "alternatives": [
+          "ignore_on_nonexists",
+          "insert_on_nonexists"
+        ]
+      },
+      {
+        "id": "api_server_supported"
+      },
+      {
+        "id": "source_incremental_update_event_have_before"
+      },
+      {
+        "id": "illegal_date_acceptable"
+      },
+      {
+        "id": "batch_read_hash_split"
+      },
+      {
+        "id": "source_support_exactly_once"
+      }
+    ],
+    "supportDDL": {
+      "events": [
+        "new_field_event",
+        "alter_field_name_event",
+        "alter_field_attributes_event",
+        "drop_field_event"
+      ]
+    },
+    "monitorAPI": {
+      "lowerCaseTableNames": {
+        "title": "${lowerCaseTableNames}",
+        "type": "string",
+        "method": "io.tapdata.connector.mysql.MysqlConnector#getLowerCaseTableNames"
+      }
+    },
+    "connection": {
+      "type": "object",
+      "properties": {
+        "deploymentMode": {
+          "type": "string",
+          "title": "${deploymentMode}",
+          "default": "standalone",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 1,
+          "enum": [
+            {
+              "label": "${standalone}",
+              "value": "standalone"
+            },
+            {
+              "label": "${master-slave}",
+              "value": "master-slave"
+            }
+          ],
+          "x-reactions": [
+            {
+              "target": "*(host,port)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value === 'standalone'}}"
+                }
+              }
+            },
+            {
+              "target": "*(masterSlaveAddress)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value === 'master-slave'}}"
+                }
+              }
+            }
+          ]
+        },
+        "host": {
+          "type": "string",
+          "title": "${host}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_host",
+          "x-decorator-props": {
+            "tooltip": "${hostTip}"
+          },
+          "x-index": 10,
+          "required": true
+        },
+        "mysqlPort": {
+          "type": "string",
+          "title": "${port} of MySql",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "database_port",
+          "x-decorator-props": {
+            "tooltip": "${portTip}"
+          },
+          "x-index": 20,
+          "required": true
+        },
+        "pgPort": {
+          "type": "string",
+          "title": "${port} of Postgres",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "database_port",
+          "x-decorator-props": {
+            "tooltip": "${portTip}"
+          },
+          "x-index": 25,
+          "required": true
+        },
+        "masterSlaveAddress": {
+          "type": "array",
+          "title": "${master-slaveAddress}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${master-slaveAddressTip}"
+          },
+          "x-component": "ArrayItems",
+          "x-index": 5,
+          "items": {
+            "type": "object",
+            "properties": {
+              "space": {
+                "type": "void",
+                "x-component": "Space",
+                "properties": {
+                  "host": {
+                    "type": "string",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${Address}"
+                    },
+                    "x-index": 1
+                  },
+                  "port": {
+                    "type": "number",
+                    "x-decorator": "FormItem",
+                    "x-component": "InputNumber",
+                    "x-component-props": {
+                      "placeholder": "${serverPort}"
+                    },
+                    "x-index": 2
+                  },
+                  "remove": {
+                    "type": "void",
+                    "x-decorator": "FormItem",
+                    "x-component": "ArrayItems.Remove"
+                  }
+                }
+              }
+            }
+          },
+          "properties": {
+            "add": {
+              "type": "void",
+              "title": "${prompt}",
+              "x-component": "ArrayItems.Addition"
+            }
+          }
+        },
+        "db": {
+          "type": "string",
+          "title": "${database}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_name",
+          "x-decorator-props": {
+            "tooltip": "${databaseTip}"
+          },
+          "default": "postgres",
+          "x-index": 30,
+          "required": true
+        },
+        "sc": {
+          "type": "string",
+          "title": "${database}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_name",
+          "x-decorator-props": {
+            "tooltip": "${databaseTip}"
+          },
+          "x-index": 35,
+          "required": true
+        },
+        "username": {
+          "type": "string",
+          "title": "${username}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_username",
+          "x-index": 40,
+          "required": true
+        },
+        "password": {
+          "type": "string",
+          "title": "${password}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "database_password",
+          "x-index": 50
+        },
+        "dataHost": {
+          "type": "string",
+          "title": "${dataHost}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_host",
+          "x-decorator-props": {
+            "tooltip": "${dataHostTip}"
+          },
+          "x-index": 60,
+          "required": true
+        },
+        "dataPort": {
+          "type": "string",
+          "title": "${dataPort}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "database_port",
+          "x-decorator-props": {
+            "tooltip": "${dataPortTip}"
+          },
+          "x-index": 70,
+          "required": true
+        },
+        "dataUsername": {
+          "type": "string",
+          "title": "${dataUsername}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_username",
+          "x-index": 80,
+          "x-decorator-props": {
+            "tooltip": "${dataUsernameTip}"
+          },
+          "required": true
+        },
+        "dataPassword": {
+          "type": "string",
+          "title": "${dataPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "database_password",
+          "x-decorator-props": {
+            "tooltip": "${dataPasswordTip}"
+          },
+          "x-index": 90
+        },
+        "OPTIONAL_FIELDS": {
+          "type": "void",
+          "properties": {
+            "addtionalString": {
+              "type": "string",
+              "title": "${addtionalString}",
+              "x-decorator": "FormItem",
+              "x-component": "Input",
+              "default": "useUnicode=yes&characterEncoding=UTF-8",
+              "apiServerKey": "addtionalString",
+              "x-decorator-props": {
+                "tooltip": "${extParamsTip}"
+              },
+              "x-index": 60
+            },
+            "timezone": {
+              "type": "string",
+              "title": "${timezone}",
+              "default": "",
+              "x-decorator": "FormItem",
+              "x-component": "Select",
+              "x-decorator-props": {
+                "tooltip": "${timezoneTip}"
+              },
+              "x-index": 70,
+              "enum": [
+                {
+                  "label": "",
+                  "value": ""
+                },
+                {
+                  "label": "UTC -11",
+                  "value": "-11:00"
+                },
+                {
+                  "label": "UTC -10",
+                  "value": "-10:00"
+                },
+                {
+                  "label": "UTC -09",
+                  "value": "-09:00"
+                },
+                {
+                  "label": "UTC -08",
+                  "value": "-08:00"
+                },
+                {
+                  "label": "UTC -07",
+                  "value": "-07:00"
+                },
+                {
+                  "label": "UTC -06",
+                  "value": "-06:00"
+                },
+                {
+                  "label": "UTC -05",
+                  "value": "-05:00"
+                },
+                {
+                  "label": "UTC -04",
+                  "value": "-04:00"
+                },
+                {
+                  "label": "UTC -03",
+                  "value": "-03:00"
+                },
+                {
+                  "label": "UTC -02",
+                  "value": "-02:00"
+                },
+                {
+                  "label": "UTC -01",
+                  "value": "-01:00"
+                },
+                {
+                  "label": "UTC",
+                  "value": "+00:00"
+                },
+                {
+                  "label": "UTC +01",
+                  "value": "+01:00"
+                },
+                {
+                  "label": "UTC +02",
+                  "value": "+02:00"
+                },
+                {
+                  "label": "UTC +03",
+                  "value": "+03:00"
+                },
+                {
+                  "label": "UTC +04",
+                  "value": "+04:00"
+                },
+                {
+                  "label": "UTC +05",
+                  "value": "+05:00"
+                },
+                {
+                  "label": "UTC +06",
+                  "value": "+06:00"
+                },
+                {
+                  "label": "UTC +07",
+                  "value": "+07:00"
+                },
+                {
+                  "label": "UTC +08",
+                  "value": "+08:00"
+                },
+                {
+                  "label": "UTC +09",
+                  "value": "+09:00"
+                },
+                {
+                  "label": "UTC +10",
+                  "value": "+10:00"
+                },
+                {
+                  "label": "UTC +11",
+                  "value": "+11:00"
+                },
+                {
+                  "label": "UTC +12",
+                  "value": "+12:00"
+                },
+                {
+                  "label": "UTC +13",
+                  "value": "+13:00"
+                },
+                {
+                  "label": "UTC +14",
+                  "value": "+14:00"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "properties": {
+        "createAutoInc": {
+          "type": "boolean",
+          "title": "${createAutoInc}",
+          "default": false,
+          "x-index": 5,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${createAutoIncTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "autoIncJumpValue": {
+          "required": true,
+          "type": "string",
+          "title": "${autoIncJumpValue}",
+          "default": 1000000,
+          "x-index": 6,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs",
+                ".createAutoInc"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "applyDefault": {
+          "type": "boolean",
+          "title": "${applyDefault}",
+          "default": false,
+          "x-index": 7,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${applyDefaultTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "hashSplit": {
+          "type": "boolean",
+          "title": "${hashSplit}",
+          "default": false,
+          "x-index": 10,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${hashSplitTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "maxSplit": {
+          "required": true,
+          "type": "string",
+          "title": "${maxSplit}",
+          "default": 20,
+          "x-index": 12,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 2,
+            "max": 10000
+          },
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs",
+                ".hashSplit"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "batchReadThreadSize": {
+          "required": true,
+          "type": "string",
+          "title": "${batchReadThreadSize}",
+          "default": 4,
+          "x-index": 13,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 1,
+            "max": 16
+          },
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs",
+                ".hashSplit"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "maximumQueueSize": {
+          "type": "string",
+          "title": "${maximumQueueSize}",
+          "default": 800,
+          "x-index": 14,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${maximumQueueSizeTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "messages": {
+    "default": "en_US",
+    "en_US": {
+      "host": "Calculate Node Host",
+      "hostTip": "The host or domain name of any one of the calculate node under the cluster",
+      "port": "Calculate Node Port",
+      "portTip": "The port corresponding to the calculate node",
+      "database": "database",
+      "databaseTip": "The name of the database, you can list all Mysql databases with the \\\\\"show databases\\\\\" command, case sensitive",
+      "username": "Calculate Node Username",
+      "usernameTip": "The username corresponding to the calculate node",
+      "password": "Calculate Node Password",
+      "passwordTip": "The password corresponding to the calculate node",
+      "addtionalString": "Connection Parameter String",
+      "extParamsTip": "Additional connection parameters in URI, you can write according to personalized scenarios",
+      "timezone": "timezone",
+      "timezoneTip": "Specify the time zone, otherwise no time zone processing will be done",
+      "doc": "docs/mysql_en_US.md",
+      "syncIndex": "Sync Index",
+      "syncIndexTip": "Enabling this capability will automatically synchronize the source index to the target. This action may impact the target database, so please enable it with caution.",
+      "deploymentMode": "Deployment mode",
+      "standalone": "Single machine deployment",
+      "master-slave": "Master-Slave Architecture",
+      "master-slaveAddress": "Server address",
+      "master-slaveAddressTip": "The address port group that the master-slave architecture needs to fill in, the address port of the master database needs to be filled in the first line, for example: 192.168.1.200:3306, 192.168.1.201:3307",
+      "Address": "Please enter the server address",
+      "serverPort": "Server port",
+      "prompt": "Add",
+      "createAutoInc": "Sync auto-increment column",
+      "createAutoIncTooltip": "After turning on, the MySQL target will synchronize the auto-increment column, but the step of the auto-increment key will only be affected by the global configuration auto_increment_increment, please configure it as needed",
+      "autoIncJumpValue": "Auto-increment key jump value",
+      "applyDefault": "Apply default value",
+      "applyDefaultTooltip": "When the switch is turned on, the default value will be applied to the target. If there are unadapted functions or expressions, it may cause an error",
+      "hashSplit": "Hash split",
+      "hashSplitTooltip": "When the switch is turned on, it can be sharded according to the hash value, suitable for large table full-stage sharded synchronization",
+      "maxSplit": "Maximum number of splits",
+      "batchReadThreadSize": "Batch read thread size",
+      "maximumQueueSize": "Maximum queue size",
+      "maximumQueueSizeTip": "The queue size for reading incremental data in MySQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting.",
+      "lowerCaseTableNames": "Lower Case TableNames",
+      "highPerformance": "High Performance Mode",
+      "dataHost": "Data Node Host",
+      "dataHostTip": "The host or domain name of any one of the data node under the cluster",
+      "dataPort": "Data Node Port",
+      "dataPortTip": "The port corresponding to the data node",
+      "dataUsername": "Data Node Username",
+      "dataUsernameTip": "The username corresponding to the data node",
+      "dataPassword": "Data Node Password",
+      "dataPasswordTip": "The password corresponding to the data node"
+    },
+    "zh_CN": {
+      "host": "计算节点地址",
+      "hostTip": "集群下任一计算节点的IP地址或者域名",
+      "port": "计算节点端口",
+      "portTip": "计算节点对应的端口",
+      "database": "数据库",
+      "databaseTip": "数据库名称，可以通过 show databases 命令列出Mysql所有数据库，区分大小写",
+      "username": "计算节点账号",
+      "password": "计算节点密码",
+      "usernameTip": "计算节点对应的用户名",
+      "passwordTip": "计算节点对应的密码",
+      "addtionalString": "连接参数",
+      "extParamsTip": "URI额外的连接参数，可以根据个性化场景书写",
+      "timezone": "时区",
+      "timezoneTip": "指定时区，否则不做时区处理",
+      "doc": "docs/mysql_zh_CN.md",
+      "syncIndex": "同步索引",
+      "syncIndexTip": "开启该能力后，会自动将源的索引同步到目标，该行为可能会对目标数据库造成影响，请谨慎开启",
+      "deploymentMode": "部署模式",
+      "standalone": "单机部署",
+      "master-slave": "主从架构",
+      "master-slaveAddress": "服务器地址",
+      "master-slaveAddressTip": "主从架构需要填写的地址端口组，主库的地址端口需填写在第一行，例如：192.168.1.200:3306, 192.168.1.201:3306",
+      "Address": "服务器地址",
+      "serverPort": "服务器端口",
+      "prompt": "添加",
+      "createAutoInc": "同步自增列",
+      "createAutoIncTooltip": "开启后，MySQL目标会同步自增列，但自增键的步长只会受全局配置auto_increment_increment影响，请自行按需配置",
+      "autoIncJumpValue": "自增键跳跃值",
+      "applyDefault": "应用默认值",
+      "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错",
+      "hashSplit": "哈希分片",
+      "hashSplitTooltip": "开关打开时，可以根据哈希值进行分片，适用于大表全量阶段分片同步",
+      "maxSplit": "最大分片数",
+      "batchReadThreadSize": "批量读取线程数",
+      "maximumQueueSize": "最大队列大小",
+      "maximumQueueSizeTip": "MySql读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置。",
+      "lowerCaseTableNames": "大小写敏感",
+      "highPerformance": "高性能模式",
+      "dataHost": "数据节点主机",
+      "dataHostTip": "集群下任一数据节点的IP地址或者域名",
+      "dataPort": "数据节点端口",
+      "dataPortTip": "数据节点对应的端口",
+      "dataUsername": "数据节点账号",
+      "dataUsernameTip": "数据节点对应的用户名",
+      "dataPassword": "数据节点密码",
+      "dataPasswordTip": "数据节点对应的密码"
+    },
+    "zh_TW": {
+      "host": "計算節點地址",
+      "hostTip": "叢集下任一計算節點的IP地址或者域名",
+      "port": "計算節點端口",
+      "portTip": "計算節點對應的端口號",
+      "database": "數據庫",
+      "databaseTip": "數據庫名稱，可以通過 show databases 命令列出Mysql所有數據庫，區分大小寫",
+      "username": "計算節點賬號",
+      "password": "計算節點密碼",
+      "usernameTip": "計算節點對應的賬號",
+      "passwordTip": "計算節點對應的密碼",
+      "addtionalString": "連接參數",
+      "extParamsTip": "URI額外的連接參數，可以根據個性化場景書寫",
+      "timezone": "時區",
+      "timezoneTip": "指定時區，否則不做時區處理",
+      "doc": "docs/mysql_zh_TW.md",
+      "syncIndex": "同步索引",
+      "syncIndexTip": "開啓該能力後，會自動將源的索引同步到目標，該行為可能會對目標數據庫造成影響，請謹慎開啓",
+      "deploymentMode": "部署模式",
+      "standalone": "單機部署",
+      "master-slave": "主從架構",
+      "master-slaveAddress": "服務器地址",
+      "master-slaveAddressTip": "主從架構需要填寫的地址端口組，主庫的地址端口需填寫在第壹行，例如：192.168.1.200:3306, 192.168.1.201:3306",
+      "Address": "服務器地址",
+      "serverPort": "端口",
+      "prompt": "添加",
+      "createAutoInc": "同步自增列",
+      "createAutoIncTooltip": "開啓後，MySQL目標會同步自增列，但自增鍵的步長只會受全局配置auto_increment_increment影響，請自行按需配置",
+      "autoIncJumpValue": "自增鍵跳躍值",
+      "applyDefault": "應用默認值",
+      "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯",
+      "hashSplit": "哈希分片",
+      "hashSplitTooltip": "開關打開時，可以根據哈希值進行分片，適用於大表全量階段分片同步",
+      "maxSplit": "最大分片數",
+      "batchReadThreadSize": "批量讀取線程數",
+      "maximumQueueSize": "最大隊列大小",
+      "maximumQueueSizeTip": "MySql 讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置。",
+      "lowerCaseTableNames": "大小寫敏感",
+      "highPerformance": "高性能模式",
+      "dataHost": "數據節點主機",
+      "dataHostTip": "集群下任一數據節點的IP地址或者域名",
+      "dataPort": "數據節點端口",
+      "dataPortTip": "數據節點對應的端口",
+      "dataUsername": "數據節點賬號",
+      "dataUsernameTip": "數據節點對應的賬號",
+      "dataPassword": "數據節點密碼",
+      "dataPasswordTip": "數據節點對應的密碼"
+    }
+  },
+  "dataTypes": {
+    "smallint": {
+      "bit": 16,
+      "priority": 3,
+      "value": [
+        -32768,
+        32767
+      ],
+      "to": "TapNumber"
+    },
+    "integer": {
+      "bit": 32,
+      "priority": 1,
+      "value": [
+        -2147483648,
+        2147483647
+      ],
+      "to": "TapNumber"
+    },
+    "bigint": {
+      "bit": 64,
+      "priority": 3,
+      "value": [
+        -9223372036854775808,
+        9223372036854775807
+      ],
+      "to": "TapNumber"
+    },
+    "numeric[($precision,$scale)]": {
+      "precision": [
+        1,
+        1000
+      ],
+      "scale": [
+        0,
+        1000
+      ],
+      "fixed": true,
+      "preferPrecision": 20,
+      "preferScale": 8,
+      "priority": 1,
+      "to": "TapNumber"
+    },
+    "real": {
+      "to": "TapNumber",
+      "bit": 4,
+      "defaultPrecision": 24,
+      "defaultScale": 8,
+      "fixed": false
+    },
+    "double precision": {
+      "priority": 2,
+      "precision": [
+        1,
+        17
+      ],
+      "preferPrecision": 11,
+      "preferScale": 4,
+      "scale": [
+        0,
+        17
+      ],
+      "fixed": false,
+      "to": "TapNumber"
+    },
+    "character[($byte)]": {
+      "byte": 10485760,
+      "priority": 2,
+      "preferByte": 255,
+      "fixed": true,
+      "to": "TapString"
+    },
+    "character varying[($byte)]": {
+      "byte": 10485760,
+      "priority": 1,
+      "defaultByte": 10485760,
+      "preferByte": 2000,
+      "to": "TapString"
+    },
+    "text": {
+      "byte": "4g",
+      "priority": 2,
+      "to": "TapString"
+    },
+    "bytea": {
+      "byte": "4g",
+      "priority": 1,
+      "to": "TapBinary"
+    },
+    "bit[($byte)]": {
+      "byte": 64,
+      "defaultByte": 1,
+      "priority": 3,
+      "fixed": true,
+      "queryOnly": true,
+      "to": "TapBinary"
+    },
+    "bit varying[($byte)]": {
+      "byte": 64,
+      "defaultByte": 64,
+      "priority": 1,
+      "queryOnly": true,
+      "to": "TapBinary"
+    },
+    "boolean": {
+      "bit": 1,
+      "priority": 1,
+      "to": "TapBoolean"
+    },
+    "date": {
+      "range": [
+        "0001-01-01",
+        "9999-12-31"
+      ],
+      "pattern": "yyyy-MM-dd",
+      "priority": 1,
+      "to": "TapDate"
+    },
+    "interval": {
+      "preferByte": 100,
+      "queryOnly": true,
+      "to": "TapString"
+    },
+    "timestamp[($fraction)] without time zone": {
+      "range": [
+        "1000-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "withTimeZone": false,
+      "defaultFraction": 6,
+      "priority": 1,
+      "to": "TapDateTime"
+    },
+    "timestamp[($fraction)] with time zone": {
+      "range": [
+        "1000-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "withTimeZone": true,
+      "defaultFraction": 6,
+      "priority": 2,
+      "to": "TapDateTime"
+    },
+    "time[($fraction)] without time zone": {
+      "range": [
+        "00:00:00",
+        "23:59:59"
+      ],
+      "pattern": "HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "withTimeZone": false,
+      "defaultFraction": 6,
+      "priority": 1,
+      "to": "TapTime"
+    },
+    "time[($fraction)] with time zone": {
+      "range": [
+        "00:00:00",
+        "23:59:59"
+      ],
+      "pattern": "HH:mm:ss",
+      "fraction": [
+        0,
+        6
+      ],
+      "withTimeZone": true,
+      "defaultFraction": 6,
+      "priority": 2,
+      "to": "TapTime"
+    },
+    "$nothing array": {
+      "queryOnly": true,
+      "to": "TapArray"
+    },
+    "point": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "line": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "lseg": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "box": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "path": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "polygon": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "circle": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "cidr": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "inet": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "macaddr": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "uuid": {
+      "to": "TapString",
+      "preferByte": 256,
+      "queryOnly": true
+    },
+    "xml": {
+      "to": "TapXml"
+    },
+    "json": {
+      "to": "TapJson"
+    },
+    "tsvector": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "tsquery": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "oid": {
+      "to": "TapNumber",
+      "bit": 64,
+      "queryOnly": true
+    },
+    "regproc": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "regprocedure": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "regoper": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "regoperator": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "regclass": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "regtype": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "regconfig": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "regdictionary": {
+      "to": "TapString",
+      "preferByte": 255,
+      "queryOnly": true
+    },
+    "jsonb": {
+      "to": "TapString",
+      "queryOnly": true
+    },
+    "money": {
+      "to": "TapMoney",
+      "defaultPrecision": 19,
+      "defaultScale": 4,
+      "fixed": true
+    }
+  }
+}
