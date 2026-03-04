@@ -42,6 +42,7 @@ public abstract class NormalWriteRecorder {
     protected final Map<String, String> columnTypeMap;
     protected boolean hasPk = false;
     protected boolean targetNeedEncode = false;
+    protected boolean smalldatetimeTruncation = false;
     protected String fromCharset;
     protected String toCharset;
 
@@ -544,6 +545,9 @@ public abstract class NormalWriteRecorder {
 
     public void setTargetNeedEncode(boolean targetNeedEncode) {
         this.targetNeedEncode = targetNeedEncode;
+    }
+    public void setSmalldatetimeTruncation(boolean smalldatetimeTruncation) {
+        this.smalldatetimeTruncation = smalldatetimeTruncation;
     }
 
     public void setFromCharset(String fromCharset) {

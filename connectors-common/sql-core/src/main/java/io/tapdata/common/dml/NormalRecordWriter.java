@@ -322,6 +322,13 @@ public class NormalRecordWriter {
         deleteRecorder.setTargetNeedEncode(targetNeedEncode);
         return this;
     }
+    public NormalRecordWriter setSmalldatetimeTruncation(boolean smalldatetimeTruncation) {
+        insertRecorder.setSmalldatetimeTruncation(smalldatetimeTruncation);
+        updateRecorder.setSmalldatetimeTruncation(smalldatetimeTruncation);
+        deleteRecorder.setSmalldatetimeTruncation(smalldatetimeTruncation);
+        return this;
+    }
+
 
     protected String getDisableTriggerSql() {
         return null;
