@@ -1819,16 +1819,30 @@ public class MongodbConnector extends ConnectorBase {
 			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
 			Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
 			tableInfo = TableInfo.create();
-			BigDecimal numOfRows = new BigDecimal(String.valueOf(collStats.get("count")));
-			tableInfo.setNumOfRows(numOfRows.longValue());
-			BigDecimal storageSize = new BigDecimal(String.valueOf(collStats.get("size")));
-			tableInfo.setStorageSize(storageSize.longValue());
+			tableInfo.setNumOfRows(getLongFromDocument(collStats, "count"));
+			tableInfo.setStorageSize(getLongFromDocument(collStats, "size"));
+			tableInfo.setAvgObjSize(getLongFromDocument(collStats, "avgObjSize"));
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
 			throw e;
 		}
 		return tableInfo;
+	}
+
+	private long getLongFromDocument(Document document, String key) {
+		Object value = document.get(key);
+		if (value == null) {
+			return 0L;
+		}
+		if (value instanceof Number) {
+			return ((Number) value).longValue();
+		}
+		try {
+			return new BigDecimal(String.valueOf(value)).longValue();
+		} catch (NumberFormatException e) {
+			return 0L;
+		}
 	}
 
 	protected void errorHandle(Throwable throwable, TapConnectorContext connectorContext) {
