@@ -39,9 +39,7 @@ import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
-import javax.script.Invocable;
-import javax.script.ScriptEngine;
-import javax.script.ScriptException;
+import javax.script.*;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.*;
@@ -424,6 +422,17 @@ public class CustomConnector extends ConnectorBase {
         } else {
             scriptEngine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT, new ScriptOptions().engineName(customConfig.getJsEngineName()).log(connectorContext.getLog()));
             scriptEngine.eval(ScriptUtil.appendTargetFunctionScript(customConfig.getTargetScript()));
+            Bindings globalBindings = scriptEngine.getBindings(ScriptContext.GLOBAL_SCOPE);
+            if (globalBindings == null) {
+                globalBindings = scriptEngine.createBindings();
+                scriptEngine.setBindings(globalBindings, ScriptContext.GLOBAL_SCOPE);
+            }
+            if (!scriptEngine.getBindings(ScriptContext.GLOBAL_SCOPE).containsKey("globalMap")) {
+                ConcurrentHashMap<String, Object> globalMap = new ConcurrentHashMap<>();
+                scriptEngine.put("globalMap", globalMap);
+
+                scriptEngine.getBindings(ScriptContext.GLOBAL_SCOPE).put("globalMap", globalMap);
+            }
             writeEnginePool.put(threadName, scriptEngine);
         }
         WriteListResult<TapRecordEvent> result = new WriteListResult<>();
