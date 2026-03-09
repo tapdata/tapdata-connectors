@@ -224,12 +224,14 @@
     },
     "node": {
       "type": "object",
+      "x-tableConfigScope": ["target"],
       "properties": {
         "supportPk": {
           "type": "boolean",
           "title": "${supportPk}",
           "default": true,
           "x-index": 1,
+          "x-perTable": true,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-reactions": [
@@ -249,6 +251,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-index": 2,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${engineExprTooltip}"
           }
@@ -259,6 +262,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-index": 3,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${partitionExprTooltip}"
           }
@@ -269,6 +273,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-index": 4,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${orderExprTooltip}"
           }
@@ -289,6 +294,7 @@
             }
           ],
           "x-index": 5,
+          "x-perTable": true,
           "items": {
             "type": "object",
             "properties": {
@@ -332,28 +338,29 @@
                 "defaultValue": { "propKey": "", "propValue": "" }
               }
             }
+          }
+        },
+        "applyDefault": {
+          "type": "boolean",
+          "title": "${applyDefault}",
+          "default": false,
+          "x-index": 7,
+          "x-perTable": true,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${applyDefaultTooltip}"
           },
-          "applyDefault": {
-            "type": "boolean",
-            "title": "${applyDefault}",
-            "default": false,
-            "x-index": 7,
-            "x-decorator": "FormItem",
-            "x-component": "Switch",
-            "x-decorator-props": {
-              "tooltip": "${applyDefaultTooltip}"
-            },
-            "x-reactions": [
-              {
-                "dependencies": ["$inputs"],
-                "fulfill": {
-                  "state": {
-                    "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
-                  }
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
                 }
               }
-            ]
-          }
+            }
+          ]
         },
         "mergeMinutes": {
           "required": true,
@@ -381,6 +388,7 @@
           "title": "${mixFastWrite}",
           "default": false,
           "x-index": 12,
+          "x-perTable": true,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-decorator-props": {
