@@ -60,7 +60,7 @@
           "x-index": 20,
           "x-reactions": [
             {
-              "target": "*(s3Endpoint,s3AccessKey,s3SecretKey,s3Region)",
+              "target": "*(s3Endpoint,s3AccessKey,s3SecretKey,s3Region,s3Properties)",
               "fulfill": {
                 "state": {
                   "visible": "{{$self.value==='s3'}}"
@@ -118,6 +118,61 @@
             "placeholder": "${s3Region_placeholder}"
           },
           "x-index": 60
+        },
+        "s3Properties": {
+          "type": "array",
+          "title": "${s3Properties}",
+          "x-decorator": "FormItem",
+          "default": [
+            {"propKey": "fs.s3a.connection.maximum", "propValue": "1000"},
+            {"propKey": "fs.s3a.connection.establish.timeout", "propValue": "5000"}
+          ],
+          "x-component": "ArrayItems",
+          "x-index": 65,
+          "items": {
+            "type": "object",
+            "properties": {
+              "space": {
+                "type": "void",
+                "x-component": "Space",
+                "properties": {
+                  "propKey": {
+                    "type": "string",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${propKey}"
+                    },
+                    "x-index": 1
+                  },
+                  "propValue": {
+                    "type": "number",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${propValue}"
+                    },
+                    "x-index": 2
+                  },
+                  "remove": {
+                    "type": "void",
+                    "x-decorator": "FormItem",
+                    "x-component": "ArrayItems.Remove"
+                  }
+                }
+              }
+            }
+          },
+          "properties": {
+            "add": {
+              "type": "void",
+              "title": "${prompt}",
+              "x-component": "ArrayItems.Addition",
+              "x-component-props": {
+                "defaultValue": { "propKey": "", "propValue": "" }
+              }
+            }
+          }
         },
         "hdfsHost": {
           "type": "string",
@@ -184,7 +239,36 @@
       }
     },
     "node": {
+      "type": "object",
+      "x-tableConfigScope": ["target"],
       "properties": {
+        "partitionKey": {
+          "title": "${partitionKey}",
+          "type": "array",
+          "x-index": 10,
+          "x-perTable": true,
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${partitionKeyTip}"
+          },
+          "x-component": "FieldSelect",
+          "x-component-props": {
+            "allowCreate": false,
+            "multiple": true,
+            "filterable": true
+          },
+          "x-reactions": [
+            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
+            {
+              "dependencies":["$inputs"],
+              "fulfill":{
+                "state":{
+                  "display": "{{$deps[0].length > 0}}"
+                }
+              }
+            }
+          ]
+        },
         "bucketMode": {
           "type": "string",
           "title": "${bucketMode}",
@@ -203,6 +287,7 @@
           "default": "dynamic",
           "required": true,
           "x-index": 20,
+          "x-perTable": true,
           "x-reactions": [
             {
               "target": "bucketCount",
@@ -224,7 +309,8 @@
             "placeholder": "${bucketCount_placeholder}"
           },
           "default": 4,
-          "x-index": 30
+          "x-index": 30,
+          "x-perTable": true
         },
         "fileFormat": {
           "type": "string",
@@ -233,6 +319,7 @@
           "x-decorator": "FormItem",
           "x-component": "Select",
           "x-index": 40,
+          "x-perTable": true,
           "enum": [
             {
               "label": "",
@@ -285,6 +372,7 @@
           "x-decorator": "FormItem",
           "x-component": "Select",
           "x-index": 50,
+          "x-perTable": true,
           "enum": [
             {
               "label": "",
@@ -325,6 +413,62 @@
               }
             }
           ]
+        },
+        "tableProperties": {
+          "type": "array",
+          "title": "${tableProperties}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${tablePropertiesTip}"
+          },
+          "x-component": "ArrayItems",
+          "x-index": 55,
+          "x-perTable": true,
+          "default": [],
+          "items": {
+            "type": "object",
+            "properties": {
+              "space": {
+                "type": "void",
+                "x-component": "Space",
+                "properties": {
+                  "propKey": {
+                    "type": "string",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${propKey}"
+                    },
+                    "x-index": 1
+                  },
+                  "propValue": {
+                    "type": "number",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-component-props": {
+                      "placeholder": "${propValue}"
+                    },
+                    "x-index": 2
+                  },
+                  "remove": {
+                    "type": "void",
+                    "x-decorator": "FormItem",
+                    "x-component": "ArrayItems.Remove"
+                  }
+                }
+              }
+            }
+          },
+          "properties": {
+            "add": {
+              "type": "void",
+              "title": "${prompt}",
+              "x-component": "ArrayItems.Addition",
+              "x-component-props": {
+                "defaultValue": { "propKey": "", "propValue": "" }
+              }
+            }
+          }
         },
         "writeBufferSize": {
           "type": "number",
@@ -443,6 +587,7 @@
           "x-component": "Switch",
           "default": true,
           "x-index": 110,
+          "x-perTable": true,
           "x-reactions": [
             {
               "dependencies": ["$inputs"],
@@ -466,6 +611,7 @@
           },
           "default": 30,
           "x-index": 120,
+          "x-perTable": true,
           "x-reactions": [
             {
               "dependencies": ["$inputs"],
@@ -489,6 +635,7 @@
           },
           "default": 128,
           "x-index": 130,
+          "x-perTable": true,
           "x-reactions": [
             {
               "dependencies": ["$inputs"],
@@ -507,6 +654,7 @@
           "x-component": "Switch",
           "default": false,
           "x-index": 140,
+          "x-perTable": true,
           "x-decorator-props": {
             "layout": "horizontal",
             "tooltip": "${enablePrimaryKeyUpdate_description}"
@@ -538,6 +686,10 @@
       "s3SecretKey": "S3 Secret Key",
       "s3Region": "S3 Region",
       "s3Region_placeholder": "e.g., us-east-1",
+      "s3Properties": "S3 Properties",
+      "prompt": "Add",
+      "propKey": "Property Name",
+      "propValue": "Property Value",
       "hdfsHost": "HDFS Host",
       "hdfsHost_placeholder": "e.g., namenode.example.com",
       "hdfsPort": "HDFS Port",
@@ -548,6 +700,8 @@
       "ossSecretKey": "OSS Secret Key",
       "database": "Database Name",
       "database_placeholder": "Paimon database name",
+      "partitionKey": "Partition Key",
+      "partitionKeyTip": "The partition key of the table, used to partition the data. If left empty, it means not to use the partitioning function.",
       "bucketMode": "Bucket Mode",
       "bucketMode_dynamic": "Dynamic (Recommended for general use)",
       "bucketMode_fixed": "Fixed (Better performance)",
@@ -555,6 +709,8 @@
       "bucketCount_placeholder": "Number of buckets for fixed mode (must be > 0)",
       "fileFormat": "File Format",
       "compression": "Compression Format",
+      "tableProperties": "Table Properties",
+      "tablePropertiesTip": "Table properties, e.g., {key1: value1, key2: value2}",
       "writeBufferSize": "Write Buffer Size (MB)",
       "writeBufferSize_placeholder": "Memory buffer for writes (64-2048 MB, default: 256)",
       "batchAccumulationSize": "Batch Accumulation Size",
@@ -583,6 +739,10 @@
       "s3SecretKey": "S3 密钥",
       "s3Region": "S3 区域",
       "s3Region_placeholder": "例如：us-east-1",
+      "s3Properties": "S3 配置",
+      "prompt": "添加",
+      "propKey": "属性名",
+      "propValue": "属性值",
       "hdfsHost": "HDFS 主机",
       "hdfsHost_placeholder": "例如：namenode.example.com",
       "hdfsPort": "HDFS 端口",
@@ -593,6 +753,8 @@
       "ossSecretKey": "OSS 密钥",
       "database": "数据库名称",
       "database_placeholder": "Paimon 数据库名称",
+      "partitionKey": "分区键",
+      "partitionKeyTip": "表的分区键，用于对数据进行分区。如果置空，则表示不使用分区功能。",
       "bucketMode": "分桶模式",
       "bucketMode_dynamic": "动态模式（推荐通用场景）",
       "bucketMode_fixed": "固定模式（更好的性能）",
@@ -600,6 +762,8 @@
       "bucketCount_placeholder": "固定模式下的桶数量（必须大于 0）",
       "fileFormat": "文件格式",
       "compression": "压缩格式",
+      "tableProperties": "表属性",
+      "tablePropertiesTip": "表属性，例如：{key1: value1, key2: value2}",
       "writeBufferSize": "写入缓冲区大小（MB）",
       "writeBufferSize_placeholder": "写入内存缓冲区大小（64-2048 MB，默认：256）",
       "batchAccumulationSize": "批量累积大小",
@@ -628,6 +792,10 @@
       "s3SecretKey": "S3 密鑰",
       "s3Region": "S3 區域",
       "s3Region_placeholder": "例如：us-east-1",
+      "s3Properties": "S3 配置",
+      "prompt": "添加",
+      "propKey": "屬性名",
+      "propValue": "屬性值",
       "hdfsHost": "HDFS 主機",
       "hdfsHost_placeholder": "例如：namenode.example.com",
       "hdfsPort": "HDFS 端口",
@@ -638,6 +806,8 @@
       "ossSecretKey": "OSS 密鑰",
       "database": "數據庫名稱",
       "database_placeholder": "Paimon 數據庫名稱",
+      "partitionKey": "分區鍵",
+      "partitionKeyTip": "表的分區鍵，用於對數據進行分區。如果置空，則表示不使用分區功能。",
       "bucketMode": "分桶模式",
       "bucketMode_dynamic": "動態模式（推薦通用場景）",
       "bucketMode_fixed": "固定模式（更好的性能）",
@@ -645,6 +815,8 @@
       "bucketCount_placeholder": "固定模式下的桶數量（必須大於 0）",
       "fileFormat": "文件格式",
       "compression": "壓縮格式",
+      "tableProperties": "表屬性",
+      "tablePropertiesTip": "表屬性，例如：{key1: value1, key2: value2}",
       "writeBufferSize": "寫入緩衝區大小（MB）",
       "writeBufferSize_placeholder": "寫入內存緩衝區大小（64-2048 MB，默認：256）",
       "batchAccumulationSize": "批量累積大小",

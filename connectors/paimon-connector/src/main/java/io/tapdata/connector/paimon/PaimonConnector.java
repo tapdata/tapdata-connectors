@@ -65,6 +65,7 @@ public class PaimonConnector extends ConnectorBase {
         if (MapUtils.isNotEmpty(nodeConfig)) {
             nodeConfig.remove("database");
             paimonConfig.load(nodeConfig);
+            paimonConfig.setTableConfig(connectionContext.getTableNodeConfig());
         }
 
         // Initialize Paimon service

@@ -352,9 +352,7 @@ public class CommonDbConfig implements Serializable {
     }
 
     public Boolean getApplyDefault(String key) {
-        if (tableConfig != null && tableConfig.containsKey(key))
-            return tableConfig.get(key).getValue("applyDefault", applyDefault);
-        return applyDefault;
+        return getTableConfigValue(key, "applyDefault", applyDefault);
     }
 
     public void setApplyDefault(Boolean applyDefault) {
@@ -495,5 +493,21 @@ public class CommonDbConfig implements Serializable {
 
     public void setTableConfig(Map<String, DataMap> tableConfig) {
         this.tableConfig = tableConfig;
+    }
+
+    /**
+     * Generic method to get table-specific or global configuration value
+     *
+     * @param key table name key
+     * @param propertyName property name in tableConfig
+     * @param defaultValue default value from global config
+     * @param <T> type of the value
+     * @return table-specific value if exists, otherwise global default value
+     */
+    protected <T> T getTableConfigValue(String key, String propertyName, T defaultValue) {
+        if (tableConfig != null && tableConfig.containsKey(key)) {
+            return tableConfig.get(key).getValue(propertyName, defaultValue);
+        }
+        return defaultValue;
     }
 }

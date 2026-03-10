@@ -4,6 +4,7 @@ import io.tapdata.common.CommonDbConfig;
 
 import java.io.Serializable;
 import java.util.*;
+import java.util.function.Function;
 
 public class ClickhouseConfig extends CommonDbConfig implements Serializable {
 
@@ -44,9 +45,7 @@ public class ClickhouseConfig extends CommonDbConfig implements Serializable {
     }
 
     public Boolean getMixFastWrite(String key) {
-        if (tableConfig != null && tableConfig.containsKey(key))
-            return tableConfig.get(key).getValue("mixFastWrite", mixFastWrite);
-        return mixFastWrite;
+        return getTableConfigValue(key, "mixFastWrite", mixFastWrite);
     }
 
     public void setMixFastWrite(Boolean mixFastWrite) {
@@ -58,9 +57,7 @@ public class ClickhouseConfig extends CommonDbConfig implements Serializable {
     }
 
     public Boolean getSupportPk(String key) {
-        if (tableConfig != null && tableConfig.containsKey(key))
-            return tableConfig.get(key).getValue("supportPk", supportPk);
-        return supportPk;
+        return getTableConfigValue(key, "supportPk", supportPk);
     }
 
     public void setSupportPk(Boolean supportPk) {
@@ -72,9 +69,7 @@ public class ClickhouseConfig extends CommonDbConfig implements Serializable {
     }
 
     public String getEngineExpr(String key) {
-        if (tableConfig != null && tableConfig.containsKey(key))
-            return tableConfig.get(key).getValue("engineExpr", engineExpr);
-        return engineExpr;
+        return getTableConfigValue(key, "engineExpr", engineExpr);
     }
 
     public void setEngineExpr(String engineExpr) {
@@ -86,9 +81,7 @@ public class ClickhouseConfig extends CommonDbConfig implements Serializable {
     }
 
     public String getPartitionExpr(String key) {
-        if (tableConfig != null && tableConfig.containsKey(key))
-            return tableConfig.get(key).getValue("partitionExpr", partitionExpr);
-        return partitionExpr;
+        return getTableConfigValue(key, "partitionExpr", partitionExpr);
     }
 
     public void setPartitionExpr(String partitionExpr) {
@@ -100,9 +93,7 @@ public class ClickhouseConfig extends CommonDbConfig implements Serializable {
     }
 
     public String getOrderExpr(String key) {
-        if (tableConfig != null && tableConfig.containsKey(key))
-            return tableConfig.get(key).getValue("orderExpr", orderExpr);
-        return orderExpr;
+        return getTableConfigValue(key, "orderExpr", orderExpr);
     }
 
     public void setOrderExpr(String orderExpr) {
@@ -114,9 +105,7 @@ public class ClickhouseConfig extends CommonDbConfig implements Serializable {
     }
 
     public List<LinkedHashMap<String, String>> getTableProperties(String key) {
-        if (tableConfig != null && tableConfig.containsKey(key))
-            return tableConfig.get(key).getValue("tableProperties", tableProperties);
-        return tableProperties;
+        return getTableConfigValue(key, "tableProperties", tableProperties);
     }
 
     public void setTableProperties(List<LinkedHashMap<String, String>> tableProperties) {

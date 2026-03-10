@@ -4,6 +4,9 @@ import io.tapdata.common.CommonDbConfig;
 import io.tapdata.kit.EmptyKit;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -20,6 +23,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     
     // Storage type: s3, hdfs, oss, local
     private String storageType = "local";
+    private List<LinkedHashMap<String, String>> s3Properties = new ArrayList<>();
     
     // S3 configuration
     private String s3Endpoint;
@@ -40,6 +44,8 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Database name (Paimon database)
     private String database = "default";
 
+    private List<String> partitionKey;
+
     // Bucket mode: "dynamic" or "fixed"
     // Dynamic mode: better for general use, uses StreamTableWrite
     // Fixed mode: better performance, uses BatchTableWrite
@@ -52,6 +58,8 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     private String fileFormat = "";
 
     private String compression = "";
+
+    private List<LinkedHashMap<String, String>> tableProperties = new ArrayList<>();
 
     // ===== Performance Optimization Settings =====
 
@@ -105,6 +113,14 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     public void setStorageType(String storageType) {
         this.storageType = storageType;
+    }
+
+    public List<LinkedHashMap<String, String>> getS3Properties() {
+        return s3Properties;
+    }
+
+    public void setS3Properties(List<LinkedHashMap<String, String>> s3Properties) {
+        this.s3Properties = s3Properties;
     }
 
     public String getS3Endpoint() {
@@ -197,8 +213,24 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         this.database = database;
     }
 
+    public List<String> getPartitionKey() {
+        return partitionKey;
+    }
+
+    public List<String> getPartitionKey(String key) {
+        return getTableConfigValue(key, "partitionKey", partitionKey);
+    }
+
+    public void setPartitionKey(List<String> partitionKey) {
+        this.partitionKey = partitionKey;
+    }
+
     public String getBucketMode() {
         return bucketMode;
+    }
+
+    public String getBucketMode(String key) {
+        return getTableConfigValue(key, "bucketMode", bucketMode);
     }
 
     public void setBucketMode(String bucketMode) {
@@ -207,6 +239,10 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     public Integer getBucketCount() {
         return bucketCount;
+    }
+
+    public Integer getBucketCount(String key) {
+        return getTableConfigValue(key, "bucketCount", bucketCount);
     }
 
     public void setBucketCount(Integer bucketCount) {
@@ -226,6 +262,10 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         return fileFormat;
     }
 
+    public String getFileFormat(String key) {
+        return getTableConfigValue(key, "fileFormat", fileFormat);
+    }
+
     public void setFileFormat(String fileFormat) {
         this.fileFormat = fileFormat;
     }
@@ -234,8 +274,24 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         return compression;
     }
 
+    public String getCompression(String key) {
+        return getTableConfigValue(key, "compression", compression);
+    }
+
     public void setCompression(String compression) {
         this.compression = compression;
+    }
+
+    public List<LinkedHashMap<String, String>> getTableProperties() {
+        return tableProperties;
+    }
+
+    public List<LinkedHashMap<String, String>> getTableProperties(String key) {
+        return getTableConfigValue(key, "tableProperties", tableProperties);
+    }
+
+    public void setTableProperties(List<LinkedHashMap<String, String>> tableProperties) {
+        this.tableProperties = tableProperties;
     }
 
     public Integer getWriteBufferSize() {
@@ -282,12 +338,20 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         return enableAutoCompaction;
     }
 
+    public Boolean getEnableAutoCompaction(String key) {
+        return getTableConfigValue(key, "enableAutoCompaction", enableAutoCompaction);
+    }
+
     public void setEnableAutoCompaction(Boolean enableAutoCompaction) {
         this.enableAutoCompaction = enableAutoCompaction;
     }
 
     public Integer getCompactionIntervalMinutes() {
         return compactionIntervalMinutes;
+    }
+
+    public Integer getCompactionIntervalMinutes(String key) {
+        return getTableConfigValue(key, "compactionIntervalMinutes", compactionIntervalMinutes);
     }
 
     public void setCompactionIntervalMinutes(Integer compactionIntervalMinutes) {
@@ -298,12 +362,20 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         return targetFileSize;
     }
 
+    public Integer getTargetFileSize(String key) {
+        return getTableConfigValue(key, "targetFileSize", targetFileSize);
+    }
+
     public void setTargetFileSize(Integer targetFileSize) {
         this.targetFileSize = targetFileSize;
     }
 
     public Boolean getEnablePrimaryKeyUpdate() {
         return enablePrimaryKeyUpdate;
+    }
+
+    public Boolean getEnablePrimaryKeyUpdate(String key) {
+        return getTableConfigValue(key, "enablePrimaryKeyUpdate", enablePrimaryKeyUpdate);
     }
 
     public void setEnablePrimaryKeyUpdate(Boolean enablePrimaryKeyUpdate) {
