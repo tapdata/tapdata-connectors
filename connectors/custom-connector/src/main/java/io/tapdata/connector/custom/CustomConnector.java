@@ -463,8 +463,7 @@ public class CustomConnector extends ConnectorBase {
                     }});
                     result.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get());
                 } catch (Exception e) {
-                    result.addError(event, e);
-                    break;
+                    throw new TapPdkRetryableEx(pdkId,e);
                 }
             }else{
                 list.add(temp);
