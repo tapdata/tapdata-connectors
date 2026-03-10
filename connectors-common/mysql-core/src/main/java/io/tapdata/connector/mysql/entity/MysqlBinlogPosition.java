@@ -46,6 +46,11 @@ public class MysqlBinlogPosition implements Serializable {
         this.gtidSet = gtidSet;
     }
 
+    public MysqlBinlogPosition gtid(String gtidSet) {
+        this.gtidSet = gtidSet;
+        return this;
+    }
+
     public MysqlBinlogPosition clone() {
         MysqlBinlogPosition mysqlBinlogPosition = new MysqlBinlogPosition(filename, position);
         mysqlBinlogPosition.setGtidSet(gtidSet);

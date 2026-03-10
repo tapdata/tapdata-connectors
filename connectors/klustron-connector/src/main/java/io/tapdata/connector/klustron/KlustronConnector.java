@@ -3,27 +3,31 @@ package io.tapdata.connector.klustron;
 import com.mysql.cj.exceptions.StatementIsClosedException;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
-import io.tapdata.common.dml.NormalRecordWriter;
+import io.tapdata.connector.klustron.cdc.KunLunOffset;
+import io.tapdata.connector.klustron.cdc.KunLunReader;
 import io.tapdata.connector.klustron.config.KunLunCdcConfig;
 import io.tapdata.connector.klustron.config.KunLunMysqlConfig;
 import io.tapdata.connector.klustron.config.KunLunPgConfig;
+import io.tapdata.connector.klustron.config.StorageNode;
 import io.tapdata.connector.klustron.context.KunLunMysqlContext;
 import io.tapdata.connector.klustron.context.KunLunPgContext;
+import io.tapdata.connector.klustron.target.KunLunMateViewWriter;
+import io.tapdata.connector.klustron.target.KunLunNormalWriter;
 import io.tapdata.connector.mysql.MysqlExceptionCollector;
-import io.tapdata.connector.mysql.MysqlReaderV2;
 import io.tapdata.connector.mysql.constant.DeployModeEnum;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
 import io.tapdata.connector.mysql.util.MysqlBinlogPositionUtil;
 import io.tapdata.connector.postgres.PostgresSqlMaker;
-import io.tapdata.connector.postgres.dml.PostgresRecordWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapClearTableEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
 import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
@@ -72,7 +76,6 @@ import org.postgresql.util.PGobject;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.sql.Connection;
 import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -91,6 +94,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -111,14 +116,11 @@ import java.util.stream.Collectors;
  */
 @TapConnectorClass("spec_klustron.json")
 public class KlustronConnector extends CommonDbConnector {
+    public static final String TABLE_TYPE = "TABLE_TYPE";
+    public static final String MATE_VIEW_NAME = "MATE_VIEW_NAME";
+    public static final String KUN_LUN_MATE_VIEW = "KUN_LUN_MATE_VIEW";
     protected KunLunPgContext pgJdbcContext;
     protected KunLunMysqlContext mysqlJdbcContext;
-    protected KunLunMysqlContext cdcJdbcContext;
-
-//    protected MysqlReader mysqlReader;
-//    protected MysqlWriter mysqlWriter;
-
-    private KunLunCdcConfig ofCdcConfig;
     private KunLunMysqlConfig ofMysqlConfig;
     private KunLunPgConfig ofPgConfig;
 
@@ -135,13 +137,12 @@ public class KlustronConnector extends CommonDbConnector {
     protected final AtomicBoolean started = new AtomicBoolean(false);
     public static final String MASTER_NODE_KEY = "MASTER_NODE";
     public java.util.HashMap<String, KunLunMysqlContext> contextMapForMasterSlave;
+    private Map<String, Map<String, List<String>>> mateViewIndexMap = new HashMap<>(16);
+
+    KunLunReader kunLunReader;
 
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
-        ofCdcConfig = (KunLunCdcConfig) new KunLunCdcConfig().load(tapConnectionContext.getConnectionConfig());
-        ofCdcConfig.load(tapConnectionContext.getNodeConfig());
-        cdcJdbcContext = new KunLunMysqlContext(ofCdcConfig);
-
         ofMysqlConfig = (KunLunMysqlConfig) new KunLunMysqlConfig().load(tapConnectionContext.getConnectionConfig());
         ofMysqlConfig.load(tapConnectionContext.getNodeConfig());
         mysqlJdbcContext = new KunLunMysqlContext(ofMysqlConfig);
@@ -218,6 +219,7 @@ public class KlustronConnector extends CommonDbConnector {
         fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
         started.set(true);
+        mateViewIndexMap = pgJdbcContext.mateViewIndex(ofPgConfig.getSchema(), null);
     }
 
     @Override
@@ -232,22 +234,10 @@ public class KlustronConnector extends CommonDbConnector {
                 ((TapConnectorContext) connectionContext).setStateMap(stateMap);
             }
         }
-//        try {
-//            Optional.ofNullable(this.mysqlReader).ifPresent(MysqlReader::close);
-//        } catch (Exception ignored) {
-//        }
         if (null != mysqlJdbcContext) {
             try {
                 this.mysqlJdbcContext.close();
                 this.mysqlJdbcContext = null;
-            } catch (Exception e) {
-                tapLogger.error("Release connector failed, error: " + e.getMessage() + "\n" + getStackString(e));
-            }
-        }
-        if (null != cdcJdbcContext) {
-            try {
-                this.cdcJdbcContext.close();
-                this.cdcJdbcContext = null;
             } catch (Exception e) {
                 tapLogger.error("Release connector failed, error: " + e.getMessage() + "\n" + getStackString(e));
             }
@@ -261,6 +251,14 @@ public class KlustronConnector extends CommonDbConnector {
                 }
             });
             contextMapForMasterSlave = null;
+        }
+        if (null != kunLunReader) {
+            try {
+                kunLunReader.close();
+                kunLunReader = null;
+            } catch (Exception e) {
+                tapLogger.error("Release connector failed, error: " + e.getMessage() + "\n" + getStackString(e));
+            }
         }
     }
 
@@ -293,8 +291,12 @@ public class KlustronConnector extends CommonDbConnector {
     }
 
     @Override
-    public void onLightStart(TapConnectionContext tapConnectionContext) throws Throwable {
-
+    protected Map<String, Object> getSpecificAttr(DataMap dataMap) {
+        String mvName = dataMap.getString("mvName");
+        if (StringUtils.isNotBlank(mvName)) {
+            return TapSimplify.map(TapSimplify.entry(TABLE_TYPE, KUN_LUN_MATE_VIEW), TapSimplify.entry(MATE_VIEW_NAME, mvName));
+        }
+        return new HashMap<>();
     }
 
     @Override
@@ -457,9 +459,9 @@ public class KlustronConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
-        MysqlReaderV2 mysqlReaderV2 = new MysqlReaderV2(cdcJdbcContext, tapLogger, dbTimeZone);
-        mysqlReaderV2.init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
-        mysqlReaderV2.startMiner(this::isAlive);
+        kunLunReader = new KunLunReader((KunLunCdcConfig) new KunLunCdcConfig().load(tapConnectorContext.getConnectionConfig()), tapLogger, dbTimeZone)
+                .init(tables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
+        kunLunReader.startMiner(this::isAlive);
     }
 
     @Override
@@ -478,26 +480,39 @@ public class KlustronConnector extends CommonDbConnector {
     }
 
     private Object timestampToStreamOffset(TapConnectorContext tapConnectorContext, Long startTime) throws Throwable {
-        if (null == startTime) {
-            MysqlBinlogPosition mysqlBinlogPosition = this.cdcJdbcContext.readBinlogPosition();
-            if (mysqlBinlogPosition == null) {
-                String solutionSuggestions = "please open mysql binlog config";
-                Throwable cause = new Exception(" Binlog config is close");
-                ((MysqlExceptionCollector) exceptionCollector).collectCdcConfigInvalid(solutionSuggestions, cause);
+        List<StorageNode> storageNodes = ofMysqlConfig.getStorageNode();
+        KunLunOffset kunLunOffset = new KunLunOffset();
+        for (StorageNode storageNode : storageNodes) {
+            KunLunCdcConfig ofCdcConfig = (KunLunCdcConfig) new KunLunCdcConfig().load(tapConnectorContext.getConnectionConfig());
+            ofCdcConfig.setHost(storageNode.getHost());
+            ofCdcConfig.setPort(storageNode.getPort());
+            ofCdcConfig.setUser(storageNode.getUsername());
+            ofCdcConfig.setPassword(storageNode.getPassword());
+            if (null == startTime) {
+                try (KunLunMysqlContext cdcJdbcContext = new KunLunMysqlContext(ofCdcConfig)) {
+                    MysqlBinlogPosition mysqlBinlogPosition = cdcJdbcContext.readBinlogPosition();
+                    if (mysqlBinlogPosition == null) {
+                        String solutionSuggestions = "please open mysql binlog config";
+                        Throwable cause = new Exception(" Binlog config is close");
+                        ((MysqlExceptionCollector) exceptionCollector).collectCdcConfigInvalid(solutionSuggestions, cause);
+                    }
+                    kunLunOffset.setOffset(storageNode.getHost(), storageNode.getPort(), cdcJdbcContext.readBinlogPosition());
+                }
+            } else {
+                try (MysqlBinlogPositionUtil ins = new MysqlBinlogPositionUtil(
+                        storageNode.getHost(),
+                        storageNode.getPort(),
+                        storageNode.getUsername(),
+                        storageNode.getPassword())) {
+                    MysqlBinlogPosition mysqlBinlogPosition = ins.findByLessTimestamp(startTime, true);
+                    if (null == mysqlBinlogPosition) {
+                        throw new RuntimeException("Not found binlog of sync time: " + startTime);
+                    }
+                    kunLunOffset.setOffset(storageNode.getHost(), storageNode.getPort(), mysqlBinlogPosition);
+                }
             }
-            return this.cdcJdbcContext.readBinlogPosition();
         }
-        try (MysqlBinlogPositionUtil ins = new MysqlBinlogPositionUtil(
-                ((KunLunMysqlConfig) ofMysqlConfig).getDataHost(),
-                ((KunLunMysqlConfig) ofMysqlConfig).getDataPort(),
-                ((KunLunMysqlConfig) ofMysqlConfig).getDataUsername(),
-                ((KunLunMysqlConfig) ofMysqlConfig).getDataPassword())) {
-            MysqlBinlogPosition mysqlBinlogPosition = ins.findByLessTimestamp(startTime, true);
-            if (null == mysqlBinlogPosition) {
-                throw new RuntimeException("Not found binlog of sync time: " + startTime);
-            }
-            return mysqlBinlogPosition;
-        }
+        return kunLunOffset;
     }
 
     private TableInfo getTableInfo(TapConnectionContext tapConnectorContext, String tableName) {
@@ -509,6 +524,19 @@ public class KlustronConnector extends CommonDbConnector {
     }
 
     protected CreateTableOptions createTableV2(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent) throws SQLException {
+        Boolean mateAble = ofPgConfig.getMaterAble();
+        if ((null != mateAble && mateAble)) {
+            CreateTableOptions options = new CreateTableOptions();
+            try {
+                pgJdbcContext.execute(ofPgConfig.getMateSql());
+                options.setTableExists(false);
+            } catch (Exception e) {
+                tapLogger.warn("Failed to create mate view, maybe it exists, msg: {}, sql: {}", e.getMessage(), ofPgConfig.getMateSql(), e);
+                options.setTableExists(false);
+            }
+            return options;
+        }
+
         if (Boolean.TRUE.equals(ofPgConfig.getCreateAutoInc()) && Integer.parseInt(version) > 100000) {
             createTableEvent.getTable().getNameFieldMap().entrySet().stream().filter(entry -> EmptyKit.isNotBlank(entry.getValue().getSequenceName())).forEach(entry -> {
                 StringBuilder sequenceSql = new StringBuilder("CREATE SEQUENCE IF NOT EXISTS " + getSchemaAndTable(entry.getValue().getSequenceName()));
@@ -529,13 +557,25 @@ public class KlustronConnector extends CommonDbConnector {
         CreateTableOptions options = createTable(connectorContext, createTableEvent, false, "");
         if (EmptyKit.isNotBlank(ofPgConfig.getTableOwner())) {
             tapLogger.info("Change table {} owner to {}", createTableEvent.getTableId(), ofPgConfig.getTableOwner());
-            jdbcContext.execute(String.format("alter table %s owner to %s", getSchemaAndTable(createTableEvent.getTableId()), ofPgConfig.getTableOwner()));
+            pgJdbcContext.execute(String.format("alter table %s owner to %s", getSchemaAndTable(createTableEvent.getTableId()), ofPgConfig.getTableOwner()));
         }
         return options;
     }
 
     @Override
     protected CreateTableOptions createTable(TapConnectorContext connectorContext, TapCreateTableEvent createTableEvent, Boolean commentInField, String append) throws SQLException {
+        Boolean mateAble = ofPgConfig.getMaterAble();
+        if ((null != mateAble && mateAble)) {
+            CreateTableOptions options = new CreateTableOptions();
+            try {
+                pgJdbcContext.execute(ofPgConfig.getMateSql());
+                options.setTableExists(false);
+            } catch (Exception e) {
+                tapLogger.warn("Failed to create mate view, maybe it exists, sql: {}", ofPgConfig.getMateSql(), e);
+                options.setTableExists(false);
+            }
+            return options;
+        }
         if (Boolean.TRUE.equals(ofPgConfig.getDoubleActive())) {
             createDoubleActiveTempTable();
         }
@@ -640,96 +680,61 @@ public class KlustronConnector extends CommonDbConnector {
         }
         if (ofPgConfig.getCreateAutoInc() && Integer.parseInt(version) > 100000) {
             if (!writtenTableMap.get(tapTable.getId()).containsKey(HAS_AUTO_INCR)) {
-                List<String> autoIncFields = tapTable.getNameFieldMap().values().stream().filter(TapField::getAutoInc).map(TapField::getName).collect(Collectors.toList());
-                writtenTableMap.get(tapTable.getId()).put(HAS_AUTO_INCR, autoIncFields);
+                List<String> autoIncFields = tapTable.getNameFieldMap()
+                        .values()
+                        .stream()
+                        .filter(TapField::getAutoInc)
+                        .map(TapField::getName)
+                        .collect(Collectors.toList());
+                writtenTableMap.get(tapTable.getId())
+                        .put(HAS_AUTO_INCR, autoIncFields);
             }
         }
     }
 
-
     protected void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws SQLException {
-        jdbcContext = pgJdbcContext;
-        beforeWriteRecord(tapTable);
-        boolean hasUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_UNIQUE_INDEX, false);
-        boolean hasMultiUniqueIndex = writtenTableMap.get(tapTable.getId()).getValue(HAS_MULTI_UNIQUE_INDEX, false);
-        List<String> autoIncFields = writtenTableMap.get(tapTable.getId()).getValue(HAS_AUTO_INCR, new ArrayList<>());
-        String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
-        if (insertDmlPolicy == null) {
-            insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
-        }
-        String updateDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
-        if (updateDmlPolicy == null) {
-            updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
-        }
-        String deleteDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_DELETE_POLICY);
-        if (deleteDmlPolicy == null) {
-            deleteDmlPolicy = ConnectionOptions.DML_DELETE_POLICY_IGNORE_ON_NON_EXISTS;
-        }
-        NormalRecordWriter postgresRecordWriter;
-        if (isTransaction) {
-            String threadName = Thread.currentThread().getName();
-            Connection connection;
-            if (transactionConnectionMap.containsKey(threadName)) {
-                connection = transactionConnectionMap.get(threadName);
-            } else {
-                connection = pgJdbcContext.getConnection();
-                transactionConnectionMap.put(threadName, connection);
+        Object tableType = Optional.ofNullable(tapTable.getTableAttr()).orElse(new HashMap<>()).get(TABLE_TYPE);
+        Boolean mateAble = ofPgConfig.getMaterAble();
+        if (KUN_LUN_MATE_VIEW.equals(tableType) || (null != mateAble && mateAble)) {
+            String tableId = tapTable.getId();
+            mateViewIndexMap.computeIfAbsent(tableId, tid -> {
+                try {
+                    Map<String, Map<String, List<String>>> indexMap = pgJdbcContext.mateViewIndex(ofPgConfig.getSchema(), tid);
+                    return indexMap.get(tid);
+                } catch (Exception e) {
+                    tapLogger.warn("Failed to get mate view index for table " + tid, e);
+                    return null;
+                }
+            });
+            Map<String, List<String>> indexKeys = mateViewIndexMap.get(tableId);
+            if (null == indexKeys || indexKeys.isEmpty()) {
+                throw new CoreException("Failed to get mate view index for table " + tableId + ", please check if the table is a materialized view");
             }
-            postgresRecordWriter = new PostgresRecordWriter(pgJdbcContext, connection, tapTable, (hasUniqueIndex && !hasMultiUniqueIndex) ? version : "90500")
-                    .setInsertPolicy(insertDmlPolicy)
-                    .setUpdatePolicy(updateDmlPolicy)
-                    .setDeletePolicy(deleteDmlPolicy)
-                    .setTapLogger(tapLogger);
+            Set<String> originTable = indexKeys.keySet();
+            List<TapRecordEvent> tapRecordFinalEvents = tapRecordEvents.stream()
+                    .filter(e -> originTable.contains(e.getTableId()))
+                    .toList();
+            if (tapRecordFinalEvents.isEmpty()) {
+                return;
+            }
+            new KunLunMateViewWriter()
+                    .init(pgJdbcContext, version, isTransaction, tapLogger)
+                    .transactionConnectionMap(transactionConnectionMap)
+                    .writtenTableMap(writtenTableMap)
+                    .getSchemaAndTable(this::getSchemaAndTable)
+                    .isAlive(this::isAlive)
+                    .indexKey(indexKeys)
+                    .writeRecord(connectorContext, tapRecordEvents, tapTable, writeListResultConsumer);
         } else {
-            postgresRecordWriter = new PostgresRecordWriter(pgJdbcContext, tapTable, (hasUniqueIndex && !hasMultiUniqueIndex) ? version : "90500")
-                    .setInsertPolicy(insertDmlPolicy)
-                    .setUpdatePolicy(updateDmlPolicy)
-                    .setDeletePolicy(deleteDmlPolicy)
-                    .setTapLogger(tapLogger);
-        }
-        if (Boolean.TRUE.equals(ofPgConfig.getAllowReplication())) {
-            if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
-                boolean canClose = postgresRecordWriter.closeConstraintCheck();
-                writtenTableMap.get(tapTable.getId()).put(CANNOT_CLOSE_CONSTRAINT, !canClose);
-            } else if (Boolean.FALSE.equals(writtenTableMap.get(tapTable.getId()).get(CANNOT_CLOSE_CONSTRAINT))) {
-                postgresRecordWriter.closeConstraintCheck();
-            }
-        }
-        if (ofPgConfig.getCreateAutoInc() && Integer.parseInt(version) > 100000 && EmptyKit.isNotEmpty(autoIncFields)
-                && "CDC".equals(tapRecordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
-            postgresRecordWriter.setAutoIncFields(autoIncFields);
-            postgresRecordWriter.write(tapRecordEvents, writeListResultConsumer, this::isAlive);
-            if (EmptyKit.isNotEmpty(postgresRecordWriter.getAutoIncMap())) {
-                List<String> alterSqls = new ArrayList<>();
-                postgresRecordWriter.getAutoIncMap().forEach((k, v) -> {
-                    String sequenceName = tapTable.getNameFieldMap().get(k).getSequenceName();
-                    AtomicLong actual = new AtomicLong(0);
-                    if (EmptyKit.isNotBlank(sequenceName)) {
-                        try {
-                            pgJdbcContext.queryWithNext("select last_value from " + getSchemaAndTable(sequenceName), resultSet -> actual.set(resultSet.getLong(1)));
-                        } catch (SQLException ignore) {
-                        }
-                        if (actual.get() >= (Long.parseLong(String.valueOf(v)) + ofPgConfig.getAutoIncJumpValue())) {
-                            return;
-                        }
-                        alterSqls.add("select setval('" + getSchemaAndTable(sequenceName) + "'," + (Long.parseLong(String.valueOf(v)) + ofPgConfig.getAutoIncJumpValue()) + ", false) ");
-                    } else {
-                        AtomicReference<String> actualSequenceName = new AtomicReference<>();
-                        try {
-                            pgJdbcContext.queryWithNext("select pg_get_serial_sequence('" + getSchemaAndTable(tapTable.getId()) + "', '\"" + k + "\"')", resultSet -> actualSequenceName.set(resultSet.getString(1)));
-                            pgJdbcContext.queryWithNext("select last_value from " + actualSequenceName.get(), resultSet -> actual.set(resultSet.getLong(1)));
-                        } catch (SQLException ignore) {
-                        }
-                        if (actual.get() >= (Long.parseLong(String.valueOf(v)) + ofPgConfig.getAutoIncJumpValue())) {
-                            return;
-                        }
-                        alterSqls.add("ALTER TABLE " + getSchemaAndTable(tapTable.getId()) + " ALTER COLUMN \"" + k + "\" SET GENERATED BY DEFAULT RESTART WITH " + (Long.parseLong(String.valueOf(v)) + ofPgConfig.getAutoIncJumpValue()));
-                    }
-                });
-                pgJdbcContext.batchExecute(alterSqls);
-            }
-        } else {
-            postgresRecordWriter.write(tapRecordEvents, writeListResultConsumer, this::isAlive);
+            jdbcContext = pgJdbcContext;
+            beforeWriteRecord(tapTable);
+            new KunLunNormalWriter()
+                    .init(pgJdbcContext, version, isTransaction, tapLogger)
+                    .transactionConnectionMap(transactionConnectionMap)
+                    .writtenTableMap(writtenTableMap)
+                    .getSchemaAndTable(this::getSchemaAndTable)
+                    .isAlive(this::isAlive)
+                    .writeRecord(connectorContext, tapRecordEvents, tapTable, writeListResultConsumer);
         }
     }
 
@@ -848,9 +853,7 @@ public class KlustronConnector extends CommonDbConnector {
             //get all column names
             List<String> columnNames = DbKit.getColumnsFromResultSet(resultSet);
             Map<String, String> typeAndName = new HashMap<>();
-            tapTable.getNameFieldMap().forEach((key, value) -> {
-                typeAndName.put(key, value.getDataType());
-            });
+            tapTable.getNameFieldMap().forEach((key, value) -> typeAndName.put(key, value.getDataType()));
             try {
                 while (isAlive() && resultSet.next()) {
                     tapEvents.add(insertRecordEvent(filterTimeForPG(resultSet, typeAndName, columnNames), tapTable.getId()));
@@ -948,5 +951,25 @@ public class KlustronConnector extends CommonDbConnector {
         } else {
             batchReadWithoutHashSplit(tapConnectorContext, tapTable, offsetState, eventBatchSize, eventsOffsetConsumer);
         }
+    }
+
+    protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
+        String tableId = tapClearTableEvent.getTableId();
+        String schema = ofPgConfig.getSchema();
+        if (mateViewIndexMap.containsKey(tableId)) {
+            jdbcContext.execute(String.format("REFRESH MATERIALIZED VIEW %s.%s WITH NO DATA", schema, tableId));
+            return;
+        }
+        super.clearTable(tapConnectorContext, tapClearTableEvent);
+    }
+
+    protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
+        String tableId = tapDropTableEvent.getTableId();
+        String schema = ofPgConfig.getSchema();
+        if (mateViewIndexMap.containsKey(tableId)) {
+            jdbcContext.execute(String.format("drop materialized view %s.%s", schema, tableId));
+            return;
+        }
+        super.dropTable(tapConnectorContext, tapDropTableEvent);
     }
 }

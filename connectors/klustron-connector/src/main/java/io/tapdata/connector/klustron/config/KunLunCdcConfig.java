@@ -14,10 +14,6 @@ public class KunLunCdcConfig extends KunLunMysqlConfig {
     @Override
     public MysqlConfig load(Map<String, Object> map) {
         MysqlConfig c = super.load(map);
-        c.setHost(dataHost);
-        c.setPort(dataPort);
-        c.setUser(dataUsername);
-        c.setPassword(dataPassword);
         c.setDatabase(String.format("%s_$$_%s", db, sc));
         c.setSchema(getDatabase());
         return c;

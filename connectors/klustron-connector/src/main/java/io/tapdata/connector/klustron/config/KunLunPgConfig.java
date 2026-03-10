@@ -1,9 +1,10 @@
 package io.tapdata.connector.klustron.config;
 
 import io.tapdata.common.CommonDbConfig;
-import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -13,55 +14,24 @@ import java.util.Map;
  * @description
  */
 public class KunLunPgConfig extends PostgresConfig {
+    List<ComputeNode> computeNode;
+    List<StorageNode> storageNode;
     String username;
-    String dataHost;
-    Integer dataPort;
-    String dataUsername;
-    String dataPassword;
+    Boolean materAble;
+    String mateSql;
+
     String db;
     String sc;
-    int pgPort;
 
     @Override
     public CommonDbConfig load(Map<String, Object> map) {
         CommonDbConfig c = super.load(map);
-        c.setPort(pgPort);
+        c.setPort(computeNode.get(0).getPortPg());
         c.setDatabase(db);
         c.setSchema(sc);
         return c;
     }
 
-    public String getDataHost() {
-        return dataHost;
-    }
-
-    public void setDataHost(String dataHost) {
-        this.dataHost = dataHost;
-    }
-
-    public Integer getDataPort() {
-        return dataPort;
-    }
-
-    public void setDataPort(Integer dataPort) {
-        this.dataPort = dataPort;
-    }
-
-    public String getDataUsername() {
-        return dataUsername;
-    }
-
-    public void setDataUsername(String dataUsername) {
-        this.dataUsername = dataUsername;
-    }
-
-    public String getDataPassword() {
-        return dataPassword;
-    }
-
-    public void setDataPassword(String dataPassword) {
-        this.dataPassword = dataPassword;
-    }
 
     public String getUsername() {
         return username;
@@ -69,14 +39,6 @@ public class KunLunPgConfig extends PostgresConfig {
 
     public void setUsername(String username) {
         this.username = username;
-    }
-
-    public int getPgPort() {
-        return pgPort;
-    }
-
-    public void setPgPort(int pgPort) {
-        this.pgPort = pgPort;
     }
 
     public String getDb() {
@@ -93,5 +55,51 @@ public class KunLunPgConfig extends PostgresConfig {
 
     public void setSc(String sc) {
         this.sc = sc;
+    }
+
+    public List<ComputeNode> getComputeNode() {
+        return computeNode;
+    }
+
+    public List<StorageNode> getStorageNode() {
+        return storageNode;
+    }
+
+    public void setComputeNode(List<Object> computeNode) {
+        this.computeNode = new ArrayList<>();
+        for (Object o : computeNode) {
+            if (o instanceof ComputeNode) {
+                this.computeNode.add((ComputeNode) o);
+            } else if (o instanceof Map<?, ?> map) {
+                this.computeNode.add(new ComputeNode().load(map));
+            }
+        }
+    }
+
+    public void setStorageNode(List<Object> storageNode) {
+        this.storageNode = new ArrayList<>();
+        for (Object o : storageNode) {
+            if (o instanceof StorageNode) {
+                this.storageNode.add((StorageNode) o);
+            } else if (o instanceof Map<?, ?> map) {
+                this.storageNode.add(new StorageNode().load(map));
+            }
+        }
+    }
+
+    public String getMateSql() {
+        return mateSql;
+    }
+
+    public void setMateSql(String mateSql) {
+        this.mateSql = mateSql;
+    }
+
+    public Boolean getMaterAble() {
+        return materAble;
+    }
+
+    public void setMaterAble(Boolean materAble) {
+        this.materAble = materAble;
     }
 }

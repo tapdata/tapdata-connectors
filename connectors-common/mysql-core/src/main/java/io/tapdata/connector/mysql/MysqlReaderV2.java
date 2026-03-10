@@ -1,7 +1,17 @@
 package io.tapdata.connector.mysql;
 
 import com.github.shyiko.mysql.binlog.BinaryLogClient;
-import com.github.shyiko.mysql.binlog.event.*;
+import com.github.shyiko.mysql.binlog.event.DeleteRowsEventData;
+import com.github.shyiko.mysql.binlog.event.Event;
+import com.github.shyiko.mysql.binlog.event.EventHeader;
+import com.github.shyiko.mysql.binlog.event.EventHeaderV4;
+import com.github.shyiko.mysql.binlog.event.EventType;
+import com.github.shyiko.mysql.binlog.event.GtidEventData;
+import com.github.shyiko.mysql.binlog.event.QueryEventData;
+import com.github.shyiko.mysql.binlog.event.RotateEventData;
+import com.github.shyiko.mysql.binlog.event.TableMapEventData;
+import com.github.shyiko.mysql.binlog.event.UpdateRowsEventData;
+import com.github.shyiko.mysql.binlog.event.WriteRowsEventData;
 import com.github.shyiko.mysql.binlog.event.deserialization.EventDeserializer;
 import io.tapdata.common.concurrent.ConcurrentProcessor;
 import io.tapdata.common.concurrent.TapExecutors;
@@ -29,7 +39,13 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,7 +57,7 @@ import static io.tapdata.base.ConnectorBase.list;
 public class MysqlReaderV2 {
 
     private final MysqlConfig mysqlConfig;
-    private final Log tapLogger;
+    protected final Log tapLogger;
     private List<String> tableList;
     private KVReadOnlyMap<TapTable> tableMap;
     private Object offsetState;
@@ -56,8 +72,12 @@ public class MysqlReaderV2 {
     private final DDLParserType ddlParserType = DDLParserType.MYSQL_CCJ_SQL_PARSER;
 
     public MysqlReaderV2(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, TimeZone timeZone) {
+        this((MysqlConfig) mysqlJdbcContext.getConfig(), tapLogger, timeZone);
+    }
+
+    public MysqlReaderV2(MysqlConfig config, Log tapLogger, TimeZone timeZone) {
         this.tapLogger = tapLogger;
-        mysqlConfig = (MysqlConfig) mysqlJdbcContext.getConfig();
+        this.mysqlConfig = config;
         this.timeZone = timeZone;
     }
 
@@ -69,10 +89,25 @@ public class MysqlReaderV2 {
         this.consumer = consumer;
     }
 
+    protected Pair setStartOffset(BinaryLogClient client, Object offset) {
+        // set start point
+        if (offset instanceof MysqlBinlogPosition) {
+            MysqlBinlogPosition position = (MysqlBinlogPosition) offset;
+            if (EmptyKit.isNotEmpty(position.getFilename())) {
+                client.setBinlogFilename(position.getFilename());
+                client.setBinlogPosition(position.getPosition());
+                tapLogger.info("Starting from binlog position: {}/{}", position.getFilename(), position.getPosition());
+                return new Pair(position.getFilename(), null);
+            }
+        }
+        return new Pair(null, null);
+    }
+
     public void startMiner(Supplier<Boolean> isAlive) throws Throwable {
         BinaryLogClient client = new BinaryLogClient(mysqlConfig.getHost(), mysqlConfig.getPort(), mysqlConfig.getUser(), mysqlConfig.getPassword());
         AtomicReference<List<TapEvent>> events = new AtomicReference<>(list());
         AtomicReference<String> currentBinlogFile = new AtomicReference<>();
+        AtomicReference<String> currentGtid = new AtomicReference<>();
 
         try (ConcurrentProcessor<ScanEvent, OffsetEvent> concurrentProcessor = TapExecutors.createSimple(8, 32, "MysqlReader-Processor")) {
             client.setServerId(randomServerId());
@@ -81,15 +116,12 @@ public class MysqlReaderV2 {
                     EventDeserializer.CompatibilityMode.DATE_AND_TIME_AS_LONG_MICRO
             );
             client.setEventDeserializer(eventDeserializer);
-            // 设置起始位置
-            if (offsetState instanceof MysqlBinlogPosition) {
-                MysqlBinlogPosition position = (MysqlBinlogPosition) offsetState;
-                if (EmptyKit.isNotEmpty(position.getFilename())) {
-                    client.setBinlogFilename(position.getFilename());
-                    client.setBinlogPosition(position.getPosition());
-                    currentBinlogFile.set(position.getFilename());
-                    tapLogger.info("Starting from binlog position: {}/{}", position.getFilename(), position.getPosition());
-                }
+            Pair pair = setStartOffset(client, offsetState);
+            if (pair.getFileName() != null) {
+                currentBinlogFile.set(pair.getFileName());
+            }
+            if (pair.getGtid() != null) {
+                currentGtid.set(pair.getGtid());
             }
 
             // 注册事件监听器
@@ -100,15 +132,18 @@ public class MysqlReaderV2 {
                     RotateEventData rotateEventData = (RotateEventData) EventDeserializer.EventDataWrapper.internal(event.getData());
                     currentBinlogFile.set(rotateEventData.getBinlogFilename());
                     tapLogger.info("Binlog rotated to: {}/{}", rotateEventData.getBinlogFilename(), rotateEventData.getBinlogPosition());
+                } else if (eventType == EventType.GTID) {
+                    GtidEventData gtid = (GtidEventData) event.getData();
+                    currentGtid.set(gtid.getGtid());
                 } else if (eventType == EventType.TABLE_MAP) {
                     handleTableMapEvent(event);
                 } else if (eventType == EventType.QUERY) {
-                    concurrentProcessor.runAsyncWithBlocking(new ScanEvent(event, currentBinlogFile.get()), this::emit);
+                    concurrentProcessor.runAsyncWithBlocking(new ScanEvent(event, currentBinlogFile.get(), currentGtid.get()), this::emit);
                     return;
                 }
 
                 // 异步处理事件
-                concurrentProcessor.runAsync(new ScanEvent(event, currentBinlogFile.get()), this::emit);
+                concurrentProcessor.runAsync(new ScanEvent(event, currentBinlogFile.get(), currentGtid.get()), this::emit);
             });
 
             consumer.streamReadStarted();
@@ -192,7 +227,7 @@ public class MysqlReaderV2 {
                     ddlEvents.add(tapDDLEvent);
                 }
                 offsetEvent.setTapEvent(ddlEvents);
-                offsetEvent.setMysqlBinlogPosition(extractBinlogPosition(event, scanEvent.getFileName()));
+                offsetEvent.setMysqlBinlogPosition(extractBinlogPosition(event, scanEvent.getFileName(), scanEvent.getGtid()));
                 ddlEvents.forEach(e -> ddlFlush(((TapDDLEvent) e).getTableId()));
                 return offsetEvent;
             }
@@ -220,7 +255,7 @@ public class MysqlReaderV2 {
 
             // 如果成功解析出 TapEvent，创建 OffsetEvent
             if (tapEvents != null) {
-                position = extractBinlogPosition(event, scanEvent.getFileName());
+                position = extractBinlogPosition(event, scanEvent.getFileName(), scanEvent.getGtid());
                 return new OffsetEvent(tapEvents, position);
             }
 
@@ -473,10 +508,10 @@ public class MysqlReaderV2 {
     /**
      * 提取 binlog 位置信息
      */
-    private MysqlBinlogPosition extractBinlogPosition(Event event, String fileName) {
+    private MysqlBinlogPosition extractBinlogPosition(Event event, String fileName, String gtid) {
         EventHeaderV4 header = event.getHeader();
         long position = header.getNextPosition();
-        return new MysqlBinlogPosition(fileName, position);
+        return new MysqlBinlogPosition(fileName, position).gtid(gtid);
     }
 
     public int randomServerId() {
@@ -489,10 +524,12 @@ public class MysqlReaderV2 {
 
         private final Event event;
         private final String fileName;
+        private final String gtid;
 
-        public ScanEvent(Event event, String fileName) {
+        public ScanEvent(Event event, String fileName, String gtid) {
             this.event = event;
             this.fileName = fileName;
+            this.gtid = gtid;
         }
 
         public Event getEvent() {
@@ -501,6 +538,10 @@ public class MysqlReaderV2 {
 
         public String getFileName() {
             return fileName;
+        }
+
+        public String getGtid() {
+            return gtid;
         }
     }
 
@@ -531,6 +572,21 @@ public class MysqlReaderV2 {
 
         public void setMysqlBinlogPosition(MysqlBinlogPosition mysqlBinlogPosition) {
             this.mysqlBinlogPosition = mysqlBinlogPosition;
+        }
+    }
+
+    public static class Pair {
+        final String fileName;
+        final String gtid;
+        public Pair(String fileName, String gtid) {
+            this.fileName = fileName;
+            this.gtid = gtid;
+        }
+        public String getFileName() {
+            return fileName;
+        }
+        public String getGtid() {
+            return gtid;
         }
     }
 }

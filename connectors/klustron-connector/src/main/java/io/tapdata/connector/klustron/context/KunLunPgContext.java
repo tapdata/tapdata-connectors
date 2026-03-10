@@ -8,13 +8,17 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
+import org.apache.commons.lang3.StringUtils;
 
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.text.DecimalFormat;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.StringJoiner;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -103,6 +107,89 @@ public class KunLunPgContext extends PostgresJdbcContext {
         return String.format(PG_ALL_FOREIGN_KEY, StringKit.escape(getConfig().getSchema(), "'"), EmptyKit.isEmpty(tableNames) ? "" : " and pc.relname in ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')");
     }
 
+
+    protected String mateSql(String schema, String mateView) {
+        return String.format(StringUtils.isBlank(mateView) ? PG_MAT_VIEW_QUERY : (PG_MAT_VIEW_QUERY + " and t2.relname=" + StringKit.escape(mateView, "'")), schema);
+    }
+
+    public Map<String, Map<String, List<String>>> mateViewIndex(String schema, String mateView) throws SQLException {
+        Map<String, Map<String, List<String>>> indexMap = new HashMap<>();
+        query(mateSql(schema, mateView), resultSet -> {
+            while (resultSet.next()) {
+                indexMap.put(resultSet.getString("mv_name"), indexOfView(mateView, resultSet.getString("idxes"), resultSet.getString("rels")));
+            }
+        });
+        return indexMap;
+    }
+
+    private Map<String, List<String>> indexOfView(String mateView, String indexOId, String relOId) throws SQLException {
+        if (null == indexOId || null == relOId) {
+            throw new SQLException("Failed to get index oid and rel oid of materialized view " + mateView);
+        }
+        final String[] indexOIds = indexOId.split(" ");
+        final String[] relOIds = relOId.split(" ");
+        if (indexOIds.length != relOIds.length) {
+            throw new SQLException("Index oid and index rel oid mismatch, indexOIds: " + indexOId + ", relOIds: " + relOId);
+        }
+        StringJoiner inSql = new StringJoiner(", ");
+        StringJoiner joiner = new StringJoiner(" OR ");
+        for (int i = 0; i < indexOIds.length; i++) {
+            inSql.add(indexOIds[i]);
+            inSql.add(relOIds[i]);
+            joiner.add("(indexrelid=" + indexOIds[i] + " and indrelid=" + relOIds[i] + ")");
+        }
+        Map<Integer, String> indexOidRelOidMap = new HashMap<>();
+        query(String.format(PG_MAT_VIEW_INDEX_QUERY, inSql), resultSet -> {
+            while (resultSet.next()) {
+                indexOidRelOidMap.put(resultSet.getInt("oid"), resultSet.getString("relname"));
+            }
+        });
+
+        //@todo 分区表
+        //  对于上面的查询返回的relkind='p'的行，是一个分区表，其relname是这个分区表根表的名称，记为root_relname。
+        //  需要进一步使用这个分区表的ID，记为mv_queried_relid，找到这个分区表的所有叶子节点，也就是存储节点中的表分区的名字，
+        //  从而建立分区表名到根表名的映射part_name_map。
+        //  方法是使用下列查询语句多次查询pg_inherits （因为支持多级分区）遍历其分区树：
+        //  select t2.relname as leaf_relname, t2.relkind, t2.oid as nextrelid from pg_inherits t1 join pg_class t2 on t1.inhrelid=t2.oid where inhparent= currelid
+
+        StringJoiner outSql = new StringJoiner(" OR ");
+        query(String.format(PG_MAT_VIEW_IND_KEY_QUERY, joiner), resultSet -> {
+            while (resultSet.next()) {
+                outSql.add(String.format("(attrelid=%d and attnum=%d)", resultSet.getInt("indrelid"), resultSet.getInt("indkey")));
+            }
+        });
+
+        Map<String, List<String>> indexNameMap = new HashMap<>();
+        query(String.format(PG_MAT_VIEW_INDEX_NAME_QUERY, outSql), resultSet -> {
+            while (resultSet.next()) {
+                String indexName = resultSet.getString("attname");
+                String tableName = indexOidRelOidMap.get(resultSet.getInt("attrelid"));
+                List<String> indexes = indexNameMap.computeIfAbsent(tableName, k -> new ArrayList<>());
+                if (EmptyKit.isEmpty(indexName)) {
+                    throw new SQLException("Failed to get index name of materialized view " + mateView);
+                }
+                indexes.add(indexName);
+            }
+        });
+        return indexNameMap;
+    }
+
+    public static final String PG_MAT_VIEW_QUERY = "select " +
+            "    rels, idxes, t2.relname as mv_name " +
+            "from pg_matview t1 " +
+            "    JOIN pg_class t2 " +
+            "    JOIN pg_namespace  t3 ON t1.mv_relid=t2.oid  AND t2.relnamespace=t3.oid " +
+            "where t1.varying=true and t2.relkind = 'm' and t3.nspname='%s'";
+    protected static final String PG_MAT_VIEW_INDEX_QUERY = "select relname, t1.oid oid from " +
+            "    pg_class t1 JOIN pg_namespace t2 ON t1.relnamespace=t2.oid " +
+            "WHERE t1.oid in (%s)";
+    protected static final String PG_MAT_VIEW_IND_KEY_QUERY = "select " +
+            "    indrelid, indkey " +
+            "from pg_index " +
+            "where %s";
+    protected static final String PG_MAT_VIEW_INDEX_NAME_QUERY = "select attname, attrelid " +
+            "from pg_attribute where %s";
+
     public DataMap getTableInfo(String tableName) {
         DataMap dataMap = DataMap.create();
         List<String> list = new ArrayList<>();
@@ -128,7 +215,7 @@ public class KunLunPgContext extends PostgresJdbcContext {
 
     protected final static String PG_ALL_TABLE =
             "SELECT DISTINCT ON (t.table_name)\n" +
-                    "    t.table_name AS \"tableName\",\n" +
+                    "    t.table_name AS \"tableName\", t2.relname as mvName, c.oid as \"tableId\"\n" +
                     "    (SELECT\n" +
                     "         COALESCE(\n" +
                     "                 CAST(obj_description(c.oid, 'pg_class') AS varchar),\n" +
@@ -149,6 +236,9 @@ public class KunLunPgContext extends PostgresJdbcContext {
                     "    pg_class c ON c.relname = t.table_name AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = t.table_schema)\n" +
                     "        LEFT JOIN\n" +
                     "    pg_inherits i ON i.inhrelid = c.oid\n" +
+                    "    left join pg_matview t1 on t1.storage_relid = c.oid " +
+                    "    left join pg_class t2 on t1.mv_relid=t2.oid " +
+                    "    left join pg_namespace t3 on t2.relnamespace=t3.oid " +
                     "WHERE\n" +
                     "        t.table_type = 'BASE TABLE'\n" +
                     "  AND t.table_catalog = '%s'\n" +
