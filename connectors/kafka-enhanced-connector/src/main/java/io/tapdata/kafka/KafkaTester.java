@@ -17,7 +17,7 @@ import java.util.function.Consumer;
  */
 public class KafkaTester extends Tester<KafkaConfig> {
     public KafkaTester(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
-        super(KafkaConfig.valueOf(connectionContext), consumer);
+        super(KafkaConfig.valueOf(connectionContext, ""), consumer);
     }
 
     @Override

@@ -10,6 +10,7 @@ import io.tapdata.kafka.constants.KafkaAcksType;
 import io.tapdata.kafka.constants.KafkaConcurrentReadMode;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.constants.KafkaSerialization;
+import io.tapdata.kafka.utils.Krb5Util;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -35,8 +36,11 @@ public class KafkaConfig extends BasicConfig implements
         IConnectionACL,
         ConnectionExtParams {
 
-    public KafkaConfig(TapConnectionContext context) {
+    private final String connectorId;
+
+    public KafkaConfig(TapConnectionContext context, String connectorId) {
         super(context);
+        this.connectorId = connectorId;
     }
 
     // ---------- 连接配置 ----------
@@ -207,6 +211,10 @@ public class KafkaConfig extends BasicConfig implements
                     " username='" + getSaslUsername() +
                     "' password='" + getSaslPassword() + "';");
         }
+        if (useKerberos()) {
+            String krb5Path = Krb5Util.saveByCatalog("connections-" + connectorId, getKrb5Keytab(), getKrb5Conf(), true);
+            Krb5Util.updateKafkaConf(getKrb5ServiceName(), getKrb5Principal(), krb5Path, getKrb5Conf(), props);
+        }
         if (useSsl()) {
 //            ssl.truststore.location=/path/to/kafka.client.truststore.jks
 //            ssl.truststore.password=truststore_password
@@ -320,7 +328,7 @@ public class KafkaConfig extends BasicConfig implements
 
     // ---------- 静态方法 ----------
 
-    public static KafkaConfig valueOf(TapConnectionContext context) {
-        return new KafkaConfig(context);
+    public static KafkaConfig valueOf(TapConnectionContext context, String connectorId) {
+        return new KafkaConfig(context, connectorId);
     }
 }

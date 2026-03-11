@@ -14,6 +14,7 @@ public interface IConnectionSecurity extends IConfigWithContext {
     String KEY_SASL_USERNAME = "saslUsername";
     String KEY_SASL_PASSWORD = "saslPassword";
     String KEY_USE_SSL = "useSsl";
+    String KEY_USE_KERBEROS = "krb5";
 
     enum Protocol {
         PLAINTEXT, // 没有任何 authentication
@@ -68,6 +69,26 @@ public interface IConnectionSecurity extends IConfigWithContext {
 
     default boolean useSasl() {
         return connectionConfigGet(KEY_USE_SASL, false);
+    }
+
+    default boolean useKerberos() {
+        return connectionConfigGet(KEY_USE_KERBEROS, false);
+    }
+
+    default String getKrb5Keytab() {
+        return connectionConfigGet("krb5Keytab", "");
+    }
+
+    default String getKrb5Conf() {
+        return connectionConfigGet("krb5Conf", "");
+    }
+
+    default String getKrb5Principal() {
+        return connectionConfigGet("krb5Principal", "");
+    }
+
+    default String getKrb5ServiceName() {
+        return connectionConfigGet("krb5ServiceName", "");
     }
 
     default String getSaslMechanism() {
