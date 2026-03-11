@@ -7,71 +7,12 @@
     <name>connectors</name>
 	<version>1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
+    <!--
+        模块声明已移至根 pom.xml 的 profile 中
+        使用方式: mvn clean package -DskipTests -Pconnector-{name}
+    -->
     <modules>
-<!--		<module>tdd-connector</module>-->
-        <module>dummy-connector</module>
-        <module>mongodb-connector</module>
-		<module>mongodb-atlas-connector</module>
-		<module>mysql-connector</module>
-        <module>postgres-connector</module>
-		<module>elasticsearch-connector</module>
-        <module>doris-connector</module>
-        <module>starrocks-connector</module>
-        <module>oceanbase-mysql-connector</module>
-		<module>kafka-connector</module>
-		<module>kafka-enhanced-connector</module>
-        <module>rabbitmq-connector</module>
-        <module>rocketmq-connector</module>
-		<module>activemq-connector</module>
-        <module>redis-connector</module>
-		<module>clickhouse-connector</module>
-		<module>mariadb-connector</module>
-		<module>coding-connector</module>
-		<module>zoho-desk-connector</module>
-		<module>tidb-connector</module>
-		<module>tablestore-connector</module>
-		<module>custom-connector</module>
-		<module>bigquery-connector</module>
-		<module>excel-connector</module>
-		<module>csv-connector</module>
-		<module>xml-connector</module>
-		<module>json-connector</module>
-		<module>tdengine-connector</module>
-		<module>vika-connector</module>
-		<module>selectdb-connector</module>
-		<module>quickapi-connector</module>
-		<module>aliyun-adb-mysql-connector</module>
-		<module>aliyun-rds-mysql-connector</module>
-		<module>mysql-pxc-connector</module>
-		<module>polar-db-mysql-connector</module>
-		<module>tencent-db-mongodb-connector</module>
-		<module>aliyun-mongodb-connector</module>
-		<module>aliyun-adb-postgres-connector</module>
-		<module>tencent-db-postgres-connector</module>
-		<module>aliyun-rds-postgres-connector</module>
-		<module>polar-db-postgres-connector</module>
-		<module>aws-rds-mysql-connector</module>
-		<module>tencent-db-mariadb-connector</module>
-		<module>aliyun-rds-mariadb-connector</module>
-		<module>databend-connector</module>
-		<module>hazelcast-connector</module>
-		<module>opengauss-connector</module>
-		<module>http-receiver-connector</module>
-		<module>yashandb-connector</module>
-		<module>greenplum-connector</module>
-		<module>dws-connector</module>
-		<module>azure-cosmosdb-connector</module>
-        <module>hudi-connector</module>
-		<module>huawei-cloud-gaussdb-connector</module>
-		<module>aws-clickhouse-connector</module>
-		<module>mongodb-lower-connector</module>
-        <module>mock-source-connector</module>
-		<module>mock-target-connector</module>
-		<module>vastbase-connector</module>
-		<module>highgo-connector</module>
-		<module>file-stream-connector</module>
-		<module>paimon-connector</module>
-	</modules>
+    </modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
 		<java.version>8</java.version>
@@ -149,6 +90,46 @@
 			<dependency>
 				<groupId>io.tapdata</groupId>
 				<artifactId>connector-core</artifactId>
+				<version>${tapdata.pdk.connector.core.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.tapdata</groupId>
+				<artifactId>sql-core</artifactId>
+				<version>${tapdata.pdk.connector.core.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.tapdata</groupId>
+				<artifactId>mysql-core</artifactId>
+				<version>${tapdata.pdk.connector.core.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.tapdata</groupId>
+				<artifactId>postgres-core</artifactId>
+				<version>${tapdata.pdk.connector.core.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.tapdata</groupId>
+				<artifactId>mq-core</artifactId>
+				<version>${tapdata.pdk.connector.core.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.tapdata</groupId>
+				<artifactId>kafka-core</artifactId>
+				<version>${tapdata.pdk.connector.core.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.tapdata</groupId>
+				<artifactId>read-partition</artifactId>
+				<version>${tapdata.pdk.connector.core.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.tapdata</groupId>
+				<artifactId>file-connector-core</artifactId>
+				<version>${tapdata.pdk.connector.core.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.tapdata</groupId>
+				<artifactId>postgres-connector</artifactId>
 				<version>${tapdata.pdk.connector.core.version}</version>
 			</dependency>
 			<dependency>
@@ -311,4 +292,3 @@
 		</repository>
 	</repositories>
 </project>
-

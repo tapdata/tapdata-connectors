@@ -7,17 +7,16 @@
     <artifactId>tapdata-connectors</artifactId>
     <name>tapdata-connectors</name>
     <packaging>pom</packaging>
+    <!--
+        默认不引入任何模块，使用 profile 按需加载连接器
+        使用方式: mvn clean package -DskipTests -Pconnector-{name}
+        例如: mvn clean package -DskipTests -Pconnector-mysql
+    -->
     <modules>
-        <module>file-storages</module>
-<!--        <module>tapdata-cli</module>-->
-        <module>connectors-common</module>
-        <module>connectors</module>
-        <module>connectors-tdd</module>
-        <module>connectors-unpackage</module>
-        <module>connectors-javascript</module>
     </modules>
 
     <properties>
+        <java.version>8</java.version>
 
         <sonar.coverage.exclusions>
             connectors-common/debezium-bucket/**,
@@ -57,7 +56,180 @@
             connectors/elasticsearch-connector/**,
             connectors/csv-connector/**
         </sonar.inclusions>
+
+        <!-- 连接器相关属性 -->
+        <connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
+        <tapdata.pdk.runner.version>2.5-SNAPSHOT</tapdata.pdk.runner.version>
+        <tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.connector.core.version>1.0-SNAPSHOT</tapdata.pdk.connector.core.version>
+        <junit.jupiter.version>5.8.1</junit.jupiter.version>
+        <junit.platform.version>1.8.1</junit.platform.version>
+        <commons.lang3.version>3.12.0</commons.lang3.version>
+        <commons.collections4.version>4.4</commons.collections4.version>
+        <log4j.version>2.17.1</log4j.version>
+        <guava.version>31.0.1-jre</guava.version>
+        <maven.compiler.encoding>UTF-8</maven.compiler.encoding>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <pdk-error-code.version>1.0-SNAPSHOT</pdk-error-code.version>
+        <mockito.version>4.11.0</mockito.version>
+        <byte-buddy.version>1.12.23</byte-buddy.version>
+        <pay.mode>Free</pay.mode>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>tapdata-api</artifactId>
+                <version>${tapdata.pdk.api.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>tapdata-pdk-api</artifactId>
+                <version>${tapdata.pdk.api.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>tapdata-pdk-runner</artifactId>
+                <version>${tapdata.pdk.runner.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>tapdata-common</artifactId>
+                <version>${tapdata.pdk.runner.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>connector-core</artifactId>
+                <version>${tapdata.pdk.connector.core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>sql-core</artifactId>
+                <version>${tapdata.pdk.connector.core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>mysql-core</artifactId>
+                <version>${tapdata.pdk.connector.core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>postgres-core</artifactId>
+                <version>${tapdata.pdk.connector.core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>mq-core</artifactId>
+                <version>${tapdata.pdk.connector.core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>kafka-core</artifactId>
+                <version>${tapdata.pdk.connector.core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>read-partition</artifactId>
+                <version>${tapdata.pdk.connector.core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>file-connector-core</artifactId>
+                <version>${tapdata.pdk.connector.core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.tapdata</groupId>
+                <artifactId>pdk-error-code</artifactId>
+                <version>${pdk-error-code.version}</version>
+                <scope>provided</scope>
+            </dependency>
+
+            <!-- JUnit -->
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>${junit.jupiter.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter-engine</artifactId>
+                <version>${junit.jupiter.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter-api</artifactId>
+                <version>${junit.jupiter.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter-params</artifactId>
+                <version>${junit.jupiter.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.platform</groupId>
+                <artifactId>junit-platform-suite</artifactId>
+                <version>${junit.platform.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.platform</groupId>
+                <artifactId>junit-platform-launcher</artifactId>
+                <version>${junit.platform.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>${commons.lang3.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-collections4</artifactId>
+                <version>${commons.collections4.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
+            </dependency>
+
+            <!-- Mockito -->
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-core</artifactId>
+                <version>${mockito.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-junit-jupiter</artifactId>
+                <version>${mockito.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-inline</artifactId>
+                <version>${mockito.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>net.bytebuddy</groupId>
+                <artifactId>byte-buddy</artifactId>
+                <version>${byte-buddy.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.bytebuddy</groupId>
+                <artifactId>byte-buddy-agent</artifactId>
+                <version>${byte-buddy.version}</version>
+            </dependency>
+
+        </dependencies>
+    </dependencyManagement>
 
     <build>
         <plugins>
@@ -130,6 +302,925 @@
                 <os.detected.classifier>osx-x86_64</os.detected.classifier>
             </properties>
         </profile>
+
+        <!-- ========== 连接器 Profile 定义 ========== -->
+        <!--
+            使用方式: mvn clean package -DskipTests -Pconnector-{name}
+            入参规则：取连接器目录名 {name}-connector 对应参数 connector-{name}
+            例如:
+            - mysql-connector -> -Pconnector-mysql
+            - mongodb-connector -> -Pconnector-mongodb
+            - postgres-connector -> -Pconnector-postgres
+        -->
+
+        <!-- MySQL 连接器: 依赖 mysql-core, read-partition -->
+        <profile>
+            <id>connector-mysql</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
+            </modules>
+        </profile>
+
+        <!-- MongoDB 连接器: 依赖 connector-core, read-partition, sql-core -->
+        <profile>
+            <id>connector-mongodb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mongodb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- PostgreSQL 连接器: 依赖 postgres-core -->
+        <profile>
+            <id>connector-postgres</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Kafka 连接器: 依赖 kafka-core -->
+        <profile>
+            <id>connector-kafka</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mq-core</module>
+                <module>connectors-common/kafka-core</module>
+                <module>connectors/kafka-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Kafka Enhanced 连接器 -->
+        <profile>
+            <id>connector-kafka-enhanced</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mq-core</module>
+                <module>connectors-common/kafka-core</module>
+                <module>connectors/kafka-enhanced-connector</module>
+            </modules>
+        </profile>
+
+        <!-- ClickHouse 连接器: 依赖 connector-core, sql-core -->
+        <profile>
+            <id>connector-clickhouse</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors/clickhouse-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Doris 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-doris</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/doris-connector</module>
+            </modules>
+        </profile>
+
+        <!-- StarRocks 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-starrocks</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/starrocks-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Elasticsearch 连接器: 依赖 connector-core, sql-core -->
+        <profile>
+            <id>connector-elasticsearch</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors/elasticsearch-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Redis 连接器: 依赖 connector-core -->
+        <profile>
+            <id>connector-redis</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/redis-connector</module>
+            </modules>
+        </profile>
+
+        <!-- RabbitMQ 连接器: 依赖 mq-core -->
+        <profile>
+            <id>connector-rabbitmq</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/mq-core</module>
+                <module>connectors/rabbitmq-connector</module>
+            </modules>
+        </profile>
+
+        <!-- RocketMQ 连接器: 依赖 mq-core -->
+        <profile>
+            <id>connector-rocketmq</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/mq-core</module>
+                <module>connectors/rocketmq-connector</module>
+            </modules>
+        </profile>
+
+        <!-- ActiveMQ 连接器: 依赖 mq-core -->
+        <profile>
+            <id>connector-activemq</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/mq-core</module>
+                <module>connectors/activemq-connector</module>
+            </modules>
+        </profile>
+
+        <!-- MariaDB 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-mariadb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/mariadb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- TiDB 连接器: 依赖 mysql-core, sql-core -->
+        <profile>
+            <id>connector-tidb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/tidb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- OceanBase MySQL 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-oceanbase-mysql</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/oceanbase-mysql-connector</module>
+            </modules>
+        </profile>
+
+        <!-- OpenGauss 连接器: 依赖 postgres-connector -->
+        <profile>
+            <id>connector-opengauss</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
+                <module>connectors/opengauss-connector</module>
+            </modules>
+        </profile>
+
+        <!-- CSV 连接器: 依赖 file-connector-core -->
+        <profile>
+            <id>connector-csv</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>file-storages/file-core</module>
+                <module>file-storages/local-file</module>
+                <module>file-storages/ftp-file</module>
+                <module>file-storages/sftp-file</module>
+                <module>file-storages/smb-file</module>
+                <module>file-storages/s3fs-file</module>
+                <module>file-storages/oss-file</module>
+                <module>file-storages/nfs-file</module>
+                <module>connectors-common/file-connector-core</module>
+                <module>connectors/csv-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Excel 连接器: 依赖 file-connector-core -->
+        <profile>
+            <id>connector-excel</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>file-storages/file-core</module>
+                <module>file-storages/local-file</module>
+                <module>file-storages/ftp-file</module>
+                <module>file-storages/sftp-file</module>
+                <module>file-storages/smb-file</module>
+                <module>file-storages/s3fs-file</module>
+                <module>file-storages/oss-file</module>
+                <module>file-storages/nfs-file</module>
+                <module>connectors-common/file-connector-core</module>
+                <module>connectors/excel-connector</module>
+            </modules>
+        </profile>
+
+        <!-- JSON 连接器: 依赖 file-connector-core -->
+        <profile>
+            <id>connector-json</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>file-storages/file-core</module>
+                <module>file-storages/local-file</module>
+                <module>file-storages/ftp-file</module>
+                <module>file-storages/sftp-file</module>
+                <module>file-storages/smb-file</module>
+                <module>file-storages/s3fs-file</module>
+                <module>file-storages/oss-file</module>
+                <module>file-storages/nfs-file</module>
+                <module>connectors-common/file-connector-core</module>
+                <module>connectors/json-connector</module>
+            </modules>
+        </profile>
+
+        <!-- XML 连接器: 依赖 file-connector-core -->
+        <profile>
+            <id>connector-xml</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>file-storages/file-core</module>
+                <module>file-storages/local-file</module>
+                <module>file-storages/ftp-file</module>
+                <module>file-storages/sftp-file</module>
+                <module>file-storages/smb-file</module>
+                <module>file-storages/s3fs-file</module>
+                <module>file-storages/oss-file</module>
+                <module>file-storages/nfs-file</module>
+                <module>connectors-common/file-connector-core</module>
+                <module>connectors/xml-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Dummy 连接器 -->
+        <profile>
+            <id>connector-dummy</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/dummy-connector</module>
+            </modules>
+        </profile>
+
+        <!-- MongoDB Atlas 连接器 -->
+        <profile>
+            <id>connector-mongodb-atlas</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mongodb-atlas-connector</module>
+            </modules>
+        </profile>
+
+        <!-- MongoDB Lower 连接器 -->
+        <profile>
+            <id>connector-mongodb-lower</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mongodb-lower-connector</module>
+            </modules>
+        </profile>
+
+        <!-- BigQuery 连接器 -->
+        <profile>
+            <id>connector-bigquery</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors/bigquery-connector</module>
+            </modules>
+        </profile>
+
+        <!-- TableStore 连接器 -->
+        <profile>
+            <id>connector-tablestore</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/tablestore-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Custom 连接器 -->
+        <profile>
+            <id>connector-custom</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/custom-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Vika 连接器 -->
+        <profile>
+            <id>connector-vika</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/vika-connector</module>
+            </modules>
+        </profile>
+
+        <!-- QuickAPI 连接器 -->
+        <profile>
+            <id>connector-quickapi</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/api-loader-core</module>
+                <module>connectors/quickapi-connector</module>
+            </modules>
+        </profile>
+
+        <!-- SelectDB 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-selectdb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/selectdb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- TDengine 连接器 -->
+        <profile>
+            <id>connector-tdengine</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors/tdengine-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Databend 连接器 -->
+        <profile>
+            <id>connector-databend</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors/databend-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Hazelcast 连接器 -->
+        <profile>
+            <id>connector-hazelcast</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/hazelcast-connector</module>
+            </modules>
+        </profile>
+
+        <!-- HTTP Receiver 连接器 -->
+        <profile>
+            <id>connector-http-receiver</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/http-receiver-connector</module>
+            </modules>
+        </profile>
+
+        <!-- YashanDB 连接器 -->
+        <profile>
+            <id>connector-yashandb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors/yashandb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Greenplum 连接器: 依赖 postgres-core -->
+        <profile>
+            <id>connector-greenplum</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/greenplum-connector</module>
+            </modules>
+        </profile>
+
+        <!-- DWS 连接器: 依赖 postgres-core -->
+        <profile>
+            <id>connector-dws</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/dws-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Azure CosmosDB 连接器 -->
+        <profile>
+            <id>connector-azure-cosmosdb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/azure-cosmosdb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Hudi 连接器 -->
+        <profile>
+            <id>connector-hudi</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/hive-core</module>
+                <module>connectors/hudi-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Coding 连接器 -->
+        <profile>
+            <id>connector-coding</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/coding-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Zoho Desk 连接器 -->
+        <profile>
+            <id>connector-zoho-desk</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/zoho-desk-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Mock Source 连接器 -->
+        <profile>
+            <id>connector-mock-source</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/mock-source-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Mock Target 连接器 -->
+        <profile>
+            <id>connector-mock-target</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/mock-target-connector</module>
+            </modules>
+        </profile>
+
+        <!-- File Stream 连接器 -->
+        <profile>
+            <id>connector-file-stream</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>file-storages/file-core</module>
+                <module>file-storages/local-file</module>
+                <module>file-storages/ftp-file</module>
+                <module>file-storages/sftp-file</module>
+                <module>file-storages/smb-file</module>
+                <module>file-storages/s3fs-file</module>
+                <module>file-storages/oss-file</module>
+                <module>file-storages/nfs-file</module>
+                <module>connectors-common/file-connector-core</module>
+                <module>connectors/file-stream-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Paimon 连接器 -->
+        <profile>
+            <id>connector-paimon</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/hive-core</module>
+                <module>connectors/paimon-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Vastbase 连接器: 依赖 postgres-core -->
+        <profile>
+            <id>connector-vastbase</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/vastbase-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Highgo 连接器: 依赖 postgres-core -->
+        <profile>
+            <id>connector-highgo</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/highgo-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Aliyun ADB MySQL 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-aliyun-adb-mysql</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/aliyun-adb-mysql-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Aliyun RDS MySQL 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-aliyun-rds-mysql</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/aliyun-rds-mysql-connector</module>
+            </modules>
+        </profile>
+
+        <!-- MySQL PXC 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-mysql-pxc</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/mysql-pxc-connector</module>
+            </modules>
+        </profile>
+
+        <!-- PolarDB MySQL 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-polar-db-mysql</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/polar-db-mysql-connector</module>
+            </modules>
+        </profile>
+
+        <!-- TencentDB MongoDB 连接器 -->
+        <profile>
+            <id>connector-tencent-db-mongodb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/tencent-db-mongodb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Aliyun MongoDB 连接器 -->
+        <profile>
+            <id>connector-aliyun-mongodb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/aliyun-mongodb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Aliyun ADB Postgres 连接器: 依赖 postgres-core -->
+        <profile>
+            <id>connector-aliyun-adb-postgres</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/aliyun-adb-postgres-connector</module>
+            </modules>
+        </profile>
+
+        <!-- TencentDB Postgres 连接器: 依赖 postgres-core -->
+        <profile>
+            <id>connector-tencent-db-postgres</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/tencent-db-postgres-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Aliyun RDS Postgres 连接器: 依赖 postgres-core -->
+        <profile>
+            <id>connector-aliyun-rds-postgres</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/aliyun-rds-postgres-connector</module>
+            </modules>
+        </profile>
+
+        <!-- PolarDB Postgres 连接器: 依赖 postgres-core -->
+        <profile>
+            <id>connector-polar-db-postgres</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/polar-db-postgres-connector</module>
+            </modules>
+        </profile>
+
+        <!-- AWS RDS MySQL 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-aws-rds-mysql</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/aws-rds-mysql-connector</module>
+            </modules>
+        </profile>
+
+        <!-- TencentDB MariaDB 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-tencent-db-mariadb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/tencent-db-mariadb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Aliyun RDS MariaDB 连接器: 依赖 mysql-core -->
+        <profile>
+            <id>connector-aliyun-rds-mariadb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors/aliyun-rds-mariadb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- Huawei Cloud GaussDB 连接器: 依赖 postgres-core -->
+        <profile>
+            <id>connector-huawei-cloud-gaussdb</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
+                <module>connectors-common/debezium-bucket/debezium-parent</module>
+                <module>connectors-common/debezium-bucket/debezium-api</module>
+                <module>connectors-common/debezium-bucket/debezium-core</module>
+                <module>connectors-common/debezium-bucket/debezium-embedded</module>
+                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
+                <module>connectors-common/debezium-bucket/debezium-bom</module>
+                <module>connectors-common/postgres-core</module>
+                <module>connectors/huawei-cloud-gaussdb-connector</module>
+            </modules>
+        </profile>
+
+        <!-- AWS ClickHouse 连接器: 依赖 connector-core, sql-core -->
+        <profile>
+            <id>connector-aws-clickhouse</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors-common/sql-core</module>
+                <module>connectors/aws-clickhouse-connector</module>
+            </modules>
+        </profile>
+
+        <!-- TDD 连接器 -->
+        <profile>
+            <id>connector-tdd</id>
+            <modules>
+                <module>connectors-common/connector-core</module>
+                <module>connectors/tdd-connector</module>
+            </modules>
+        </profile>
+
     </profiles>
 </project>
-
