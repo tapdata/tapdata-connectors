@@ -241,6 +241,14 @@
     "node": {
       "type": "object",
       "x-tableConfigScope": ["target"],
+      "x-reactions": {
+        "target": "nodeConfig.partitionKey",
+        "fulfill": {
+            "state": {
+                "display": "none"
+            }
+        }
+      },
       "properties": {
         "partitionKey": {
           "title": "${partitionKey}",
@@ -258,12 +266,12 @@
             "filterable": true
           },
           "x-reactions": [
-            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
+            "{{useAsyncDataSourceByConfig({service: loadNodeTableFields, withoutField: true}, $values.id, $self.path.pop().segments.slice(-1)[0])}}",
             {
               "dependencies":["$inputs"],
               "fulfill":{
                 "state":{
-                  "display": "{{$deps[0].length > 0}}"
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
                 }
               }
             }

@@ -1538,7 +1538,7 @@ public class PaimonService implements Closeable {
 			case "TIMESTAMP_WITHOUT_TIME_ZONE":
 			case "TIMESTAMP_WITH_LOCAL_TIME_ZONE":
 				java.sql.Timestamp sqlTimestamp = (java.sql.Timestamp) value;
-				return Timestamp.fromEpochMillis(sqlTimestamp.getTime(), sqlTimestamp.getNanos());
+				return Timestamp.fromEpochMillis(sqlTimestamp.getTime(), (sqlTimestamp.getNanos() % 1000000));
 		}
 		return value;
 	}
