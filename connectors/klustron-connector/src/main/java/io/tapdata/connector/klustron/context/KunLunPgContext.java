@@ -116,7 +116,12 @@ public class KunLunPgContext extends PostgresJdbcContext {
         Map<String, Map<String, List<String>>> indexMap = new HashMap<>();
         query(mateSql(schema, mateView), resultSet -> {
             while (resultSet.next()) {
-                indexMap.put(resultSet.getString("mv_name"), indexOfView(mateView, resultSet.getString("idxes"), resultSet.getString("rels")));
+                String rels = resultSet.getString("rels");
+                String idxes = resultSet.getString("idxes");
+                if (StringUtils.isBlank(idxes) || StringUtils.isBlank(rels)) {
+                    continue;
+                }
+                indexMap.put(resultSet.getString("mv_name"), indexOfView(mateView, idxes, rels));
             }
         });
         return indexMap;
@@ -215,7 +220,7 @@ public class KunLunPgContext extends PostgresJdbcContext {
 
     protected final static String PG_ALL_TABLE =
             "SELECT DISTINCT ON (t.table_name)\n" +
-                    "    t.table_name AS \"tableName\", t2.relname as mvName, c.oid as \"tableId\"\n" +
+                    "    t.table_name AS \"tableName\", t2.relname as mvName, c.oid as \"tableId\", \n" +
                     "    (SELECT\n" +
                     "         COALESCE(\n" +
                     "                 CAST(obj_description(c.oid, 'pg_class') AS varchar),\n" +
