@@ -487,7 +487,7 @@
             </modules>
         </profile>
 
-        <!-- MariaDB 连接器: 依赖 mysql-core -->
+        <!-- MariaDB 连接器: 依赖 mysql-connector -->
         <profile>
             <id>connector-mariadb</id>
             <modules>
@@ -503,6 +503,8 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
                 <module>connectors/mariadb-connector</module>
             </modules>
         </profile>
@@ -527,7 +529,7 @@
             </modules>
         </profile>
 
-        <!-- OceanBase MySQL 连接器: 依赖 mysql-core -->
+        <!-- OceanBase MySQL 连接器: 依赖 mysql-connector -->
         <profile>
             <id>connector-oceanbase-mysql</id>
             <modules>
@@ -543,6 +545,8 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
                 <module>connectors/oceanbase-mysql-connector</module>
             </modules>
         </profile>
@@ -785,7 +789,7 @@
             </modules>
         </profile>
 
-        <!-- Greenplum 连接器: 依赖 postgres-core -->
+        <!-- Greenplum 连接器: 依赖 postgres-connector -->
         <profile>
             <id>connector-greenplum</id>
             <modules>
@@ -800,11 +804,12 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
                 <module>connectors/greenplum-connector</module>
             </modules>
         </profile>
 
-        <!-- DWS 连接器: 依赖 postgres-core -->
+        <!-- DWS 连接器: 依赖 postgres-connector -->
         <profile>
             <id>connector-dws</id>
             <modules>
@@ -819,6 +824,7 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
                 <module>connectors/dws-connector</module>
             </modules>
         </profile>
@@ -908,7 +914,7 @@
             </modules>
         </profile>
 
-        <!-- Vastbase 连接器: 依赖 postgres-core -->
+        <!-- Vastbase 连接器: 依赖 postgres-connector -->
         <profile>
             <id>connector-vastbase</id>
             <modules>
@@ -923,11 +929,12 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
                 <module>connectors/vastbase-connector</module>
             </modules>
         </profile>
 
-        <!-- Highgo 连接器: 依赖 postgres-core -->
+        <!-- Highgo 连接器: 依赖 postgres-connector -->
         <profile>
             <id>connector-highgo</id>
             <modules>
@@ -942,11 +949,12 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
                 <module>connectors/highgo-connector</module>
             </modules>
         </profile>
 
-        <!-- Aliyun ADB MySQL 连接器: 依赖 mysql-core -->
+        <!-- Aliyun ADB MySQL 连接器: 依赖 mysql-connector -->
         <profile>
             <id>connector-aliyun-adb-mysql</id>
             <modules>
@@ -962,11 +970,13 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
                 <module>connectors/aliyun-adb-mysql-connector</module>
             </modules>
         </profile>
 
-        <!-- Aliyun RDS MySQL 连接器: 依赖 mysql-core -->
+        <!-- Aliyun RDS MySQL 连接器: 依赖 mysql-connector -->
         <profile>
             <id>connector-aliyun-rds-mysql</id>
             <modules>
@@ -982,11 +992,13 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
                 <module>connectors/aliyun-rds-mysql-connector</module>
             </modules>
         </profile>
 
-        <!-- MySQL PXC 连接器: 依赖 mysql-core -->
+        <!-- MySQL PXC 连接器: 依赖 mysql-connector -->
         <profile>
             <id>connector-mysql-pxc</id>
             <modules>
@@ -1002,11 +1014,13 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
                 <module>connectors/mysql-pxc-connector</module>
             </modules>
         </profile>
 
-        <!-- PolarDB MySQL 连接器: 依赖 mysql-core -->
+        <!-- PolarDB MySQL 连接器: 依赖 mysql-connector -->
         <profile>
             <id>connector-polar-db-mysql</id>
             <modules>
@@ -1022,6 +1036,8 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
                 <module>connectors/polar-db-mysql-connector</module>
             </modules>
         </profile>
@@ -1048,7 +1064,7 @@
             </modules>
         </profile>
 
-        <!-- Aliyun ADB Postgres 连接器: 依赖 postgres-core -->
+        <!-- Aliyun ADB Postgres 连接器: 依赖 postgres-connector -->
         <profile>
             <id>connector-aliyun-adb-postgres</id>
             <modules>
@@ -1063,11 +1079,12 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
                 <module>connectors/aliyun-adb-postgres-connector</module>
             </modules>
         </profile>
 
-        <!-- TencentDB Postgres 连接器: 依赖 postgres-core -->
+        <!-- TencentDB Postgres 连接器: 依赖 postgres-connector -->
         <profile>
             <id>connector-tencent-db-postgres</id>
             <modules>
@@ -1082,11 +1099,12 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
                 <module>connectors/tencent-db-postgres-connector</module>
             </modules>
         </profile>
 
-        <!-- Aliyun RDS Postgres 连接器: 依赖 postgres-core -->
+        <!-- Aliyun RDS Postgres 连接器: 依赖 postgres-connector -->
         <profile>
             <id>connector-aliyun-rds-postgres</id>
             <modules>
@@ -1101,11 +1119,12 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
                 <module>connectors/aliyun-rds-postgres-connector</module>
             </modules>
         </profile>
 
-        <!-- PolarDB Postgres 连接器: 依赖 postgres-core -->
+        <!-- PolarDB Postgres 连接器: 依赖 postgres-connector -->
         <profile>
             <id>connector-polar-db-postgres</id>
             <modules>
@@ -1120,11 +1139,12 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
                 <module>connectors/polar-db-postgres-connector</module>
             </modules>
         </profile>
 
-        <!-- AWS RDS MySQL 连接器: 依赖 mysql-core -->
+        <!-- AWS RDS MySQL 连接器: 依赖 mysql-connector -->
         <profile>
             <id>connector-aws-rds-mysql</id>
             <modules>
@@ -1140,11 +1160,13 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
                 <module>connectors/aws-rds-mysql-connector</module>
             </modules>
         </profile>
 
-        <!-- TencentDB MariaDB 连接器: 依赖 mysql-core -->
+        <!-- TencentDB MariaDB 连接器: 依赖 mysql-connector -->
         <profile>
             <id>connector-tencent-db-mariadb</id>
             <modules>
@@ -1160,11 +1182,13 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
                 <module>connectors/tencent-db-mariadb-connector</module>
             </modules>
         </profile>
 
-        <!-- Aliyun RDS MariaDB 连接器: 依赖 mysql-core -->
+        <!-- Aliyun RDS MariaDB 连接器: 依赖 mysql-connector -->
         <profile>
             <id>connector-aliyun-rds-mariadb</id>
             <modules>
@@ -1180,11 +1204,13 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
                 <module>connectors/aliyun-rds-mariadb-connector</module>
             </modules>
         </profile>
 
-        <!-- Huawei Cloud GaussDB 连接器: 依赖 postgres-core -->
+        <!-- Huawei Cloud GaussDB 连接器: 依赖 postgres-connector -->
         <profile>
             <id>connector-huawei-cloud-gaussdb</id>
             <modules>
@@ -1199,6 +1225,7 @@
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
                 <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
+                <module>connectors/postgres-connector</module>
                 <module>connectors/huawei-cloud-gaussdb-connector</module>
             </modules>
         </profile>
