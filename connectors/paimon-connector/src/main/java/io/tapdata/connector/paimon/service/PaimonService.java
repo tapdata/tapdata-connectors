@@ -38,9 +38,12 @@ import org.apache.paimon.types.*;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.security.MessageDigest;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
@@ -60,6 +63,11 @@ import java.util.stream.Collectors;
 public class PaimonService implements Closeable {
 
 	private static final String TAG = PaimonService.class.getName();
+	private static final String HASH_KEY = "_hash_key";
+	public static final String HASH_ALGORITHM = "MD5";
+	public static final byte SPLIT_CHAR = ',';
+	private final Map<String, Boolean> computeHashKey = new ConcurrentHashMap<>();
+	private final Map<String, Collection<String>> primaryKeyMap = new ConcurrentHashMap<>();
 	private final PaimonConfig config;
 	private Catalog catalog;
 
@@ -497,21 +505,28 @@ public class PaimonService implements Closeable {
 		// Build schema
 		Schema.Builder schemaBuilder = Schema.newBuilder();
 
+		// Set primary keys
+		Collection<String> primaryKeys = tapTable.primaryKeys(true);
+		if (primaryKeys != null && !primaryKeys.isEmpty()) {
+			if (config.getHashKey(tableName) && primaryKeys.size() > 5) {
+				schemaBuilder.primaryKey(Collections.singletonList(HASH_KEY));
+			} else {
+				schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
+			}
+		}
+
 		// Add fields
 		Map<String, TapField> fields = tapTable.getNameFieldMap();
 		if (fields != null) {
+			if (config.getHashKey(tableName) && EmptyKit.isNotEmpty(primaryKeys) && primaryKeys.size() > 5) {
+				schemaBuilder.column(HASH_KEY, DataTypes.VARCHAR(32));
+			}
 			for (Map.Entry<String, TapField> entry : fields.entrySet()) {
 				String fieldName = entry.getKey();
 				TapField tapField = entry.getValue();
 				DataType dataType = convertToPaimonDataType(tapField);
 				schemaBuilder.column(fieldName, dataType);
 			}
-		}
-
-		// Set primary keys
-		Collection<String> primaryKeys = tapTable.primaryKeys(true);
-		if (primaryKeys != null && !primaryKeys.isEmpty()) {
-			schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
 		}
 
 		if (EmptyKit.isNotEmpty(config.getPartitionKey(tableName))) {
@@ -801,6 +816,10 @@ public class PaimonService implements Closeable {
 	public WriteListResult<TapRecordEvent> writeRecords(List<TapRecordEvent> recordEvents,
 														TapTable table,
 														TapConnectorContext connectorContext) throws Exception {
+		if (!computeHashKey.containsKey(table.getId())) {
+			computeHashKey.put(table.getId(), config.getHashKey(table.getId()) && EmptyKit.isNotEmpty(table.primaryKeys(true)) && table.primaryKeys(true).size() > 5);
+			primaryKeyMap.put(table.getId(), table.primaryKeys(true));
+		}
 		return writeRecordsWithStreamWriteInternal(recordEvents, table, connectorContext);
 	}
 
@@ -1489,7 +1508,11 @@ public class PaimonService implements Closeable {
 		}
 
 		GenericRow genericRow = new GenericRow(paimonFields.size());
-		for (int i = 0; i < paimonFields.size(); i++) {
+		int i = 0;
+		if (computeHashKey.get(table.getName())) {
+			genericRow.setField(i++, BinaryString.fromString(toHash(primaryKeyMap.get(table.getName()), data)));
+		}
+		for (; i < paimonFields.size(); i++) {
 			DataField dataField = paimonFields.get(i);
 			String fieldName = dataField.name();
 			Object value = data.get(fieldName);
@@ -1501,6 +1524,76 @@ public class PaimonService implements Closeable {
 		}
 
 		return genericRow;
+	}
+
+	protected String toHash(Collection<String> keys, Map<String, Object> data) {
+		try {
+			MessageDigest md = MessageDigest.getInstance(HASH_ALGORITHM);
+			try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+				boolean isFirst = true;
+				baos.write('[');
+				for (String key : keys) {
+					if (isFirst) {
+						isFirst = false;
+					} else {
+						baos.write(SPLIT_CHAR);
+					}
+
+					Object val = data.get(key);
+					byte[] bytes = toBytes(val);
+					baos.write(bytes);
+				}
+				baos.write(']');
+
+				byte[] hashBytes = md.digest(baos.toByteArray());
+				StringBuilder hashHex = new StringBuilder();
+				for (byte b : hashBytes) {
+					hashHex.append(String.format("%02x", b));
+				}
+				return hashHex.toString(); // 返回 128 位（32 个字符）的哈希值
+			}
+		} catch (Exception e) {
+			throw new RuntimeException("Failed to compute hash key for data: " + data, e);
+		}
+	}
+
+	protected byte[] toBytes(Object data) throws IOException {
+		if (null == data) return new byte[0];
+		if (data instanceof byte[]) return (byte[]) data;
+		if (data.getClass().isArray()) return arrayToBytes(Arrays.asList((Object[]) data));
+		if (data instanceof Collection) return arrayToBytes((Collection<?>) data);
+		if (data instanceof Map) return mapToBytes((Map<?, ?>) data);
+		return data.toString().getBytes();
+	}
+
+	protected byte[] arrayToBytes(Collection<?> collection) throws IOException {
+		try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+			boolean isFirst = true;
+			baos.write('[');
+			for (Object o : collection) {
+				if (isFirst) {
+					isFirst = false;
+				} else {
+					baos.write(SPLIT_CHAR);
+				}
+				baos.write(toBytes(o));
+			}
+			baos.write(']');
+			return baos.toByteArray();
+		}
+	}
+
+	protected byte[] mapToBytes(Map<?, ?> map) throws IOException {
+		try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+			baos.write('{');
+			for (Map.Entry<?, ?> en : map.entrySet()) {
+				baos.write(toBytes(en.getKey()));
+				baos.write(':');
+				baos.write(toBytes(en.getValue()));
+			}
+			baos.write('}');
+			return baos.toByteArray();
+		}
 	}
 
 	/**

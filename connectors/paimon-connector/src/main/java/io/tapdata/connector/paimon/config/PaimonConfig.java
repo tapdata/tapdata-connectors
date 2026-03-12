@@ -44,6 +44,7 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Database name (Paimon database)
     private String database = "default";
 
+    private Boolean hashKey = false;
     private List<String> partitionKey;
 
     // Bucket mode: "dynamic" or "fixed"
@@ -211,6 +212,18 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     @Override
     public void setDatabase(String database) {
         this.database = database;
+    }
+
+    public Boolean getHashKey() {
+        return hashKey;
+    }
+
+    public Boolean getHashKey(String key) {
+        return getTableConfigValue(key, "hashKey", hashKey);
+    }
+
+    public void setHashKey(Boolean hashKey) {
+        this.hashKey = hashKey;
     }
 
     public List<String> getPartitionKey() {

@@ -250,6 +250,28 @@
         }
       },
       "properties": {
+        "hashKey": {
+          "type": "boolean",
+          "title": "${hashKey}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${hashKeyTip}"
+          },
+          "default": false,
+          "x-index": 5,
+          "x-perTable": true,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "partitionKey": {
           "title": "${partitionKey}",
           "type": "array",
@@ -708,6 +730,8 @@
       "ossSecretKey": "OSS Secret Key",
       "database": "Database Name",
       "database_placeholder": "Paimon database name",
+      "hashKey": "Hash Key",
+      "hashKeyTip": "When enabled, if the primary key or update condition field is greater than 5, the hash field will be automatically added in the paimon table to improve write performance",
       "partitionKey": "Partition Key",
       "partitionKeyTip": "The partition key of the table, used to partition the data. If left empty, it means not to use the partitioning function.",
       "bucketMode": "Bucket Mode",
@@ -761,6 +785,8 @@
       "ossSecretKey": "OSS 密钥",
       "database": "数据库名称",
       "database_placeholder": "Paimon 数据库名称",
+      "hashKey": "Hash键",
+      "hashKeyTip": "开关打开时，如果主键或更新条件字段大于5个时，会自动在paimon表中添加hash字段，用于提升写入性能",
       "partitionKey": "分区键",
       "partitionKeyTip": "表的分区键，用于对数据进行分区。如果置空，则表示不使用分区功能。",
       "bucketMode": "分桶模式",
@@ -814,6 +840,8 @@
       "ossSecretKey": "OSS 密鑰",
       "database": "數據庫名稱",
       "database_placeholder": "Paimon 數據庫名稱",
+      "hashKey": "Hash 鍵",
+      "hashKeyTip": "開啟後，如果主鍵或更新條件字段大於5個時，會自動在paimon表中添加hash字段，用於提升寫入性能",
       "partitionKey": "分區鍵",
       "partitionKeyTip": "表的分區鍵，用於對數據進行分區。如果置空，則表示不使用分區功能。",
       "bucketMode": "分桶模式",
