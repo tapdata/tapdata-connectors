@@ -245,7 +245,7 @@
         "target": "nodeConfig.partitionKey",
         "fulfill": {
             "state": {
-                "display": "none"
+                "display": "{{$settings.syncType===\"migrate\"?\"hidden\":\"visible\"}}"
             }
         }
       },
@@ -266,7 +266,7 @@
             "filterable": true
           },
           "x-reactions": [
-            "{{useAsyncDataSourceByConfig({service: loadNodeTableFields, withoutField: true}, $values.id, $self.path.pop().segments.slice(-1)[0])}}",
+            "{{useAsyncDataSourceByConfig({service: loadNodeTableFields, withoutField: true}, $values.id, $settings.syncType===\"migrate\"?$self.path.pop().segments.slice(-1)[0]:$values.tableName)}}",
             {
               "dependencies":["$inputs"],
               "fulfill":{
