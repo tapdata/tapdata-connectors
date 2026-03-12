@@ -21,7 +21,7 @@ public class StringRedisRecordWriter extends AbstractRedisRecordWriter {
     @Override
     protected void handleInsertEvent(TapInsertRecordEvent event, RedisPipeline pipelined) {
         Map<String, Object> value = event.getAfter();
-        String strValue = ValueDataEnum.JSON.getType().equals(redisConfig.getValueData()) ? getJsonValue(value) : getTextValue(value);
+        String strValue = ValueDataEnum.JSON.getType().equals(valueData) ? getJsonValue(value) : getTextValue(value);
         pipelined.set(getRedisKey(value), strValue);
     }
 
@@ -36,7 +36,7 @@ public class StringRedisRecordWriter extends AbstractRedisRecordWriter {
             keyFieldList.forEach(v -> lastBefore.put(v, afterValue.get(v)));
         }
         pipelined.del(getRedisKey(lastBefore));
-        String strValue = ValueDataEnum.JSON.getType().equals(redisConfig.getValueData()) ? getJsonValue(afterValue) : getTextValue(afterValue);
+        String strValue = ValueDataEnum.JSON.getType().equals(valueData) ? getJsonValue(afterValue) : getTextValue(afterValue);
         pipelined.set(getRedisKey(afterValue), strValue);
     }
 

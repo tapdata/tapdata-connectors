@@ -2,6 +2,7 @@ package io.tapdata.connector.redis;
 
 import io.tapdata.connector.redis.constant.DeployModeEnum;
 import io.tapdata.entity.utils.BeanUtils;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.kit.EmptyKit;
 import org.apache.commons.lang3.StringUtils;
@@ -40,6 +41,7 @@ public class RedisConfig {
     private Boolean oneKey = false;
     private String schemaKey = "-schema-key-";
     private long rateLimit = 5000L;
+    private Map<String, DataMap> tableConfig;
 
     private final static String DATA_BASE ="database";
 
@@ -168,6 +170,10 @@ public class RedisConfig {
         return valueType;
     }
 
+    public String getValueType(String key) {
+        return getTableConfigValue(key, "valueType", valueType);
+    }
+
     public void setValueType(String valueType) {
         this.valueType = valueType;
     }
@@ -192,12 +198,20 @@ public class RedisConfig {
         return valueData;
     }
 
+    public String getValueData(String key) {
+        return getTableConfigValue(key, "valueData", valueData);
+    }
+
     public void setValueData(String valueData) {
         this.valueData = valueData;
     }
 
     public String getValueJoinString() {
         return valueJoinString;
+    }
+
+    public String getValueJoinString(String key) {
+        return getTableConfigValue(key, "valueJoinString", valueJoinString);
     }
 
     public void setValueJoinString(String valueJoinString) {
@@ -216,6 +230,10 @@ public class RedisConfig {
         return csvFormat;
     }
 
+    public Boolean getCsvFormat(String key) {
+        return getTableConfigValue(key, "csvFormat", csvFormat);
+    }
+
     public void setCsvFormat(Boolean csvFormat) {
         this.csvFormat = csvFormat;
     }
@@ -224,12 +242,20 @@ public class RedisConfig {
         return listHead;
     }
 
+    public Boolean getListHead(String key) {
+        return getTableConfigValue(key, "listHead", listHead);
+    }
+
     public void setListHead(Boolean listHead) {
         this.listHead = listHead;
     }
 
     public String getKeyExpression() {
         return keyExpression;
+    }
+
+    public String getKeyExpression(String key) {
+        return getTableConfigValue(key, "keyExpression", keyExpression);
     }
 
     public void setKeyExpression(String keyExpression) {
@@ -264,6 +290,10 @@ public class RedisConfig {
         return oneKey;
     }
 
+    public Boolean getOneKey(String key) {
+        return getTableConfigValue(key, "oneKey", oneKey);
+    }
+
     public void setOneKey(Boolean oneKey) {
         this.oneKey = oneKey;
     }
@@ -282,5 +312,20 @@ public class RedisConfig {
 
     public void setRateLimit(long rateLimit) {
         this.rateLimit = rateLimit;
+    }
+
+    public Map<String, DataMap> getTableConfig() {
+        return tableConfig;
+    }
+
+    public void setTableConfig(Map<String, DataMap> tableConfig) {
+        this.tableConfig = tableConfig;
+    }
+
+    private <T> T getTableConfigValue(String key, String propertyName, T defaultValue) {
+        if (tableConfig != null && tableConfig.containsKey(key)) {
+            return tableConfig.get(key).getValue(propertyName, defaultValue);
+        }
+        return defaultValue;
     }
 }
