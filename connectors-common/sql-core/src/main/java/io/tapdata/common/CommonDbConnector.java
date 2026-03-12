@@ -920,6 +920,34 @@ public abstract class CommonDbConnector extends ConnectorBase {
         });
     }
 
+    //for SQL Server type (with OFFSET-FETCH)
+    protected void queryByAdvanceFilterWithOffsetFetch(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
+        String sql = commonSqlMaker.buildSelectClause(table, filter, false) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilterWithOffsetFetch(filter);
+        jdbcContext.query(sql, resultSet -> {
+            FilterResults filterResults = new FilterResults();
+            try {
+                while (resultSet.next()) {
+                    List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
+                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, allColumn);
+                    processDataMap(dataMap, table);
+                    filterResults.add(dataMap);
+                    if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
+                        consumer.accept(filterResults);
+                        filterResults = new FilterResults();
+                    }
+                }
+            } catch (SQLException e) {
+                exceptionCollector.collectTerminateByServer(e);
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+                exceptionCollector.revealException(e);
+                throw e;
+            }
+            if (EmptyKit.isNotEmpty(filterResults.getResults())) {
+                consumer.accept(filterResults);
+            }
+        });
+    }
+
     protected void beginTransaction(TapConnectorContext connectorContext) throws Throwable {
         isTransaction = true;
     }
@@ -1002,6 +1030,17 @@ public abstract class CommonDbConnector extends ConnectorBase {
     protected long countByAdvanceFilterV2(TapConnectorContext connectorContext, TapTable tapTable, TapAdvanceFilter tapAdvanceFilter) throws SQLException {
         AtomicLong count = new AtomicLong(0);
         String sql = "SELECT COUNT(1) FROM " + commonSqlMaker.buildRowNumberPreClause(tapAdvanceFilter) + getSchemaAndTable(tapTable.getId()) + commonSqlMaker.buildSqlByAdvanceFilterV2(tapAdvanceFilter);
+        jdbcContext.query(sql, resultSet -> {
+            if (resultSet.next()) {
+                count.set(resultSet.getLong(1));
+            }
+        });
+        return count.get();
+    }
+
+    protected long countByAdvanceFilterWithOffsetFetch(TapConnectorContext connectorContext, TapTable tapTable, TapAdvanceFilter tapAdvanceFilter) throws SQLException {
+        AtomicLong count = new AtomicLong(0);
+        String sql = "SELECT COUNT(1) FROM " + getSchemaAndTable(tapTable.getId()) + commonSqlMaker.buildSqlByAdvanceFilterWithOffsetFetch(tapAdvanceFilter);
         jdbcContext.query(sql, resultSet -> {
             if (resultSet.next()) {
                 count.set(resultSet.getLong(1));
