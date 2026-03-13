@@ -63,7 +63,10 @@ public class DorisConnector extends CommonDbConnector {
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) {
         this.dorisConfig = new DorisConfig().load(tapConnectionContext.getConnectionConfig());
-        isConnectorStarted(tapConnectionContext, connectorContext -> dorisConfig.load(connectorContext.getNodeConfig()));
+        isConnectorStarted(tapConnectionContext, connectorContext -> {
+            dorisConfig.load(connectorContext.getNodeConfig());
+            dorisConfig.setTableConfig(tapConnectionContext.getTableNodeConfig());
+        });
         dorisJdbcContext = new DorisJdbcContext(dorisConfig);
 //        if (!dorisJdbcContext.queryVersion().contains("2.")) {
 //            dorisConfig.setUpdateSpecific(false);
@@ -219,16 +222,16 @@ public class DorisConnector extends CommonDbConnector {
             return createTableOptions;
         }
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
-        DorisTableType uniqueType = DorisTableType.valueOf(dorisConfig.getUniqueKeyType());
+        DorisTableType uniqueType = DorisTableType.valueOf(dorisConfig.getUniqueKeyType(tapTable.getId()));
         StringBuilder stringBuilder = new StringBuilder();
         stringBuilder.append("CREATE TABLE IF NOT EXISTS ").append(getSchemaAndTable(tapTable.getId())).append("(");
         //generate column definition
         if (uniqueType == DorisTableType.Duplicate) {
             if (EmptyKit.isEmpty(primaryKeys)) {
-                if (EmptyKit.isEmpty(dorisConfig.getDuplicateKey())) {
+                if (EmptyKit.isEmpty(dorisConfig.getDuplicateKey(tapTable.getId()))) {
                     stringBuilder.append(commonSqlMaker.buildColumnDefinition(tapTable, true));
                 } else {
-                    stringBuilder.append(((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, dorisConfig.getDuplicateKey(), false));
+                    stringBuilder.append(((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, dorisConfig.getDuplicateKey(tapTable.getId()), false));
                 }
             } else {
                 stringBuilder.append(((DorisSqlMaker) commonSqlMaker).buildColumnDefinitionByOrder(tapTable, primaryKeys, false));
@@ -243,29 +246,29 @@ public class DorisConnector extends CommonDbConnector {
         //generate key definition
         stringBuilder.append(") ").append(uniqueType).append(" KEY (`");
         if (EmptyKit.isEmpty(primaryKeys)) {
-            if (EmptyKit.isEmpty(dorisConfig.getDuplicateKey())) {
+            if (EmptyKit.isEmpty(dorisConfig.getDuplicateKey(tapTable.getId()))) {
                 stringBuilder.append(String.join("`,`", tapTable.getNameFieldMap().keySet()));
             } else {
-                stringBuilder.append(String.join("`,`", dorisConfig.getDuplicateKey()));
+                stringBuilder.append(String.join("`,`", dorisConfig.getDuplicateKey(tapTable.getId())));
             }
         } else {
             stringBuilder.append(String.join("`,`", primaryKeys));
         }
         stringBuilder.append("`) DISTRIBUTED BY HASH(`");
         //generate distributed key
-        if (EmptyKit.isEmpty(dorisConfig.getDistributedKey())) {
+        if (EmptyKit.isEmpty(dorisConfig.getDistributedKey(tapTable.getId()))) {
             if (EmptyKit.isEmpty(primaryKeys)) {
                 stringBuilder.append(String.join("`,`", tapTable.getNameFieldMap().keySet()));
             } else {
                 stringBuilder.append(String.join("`,`", primaryKeys));
             }
         } else {
-            stringBuilder.append(String.join("`,`", dorisConfig.getDistributedKey()));
+            stringBuilder.append(String.join("`,`", dorisConfig.getDistributedKey(tapTable.getId())));
         }
         //generate bucket
-        stringBuilder.append("`) BUCKETS ").append(dorisConfig.getBucket()).append(" PROPERTIES(");
+        stringBuilder.append("`) BUCKETS ").append(dorisConfig.getBucket(tapTable.getId())).append(" PROPERTIES(");
         //generate properties
-        stringBuilder.append(dorisConfig.getTableProperties().stream().map(v -> "\"" + v.get("propKey") + "\"=\"" + v.get("propValue") + "\"").collect(Collectors.joining(", ")));
+        stringBuilder.append(dorisConfig.getTableProperties(tapTable.getId()).stream().map(v -> "\"" + v.get("propKey") + "\"=\"" + v.get("propValue") + "\"").collect(Collectors.joining(", ")));
         stringBuilder.append(")");
         createTableOptions.setTableExists(false);
         try {
