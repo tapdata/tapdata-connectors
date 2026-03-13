@@ -65,6 +65,8 @@ import java.io.Closeable;
 import java.math.BigDecimal;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -515,7 +517,14 @@ public class MongodbConnector extends ConnectorBase {
 			Symbol symbol = (Symbol) value;
 			return new TapStringValue(symbol.getSymbol());
 		});
-
+		codecRegistry.registerToTapValue(BsonTimestamp.class, (value, tapType) -> {
+			BsonTimestamp bsonTimestamp = (BsonTimestamp) value;
+			return new TapDateTimeValue(new DateTime(Instant.ofEpochMilli(bsonTimestamp.getTime()).atZone(ZoneOffset.UTC)));
+		});
+		codecRegistry.registerToTapValue(BsonRegularExpression.class, (value, tapType) -> {
+			BsonRegularExpression bsonRegularExpression = (BsonRegularExpression) value;
+			return new TapStringValue("/" + bsonRegularExpression.getPattern() + "/" + bsonRegularExpression.getOptions());
+		});
 		//TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
 		codecRegistry.registerFromTapValue(TapTimeValue.class, "DATE_TIME", tapTimeValue -> tapTimeValue.getValue().toDate());
 		codecRegistry.registerFromTapValue(TapDateTimeValue.class, "DATE_TIME", tapDateTimeValue -> tapDateTimeValue.getValue().toDate());
