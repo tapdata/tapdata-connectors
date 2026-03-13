@@ -304,30 +304,31 @@
         </profile>
 
         <!-- ========== 连接器 Profile 定义 ========== -->
-        <!--
-            使用方式: mvn clean package -DskipTests -Pconnector-{name}
-            入参规则：取连接器目录名 {name}-connector 对应参数 connector-{name}
-            例如:
-            - mysql-connector -> -Pconnector-mysql
-            - mongodb-connector -> -Pconnector-mongodb
-            - postgres-connector -> -Pconnector-postgres
-        -->
+        <profile>
+            <id>GAConnectors</id>
+            <properties>
+
+            </properties>
+            <modules>
+                <module>connectors-common</module>
+                <module>connectors-common/mysql-binlog-connector-java</module>
+                <module>connectors-common/debezium-bucket</module>
+                <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
+                <module>connectors-common/mysql-core</module>
+                <module>connectors-common/read-partition</module>
+                <module>connectors/mysql-connector</module>
+            </modules>
+        </profile>
 
         <!-- MySQL 连接器: 依赖 mysql-core, read-partition -->
         <profile>
             <id>connector-mysql</id>
             <modules>
-                <module>connectors-common/connector-core</module>
-                <module>connectors-common/sql-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mysql-connector</module>
@@ -338,7 +339,7 @@
         <profile>
             <id>connector-mongodb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mongodb-connector</module>
@@ -349,16 +350,11 @@
         <profile>
             <id>connector-postgres</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
             </modules>
@@ -368,7 +364,7 @@
         <profile>
             <id>connector-kafka</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mq-core</module>
                 <module>connectors-common/kafka-core</module>
@@ -380,7 +376,7 @@
         <profile>
             <id>connector-kafka-enhanced</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mq-core</module>
                 <module>connectors-common/kafka-core</module>
@@ -392,7 +388,7 @@
         <profile>
             <id>connector-clickhouse</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors/clickhouse-connector</module>
             </modules>
@@ -402,17 +398,12 @@
         <profile>
             <id>connector-doris</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors/doris-connector</module>
             </modules>
@@ -422,17 +413,12 @@
         <profile>
             <id>connector-starrocks</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors/starrocks-connector</module>
             </modules>
@@ -442,7 +428,7 @@
         <profile>
             <id>connector-elasticsearch</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors/elasticsearch-connector</module>
             </modules>
@@ -452,7 +438,7 @@
         <profile>
             <id>connector-redis</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/redis-connector</module>
             </modules>
         </profile>
@@ -461,7 +447,7 @@
         <profile>
             <id>connector-rabbitmq</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/mq-core</module>
                 <module>connectors/rabbitmq-connector</module>
             </modules>
@@ -471,7 +457,7 @@
         <profile>
             <id>connector-rocketmq</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/mq-core</module>
                 <module>connectors/rocketmq-connector</module>
             </modules>
@@ -481,7 +467,7 @@
         <profile>
             <id>connector-activemq</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/mq-core</module>
                 <module>connectors/activemq-connector</module>
             </modules>
@@ -491,17 +477,12 @@
         <profile>
             <id>connector-mariadb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mysql-connector</module>
@@ -513,17 +494,12 @@
         <profile>
             <id>connector-tidb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors/tidb-connector</module>
             </modules>
@@ -533,17 +509,12 @@
         <profile>
             <id>connector-oceanbase-mysql</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mysql-connector</module>
@@ -555,16 +526,11 @@
         <profile>
             <id>connector-opengauss</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
                 <module>connectors/opengauss-connector</module>
@@ -575,16 +541,9 @@
         <profile>
             <id>connector-csv</id>
             <modules>
-                <module>connectors-common/connector-core</module>
-                <module>file-storages/file-core</module>
-                <module>file-storages/local-file</module>
-                <module>file-storages/ftp-file</module>
-                <module>file-storages/sftp-file</module>
-                <module>file-storages/smb-file</module>
-                <module>file-storages/s3fs-file</module>
-                <module>file-storages/oss-file</module>
-                <module>file-storages/nfs-file</module>
+                <module>connectors-common</module>
                 <module>connectors-common/file-connector-core</module>
+                <module>file-storages</module>
                 <module>connectors/csv-connector</module>
             </modules>
         </profile>
@@ -593,16 +552,9 @@
         <profile>
             <id>connector-excel</id>
             <modules>
-                <module>connectors-common/connector-core</module>
-                <module>file-storages/file-core</module>
-                <module>file-storages/local-file</module>
-                <module>file-storages/ftp-file</module>
-                <module>file-storages/sftp-file</module>
-                <module>file-storages/smb-file</module>
-                <module>file-storages/s3fs-file</module>
-                <module>file-storages/oss-file</module>
-                <module>file-storages/nfs-file</module>
+                <module>connectors-common</module>
                 <module>connectors-common/file-connector-core</module>
+                <module>file-storages</module>
                 <module>connectors/excel-connector</module>
             </modules>
         </profile>
@@ -611,16 +563,9 @@
         <profile>
             <id>connector-json</id>
             <modules>
-                <module>connectors-common/connector-core</module>
-                <module>file-storages/file-core</module>
-                <module>file-storages/local-file</module>
-                <module>file-storages/ftp-file</module>
-                <module>file-storages/sftp-file</module>
-                <module>file-storages/smb-file</module>
-                <module>file-storages/s3fs-file</module>
-                <module>file-storages/oss-file</module>
-                <module>file-storages/nfs-file</module>
+                <module>connectors-common</module>
                 <module>connectors-common/file-connector-core</module>
+                <module>file-storages</module>
                 <module>connectors/json-connector</module>
             </modules>
         </profile>
@@ -629,16 +574,9 @@
         <profile>
             <id>connector-xml</id>
             <modules>
-                <module>connectors-common/connector-core</module>
-                <module>file-storages/file-core</module>
-                <module>file-storages/local-file</module>
-                <module>file-storages/ftp-file</module>
-                <module>file-storages/sftp-file</module>
-                <module>file-storages/smb-file</module>
-                <module>file-storages/s3fs-file</module>
-                <module>file-storages/oss-file</module>
-                <module>file-storages/nfs-file</module>
+                <module>connectors-common</module>
                 <module>connectors-common/file-connector-core</module>
+                <module>file-storages</module>
                 <module>connectors/xml-connector</module>
             </modules>
         </profile>
@@ -647,7 +585,7 @@
         <profile>
             <id>connector-dummy</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/dummy-connector</module>
             </modules>
         </profile>
@@ -656,8 +594,7 @@
         <profile>
             <id>connector-mongodb-atlas</id>
             <modules>
-                <module>connectors-common/connector-core</module>
-                <module>connectors-common/sql-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mongodb-atlas-connector</module>
             </modules>
@@ -667,7 +604,7 @@
         <profile>
             <id>connector-mongodb-lower</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mongodb-lower-connector</module>
@@ -678,7 +615,7 @@
         <profile>
             <id>connector-bigquery</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors/bigquery-connector</module>
             </modules>
@@ -688,7 +625,7 @@
         <profile>
             <id>connector-tablestore</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/tablestore-connector</module>
             </modules>
         </profile>
@@ -697,7 +634,7 @@
         <profile>
             <id>connector-custom</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/custom-connector</module>
             </modules>
         </profile>
@@ -706,7 +643,7 @@
         <profile>
             <id>connector-vika</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/vika-connector</module>
             </modules>
         </profile>
@@ -715,7 +652,7 @@
         <profile>
             <id>connector-quickapi</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/api-loader-core</module>
                 <module>connectors/quickapi-connector</module>
             </modules>
@@ -725,17 +662,12 @@
         <profile>
             <id>connector-selectdb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors/selectdb-connector</module>
             </modules>
@@ -745,7 +677,7 @@
         <profile>
             <id>connector-tdengine</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors/tdengine-connector</module>
             </modules>
@@ -755,7 +687,7 @@
         <profile>
             <id>connector-databend</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors/databend-connector</module>
             </modules>
@@ -765,7 +697,7 @@
         <profile>
             <id>connector-hazelcast</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/hazelcast-connector</module>
             </modules>
         </profile>
@@ -774,7 +706,7 @@
         <profile>
             <id>connector-http-receiver</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/http-receiver-connector</module>
             </modules>
         </profile>
@@ -783,7 +715,7 @@
         <profile>
             <id>connector-yashandb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors/yashandb-connector</module>
             </modules>
@@ -793,16 +725,11 @@
         <profile>
             <id>connector-greenplum</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
                 <module>connectors/greenplum-connector</module>
@@ -813,16 +740,11 @@
         <profile>
             <id>connector-dws</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
                 <module>connectors/dws-connector</module>
@@ -833,7 +755,7 @@
         <profile>
             <id>connector-azure-cosmosdb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/azure-cosmosdb-connector</module>
             </modules>
         </profile>
@@ -842,7 +764,7 @@
         <profile>
             <id>connector-hudi</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/hive-core</module>
                 <module>connectors/hudi-connector</module>
@@ -853,7 +775,7 @@
         <profile>
             <id>connector-coding</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/coding-connector</module>
             </modules>
         </profile>
@@ -862,7 +784,6 @@
         <profile>
             <id>connector-zoho-desk</id>
             <modules>
-                <module>connectors-common/connector-core</module>
                 <module>connectors/zoho-desk-connector</module>
             </modules>
         </profile>
@@ -871,7 +792,7 @@
         <profile>
             <id>connector-mock-source</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/mock-source-connector</module>
             </modules>
         </profile>
@@ -880,7 +801,6 @@
         <profile>
             <id>connector-mock-target</id>
             <modules>
-                <module>connectors-common/connector-core</module>
                 <module>connectors/mock-target-connector</module>
             </modules>
         </profile>
@@ -889,16 +809,9 @@
         <profile>
             <id>connector-file-stream</id>
             <modules>
-                <module>connectors-common/connector-core</module>
-                <module>file-storages/file-core</module>
-                <module>file-storages/local-file</module>
-                <module>file-storages/ftp-file</module>
-                <module>file-storages/sftp-file</module>
-                <module>file-storages/smb-file</module>
-                <module>file-storages/s3fs-file</module>
-                <module>file-storages/oss-file</module>
-                <module>file-storages/nfs-file</module>
+                <module>connectors-common</module>
                 <module>connectors-common/file-connector-core</module>
+                <module>file-storages</module>
                 <module>connectors/file-stream-connector</module>
             </modules>
         </profile>
@@ -907,7 +820,7 @@
         <profile>
             <id>connector-paimon</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/hive-core</module>
                 <module>connectors/paimon-connector</module>
@@ -918,16 +831,11 @@
         <profile>
             <id>connector-vastbase</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
                 <module>connectors/vastbase-connector</module>
@@ -938,16 +846,11 @@
         <profile>
             <id>connector-highgo</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
                 <module>connectors/highgo-connector</module>
@@ -958,17 +861,12 @@
         <profile>
             <id>connector-aliyun-adb-mysql</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mysql-connector</module>
@@ -980,17 +878,12 @@
         <profile>
             <id>connector-aliyun-rds-mysql</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mysql-connector</module>
@@ -1002,17 +895,12 @@
         <profile>
             <id>connector-mysql-pxc</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mysql-connector</module>
@@ -1024,17 +912,12 @@
         <profile>
             <id>connector-polar-db-mysql</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mysql-connector</module>
@@ -1046,7 +929,7 @@
         <profile>
             <id>connector-tencent-db-mongodb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/tencent-db-mongodb-connector</module>
@@ -1057,7 +940,7 @@
         <profile>
             <id>connector-aliyun-mongodb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/aliyun-mongodb-connector</module>
@@ -1068,16 +951,11 @@
         <profile>
             <id>connector-aliyun-adb-postgres</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
                 <module>connectors/aliyun-adb-postgres-connector</module>
@@ -1088,16 +966,11 @@
         <profile>
             <id>connector-tencent-db-postgres</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
                 <module>connectors/tencent-db-postgres-connector</module>
@@ -1108,16 +981,11 @@
         <profile>
             <id>connector-aliyun-rds-postgres</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
                 <module>connectors/aliyun-rds-postgres-connector</module>
@@ -1128,16 +996,11 @@
         <profile>
             <id>connector-polar-db-postgres</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
                 <module>connectors/polar-db-postgres-connector</module>
@@ -1148,17 +1011,12 @@
         <profile>
             <id>connector-aws-rds-mysql</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mysql-connector</module>
@@ -1170,17 +1028,12 @@
         <profile>
             <id>connector-tencent-db-mariadb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mysql-connector</module>
@@ -1192,17 +1045,12 @@
         <profile>
             <id>connector-aliyun-rds-mariadb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors-common/mysql-binlog-connector-java</module>
                 <!-- debezium-bucket 子模块 - 只引入 MySQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-mysql</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/mysql-core</module>
                 <module>connectors-common/read-partition</module>
                 <module>connectors/mysql-connector</module>
@@ -1214,16 +1062,11 @@
         <profile>
             <id>connector-huawei-cloud-gaussdb</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <!-- debezium-bucket 子模块 - 只引入 PostgreSQL 相关的 -->
-                <module>connectors-common/debezium-bucket/debezium-parent</module>
-                <module>connectors-common/debezium-bucket/debezium-api</module>
-                <module>connectors-common/debezium-bucket/debezium-core</module>
-                <module>connectors-common/debezium-bucket/debezium-embedded</module>
-                <module>connectors-common/debezium-bucket/debezium-ddl-parser</module>
+                <module>connectors-common/debezium-bucket</module>
                 <module>connectors-common/debezium-bucket/debezium-connector-postgres</module>
-                <module>connectors-common/debezium-bucket/debezium-bom</module>
                 <module>connectors-common/postgres-core</module>
                 <module>connectors/postgres-connector</module>
                 <module>connectors/huawei-cloud-gaussdb-connector</module>
@@ -1234,7 +1077,7 @@
         <profile>
             <id>connector-aws-clickhouse</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors-common/sql-core</module>
                 <module>connectors/aws-clickhouse-connector</module>
             </modules>
@@ -1244,7 +1087,7 @@
         <profile>
             <id>connector-tdd</id>
             <modules>
-                <module>connectors-common/connector-core</module>
+                <module>connectors-common</module>
                 <module>connectors/tdd-connector</module>
             </modules>
         </profile>
