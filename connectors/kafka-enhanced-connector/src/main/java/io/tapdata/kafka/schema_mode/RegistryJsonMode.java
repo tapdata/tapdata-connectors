@@ -52,8 +52,11 @@ public class RegistryJsonMode extends AbsSchemaMode {
                     // 从数据推断 schema
                     List<String> primaryKeys = new ArrayList<>();
                     if (record.key() != null) {
-                        Map<String, Object> keyMap = (Map<String, Object>) TapSimplify.fromJson(record.key());
-                        primaryKeys.addAll(keyMap.keySet());
+                        try {
+                            primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
+                        } catch (Exception e) {
+                            tapLogger.warn("Failed to parse primary keys: {}", record.key(), e);
+                        }
                     }
 
                     // 构建 TapTable schema

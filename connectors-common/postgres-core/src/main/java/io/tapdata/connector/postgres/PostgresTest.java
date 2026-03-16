@@ -63,6 +63,7 @@ public class PostgresTest extends CommonDbTest {
                     isMaster.set(!resultSet.getBoolean(1));
                 });
                 if (isMaster.get()) {
+                    masterConnected = true;
                     return;
                 } else {
                     availableHost = commonDbConfig.getHost();

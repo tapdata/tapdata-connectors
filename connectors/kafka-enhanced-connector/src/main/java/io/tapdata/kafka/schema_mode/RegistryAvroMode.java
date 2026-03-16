@@ -46,7 +46,11 @@ public class RegistryAvroMode extends AbsSchemaMode {
                     GenericRecord genericRecord = (GenericRecord) record.value();
                     List<String> primaryKeys = new ArrayList<>();
                     if (record.key() != null) {
-                        primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
+                        try {
+                            primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
+                        } catch (Exception e) {
+                            tapLogger.warn("Failed to parse primary keys: {}", record.key(), e);
+                        }
                     }
                     genericRecordToTapTable(sampleTable, genericRecord, primaryKeys);
                     return false;

@@ -262,6 +262,15 @@
     },
     "node": {
       "type": "object",
+      "x-tableConfigScope": ["target"],
+      "x-reactions": {
+        "target": "nodeConfig.*(duplicateKey,distributedKey)",
+        "fulfill": {
+          "state": {
+            "display": "{{$settings.syncType===\"migrate\"?\"hidden\":\"visible\"}}"
+          }
+        }
+      },
       "properties": {
         "uniqueKeyType": {
           "type": "string",
@@ -273,6 +282,7 @@
           },
           "x-component": "Select",
           "x-index": 1,
+          "x-perTable": true,
           "enum": [
             {
               "label": "Aggregate",
@@ -302,6 +312,7 @@
           "title": "${duplicateKey}",
           "type": "array",
           "x-index": 2,
+          "x-perTable": true,
           "required": true,
           "default": null,
           "x-decorator": "FormItem",
@@ -315,12 +326,12 @@
             "filterable": true
           },
           "x-reactions": [
-            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
+            "{{useAsyncDataSourceByConfig({service: loadNodeTableFields, withoutField: true}, $values.id, $settings.syncType===\"migrate\"?$self.path.pop().segments.slice(-1)[0]:$values.tableName)}}",
             {
-              "dependencies":["writeStrategy", ".uniqueKeyType", "type"],
+              "dependencies":["writeStrategy", ".uniqueKeyType"],
               "fulfill":{
                 "state":{
-                  "display": "{{$deps[0] === \"appendWrite\" && $deps[1] === \"Duplicate\" && $deps[2] !== 'database' ? \"visible\":\"hidden\"}}"
+                  "display": "{{$deps[0] === \"appendWrite\" && $deps[1] === \"Duplicate\" ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -330,6 +341,7 @@
           "title": "${distributedKey}",
           "type": "array",
           "x-index": 3,
+          "x-perTable": true,
           "x-decorator": "FormItem",
           "x-decorator-props": {
             "tooltip": "${distributedKeyTip}"
@@ -341,12 +353,12 @@
             "filterable": true
           },
           "x-reactions": [
-            "{{useAsyncDataSourceByConfig({service: loadNodeFieldOptions, withoutField: true}, $values.$inputs[0])}}",
+            "{{useAsyncDataSourceByConfig({service: loadNodeTableFields, withoutField: true}, $values.id, $settings.syncType===\"migrate\"?$self.path.pop().segments.slice(-1)[0]:$values.tableName)}}",
             {
-              "dependencies":["$inputs", "type"],
+              "dependencies":["$inputs"],
               "fulfill":{
                 "state":{
-                  "display": "{{$deps[0].length > 0 && $deps[1] !== 'database' ? \"visible\":\"hidden\"}}"
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -359,6 +371,7 @@
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-index": 4,
+          "x-perTable": true,
           "x-decorator-props": {
             "min": 1,
             "max": 100
@@ -405,6 +418,7 @@
             }
           ],
           "x-index": 5,
+          "x-perTable": true,
           "items": {
             "type": "object",
             "properties": {
@@ -473,6 +487,7 @@
           "title": "${writeFormat}",
           "default": "json",
           "x-index": 7,
+          "x-perTable": true,
           "x-decorator": "FormItem",
           "x-decorator-props": {
             "feedbackLayout": "none"
@@ -502,6 +517,7 @@
           "title": "${applyDefault}",
           "default": false,
           "x-index": 8,
+          "x-perTable": true,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-decorator-props": {

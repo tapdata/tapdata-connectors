@@ -89,6 +89,7 @@ public class RedisConnector extends ConnectorBase {
                 connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
             redisConfig.load(connectionContext.getNodeConfig());
+            redisConfig.setTableConfig(connectionContext.getTableNodeConfig());
         });
         this.redisContext = new RedisContext(redisConfig);
         this.redisExceptionCollector = new RedisExceptionCollector();
@@ -140,7 +141,7 @@ public class RedisConnector extends ConnectorBase {
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
         AbstractRedisRecordWriter recordWriter;
-        switch (ValueTypeEnum.fromString(redisConfig.getValueType())) {
+        switch (ValueTypeEnum.fromString(redisConfig.getValueType(tapTable.getId()))) {
             case LIST:
                 recordWriter = new ListRedisRecordWriter(redisContext, tapTable);
                 break;
@@ -162,13 +163,13 @@ public class RedisConnector extends ConnectorBase {
     }
 
     private void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) {
-        if (redisConfig.getOneKey()) {
+        if (redisConfig.getOneKey(tapClearTableEvent.getTableId())) {
             cleanOneKey(tapClearTableEvent.getTableId());
         }
     }
 
     private void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) {
-        if (redisConfig.getOneKey()) {
+        if (redisConfig.getOneKey(tapDropTableEvent.getTableId())) {
             cleanOneKey(tapDropTableEvent.getTableId());
         }
     }
@@ -179,30 +180,30 @@ public class RedisConnector extends ConnectorBase {
         }
         try (CommonJedis jedis = redisContext.getJedis()) {
             jedis.del(keyName);
-            if (ValueTypeEnum.fromString(redisConfig.getValueType()) == ValueTypeEnum.HASH) {
+            if (ValueTypeEnum.fromString(redisConfig.getValueType(keyName)) == ValueTypeEnum.HASH) {
                 jedis.hdel(redisConfig.getSchemaKey(), keyName);
             }
         }
     }
 
     private void createTable(TapConnectorContext tapConnectorContext, TapCreateTableEvent createTableEvent) {
-        switch (ValueTypeEnum.fromString(redisConfig.getValueType())) {
+        String keyName = createTableEvent.getTableId();
+        switch (ValueTypeEnum.fromString(redisConfig.getValueType(keyName))) {
             case STRING:
             case SET:
             case ZSET:
                 return;
         }
-        if (!redisConfig.getListHead()) {
+        if (!redisConfig.getListHead(keyName)) {
             return;
         }
         try (CommonJedis jedis = redisContext.getJedis()) {
             List<String> fieldList = createTableEvent.getTable().getNameFieldMap().entrySet().stream().sorted(Comparator.comparing(v ->
                     EmptyKit.isNull(v.getValue().getPos()) ? 99999 : v.getValue().getPos())).map(Map.Entry::getKey).collect(Collectors.toList());
-            if (redisConfig.getOneKey()) {
-                String keyName = createTableEvent.getTableId();
-                if (ValueTypeEnum.fromString(redisConfig.getValueType()) == ValueTypeEnum.LIST) {
+            if (redisConfig.getOneKey(keyName)) {
+                if (ValueTypeEnum.fromString(redisConfig.getValueType(keyName)) == ValueTypeEnum.LIST) {
                     jedis.del(keyName);
-                    jedis.rpush(keyName, String.join(EmptyKit.isEmpty(redisConfig.getValueJoinString()) ? "," : redisConfig.getValueJoinString(), fieldList));
+                    jedis.rpush(keyName, String.join(EmptyKit.isEmpty(redisConfig.getValueJoinString(keyName)) ? "," : redisConfig.getValueJoinString(keyName), fieldList));
                 } else {
                     jedis.hset(redisConfig.getSchemaKey(), keyName, fieldList.stream().map(v -> csvFormat(v, ",")).collect(Collectors.joining(",")));
                 }

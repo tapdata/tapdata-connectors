@@ -80,9 +80,7 @@ public class KafkaService extends AbstractMqService {
         try {
             kafkaProducer = new KafkaProducer<>(producerConfiguration.build());
         } catch (Exception e) {
-            e.printStackTrace();
-            tapLogger.error("Kafka producer error: " + ErrorKit.getLastCause(e).getMessage(), e);
-            throw new RuntimeException(e);
+            tapLogger.warn("Kafka producer error: " + ErrorKit.getLastCause(e).getMessage(), e);
         }
     }
 

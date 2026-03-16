@@ -25,8 +25,8 @@ public class HashRedisRecordWriter extends AbstractRedisRecordWriter {
     protected void handleInsertEvent(TapInsertRecordEvent event, RedisPipeline pipelined) {
         Map<String, Object> value = event.getAfter();
         String fieldName = getRedisKey(value);
-        if (redisConfig.getOneKey()) {
-            String strValue = ValueDataEnum.JSON.getType().equals(redisConfig.getValueData()) ? getJsonValue(value) : getTextValue(value);
+        if (oneKey) {
+            String strValue = ValueDataEnum.JSON.getType().equals(valueData) ? getJsonValue(value) : getTextValue(value);
             pipelined.hset(keyName, fieldName, strValue);
         } else {
             pipelined.hmset(fieldName, toStringMap(value));
@@ -43,9 +43,9 @@ public class HashRedisRecordWriter extends AbstractRedisRecordWriter {
         } else {
             keyFieldList.forEach(v -> lastBefore.put(v, afterValue.get(v)));
         }
-        if (redisConfig.getOneKey()) {
+        if (oneKey) {
             pipelined.hdel(keyName, getRedisKey(lastBefore));
-            String strValue = ValueDataEnum.JSON.getType().equals(redisConfig.getValueData()) ? getJsonValue(afterValue) : getTextValue(afterValue);
+            String strValue = ValueDataEnum.JSON.getType().equals(valueData) ? getJsonValue(afterValue) : getTextValue(afterValue);
             pipelined.hset(keyName, getRedisKey(afterValue), strValue);
         } else {
             pipelined.del(getRedisKey(lastBefore));
@@ -57,8 +57,8 @@ public class HashRedisRecordWriter extends AbstractRedisRecordWriter {
     protected void handleDeleteEvent(TapDeleteRecordEvent event, RedisPipeline pipelined) {
         Map<String, Object> value = event.getBefore();
         String fieldName = getRedisKey(value);
-        if (redisConfig.getOneKey()) {
-            String strValue = ValueDataEnum.JSON.getType().equals(redisConfig.getValueData()) ? getJsonValue(value) : getTextValue(value);
+        if (oneKey) {
+            String strValue = ValueDataEnum.JSON.getType().equals(valueData) ? getJsonValue(value) : getTextValue(value);
             pipelined.hdel(keyName, fieldName, strValue);
         } else {
             pipelined.del(fieldName);
