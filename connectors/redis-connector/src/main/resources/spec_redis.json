@@ -188,6 +188,16 @@
       }
     },
     "node":{
+      "type": "object",
+      "x-tableConfigScope": ["target"],
+      "x-reactions": {
+        "target": "nodeConfig.keyExpression",
+        "fulfill": {
+          "state": {
+            "display": "{{$settings.syncType===\"migrate\"?\"hidden\":\"visible\"}}"
+          }
+        }
+      },
       "properties":{
         "valueType": {
           "type": "string",
@@ -199,6 +209,7 @@
             "tooltip": "${valueTypeTooltip}"
           },
           "x-index": 1,
+          "x-perTable": true,
           "enum": [
             {
               "label": "String",
@@ -234,6 +245,7 @@
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-index": 2,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${oneKeyTooltip}"
           },
@@ -255,6 +267,7 @@
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-index": 4,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${listHeadTooltip}"
           },
@@ -276,16 +289,17 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-index": 5,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${keyExpressionTooltip}"
           },
           "required": true,
           "x-reactions": [
             {
-              "dependencies": [".valueType",".oneKey","type","$inputs"],
+              "dependencies": [".valueType",".oneKey","$inputs"],
               "fulfill": {
                 "state": {
-                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && $deps[0] !== 'Redis' && ($deps[2] !== 'database') && $deps[3].length > 0}}"
+                  "visible": "{{($deps[0] === 'Hash' || !$deps[1]) && $deps[0] !== 'Redis' && $deps[2].length > 0}}"
                 }
               }
             }
@@ -359,6 +373,7 @@
           "x-decorator": "FormItem",
           "x-component": "Select",
           "x-index": 9,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${valueDataTooltip}"
           },
@@ -391,6 +406,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-index": 10,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${valueJoinStringTooltip}"
           },
@@ -413,6 +429,7 @@
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-index": 11,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${csvFormatTooltip}"
           },

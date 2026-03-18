@@ -77,12 +77,20 @@ public class DorisConfig extends CommonDbConfig {
         return duplicateKey;
     }
 
+    public List<String> getDuplicateKey(String key) {
+        return getTableConfigValue(key, "duplicateKey", duplicateKey);
+    }
+
     public void setDuplicateKey(List<String> duplicateKey) {
         this.duplicateKey = duplicateKey;
     }
 
     public List<String> getDistributedKey() {
         return distributedKey;
+    }
+
+    public List<String> getDistributedKey(String key) {
+        return getTableConfigValue(key, "distributedKey", distributedKey);
     }
 
     public void setDistributedKey(List<String> distributedKey) {
@@ -101,6 +109,10 @@ public class DorisConfig extends CommonDbConfig {
         return writeFormat;
     }
 
+    public String getWriteFormat(String key) {
+        return getTableConfigValue(key, "writeFormat", writeFormat);
+    }
+
     public void setWriteFormat(String writeFormat) {
         this.writeFormat = writeFormat;
     }
@@ -109,12 +121,20 @@ public class DorisConfig extends CommonDbConfig {
         return uniqueKeyType;
     }
 
+    public String getUniqueKeyType(String key) {
+        return getTableConfigValue(key, "uniqueKeyType", uniqueKeyType);
+    }
+
     public void setUniqueKeyType(String uniqueKeyType) {
         this.uniqueKeyType = uniqueKeyType;
     }
 
     public int getBucket() {
         return bucket;
+    }
+
+    public int getBucket(String key) {
+        return getTableConfigValue(key, "bucket", bucket);
     }
 
     public Integer getBackendNum() {
@@ -141,6 +161,10 @@ public class DorisConfig extends CommonDbConfig {
         return tableProperties;
     }
 
+    public List<LinkedHashMap<String, String>> getTableProperties(String key) {
+        return getTableConfigValue(key, "tableProperties", tableProperties);
+    }
+
     public void setTableProperties(List<LinkedHashMap<String, String>> tableProperties) {
         this.tableProperties = tableProperties;
     }
@@ -160,5 +184,9 @@ public class DorisConfig extends CommonDbConfig {
 
     public WriteFormat getWriteFormatEnum() {
         return WriteFormat.valueOf(writeFormat);
+    }
+
+    public WriteFormat getWriteFormatEnum(String key) {
+        return WriteFormat.valueOf(getTableConfigValue(key, "writeFormat", writeFormat));
     }
 }

@@ -38,9 +38,12 @@ import org.apache.paimon.types.*;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.security.MessageDigest;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
@@ -60,6 +63,11 @@ import java.util.stream.Collectors;
 public class PaimonService implements Closeable {
 
 	private static final String TAG = PaimonService.class.getName();
+	private static final String HASH_KEY = "_hash_key";
+	public static final String HASH_ALGORITHM = "MD5";
+	public static final byte SPLIT_CHAR = ',';
+	private final Map<String, Boolean> computeHashKey = new ConcurrentHashMap<>();
+	private final Map<String, Collection<String>> primaryKeyMap = new ConcurrentHashMap<>();
 	private final PaimonConfig config;
 	private Catalog catalog;
 
@@ -270,7 +278,9 @@ public class PaimonService implements Closeable {
 			conf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
 			conf.set("fs.s3a.impl.disable.cache", "true");
 			conf.set("fs.AbstractFileSystem.s3a.impl", "org.apache.hadoop.fs.s3a.S3A");
-
+			if (EmptyKit.isNotEmpty(config.getS3Properties())) {
+				config.getS3Properties().forEach(e -> e.forEach(conf::set));
+			}
 		}
 		return conf;
 	}
@@ -494,11 +504,23 @@ public class PaimonService implements Closeable {
 
 		// Build schema
 		Schema.Builder schemaBuilder = Schema.newBuilder();
-		Map<String, Object> schemaBuilderVariableMap = new HashMap<>();
+
+		// Set primary keys
+		Collection<String> primaryKeys = tapTable.primaryKeys(true);
+		if (primaryKeys != null && !primaryKeys.isEmpty()) {
+			if (config.getHashKey(tableName) && primaryKeys.size() > 5) {
+				schemaBuilder.primaryKey(Collections.singletonList(HASH_KEY));
+			} else {
+				schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
+			}
+		}
 
 		// Add fields
 		Map<String, TapField> fields = tapTable.getNameFieldMap();
 		if (fields != null) {
+			if (config.getHashKey(tableName) && EmptyKit.isNotEmpty(primaryKeys) && primaryKeys.size() > 5) {
+				schemaBuilder.column(HASH_KEY, DataTypes.VARCHAR(32));
+			}
 			for (Map.Entry<String, TapField> entry : fields.entrySet()) {
 				String fieldName = entry.getKey();
 				TapField tapField = entry.getValue();
@@ -507,10 +529,8 @@ public class PaimonService implements Closeable {
 			}
 		}
 
-		// Set primary keys
-		Collection<String> primaryKeys = tapTable.primaryKeys(true);
-		if (primaryKeys != null && !primaryKeys.isEmpty()) {
-			schemaBuilder.primaryKey(new ArrayList<>(primaryKeys));
+		if (EmptyKit.isNotEmpty(config.getPartitionKey(tableName))) {
+			schemaBuilder.partitionKeys(config.getPartitionKey(tableName));
 		}
 
 		// Set bucket configuration based on bucket mode
@@ -518,23 +538,19 @@ public class PaimonService implements Closeable {
 			// Dynamic bucket mode: set bucket to -1
 			// This mode provides better flexibility
 			schemaBuilder.option("bucket", "-1");
-			schemaBuilderVariableMap.put("bucket", -1);
 		} else {
 			// Fixed bucket mode: set specific bucket count
-			Integer bucketCount = config.getBucketCount();
+			Integer bucketCount = config.getBucketCount(tableName);
 			if (bucketCount == null || bucketCount <= 0) {
 				bucketCount = 4; // Default to 4 buckets if not configured
 			}
 			schemaBuilder.option("bucket", String.valueOf(bucketCount));
-			schemaBuilderVariableMap.put("bucket", String.valueOf(bucketCount));
 		}
-		if (EmptyKit.isNotBlank(config.getFileFormat())) {
-			schemaBuilder.option("file.format", config.getFileFormat());
-			schemaBuilderVariableMap.put("file.format", config.getFileFormat());
+		if (EmptyKit.isNotBlank(config.getFileFormat(tableName))) {
+			schemaBuilder.option("file.format", config.getFileFormat(tableName));
 		}
-		if (EmptyKit.isNotBlank(config.getCompression())) {
-			schemaBuilder.option("compression", config.getCompression());
-			schemaBuilderVariableMap.put("compression", config.getCompression());
+		if (EmptyKit.isNotBlank(config.getCompression(tableName))) {
+			schemaBuilder.option("compression", config.getCompression(tableName));
 		}
 
 		// ===== Performance Optimization Options =====
@@ -543,38 +559,30 @@ public class PaimonService implements Closeable {
 		// Larger buffer = better performance but more memory usage
 		if (config.getWriteBufferSize() != null && config.getWriteBufferSize() > 0) {
 			schemaBuilder.option("write-buffer-size", config.getWriteBufferSize() + "mb");
-			schemaBuilderVariableMap.put("write-buffer-size", config.getWriteBufferSize() + "mb");
 		}
 
 		// 2. Target file size - Paimon will try to create files of this size
 		// Larger files = fewer files but slower compaction
-		if (config.getTargetFileSize() != null && config.getTargetFileSize() > 0) {
-			schemaBuilder.option("target-file-size", config.getTargetFileSize() + "mb");
-			schemaBuilderVariableMap.put("target-file-size", config.getTargetFileSize() + "mb");
+		if (config.getTargetFileSize(tableName) != null && config.getTargetFileSize(tableName) > 0) {
+			schemaBuilder.option("target-file-size", config.getTargetFileSize(tableName) + "mb");
 		}
 
 		// 3. Compaction settings
-		if (config.getEnableAutoCompaction() != null) {
-			if (config.getEnableAutoCompaction()) {
+		if (config.getEnableAutoCompaction(tableName) != null) {
+			if (config.getEnableAutoCompaction(tableName)) {
 				// Enable full compaction for better query performance
 				schemaBuilder.option("compaction.async.enabled", "true");
-				schemaBuilder.option("compaction.optimization-interval", config.getCompactionIntervalMinutes() + "min");
-				schemaBuilderVariableMap.put("compaction.async.enabled", "true");
-				schemaBuilderVariableMap.put("compaction.optimization-interval", config.getCompactionIntervalMinutes() + "min");
+				schemaBuilder.option("compaction.optimization-interval", config.getCompactionIntervalMinutes(tableName) + "min");
 
 				// Set compaction strategy
 				schemaBuilder.option("changelog-producer", "input");
-				schemaBuilderVariableMap.put("changelog-producer", "input");
 
 				// Compact small files more aggressively
 				schemaBuilder.option("num-sorted-run.compaction-trigger", "3");
-				schemaBuilderVariableMap.put("num-sorted-run.compaction-trigger", "3");
 				schemaBuilder.option("num-sorted-run.stop-trigger", "5");
-				schemaBuilderVariableMap.put("num-sorted-run.stop-trigger", "5");
 			} else {
 				// Disable auto compaction
 				schemaBuilder.option("compaction.optimization-interval", "0");
-				schemaBuilderVariableMap.put("compaction.optimization-interval", "0");
 			}
 		}
 
@@ -583,27 +591,23 @@ public class PaimonService implements Closeable {
 		schemaBuilder.option("snapshot.num-retained.min", "5");
 		schemaBuilder.option("snapshot.num-retained.max", "50");
 		schemaBuilder.option("snapshot.time-retained", "30min");
-		schemaBuilderVariableMap.put("snapshot.num-retained.min", "5");
-		schemaBuilderVariableMap.put("snapshot.num-retained.max", "50");
-		schemaBuilderVariableMap.put("snapshot.time-retained", "30min");
 
 		// 5. Commit settings
 		// Force compact on commit for better read performance
-		schemaBuilder.option("commit.force-compact", "false"); // Don't force compact on every commit
-		schemaBuilderVariableMap.put("commit.force-compact", "false");
+		schemaBuilder.option("commit.force-compact", "false");
 
 		// 6. Scan settings for better read performance
 		schemaBuilder.option("scan.plan-sort-partition", "true");
-		schemaBuilderVariableMap.put("scan.plan-sort-partition", "true");
 
 		// 7. Changelog settings for CDC scenarios
 		schemaBuilder.option("changelog-producer.lookup-wait", "false"); // Don't wait for lookup
-		schemaBuilderVariableMap.put("changelog-producer.lookup-wait", "false");
 
 		// 8. Memory settings
 		schemaBuilder.option("sink.parallelism", String.valueOf(config.getWriteThreads()));
-		schemaBuilderVariableMap.put("sink.parallelism", String.valueOf(config.getWriteThreads()));
 
+		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
+			config.getTableProperties(tableName).forEach(e -> e.forEach(schemaBuilder::option));
+		}
 		// Create table
 		catalog.createTable(identifier, schemaBuilder.build(), false);
 
@@ -812,6 +816,10 @@ public class PaimonService implements Closeable {
 	public WriteListResult<TapRecordEvent> writeRecords(List<TapRecordEvent> recordEvents,
 														TapTable table,
 														TapConnectorContext connectorContext) throws Exception {
+		if (!computeHashKey.containsKey(table.getId())) {
+			computeHashKey.put(table.getId(), config.getHashKey(table.getId()) && EmptyKit.isNotEmpty(table.primaryKeys(true)) && table.primaryKeys(true).size() > 5);
+			primaryKeyMap.put(table.getId(), table.primaryKeys(true));
+		}
 		return writeRecordsWithStreamWriteInternal(recordEvents, table, connectorContext);
 	}
 
@@ -1220,7 +1228,7 @@ public class PaimonService implements Closeable {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
-		if (config.getBucketMode().equals("fixed")) {
+		if (config.getBucketMode(table.getName()).equals("fixed")) {
 			writer.write(row);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
@@ -1252,7 +1260,7 @@ public class PaimonService implements Closeable {
 		GenericRow afterRow = convertToGenericRow(after, table, identifier);
 
 		// Check if primary key update detection is enabled
-		Boolean enablePkUpdate = config.getEnablePrimaryKeyUpdate();
+		Boolean enablePkUpdate = config.getEnablePrimaryKeyUpdate(table.getName());
 		if (enablePkUpdate != null && enablePkUpdate) {
 			// Validate that before data is available when primary key update detection is enabled
 			if (beforeRow == null) {
@@ -1265,7 +1273,7 @@ public class PaimonService implements Closeable {
 				// Convert update to delete + insert
 				// First, write DELETE using before data
 				beforeRow.setRowKind(RowKind.DELETE);
-				if (config.getBucketMode().equals("fixed")) {
+				if (config.getBucketMode(table.getName()).equals("fixed")) {
 					writer.write(beforeRow);
 				} else {
 					int bucket = selectBucketForDynamic(beforeRow, table);
@@ -1274,7 +1282,7 @@ public class PaimonService implements Closeable {
 
 				// Then, write INSERT using after data
 				afterRow.setRowKind(RowKind.INSERT);
-				if (config.getBucketMode().equals("fixed")) {
+				if (config.getBucketMode(table.getName()).equals("fixed")) {
 					writer.write(afterRow);
 				} else {
 					int bucket = selectBucketForDynamic(afterRow, table);
@@ -1287,7 +1295,7 @@ public class PaimonService implements Closeable {
 		// Normal update logic: Write U- (UPDATE_BEFORE) if before data exists
 		if (beforeRow != null) {
 			beforeRow.setRowKind(RowKind.UPDATE_BEFORE);
-			if (config.getBucketMode().equals("fixed")) {
+			if (config.getBucketMode(table.getName()).equals("fixed")) {
 				writer.write(beforeRow);
 			} else {
 				int bucket = selectBucketForDynamic(beforeRow, table);
@@ -1297,7 +1305,7 @@ public class PaimonService implements Closeable {
 
 		// Write U+ (UPDATE_AFTER) using after data
 		afterRow.setRowKind(RowKind.UPDATE_AFTER);
-		if (config.getBucketMode().equals("fixed")) {
+		if (config.getBucketMode(table.getName()).equals("fixed")) {
 			writer.write(afterRow);
 		} else {
 			int bucket = selectBucketForDynamic(afterRow, table);
@@ -1369,7 +1377,7 @@ public class PaimonService implements Closeable {
 		GenericRow row = convertToGenericRow(before, table, identifier);
 		// Set row kind to DELETE
 		row.setRowKind(RowKind.DELETE);
-		if (config.getBucketMode().equals("fixed")) {
+		if (config.getBucketMode(table.getName()).equals("fixed")) {
 			writer.write(row);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
@@ -1390,7 +1398,7 @@ public class PaimonService implements Closeable {
 	 * @return bucket number
 	 */
 	private int selectBucketForDynamic(GenericRow row, TapTable table) {
-		int hint = (config.getBucketCount() != null && config.getBucketCount() > 0) ? config.getBucketCount() : 4;
+		int hint = (config.getBucketCount(table.getName()) != null && config.getBucketCount(table.getName()) > 0) ? config.getBucketCount(table.getName()) : 4;
 		int hash = 0;
 		Collection<String> pks = table.primaryKeys(true);
 		Map<String, TapField> fields = table.getNameFieldMap();
@@ -1500,7 +1508,11 @@ public class PaimonService implements Closeable {
 		}
 
 		GenericRow genericRow = new GenericRow(paimonFields.size());
-		for (int i = 0; i < paimonFields.size(); i++) {
+		int i = 0;
+		if (computeHashKey.get(table.getName())) {
+			genericRow.setField(i++, BinaryString.fromString(toHash(primaryKeyMap.get(table.getName()), data)));
+		}
+		for (; i < paimonFields.size(); i++) {
 			DataField dataField = paimonFields.get(i);
 			String fieldName = dataField.name();
 			Object value = data.get(fieldName);
@@ -1512,6 +1524,76 @@ public class PaimonService implements Closeable {
 		}
 
 		return genericRow;
+	}
+
+	protected String toHash(Collection<String> keys, Map<String, Object> data) {
+		try {
+			MessageDigest md = MessageDigest.getInstance(HASH_ALGORITHM);
+			try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+				boolean isFirst = true;
+				baos.write('[');
+				for (String key : keys) {
+					if (isFirst) {
+						isFirst = false;
+					} else {
+						baos.write(SPLIT_CHAR);
+					}
+
+					Object val = data.get(key);
+					byte[] bytes = toBytes(val);
+					baos.write(bytes);
+				}
+				baos.write(']');
+
+				byte[] hashBytes = md.digest(baos.toByteArray());
+				StringBuilder hashHex = new StringBuilder();
+				for (byte b : hashBytes) {
+					hashHex.append(String.format("%02x", b));
+				}
+				return hashHex.toString(); // 返回 128 位（32 个字符）的哈希值
+			}
+		} catch (Exception e) {
+			throw new RuntimeException("Failed to compute hash key for data: " + data, e);
+		}
+	}
+
+	protected byte[] toBytes(Object data) throws IOException {
+		if (null == data) return new byte[0];
+		if (data instanceof byte[]) return (byte[]) data;
+		if (data.getClass().isArray()) return arrayToBytes(Arrays.asList((Object[]) data));
+		if (data instanceof Collection) return arrayToBytes((Collection<?>) data);
+		if (data instanceof Map) return mapToBytes((Map<?, ?>) data);
+		return data.toString().getBytes();
+	}
+
+	protected byte[] arrayToBytes(Collection<?> collection) throws IOException {
+		try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+			boolean isFirst = true;
+			baos.write('[');
+			for (Object o : collection) {
+				if (isFirst) {
+					isFirst = false;
+				} else {
+					baos.write(SPLIT_CHAR);
+				}
+				baos.write(toBytes(o));
+			}
+			baos.write(']');
+			return baos.toByteArray();
+		}
+	}
+
+	protected byte[] mapToBytes(Map<?, ?> map) throws IOException {
+		try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+			baos.write('{');
+			for (Map.Entry<?, ?> en : map.entrySet()) {
+				baos.write(toBytes(en.getKey()));
+				baos.write(':');
+				baos.write(toBytes(en.getValue()));
+			}
+			baos.write('}');
+			return baos.toByteArray();
+		}
 	}
 
 	/**
@@ -1549,7 +1631,7 @@ public class PaimonService implements Closeable {
 			case "TIMESTAMP_WITHOUT_TIME_ZONE":
 			case "TIMESTAMP_WITH_LOCAL_TIME_ZONE":
 				java.sql.Timestamp sqlTimestamp = (java.sql.Timestamp) value;
-				return Timestamp.fromEpochMillis(sqlTimestamp.getTime(), sqlTimestamp.getNanos());
+				return Timestamp.fromEpochMillis(sqlTimestamp.getTime(), (sqlTimestamp.getNanos() % 1000000));
 		}
 		return value;
 	}

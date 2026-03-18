@@ -15,6 +15,7 @@ import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import org.apache.avro.JsonProperties;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericData;
@@ -24,6 +25,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
+import java.io.Serializable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -46,7 +48,11 @@ public class RegistryAvroMode extends AbsSchemaMode {
                     GenericRecord genericRecord = (GenericRecord) record.value();
                     List<String> primaryKeys = new ArrayList<>();
                     if (record.key() != null) {
-                        primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
+                        try {
+                            primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
+                        } catch (Exception e) {
+                            tapLogger.warn("Failed to parse primary keys: {}", record.key(), e);
+                        }
                     }
                     genericRecordToTapTable(sampleTable, genericRecord, primaryKeys);
                     return false;
@@ -73,7 +79,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
             } else {
                 field.setDataType(toTapType(key.schema().getType().name()));
             }
-            field.setDefaultValue(key.defaultVal());
+            field.setDefaultValue(getDefaultValue(key.defaultVal()));
             field.setNullable(key.schema().isNullable());
             if (primaryKeys.contains(key.name())) {
                 field.setPrimaryKey(true);
@@ -81,6 +87,19 @@ public class RegistryAvroMode extends AbsSchemaMode {
             }
             sampleTable.add(field);
         });
+    }
+
+    private Object getDefaultValue(Object obj) {
+        if (obj == null) {
+            return null;
+        }
+        if (obj instanceof JsonProperties.Null) {
+            return null;
+        }
+        if (!(obj instanceof Serializable)) {
+            return String.valueOf(obj);
+        }
+        return obj;
     }
 
     @Override

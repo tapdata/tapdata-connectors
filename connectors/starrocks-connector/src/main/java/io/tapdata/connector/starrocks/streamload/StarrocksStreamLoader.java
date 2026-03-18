@@ -37,6 +37,8 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static io.tapdata.base.ConnectorBase.writeListResult;
+import static io.tapdata.entity.event.TapCallbackOffset.KEY_BATCH_OFFSET;
+import static io.tapdata.entity.event.TapCallbackOffset.KEY_STREAM_OFFSET;
 
 /**
  * @author jarad
@@ -77,8 +79,8 @@ public class StarrocksStreamLoader {
     // 表名到 TapTable 的映射，用于刷新时获取真正的 TapTable
     private final Map<String, TapTable> tableNameToTapTableMap;
 
-    // 保存每个表的最后一个 TapOffset，用于在 flush 成功后回调
-    private final Map<String, TapCallbackOffset> lastTapOffsetByTable;
+    // 保存每个表的第一个 TapOffset，用于在 flush 成功后回调
+    private final Map<String, TapCallbackOffset> firstOffsetByTable;
 
     // 日志打印控制
     private long lastLogTime;
@@ -129,7 +131,7 @@ public class StarrocksStreamLoader {
         this.isFirstRecordByTable = new ConcurrentHashMap<>();
         this.pendingFlushTables = ConcurrentHashMap.newKeySet();
         this.tableNameToTapTableMap = new ConcurrentHashMap<>();
-        this.lastTapOffsetByTable = new ConcurrentHashMap<>();
+        this.firstOffsetByTable = Collections.synchronizedMap(new LinkedHashMap<>());
 
         // 初始化定时刷新
         initializeFlushScheduler();
@@ -452,10 +454,13 @@ public class StarrocksStreamLoader {
                         .eventTime(tapRecordEvent.getReferenceTime())
                         .nodeIds(nodeIds);
 
-                // 保存到 lastTapOffsetByTable，用于 flush 时回调
                 // 只有当 offset 有效时才保存（避免覆盖之前的有效 offset）
                 if (tapOffset.hasValidOffset()) {
-                    lastTapOffsetByTable.put(tableName, tapOffset);
+                    if (!firstOffsetByTable.containsKey(tableName)) {
+                        firstOffsetByTable.put(tableName, tapOffset);
+                        taplogger.debug("Saved first offset for table {}: streamOffset={}, batchOffset={}",
+                                tableName, streamOffset, batchOffset);
+                    }
                 }
 
                 byte[] bytes = messageSerializer.serialize(table, tapRecordEvent, isAgg);
@@ -906,13 +911,40 @@ public class StarrocksStreamLoader {
             taplogger.debug("Table {} successfully flushed and removed from pending list. " +
                 "Remaining pending tables: {}", tableName, pendingFlushTables.size());
 
-            // 如果所有表都已刷新完成，并且有 TapOffset 数据，主动通知引擎保存断点
-            if (pendingFlushTables.isEmpty() && flushOffsetCallback != null) {
-                TapCallbackOffset tapOffset = lastTapOffsetByTable.get(tableName);
-                if (tapOffset != null && tapOffset.hasValidOffset()) {
-                    taplogger.info("All tables flushed successfully, triggering flush offset callback with TapOffset: {}", tapOffset);
+            if (flushOffsetCallback != null) {
+                TapCallbackOffset offsetToSave = null;
+                synchronized (firstOffsetByTable) {
+                    Map.Entry<String, TapCallbackOffset> firstEntry = firstOffsetByTable.entrySet()
+                            .stream()
+                            .findFirst()
+                            .orElse(null);
+
+                    if (firstEntry != null) {
+                        String firstTableName = firstEntry.getKey();
+                        TapCallbackOffset firstOffset = firstEntry.getValue();
+
+                        // 如果当前刷新的表是第一个表
+                        offsetToSave = firstOffset;
+                        if (tableName.equals(firstTableName)) {
+                            firstOffsetByTable.remove(firstTableName);
+                            taplogger.info("Table {} is the first table in queue, saving its latest offset: " +
+                                            "batchOffset={}, streamOffset={}",
+                                    tableName,
+                                    offsetToSave != null ? offsetToSave.get(KEY_BATCH_OFFSET) : null,
+                                    offsetToSave != null ? offsetToSave.get(KEY_STREAM_OFFSET) : null);
+                        } else {
+                            taplogger.info("Table {} is not the first table, saving first table {}'s offset: " +
+                                            "batchOffset={}, streamOffset={}",
+                                    tableName, firstTableName,
+                                    offsetToSave.get(KEY_BATCH_OFFSET),
+                                    offsetToSave.get(KEY_STREAM_OFFSET));
+                        }
+                    }
+                }
+                if (offsetToSave != null && offsetToSave.hasValidOffset()) {
+                    taplogger.info("Table flushed successfully, triggering flush offset callback with TapOffset: {}", offsetToSave);
                     try {
-                        flushOffsetCallback.accept(tapOffset);
+                        flushOffsetCallback.accept(offsetToSave);
                     } catch (Exception e) {
                         taplogger.warn("Failed to flush offset callback: {}", e.getMessage(), e);
                     }

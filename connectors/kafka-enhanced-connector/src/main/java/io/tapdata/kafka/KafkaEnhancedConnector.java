@@ -9,6 +9,7 @@ import io.tapdata.kafka.service.KafkaService;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
+import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
@@ -37,15 +38,18 @@ public class KafkaEnhancedConnector extends ConnectorBase {
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Throwable {
         connectionContext.getLog().info("Starting {}", PDK_ID);
-        kafkaConfig = KafkaConfig.valueOf(connectionContext);
-        kafkaService = new KafkaService(kafkaConfig, stopping);
         isConnectorStarted(connectionContext, connectorContext -> {
             String firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
             if (EmptyKit.isNull(firstConnectorId)) {
                 firstConnectorId = UUID.randomUUID().toString().replace("-", "");
                 connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
+            kafkaConfig = KafkaConfig.valueOf(connectionContext, firstConnectorId);
         });
+        if (!(connectionContext instanceof TapConnectorContext)) {
+            kafkaConfig = KafkaConfig.valueOf(connectionContext, "");
+        }
+        kafkaService = new KafkaService(kafkaConfig, stopping);
     }
 
     @Override

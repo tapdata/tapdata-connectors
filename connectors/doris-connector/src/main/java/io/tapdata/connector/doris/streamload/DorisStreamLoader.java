@@ -71,7 +71,7 @@ public class DorisStreamLoader {
     }
 
     private void initMessageSerializer() {
-        DorisConfig.WriteFormat writeFormat = dorisConfig.getWriteFormatEnum();
+        DorisConfig.WriteFormat writeFormat = dorisConfig.getWriteFormatEnum(tapTable.getId());
         TapLogger.info(TAG, "Doris stream load run with {} format", writeFormat);
         switch (writeFormat) {
             case csv:
@@ -88,7 +88,7 @@ public class DorisStreamLoader {
             TapLogger.debug(TAG, "Batch events length is: {}", tapRecordEvents.size());
             WriteListResult<TapRecordEvent> listResult = writeListResult();
             this.tapTable = table;
-            boolean isAgg = DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType());
+            boolean isAgg = DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType(table.getId()));
             for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
                 byte[] bytes = messageSerializer.serialize(table, tapRecordEvent, isAgg);
                 if (needFlush(tapRecordEvent, bytes.length, isAgg)) {
@@ -137,7 +137,7 @@ public class DorisStreamLoader {
     }
 
     public RespContent put(final TapTable table) throws StreamLoadException, DorisRetryableException {
-        DorisConfig.WriteFormat writeFormat = dorisConfig.getWriteFormatEnum();
+        DorisConfig.WriteFormat writeFormat = dorisConfig.getWriteFormatEnum(table.getId());
         try {
             final String loadUrl = buildLoadUrl(dorisConfig.getDorisHttp(), dorisConfig.getDatabase(), table.getId());
             final String prefix = buildPrefix(URLEncoder.encode(table.getId()).replace("%", ""));
@@ -145,7 +145,7 @@ public class DorisStreamLoader {
             String label = prefix + "-" + UUID.randomUUID();
             List<String> columns = new ArrayList<>();
             for (String col : tapTable.getNameFieldMap().keySet()) {
-                if (dataColumns.get().contains(col) || DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType())) {
+                if (dataColumns.get().contains(col) || DorisTableType.Aggregate.toString().equals(dorisConfig.getUniqueKeyType(table.getId()))) {
                     columns.add("`" + col + "`");
                 }
             }
@@ -167,7 +167,7 @@ public class DorisStreamLoader {
             if (CollectionUtils.isEmpty(primaryKeys)) {
                 putBuilder.enableAppend();
             } else {
-                if (DorisTableType.Unique.toString().equals(dorisConfig.getUniqueKeyType())) {
+                if (DorisTableType.Unique.toString().equals(dorisConfig.getUniqueKeyType(table.getId()))) {
                     putBuilder.enableDelete();
                     putBuilder.addPartialHeader();
                 } else {

@@ -318,6 +318,33 @@ public class CommonSqlMaker {
     }
 
     /**
+     * build subSql after where for advance query using OFFSET-FETCH syntax
+     *
+     * @param filter condition of advance query
+     * @return where substring
+     */
+    public String buildSqlByAdvanceFilterWithOffsetFetch(TapAdvanceFilter filter) {
+        StringBuilder builder = new StringBuilder();
+        buildWhereClause(builder, filter);
+        buildOrderClause(builder, filter);
+        buildOffsetFetchClause(builder, filter);
+        return builder.toString();
+    }
+
+    public void buildOffsetFetchClause(StringBuilder builder, TapAdvanceFilter filter) {
+        if (EmptyKit.isNotNull(filter.getSkip())) {
+            builder.append(" OFFSET ").append(filter.getSkip()).append(" ROWS ");
+        } else if (EmptyKit.isNotNull(filter.getLimit())) {
+            // FETCH requires OFFSET, so add OFFSET 0 if only LIMIT is specified
+            builder.append(" OFFSET 0 ROWS ");
+        }
+
+        if (EmptyKit.isNotNull(filter.getLimit())) {
+            builder.append(" FETCH FIRST ").append(filter.getLimit()).append(" ROWS ONLY ");
+        }
+    }
+
+    /**
      * set value for each column in sql
      * e.g.
      * id=12,name=Jarad,age=34

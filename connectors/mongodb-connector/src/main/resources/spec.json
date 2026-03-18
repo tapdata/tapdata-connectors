@@ -685,15 +685,19 @@
 	"dataTypes": {
 		"DOUBLE": {
 			"to": "TapNumber",
+			"precision": [
+				1,
+				255
+			],
+			"scale": [
+				0,
+				30
+			],
 			"value": [
 				"-1.7976931348623157E+308",
 				"1.7976931348623157E+308"
 			],
-			"preferPrecision": 20,
-			"preferScale": 8,
-			"scale": 17,
-			"precision": 309,
-			"fixed": true
+			"fixed": false
 		},
 		"STRING[($byte)]": {
 			"to": "TapString",
@@ -753,6 +757,21 @@
 			]
 		},
 		"TIMESTAMP": {
+			"to": "TapDateTime",
+			"range": [
+				"1970-01-01 00:00:00",
+				"2038-01-19 03:14:07"
+			],
+			"pattern": "yyyy-MM-dd HH:mm:ss",
+			"fraction": [
+				0,
+				3
+			],
+			"defaultFraction": 3,
+			"withTimeZone": true,
+			"queryOnly": true
+		},
+		"REGULAR_EXPRESSION": {
 			"to": "TapString",
 			"queryOnly": true
 		},
@@ -770,7 +789,17 @@
 				-1E+6145,
 				1E+6145
 			],
-			"scale": 1000
+			"precision": [
+				1,
+				65
+			],
+			"scale": [
+				0,
+				30
+			],
+			"defaultPrecision": 30,
+			"defaultScale": 10,
+			"fixed": true
 		},
 		"MIN_KEY": {
 			"to": "TapString",

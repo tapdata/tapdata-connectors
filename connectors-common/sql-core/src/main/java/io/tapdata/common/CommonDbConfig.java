@@ -3,6 +3,7 @@ package io.tapdata.common;
 import io.tapdata.common.log.CustomLogDelegator;
 import io.tapdata.common.util.FileUtil;
 import io.tapdata.entity.utils.BeanUtils;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.InstanceFactory;
 import io.tapdata.entity.utils.JsonParser;
 import io.tapdata.kit.EmptyKit;
@@ -61,6 +62,7 @@ public class CommonDbConfig implements Serializable {
 
     protected Boolean enableFileInput = false;
     protected Long bufferCapacity = 10000000L;
+    protected Map<String, DataMap> tableConfig;
 
     private Boolean useSSL = false;
     private String sslCa;
@@ -349,6 +351,10 @@ public class CommonDbConfig implements Serializable {
         return applyDefault;
     }
 
+    public Boolean getApplyDefault(String key) {
+        return getTableConfigValue(key, "applyDefault", applyDefault);
+    }
+
     public void setApplyDefault(Boolean applyDefault) {
         this.applyDefault = applyDefault;
     }
@@ -479,5 +485,29 @@ public class CommonDbConfig implements Serializable {
 
     public void setMaxIndexNameLength(int maxIndexNameLength) {
         this.maxIndexNameLength = maxIndexNameLength;
+    }
+
+    public Map<String, DataMap> getTableConfig() {
+        return tableConfig;
+    }
+
+    public void setTableConfig(Map<String, DataMap> tableConfig) {
+        this.tableConfig = tableConfig;
+    }
+
+    /**
+     * Generic method to get table-specific or global configuration value
+     *
+     * @param key table name key
+     * @param propertyName property name in tableConfig
+     * @param defaultValue default value from global config
+     * @param <T> type of the value
+     * @return table-specific value if exists, otherwise global default value
+     */
+    protected <T> T getTableConfigValue(String key, String propertyName, T defaultValue) {
+        if (tableConfig != null && tableConfig.containsKey(key)) {
+            return tableConfig.get(key).getValue(propertyName, defaultValue);
+        }
+        return defaultValue;
     }
 }
