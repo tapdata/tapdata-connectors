@@ -38,6 +38,7 @@ public class KafkaEnhancedConnector extends ConnectorBase {
     public void onStart(TapConnectionContext connectionContext) throws Throwable {
         connectionContext.getLog().info("Starting {}", PDK_ID);
         kafkaConfig = KafkaConfig.valueOf(connectionContext);
+        stopping.compareAndSet(true, false);
         kafkaService = new KafkaService(kafkaConfig, stopping);
         isConnectorStarted(connectionContext, connectorContext -> {
             String firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
@@ -53,6 +54,7 @@ public class KafkaEnhancedConnector extends ConnectorBase {
         stopping.compareAndSet(false, true);
         connectionContext.getLog().info("Stopping {}", PDK_ID);
         ErrorHelper.closeWithNotNull(kafkaService);
+        kafkaService = null;
     }
 
     @Override
