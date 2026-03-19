@@ -49,7 +49,7 @@ public class KafkaEnhancedConnector extends ConnectorBase {
         if (!(connectionContext instanceof TapConnectorContext)) {
             kafkaConfig = KafkaConfig.valueOf(connectionContext, "");
         }
-        stopping.compareAndSet(false, true);
+        stopping.compareAndSet(true, false);
         kafkaService = new KafkaService(kafkaConfig, stopping);
     }
 
