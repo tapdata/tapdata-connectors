@@ -49,6 +49,7 @@ public class KafkaEnhancedConnector extends ConnectorBase {
         if (!(connectionContext instanceof TapConnectorContext)) {
             kafkaConfig = KafkaConfig.valueOf(connectionContext, "");
         }
+        stopping.compareAndSet(false, true);
         kafkaService = new KafkaService(kafkaConfig, stopping);
     }
 
@@ -57,6 +58,7 @@ public class KafkaEnhancedConnector extends ConnectorBase {
         stopping.compareAndSet(false, true);
         connectionContext.getLog().info("Stopping {}", PDK_ID);
         ErrorHelper.closeWithNotNull(kafkaService);
+        kafkaService = null;
     }
 
     @Override
