@@ -9,8 +9,11 @@ import io.tapdata.connector.starrocks.streamload.StarrocksStreamLoader;
 import io.tapdata.connector.starrocks.streamload.StarrocksTableType;
 import io.tapdata.connector.starrocks.streamload.exception.StarrocksRetryableException;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.control.ControlEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
@@ -24,6 +27,7 @@ import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
+import io.tapdata.pdk.apis.entity.ControlResult;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
@@ -113,6 +117,7 @@ public class StarrocksConnector extends CommonDbConnector {
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> starrocksJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportSendControlFunction(this::sendControl);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null)
@@ -401,6 +406,20 @@ public class StarrocksConnector extends CommonDbConnector {
             exceptionCollector.collectWritePrivileges("execute sqls: " + TapSimplify.toJson(sqlList), Collections.emptyList(), e);
             throw e;
         }
+    }
+
+    protected void sendControl(TapConnectorContext tapConnectorContext, List<ControlEvent> controlEvents, Consumer<ControlResult<ControlEvent>> consumer) {
+        ControlResult<ControlEvent> controlResult = new ControlResult<>();
+        if (controlEvents.stream().anyMatch(v -> v instanceof HeartbeatEvent) && EmptyKit.isNotEmpty(starrocksStreamLoaderMap)) {
+            if (starrocksStreamLoaderMap.entrySet().stream().anyMatch(v -> EmptyKit.isNotEmpty(v.getValue().getPendingFlushTables()))) {
+                controlResult.setSuccess(false);
+                TapLogger.info("StarrocksConnector", "Pending flush tables, send heartbeat event failed");
+                consumer.accept(controlResult);
+                return;
+            }
+        }
+        controlResult.setSuccess(true);
+        consumer.accept(controlResult);
     }
 
     @Override
