@@ -9,6 +9,9 @@ import io.tapdata.connector.starrocks.streamload.StarrocksStreamLoader;
 import io.tapdata.connector.starrocks.streamload.StarrocksTableType;
 import io.tapdata.connector.starrocks.streamload.exception.StarrocksRetryableException;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.TapCallbackOffset;
+import io.tapdata.entity.event.control.ControlEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
@@ -113,6 +116,7 @@ public class StarrocksConnector extends CommonDbConnector {
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> starrocksJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportSendControlFunction(this::processControl);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null)
@@ -403,6 +407,30 @@ public class StarrocksConnector extends CommonDbConnector {
         }
     }
 
+    protected void processControl(TapConnectorContext tapConnectorContext, ControlEvent controlEvent) {
+        if (controlEvent instanceof HeartbeatEvent) {
+            if (starrocksStreamLoaderMap.entrySet().stream().allMatch(v -> EmptyKit.isEmpty(v.getValue().getPendingFlushTables()))) {
+                TapCallbackOffset tapOffset = new TapCallbackOffset();
+                // 从 TapRecordEvent.info 中提取 offset 信息
+                // 这些信息由 HazelcastTargetPdkBaseNode.handleTapdataEventDML 方法添加
+                Object batchOffset = controlEvent.getInfo("batchOffset");
+                Object streamOffset = controlEvent.getInfo("streamOffset");
+                Object syncStage = controlEvent.getInfo("syncStage");
+                Object sourceTime = controlEvent.getInfo("sourceTime");
+                Object nodeIds = controlEvent.getInfo("nodeIds");
+
+                // 填充 TapOffset
+                tapOffset.batchOffset(batchOffset)
+                        .streamOffset(streamOffset)
+                        .syncStage(syncStage != null ? syncStage.toString() : null)
+                        .sourceTime(sourceTime instanceof Long ? (Long) sourceTime : null)
+                        .eventTime(((HeartbeatEvent) controlEvent).getReferenceTime())
+                        .nodeIds(nodeIds);
+                tapConnectorContext.getFlushOffsetCallback().accept(tapOffset);
+            }
+        }
+    }
+
     @Override
     protected void processDataMap(DataMap dataMap, TapTable tapTable) {
         if (!starrocksConfig.getOldVersionTimezone()) {
@@ -417,9 +445,9 @@ public class StarrocksConnector extends CommonDbConnector {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
                 } else if (value instanceof String) {
                     String dataType = StringKit.removeParentheses(tapTable.getNameFieldMap().get(entry.getKey()).getDataType());
-                    if(dataType.equals("largeint")) {
+                    if (dataType.equals("largeint")) {
                         entry.setValue(new BigDecimal((String) value));
-                    } else if(dataType.contains("binary")) {
+                    } else if (dataType.contains("binary")) {
                         entry.setValue(((String) value).getBytes());
                     }
                 }

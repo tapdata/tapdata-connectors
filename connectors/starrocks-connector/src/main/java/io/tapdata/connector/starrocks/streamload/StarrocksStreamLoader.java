@@ -1491,4 +1491,8 @@ public class StarrocksStreamLoader {
     public void setFlushOffsetCallback(Consumer<Object> flushOffsetCallback) {
         this.flushOffsetCallback = flushOffsetCallback;
     }
+
+    public Set<String> getPendingFlushTables() {
+        return pendingFlushTables;
+    }
 }
