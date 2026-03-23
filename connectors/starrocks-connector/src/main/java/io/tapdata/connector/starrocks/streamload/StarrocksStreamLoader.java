@@ -1142,7 +1142,7 @@ public class StarrocksStreamLoader {
     /**
      * 完成指定表的缓存文件写入
      */
-    private void finalizeCacheFileForTable(String tableName) throws IOException {
+    private synchronized void finalizeCacheFileForTable(String tableName) throws IOException {
         try {
             FileOutputStream cacheFileStream = cacheFileStreamsByTable.get(tableName);
             Path tempCacheFile = tempCacheFilesByTable.get(tableName);
@@ -1266,7 +1266,7 @@ public class StarrocksStreamLoader {
 
             // 清理相关状态
             isFirstRecordByTable.remove(tableName);
-            dataColumnsByTable.remove(tableName);
+//            dataColumnsByTable.remove(tableName);
             currentBatchSizeByTable.remove(tableName);
             // 注意：lastFlushTimeByTable 不清理，需要保持刷新时间记录
             // 注意：tableNameToTapTableMap 不清理，因为表结构信息需要持久保存
