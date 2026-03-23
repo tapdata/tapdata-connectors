@@ -116,7 +116,7 @@ public class StarrocksConnector extends CommonDbConnector {
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> starrocksJdbcContext.getConnection(), this::isAlive, c));
-        connectorFunctions.supportSendControlFunction(this::processControl);
+        connectorFunctions.supportProcessControlFunction(this::processControl);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null)
