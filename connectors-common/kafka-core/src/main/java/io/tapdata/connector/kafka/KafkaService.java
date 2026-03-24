@@ -257,7 +257,7 @@ public class KafkaService extends AbstractMqService {
                                 messageBody = (Map<String, Object>) messageBody.get("data");
                             }
                         } catch (Exception e) {
-                            tapLogger.warn("topic[{}] value [{}] can not parse to json, ignore...", record.topic(), new String(record.value()));
+                            tapLogger.warn("topic[{}] value [{}] can not parse to json, ignore...", record.topic(), String.valueOf(record.value()));
                             TapTable tapTable = new TapTable(record.topic());
                             tableList.add(tapTable);
                             topics.remove(record.topic());
