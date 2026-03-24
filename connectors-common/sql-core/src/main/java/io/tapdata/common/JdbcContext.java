@@ -239,6 +239,19 @@ public abstract class JdbcContext implements AutoCloseable {
         }
     }
 
+    public void batchExecute(List<String> sqlList, int timeout) throws SQLException {
+        try (
+                Connection connection = getConnection();
+                Statement statement = connection.createStatement()
+        ) {
+            statement.setQueryTimeout(timeout);
+            for (String sql : sqlList) {
+                statement.execute(sql);
+            }
+            connection.commit();
+        }
+    }
+
     public void queryAllTables(List<String> tableNames, int batchSize, Consumer<List<String>> consumer) throws SQLException {
         List<String> temp = list();
         query(queryAllTablesSql(getConfig().getSchema(), tableNames),
