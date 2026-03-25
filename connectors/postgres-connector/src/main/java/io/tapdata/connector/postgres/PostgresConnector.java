@@ -37,6 +37,7 @@ import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.exception.TapCodeException;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.*;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -296,10 +297,15 @@ public class PostgresConnector extends CommonDbConnector {
         if (EmptyKit.isNull(slotName)) {
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
             String sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
+            long begin = System.currentTimeMillis();
             try {
-                postgresJdbcContext.execute(sql);
+                postgresJdbcContext.execute(sql, 20);
             } catch (SQLException e) {
-                throw new TapCodeException(PostgresErrorCode.SELECT_PUBLICATION_FAILED, "Select publication failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                if (System.currentTimeMillis() - begin > 18000) {
+                    throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_TIMEOUT, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                } else {
+                    throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                }
             }
             tapLogger.info("new logical replication slot created, slotName:{}", slotName);
             connectorContext.getStateMap().put("tapdata_pg_slot", slotName);
@@ -393,15 +399,15 @@ public class PostgresConnector extends CommonDbConnector {
             postgresOffset.setSourceOffset(sourceOffset);
 
             tapLogger.info("Created offset from LSN string '{}', parsed LSN value: {}, offset: {}",
-                offsetString, lsnValue, sourceOffset);
+                    offsetString, lsnValue, sourceOffset);
 
             return postgresOffset;
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Failed to create offset from string: " + offsetString +
-                ". Error: " + e.getMessage(), e);
+                    ". Error: " + e.getMessage(), e);
         } catch (Exception e) {
             throw new RuntimeException("Invalid LSN offset string: " + offsetString +
-                ". Expected format: '0/1234567' or '19088743' or JSON format. Error: " + e.getMessage(), e);
+                    ". Expected format: '0/1234567' or '19088743' or JSON format. Error: " + e.getMessage(), e);
         }
     }
 
@@ -421,7 +427,7 @@ public class PostgresConnector extends CommonDbConnector {
             String[] parts = lsnString.split("/");
             if (parts.length != 2) {
                 throw new IllegalArgumentException("Invalid LSN format: " + lsnString +
-                    ". Expected format: 'segment/offset' (e.g., '0/1234567')");
+                        ". Expected format: 'segment/offset' (e.g., '0/1234567')");
             }
 
             try {
@@ -433,12 +439,12 @@ public class PostgresConnector extends CommonDbConnector {
                 long lsn = (segment << 32) | offset;
 
                 tapLogger.debug("Parsed LSN from '{}': segment={}, offset={}, lsn={}",
-                    lsnString, segment, offset, lsn);
+                        lsnString, segment, offset, lsn);
 
                 return lsn;
             } catch (NumberFormatException e) {
                 throw new IllegalArgumentException("Invalid LSN format: " + lsnString +
-                    ". Segment and offset must be hexadecimal numbers. Error: " + e.getMessage(), e);
+                        ". Segment and offset must be hexadecimal numbers. Error: " + e.getMessage(), e);
             }
         }
 
@@ -449,7 +455,7 @@ public class PostgresConnector extends CommonDbConnector {
             return lsn;
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Invalid LSN format: " + lsnString +
-                ". Expected either 'segment/offset' format or a decimal number. Error: " + e.getMessage(), e);
+                    ". Expected either 'segment/offset' format or a decimal number. Error: " + e.getMessage(), e);
         }
     }
 

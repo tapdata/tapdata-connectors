@@ -85,7 +85,7 @@ public interface PostgresErrorCode {
             describeCN = "创建 slot 超时，大概率是受长时间未提交事务影响或其它数据库进程阻塞等待",
             solution = "Solution (cautious handling): \n" +
                     "1. Please check if there are any long uncommitted transactions in the database. If so, please commit them first. \n" +
-                    "2. Please check if there are any other database processes blocking wait. If so, please handle them first." +
+                    "2. Please check if there are any other database processes blocking wait. If so, please handle them first.\n" +
                     "SELECT pid, datname, usename, state, xact_start, now() - xact_start AS duration, query\n" +
                     "FROM pg_stat_activity\n" +
                     "WHERE state != 'idle'\n" +
@@ -93,7 +93,7 @@ public interface PostgresErrorCode {
                     "  AND now() - xact_start > interval '300 seconds'  -- for example, find transactions that have been running for more than 5 minutes\n" +
                     "ORDER BY xact_start;",
             solutionCN = "解决方案（需谨慎处理）：\n" +
-                    "1. 请检查数据库是否存在长时间未提交事务，如存在请先提交事务。" +
+                    "1. 请检查数据库是否存在长时间未提交事务，如存在请先提交事务。\n" +
                     "SELECT pid, datname, usename, state, xact_start, now() - xact_start AS duration, query\n" +
                     "FROM pg_stat_activity\n" +
                     "WHERE state != 'idle'\n" +
@@ -104,7 +104,8 @@ public interface PostgresErrorCode {
             dynamicDescription = "Execute sql failed: {}",
             dynamicDescriptionCN = "执行语句失败：{}",
             level = TapExLevel.CRITICAL,
-            type = TapExType.RUNTIME
+            type = TapExType.RUNTIME,
+            recoverable = true
     )
     String CREATE_SLOT_TIMEOUT = "410004";
 }
