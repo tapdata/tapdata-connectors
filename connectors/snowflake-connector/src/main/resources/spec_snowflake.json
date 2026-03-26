@@ -1,0 +1,390 @@
+{
+  "properties": {
+    "name": "Snowflake",
+    "realName": "Snowflake",
+    "icon": "icons/snowflake.png",
+    "doc": "${doc}",
+    "id": "snowflake",
+    "tags": ["Database", "Cloud", "DataWarehouse"]
+  },
+  "configOptions": {
+    "capabilities": [
+      {
+        "id": "dml_insert_policy",
+        "alternatives": ["update_on_exists", "ignore_on_exists", "just_insert"]
+      },
+      {
+        "id": "dml_update_policy",
+        "alternatives": ["ignore_on_nonexists", "insert_on_nonexists", "log_on_nonexists"]
+      },
+      {
+        "id": "dml_delete_policy",
+        "alternatives": ["ignore_on_nonexists", "log_on_nonexists"]
+      },
+      {
+        "id": "api_server_supported"
+      }
+    ],
+    "connection": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string",
+          "title": "${account}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_host",
+          "x-index": 1,
+          "required": true
+        },
+        "user": {
+          "type": "string",
+          "title": "${user}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_username",
+          "x-index": 2,
+          "required": true
+        },
+        "password": {
+          "type": "string",
+          "title": "${password}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "database_password",
+          "x-index": 3,
+          "required": true
+        },
+        "warehouse": {
+          "type": "string",
+          "title": "${warehouse}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 4,
+          "required": true
+        },
+        "database": {
+          "type": "string",
+          "title": "${database}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_name",
+          "x-index": 5,
+          "required": true
+        },
+        "schema": {
+          "type": "string",
+          "title": "${schema}",
+          "default": "PUBLIC",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_owner",
+          "x-index": 6,
+          "required": true
+        },
+        "role": {
+          "type": "string",
+          "title": "${role}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 7
+        },
+        "timezone": {
+          "type": "string",
+          "title": "${timezone}",
+          "default": "+00:00",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 8,
+          "enum": [
+            {
+              "label": "UTC -11",
+              "value": "-11:00"
+            },
+            {
+              "label": "UTC -10",
+              "value": "-10:00"
+            },
+            {
+              "label": "UTC -09",
+              "value": "-09:00"
+            },
+            {
+              "label": "UTC -08",
+              "value": "-08:00"
+            },
+            {
+              "label": "UTC -07",
+              "value": "-07:00"
+            },
+            {
+              "label": "UTC -06",
+              "value": "-06:00"
+            },
+            {
+              "label": "UTC -05",
+              "value": "-05:00"
+            },
+            {
+              "label": "UTC -04",
+              "value": "-04:00"
+            },
+            {
+              "label": "UTC -03",
+              "value": "-03:00"
+            },
+            {
+              "label": "UTC -02",
+              "value": "-02:00"
+            },
+            {
+              "label": "UTC -01",
+              "value": "-01:00"
+            },
+            {
+              "label": "UTC",
+              "value": "+00:00"
+            },
+            {
+              "label": "UTC +01",
+              "value": "+01:00"
+            },
+            {
+              "label": "UTC +02",
+              "value": "+02:00"
+            },
+            {
+              "label": "UTC +03",
+              "value": "+03:00"
+            },
+            {
+              "label": "UTC +04",
+              "value": "+04:00"
+            },
+            {
+              "label": "UTC +05",
+              "value": "+05:00"
+            },
+            {
+              "label": "UTC +06",
+              "value": "+06:00"
+            },
+            {
+              "label": "UTC +07",
+              "value": "+07:00"
+            },
+            {
+              "label": "UTC +08",
+              "value": "+08:00"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "messages": {
+    "default": "en_US",
+    "en_US": {
+      "doc": "docs/snowflake_en_US.md",
+      "account": "Account",
+      "user": "User",
+      "password": "Password",
+      "warehouse": "Warehouse",
+      "database": "Database",
+      "schema": "Schema",
+      "role": "Role",
+      "timezone": "Timezone"
+    },
+    "zh_CN": {
+      "doc": "docs/snowflake_zh_CN.md",
+      "account": "账户",
+      "user": "用户名",
+      "password": "密码",
+      "warehouse": "仓库",
+      "database": "数据库",
+      "schema": "模式",
+      "role": "角色",
+      "timezone": "时区"
+    },
+    "zh_TW": {
+      "doc": "docs/snowflake_zh_TW.md",
+      "account": "賬戶",
+      "user": "用戶名",
+      "password": "密碼",
+      "warehouse": "倉庫",
+      "database": "數據庫",
+      "schema": "模式",
+      "role": "角色",
+      "timezone": "時區"
+    }
+  },
+  "dataTypes": {
+    "NUMBER[($precision,$scale)]": {
+      "precision": [
+        1,
+        38
+      ],
+      "scale": [
+        0,
+        37
+      ],
+      "fixed": true,
+      "preferPrecision": 38,
+      "preferScale": 0,
+      "priority": 1,
+      "to": "TapNumber"
+    },
+    "FLOAT": {
+      "priority": 2,
+      "precision": [
+        1,
+        17
+      ],
+      "preferPrecision": 11,
+      "preferScale": 4,
+      "scale": [
+        0,
+        17
+      ],
+      "fixed": false,
+      "to": "TapNumber"
+    },
+    "DECFLOAT": {
+      "precision": [
+        1,
+        17
+      ],
+      "preferPrecision": 11,
+      "preferScale": 4,
+      "scale": [
+        0,
+        17
+      ],
+      "fixed": false,
+      "to": "TapNumber",
+      "queryOnly": true
+    },
+    "TEXT[($byte)]": {
+      "byte": 134217728,
+      "priority": 1,
+      "defaultByte": 16777216,
+      "preferByte": 255,
+      "to": "TapString"
+    },
+    "BINARY": {
+      "byte": "4g",
+      "priority": 1,
+      "to": "TapBinary"
+    },
+    "BOOLEAN": {
+      "bit": 1,
+      "priority": 1,
+      "to": "TapBoolean"
+    },
+    "DATE": {
+      "range": [
+        "0001-01-01",
+        "9999-12-31"
+      ],
+      "pattern": "yyyy-MM-dd",
+      "priority": 1,
+      "to": "TapDate"
+    },
+    "TIME[($fraction)]": {
+      "range": [
+        "00:00:00",
+        "23:59:59"
+      ],
+      "pattern": "HH:mm:ss",
+      "fraction": [
+        0,
+        9
+      ],
+      "defaultFraction": 9,
+      "priority": 1,
+      "to": "TapTime"
+    },
+    "TIMESTAMP_NTZ[($fraction)]": {
+      "range": [
+        "0001-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        9
+      ],
+      "withTimeZone": false,
+      "defaultFraction": 9,
+      "priority": 1,
+      "to": "TapDateTime"
+    },
+    "TIMESTAMP_TZ[($fraction)]": {
+      "range": [
+        "0001-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        9
+      ],
+      "withTimeZone": true,
+      "defaultFraction": 9,
+      "to": "TapDateTime"
+    },
+    "TIMESTAMP_LTZ[($fraction)]": {
+      "range": [
+        "0001-01-01 00:00:00",
+        "9999-12-31 23:59:59"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss",
+      "fraction": [
+        0,
+        9
+      ],
+      "withTimeZone": true,
+      "queryOnly": true,
+      "defaultFraction": 9,
+      "to": "TapDateTime"
+    },
+    "VARIANT": {
+      "byte": 16777216,
+      "priority": 2,
+      "queryOnly": true,
+      "to": "TapMap"
+    },
+    "OBJECT": {
+      "byte": 16777216,
+      "priority": 1,
+      "to": "TapMap"
+    },
+    "ARRAY": {
+      "byte": 16777216,
+      "priority": 1,
+      "to": "TapArray"
+    },
+    "GEOGRAPHY": {
+      "byte": 16777216,
+      "priority": 1,
+      "queryOnly": true,
+      "to": "TapString"
+    },
+    "GEOMETRY": {
+      "byte": 16777216,
+      "priority": 2,
+      "queryOnly": true,
+      "to": "TapString"
+    },
+    "UUID": {
+      "to": "TapString",
+      "preferByte": 256,
+      "queryOnly": true
+    },
+    "FILE": {
+      "to": "TapInputStream"
+    }
+  }
+}
+
+
