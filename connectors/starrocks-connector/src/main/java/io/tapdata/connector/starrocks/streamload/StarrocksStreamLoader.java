@@ -963,9 +963,6 @@ public class StarrocksStreamLoader {
             taplogger.warn("Table {} flush failed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, error={}",
                 tableName, formatBytes(tableDataSize), waitTime, flushDuration, e.getMessage());
-
-            // 失败：保留缓存文件（不删除），仅关闭文件流
-            cleanupCacheFileForTable(tableName, false);
             throw e;
         } catch (Exception e) {
             long flushEndTime = System.currentTimeMillis();
@@ -973,9 +970,6 @@ public class StarrocksStreamLoader {
             taplogger.warn("Table {} flush failed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, error={}",
                 tableName, formatBytes(tableDataSize), waitTime, flushDuration, e.getMessage());
-
-            // 失败：保留缓存文件（不删除），仅关闭文件流
-            cleanupCacheFileForTable(tableName, false);
             throw new StarrocksRuntimeException(e);
         } finally {
 
@@ -1275,7 +1269,7 @@ public class StarrocksStreamLoader {
 
             // 清理相关状态
             isFirstRecordByTable.remove(tableName);
-//            dataColumnsByTable.remove(tableName);
+            dataColumnsByTable.remove(tableName);
             currentBatchSizeByTable.remove(tableName);
             // 注意：lastFlushTimeByTable 不清理，需要保持刷新时间记录
             // 注意：tableNameToTapTableMap 不清理，因为表结构信息需要持久保存
