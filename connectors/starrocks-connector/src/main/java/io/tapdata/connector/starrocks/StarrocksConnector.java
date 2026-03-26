@@ -58,6 +58,7 @@ public class StarrocksConnector extends CommonDbConnector {
     private StarrocksConfig starrocksConfig;
     private final Map<String, StarrocksStreamLoader> starrocksStreamLoaderMap = new ConcurrentHashMap<>();
     private Consumer<Object> flushOffsetCallback;
+    private boolean hasMethodError = false;
 
 
     @Override
@@ -181,6 +182,7 @@ public class StarrocksConnector extends CommonDbConnector {
             retryOptions.needRetry(true);
             return retryOptions;
         }
+        hasMethodError = true;
         return retryOptions;
     }
 
@@ -196,6 +198,19 @@ public class StarrocksConnector extends CommonDbConnector {
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
+        if (hasMethodError) {
+            for (StarrocksStreamLoader starrocksStreamLoader : starrocksStreamLoaderMap.values()) {
+                if (EmptyKit.isNotNull(starrocksStreamLoader)) {
+                    try {
+                        starrocksStreamLoader.flushOnStop();
+                        tapLogger.info("StarrocksConnector", "Flushed remaining data before stopping StarrocksStreamLoader");
+                    } catch (Exception e) {
+                        tapLogger.warn("StarrocksConnector", "Failed to flush data before stopping: {}", e.getMessage());
+                    }
+                }
+            }
+            hasMethodError = false;
+        }
         try {
             if (checkStreamLoad()) {
                 getStarrocksStreamLoader().writeRecord(tapRecordEvents, tapTable, writeListResultConsumer);
