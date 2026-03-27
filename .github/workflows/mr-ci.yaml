@@ -74,11 +74,11 @@ jobs:
 
   Sync-Code-to-Office:
     needs: Get-Stable-Branch
-    uses: tapdata/tapdata-application/.github/workflows/universal-mirror-sync.yaml@main
+    uses: tapdata/tapdata-application/.github/workflows/sync-code-to-office.yaml@main
     secrets: inherit
     with:
-      source-repo: "git@github.com:tapdata/tapdata-connectors.git"
-      destination-repo: "git@gitee.com:tapdata_1/tapdata-connectors.git"
+      tapdata-connectors: ${{ needs.Get-Current-Branch.outputs.branch }}
+      gitee-token-user: "${{ vars.GITEE_TOKEN_USER }}"
 
   Scan-Connectors:
     runs-on: ubuntu-latest
