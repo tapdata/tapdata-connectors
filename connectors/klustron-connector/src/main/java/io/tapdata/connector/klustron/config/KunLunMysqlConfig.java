@@ -24,6 +24,7 @@ public class KunLunMysqlConfig extends MysqlConfig {
     public MysqlConfig load(Map<String, Object> map) {
         MysqlConfig c = super.load(map);
         //@todo
+        c.setHost(computeNode.get(0).getHost());
         c.setPort(computeNode.get(0).getPortMysql());
         if ("postgres".equals(db)) {
             c.setDatabase(sc);

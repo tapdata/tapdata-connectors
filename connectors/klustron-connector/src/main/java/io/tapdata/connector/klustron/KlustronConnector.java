@@ -488,28 +488,36 @@ public class KlustronConnector extends CommonDbConnector {
             ofCdcConfig.setPort(storageNode.getPort());
             ofCdcConfig.setUser(storageNode.getUsername());
             ofCdcConfig.setPassword(storageNode.getPassword());
-            if (null == startTime) {
-                try (KunLunMysqlContext cdcJdbcContext = new KunLunMysqlContext(ofCdcConfig)) {
-                    MysqlBinlogPosition mysqlBinlogPosition = cdcJdbcContext.readBinlogPosition();
-                    if (mysqlBinlogPosition == null) {
-                        String solutionSuggestions = "please open mysql binlog config";
-                        Throwable cause = new Exception(" Binlog config is close");
-                        ((MysqlExceptionCollector) exceptionCollector).collectCdcConfigInvalid(solutionSuggestions, cause);
+            try {
+                if (null == startTime) {
+                    try (KunLunMysqlContext cdcJdbcContext = new KunLunMysqlContext(ofCdcConfig)) {
+                        MysqlBinlogPosition mysqlBinlogPosition = cdcJdbcContext.readBinlogPosition();
+                        if (mysqlBinlogPosition == null) {
+                            String solutionSuggestions = "please open mysql binlog config";
+                            Throwable cause = new Exception(" Binlog config is close");
+                            ((MysqlExceptionCollector) exceptionCollector).collectCdcConfigInvalid(solutionSuggestions, cause);
+                        }
+                        kunLunOffset.setOffset(storageNode.getHost(), storageNode.getPort(), cdcJdbcContext.readBinlogPosition());
                     }
-                    kunLunOffset.setOffset(storageNode.getHost(), storageNode.getPort(), cdcJdbcContext.readBinlogPosition());
-                }
-            } else {
-                try (MysqlBinlogPositionUtil ins = new MysqlBinlogPositionUtil(
-                        storageNode.getHost(),
-                        storageNode.getPort(),
-                        storageNode.getUsername(),
-                        storageNode.getPassword())) {
-                    MysqlBinlogPosition mysqlBinlogPosition = ins.findByLessTimestamp(startTime, true);
-                    if (null == mysqlBinlogPosition) {
-                        throw new RuntimeException("Not found binlog of sync time: " + startTime);
+                } else {
+                    try (MysqlBinlogPositionUtil ins = new MysqlBinlogPositionUtil(
+                            storageNode.getHost(),
+                            storageNode.getPort(),
+                            storageNode.getUsername(),
+                            storageNode.getPassword())) {
+                        MysqlBinlogPosition mysqlBinlogPosition = ins.findByLessTimestamp(startTime, true);
+                        if (null == mysqlBinlogPosition) {
+                            throw new RuntimeException("Not found binlog of sync time: " + startTime);
+                        }
+                        kunLunOffset.setOffset(storageNode.getHost(), storageNode.getPort(), mysqlBinlogPosition);
                     }
-                    kunLunOffset.setOffset(storageNode.getHost(), storageNode.getPort(), mysqlBinlogPosition);
                 }
+            } catch (Exception e) {
+                tapConnectorContext.getLog().warn("Unable get offset: {}:{}/{}, error: {}",
+                        ofCdcConfig.getHost(),
+                        ofCdcConfig.getPort(),
+                        ofCdcConfig.getDatabase(),
+                        e.getMessage());
             }
         }
         return kunLunOffset;

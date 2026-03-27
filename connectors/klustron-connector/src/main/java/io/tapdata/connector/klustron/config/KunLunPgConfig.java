@@ -2,6 +2,7 @@ package io.tapdata.connector.klustron.config;
 
 import io.tapdata.common.CommonDbConfig;
 import io.tapdata.connector.postgres.config.PostgresConfig;
+import io.tapdata.kit.EmptyKit;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -26,9 +27,23 @@ public class KunLunPgConfig extends PostgresConfig {
     @Override
     public CommonDbConfig load(Map<String, Object> map) {
         CommonDbConfig c = super.load(map);
+        if (EmptyKit.isNotEmpty(map)) {
+            setUser(EmptyKit.isBlank(getUser()) ? (String) map.get("username") : getUser());
+            setExtParams(EmptyKit.isBlank(getExtParams()) ? (String) map.get("addtionalString") : getExtParams());
+        }
+        c.setHost(computeNode.get(0).getHost());
         c.setPort(computeNode.get(0).getPortPg());
         c.setDatabase(db);
         c.setSchema(sc);
+        if (Boolean.TRUE.equals(materAble)) {
+            String extParams = c.getExtParams();
+            extParams = extParams == null ? "" : extParams.trim();
+            String normalized = extParams.startsWith("?") ? extParams.substring(1) : extParams;
+            if (!normalized.matches("(^|.*&)(?i:preferQueryMode)=.*")) {
+                normalized = EmptyKit.isBlank(normalized) ? "preferQueryMode=simple" : normalized + "&preferQueryMode=simple";
+            }
+            c.setExtParams(normalized);
+        }
         return c;
     }
 

@@ -218,13 +218,28 @@ public abstract class JdbcContext implements AutoCloseable {
     }
 
     public void execute(String sql) throws SQLException {
-        try (
-                Connection connection = getConnection();
-                Statement statement = connection.createStatement()
-        ) {
-            statement.execute(sql);
-            connection.commit();
-        }
+        execute(sql, 30000, -1);
+    }
+
+    public void execute(String sql, int timeout, int retryTimes) throws SQLException {
+        do {
+            try (Connection connection = getConnection()) {
+                try (Statement statement = connection.createStatement()) {
+                    statement.setQueryTimeout(timeout);
+                    statement.execute(sql);
+                    connection.commit();
+                } catch (SQLException ex) {
+                    connection.rollback();
+                    if (retryTimes > 0) {
+                        try {
+                            Thread.yield();
+                        } catch (Exception ignored) {
+                            //do nothing
+                        }
+                    }
+                }
+            }
+        } while (retryTimes-- > 0);
     }
 
     public void execute(String sql, int timeout) throws SQLException {

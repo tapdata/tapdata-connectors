@@ -715,6 +715,26 @@
               }
             }
           ]
+        },
+        "retryTimes": {
+          "type": "string",
+          "title": "${retryTimes}",
+          "default": 3,
+          "x-index": 90,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -782,7 +802,8 @@
       "storage_add": "Add Storage Node",
       "df_table_field_operator": "Operation",
       "materAble": "Materialized View",
-      "materAbleTip": "Synchronize as a materialized view"
+      "materAbleTip": "Synchronize as a materialized view",
+      "retryTimes": "Number of retries when an exception occurs during SQL execution"
     },
     "zh_CN": {
       "mateSql": "视图创建语句",
@@ -845,7 +866,8 @@
       "storage_add": "增加存储节点",
       "df_table_field_operator": "操作",
       "materAble": "物化视图",
-      "materAbleTip": "当成一个物化视图进行同步"
+      "materAbleTip": "当成一个物化视图进行同步",
+      "retryTimes": "SQL执行发生异常时重试次数"
     },
     "zh_TW": {
       "mateSql": "视图创建语句",
@@ -908,7 +930,8 @@
       "storage_add": "增加數據節點",
       "df_table_field_operator": "操作",
       "materAble": "物化視圖",
-      "materAbleTip": "當成一個物化視圖進行同步"
+      "materAbleTip": "當成一個物化視圖進行同步",
+      "retryTimes": "SQL執行發生異常時重試次數"
     }
   },
   "dataTypes": {

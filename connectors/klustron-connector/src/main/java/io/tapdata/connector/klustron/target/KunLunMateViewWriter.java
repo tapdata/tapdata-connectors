@@ -5,13 +5,13 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -34,10 +34,12 @@ public class KunLunMateViewWriter extends KunLunWriter<KunLunMateViewWriter> {
         return this;
     }
 
+    Log log;
     public void writeRecord(TapConnectorContext connectorContext,
                             List<TapRecordEvent> tapRecordEvents,
                             TapTable tapTable,
                             Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) {
+        log = connectorContext.getLog();
         cacheEvents = new ArrayList<>();
         for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
             accept(tapRecordEvent, tapTable, writeListResultConsumer);
@@ -166,9 +168,14 @@ public class KunLunMateViewWriter extends KunLunWriter<KunLunMateViewWriter> {
                 sql.append(',');
             }
         }
-        try (Connection connection = pgJdbcContext.getConnection();
-             Statement statement = connection.createStatement()) {
-            statement.execute(sql.toString());
+        try (Connection connection = pgJdbcContext.getConnection()) {
+            boolean c = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try {
+                pgJdbcContext.execute(sql.toString(), 30000, 5);
+            } finally {
+                connection.setAutoCommit(c);
+            }
             writeListResultConsumer.accept(listResult);
         } catch (SQLException e) {
             throw new CoreException("Refresh materialized varying view failed: {}", e.getMessage(), e);

@@ -16,8 +16,10 @@ import java.text.DecimalFormat;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.StringJoiner;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicReference;
@@ -144,9 +146,14 @@ public class KunLunPgContext extends PostgresJdbcContext {
             joiner.add("(indexrelid=" + indexOIds[i] + " and indrelid=" + relOIds[i] + ")");
         }
         Map<Integer, String> indexOidRelOidMap = new HashMap<>();
+        Set<Integer> indexOidRelOidMapPartition = new HashSet<>();
         query(String.format(PG_MAT_VIEW_INDEX_QUERY, inSql), resultSet -> {
             while (resultSet.next()) {
-                indexOidRelOidMap.put(resultSet.getInt("oid"), resultSet.getString("relname"));
+                if ("p".equalsIgnoreCase(resultSet.getString("relkind"))) {
+                    indexOidRelOidMapPartition.add(resultSet.getInt("oid"));
+                } else {
+                    indexOidRelOidMap.put(resultSet.getInt("oid"), resultSet.getString("relname"));
+                }
             }
         });
 
@@ -155,7 +162,22 @@ public class KunLunPgContext extends PostgresJdbcContext {
         //  需要进一步使用这个分区表的ID，记为mv_queried_relid，找到这个分区表的所有叶子节点，也就是存储节点中的表分区的名字，
         //  从而建立分区表名到根表名的映射part_name_map。
         //  方法是使用下列查询语句多次查询pg_inherits （因为支持多级分区）遍历其分区树：
-        //  select t2.relname as leaf_relname, t2.relkind, t2.oid as nextrelid from pg_inherits t1 join pg_class t2 on t1.inhrelid=t2.oid where inhparent= currelid
+        //  select t2.relname as leaf_relname, t2.relkind, t2.oid as nextrelid from pg_inherits t1
+        //      join pg_class t2 on t1.inhrelid = t2.oid
+        //      where inhparent = currelid
+        while (!indexOidRelOidMapPartition.isEmpty()) {
+            String queryInSql = indexOidRelOidMap.keySet().stream().map(String::valueOf).collect(Collectors.joining(","));
+            indexOidRelOidMapPartition.clear();
+            query(String.format(PG_MAT_VIEW_INHERITS_QUERY, queryInSql), resultSet -> {
+                while (resultSet.next()) {
+                    if ("p".equalsIgnoreCase(resultSet.getString("relkind"))) {
+                        indexOidRelOidMapPartition.add(resultSet.getInt("oid"));
+                    } else {
+                        indexOidRelOidMap.put(resultSet.getInt("oid"), resultSet.getString("relname"));
+                    }
+                }
+            });
+        }
 
         StringJoiner outSql = new StringJoiner(" OR ");
         query(String.format(PG_MAT_VIEW_IND_KEY_QUERY, joiner), resultSet -> {
@@ -185,9 +207,12 @@ public class KunLunPgContext extends PostgresJdbcContext {
             "    JOIN pg_class t2 " +
             "    JOIN pg_namespace  t3 ON t1.mv_relid=t2.oid  AND t2.relnamespace=t3.oid " +
             "where t1.varying=true and t2.relkind = 'm' and t3.nspname='%s'";
-    protected static final String PG_MAT_VIEW_INDEX_QUERY = "select relname, t1.oid oid from " +
+    protected static final String PG_MAT_VIEW_INDEX_QUERY = "select relname, relkind, t1.oid oid from " +
             "    pg_class t1 JOIN pg_namespace t2 ON t1.relnamespace=t2.oid " +
             "WHERE t1.oid in (%s)";
+    private static final String PG_MAT_VIEW_INHERITS_QUERY = "select t2.relname as relname, t2.relkind as relkind, t2.oid as oid " +
+            " from pg_inherits t1 join pg_class t2 on t1.inhrelid=t2.oid " +
+            " where inhparent in (%s)";
     protected static final String PG_MAT_VIEW_IND_KEY_QUERY = "select " +
             "    indrelid, indkey " +
             "from pg_index " +

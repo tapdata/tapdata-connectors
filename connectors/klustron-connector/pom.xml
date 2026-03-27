@@ -19,7 +19,7 @@
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <postgres.driver.version>42.7.3</postgres.driver.version>
-        <tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>2.0.6-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
 
     <dependencies>
