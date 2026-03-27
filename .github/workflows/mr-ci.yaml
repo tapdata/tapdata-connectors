@@ -77,8 +77,8 @@ jobs:
     uses: tapdata/tapdata-application/.github/workflows/universal-mirror-sync.yaml@main
     secrets: inherit
     with:
-      source-repo: "git@github.com:tapdata/tapdata-enterprise.git"
-      destination-repo: "git@gitee.com:tapdata_1/tapdata-enterprise.git"
+      source-repo: "git@github.com:tapdata/tapdata-connectors.git"
+      destination-repo: "git@gitee.com:tapdata_1/tapdata-connectors.git"
 
   Scan-Connectors:
     runs-on: ubuntu-latest
