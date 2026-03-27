@@ -73,11 +73,11 @@ jobs:
           echo "::set-output name=TAG_NAME::${TAG_NAME}"
 
   Sync-Code-to-Office:
-    needs: Get-Stable-Branch
-    uses: tapdata/tapdata-application/.github/workflows/sync-code-to-office.yaml@main
-    with:
-      tapdata-connectors: ${{ needs.Get-Stable-Branch.outputs.CONNECTORS_BRANCH }}
+    uses: tapdata/tapdata-application/.github/workflows/universal-mirror-sync.yaml@main
     secrets: inherit
+    with:
+      source-repo: "git@github.com:tapdata/tapdata-connectors.git"
+      destination-repo: "git@gitee.com:tapdata_1/tapdata-connectors.git"
 
   Scan-Connectors:
     runs-on: ubuntu-latest
