@@ -91,6 +91,9 @@ public class StarrocksStreamLoader {
     private ScheduledExecutorService flushScheduler;
     private ScheduledFuture<?> flushTask;
 
+    // 表级别的锁，用于 finalizeCacheFileForTable 方法
+    private final Map<String, Object> tableLocks = new ConcurrentHashMap<>();
+
     // 内存监控
     private long lastMemoryCheckTime = 0;
     private static final long MEMORY_CHECK_INTERVAL = 30000; // 30秒检查一次内存
@@ -960,9 +963,6 @@ public class StarrocksStreamLoader {
             taplogger.warn("Table {} flush failed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, error={}",
                 tableName, formatBytes(tableDataSize), waitTime, flushDuration, e.getMessage());
-
-            // 失败：保留缓存文件（不删除），仅关闭文件流
-            cleanupCacheFileForTable(tableName, false);
             throw e;
         } catch (Exception e) {
             long flushEndTime = System.currentTimeMillis();
@@ -970,9 +970,6 @@ public class StarrocksStreamLoader {
             taplogger.warn("Table {} flush failed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, error={}",
                 tableName, formatBytes(tableDataSize), waitTime, flushDuration, e.getMessage());
-
-            // 失败：保留缓存文件（不删除），仅关闭文件流
-            cleanupCacheFileForTable(tableName, false);
             throw new StarrocksRuntimeException(e);
         } finally {
 
@@ -1141,53 +1138,59 @@ public class StarrocksStreamLoader {
 
     /**
      * 完成指定表的缓存文件写入
+     * 使用表级别的锁，避免对整个对象加锁影响其他表的操作
      */
     private void finalizeCacheFileForTable(String tableName) throws IOException {
-        try {
-            FileOutputStream cacheFileStream = cacheFileStreamsByTable.get(tableName);
-            Path tempCacheFile = tempCacheFilesByTable.get(tableName);
+        // 获取或创建该表的锁对象
+        Object tableLock = tableLocks.computeIfAbsent(tableName, k -> new Object());
 
-            if (cacheFileStream != null && tempCacheFile != null) {
-                if (!cacheFileStream.getChannel().isOpen()) {
-                    cacheFileStream = new FileOutputStream(tempCacheFile.toFile(), true);
-                    cacheFileStreamsByTable.put(tableName, cacheFileStream);
-                }
+        synchronized (tableLock) {
+            try {
+                FileOutputStream cacheFileStream = cacheFileStreamsByTable.get(tableName);
+                Path tempCacheFile = tempCacheFilesByTable.get(tableName);
 
-                // 检查文件是否已经有结束标记
-                boolean needsEndMarker = true;
-                if (Files.exists(tempCacheFile) && Files.size(tempCacheFile) > 0) {
-                    // 读取文件最后几个字节，检查是否已经有 ']'
-                    byte[] lastBytes = new byte[10];
-                    try (FileInputStream fis = new FileInputStream(tempCacheFile.toFile())) {
-                        long fileSize = Files.size(tempCacheFile);
-                        long skipBytes = Math.max(0, fileSize - 10);
-                        fis.skip(skipBytes);
-                        int bytesRead = fis.read(lastBytes);
-                        String lastContent = new String(lastBytes, 0, bytesRead, java.nio.charset.StandardCharsets.UTF_8);
-                        needsEndMarker = !lastContent.trim().endsWith("]");
+                if (cacheFileStream != null && tempCacheFile != null) {
+                    if (!cacheFileStream.getChannel().isOpen()) {
+                        cacheFileStream = new FileOutputStream(tempCacheFile.toFile(), true);
+                        cacheFileStreamsByTable.put(tableName, cacheFileStream);
                     }
+
+                    // 检查文件是否已经有结束标记
+                    boolean needsEndMarker = true;
+                    if (Files.exists(tempCacheFile) && Files.size(tempCacheFile) > 0) {
+                        // 读取文件最后几个字节，检查是否已经有 ']'
+                        byte[] lastBytes = new byte[10];
+                        try (FileInputStream fis = new FileInputStream(tempCacheFile.toFile())) {
+                            long fileSize = Files.size(tempCacheFile);
+                            long skipBytes = Math.max(0, fileSize - 10);
+                            fis.skip(skipBytes);
+                            int bytesRead = fis.read(lastBytes);
+                            String lastContent = new String(lastBytes, 0, bytesRead, java.nio.charset.StandardCharsets.UTF_8);
+                            needsEndMarker = !lastContent.trim().endsWith("]");
+                        }
+                    }
+
+                    // 只在需要时写入结束标记
+                    if (needsEndMarker) {
+                        cacheFileStream.write(messageSerializer.batchEnd());
+                        taplogger.debug("Added end marker ']' to cache file for table {}", tableName);
+                    } else {
+                        taplogger.debug("Cache file for table {} already has end marker, skipping", tableName);
+                    }
+
+                    cacheFileStream.flush();
+                    cacheFileStream.close();
+
+                    // 验证文件完整性
+                    verifyFileCompleteness(tableName, tempCacheFile);
+
+                    taplogger.debug("Finalized cache file for table {}: {}, size: {}",
+                        tableName, tempCacheFile.toString(), formatBytes(Files.size(tempCacheFile)));
                 }
-
-                // 只在需要时写入结束标记
-                if (needsEndMarker) {
-                    cacheFileStream.write(messageSerializer.batchEnd());
-                    taplogger.debug("Added end marker ']' to cache file for table {}", tableName);
-                } else {
-                    taplogger.debug("Cache file for table {} already has end marker, skipping", tableName);
-                }
-
-                cacheFileStream.flush();
-                cacheFileStream.close();
-
-                // 验证文件完整性
-                verifyFileCompleteness(tableName, tempCacheFile);
-
-                taplogger.debug("Finalized cache file for table {}: {}, size: {}",
-                    tableName, tempCacheFile.toString(), formatBytes(Files.size(tempCacheFile)));
+            } catch (IOException e) {
+                taplogger.warn("Failed to finalize cache file for table {}: {}", tableName, e.getMessage());
+                throw e;
             }
-        } catch (IOException e) {
-            taplogger.warn("Failed to finalize cache file for table {}: {}", tableName, e.getMessage());
-            throw e;
         }
     }
 
@@ -1490,5 +1493,9 @@ public class StarrocksStreamLoader {
      */
     public void setFlushOffsetCallback(Consumer<Object> flushOffsetCallback) {
         this.flushOffsetCallback = flushOffsetCallback;
+    }
+
+    public Set<String> getPendingFlushTables() {
+        return pendingFlushTables;
     }
 }

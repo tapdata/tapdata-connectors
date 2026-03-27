@@ -279,7 +279,7 @@ public class PaimonService implements Closeable {
 			conf.set("fs.s3a.impl.disable.cache", "true");
 			conf.set("fs.AbstractFileSystem.s3a.impl", "org.apache.hadoop.fs.s3a.S3A");
 			if (EmptyKit.isNotEmpty(config.getS3Properties())) {
-				config.getS3Properties().forEach(e -> e.forEach(conf::set));
+				config.getS3Properties().forEach(v -> conf.set(v.get("propKey"), v.get("propValue")));
 			}
 		}
 		return conf;
@@ -606,7 +606,7 @@ public class PaimonService implements Closeable {
 		schemaBuilder.option("sink.parallelism", String.valueOf(config.getWriteThreads()));
 
 		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
-			config.getTableProperties(tableName).forEach(e -> e.forEach(schemaBuilder::option));
+			config.getTableProperties(tableName).forEach(v -> schemaBuilder.option(v.get("propKey"), v.get("propValue")));
 		}
 		// Create table
 		catalog.createTable(identifier, schemaBuilder.build(), false);

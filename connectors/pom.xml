@@ -71,6 +71,7 @@
 		<module>highgo-connector</module>
 		<module>file-stream-connector</module>
 		<module>paimon-connector</module>
+		<module>snowflake-connector</module>
 		<module>klustron-connector</module>
 	</modules>
 	<properties>
