@@ -44,7 +44,7 @@ jobs:
       TAG_NAME: ${{ steps.set-output.outputs.TAG_NAME }}
     steps:
       - name: Checkout Tapdata Opensource
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: 'tapdata/tapdata'
           token: ${{ secrets.TAPDATA_ENT_CICD_TOKEN }}
@@ -78,7 +78,7 @@ jobs:
       - Get-Stable-Branch
     steps:
       - name: Checkout Tapdata Connectors Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: 'tapdata/tapdata-connectors'
           ref: ${{ needs.Get-Stable-Branch.outputs.CONNECTORS_BRANCH }}
@@ -86,7 +86,7 @@ jobs:
           path: tapdata-connectors
           fetch-depth: 0
       - name: Checkout Tapdata Application
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           repository: 'tapdata/tapdata-application'
           ref: main
@@ -124,7 +124,7 @@ jobs:
           wait_workflow: true
       - name: Checkout Tapdata-Application
         if: ${{ always() && steps.sonar.outcome == 'failure' }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           repository: 'tapdata/tapdata-application'
           ref: "main"
