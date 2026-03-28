@@ -1,6 +1,7 @@
 package io.tapdata.connector.snowflake;
 
 import io.tapdata.common.CommonDbTest;
+import io.tapdata.connector.snowflake.config.SnowflakeConfig;
 import io.tapdata.constant.DbTestItem;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.exception.testItem.TapTestHostPortEx;

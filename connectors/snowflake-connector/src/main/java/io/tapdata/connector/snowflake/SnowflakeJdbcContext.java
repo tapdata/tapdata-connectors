@@ -1,6 +1,7 @@
 package io.tapdata.connector.snowflake;
 
 import io.tapdata.common.JdbcContext;
+import io.tapdata.connector.snowflake.config.SnowflakeConfig;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.DbKit;

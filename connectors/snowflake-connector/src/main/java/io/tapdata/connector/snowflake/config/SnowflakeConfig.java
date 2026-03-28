@@ -1,4 +1,4 @@
-package io.tapdata.connector.snowflake;
+package io.tapdata.connector.snowflake.config;
 
 import io.tapdata.common.CommonDbConfig;
 

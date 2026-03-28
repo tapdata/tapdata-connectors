@@ -1,15 +1,17 @@
 package io.tapdata.connector.snowflake;
 
-import io.tapdata.common.CommonColumn;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.exception.AbstractExceptionCollector;
+import io.tapdata.connector.snowflake.config.SnowflakeConfig;
+import io.tapdata.connector.snowflake.dml.SnowflakeRecordWriter;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
 import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
 import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
@@ -20,11 +22,13 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
+import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
-import org.apache.commons.lang3.StringUtils;
 
+import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -54,7 +58,7 @@ public class SnowflakeConnector extends CommonDbConnector {
         List<String> subTableNames = subList.stream().map(v -> v.getString("tableName")).collect(Collectors.toList());
         List<DataMap> columnList = snowflakeJdbcContext.queryAllColumns(subTableNames);
         List<DataMap> pkList = snowflakeJdbcContext.queryAllPks(subTableNames);
-        List<DataMap> indexList = snowflakeJdbcContext.queryAllIndexes(subTableNames);
+        List<DataMap> indexList = TapSimplify.list();
         subList.forEach(subTable -> {
             //2、table name/comment
             String table = subTable.getString("tableName");
@@ -93,6 +97,7 @@ public class SnowflakeConnector extends CommonDbConnector {
                             throw new CoreException("Construct field failed, table: " + table + ", column: " + col + ", error: " + e.getMessage());
                         }
                     });
+            tapIndexList.add(pkIndex);
             tapTable.setIndexList(tapIndexList);
             tapTableList.add(tapTable);
         });
@@ -118,7 +123,7 @@ public class SnowflakeConnector extends CommonDbConnector {
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
 
         // Target
-//        connectorFunctions.supportWriteRecord(this::writeRecord);
+        connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportCreateTableV2(this::createTableV2);
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportDropTable(this::dropTable);
@@ -166,6 +171,22 @@ public class SnowflakeConnector extends CommonDbConnector {
 
         exceptionCollector = new AbstractExceptionCollector() {
         };
+    }
+
+    private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws SQLException {
+        String insertDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_INSERT_POLICY);
+        if (insertDmlPolicy == null) {
+            insertDmlPolicy = ConnectionOptions.DML_INSERT_POLICY_UPDATE_ON_EXISTS;
+        }
+        String updateDmlPolicy = connectorContext.getConnectorCapabilities().getCapabilityAlternative(ConnectionOptions.DML_UPDATE_POLICY);
+        if (updateDmlPolicy == null) {
+            updateDmlPolicy = ConnectionOptions.DML_UPDATE_POLICY_IGNORE_ON_NON_EXISTS;
+        }
+        new SnowflakeRecordWriter(snowflakeJdbcContext, tapTable)
+                .setInsertPolicy(insertDmlPolicy)
+                .setUpdatePolicy(updateDmlPolicy)
+                .setTapLogger(tapLogger)
+                .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
     }
 }
 
