@@ -203,6 +203,12 @@
                                         <exclude>**/org/slf4j/**</exclude>
                                     </excludes>
                                 </filter>
+                                <filter>
+                                    <artifact>org.apache.paimon:paimon-api</artifact>
+                                    <excludes>
+                                        <exclude>org/apache/paimon/utils/ThreadUtils</exclude>
+                                    </excludes>
+                                </filter>
                             </filters>
                         </configuration>
                     </execution>
@@ -300,6 +306,25 @@
                         <goals>
                             <goal>report</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>add-source</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>src/main/overwrite/</source>
+                            </sources>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
