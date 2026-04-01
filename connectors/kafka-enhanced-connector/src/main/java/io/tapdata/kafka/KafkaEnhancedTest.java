@@ -3,6 +3,7 @@ package io.tapdata.kafka;
 import io.tapdata.constant.MqTestItem;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.kafka.service.KafkaAdminService;
+import io.tapdata.kafka.utils.Krb5Util;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.entity.TestItem;
@@ -29,7 +30,10 @@ public class KafkaEnhancedTest implements AutoCloseable {
         this.kafkaAdminService = new KafkaAdminService(kafkaConfig, tapLogger);
         testFunctionMap = new LinkedHashMap<>();
         testFunctionMap.put("testHostPort", this::testHostAndPort);
-//        testFunctionMap.put("testConnect", this::testConnect);
+        if (kafkaConfig.useKerberos()) {
+            testFunctionMap.put("testKerberos", this::testKerberos);
+        }
+        testFunctionMap.put("testConnect", this::testConnect);
 //        testFunctionMap.put("testVersion", this::testVersion);
     }
 
@@ -61,6 +65,32 @@ public class KafkaEnhancedTest implements AutoCloseable {
             consumer.accept(testItem(MqTestItem.NAME_SERVER.getContent(), TestItem.RESULT_SUCCESSFULLY_WITH_WARN, "some addresses of name server is down!"));
         }
         return true;
+    }
+
+    public Boolean testKerberos() {
+        try {
+            Krb5Util.checkKDCDomainsBase64(kafkaConfig.getKrb5Conf());
+            consumer.accept(new TestItem(MqTestItem.KAFKA_BASE64_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null));
+            return true;
+        } catch (Exception e) {
+            consumer.accept(new TestItem(MqTestItem.KAFKA_BASE64_CONNECTION.getContent(), TestItem.RESULT_FAILED, e.getMessage()));
+            return false;
+        }
+    }
+
+    public Boolean testConnect() {
+        try {
+            if (kafkaAdminService.isClusterConnectable()) {
+                consumer.accept(new TestItem(MqTestItem.KAFKA_MQ_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null));
+                return true;
+            } else {
+                consumer.accept(new TestItem(MqTestItem.KAFKA_MQ_CONNECTION.getContent(), TestItem.RESULT_FAILED, "cluster is not connectable"));
+                return false;
+            }
+        } catch (Exception e) {
+            consumer.accept(new TestItem(MqTestItem.KAFKA_MQ_CONNECTION.getContent(), TestItem.RESULT_FAILED, "when connect to cluster, error occurred " + e.getMessage()));
+            return false;
+        }
     }
 
     public Boolean testOneByOne() {
