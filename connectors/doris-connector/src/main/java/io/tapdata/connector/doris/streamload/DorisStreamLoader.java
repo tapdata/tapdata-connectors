@@ -71,7 +71,7 @@ public class DorisStreamLoader {
     }
 
     private void initMessageSerializer() {
-        DorisConfig.WriteFormat writeFormat = dorisConfig.getWriteFormatEnum(tapTable.getId());
+        DorisConfig.WriteFormat writeFormat = dorisConfig.getWriteFormatEnum();
         TapLogger.info(TAG, "Doris stream load run with {} format", writeFormat);
         switch (writeFormat) {
             case csv:
@@ -137,7 +137,7 @@ public class DorisStreamLoader {
     }
 
     public RespContent put(final TapTable table) throws StreamLoadException, DorisRetryableException {
-        DorisConfig.WriteFormat writeFormat = dorisConfig.getWriteFormatEnum(table.getId());
+        DorisConfig.WriteFormat writeFormat = dorisConfig.getWriteFormatEnum();
         try {
             final String loadUrl = buildLoadUrl(dorisConfig.getDorisHttp(), dorisConfig.getDatabase(), table.getId());
             final String prefix = buildPrefix(URLEncoder.encode(table.getId()).replace("%", ""));

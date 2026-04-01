@@ -24,7 +24,7 @@ public class DorisConfig extends CommonDbConfig {
     private List<LinkedHashMap<String, String>> tableProperties = new ArrayList<>();
     private Boolean jdbcCompletion = false;
 
-    private Boolean useHTTPS =false;
+    private Boolean useHTTPS = false;
 
     private Integer backendNum;
 
@@ -38,9 +38,9 @@ public class DorisConfig extends CommonDbConfig {
     public DorisConfig load(Map<String, Object> map) {
         DorisConfig config = (DorisConfig) super.load(map);
         config.setSchema(config.getDatabase());
-        if(Boolean.TRUE.equals(useHTTPS)){
+        if (Boolean.TRUE.equals(useHTTPS)) {
             config.setDorisHttp(getDorisHttp().replace("https://", ""));
-        }else{
+        } else {
             config.setDorisHttp(getDorisHttp().replace("http://", ""));
         }
         return config;
@@ -107,10 +107,6 @@ public class DorisConfig extends CommonDbConfig {
 
     public String getWriteFormat() {
         return writeFormat;
-    }
-
-    public String getWriteFormat(String key) {
-        return getTableConfigValue(key, "writeFormat", writeFormat);
     }
 
     public void setWriteFormat(String writeFormat) {
@@ -184,9 +180,5 @@ public class DorisConfig extends CommonDbConfig {
 
     public WriteFormat getWriteFormatEnum() {
         return WriteFormat.valueOf(writeFormat);
-    }
-
-    public WriteFormat getWriteFormatEnum(String key) {
-        return WriteFormat.valueOf(getTableConfigValue(key, "writeFormat", writeFormat));
     }
 }

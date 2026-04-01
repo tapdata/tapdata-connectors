@@ -487,7 +487,6 @@
           "title": "${writeFormat}",
           "default": "json",
           "x-index": 7,
-          "x-perTable": true,
           "x-decorator": "FormItem",
           "x-decorator-props": {
             "feedbackLayout": "none"
