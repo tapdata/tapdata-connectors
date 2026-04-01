@@ -130,10 +130,10 @@ public class MongodbWriter {
 
 	private void doubleActiveWrite(List<TapRecordEvent> tapRecordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
 		Document doubleActiveDoc = new Document("_id", "aaaaaaaa");
-        UpdateOptions options = new UpdateOptions().upsert(true);
-        mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
-        write(table, tapRecordEvents, writeListResultConsumer, session);
-    }
+		UpdateOptions options = new UpdateOptions().upsert(true);
+		mongoDatabase.getCollection("_tap_double_active").updateOne(session, doubleActiveDoc, new Document("$set", new Document("ts", System.currentTimeMillis())), options);
+		write(table, tapRecordEvents, writeListResultConsumer, session);
+	}
 
 	private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
 		AtomicLong inserted = new AtomicLong(0); //insert count
@@ -528,6 +528,18 @@ public class MongodbWriter {
 		return bulkWriteOptions;
 	}
 
+	private boolean isShardedCollection(String tableId) {
+		return shardKeyMap != null && shardKeyMap.containsKey(tableId);
+	}
+
+	private WriteModel<Document> createUpdateModel(String tableId, Document filter, Document update, UpdateOptions options) {
+		if (isShardedCollection(tableId)) {
+			return new UpdateOneModel<>(filter, update, options);
+		} else {
+			return new UpdateManyModel<>(filter, update, options);
+		}
+	}
+
 	protected List<WriteModel<Document>> normalWriteMode(AtomicLong inserted, AtomicLong updated, AtomicLong deleted, UpdateOptions options, TapTable tapTable, Collection<String> pks, TapRecordEvent recordEvent) {
 		List<WriteModel<Document>> writeModels = new ArrayList<>();
 		if (recordEvent instanceof TapInsertRecordEvent) {
@@ -552,17 +564,17 @@ public class MongodbWriter {
 				}
 				MongodbUtil.removeIdIfNeed(pks, insertRecordEvent.getAfter());
 				Document update = new Document(operation, insertRecordEvent.getAfter());
-				writeModels.add(new UpdateManyModel<>(pkFilter, update, options));
+				writeModels.add(createUpdateModel(tapTable.getId(), pkFilter, update, options));
 				if (MapUtils.isNotEmpty(unsetDoc)) {
-					writeModels.add(new UpdateManyModel<>(pkFilter, new Document("$unset", unsetDoc), options));
+					writeModels.add(createUpdateModel(tapTable.getId(), pkFilter, new Document("$unset", unsetDoc), options));
 				}
 			} else {
 				if (CollectionUtils.isNotEmpty(pks) && MapUtils.isNotEmpty(unsetDoc)) {
 					Document pkFilter = getPkFilter(pks, insertRecordEvent.getAfter());
 					Document update = new Document("$set", insertRecordEvent.getAfter());
-					writeModels.add(new UpdateManyModel<>(pkFilter, update, options));
+					writeModels.add(createUpdateModel(tapTable.getId(), pkFilter, update, options));
 					if (MapUtils.isNotEmpty(unsetDoc)) {
-						writeModels.add(new UpdateManyModel<>(pkFilter, new Document("$unset", unsetDoc), options));
+						writeModels.add(createUpdateModel(tapTable.getId(), pkFilter, new Document("$unset", unsetDoc), options));
 					}
 				} else {
 					writeModels.add(new InsertOneModel<>(new Document(insertRecordEvent.getAfter())));
@@ -590,7 +602,7 @@ public class MongodbWriter {
 				u.remove("$v"); // Exists '$v' in update operation of MongoDB(v3.6), remove it because can't apply in write model.
 				boolean isUpdate = u.keySet().stream().anyMatch(k -> k.startsWith("$"));
 				if (isUpdate) {
-					writeModel = new UpdateManyModel<>(pkFilter, u, options);
+					writeModel = createUpdateModel(tapTable.getId(), pkFilter, u, options);
 					options.upsert(false);
 				} else {
 					writeModel = new ReplaceOneModel<>(pkFilter, u, new ReplaceOptions().upsert(false));
@@ -607,10 +619,10 @@ public class MongodbWriter {
 					}
 					MongodbUtil.removeIdIfNeed(pks, after);
 					u.append("$set", after);
-					writeModels.add(new UpdateManyModel<>(pkFilter, u, options));
+					writeModels.add(createUpdateModel(tapTable.getId(), pkFilter, u, options));
 					Document unsetDoc = wrapUnset(recordEvent);
 					if (MapUtils.isNotEmpty(unsetDoc)) {
-						writeModels.add(new UpdateManyModel<>(pkFilter, new Document("$unset", unsetDoc), options));
+						writeModels.add(createUpdateModel(tapTable.getId(), pkFilter, new Document("$unset", unsetDoc), options));
 					}
 				}
 			}
