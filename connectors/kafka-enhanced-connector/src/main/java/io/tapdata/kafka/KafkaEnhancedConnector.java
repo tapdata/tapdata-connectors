@@ -3,6 +3,7 @@ package io.tapdata.kafka;
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.connector.utils.ErrorHelper;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.kafka.service.KafkaService;
@@ -10,16 +11,17 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
+import io.tapdata.pdk.apis.entity.Capability;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+
+import static io.tapdata.pdk.apis.entity.ConnectionOptions.*;
+import static io.tapdata.pdk.apis.entity.ConnectionOptions.DDL_DROP_FIELD_EVENT;
 
 /**
  * 标准 Kafka 连接器
@@ -107,7 +109,28 @@ public class KafkaEnhancedConnector extends ConnectorBase {
 
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws Throwable {
-        return new KafkaTester(connectionContext, consumer).start();
+        ConnectionOptions connectionOptions = ConnectionOptions.create();
+        try {
+            onStart(connectionContext);
+            connectionOptions.connectionString(kafkaConfig.getConnectionClusterURI());
+            try (KafkaEnhancedTest kafkaTest = new KafkaEnhancedTest(kafkaConfig, consumer, connectionContext.getLog())) {
+                kafkaTest.testOneByOne();
+            }
+        } catch (Throwable throwable) {
+//            TapLogger.error(TAG, throwable.getMessage());
+//            kafkaExceptionCollector.collectTerminateByServer(throwable);
+//            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), throwable);
+            consumer.accept(testItem(TestItem.ITEM_CONNECTION, TestItem.RESULT_FAILED, "Failed, " + throwable.getMessage()));
+        } finally {
+            onStop(connectionContext);
+        }
+        List<Capability> ddlCapabilities = Arrays.asList(
+                Capability.create(DDL_NEW_FIELD_EVENT).type(Capability.TYPE_DDL),
+                Capability.create(DDL_ALTER_FIELD_NAME_EVENT).type(Capability.TYPE_DDL),
+                Capability.create(DDL_ALTER_FIELD_ATTRIBUTES_EVENT).type(Capability.TYPE_DDL),
+                Capability.create(DDL_DROP_FIELD_EVENT).type(Capability.TYPE_DDL));
+        ddlCapabilities.forEach(connectionOptions::capability);
+        return connectionOptions;
     }
 
     @Override
