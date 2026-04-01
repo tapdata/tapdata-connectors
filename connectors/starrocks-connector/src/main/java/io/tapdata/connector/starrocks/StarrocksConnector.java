@@ -179,6 +179,15 @@ public class StarrocksConnector extends CommonDbConnector {
         if (null != matchThrowable(throwable, StarrocksRetryableException.class)
                 || null != matchThrowable(throwable, IOException.class)) {
             retryOptions.needRetry(true);
+            retryOptions.beforeRetryMethod(() -> {
+                // 重试前等待一段时间，避免立即重试打满日志
+                tapLogger.info("Connection error detected, waiting 5s before retry...");
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            });
             return retryOptions;
         }
         return retryOptions;
