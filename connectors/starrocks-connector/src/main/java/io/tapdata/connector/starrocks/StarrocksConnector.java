@@ -166,6 +166,7 @@ public class StarrocksConnector extends CommonDbConnector {
             }
         });
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
+        codecRegistry.registerFromTapValue(TapMoneyValue.class, "decimal(10,4)", TapValue::getValue);
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
