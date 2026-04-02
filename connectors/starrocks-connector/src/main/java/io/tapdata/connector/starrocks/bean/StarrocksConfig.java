@@ -32,7 +32,7 @@ public class StarrocksConfig extends CommonDbConfig {
     private Integer flushSizeMB = 100;
 
     // 新增配置：刷新超时阈值（秒）
-    private Integer flushTimeoutSeconds = 300;
+    private Integer flushTimeoutSeconds = 30;
 
     // 新增配置：每分钟写入限制（MB，0表示不限制）
     private Integer minuteLimitMB = 0;
