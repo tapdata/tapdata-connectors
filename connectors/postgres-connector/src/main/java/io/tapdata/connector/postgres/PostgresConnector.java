@@ -37,6 +37,7 @@ import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.exception.TapCodeException;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.*;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -296,10 +297,15 @@ public class PostgresConnector extends CommonDbConnector {
         if (EmptyKit.isNull(slotName)) {
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
             String sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
+            long begin = System.currentTimeMillis();
             try {
-                postgresJdbcContext.execute(sql);
+                postgresJdbcContext.execute(sql, 20);
             } catch (SQLException e) {
-                throw new TapCodeException(PostgresErrorCode.SELECT_PUBLICATION_FAILED, "Select publication failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                if (System.currentTimeMillis() - begin > 18000) {
+                    throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_TIMEOUT, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                } else {
+                    throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                }
             }
             tapLogger.info("new logical replication slot created, slotName:{}", slotName);
             connectorContext.getStateMap().put("tapdata_pg_slot", slotName);
@@ -363,13 +369,93 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
-    private Object getStreamOffsetFromString(TapConnectorContext connectorContext, String offset) {
+    private Object getStreamOffsetFromString(TapConnectorContext connectorContext, String offsetString) {
+        if (EmptyKit.isBlank(offsetString)) {
+            throw new IllegalArgumentException("Offset string cannot be null or empty");
+        }
+
         try {
             PostgresOffset postgresOffset = new PostgresOffset();
-            postgresOffset.setSourceOffset(offset);
+
+            // 尝试解析为 JSON 格式的完整 offset
+            if (offsetString.trim().startsWith("{")) {
+                // 直接使用 JSON 字符串作为 sourceOffset
+                postgresOffset.setSourceOffset(offsetString);
+                tapLogger.info("Using JSON format offset: {}", offsetString);
+                return postgresOffset;
+            }
+
+            // 解析 LSN 值
+            Long lsnValue = parseLsn(offsetString);
+
+            // 构建最小化的 offset JSON
+            // 只包含必要的 lsn 字段，让 Debezium 从这个 LSN 开始读取
+            Map<String, Object> offsetMap = new HashMap<>();
+            offsetMap.put("lsn", lsnValue);
+
+            // 将 Map 转换为 JSON 字符串
+            ObjectMapper objectMapper = new ObjectMapper();
+            String sourceOffset = objectMapper.writeValueAsString(offsetMap);
+            postgresOffset.setSourceOffset(sourceOffset);
+
+            tapLogger.info("Created offset from LSN string '{}', parsed LSN value: {}, offset: {}",
+                    offsetString, lsnValue, sourceOffset);
+
             return postgresOffset;
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to create offset from string: " + offsetString +
+                    ". Error: " + e.getMessage(), e);
         } catch (Exception e) {
-            throw new RuntimeException("Oracle use scn as offset, invalid scn: " + offset, e);
+            throw new RuntimeException("Invalid LSN offset string: " + offsetString +
+                    ". Expected format: '0/1234567' or '19088743' or JSON format. Error: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 解析 LSN 字符串为 Long 值
+     *
+     * @param lsnString LSN 字符串，支持两种格式：
+     *                  1. PostgreSQL 标准格式：0/1234567 (segment/offset)
+     *                  2. 十进制数值：19088743
+     * @return LSN 的 Long 值
+     */
+    private Long parseLsn(String lsnString) {
+        lsnString = lsnString.trim();
+
+        // 格式 1: PostgreSQL 标准格式 "segment/offset" (如 "0/1234567")
+        if (lsnString.contains("/")) {
+            String[] parts = lsnString.split("/");
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("Invalid LSN format: " + lsnString +
+                        ". Expected format: 'segment/offset' (e.g., '0/1234567')");
+            }
+
+            try {
+                // 将十六进制的 segment 和 offset 转换为 Long
+                long segment = Long.parseLong(parts[0], 16);
+                long offset = Long.parseLong(parts[1], 16);
+
+                // LSN = (segment << 32) | offset
+                long lsn = (segment << 32) | offset;
+
+                tapLogger.debug("Parsed LSN from '{}': segment={}, offset={}, lsn={}",
+                        lsnString, segment, offset, lsn);
+
+                return lsn;
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid LSN format: " + lsnString +
+                        ". Segment and offset must be hexadecimal numbers. Error: " + e.getMessage(), e);
+            }
+        }
+
+        // 格式 2: 直接的十进制数值
+        try {
+            long lsn = Long.parseLong(lsnString);
+            tapLogger.debug("Parsed LSN from decimal string '{}': {}", lsnString, lsn);
+            return lsn;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid LSN format: " + lsnString +
+                    ". Expected either 'segment/offset' format or a decimal number. Error: " + e.getMessage(), e);
         }
     }
 

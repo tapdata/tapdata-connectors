@@ -154,6 +154,22 @@ public class StarrocksStreamLoader {
         return httpClient;
     }
 
+    /**
+     * 清除指定表的缓存 HttpClient，使下次请求创建新的连接。
+     * 在连接超时等网络异常后调用，避免反复复用坏连接。
+     */
+    private void evictHttpClient(String tableName) {
+        CloseableHttpClient removed = httpClientMap.remove(tableName);
+        if (removed != null) {
+            taplogger.info("Evicted stale HttpClient for table {}, will create new one on next request", tableName);
+            try {
+                removed.close();
+            } catch (IOException e) {
+                taplogger.warn("Failed to close evicted HttpClient for table {}: {}", tableName, e.getMessage());
+            }
+        }
+    }
+
     private void initMessageSerializer() {
         StarrocksConfig.WriteFormat writeFormat = StarrocksConfig.getWriteFormatEnum();
         taplogger.info("Starrocks stream load run with {} format", writeFormat);
@@ -632,10 +648,10 @@ public class StarrocksStreamLoader {
 
     public RespContent put(final TapTable table) throws StreamLoadException, StarrocksRetryableException {
         StarrocksConfig.WriteFormat writeFormat = StarrocksConfig.getWriteFormatEnum();
+        String tableName = table.getId();
         try {
-            final String loadUrl = buildLoadUrl(StarrocksConfig.getStarrocksHttp(), StarrocksConfig.getDatabase(), table.getId());
-            final String prefix = buildPrefix(table.getId());
-            String tableName = table.getId();
+            final String loadUrl = buildLoadUrl(StarrocksConfig.getStarrocksHttp(), StarrocksConfig.getDatabase(), tableName);
+            final String prefix = buildPrefix(tableName);
 
             // StarRocks label naming rules: only digits, letters, and underscores are allowed
             String label = prefix + "_" + UUID.randomUUID().toString().replace("-", "_");
@@ -699,6 +715,8 @@ public class StarrocksStreamLoader {
         } catch (StarrocksRetryableException e) {
             throw e;
         } catch (Exception e) {
+            // 连接异常时清除缓存的 HttpClient，下次重试会创建新的
+            evictHttpClient(tableName);
             throw new StreamLoadException(String.format("Call stream load error: %s", e.getMessage()), e);
         }
     }
@@ -828,6 +846,9 @@ public class StarrocksStreamLoader {
         } catch (Exception e) {
             taplogger.warn("Failed to load table, error: {}", e);
             taplogger.warn(Arrays.stream(e.getStackTrace()).map(StackTraceElement::toString).collect(Collectors.joining(",")));
+            // 连接异常时清除缓存的 HttpClient，下次重试会创建新的
+            String tableName = table.getId();
+            evictHttpClient(tableName);
             throw new StreamLoadException(String.format("Call stream load from file error: %s", e.getMessage()), e);
         }
     }
