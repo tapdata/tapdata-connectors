@@ -540,7 +540,7 @@
           "type": "int",
           "x-index": 9,
           "title": "${flushTimeoutSeconds}",
-          "default": 300,
+          "default": 30,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-decorator-props": {
