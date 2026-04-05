@@ -164,7 +164,6 @@ public abstract class NormalWriteRecorder {
                 }
                 preparedStatement.clearBatch();
                 batchCache.clear();
-                batchCacheSize = 0;
             }
         } catch (SQLException e) {
 //            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
@@ -172,6 +171,7 @@ public abstract class NormalWriteRecorder {
             batchCacheSize = 0;
             throw e;
         }
+        batchCacheSize = 0;
         atomicLong.addAndGet(succeed);
     }
 
