@@ -3,11 +3,13 @@ package io.tapdata.connector.paimon.service;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import io.tapdata.connector.paimon.config.PaimonConfig;
+import io.tapdata.entity.event.TapCallbackOffset;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
@@ -50,6 +52,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -91,8 +94,8 @@ public class PaimonService implements Closeable {
 	// ===== Async Commit Support =====
 	// Background thread for async commits
 	private ScheduledExecutorService asyncCommitExecutor;
-	// Flag to track if async commit is enabled
-	private volatile boolean asyncCommitEnabled = false;
+	private final Map<String, TapCallbackOffset> firstOffsetByTable;
+	private Consumer<Object> flushOffsetCallback;
 
 	// ===== Paimon Field Cache for Performance =====
 	// LRU cache for Paimon field mappings: Key = "database.tableName", Value = Map<fieldName, DataType>
@@ -123,6 +126,7 @@ public class PaimonService implements Closeable {
 
 	public PaimonService(PaimonConfig config) {
 		this.config = config;
+		this.firstOffsetByTable = Collections.synchronizedMap(new LinkedHashMap<>());
 	}
 
 	/**
@@ -158,8 +162,6 @@ public class PaimonService implements Closeable {
 		Integer commitInterval = config.getCommitIntervalMs();
 
 		if (enableAsync != null && enableAsync && commitInterval != null && commitInterval > 0) {
-			asyncCommitEnabled = true;
-
 			// Create scheduled executor with single thread
 			asyncCommitExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
 				Thread t = new Thread(r, "paimon-async-commit");
@@ -878,6 +880,28 @@ public class PaimonService implements Closeable {
 
 				// Write all records to the writer
 				for (TapRecordEvent event : recordEvents) {
+					if (!firstOffsetByTable.containsKey(tableName)) {
+						TapCallbackOffset tapOffset = new TapCallbackOffset();
+						// 从 TapRecordEvent.info 中提取 offset 信息
+						// 这些信息由 HazelcastTargetPdkBaseNode.handleTapdataEventDML 方法添加
+						Object batchOffset = event.getInfo("batchOffset");
+						Object streamOffset = event.getInfo("streamOffset");
+						Object syncStage = event.getInfo("syncStage");
+						Object sourceTime = event.getInfo("sourceTime");
+						Object nodeIds = event.getInfo("nodeIds");
+
+						// 填充 TapOffset
+						tapOffset.batchOffset(batchOffset)
+								.streamOffset(streamOffset)
+								.tableId(event.getTableId())
+								.syncStage(syncStage != null ? syncStage.toString() : null)
+								.sourceTime(sourceTime instanceof Long ? (Long) sourceTime : null)
+								.eventTime(event.getReferenceTime())
+								.nodeIds(nodeIds);
+						if (tapOffset.hasValidOffset()) {
+							firstOffsetByTable.put(tableName, tapOffset);
+						}
+					}
 					if (event instanceof TapInsertRecordEvent) {
 						handleStreamInsert((TapInsertRecordEvent) event, writer, table);
 						result.incrementInserted(1);
@@ -890,13 +914,60 @@ public class PaimonService implements Closeable {
 					}
 				}
 
-				// Prepare commit with commitIdentifier
-				// Use atomic counter to generate unique, incrementing commit identifier
-				long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
-				List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+				// Update accumulated record count
+				AtomicInteger recordCount = accumulatedRecordCount.computeIfAbsent(tableKey, k -> new AtomicInteger(0));
+				int currentCount = recordCount.addAndGet(recordEvents.size());
 
-				// Commit the batch
-				commit.commit(commitIdentifier, messages);
+				// Initialize last commit time if not exists
+				AtomicLong lastCommit = lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong(System.currentTimeMillis()));
+
+				// Determine if we should commit based on:
+				// 1. Accumulated record count exceeds threshold
+				// 2. Time since last commit exceeds interval
+				// 3. Batch accumulation is disabled (size = 0)
+				boolean shouldCommit = false;
+				Integer batchSize = config.getBatchAccumulationSize();
+				Integer commitInterval = config.getCommitIntervalMs();
+
+				if (batchSize == null || batchSize <= 0) {
+					// Batch accumulation disabled, commit immediately
+					shouldCommit = true;
+				} else if (currentCount >= batchSize) {
+					// Record count threshold reached
+					shouldCommit = true;
+				} else if (commitInterval != null && commitInterval > 0) {
+					// Check time-based commit
+					long timeSinceLastCommit = System.currentTimeMillis() - lastCommit.get();
+					if (timeSinceLastCommit >= commitInterval) {
+						shouldCommit = true;
+					}
+				}
+
+				// Perform commit if needed
+				if (shouldCommit) {
+					// Use lock to ensure only one thread commits at a time for this table
+					Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
+					synchronized (lock) {
+						// Double-check if we still need to commit (another thread might have committed)
+						int finalCount = recordCount.get();
+						if (finalCount > 0) {
+							// Prepare commit with commitIdentifier
+							// Use atomic counter to generate unique, incrementing commit identifier
+							long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
+							List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+
+							// Commit the batch
+							commit.commit(commitIdentifier, messages);
+							commitCallback(tableName);
+							// Reset counters after successful commit
+							recordCount.set(0);
+							lastCommit.set(System.currentTimeMillis());
+
+							connectorContext.getLog().debug("Committed {} accumulated records for table {}",
+									finalCount, tableKey);
+						}
+					}
+				}
 
 				// StreamTableWrite can be reused, so we don't clean up here
 				return result;
@@ -965,7 +1036,6 @@ public class PaimonService implements Closeable {
 	private void cleanupAllResources() {
 		// Shutdown async commit executor first
 		if (asyncCommitExecutor != null) {
-			asyncCommitEnabled = false;
 			asyncCommitExecutor.shutdown();
 			try {
 				if (!asyncCommitExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -1673,7 +1743,7 @@ public class PaimonService implements Closeable {
 				long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
 				List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
 				commit.commit(commitIdentifier, messages);
-
+				commitCallback(tableKey);
 				// Reset counters
 				recordCount.set(0);
 				AtomicLong lastCommit = lastCommitTime.get(tableKey);
@@ -2555,6 +2625,43 @@ public class PaimonService implements Closeable {
 		}
 
 		cleanupAllResources();
+	}
+
+	public void setFlushOffsetCallback(Consumer<Object> flushOffsetCallback) {
+		this.flushOffsetCallback = flushOffsetCallback;
+	}
+
+	public Map<String, TapCallbackOffset> getFirstOffsetByTable() {
+		return firstOffsetByTable;
+	}
+
+	private void commitCallback(String tableName) {
+		if (flushOffsetCallback != null) {
+			TapCallbackOffset offsetToSave = null;
+			synchronized (firstOffsetByTable) {
+				Map.Entry<String, TapCallbackOffset> firstEntry = firstOffsetByTable.entrySet()
+						.stream()
+						.findFirst()
+						.orElse(null);
+
+				if (firstEntry != null) {
+					String firstTableName = firstEntry.getKey();
+
+                    // 如果当前刷新的表是第一个表
+					offsetToSave = firstEntry.getValue();
+					if (tableName.equals(firstTableName)) {
+						firstOffsetByTable.remove(firstTableName);
+					}
+				}
+			}
+			if (offsetToSave != null && offsetToSave.hasValidOffset()) {
+				try {
+					flushOffsetCallback.accept(offsetToSave);
+				} catch (Exception e) {
+					TapLogger.warn("Failed to flush offset callback: {}", e.getMessage(), e);
+				}
+			}
+		}
 	}
 }
 
