@@ -9,6 +9,12 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.spec.TapNodeSpecification;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.Table;
 import org.mockito.Mockito;
 
 import java.io.*;
@@ -32,11 +38,11 @@ public class PerformanceTestRunner {
 
     // ─── 常量 ─────────────────────────────────────────────────────────────────
 
-    private static final String BASE_TEST_DIR = "/tmp/paimon-perf-test";
+    public static final String BASE_TEST_DIR = "/tmp/paimon-perf-test";
     private static final String DATABASE = "default";
     private static final String TABLE_NAME = "test_table";
-    private static final int    BATCH_SIZE = 5_000;   // 每批次写入记录数
-    private static final int    BATCH_ACCUMULATE = 10_000; // PaimonService 累积批次大小
+    public static final int TOTAL_RECORDS = 5_000_000;   // 数据集总大小
+    private static final int BATCH_SIZE = 10_000; // 每批次写入记录数，也是PaimonService 累积批次大小
 
     // ─── 实例变量 ─────────────────────────────────────────────────────────────
 
@@ -92,9 +98,10 @@ public class PerformanceTestRunner {
         config.setWarehouse(warehouseForCase(tc));
         config.setStorageType("local");
         config.setDatabase(database);
-        config.setBatchAccumulationSize(BATCH_ACCUMULATE);
+        config.setBatchAccumulationSize(BATCH_SIZE);
         config.setCommitIntervalMs(0);         // 关闭时间触发，依靠数量触发
         config.setEnableAsyncCommit(false);    // 测试中关闭异步 commit
+        config.setCreateAutoInc(true);
 
         // 设置 bucketMode & bucketCount（先给一个安全默认，后续 tableProperties 可覆盖）
         Map<String, String> params = tc.getParameters();
@@ -104,6 +111,9 @@ public class PerformanceTestRunner {
 
         if (bucket > 0) {
             config.setBucketMode("fixed");
+            config.setBucketCount(bucket);
+        } else if (bucket == -2) {
+//            config.setBucketMode("fixed");
             config.setBucketCount(bucket);
         } else {
             config.setBucketMode("dynamic");
@@ -215,7 +225,11 @@ public class PerformanceTestRunner {
             service = buildPaimonService(tc);
             createFreshTable(service);
 
-            TapConnectorContext tapConnectorContext = new TapConnectorContext(Mockito.mock(TapNodeSpecification.class), new DataMap(), new DataMap(), new HashMap<>(), Mockito.mock(Log.class));
+            // 2. 验证表参数是否生效
+            System.out.println("  >> 验证表配置参数...");
+            validateTableParameters(tc, service);
+
+            TapConnectorContext tapConnectorContext = new TapConnectorContext(Mockito.mock(TapNodeSpecification.class), new DataMap(), new DataMap(), new HashMap<>(), logger);
 
             System.out.printf("  >> 仓库路径: %s%n", warehouseForCase(tc));
             System.out.printf("  >> 开始写入 %,d 条记录 (主键重复率 %d%%, QPS限制 %s)%n",
@@ -241,7 +255,14 @@ public class PerformanceTestRunner {
                     evt.setAfter(rec);
                     evt.setTableId(tableName);
                     evt.setReferenceTime(System.currentTimeMillis());
+                    Map<String, Object> info = new HashMap<>(1);
+                    info.put("batchOffset",i);
+                    evt.setInfo(info);
                     batch.add(evt);
+                    if (remain <= BATCH_SIZE) {
+                        // 模拟最后一个batch为增量cdc：
+                        evt.getInfo().put(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+                    }
                 }
                 service.writeRecords(batch, tapTable, tapConnectorContext);
                 remain -= batchSz;
@@ -260,7 +281,7 @@ public class PerformanceTestRunner {
 
                 // 进度打印
                 long pct = (written.get() * 100) / total;
-                if (written.get() % (BATCH_SIZE * 10) == 0 || remain == 0) {
+                if (written.get() % (TOTAL_RECORDS * 10) == 0 || remain == 0) {
                     double elapsed = (System.currentTimeMillis() - startMs) / 1000.0;
                     double throughput = elapsed > 0 ? written.get() / elapsed : 0;
                     System.out.printf("  >> 进度: %,d/%,d (%d%%) | 吞吐: %.0f 条/秒%n",
@@ -346,42 +367,321 @@ public class PerformanceTestRunner {
         System.out.println(ch.repeat(70));
     }
 
-    private static void printParameters(Map<String, String> params) {
-        System.out.println("  参数配置:");
-        // 分组打印
-        String[][] groups = {
-            {"[写入缓冲区]", "write-buffer-size", "write-buffer-spillable", "write-buffer-spill.max-disk-size"},
-            {"[文件大小]",   "target-file-size", "file.format", "file.compression", "spill-compression"},
-            {"[分桶策略]",   "bucket", "dynamic-bucket.target-row-num"},
-            {"[合并控制]",   "compaction.async.enabled", "num-sorted-run.compaction-trigger",
-                            "num-sorted-run.stop-trigger", "compaction.size-ratio",
-                            "commit.force-compact", "write-only"},
-            {"[排序/合并]",  "local-merge-buffer-size", "sort-spill-buffer-size"},
-            {"[并行度]",     "sink.parallelism"},
-        };
-        for (String[] group : groups) {
-            boolean hasAny = false;
-            for (int i = 1; i < group.length; i++) {
-                if (params.containsKey(group[i])) { hasAny = true; break; }
+    /**
+     * 从 Paimon Catalog 中读取表的实际配置参数
+     */
+    private Map<String, String> readActualTableOptions(String warehouse, String database, String tableName) {
+        try {
+            Options catalogOptions = new Options();
+            catalogOptions.set("warehouse", warehouse);
+            CatalogContext context = CatalogContext.create(catalogOptions);
+            Catalog catalog = CatalogFactory.createCatalog(context);
+            Identifier identifier = Identifier.create(database, tableName);
+            Table table = catalog.getTable(identifier);
+            Map<String, String> options = table.options();
+            catalog.close();
+            return options;
+        } catch (Exception e) {
+            System.err.println("  [WARN] 读取表配置失败: " + e.getMessage());
+            return Collections.emptyMap();
+        }
+    }
+
+    /**
+     * 验证表参数是否已生效：对比预期参数和实际表配置
+     */
+    private void validateTableParameters(TestCase tc, PaimonService service) {
+        Map<String, String> expectedParams = tc.getParameters();
+        Map<String, String> actualOptions = readActualTableOptions(warehouseForCase(tc), database, tableName);
+
+        if (actualOptions.isEmpty()) {
+            System.out.println("  [WARN] 无法读取表配置，跳过参数验证");
+            return;
+        }
+
+        // 分类验证
+        List<String> serviceOnlyParams = Arrays.asList(
+            "write-buffer-spillable", "write-buffer-spill.max-disk-size"
+        );
+
+        System.out.println("  参数验证结果:");
+        int validated = 0;
+        int matched = 0;
+        int mismatched = 0;
+
+        for (Map.Entry<String, String> entry : expectedParams.entrySet()) {
+            String key = entry.getKey();
+            String expectedValue = entry.getValue();
+
+            // Service 专有参数不在表选项中
+            if (serviceOnlyParams.contains(key)) {
+                System.out.printf("    [Service] %-45s = %-20s ✓ 作用于 PaimonService%n", key, expectedValue);
+                validated++;
+                continue;
             }
-            if (!hasAny) continue;
-            System.out.println("    " + group[0]);
-            for (int i = 1; i < group.length; i++) {
-                String val = params.get(group[i]);
-                if (val != null) {
-                    System.out.printf("      %-45s = %s%n", group[i], val);
+
+            // 检查表选项中是否有该参数
+            String actualValue = null;
+            for (Map.Entry<String, String> opt : actualOptions.entrySet()) {
+                if (opt.getKey().equals(key)) {
+                    actualValue = opt.getValue();
+                    break;
                 }
             }
+
+            validated++;
+            if (actualValue != null) {
+                // 标准化后比较（去除单位差异）
+                String normalizedExpected = normalizeParamValue(key, expectedValue);
+                String normalizedActual = normalizeParamValue(key, actualValue);
+                
+                if (normalizedExpected.equals(normalizedActual)) {
+                    System.out.printf("    [表选项]  %-45s = %-20s ✅ 已生效（实际: %s）%n", key, expectedValue, actualValue);
+                    matched++;
+                } else {
+                    System.out.printf("    [表选项]  %-45s = %-20s ⚠️  值不一致（实际: %s）%n", key, expectedValue, actualValue);
+                    mismatched++;
+                }
+            } else {
+                // 某些参数可能被 PaimonService 的 createTable 硬编码覆盖
+                System.out.printf("    [表选项]  %-45s = %-20s ❌ 未在表配置中找到%n", key, expectedValue);
+                mismatched++;
+            }
         }
-        // 打印剩余未分组的参数
-        Set<String> grouped = new HashSet<>();
-        for (String[] g : groups) for (int i = 1; i < g.length; i++) grouped.add(g[i]);
+
+        System.out.println();
+        System.out.printf("  验证统计: 共验证 %d 个参数，%d 个已生效，%d 个不匹配%n%n", validated, matched, mismatched);
+    }
+
+    /**
+     * 标准化参数值以便比较（去除单位差异，如 "256mb" vs "256 MB"）
+     */
+    private String normalizeParamValue(String key, String value) {
+        if (value == null) return "";
+        String normalized = value.trim().toLowerCase();
+        
+        // 对于大小相关参数，统一转换为 MB 数值
+        if (key.contains("size") || key.contains("buffer")) {
+            try {
+                if (normalized.endsWith("gb")) {
+                    int mb = (int) (Double.parseDouble(normalized.replace("gb", "").trim()) * 1024);
+                    return mb + "mb";
+                } else if (normalized.endsWith("mb")) {
+                    return normalized;
+                } else if (normalized.endsWith("kb")) {
+                    double mb = Double.parseDouble(normalized.replace("kb", "").trim()) / 1024.0;
+                    return String.format("%.2fmb", mb);
+                } else {
+                    // 假设是字节，尝试转换为 MB
+                    try {
+                        long bytes = Long.parseLong(normalized);
+                        double mb = bytes / (1024.0 * 1024.0);
+                        return String.format("%.2fmb", mb);
+                    } catch (NumberFormatException ignored) {}
+                }
+            } catch (Exception ignored) {}
+        }
+        
+        return normalized;
+    }
+
+    /**
+     * 参数分类信息
+     */
+    private static class ParamInfo {
+        String key;
+        String value;
+        ParamCategory category;  // 参数分类
+        String targetComponent;  // 作用于哪个组件
+        boolean applied;         // 是否已生效
+        String actualValue;      // 实际值（用于验证）
+        String description;      // 参数说明
+
+        enum ParamCategory {
+            SERVICE_CONFIG,      // PaimonService 配置
+            TABLE_OPTION,        // Paimon 表选项
+            INTERNAL             // 内部参数（不直接传递）
+        }
+
+        ParamInfo(String key, String value, ParamCategory category, String targetComponent, String description) {
+            this.key = key;
+            this.value = value;
+            this.category = category;
+            this.targetComponent = targetComponent;
+            this.description = description;
+            this.applied = false;
+            this.actualValue = null;
+        }
+    }
+
+    /**
+     * 打印参数（增强版）：分类、作用目标、预期效果、验证状态
+     */
+    private void printParameters(Map<String, String> params) {
+        System.out.println();
+        System.out.println("  ┌─ 参数配置详情" + "─".repeat(50));
+        System.out.println("  │");
+
+        // 定义参数分组及其元数据
+        String[][] paramGroups = {
+            // 组名 | 作用目标分类
+            {"[1/6] 写入缓冲区配置", "Service 配置"},
+            {"[2/6] 文件大小与格式", "Paimon 表选项"},
+            {"[3/6] 分桶策略", "混合（Service + 表选项）"},
+            {"[4/6] Compaction 合并控制", "Paimon 表选项"},
+            {"[5/6] 排序与合并优化", "Paimon 表选项"},
+            {"[6/6] 并行度与线程", "Service 配置 → 表选项"},
+        };
+
+        String[][][] groupParams = {
+            {
+                {"write-buffer-size", "写入缓冲区大小（MB），控制内存缓冲容量", "256", "增大可减少 flush 频率，提升吞吐"},
+                {"write-buffer-spillable", "是否允许溢写到磁盘", "false", "true 可避免 OOM，适合大数据量"},
+                {"write-buffer-spill.max-disk-size", "溢写磁盘最大大小", "不限", "限制磁盘占用"},
+            },
+            {
+                {"target-file-size", "LSM L0 层目标文件大小（MB）", "128", "影响文件碎片化和查询效率"},
+                {"file.format", "文件格式（parquet/orc）", "parquet", "Parquet 压缩比更好，查询更快"},
+                {"file.compression", "文件压缩算法", "zstd", "zstd 压缩比优于 lz4/snappy"},
+                {"spill-compression", "溢写时压缩算法", "lz4", "减少磁盘 I/O"},
+            },
+            {
+                {"bucket", "分桶数量（-1=动态，>0=固定）", "-1", "动态分桶适合未知数据分布"},
+                {"dynamic-bucket.target-row-num", "动态分桶目标行数", "不限", "控制动态桶粒度"},
+            },
+            {
+                {"compaction.async.enabled", "是否启用异步 compaction", "true", "异步可减少写入阻塞"},
+                {"num-sorted-run.compaction-trigger", "触发 compaction 的 sorted run 数量", "5", "值越大延迟合并"},
+                {"num-sorted-run.stop-trigger", "停止写入的 sorted run 阈值", "8", "防止内存溢出"},
+                {"compaction.size-ratio", "Compaction 大小比率", "不限", "影响合并策略"},
+                {"commit.force-compact", "提交时强制 compact", "false", "true 可保证读性能"},
+                {"write-only", "仅写入模式（跳过 compact）", "false", "true 最大化导入吞吐"},
+            },
+            {
+                {"local-merge-buffer-size", "本地合并缓冲区大小", "不限", "影响 merge 性能"},
+                {"sort-spill-buffer-size", "排序溢写缓冲区大小", "不限", "控制排序内存占用"},
+            },
+            {
+                {"sink.parallelism", "写入并行度（线程数）", "4", "影响并发写入能力"},
+            },
+        };
+
+        // 打印每个分组的参数
+        for (int g = 0; g < paramGroups.length; g++) {
+            String[][] currentGroupParams = groupParams[g];
+            boolean hasAny = false;
+            
+            // 检查该分组是否有任何参数
+            for (String[] paramMeta : currentGroupParams) {
+                if (params.containsKey(paramMeta[0])) {
+                    hasAny = true;
+                    break;
+                }
+            }
+            
+            if (!hasAny) continue;
+
+            // 打印组名和作用目标
+            System.out.printf("  │  %s → %s%n", paramGroups[g][0], paramGroups[g][1]);
+
+            // 打印该组的参数
+            for (String[] paramMeta : currentGroupParams) {
+                String key = paramMeta[0];
+                String desc = paramMeta[1];
+                String defaultVal = paramMeta[2];
+                String effect = paramMeta[3];
+                
+                if (!params.containsKey(key)) continue;
+                
+                String value = params.get(key);
+                
+                // 判断参数类型和作用目标
+                String paramType;
+                String targetComponent;
+                
+                if (key.equals("write-buffer-size") || key.equals("write-buffer-spillable") || 
+                    key.equals("write-buffer-spill.max-disk-size")) {
+                    paramType = "Service";
+                    targetComponent = "PaimonService 运行时配置";
+                } else if (key.equals("sink.parallelism")) {
+                    paramType = "混合";
+                    targetComponent = "Service.writeThreads → 表选项 sink.parallelism";
+                } else if (key.equals("bucket")) {
+                    paramType = "混合";
+                    targetComponent = "Service.bucketMode/bucketCount + 表选项 bucket";
+                } else {
+                    paramType = "表选项";
+                    targetComponent = "Paimon 表 schema OPTIONS";
+                }
+                
+                // 打印参数值、预期效果和作用目标
+                System.out.printf("  │    %-40s = %-15s [%s]%n", key, value, paramType);
+                System.out.printf("  │      ↳ 作用: %s%n", targetComponent);
+                System.out.printf("  │      ↳ 预期: %s%n", effect);
+            }
+            System.out.println("  │");
+        }
+
+        // 打印未分组的参数
+        Set<String> allGroupedKeys = new HashSet<>();
+        for (String[][] gp : groupParams) {
+            for (String[] paramMeta : gp) {
+                allGroupedKeys.add(paramMeta[0]);
+            }
+        }
+        
         boolean hasOther = false;
         for (String k : params.keySet()) {
-            if (!grouped.contains(k)) {
-                if (!hasOther) { System.out.println("    [其他]"); hasOther = true; }
-                System.out.printf("      %-45s = %s%n", k, params.get(k));
+            if (!allGroupedKeys.contains(k)) {
+                if (!hasOther) { 
+                    System.out.println("  │  [其他参数] → Paimon 表选项");
+                    hasOther = true; 
+                }
+                System.out.printf("  │    %-40s = %-15s [表选项]%n", k, params.get(k));
             }
+        }
+
+        // 打印参数统计
+        System.out.println("  │");
+        System.out.printf("  │  参数统计: 共 %d 个参数 | ", params.size());
+        
+        long serviceCount = params.keySet().stream()
+            .filter(k -> k.equals("write-buffer-size") || k.equals("write-buffer-spillable") || 
+                        k.equals("write-buffer-spill.max-disk-size") || k.equals("sink.parallelism"))
+            .count();
+        long tableOptionCount = params.size() - serviceCount;
+        
+        System.out.printf("Service 配置: %d 个 | 表选项: %d 个%n", serviceCount, tableOptionCount);
+        System.out.println("  │");
+        System.out.println("  └" + "─".repeat(69));
+        System.out.println();
+        System.out.println("  参数分类说明:");
+        System.out.println("    • Service 配置  → 通过 PaimonConfig setter 设置，影响运行时行为（缓冲区、线程数等）");
+        System.out.println("    • Paimon 表选项 → 通过 CREATE TABLE 的 OPTIONS 设置，定义表的物理存储特性");
+        System.out.println("    • 混合类型      → 同时作用于 Service 和表选项（如 bucket、parallelism）");
+        System.out.println("    ✓ 参数生效验证将在表创建后自动执行");
+        System.out.println();
+    }
+
+    /**
+     * 参数元数据
+     */
+    private static class ParamMeta {
+        String groupName;
+        String targetComponent;
+        String description;
+        String key;
+        String defaultValue;
+        String validationMethod;
+
+        ParamMeta(String groupName, String targetComponent, String description,
+                  String key, String defaultValue, String validationMethod) {
+            this.groupName = groupName;
+            this.targetComponent = targetComponent;
+            this.description = description;
+            this.key = key;
+            this.defaultValue = defaultValue;
+            this.validationMethod = validationMethod;
         }
     }
 
