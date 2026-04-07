@@ -1,21 +1,25 @@
 #!/bin/bash
 ################################################################################
 # Paimon 写入性能参数调优测试 - 一键启动脚本
-# 用法: ./run-perf-test.sh [mode]
+# 
+# 测试模式配置已统一到 TestModeConfig.java
+# 新增测试模式只需修改 TestModeConfig.ALL_MODES 列表
 #
-# mode 可选值:
+# 用法: ./run-perf-test.sh [模式]
+#
+# 可用模式（详见 TestModeConfig.java）:
 #   1  basic        - 基础用例组(TC-01~03) 默认
 #   2  all          - 全量测试(所有组)
-#   3  nosmallfile  - 无小文件测试(TC-50~53)
+#   3  nosmallfile  - 无小文件测试(TC-50~54)
 #   4  single       - 单个基准用例(TC-01)
-#   auto            - 全自动(无需按回车)，运行全量
-#   bucket          - 分桶策略(TC-30~35，重点验证bucket=-2)
-#   compaction      - 合并策略(TC-40~45)
-#   buffer          - 写入缓冲区(TC-10~16)
-#   target          - 目标文件大小(TC-20~23)
-#   format          - 文件格式&压缩(TC-60~64)
-#   pkupdate        - 主键更新(TC-70~73)
-#   parallelism     - 写入并行度(TC-80~83)
+#   5  bucket       - 分桶策略测试(TC-30~35)
+#   6  compaction   - 合并策略测试(TC-40~45)
+#   7  buffer       - 写入缓冲区测试(TC-10~16)
+#   8  target       - 目标文件大小测试(TC-20~23)
+#   9  format       - 文件格式压缩测试(TC-60~64)
+#   10 pkupdate     - 主键更新测试(TC-70~73)
+#   11 parallelism  - 写入并行度测试(TC-80~83)
+#   auto            - 全自动运行(无需交互)
 #   空/无参数       - 交互式选择
 ################################################################################
 
@@ -30,12 +34,42 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+# ═══════════════════════════════════════════════════════════════════════
+#  测试模式配置（与 TestModeConfig.java 保持一致）
+#  新增模式请修改 TestModeConfig.java，无需修改此脚本
+# ═══════════════════════════════════════════════════════════════════════
+
+# 所有可用的命令行别名（用于帮助提示）
+VALID_MODES="basic all nosmallfile single bucket compaction buffer target format pkupdate parallelism auto"
+
 echo -e "${BLUE}"
 echo "════════════════════════════════════════════════════════════"
 echo "  Paimon 1.3.1  写入性能参数调优测试"
 echo "  测试仓库: /tmp/paimon-perf-test"
 echo "════════════════════════════════════════════════════════════"
 echo -e "${NC}"
+
+# ── 帮助信息 ──────────────────────────────────────────────────────────────
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    echo "用法: ./run-perf-test.sh [模式]"
+    echo ""
+    echo "可用模式:"
+    echo "  1  basic        - 基础用例组(TC-01~03)"
+    echo "  2  all          - 全量测试(所有组)"
+    echo "  3  nosmallfile  - 无小文件测试(TC-50~54)"
+    echo "  4  single       - 单个基准用例(TC-01)"
+    echo "  5  bucket       - 分桶策略测试(TC-30~35)"
+    echo "  6  compaction   - 合并策略测试(TC-40~45)"
+    echo "  7  buffer       - 写入缓冲区测试(TC-10~16)"
+    echo "  8  target       - 目标文件大小测试(TC-20~23)"
+    echo "  9  format       - 文件格式压缩测试(TC-60~64)"
+    echo "  10 pkupdate     - 主键更新测试(TC-70~73)"
+    echo "  11 parallelism  - 写入并行度测试(TC-80~83)"
+    echo "  auto            - 全自动运行(无需交互)"
+    echo ""
+    echo "默认模式: basic (1)"
+    exit 0
+fi
 
 # ── 环境检查 ──────────────────────────────────────────────────────────────────
 if ! command -v java &>/dev/null; then
@@ -80,18 +114,20 @@ if [ -n "$TEST_MODE" ]; then
         -Dexec.args="${TEST_MODE}" \
         -Dexec.jvmArgs="${JVM_OPTS}"
 else
-    # 交互式菜单
+    # 交互式菜单（与 TestModeConfig.java 保持一致）
     echo -e "${BLUE}请选择测试模式 (直接回车默认 1):${NC}"
     echo "  1  basic        - 基础用例组(TC-01~03)"
     echo "  2  all          - 全量测试(所有组)"
-    echo "  3  nosmallfile  - 无小文件测试(TC-50~53)"
-    echo "  4  single       - 单个基准用例"
+    echo "  3  nosmallfile  - 无小文件测试(TC-50~54)"
+    echo "  4  single       - 单个基准用例(TC-01)"
+    echo "  5  bucket       - 分桶策略测试(TC-30~35)"
+    echo "  6  compaction   - 合并策略测试(TC-40~45)"
+    echo "  7  buffer       - 写入缓冲区测试(TC-10~16)"
+    echo "  8  target       - 目标文件大小测试(TC-20~23)"
+    echo "  9  format       - 文件格式压缩测试(TC-60~64)"
+    echo "  10 pkupdate     - 主键更新测试(TC-70~73)"
+    echo "  11 parallelism  - 写入并行度测试(TC-80~83)"
     echo "  auto            - 全自动运行(无需按回车)"
-    echo "  bucket          - 分桶策略测试(验证bucket=-2)"
-    echo "  compaction      - 合并策略测试"
-    echo "  buffer          - 缓冲区参数测试"
-    echo "  target          - 目标文件大小测试"
-    echo "  format          - 文件格式&压缩测试"
     echo ""
     read -r -p "  请输入选项 [1]: " CHOICE
     CHOICE="${CHOICE:-1}"

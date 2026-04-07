@@ -41,8 +41,9 @@ public class PerformanceTestRunner {
     public static final String BASE_TEST_DIR = "/tmp/paimon-perf-test";
     private static final String DATABASE = "default";
     private static final String TABLE_NAME = "test_table";
-    public static final int TOTAL_RECORDS = 5_000_000;   // 数据集总大小
-    private static final int BATCH_SIZE = 10_000; // 每批次写入记录数，也是PaimonService 累积批次大小
+    public static final int TOTAL_RECORDS = 5_000;   // 数据集总大小
+    private static final int BATCH_SIZE = 1_000; // 每批次写入记录数，也是PaimonService 累积批次大小
+    private static final int INIT_TOTAL_RECORDS = 0; //模拟初始化阶段全表数据量
 
     // ─── 实例变量 ─────────────────────────────────────────────────────────────
 
@@ -259,8 +260,8 @@ public class PerformanceTestRunner {
                     info.put("batchOffset",i);
                     evt.setInfo(info);
                     batch.add(evt);
-                    if (remain <= BATCH_SIZE) {
-                        // 模拟最后一个batch为增量cdc：
+                    if (remain <= BATCH_SIZE || qpsSlotWritten >= INIT_TOTAL_RECORDS) {
+                        // 模拟最后一个batch为增量cdc、已写数据量 大于 初始化阶段全表数据量：
                         evt.getInfo().put(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
                     }
                 }
@@ -281,7 +282,7 @@ public class PerformanceTestRunner {
 
                 // 进度打印
                 long pct = (written.get() * 100) / total;
-                if (written.get() % (TOTAL_RECORDS * 10) == 0 || remain == 0) {
+                if (written.get() % (BATCH_SIZE * 10) == 0 || remain == 0) {
                     double elapsed = (System.currentTimeMillis() - startMs) / 1000.0;
                     double throughput = elapsed > 0 ? written.get() / elapsed : 0;
                     System.out.printf("  >> 进度: %,d/%,d (%d%%) | 吞吐: %.0f 条/秒%n",
@@ -823,64 +824,297 @@ public class PerformanceTestRunner {
         }
     }
 
+    /**
+     * 基于测试结果动态生成推荐配置
+     * 分析实际测试数据，从各场景最优用例中提取配置参数
+     */
     private void appendRecommendedConfig(StringBuilder sb, List<TestResult> results) {
-        // 找无小文件组最优
-        Optional<TestResult> noSmallBest = results.stream()
-            .filter(r -> r.error == null && "无小文件".equals(r.testCase.getGroup()))
-            .max(Comparator.comparingDouble(r -> r.throughput));
-
-        // 找全局最高吞吐
-        Optional<TestResult> globalBest = results.stream()
+        // 筛选成功的测试结果
+        List<TestResult> successResults = results.stream()
             .filter(r -> r.error == null)
-            .max(Comparator.comparingDouble(r -> r.throughput));
+            .collect(Collectors.toList());
 
-        sb.append("### 场景1：导入无 Compact，大文件优先（推荐生产导入场景）\n\n");
+        if (successResults.isEmpty()) {
+            sb.append("> ⚠️ 所有测试用例均失败，无法生成推荐配置\n\n");
+            return;
+        }
+
+        // 按场景分类获取最优配置
+        ScenarioRecommendation importRecommend = findBestForScenario(successResults, "无小文件", 
+            "导入无 Compact 场景", Comparator.comparingDouble(r -> -r.throughput));
+        
+        ScenarioRecommendation realtimeRecommend = findBestForScenario(successResults, "合并策略", 
+            "实时写入允许合并场景", Comparator.comparingDouble(r -> r.throughput / Math.max(1, r.fileCount)));
+        
+        ScenarioRecommendation smallFileRecommend = findBestForScenario(successResults, "无小文件", 
+            "最少文件数场景", Comparator.comparingInt(r -> r.fileCount));
+        
+        ScenarioRecommendation globalThroughputRecommend = findBestForScenario(successResults, null, 
+            "全局最高吞吐", Comparator.comparingDouble(r -> -r.throughput));
+        
+        ScenarioRecommendation balancedRecommend = findBestForScenario(successResults, null, 
+            "均衡场景（吞吐/文件数综合）", Comparator.comparingDouble(r -> r.throughput / Math.max(1, r.fileCount)));
+
+        // 场景 1：导入无 Compact
+        sb.append("### 场景1：大批量导入无 Compact（基于实测最优）\n\n");
+        if (importRecommend != null) {
+            sb.append(String.format("**推荐用例**: %s - %s%n", importRecommend.result.testCase.getId(), 
+                importRecommend.result.testCase.getName()));
+            sb.append(String.format("**实测吞吐**: %.0f 条/秒 | **文件数**: %d | **总大小**: %s%n%n", 
+                importRecommend.result.throughput, importRecommend.result.fileCount, 
+                PaimonFileObserver.formatSize(importRecommend.result.totalFileSize)));
+            appendConfigBlock(sb, importRecommend.result.testCase.getParameters(), 
+                "大批量导入优化配置（追求最大吞吐，禁止合并）");
+            
+            sb.append("\n**配置说明**:\n");
+            appendConfigExplanation(sb, importRecommend);
+        } else {
+            sb.append("> ⚠️ 未找到无小文件测试组结果，请运行 nosmallfile 测试组\n\n");
+        }
+
+        // 场景 2：实时写入允许合并
+        sb.append("\n### 场景2：实时写入允许合并（基于实测最优）\n\n");
+        if (realtimeRecommend != null) {
+            sb.append(String.format("**推荐用例**: %s - %s%n", realtimeRecommend.result.testCase.getId(), 
+                realtimeRecommend.result.testCase.getName()));
+            sb.append(String.format("**实测吞吐**: %.0f 条/秒 | **文件数**: %d | **平均大小**: %s%n%n", 
+                realtimeRecommend.result.throughput, realtimeRecommend.result.fileCount,
+                realtimeRecommend.result.fileCount > 0 ? 
+                    PaimonFileObserver.formatSize(realtimeRecommend.result.totalFileSize / realtimeRecommend.result.fileCount) : "N/A"));
+            appendConfigBlock(sb, realtimeRecommend.result.testCase.getParameters(), 
+                "实时写入优化配置（允许异步合并，平衡读写性能）");
+            
+            sb.append("\n**配置说明**:\n");
+            appendConfigExplanation(sb, realtimeRecommend);
+        } else {
+            sb.append("> ⚠️ 未找到合并策略测试组结果，请运行 compaction 测试组\n\n");
+        }
+
+        // 场景 3：最少文件数
+        sb.append("\n### 场景3：最少文件数优化（基于实测最少）\n\n");
+        if (smallFileRecommend != null) {
+            sb.append(String.format("**推荐用例**: %s - %s%n", smallFileRecommend.result.testCase.getId(), 
+                smallFileRecommend.result.testCase.getName()));
+            sb.append(String.format("**实测吞吐**: %.0f 条/秒 | **文件数**: %d（最少）| **平均大小**: %s%n%n", 
+                smallFileRecommend.result.throughput, smallFileRecommend.result.fileCount,
+                smallFileRecommend.result.fileCount > 0 ? 
+                    PaimonFileObserver.formatSize(smallFileRecommend.result.totalFileSize / smallFileRecommend.result.fileCount) : "N/A"));
+            appendConfigBlock(sb, smallFileRecommend.result.testCase.getParameters(), 
+                "最少文件数优化配置（减少文件碎片，便于后续查询）");
+            
+            sb.append("\n**配置说明**:\n");
+            appendConfigExplanation(sb, smallFileRecommend);
+        } else {
+            sb.append("> ⚠️ 未找到相关测试结果\n\n");
+        }
+
+        // 场景 4：全局最高吞吐
+        sb.append("\n### 场景4：全局最高吞吐（基于实测数据）\n\n");
+        if (globalThroughputRecommend != null) {
+            sb.append(String.format("**推荐用例**: %s - %s%n", globalThroughputRecommend.result.testCase.getId(), 
+                globalThroughputRecommend.result.testCase.getName()));
+            sb.append(String.format("**实测吞吐**: %.0f 条/秒 | **文件数**: %d | **总大小**: %s%n%n", 
+                globalThroughputRecommend.result.throughput, globalThroughputRecommend.result.fileCount, 
+                PaimonFileObserver.formatSize(globalThroughputRecommend.result.totalFileSize)));
+            appendConfigBlock(sb, globalThroughputRecommend.result.testCase.getParameters(), 
+                "全局最高吞吐配置（所有测试用例中的最佳表现）");
+            
+            sb.append("\n**配置说明**:\n");
+            appendConfigExplanation(sb, globalThroughputRecommend);
+        }
+
+        // 场景 5：均衡配置
+        sb.append("\n### 场景5：吞吐与文件数均衡（综合最优）\n\n");
+        if (balancedRecommend != null) {
+            sb.append(String.format("**推荐用例**: %s - %s%n", balancedRecommend.result.testCase.getId(), 
+                balancedRecommend.result.testCase.getName()));
+            sb.append(String.format("**实测吞吐**: %.0f 条/秒 | **文件数**: %d | **效能**: %.0f 条/秒/文件%n%n", 
+                balancedRecommend.result.throughput, balancedRecommend.result.fileCount,
+                balancedRecommend.result.fileCount > 0 ? 
+                    balancedRecommend.result.throughput / balancedRecommend.result.fileCount : 0));
+            appendConfigBlock(sb, balancedRecommend.result.testCase.getParameters(), 
+                "吞吐与文件数均衡配置（适合一般生产场景）");
+            
+            sb.append("\n**配置说明**:\n");
+            appendConfigExplanation(sb, balancedRecommend);
+        }
+
+        // 参数对比分析
+        sb.append("\n### 配置参数对比分析\n\n");
+        appendParameterComparison(sb, importRecommend, realtimeRecommend, smallFileRecommend, globalThroughputRecommend);
+    }
+
+    /**
+     * 场景推荐结果
+     */
+    private static class ScenarioRecommendation {
+        TestResult result;
+        String scenarioName;
+        
+        ScenarioRecommendation(TestResult result, String scenarioName) {
+            this.result = result;
+            this.scenarioName = scenarioName;
+        }
+    }
+
+    /**
+     * 根据场景查找最优配置
+     */
+    private ScenarioRecommendation findBestForScenario(List<TestResult> results, String groupName, 
+            String scenarioName, Comparator<TestResult> comparator) {
+        return results.stream()
+            .filter(r -> groupName == null || groupName.equals(r.testCase.getGroup()))
+            .max(comparator)
+            .map(r -> new ScenarioRecommendation(r, scenarioName))
+            .orElse(null);
+    }
+
+    /**
+     * 打印配置参数块
+     */
+    private void appendConfigBlock(StringBuilder sb, Map<String, String> params, String comment) {
         sb.append("```properties\n");
-        sb.append("# 最大化写入性能，禁止合并，溢写磁盘保证大文件\n");
-        sb.append("write-buffer-size         = 512mb\n");
-        sb.append("write-buffer-spillable    = true\n");
-        sb.append("target-file-size          = 256mb\n");
-        sb.append("bucket                    = -1\n");
-        sb.append("compaction.async.enabled  = false\n");
-        sb.append("write-only                = true\n");
-        sb.append("num-sorted-run.compaction-trigger = 100\n");
-        sb.append("num-sorted-run.stop-trigger       = 200\n");
-        sb.append("file.format               = parquet\n");
-        sb.append("file.compression          = zstd\n");
-        sb.append("sink.parallelism          = 4\n");
-        sb.append("```\n\n");
-
-        sb.append("### 场景2：实时写入，允许合并\n\n");
-        sb.append("```properties\n");
-        sb.append("write-buffer-size         = 256mb\n");
-        sb.append("write-buffer-spillable    = true\n");
-        sb.append("target-file-size          = 128mb\n");
-        sb.append("bucket                    = -1\n");
-        sb.append("compaction.async.enabled  = true\n");
-        sb.append("num-sorted-run.compaction-trigger = 5\n");
-        sb.append("num-sorted-run.stop-trigger       = 10\n");
-        sb.append("write-only                = false\n");
-        sb.append("file.format               = parquet\n");
-        sb.append("file.compression          = zstd\n");
-        sb.append("```\n\n");
-
-        if (noSmallBest.isPresent()) {
-            TestResult r = noSmallBest.get();
-            sb.append("### 场景3：基于测试数据的最佳无小文件配置（").append(r.testCase.getId()).append("）\n\n");
-            sb.append("```properties\n");
-            for (Map.Entry<String, String> e : r.testCase.getParameters().entrySet()) {
-                sb.append(String.format("%-40s = %s%n", e.getKey(), e.getValue()));
+        sb.append("# " + comment + "\n");
+        
+        // 按分类排序打印
+        String[] orderedKeys = {
+            "write-buffer-size", "write-buffer-spillable", "write-buffer-spill.max-disk-size",
+            "target-file-size", "file.format", "file.compression", "spill-compression",
+            "bucket", "dynamic-bucket.target-row-num",
+            "compaction.async.enabled", "num-sorted-run.compaction-trigger", 
+            "num-sorted-run.stop-trigger", "compaction.size-ratio",
+            "commit.force-compact", "write-only",
+            "local-merge-buffer-size", "sort-spill-buffer-size",
+            "sink.parallelism", "changelog-producer"
+        };
+        
+        Set<String> printed = new HashSet<>();
+        for (String key : orderedKeys) {
+            if (params.containsKey(key)) {
+                sb.append(String.format("%-45s = %s%n", key, params.get(key)));
+                printed.add(key);
             }
-            sb.append("```\n\n");
-            sb.append(String.format("**实测结果**: 吞吐 %.0f 条/秒，%d 个文件，总大小 %s%n%n",
-                r.throughput, r.fileCount, PaimonFileObserver.formatSize(r.totalFileSize)));
         }
+        
+        // 打印剩余参数
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            if (!printed.contains(entry.getKey())) {
+                sb.append(String.format("%-45s = %s%n", entry.getKey(), entry.getValue()));
+            }
+        }
+        
+        sb.append("```\n");
+    }
 
-        if (globalBest.isPresent()) {
-            TestResult r = globalBest.get();
-            sb.append("### 场景4：全局最高吞吐配置（").append(r.testCase.getId()).append("）\n\n");
-            sb.append(String.format("**实测吞吐**: %.0f 条/秒  文件数: %d%n%n", r.throughput, r.fileCount));
+    /**
+     * 打印配置说明
+     */
+    private void appendConfigExplanation(StringBuilder sb, ScenarioRecommendation rec) {
+        Map<String, String> params = rec.result.testCase.getParameters();
+        
+        // 缓冲区说明
+        if (params.containsKey("write-buffer-size")) {
+            String size = params.get("write-buffer-size");
+            sb.append(String.format("- **write-buffer-size=%s**: 写入缓冲区大小，", size));
+            if (size.contains("512") || size.contains("1024")) {
+                sb.append("大缓冲区可减少 flush 频率，提升大批量导入吞吐\n");
+            } else if (size.contains("64") || size.contains("128")) {
+                sb.append("中小缓冲区适合内存受限场景\n");
+            } else {
+                sb.append("默认配置，平衡吞吐和内存占用\n");
+            }
         }
+        
+        // 溢写说明
+        if ("true".equals(params.get("write-buffer-spillable"))) {
+            sb.append("- **write-buffer-spillable=true**: 允许溢写磁盘，避免 OOM，适合大数据量导入\n");
+        }
+        
+        // 目标文件大小说明
+        if (params.containsKey("target-file-size")) {
+            String size = params.get("target-file-size");
+            sb.append(String.format("- **target-file-size=%s**: 控制生成文件的大小，", size));
+            if (size.contains("256") || size.contains("512")) {
+                sb.append("大文件减少碎片，适合查询优化\n");
+            } else {
+                sb.append("中小文件适合频繁读取场景\n");
+            }
+        }
+        
+        // 合并说明
+        if (params.containsKey("write-only")) {
+            if ("true".equals(params.get("write-only"))) {
+                sb.append("- **write-only=true**: 完全跳过 compaction，最大化写入性能\n");
+            } else {
+                sb.append("- **write-only=false**: 允许后台合并，保证读性能\n");
+            }
+        }
+        
+        if (params.containsKey("compaction.async.enabled")) {
+            if ("true".equals(params.get("compaction.async.enabled"))) {
+                sb.append("- **compaction.async.enabled=true**: 异步合并不阻塞写入\n");
+            } else {
+                sb.append("- **compaction.async.enabled=false**: 关闭异步合并\n");
+            }
+        }
+        
+        // 分桶说明
+        if (params.containsKey("bucket")) {
+            String bucket = params.get("bucket");
+            sb.append(String.format("- **bucket=%s**: ", bucket));
+            if ("-1".equals(bucket)) {
+                sb.append("动态分桶，自动适应数据分布\n");
+            } else if ("-2".equals(bucket)) {
+                sb.append("延迟分桶，Paimon 1.3+ 新特性\n");
+            } else {
+                sb.append(String.format("固定 %s 桶，适合已知数据量的场景\n", bucket));
+            }
+        }
+        
+        // 并行度说明
+        if (params.containsKey("sink.parallelism")) {
+            sb.append(String.format("- **sink.parallelism=%s**: 写入并行度，影响并发线程数\n", 
+                params.get("sink.parallelism")));
+        }
+    }
+
+    /**
+     * 打印参数对比分析
+     */
+    private void appendParameterComparison(StringBuilder sb, ScenarioRecommendation... recommendations) {
+        // 收集所有出现过的参数
+        Set<String> allParams = new LinkedHashSet<>();
+        for (ScenarioRecommendation rec : recommendations) {
+            if (rec != null) {
+                allParams.addAll(rec.result.testCase.getParameters().keySet());
+            }
+        }
+        
+        if (allParams.isEmpty()) return;
+        
+        sb.append("| 参数 | ");
+        for (ScenarioRecommendation rec : recommendations) {
+            if (rec != null) {
+                sb.append(rec.result.testCase.getId()).append(" | ");
+            }
+        }
+        sb.append("\n|------|");
+        for (ScenarioRecommendation rec : recommendations) {
+            if (rec != null) sb.append("------|");
+        }
+        sb.append("\n");
+        
+        for (String param : allParams) {
+            sb.append("| ").append(param).append(" | ");
+            for (ScenarioRecommendation rec : recommendations) {
+                if (rec != null) {
+                    String val = rec.result.testCase.getParameters().getOrDefault(param, "-");
+                    sb.append(val).append(" | ");
+                }
+            }
+            sb.append("\n");
+        }
+        sb.append("\n");
     }
 
     private void appendConclusions(StringBuilder sb, List<TestResult> results) {
@@ -1030,41 +1264,35 @@ public class PerformanceTestRunner {
     }
 
     private static String resolveMode(String mode) {
-        switch (mode) {
-            case "1": case "basic":        return "basic";
-            case "2": case "all":          return "all";
-            case "3": case "nosmallfile":  return "nosmallfile";
-            case "4": case "single":       return "single";
-            case "bucket":                 return "bucket";
-            case "compaction":             return "compaction";
-            case "buffer":                 return "buffer";
-            case "target":                 return "target";
-            case "format":                 return "format";
-            case "pkupdate":               return "pkupdate";
-            case "parallelism":            return "parallelism";
-            default:
-                System.out.println("  [WARN] 未知模式: " + mode + "，使用 basic");
-                return "basic";
+        // 委托给 TestModeConfig 统一处理
+        String groupKey = TestModeConfig.resolveToGroupKey(mode);
+        if (groupKey != null) {
+            return groupKey;
         }
+        
+        // 未找到匹配的模式，给出警告并返回默认
+        System.out.println("  [WARN] 未知模式: " + mode + "，使用默认 basic");
+        return TestModeConfig.DEFAULT_MODE_GROUP;
     }
 
     private static String interactiveChooseMode() throws IOException {
-        System.out.println("\n  请选择测试模式（回车默认 1）:");
-        System.out.println("    1  basic         - 基础用例组(TC-01~03)");
-        System.out.println("    2  all            - 全量测试(所有组)");
-        System.out.println("    3  nosmallfile    - 无小文件测试(TC-50~53)");
-        System.out.println("    4  single         - 单个基准用例(TC-01)");
-        System.out.println("    bucket           - 分桶策略测试(TC-30~35)");
-        System.out.println("    compaction       - 合并策略测试(TC-40~45)");
-        System.out.println("    buffer           - 写入缓冲区测试(TC-10~16)");
-        System.out.println("    target           - 目标文件大小测试(TC-20~23)");
-        System.out.println("    format           - 文件格式压缩测试(TC-60~64)");
-        System.out.println("    auto             - 全自动运行(无需交互)");
-        System.out.print("  > ");
+        // 使用 TestModeConfig 生成的菜单文本
+        System.out.print(TestModeConfig.getInteractiveMenuText());
         System.out.flush();
+        
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
         String line = br.readLine();
-        return (line == null || line.trim().isEmpty()) ? "1" : line.trim();
+        String choice = (line == null || line.trim().isEmpty()) ? 
+            TestModeConfig.DEFAULT_MODE_ID : line.trim();
+        
+        // 解析选择并返回 group key
+        String groupKey = TestModeConfig.resolveToGroupKey(choice);
+        if (groupKey == null) {
+            System.out.println("  [WARN] 无效选项: " + choice + "，使用默认 basic");
+            return TestModeConfig.DEFAULT_MODE_GROUP;
+        }
+        
+        return groupKey;
     }
 
     private static void printWelcome() {
