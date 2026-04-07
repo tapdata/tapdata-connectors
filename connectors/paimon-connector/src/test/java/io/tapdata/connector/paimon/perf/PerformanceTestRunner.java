@@ -45,6 +45,26 @@ public class PerformanceTestRunner {
     private static final int BATCH_SIZE = 1_000; // 每批次写入记录数，也是PaimonService 累积批次大小
     private static final int INIT_TOTAL_RECORDS = 0; //模拟初始化阶段全表数据量
 
+    // ─── S3 测试配置 ──────────────────────────────────────────────────────────
+
+    /** 是否启用 S3 存储（false = 使用本地文件系统） */
+    private static final boolean ENABLE_S3 = true;
+
+    /** S3 端点地址 */
+    private static final String S3_ENDPOINT = "http://192.168.1.184:9081";
+
+    /** S3 访问密钥 */
+    private static final String S3_ACCESS_KEY = "admin";
+
+    /** S3 密钥 */
+    private static final String S3_SECRET_KEY = "admin123";
+
+    /** S3 区域（可选）:MinIO里 几乎没用，随便填一个合法字符串即可，不校验 region，不影响连接、不影响权限、不影响性能 */
+    private static final String S3_REGION = "us-east-1";
+
+    /** S3 仓库路径前缀（bucket 名称） */
+    private static final String S3_WAREHOUSE_PREFIX = "luke/warehouse-paimon-perf";
+
     // ─── 实例变量 ─────────────────────────────────────────────────────────────
 
     private final String baseDir;
@@ -96,8 +116,24 @@ public class PerformanceTestRunner {
 
     private PaimonService buildPaimonService(TestCase tc) throws Exception {
         PaimonConfig config = new PaimonConfig();
-        config.setWarehouse(warehouseForCase(tc));
-        config.setStorageType("local");
+        
+        // ── 存储类型和仓库路径 ──────────────────────────────────────────────
+        if (ENABLE_S3) {
+            // 使用 S3 存储
+            config.setStorageType("s3");
+            config.setWarehouse(S3_WAREHOUSE_PREFIX + "/" + tc.getId());
+            config.setS3Endpoint(S3_ENDPOINT);
+            config.setS3AccessKey(S3_ACCESS_KEY);
+            config.setS3SecretKey(S3_SECRET_KEY);
+            config.setS3Region(S3_REGION);
+            System.out.println("  >> 存储类型: S3 (" + S3_ENDPOINT + ")");
+        } else {
+            // 使用本地文件系统
+            config.setStorageType("local");
+            config.setWarehouse(warehouseForCase(tc));
+            System.out.println("  >> 存储类型: 本地文件系统");
+        }
+        
         config.setDatabase(database);
         config.setBatchAccumulationSize(BATCH_SIZE);
         config.setCommitIntervalMs(0);         // 关闭时间触发，依靠数量触发
@@ -1299,7 +1335,16 @@ public class PerformanceTestRunner {
         printSeparator("═");
         System.out.println("  Paimon 1.3.1 写入性能参数调优测试");
         System.out.printf("  时 间: %s%n", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()));
-        System.out.printf("  仓 库: %s%n", BASE_TEST_DIR);
+        
+        // 根据存储类型显示不同的仓库信息
+        if (ENABLE_S3) {
+            System.out.printf("  仓 库: S3 - %s/%s%n", S3_ENDPOINT, S3_WAREHOUSE_PREFIX);
+            System.out.printf("  模 式: S3 对象存储%n");
+        } else {
+            System.out.printf("  仓 库: %s%n", BASE_TEST_DIR);
+            System.out.printf("  模 式: 本地文件系统%n");
+        }
+        
         System.out.printf("  Java : %s  堆: %dMB  CPU: %d 核%n",
             System.getProperty("java.version"),
             Runtime.getRuntime().maxMemory() / 1024 / 1024,
