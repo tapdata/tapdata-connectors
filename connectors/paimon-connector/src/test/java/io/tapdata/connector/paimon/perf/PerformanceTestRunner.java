@@ -41,9 +41,9 @@ public class PerformanceTestRunner {
     public static final String BASE_TEST_DIR = "/tmp/paimon-perf-test";
     private static final String DATABASE = "default";
     private static final String TABLE_NAME = "test_table";
-    public static final int TOTAL_RECORDS = 5_000;   // 数据集总大小
+    public static final int TOTAL_RECORDS = 5_000_000;   // 数据集总大小
     private static final int BATCH_SIZE = 1_000; // 每批次写入记录数，也是PaimonService 累积批次大小
-    private static final int INIT_TOTAL_RECORDS = 0; //模拟初始化阶段全表数据量
+    private static final int INIT_TOTAL_RECORDS = 5_000_000; //模拟初始化阶段全表数据量
 
     // ─── S3 测试配置 ──────────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ public class PerformanceTestRunner {
     private static final boolean ENABLE_S3 = true;
 
     /** S3 端点地址 */
-    private static final String S3_ENDPOINT = "http://192.168.1.184:9081";
+    private static final String S3_ENDPOINT = "http://192.168.1.184:9080";
 
     /** S3 访问密钥 */
     private static final String S3_ACCESS_KEY = "admin";
