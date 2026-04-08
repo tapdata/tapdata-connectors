@@ -655,7 +655,6 @@
                     "properties": {
                       "val": {
                         "type": "string",
-                        "required": true,
                         "x-decorator": "FormItem",
                         "x-component": "Input"
                       }
