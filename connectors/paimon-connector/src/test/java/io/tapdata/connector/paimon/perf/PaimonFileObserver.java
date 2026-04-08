@@ -1,28 +1,55 @@
 package io.tapdata.connector.paimon.perf;
 
-import java.io.File;
+import org.apache.hadoop.fs.FileStatus;
+
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 /**
- * Paimon 文件观测器 - 增强版
+ * Paimon 文件观测器 - 增强版（支持本地和 S3）
  * 自动扫描并输出Paimon数据目录的文件列表、文件大小、文件数量
  */
 public class PaimonFileObserver {
     private final String warehousePath;
     private final String database;
     private final String tableName;
+    private final boolean isS3;
+    private final UnifiedFileSystem fileSystem;
     private List<FileInfo> lastScanFiles = new ArrayList<>();
 
+    /**
+     * 创建本地文件观测器
+     */
     public PaimonFileObserver(String warehousePath, String database, String tableName) {
         this.warehousePath = warehousePath;
         this.database = database;
         this.tableName = tableName;
+        this.isS3 = false;
+        this.fileSystem = UnifiedFileSystem.createLocal();
+    }
+
+    /**
+     * 创建 S3 文件观测器
+     */
+    public PaimonFileObserver(String warehousePath, String database, String tableName,
+                              String s3Endpoint, String s3AccessKey, String s3SecretKey, String s3Region) {
+        this.warehousePath = warehousePath;
+        this.database = database;
+        this.tableName = tableName;
+        this.isS3 = true;
+        // 从仓库路径中提取 bucket 名称 (格式: s3://bucket/key)
+        String bucket = "default-bucket";
+        if (warehousePath.startsWith("s3://")) {
+            String pathWithoutScheme = warehousePath.substring(5);
+            int slashIdx = pathWithoutScheme.indexOf('/');
+            if (slashIdx > 0) {
+                bucket = pathWithoutScheme.substring(0, slashIdx);
+            } else {
+                bucket = pathWithoutScheme;
+            }
+        }
+        this.fileSystem = UnifiedFileSystem.createS3(s3Endpoint, s3AccessKey, s3SecretKey, s3Region, bucket);
     }
 
     /**
@@ -37,7 +64,12 @@ public class PaimonFileObserver {
      * 获取表的完整目录路径
      */
     public String getTablePath() {
-        return warehousePath + File.separator + database + ".db" + File.separator + tableName;
+        if (isS3) {
+            // S3 路径格式：s3a://bucket/prefix/TC-01/default.db/test_table
+            return warehousePath + "/" + database + ".db" + "/" + tableName;
+        } else {
+            return warehousePath + java.io.File.separator + database + ".db" + java.io.File.separator + tableName;
+        }
     }
 
     /**
@@ -45,32 +77,40 @@ public class PaimonFileObserver {
      */
     public List<FileInfo> scanDataFiles() throws IOException {
         List<FileInfo> fileInfos = new ArrayList<>();
-        Path tablePath = Paths.get(getTablePath());
+        String tablePath = getTablePath();
 
-        if (!Files.exists(tablePath) || !Files.isDirectory(tablePath)) {
-            lastScanFiles = fileInfos;
-            return fileInfos;
+        try {
+            if (!fileSystem.exists(tablePath) || !fileSystem.isDirectory(tablePath)) {
+                lastScanFiles = fileInfos;
+                return fileInfos;
+            }
+
+            // 递归列出所有文件
+            List<FileStatus> fileStatuses = fileSystem.listFilesRecursive(tablePath);
+            
+            for (FileStatus status : fileStatuses) {
+                String fileName = status.getPath().getName();
+                String pathStr = status.getPath().toString();
+                
+                // 只统计数据文件（parquet/orc/avro），排除元数据
+                if ((fileName.endsWith(".parquet") ||
+                     fileName.endsWith(".orc") ||
+                     fileName.endsWith(".avro"))
+                    && !pathStr.contains("/snapshot/")
+                    && !pathStr.contains("/schema/")
+                    && !pathStr.contains("/index/")
+                    && !pathStr.contains("/manifest/")) {
+                    fileInfos.add(new FileInfo(
+                        status.getPath().toString(),
+                        status.getLen(),
+                        status.getModificationTime()
+                    ));
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("  [WARN] 扫描文件失败: " + e.getMessage());
+            PerformanceTestRunner.printStackTrace(e);
         }
-
-        Files.walk(tablePath)
-                .filter(Files::isRegularFile)
-                .filter(path -> {
-                    String fileName = path.getFileName().toString();
-                    // 只统计数据文件（parquet/orc/avro），排除元数据
-                    return (fileName.endsWith(".parquet") ||
-                            fileName.endsWith(".orc") ||
-                            fileName.endsWith(".avro"))
-                           && !path.toString().contains(File.separator + "snapshot" + File.separator)
-                           && !path.toString().contains(File.separator + "schema" + File.separator)
-                           && !path.toString().contains(File.separator + "index" + File.separator)
-                           && !path.toString().contains(File.separator + "manifest" + File.separator);
-                })
-                .forEach(path -> {
-                    try {
-                        File file = path.toFile();
-                        fileInfos.add(new FileInfo(file.getPath(), file.length(), file.lastModified()));
-                    } catch (Exception ignored) {}
-                });
 
         lastScanFiles = fileInfos;
         return fileInfos;
@@ -90,6 +130,11 @@ public class PaimonFileObserver {
     public void printFileInfo(List<FileInfo> fileInfos) throws IOException {
         System.out.println("\n" + "=".repeat(70));
         System.out.println("  Paimon 数据文件观测报告");
+        if (isS3) {
+            System.out.println("  存储类型: S3 对象存储");
+        } else {
+            System.out.println("  存储类型: 本地文件系统");
+        }
         System.out.println("=".repeat(70));
         System.out.println("表路径: " + getTableDataPath());
         System.out.println("扫描时间: " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date()));
@@ -124,14 +169,19 @@ public class PaimonFileObserver {
 
         // 文件列表(前20个)
         System.out.println("\n📄 文件列表(前20个):");
-        System.out.printf("  %-60s %12s%n", "文件路径", "大小");
-        System.out.println("  " + "-".repeat(60) + " " + "-".repeat(12));
-        
+        System.out.printf("  %-70s %12s%n", "文件路径", "大小");
+        System.out.println("  " + "-".repeat(70) + " " + "-".repeat(12));
+
         int count = 0;
+        String tablePath = getTableDataPath();
         for (FileInfo fileInfo : fileInfos) {
             if (count >= 20) break;
-            String relativePath = fileInfo.getPath().replace(getTableDataPath() + File.separator, "");
-            System.out.printf("  %-60s %12s%n", relativePath, formatSize(fileInfo.getSize()));
+            // 显示相对路径
+            String relativePath = fileInfo.getPath();
+            if (relativePath.startsWith(tablePath)) {
+                relativePath = relativePath.substring(tablePath.length() + 1);
+            }
+            System.out.printf("  %-70s %12s%n", relativePath, formatSize(fileInfo.getSize()));
             count++;
         }
         
@@ -296,7 +346,7 @@ public class PaimonFileObserver {
     }
 
     /**
-     * 紧凑格式打印（最多15个文件）
+     * 紧凑格式打印（至15个文件）
      */
     public void printCompact() throws IOException {
         List<FileInfo> files = scanDataFiles();
@@ -307,10 +357,14 @@ public class PaimonFileObserver {
         long total = files.stream().mapToLong(FileInfo::getSize).sum();
         System.out.printf("  [文件] 数量: %d  总大小: %s%n", files.size(), formatSize(total));
         int shown = Math.min(files.size(), 15);
+        String tablePath = getTablePath();
         for (int i = 0; i < shown; i++) {
             FileInfo fi = files.get(i);
-            String rel = fi.getPath().replace(getTablePath() + File.separator, "");
-            System.out.printf("    %-55s %s%n", rel, formatSize(fi.getSize()));
+            String rel = fi.getPath();
+            if (rel.startsWith(tablePath)) {
+                rel = rel.substring(tablePath.length() + 1);
+            }
+            System.out.printf("    %-65s %s%n", rel, formatSize(fi.getSize()));
         }
         if (files.size() > 15) {
             System.out.printf("    ... 还有 %d 个文件%n", files.size() - 15);

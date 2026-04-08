@@ -42,8 +42,8 @@ public class PerformanceTestRunner {
     private static final String DATABASE = "default";
     private static final String TABLE_NAME = "test_table";
     public static final int TOTAL_RECORDS = 5_000_000;   // 数据集总大小
-    private static final int BATCH_SIZE = 1_000; // 每批次写入记录数，也是PaimonService 累积批次大小
-    private static final int INIT_TOTAL_RECORDS = 5_000_000; //模拟初始化阶段全表数据量
+    private static final int BATCH_SIZE = 1_000_00; // 每批次写入记录数，也是PaimonService 累积批次大小
+    private static final int INIT_TOTAL_RECORDS = 0; //模拟初始化阶段全表数据量
 
     // ─── S3 测试配置 ──────────────────────────────────────────────────────────
 
@@ -63,7 +63,8 @@ public class PerformanceTestRunner {
     private static final String S3_REGION = "us-east-1";
 
     /** S3 仓库路径前缀（bucket 名称） */
-    private static final String S3_WAREHOUSE_PREFIX = "luke/warehouse-paimon-perf";
+    public static final String S3_BUCKET = "s3://luke";
+    private static final String S3_WAREHOUSE = S3_BUCKET+"/warehouse-paimon-perf";
 
     // ─── 实例变量 ─────────────────────────────────────────────────────────────
 
@@ -121,7 +122,7 @@ public class PerformanceTestRunner {
         if (ENABLE_S3) {
             // 使用 S3 存储
             config.setStorageType("s3");
-            config.setWarehouse(S3_WAREHOUSE_PREFIX + "/" + tc.getId());
+            config.setWarehouse(S3_WAREHOUSE + "/" + tc.getId());
             config.setS3Endpoint(S3_ENDPOINT);
             config.setS3AccessKey(S3_ACCESS_KEY);
             config.setS3SecretKey(S3_SECRET_KEY);
@@ -254,7 +255,22 @@ public class PerformanceTestRunner {
         long endMs   = 0;
         AtomicLong written = new AtomicLong(0);
         String error = null;
-        PaimonFileObserver observer = new PaimonFileObserver(warehouseForCase(tc), database, tableName);
+        PaimonFileObserver observer;
+        if (ENABLE_S3) {
+            // S3 模式的观测器
+            observer = new PaimonFileObserver(
+                S3_WAREHOUSE + "/" + tc.getId(),
+                database, 
+                tableName,
+                S3_ENDPOINT,
+                S3_ACCESS_KEY,
+                S3_SECRET_KEY,
+                S3_REGION
+            );
+        } else {
+            // 本地模式的观测器
+            observer = new PaimonFileObserver(warehouseForCase(tc), database, tableName);
+        }
 
         try {
             // 1. 初始化服务并创建表
@@ -266,7 +282,7 @@ public class PerformanceTestRunner {
             System.out.println("  >> 验证表配置参数...");
             validateTableParameters(tc, service);
 
-            TapConnectorContext tapConnectorContext = new TapConnectorContext(Mockito.mock(TapNodeSpecification.class), new DataMap(), new DataMap(), new HashMap<>(), logger);
+            TapConnectorContext tapConnectorContext = new TapConnectorContext(Mockito.mock(TapNodeSpecification.class), new DataMap(), new DataMap(), logger);
 
             System.out.printf("  >> 仓库路径: %s%n", warehouseForCase(tc));
             System.out.printf("  >> 开始写入 %,d 条记录 (主键重复率 %d%%, QPS限制 %s)%n",
@@ -296,8 +312,8 @@ public class PerformanceTestRunner {
                     info.put("batchOffset",i);
                     evt.setInfo(info);
                     batch.add(evt);
-                    if (remain <= BATCH_SIZE || qpsSlotWritten >= INIT_TOTAL_RECORDS) {
-                        // 模拟最后一个batch为增量cdc、已写数据量 大于 初始化阶段全表数据量：
+                    if (qpsSlotWritten + BATCH_SIZE >= INIT_TOTAL_RECORDS) {
+                        // 模拟 已写数据量 大于 初始化阶段全表数据量 为增量cdc：
                         evt.getInfo().put(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
                     }
                 }
@@ -335,7 +351,7 @@ public class PerformanceTestRunner {
             endMs = System.currentTimeMillis();
             error = e.getClass().getSimpleName() + ": " + e.getMessage();
             System.err.println("  [ERROR] 用例执行异常: " + error);
-            if (System.getProperty("perf.verbose", "false").equals("true")) e.printStackTrace();
+            printStackTrace(e);
         } finally {
             if (service != null) {
                 try { service.close(); } catch (Exception ignored) {}
@@ -361,6 +377,10 @@ public class PerformanceTestRunner {
             waitForEnter();
         }
         return result;
+    }
+
+    public static void printStackTrace(Throwable e) {
+        e.printStackTrace();
     }
 
     /**
@@ -405,12 +425,37 @@ public class PerformanceTestRunner {
     }
 
     /**
-     * 从 Paimon Catalog 中读取表的实际配置参数
+     * 从 Paimon Catalog 中读取表的实际配置参数（支持本地和 S3）
      */
     private Map<String, String> readActualTableOptions(String warehouse, String database, String tableName) {
         try {
             Options catalogOptions = new Options();
-            catalogOptions.set("warehouse", warehouse);
+
+            if (ENABLE_S3) {
+                // S3 模式：使用 s3:// 协议（Paimon 原生 S3 FileIO）而非 s3a://
+                catalogOptions.set("warehouse", warehouse);
+
+                // Paimon S3 配置
+                catalogOptions.set("s3.endpoint", S3_ENDPOINT);
+                catalogOptions.set("s3.access-key", S3_ACCESS_KEY);
+                catalogOptions.set("s3.secret-key", S3_SECRET_KEY);
+
+                if (S3_REGION != null && !S3_REGION.isEmpty()) {
+                    catalogOptions.set("s3.region", S3_REGION);
+                }
+
+                // 路径样式访问（MinIO 需要）
+                catalogOptions.set("s3.path-style-access", "true");
+                
+                // 禁用 SSL（如果是 http 端点）
+                if (S3_ENDPOINT.startsWith("http://")) {
+                    catalogOptions.set("s3.ssl.enabled", "false");
+                }
+            } else {
+                // 本地模式
+                catalogOptions.set("warehouse", warehouse);
+            }
+
             CatalogContext context = CatalogContext.create(catalogOptions);
             Catalog catalog = CatalogFactory.createCatalog(context);
             Identifier identifier = Identifier.create(database, tableName);
@@ -418,18 +463,37 @@ public class PerformanceTestRunner {
             Map<String, String> options = table.options();
             catalog.close();
             return options;
+        } catch (org.apache.paimon.fs.UnsupportedSchemeException e) {
+            // S3 协议不可用，可能是缺少 paimon-s3 依赖
+            System.err.println("  [WARN] S3 文件系统不可用: " + e.getMessage());
+            System.err.println("  [提示] 请确保项目中包含 paimon-s3 依赖");
+            return Collections.emptyMap();
         } catch (Exception e) {
             System.err.println("  [WARN] 读取表配置失败: " + e.getMessage());
+            if (System.getProperty("perf.verbose", "false").equals("true")) {
+                e.printStackTrace();
+            }
             return Collections.emptyMap();
         }
     }
 
     /**
-     * 验证表参数是否已生效：对比预期参数和实际表配置
+     * 验证表参数是否已生效：对比预期参数和实际表配置（支持本地和 S3）
      */
     private void validateTableParameters(TestCase tc, PaimonService service) {
         Map<String, String> expectedParams = tc.getParameters();
-        Map<String, String> actualOptions = readActualTableOptions(warehouseForCase(tc), database, tableName);
+        
+        // 根据存储类型构建仓库路径
+        String warehousePath;
+        if (ENABLE_S3) {
+            warehousePath = S3_WAREHOUSE + "/" + tc.getId();
+            System.out.println("  >> 验证存储: S3 (" + S3_ENDPOINT + ")");
+        } else {
+            warehousePath = warehouseForCase(tc);
+            System.out.println("  >> 验证存储: 本地文件系统");
+        }
+        
+        Map<String, String> actualOptions = readActualTableOptions(warehousePath, database, tableName);
 
         if (actualOptions.isEmpty()) {
             System.out.println("  [WARN] 无法读取表配置，跳过参数验证");
@@ -471,7 +535,7 @@ public class PerformanceTestRunner {
                 // 标准化后比较（去除单位差异）
                 String normalizedExpected = normalizeParamValue(key, expectedValue);
                 String normalizedActual = normalizeParamValue(key, actualValue);
-                
+
                 if (normalizedExpected.equals(normalizedActual)) {
                     System.out.printf("    [表选项]  %-45s = %-20s ✅ 已生效（实际: %s）%n", key, expectedValue, actualValue);
                     matched++;
@@ -1255,7 +1319,7 @@ public class PerformanceTestRunner {
         boolean autoMode = "auto".equals(mode);
         String group     = autoMode ? "all" : resolveMode(mode);
 
-        PerformanceTestRunner runner = new PerformanceTestRunner(BASE_TEST_DIR, DATABASE, TABLE_NAME);
+        PerformanceTestRunner runner = new PerformanceTestRunner(ENABLE_S3 ? S3_WAREHOUSE : BASE_TEST_DIR, DATABASE, TABLE_NAME);
         runner.setInteractive(!autoMode);
 
         // 确保基础目录存在
@@ -1338,7 +1402,7 @@ public class PerformanceTestRunner {
         
         // 根据存储类型显示不同的仓库信息
         if (ENABLE_S3) {
-            System.out.printf("  仓 库: S3 - %s/%s%n", S3_ENDPOINT, S3_WAREHOUSE_PREFIX);
+            System.out.printf("  仓 库: S3 - %s/%s%n", S3_ENDPOINT, S3_WAREHOUSE);
             System.out.printf("  模 式: S3 对象存储%n");
         } else {
             System.out.printf("  仓 库: %s%n", BASE_TEST_DIR);
