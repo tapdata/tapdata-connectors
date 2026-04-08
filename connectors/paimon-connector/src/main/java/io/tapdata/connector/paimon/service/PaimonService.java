@@ -19,11 +19,13 @@ import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.core.utils.CommonUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.*;
 import org.apache.paimon.data.*;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.paimon.options.Options;
@@ -57,6 +59,8 @@ import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
 
 /**
  * Service class for Paimon operations
@@ -945,6 +949,12 @@ public class PaimonService implements Closeable {
 
 				// Perform commit if needed
 				if (shouldCommit) {
+					// init sync stage just commit once, for batch commit + spill disk
+					if (config.getCreateAutoInc()
+//							&& EmptyKit.isNotEmpty(autoIncFields)
+							&& !"CDC".equals(recordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
+						return result;
+					}
 					// Use lock to ensure only one thread commits at a time for this table
 					Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
 					synchronized (lock) {
@@ -1195,7 +1205,13 @@ public class PaimonService implements Closeable {
 	private StreamTableWrite createStreamWriter(Identifier identifier) throws Exception {
 		Table table = catalog.getTable(identifier);
 		StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
-		return writeBuilder.newWrite();
+		String tmpDirs = config.getProperties().getProperty("write-buffer-spill.tmp-dirs");
+		if (StringUtils.isEmpty(tmpDirs)) {
+			return writeBuilder.newWrite();
+		} else {
+			return (StreamTableWrite) writeBuilder.newWrite()
+					.withIOManager(IOManager.create(splitPaths(tmpDirs)));
+		}
 	}
 
 	/**
@@ -1298,7 +1314,7 @@ public class PaimonService implements Closeable {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
-		if (config.getBucketMode(table.getName()).equals("fixed")) {
+		if (config.getBucketMode(table.getName()).equals("fixed") || config.getBucketCount() == -2) {
 			writer.write(row);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
