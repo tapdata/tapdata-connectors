@@ -59,11 +59,17 @@ public class PostgresCDCSQLParser extends CDCSQLParser {
         while (true) {
             tmp = loadName(sr, CANNOT_FIND_COLUMN_NAME);
             sr.nextAndSkip(isSkip);
-            result.putData(tmp, loadConditionValue(sr));
-            sr.nextAndSkip(isSkip);
-            if (sr.current(',')) {
+            try {
+                result.putData(tmp, loadConditionValue(sr));
                 sr.nextAndSkip(isSkip);
-                continue;
+                if (sr.current(',')) {
+                    sr.nextAndSkip(isSkip);
+                    continue;
+                }
+            } catch (RuntimeException e) {
+                if (!"valueEx".equals(e.getMessage())) {
+                    throw sr.ex(e.getMessage());
+                }
             }
             break;
         }
@@ -85,11 +91,17 @@ public class PostgresCDCSQLParser extends CDCSQLParser {
         while (true) {
             loadName(sr, "Can't found column name");
             sr.nextAndSkip(isSkip);
-            loadConditionValue(sr);
-            sr.nextAndSkip(isSkip);
-            if (sr.current(',')) {
+            try {
+                loadConditionValue(sr);
                 sr.nextAndSkip(isSkip);
-                continue;
+                if (sr.current(',')) {
+                    sr.nextAndSkip(isSkip);
+                    continue;
+                }
+            } catch (RuntimeException e) {
+                if (!"valueEx".equals(e.getMessage())) {
+                    throw sr.ex(e.getMessage());
+                }
             }
             break;
         }
@@ -158,7 +170,7 @@ public class PostgresCDCSQLParser extends CDCSQLParser {
             } else if (sr.nextAndSkip(isSkip) && sr.current('(')) {
                 return tmp + sr.loadInQuoteMulti(50, ')');
             }
-            throw sr.ex("Value error '" + tmp + "'");
+            throw sr.valueEx();
         }
     }
 
