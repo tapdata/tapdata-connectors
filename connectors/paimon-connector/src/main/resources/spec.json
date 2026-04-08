@@ -338,7 +338,7 @@
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-component-props": {
-            "min": 1,
+            "min": -2,
             "placeholder": "${bucketCount_placeholder}"
           },
           "default": 4,
