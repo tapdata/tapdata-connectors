@@ -190,6 +190,7 @@ public class PaimonConnector extends ConnectorBase {
         connectorFunctions.supportCreateIndex(this::createIndex);
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportProcessControlFunction(this::processControl);
+        connectorFunctions.supportAfterInitialSync(this::afterInitialSync);
 
         // Register codec for data type conversions
         registerCodecs(codecRegistry);
@@ -364,6 +365,12 @@ public class PaimonConnector extends ConnectorBase {
         } catch (Exception e) {
             log.error("Error in stream read from tables " + tables + ": " + e.getMessage(), e);
             throw e;
+        }
+    }
+
+    protected void afterInitialSync(TapConnectorContext connectorContext, TapTable tapTable) throws Throwable {
+        if (paimonService != null) {
+            paimonService.afterInitialSync(connectorContext, tapTable);
         }
     }
 
