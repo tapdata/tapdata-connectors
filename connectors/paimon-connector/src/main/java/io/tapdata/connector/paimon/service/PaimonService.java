@@ -854,6 +854,24 @@ public class PaimonService implements Closeable {
 		}
 	}
 
+	public void afterInitialSync(TapConnectorContext connectorContext, TapTable tapTable) throws Exception {
+		String tableName = tapTable.getId();
+		String database = config.getDatabase();
+		Identifier identifier = Identifier.create(database, tableName);
+		StreamTableWrite writer = getOrCreateStreamWriter(tableName, identifier);
+		StreamTableCommit commit = getOrCreateStreamCommit(tableName, identifier);
+		Object lock = commitLocks.computeIfAbsent(tapTable.getId(), k -> new Object());
+		synchronized (lock) {
+			// Prepare commit with commitIdentifier
+			// Use atomic counter to generate unique, incrementing commit identifier
+			long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
+			List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+
+			// Commit the batch
+			commit.commit(commitIdentifier, messages);
+		}
+	}
+
 	/**
 	 * Internal implementation of stream write with retry support
 	 *
@@ -950,9 +968,7 @@ public class PaimonService implements Closeable {
 				// Perform commit if needed
 				if (shouldCommit) {
 					// init sync stage just commit once, for batch commit + spill disk
-					if (config.getCreateAutoInc()
-//							&& EmptyKit.isNotEmpty(autoIncFields)
-							&& !"CDC".equals(recordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
+					if (!"CDC".equals(recordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
 						return result;
 					}
 					// Use lock to ensure only one thread commits at a time for this table
