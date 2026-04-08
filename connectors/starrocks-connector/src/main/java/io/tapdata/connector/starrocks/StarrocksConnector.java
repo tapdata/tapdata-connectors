@@ -198,7 +198,7 @@ public class StarrocksConnector extends CommonDbConnector {
         String threadName = Thread.currentThread().getName();
         if (!starrocksStreamLoaderMap.containsKey(threadName)) {
             StarrocksJdbcContext context = new StarrocksJdbcContext(starrocksConfig);
-            StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, new HashMap<>(), starrocksConfig.getUseHTTPS(), tapLogger);
+            StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, starrocksConfig.getUseHTTPS(), tapLogger);
             StarrocksStreamLoader.setFlushOffsetCallback(flushOffsetCallback);
             starrocksStreamLoaderMap.put(threadName, StarrocksStreamLoader);
         }
