@@ -567,6 +567,12 @@ public class PaimonService implements Closeable {
 			schemaBuilder.option("write-buffer-size", config.getWriteBufferSize() + "mb");
 		}
 
+		if (Boolean.TRUE.equals(config.getDiskOverflowWrite())) {
+			schemaBuilder.option("write-buffer-spillable", "true");
+			schemaBuilder.option("write-buffer-spill.max-disk-size", config.getDiskMaxSize() + "gb");
+			schemaBuilder.option("write-buffer-spill.tmp-dirs", config.getDiskTmpDir());
+		}
+
 		// 2. Target file size - Paimon will try to create files of this size
 		// Larger files = fewer files but slower compaction
 		if (config.getTargetFileSize(tableName) != null && config.getTargetFileSize(tableName) > 0) {
@@ -1221,7 +1227,7 @@ public class PaimonService implements Closeable {
 	private StreamTableWrite createStreamWriter(Identifier identifier) throws Exception {
 		Table table = catalog.getTable(identifier);
 		StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
-		String tmpDirs = config.getProperties().getProperty("write-buffer-spill.tmp-dirs");
+		String tmpDirs = config.getDiskTmpDir();
 		if (StringUtils.isEmpty(tmpDirs)) {
 			return writeBuilder.newWrite();
 		} else {
