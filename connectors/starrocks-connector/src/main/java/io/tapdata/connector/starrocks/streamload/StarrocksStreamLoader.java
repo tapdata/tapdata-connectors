@@ -52,7 +52,6 @@ public class StarrocksStreamLoader {
     private static final String LABEL_PREFIX_PATTERN = "tapdata_%s_%s";
 
     private final StarrocksConfig StarrocksConfig;
-    private final Map<String, CloseableHttpClient> httpClientMap;
     private final boolean useHttps;
     private final RecordStream recordStream;
 
@@ -103,9 +102,8 @@ public class StarrocksStreamLoader {
     // 回调 flush offset
     private Consumer<Object> flushOffsetCallback;
 
-    public StarrocksStreamLoader(StarrocksJdbcContext StarrocksJdbcContext, Map<String, CloseableHttpClient> httpClientMap, boolean useHttps, Log taplogger) {
+    public StarrocksStreamLoader(StarrocksJdbcContext StarrocksJdbcContext, boolean useHttps, Log taplogger) {
         this.StarrocksConfig = (StarrocksConfig) StarrocksJdbcContext.getConfig();
-        this.httpClientMap = httpClientMap;
         this.useHttps = useHttps;
         this.taplogger = taplogger;
         Integer writeByteBufferCapacity = StarrocksConfig.getWriteByteBufferCapacity();
@@ -140,34 +138,14 @@ public class StarrocksStreamLoader {
         initializeFlushScheduler();
     }
 
-    private CloseableHttpClient getHttpClient(String tableName) {
-        if (httpClientMap.containsKey(tableName)) {
-            return httpClientMap.get(tableName);
-        }
+    private CloseableHttpClient getHttpClient() {
         CloseableHttpClient httpClient;
         if (useHttps) {
             httpClient = HttpUtil.generationHttpClient();
         } else {
             httpClient = new HttpUtil().getHttpClient();
         }
-        httpClientMap.put(tableName, httpClient);
         return httpClient;
-    }
-
-    /**
-     * 清除指定表的缓存 HttpClient，使下次请求创建新的连接。
-     * 在连接超时等网络异常后调用，避免反复复用坏连接。
-     */
-    private void evictHttpClient(String tableName) {
-        CloseableHttpClient removed = httpClientMap.remove(tableName);
-        if (removed != null) {
-            taplogger.info("Evicted stale HttpClient for table {}, will create new one on next request", tableName);
-            try {
-                removed.close();
-            } catch (IOException e) {
-                taplogger.warn("Failed to close evicted HttpClient for table {}: {}", tableName, e.getMessage());
-            }
-        }
     }
 
     private void initMessageSerializer() {
@@ -709,14 +687,15 @@ public class StarrocksStreamLoader {
                 }
             }
             HttpPut httpPut = putBuilder.build();
-            try (CloseableHttpResponse execute = getHttpClient(tableName).execute(httpPut)) {
+            try (
+                    CloseableHttpClient httpClient = getHttpClient();
+                    CloseableHttpResponse execute = httpClient.execute(httpPut)
+            ) {
                 return handlePreCommitResponse(execute);
             }
         } catch (StarrocksRetryableException e) {
             throw e;
         } catch (Exception e) {
-            // 连接异常时清除缓存的 HttpClient，下次重试会创建新的
-            evictHttpClient(tableName);
             throw new StreamLoadException(String.format("Call stream load error: %s", e.getMessage()), e);
         }
     }
@@ -812,7 +791,10 @@ public class StarrocksStreamLoader {
             taplogger.info("=====================================");
 
             long requestStartTime = System.currentTimeMillis();
-            try (CloseableHttpResponse execute = getHttpClient(tableName).execute(httpPut)) {
+            try (
+                    CloseableHttpClient client  = getHttpClient();
+                    CloseableHttpResponse execute = client.execute(httpPut)
+            ) {
                 long requestEndTime = System.currentTimeMillis();
                 long requestDuration = requestEndTime - requestStartTime;
 
@@ -846,9 +828,6 @@ public class StarrocksStreamLoader {
         } catch (Exception e) {
             taplogger.warn("Failed to load table, error: {}", e);
             taplogger.warn(Arrays.stream(e.getStackTrace()).map(StackTraceElement::toString).collect(Collectors.joining(",")));
-            // 连接异常时清除缓存的 HttpClient，下次重试会创建新的
-            String tableName = table.getId();
-            evictHttpClient(tableName);
             throw new StreamLoadException(String.format("Call stream load from file error: %s", e.getMessage()), e);
         }
     }
@@ -1047,17 +1026,6 @@ public class StarrocksStreamLoader {
                     Thread.currentThread().interrupt();
                 }
                 flushScheduler = null;
-            }
-
-            // 关闭HTTP客户端
-            if (this.httpClientMap != null) {
-                httpClientMap.forEach((k, v) -> {
-                    try {
-                        v.close();
-                    } catch (IOException e) {
-                        taplogger.warn("Failed to close http client", e);
-                    }
-                });
             }
 
             // 清理所有Map，释放内存
