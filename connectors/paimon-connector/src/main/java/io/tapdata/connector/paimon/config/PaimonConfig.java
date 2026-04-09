@@ -341,6 +341,10 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
         return diskTmpDir;
     }
 
+    public String getDiskTmpDir(String key) {
+        return getTableConfigValue(key, "diskTmpDir", diskTmpDir);
+    }
+
     public void setDiskTmpDir(String diskTmpDir) {
         this.diskTmpDir = diskTmpDir;
     }
