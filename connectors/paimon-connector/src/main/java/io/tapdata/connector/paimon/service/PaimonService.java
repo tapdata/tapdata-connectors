@@ -14,7 +14,9 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.ErrorKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.WriteListResult;
@@ -1019,7 +1021,7 @@ public class PaimonService implements Closeable {
 					continue;
 				}
 
-				throw new RuntimeException("Failed to write records to table " + tableName, e);
+				throw new TapPdkRetryableEx("paimon", ErrorKit.getLastCause(e));
 			}
 		}
 	}
