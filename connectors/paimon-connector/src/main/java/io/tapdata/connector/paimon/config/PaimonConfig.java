@@ -68,9 +68,15 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Larger buffer = better performance but more memory usage
     private Integer writeBufferSize = 256;
 
+    private Boolean diskOverflowWrite = false;
+
+    private Integer diskMaxSize = 1;
+
+    private String diskTmpDir = "/tmp";
+
     // Batch accumulation size before commit (default: 10000 records)
     // 0 = commit immediately (no batching)
-    private Integer batchAccumulationSize = 10000;
+    private Integer batchAccumulationSize = 100000;
 
     // Commit interval in milliseconds (default: 30000ms = 30s)
     // 0 = no time-based commit, only size-based
@@ -313,6 +319,34 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
 
     public void setWriteBufferSize(Integer writeBufferSize) {
         this.writeBufferSize = writeBufferSize;
+    }
+
+    public Boolean getDiskOverflowWrite() {
+        return diskOverflowWrite;
+    }
+
+    public void setDiskOverflowWrite(Boolean diskOverflowWrite) {
+        this.diskOverflowWrite = diskOverflowWrite;
+    }
+
+    public Integer getDiskMaxSize() {
+        return diskMaxSize;
+    }
+
+    public void setDiskMaxSize(Integer diskMaxSize) {
+        this.diskMaxSize = diskMaxSize;
+    }
+
+    public String getDiskTmpDir() {
+        return diskTmpDir;
+    }
+
+    public String getDiskTmpDir(String key) {
+        return getTableConfigValue(key, "diskTmpDir", diskTmpDir);
+    }
+
+    public void setDiskTmpDir(String diskTmpDir) {
+        this.diskTmpDir = diskTmpDir;
     }
 
     public Integer getBatchAccumulationSize() {

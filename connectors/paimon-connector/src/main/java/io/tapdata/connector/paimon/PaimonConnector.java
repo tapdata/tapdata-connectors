@@ -190,6 +190,7 @@ public class PaimonConnector extends ConnectorBase {
         connectorFunctions.supportCreateIndex(this::createIndex);
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportProcessControlFunction(this::processControl);
+        connectorFunctions.supportAfterInitialSync(this::afterInitialSync);
 
         // Register codec for data type conversions
         registerCodecs(codecRegistry);
@@ -226,7 +227,7 @@ public class PaimonConnector extends ConnectorBase {
         });
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> (int) (tapDateValue.getValue().getSeconds() / 86400));
-        codecRegistry.registerFromTapValue(TapTimeValue.class, "CHAR(8)", tapTimeValue -> formatTapDateTime(tapTimeValue.getValue(), "HH:mm:ss"));
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().getSeconds().intValue());
         codecRegistry.registerFromTapValue(TapYearValue.class, "CHAR(4)", TapValue::getOriginValue);
     }
 
@@ -364,6 +365,12 @@ public class PaimonConnector extends ConnectorBase {
         } catch (Exception e) {
             log.error("Error in stream read from tables " + tables + ": " + e.getMessage(), e);
             throw e;
+        }
+    }
+
+    protected void afterInitialSync(TapConnectorContext connectorContext, TapTable tapTable) throws Throwable {
+        if (paimonService != null) {
+            paimonService.afterInitialSync(connectorContext, tapTable);
         }
     }
 

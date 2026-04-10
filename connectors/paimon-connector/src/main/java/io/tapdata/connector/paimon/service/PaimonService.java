@@ -48,6 +48,8 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.security.MessageDigest;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
@@ -567,6 +569,12 @@ public class PaimonService implements Closeable {
 			schemaBuilder.option("write-buffer-size", config.getWriteBufferSize() + "mb");
 		}
 
+		if (Boolean.TRUE.equals(config.getDiskOverflowWrite())) {
+			schemaBuilder.option("write-buffer-spillable", "true");
+			schemaBuilder.option("write-buffer-spill.max-disk-size", config.getDiskMaxSize() + "gb");
+			schemaBuilder.option("write-buffer-spill.tmp-dirs", config.getDiskTmpDir(tableName));
+		}
+
 		// 2. Target file size - Paimon will try to create files of this size
 		// Larger files = fewer files but slower compaction
 		if (config.getTargetFileSize(tableName) != null && config.getTargetFileSize(tableName) > 0) {
@@ -661,7 +669,7 @@ public class PaimonService implements Closeable {
 				return DataTypes.TIME(getFieldFraction(dataType));
 			case "TIMESTAMP":
 				return DataTypes.TIMESTAMP(getFieldFraction(dataType));
-			case "TIMESTAMP_LTZ":
+			case "TIMESTAMP WITH LOCAL TIME ZONE":
 				return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(getFieldFraction(dataType));
 			case "BINARY":
 				return DataTypes.BINARY(getFieldLength(dataType));
@@ -854,6 +862,24 @@ public class PaimonService implements Closeable {
 		}
 	}
 
+	public void afterInitialSync(TapConnectorContext connectorContext, TapTable tapTable) throws Exception {
+		String tableName = tapTable.getId();
+		String database = config.getDatabase();
+		Identifier identifier = Identifier.create(database, tableName);
+		StreamTableWrite writer = getOrCreateStreamWriter(tableName, identifier);
+		StreamTableCommit commit = getOrCreateStreamCommit(tableName, identifier);
+		Object lock = commitLocks.computeIfAbsent(tapTable.getId(), k -> new Object());
+		synchronized (lock) {
+			// Prepare commit with commitIdentifier
+			// Use atomic counter to generate unique, incrementing commit identifier
+			long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
+			List<CommitMessage> messages = writer.prepareCommit(false, commitIdentifier);
+
+			// Commit the batch
+			commit.commit(commitIdentifier, messages);
+		}
+	}
+
 	/**
 	 * Internal implementation of stream write with retry support
 	 *
@@ -950,9 +976,7 @@ public class PaimonService implements Closeable {
 				// Perform commit if needed
 				if (shouldCommit) {
 					// init sync stage just commit once, for batch commit + spill disk
-					if (config.getCreateAutoInc()
-//							&& EmptyKit.isNotEmpty(autoIncFields)
-							&& !"CDC".equals(recordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
+					if (!"CDC".equals(recordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
 						return result;
 					}
 					// Use lock to ensure only one thread commits at a time for this table
@@ -1205,7 +1229,7 @@ public class PaimonService implements Closeable {
 	private StreamTableWrite createStreamWriter(Identifier identifier) throws Exception {
 		Table table = catalog.getTable(identifier);
 		StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
-		String tmpDirs = config.getProperties().getProperty("write-buffer-spill.tmp-dirs");
+		String tmpDirs = config.getDiskTmpDir(table.name());
 		if (StringUtils.isEmpty(tmpDirs)) {
 			return writeBuilder.newWrite();
 		} else {
@@ -2399,6 +2423,8 @@ public class PaimonService implements Closeable {
 				}
 				return null;
 			}
+			case "TIME_WITHOUT_TIME_ZONE":
+				return LocalTime.ofSecondOfDay(row.getInt(pos)).atDate(LocalDate.ofYearDay(1970, 1));
 			case "BINARY":
 			case "VARBINARY":
 			case "BYTES":

@@ -338,7 +338,7 @@
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-component-props": {
-            "min": 1,
+            "min": -2,
             "placeholder": "${bucketCount_placeholder}"
           },
           "default": 4,
@@ -526,6 +526,65 @@
             }
           ]
         },
+        "diskOverflowWrite": {
+          "type": "boolean",
+          "title": "${diskOverflowWrite}",
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "default": false,
+          "x-index": 62,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "diskMaxSize": {
+          "type": "number",
+          "title": "${diskMaxSize}",
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-component-props": {
+            "min": 1,
+            "max": 10
+          },
+          "default": 1,
+          "x-index": 65,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".diskOverflowWrite"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "diskTmpDir": {
+          "type": "string",
+          "title": "${diskTmpDir}",
+          "default": "/tmp",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-index": 68,
+          "x-perTable": true,
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".diskOverflowWrite"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "batchAccumulationSize": {
           "type": "number",
           "title": "${batchAccumulationSize}",
@@ -533,10 +592,10 @@
           "x-component": "InputNumber",
           "x-component-props": {
             "min": 0,
-            "max": 100000,
+            "max": 1000000,
             "placeholder": "${batchAccumulationSize_placeholder}"
           },
-          "default": 10000,
+          "default": 100000,
           "x-index": 70,
           "x-reactions": [
             {
@@ -748,6 +807,9 @@
       "tablePropertiesTip": "Table properties, e.g., {key1: value1, key2: value2}",
       "writeBufferSize": "Write Buffer Size (MB)",
       "writeBufferSize_placeholder": "Memory buffer for writes (64-2048 MB, default: 256)",
+      "diskOverflowWrite": "Data disk overflow write",
+      "diskMaxSize": "Disk overflow capacity (GB)",
+      "diskTmpDir": "Disk temporary directory",
       "batchAccumulationSize": "Batch Accumulation Size",
       "batchAccumulationSize_placeholder": "Records to accumulate before commit (0=immediate, default: 10000)",
       "commitIntervalMs": "Commit Interval (ms)",
@@ -803,6 +865,9 @@
       "tablePropertiesTip": "表属性，例如：{key1: value1, key2: value2}",
       "writeBufferSize": "写入缓冲区大小（MB）",
       "writeBufferSize_placeholder": "写入内存缓冲区大小（64-2048 MB，默认：256）",
+      "diskOverflowWrite": "数据磁盘溢写",
+      "diskMaxSize": "磁盘溢写容量(GB)",
+      "diskTmpDir": "磁盘临时目录",
       "batchAccumulationSize": "批量累积大小",
       "batchAccumulationSize_placeholder": "提交前累积的记录数（0=立即提交，默认：10000）",
       "commitIntervalMs": "提交间隔（毫秒）",
@@ -858,6 +923,9 @@
       "tablePropertiesTip": "表屬性，例如：{key1: value1, key2: value2}",
       "writeBufferSize": "寫入緩衝區大小（MB）",
       "writeBufferSize_placeholder": "寫入內存緩衝區大小（64-2048 MB，默認：256）",
+      "diskOverflowWrite": "數據磁盤溢寫",
+      "diskMaxSize": "磁盤溢寫容量(GB)",
+      "diskTmpDir": "磁盤臨時目錄",
       "batchAccumulationSize": "批量累積大小",
       "batchAccumulationSize_placeholder": "提交前累積的記錄數（0=立即提交，默認：10000）",
       "commitIntervalMs": "提交間隔（毫秒）",
@@ -960,6 +1028,19 @@
       "to": "TapDate",
       "range": ["0001-01-01", "9999-12-31"],
       "pattern": "yyyy-MM-dd"
+    },
+    "TIME[($fraction)]": {
+      "to": "TapTime",
+      "fraction": [
+        0,
+        6
+      ],
+      "defaultFraction": 6,
+      "range": [
+        "00:00:00",
+        "23:59:59"
+      ],
+      "pattern": "HH:mm:ss"
     },
     "TIMESTAMP[($fraction)]": {
       "to": "TapDateTime",
