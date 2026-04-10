@@ -48,6 +48,8 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.security.MessageDigest;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
@@ -570,7 +572,7 @@ public class PaimonService implements Closeable {
 		if (Boolean.TRUE.equals(config.getDiskOverflowWrite())) {
 			schemaBuilder.option("write-buffer-spillable", "true");
 			schemaBuilder.option("write-buffer-spill.max-disk-size", config.getDiskMaxSize() + "gb");
-			schemaBuilder.option("write-buffer-spill.tmp-dirs", config.getDiskTmpDir());
+			schemaBuilder.option("write-buffer-spill.tmp-dirs", config.getDiskTmpDir(tableName));
 		}
 
 		// 2. Target file size - Paimon will try to create files of this size
@@ -667,7 +669,7 @@ public class PaimonService implements Closeable {
 				return DataTypes.TIME(getFieldFraction(dataType));
 			case "TIMESTAMP":
 				return DataTypes.TIMESTAMP(getFieldFraction(dataType));
-			case "TIMESTAMP_LTZ":
+			case "TIMESTAMP WITH LOCAL TIME ZONE":
 				return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(getFieldFraction(dataType));
 			case "BINARY":
 				return DataTypes.BINARY(getFieldLength(dataType));
@@ -1227,7 +1229,7 @@ public class PaimonService implements Closeable {
 	private StreamTableWrite createStreamWriter(Identifier identifier) throws Exception {
 		Table table = catalog.getTable(identifier);
 		StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
-		String tmpDirs = config.getDiskTmpDir();
+		String tmpDirs = config.getDiskTmpDir(table.name());
 		if (StringUtils.isEmpty(tmpDirs)) {
 			return writeBuilder.newWrite();
 		} else {
@@ -2421,6 +2423,8 @@ public class PaimonService implements Closeable {
 				}
 				return null;
 			}
+			case "TIME_WITHOUT_TIME_ZONE":
+				return LocalTime.ofSecondOfDay(row.getInt(pos)).atDate(LocalDate.ofYearDay(1970, 1));
 			case "BINARY":
 			case "VARBINARY":
 			case "BYTES":

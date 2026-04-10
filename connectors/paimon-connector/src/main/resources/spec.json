@@ -573,6 +573,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-index": 68,
+          "x-perTable": true,
           "x-reactions": [
             {
               "dependencies": ["$inputs", ".diskOverflowWrite"],
@@ -1027,6 +1028,19 @@
       "to": "TapDate",
       "range": ["0001-01-01", "9999-12-31"],
       "pattern": "yyyy-MM-dd"
+    },
+    "TIME[($fraction)]": {
+      "to": "TapTime",
+      "fraction": [
+        0,
+        6
+      ],
+      "defaultFraction": 6,
+      "range": [
+        "00:00:00",
+        "23:59:59"
+      ],
+      "pattern": "HH:mm:ss"
     },
     "TIMESTAMP[($fraction)]": {
       "to": "TapDateTime",
