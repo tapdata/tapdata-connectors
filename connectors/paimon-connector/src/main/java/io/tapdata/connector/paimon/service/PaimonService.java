@@ -156,14 +156,14 @@ public class PaimonService implements Closeable {
 		// Create catalog
 		catalog = CatalogFactory.createCatalog(context);
 
-		// Initialize async commit if enabled
-		initAsyncCommit();
+//		// Initialize async commit if enabled
+//		initAsyncCommit();
 	}
 
 	/**
 	 * Initialize async commit executor if enabled in config
 	 */
-	private void initAsyncCommit() {
+	public void initAsyncCommit() {
 		Boolean enableAsync = config.getEnableAsyncCommit();
 		Integer commitInterval = config.getCommitIntervalMs();
 
@@ -878,6 +878,7 @@ public class PaimonService implements Closeable {
 			// Commit the batch
 			commit.commit(commitIdentifier, messages);
 		}
+		initAsyncCommit();
 	}
 
 	/**
