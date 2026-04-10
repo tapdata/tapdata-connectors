@@ -156,7 +156,7 @@ public class PaimonService implements Closeable {
 		// Create catalog
 		catalog = CatalogFactory.createCatalog(context);
 
-		// Initialize async commit if enabled
+//		// Initialize async commit if enabled
 		initAsyncCommit();
 	}
 
@@ -878,6 +878,7 @@ public class PaimonService implements Closeable {
 			// Commit the batch
 			commit.commit(commitIdentifier, messages);
 		}
+//		initAsyncCommit();
 	}
 
 	/**
@@ -907,81 +908,78 @@ public class PaimonService implements Closeable {
 				// Get or create cached writer and commit ghv
 				StreamTableWrite writer = getOrCreateStreamWriter(tableKey, identifier);
 				StreamTableCommit commit = getOrCreateStreamCommit(tableKey, identifier);
+				Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
+				synchronized (lock) {
+					for (TapRecordEvent event : recordEvents) {
+						if (!firstOffsetByTable.containsKey(tableName)) {
+							TapCallbackOffset tapOffset = new TapCallbackOffset();
+							// 从 TapRecordEvent.info 中提取 offset 信息
+							// 这些信息由 HazelcastTargetPdkBaseNode.handleTapdataEventDML 方法添加
+							Object batchOffset = event.getInfo("batchOffset");
+							Object streamOffset = event.getInfo("streamOffset");
+							Object syncStage = event.getInfo("syncStage");
+							Object sourceTime = event.getInfo("sourceTime");
+							Object nodeIds = event.getInfo("nodeIds");
 
-				// Write all records to the writer
-				for (TapRecordEvent event : recordEvents) {
-					if (!firstOffsetByTable.containsKey(tableName)) {
-						TapCallbackOffset tapOffset = new TapCallbackOffset();
-						// 从 TapRecordEvent.info 中提取 offset 信息
-						// 这些信息由 HazelcastTargetPdkBaseNode.handleTapdataEventDML 方法添加
-						Object batchOffset = event.getInfo("batchOffset");
-						Object streamOffset = event.getInfo("streamOffset");
-						Object syncStage = event.getInfo("syncStage");
-						Object sourceTime = event.getInfo("sourceTime");
-						Object nodeIds = event.getInfo("nodeIds");
-
-						// 填充 TapOffset
-						tapOffset.batchOffset(batchOffset)
-								.streamOffset(streamOffset)
-								.tableId(event.getTableId())
-								.syncStage(syncStage != null ? syncStage.toString() : null)
-								.sourceTime(sourceTime instanceof Long ? (Long) sourceTime : null)
-								.eventTime(event.getReferenceTime())
-								.nodeIds(nodeIds);
-						if (tapOffset.hasValidOffset()) {
-							firstOffsetByTable.put(tableName, tapOffset);
+							// 填充 TapOffset
+							tapOffset.batchOffset(batchOffset)
+									.streamOffset(streamOffset)
+									.tableId(event.getTableId())
+									.syncStage(syncStage != null ? syncStage.toString() : null)
+									.sourceTime(sourceTime instanceof Long ? (Long) sourceTime : null)
+									.eventTime(event.getReferenceTime())
+									.nodeIds(nodeIds);
+							if (tapOffset.hasValidOffset()) {
+								firstOffsetByTable.put(tableName, tapOffset);
+							}
+						}
+						if (event instanceof TapInsertRecordEvent) {
+							handleStreamInsert((TapInsertRecordEvent) event, writer, table);
+							result.incrementInserted(1);
+						} else if (event instanceof TapUpdateRecordEvent) {
+							handleStreamUpdate((TapUpdateRecordEvent) event, writer, table);
+							result.incrementModified(1);
+						} else if (event instanceof TapDeleteRecordEvent) {
+							handleStreamDelete((TapDeleteRecordEvent) event, writer, table);
+							result.incrementRemove(1);
 						}
 					}
-					if (event instanceof TapInsertRecordEvent) {
-						handleStreamInsert((TapInsertRecordEvent) event, writer, table);
-						result.incrementInserted(1);
-					} else if (event instanceof TapUpdateRecordEvent) {
-						handleStreamUpdate((TapUpdateRecordEvent) event, writer, table);
-						result.incrementModified(1);
-					} else if (event instanceof TapDeleteRecordEvent) {
-						handleStreamDelete((TapDeleteRecordEvent) event, writer, table);
-						result.incrementRemove(1);
-					}
-				}
 
-				// Update accumulated record count
-				AtomicInteger recordCount = accumulatedRecordCount.computeIfAbsent(tableKey, k -> new AtomicInteger(0));
-				int currentCount = recordCount.addAndGet(recordEvents.size());
+					// Update accumulated record count
+					AtomicInteger recordCount = accumulatedRecordCount.computeIfAbsent(tableKey, k -> new AtomicInteger(0));
+					int currentCount = recordCount.addAndGet(recordEvents.size());
 
-				// Initialize last commit time if not exists
-				AtomicLong lastCommit = lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong(System.currentTimeMillis()));
+					// Initialize last commit time if not exists
+					AtomicLong lastCommit = lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong(System.currentTimeMillis()));
 
-				// Determine if we should commit based on:
-				// 1. Accumulated record count exceeds threshold
-				// 2. Time since last commit exceeds interval
-				// 3. Batch accumulation is disabled (size = 0)
-				boolean shouldCommit = false;
-				Integer batchSize = config.getBatchAccumulationSize();
-				Integer commitInterval = config.getCommitIntervalMs();
+					// Determine if we should commit based on:
+					// 1. Accumulated record count exceeds threshold
+					// 2. Time since last commit exceeds interval
+					// 3. Batch accumulation is disabled (size = 0)
+					boolean shouldCommit = false;
+					Integer batchSize = config.getBatchAccumulationSize();
+					Integer commitInterval = config.getCommitIntervalMs();
 
-				if (batchSize == null || batchSize <= 0) {
-					// Batch accumulation disabled, commit immediately
-					shouldCommit = true;
-				} else if (currentCount >= batchSize) {
-					// Record count threshold reached
-					shouldCommit = true;
-				} else if (commitInterval != null && commitInterval > 0) {
-					// Check time-based commit
-					long timeSinceLastCommit = System.currentTimeMillis() - lastCommit.get();
-					if (timeSinceLastCommit >= commitInterval) {
+					if (batchSize == null || batchSize <= 0) {
+						// Batch accumulation disabled, commit immediately
 						shouldCommit = true;
+					} else if (currentCount >= batchSize) {
+						// Record count threshold reached
+						shouldCommit = true;
+					} else if (commitInterval != null && commitInterval > 0) {
+						// Check time-based commit
+						long timeSinceLastCommit = System.currentTimeMillis() - lastCommit.get();
+						if (timeSinceLastCommit >= commitInterval) {
+							shouldCommit = true;
+						}
 					}
-				}
 
-				// Perform commit if needed
-				if (shouldCommit) {
-					// init sync stage just commit once, for batch commit + spill disk
-					if (!"CDC".equals(recordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
-						return result;
-					}
-					// Use lock to ensure only one thread commits at a time for this table
-					Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
-					synchronized (lock) {
+					// Perform commit if needed
+					if (shouldCommit) {
+						// init sync stage just commit once, for batch commit + spill disk
+						if (!"CDC".equals(recordEvents.get(0).getInfo().get(TapRecordEvent.INFO_KEY_SYNC_STAGE))) {
+							return result;
+						}
 						// Double-check if we still need to commit (another thread might have committed)
 						int finalCount = recordCount.get();
 						if (finalCount > 0) {
