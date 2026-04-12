@@ -16,6 +16,7 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
@@ -28,9 +29,13 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 
-import java.sql.Connection;
-import java.sql.SQLException;
+import java.sql.*;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -143,6 +148,21 @@ public class SnowflakeConnector extends CommonDbConnector {
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportGetTableNamesFunction(this::getTableNames);
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> snowflakeJdbcContext.getConnection(), this::isAlive, c));
+
+        codecRegistry.registerFromTapValue(TapRawValue.class, "TEXT", tapRawValue -> {
+            if (tapRawValue != null && tapRawValue.getValue() != null) return toJson(tapRawValue.getValue());
+            return "null";
+        });
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> {
+            if (EmptyKit.isNotNull(tapDateTimeValue.getValue().getTimeZone())) {
+                return tapDateTimeValue.getValue().toTimestamp();
+            } else {
+                return formatTapDateTime(tapDateTimeValue.getValue(), "yyyy-MM-dd HH:mm:ss.SSSSSS");
+            }
+        });
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
+        codecRegistry.registerFromTapValue(TapYearValue.class, "TEXT(4)", TapValue::getOriginValue);
     }
 
     @Override
@@ -187,6 +207,24 @@ public class SnowflakeConnector extends CommonDbConnector {
                 .setUpdatePolicy(updateDmlPolicy)
                 .setTapLogger(tapLogger)
                 .write(tapRecordEvents, writeListResultConsumer, this::isAlive);
+    }
+
+    @Override
+    protected void processDataMap(DataMap dataMap, TapTable tapTable) {
+        for (Map.Entry<String, Object> entry : dataMap.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof Timestamp) {
+                if (!tapTable.getNameFieldMap().get(entry.getKey()).getDataType().startsWith("TIMESTAMP_TZ")) {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(snowflakeConfig.getZoneOffsetHour()));
+                } else {
+                    entry.setValue(((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
+                }
+            } else if (value instanceof Date) {
+                entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
+            } else if (value instanceof Time) {
+                entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(snowflakeConfig.getZoneOffsetHour()));
+            }
+        }
     }
 }
 
