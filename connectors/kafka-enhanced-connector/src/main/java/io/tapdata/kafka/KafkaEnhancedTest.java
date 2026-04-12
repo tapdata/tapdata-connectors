@@ -1,12 +1,15 @@
 package io.tapdata.kafka;
 
+import io.tapdata.connector.error.KafkaErrorCodes;
 import io.tapdata.constant.MqTestItem;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.kafka.service.KafkaAdminService;
 import io.tapdata.kafka.utils.Krb5Util;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.TapTestItemException;
 import io.tapdata.util.NetUtil;
 
 import java.io.IOException;
@@ -88,7 +91,7 @@ public class KafkaEnhancedTest implements AutoCloseable {
                 return false;
             }
         } catch (Exception e) {
-            consumer.accept(new TestItem(MqTestItem.KAFKA_MQ_CONNECTION.getContent(), TestItem.RESULT_FAILED, "when connect to cluster, error occurred " + e.getMessage()));
+            consumer.accept(new TestItem(MqTestItem.KAFKA_MQ_CONNECTION.getContent(), new TapTestItemException(new TapCodeException(KafkaErrorCodes.KAFKA_COMMON_ERROR, e)), TestItem.RESULT_FAILED));
             return false;
         }
     }

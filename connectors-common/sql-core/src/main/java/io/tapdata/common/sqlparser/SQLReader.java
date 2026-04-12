@@ -184,6 +184,10 @@ public class SQLReader {
         return new RuntimeException(msg + ", position " + position + ": " + data);
     }
 
+    public RuntimeException valueEx() {
+        return new RuntimeException("valueEx");
+    }
+
     public static SQLReader build(String data) {
         return new SQLReader(data);
     }
