@@ -94,8 +94,8 @@ public class PaimonConfig extends CommonDbConfig implements Serializable {
     // Compaction merges small files for better query performance
     private Boolean enableAutoCompaction = true;
 
-    // Compaction interval in minutes (default: 30 minutes)
-    private Integer compactionIntervalMinutes = 30;
+    // Full Compaction interval in minutes (default: 60 minutes)
+    private Integer compactionIntervalMinutes = 60;
 
     // Target file size in MB (default: 128MB)
     // Paimon will try to create files of this size

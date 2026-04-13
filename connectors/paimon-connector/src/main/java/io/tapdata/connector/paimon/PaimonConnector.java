@@ -77,7 +77,7 @@ public class PaimonConnector extends ConnectorBase {
             connectionContext.getLog().info("Flush offset callback registered for StarRocks connector");
         }
         // Initialize Paimon service
-        paimonService = new PaimonService(paimonConfig);
+        paimonService = new PaimonService(paimonConfig, connectionContext.getLog());
         paimonService.setFlushOffsetCallback(flushOffsetCallback);
         paimonService.init();
         
@@ -248,7 +248,7 @@ public class PaimonConnector extends ConnectorBase {
         TapTable table = createTableEvent.getTable();
         log.info("Creating Paimon table: " + table.getName());
         
-        boolean created = paimonService.createTable(table, log);
+        boolean created = paimonService.createTable(table);
         if (created) {
             log.info("Table created successfully: " + table.getName());
         } else {

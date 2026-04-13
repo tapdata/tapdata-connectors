@@ -9,7 +9,6 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
@@ -131,8 +130,13 @@ public class PaimonService implements Closeable {
 				}
 			}
 	);
+	/**
+	 * save tapContext log
+	 */
+	private Log log;
 
-	public PaimonService(PaimonConfig config) {
+	public PaimonService(PaimonConfig config, Log log) {
+		this.log = log;
 		this.config = config;
 		this.firstOffsetByTable = Collections.synchronizedMap(new LinkedHashMap<>());
 	}
@@ -158,7 +162,7 @@ public class PaimonService implements Closeable {
 		// Create catalog
 		catalog = CatalogFactory.createCatalog(context);
 
-//		// Initialize async commit if enabled
+		// Initialize async commit if enabled
 		initAsyncCommit();
 	}
 
@@ -196,7 +200,7 @@ public class PaimonService implements Closeable {
 					}
 				} catch (Exception e) {
 					// Log error but don't stop the scheduler
-					System.err.println("Error in async commit: " + e.getMessage());
+					log.error("Error in async commit: {}", e.getMessage(), e);
 				}
 			}, commitInterval, commitInterval, TimeUnit.MILLISECONDS);
 		}
@@ -223,6 +227,14 @@ public class PaimonService implements Closeable {
 				options.set("s3.upload.part-size", "16mb");
 				options.set("s3.fast-upload", "true");
 				options.set("s3.accelerate-mode", "true");
+				// 解决连接重置：调低并发、增大超时
+//				options.set("fs.s3a.connection.maximum", "32");
+//				options.set("fs.s3a.connection.timeout", "300000");
+//				options.set("fs.s3a.socket.timeout", "300000");
+//				// 重试机制（解决临时连接失败）
+//				options.set("fs.s3a.retry.limit", "5");
+//				options.set("fs.s3a.retry.interval", "1000");
+
 				break;
 			case "hdfs":
 				options.set("fs.defaultFS", "hdfs://" + config.getHdfsHost() + ":" + config.getHdfsPort());
@@ -477,7 +489,7 @@ public class PaimonService implements Closeable {
 	 * @return true if created, false if already exists
 	 * @throws Exception if creation fails
 	 */
-	public boolean createTable(TapTable tapTable, Log log) throws Exception {
+	public boolean createTable(TapTable tapTable) throws Exception {
 		String database = config.getDatabase();
 		String tableName = tapTable.getName();
 
@@ -547,7 +559,7 @@ public class PaimonService implements Closeable {
 		if (config.isDynamicBucketMode()) {
 			// Dynamic bucket mode: set bucket to -1
 			// This mode provides better flexibility
-			schemaBuilder.option("bucket", "-1");
+			schemaBuilder.option("bucket", String.valueOf(config.getBucketCount()));
 		} else {
 			// Fixed bucket mode: set specific bucket count
 			Integer bucketCount = config.getBucketCount(tableName);
@@ -574,7 +586,6 @@ public class PaimonService implements Closeable {
 		if (Boolean.TRUE.equals(config.getDiskOverflowWrite())) {
 			schemaBuilder.option("write-buffer-spillable", "true");
 			schemaBuilder.option("write-buffer-spill.max-disk-size", config.getDiskMaxSize() + "gb");
-			schemaBuilder.option("write-buffer-spill.tmp-dirs", config.getDiskTmpDir(tableName));
 		}
 
 		// 2. Target file size - Paimon will try to create files of this size
@@ -587,25 +598,24 @@ public class PaimonService implements Closeable {
 		if (config.getEnableAutoCompaction(tableName) != null) {
 			if (config.getEnableAutoCompaction(tableName)) {
 				// Enable full compaction for better query performance
-				schemaBuilder.option("compaction.async.enabled", "true");
 				schemaBuilder.option("compaction.optimization-interval", config.getCompactionIntervalMinutes(tableName) + "min");
 
 				// Set compaction strategy
 				schemaBuilder.option("changelog-producer", "input");
 
 				// Compact small files more aggressively
-				schemaBuilder.option("num-sorted-run.compaction-trigger", "3");
-				schemaBuilder.option("num-sorted-run.stop-trigger", "5");
+				schemaBuilder.option("num-sorted-run.compaction-trigger", "30");
+				schemaBuilder.option("num-sorted-run.stop-trigger", "2147483647");
 			} else {
 				// Disable auto compaction
-				schemaBuilder.option("compaction.optimization-interval", "0");
+				schemaBuilder.option("write-only", "true");
 			}
 		}
 
 		// 4. Snapshot settings for better performance
 		// Keep more snapshots in memory for faster access
-		schemaBuilder.option("snapshot.num-retained.min", "5");
-		schemaBuilder.option("snapshot.num-retained.max", "50");
+		schemaBuilder.option("snapshot.num-retained.min", "2");
+		schemaBuilder.option("snapshot.num-retained.max", "5");
 		schemaBuilder.option("snapshot.time-retained", "30min");
 
 		// 5. Commit settings
@@ -622,7 +632,15 @@ public class PaimonService implements Closeable {
 		schemaBuilder.option("sink.parallelism", String.valueOf(config.getWriteThreads()));
 
 		if (EmptyKit.isNotEmpty(config.getTableProperties(tableName))) {
-			config.getTableProperties(tableName).forEach(v -> schemaBuilder.option(v.get("propKey"), v.get("propValue")));
+			config.getTableProperties(tableName).forEach(v -> {
+				if (StringUtils.isEmpty(v.get("propKey"))
+					|| StringUtils.isEmpty(v.get("propValue"))
+				) {
+					log.warn("tapdata paimon config error", "key or value exists null in tableProperties");
+				} else {
+					schemaBuilder.option(v.get("propKey"), v.get("propValue"));
+				}
+			});
 		}
 		// Create table
 		catalog.createTable(identifier, schemaBuilder.build(), false);
@@ -985,6 +1003,7 @@ public class PaimonService implements Closeable {
 						// Double-check if we still need to commit (another thread might have committed)
 						int finalCount = recordCount.get();
 						if (finalCount > 0) {
+							long commitStartTime = System.currentTimeMillis();
 							// Prepare commit with commitIdentifier
 							// Use atomic counter to generate unique, incrementing commit identifier
 							long commitIdentifier = commitIdentifierGenerator.incrementAndGet();
@@ -997,8 +1016,9 @@ public class PaimonService implements Closeable {
 							recordCount.set(0);
 							lastCommit.set(System.currentTimeMillis());
 
-							connectorContext.getLog().debug("Committed {} accumulated records for table {}",
-									finalCount, tableKey);
+							long commitDuration = System.currentTimeMillis() - commitStartTime;
+							connectorContext.getLog().debug("Committed {} accumulated records for table {} in {} ms",
+									finalCount, tableKey, commitDuration);
 						}
 					}
 				}
@@ -1009,11 +1029,11 @@ public class PaimonService implements Closeable {
 			} catch (Exception e) {
 				if (retryCount < maxRetries) {
 					if (isThreadGroupDestroyedError(e)) {
-						connectorContext.getLog().warn("ThreadGroup destroyed in stream write, retrying... (attempt {}/{})", retryCount + 1, maxRetries);
+						connectorContext.getLog().warn("ThreadGroup destroyed in stream write, retrying... (attempt {}/{})", retryCount + 1, maxRetries, e);
 					} else if (isPaimonConflict(e)) {
 						connectorContext.getLog().warn("Commit conflict detected, retrying... (attempt {}/{})", retryCount + 1, maxRetries, e);
 					} else {
-						connectorContext.getLog().warn("Failed to write records to table {}, error message: {}, retrying... (attempt {}/{})", tableName, e.getMessage(), retryCount + 1, maxRetries);
+						connectorContext.getLog().warn("Failed to write records to table {}, error message: {}, retrying... (attempt {}/{})", tableName, e.getMessage(), retryCount + 1, maxRetries, e);
 					}
 					retryCount++;
 					reinitCatalog();
@@ -1383,7 +1403,7 @@ public class PaimonService implements Closeable {
 				// Convert update to delete + insert
 				// First, write DELETE using before data
 				beforeRow.setRowKind(RowKind.DELETE);
-				if (config.getBucketMode(table.getName()).equals("fixed")) {
+				if (config.getBucketMode(table.getName()).equals("fixed") || config.getBucketCount() == -2) {
 					writer.write(beforeRow);
 				} else {
 					int bucket = selectBucketForDynamic(beforeRow, table);
@@ -1487,7 +1507,7 @@ public class PaimonService implements Closeable {
 		GenericRow row = convertToGenericRow(before, table, identifier);
 		// Set row kind to DELETE
 		row.setRowKind(RowKind.DELETE);
-		if (config.getBucketMode(table.getName()).equals("fixed")) {
+		if (config.getBucketMode(table.getName()).equals("fixed") || config.getBucketCount() == -2) {
 			writer.write(row);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
@@ -2700,7 +2720,7 @@ public class PaimonService implements Closeable {
 				try {
 					flushOffsetCallback.accept(offsetToSave);
 				} catch (Exception e) {
-					TapLogger.warn("Failed to flush offset callback: {}", e.getMessage(), e);
+					log.warn("Failed to flush offset callback: {}", e.getMessage());
 				}
 			}
 		}

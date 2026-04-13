@@ -8,8 +8,39 @@ import static io.tapdata.connector.paimon.perf.PerformanceTestRunner.BASE_TEST_D
 /**
  * 性能测试用例定义
  * 参数键直接对应 Paimon CoreOptions 表选项名称，可通过 tableProperties 直接注入
- * 
- * 注意：所有测试用例的 dataSize 统一使用 BATCH_SIZE，便于集中控制测试数据量
+ *
+ * <h3>用例级别的全局参数覆盖</h3>
+ * <p>
+ * 默认情况下，所有测试用例使用 PerformanceTestRunner 中定义的全局常量：
+ * <ul>
+ *   <li>{@code TOTAL_RECORDS} = 100,000,000（数据集总大小）</li>
+ *   <li>{@code BATCH_SIZE} = 100,000（每批次写入记录数）</li>
+ *   <li>{@code INIT_TOTAL_RECORDS} = 95,000,000（初始化阶段全表数据量）</li>
+ * </ul>
+ * <p>
+ * 如果单个 TestCase 需要灵活控制这些值，可以使用 builder 方法覆盖：
+ * <pre>{@code
+ * new TestCase("TC-XX", "用例名称", "测试组",
+ *     params(...),
+ *     0, 0,
+ *     "用例描述")
+ *     .totalRecords(5_000_000)        // 覆盖全局 TOTAL_RECORDS
+ *     .batchSize(50_000)              // 覆盖全局 BATCH_SIZE
+ *     .initTotalRecords(4_500_000);   // 覆盖全局 INIT_TOTAL_RECORDS
+ * }</pre>
+ *
+ * <h3>优先级规则</h3>
+ * <ol>
+ *   <li>如果 TestCase 中设置了值，以 TestCase 中的值为准</li>
+ *   <li>如果未设置，使用 PerformanceTestRunner 中的全局常量</li>
+ * </ol>
+ *
+ * <h3>使用场景</h3>
+ * <ul>
+ *   <li>快速验证：用小数据量快速验证配置是否正确</li>
+ *   <li>对比测试：不同数据量下的性能表现对比</li>
+ *   <li>边界测试：测试极端数据量下的系统行为</li>
+ * </ul>
  */
 public class TestCase {
     private final String id;
@@ -19,6 +50,18 @@ public class TestCase {
     private final int primaryKeyDuplicateRate; // 0-100
     private final int qps;                    // 0 = unlimited
     private final String description;
+
+    // ─── 用例级别的全局参数覆盖 ─────────────────────────────────────────────
+    // 如果设置了这些值，以 TestCase 中的值为准；否则使用 PerformanceTestRunner 的全局常量
+
+    /** 用例独立的数据集总大小（覆盖 PerformanceTestRunner.TOTAL_RECORDS） */
+    private Integer totalRecords = null;
+
+    /** 用例独立的批次大小（覆盖 PerformanceTestRunner.BATCH_SIZE） */
+    private Integer batchSize = null;
+
+    /** 用例独立的初始化阶段全表数据量（覆盖 PerformanceTestRunner.INIT_TOTAL_RECORDS） */
+    private Integer initTotalRecords = null;
 
     public TestCase(String id, String name, String group,
                     Map<String, String> parameters,
@@ -41,10 +84,28 @@ public class TestCase {
     public Map<String, String> getParameters() { return parameters; }
     
     /**
-     * 获取数据量：统一使用 BATCH_SIZE 控制
-     * 所有测试用例的数据量都由 PerformanceTestRunner.BATCH_SIZE 统一管理
+     * 获取数据量：默认使用 PerformanceTestRunner.TOTAL_RECORDS，
+     * 但如果当前 TestCase 设置了 totalRecords，则以用例中的值为准
      */
-    public long getDataSize() { return TOTAL_RECORDS; }
+    public long getDataSize() {
+        return totalRecords != null ? totalRecords.longValue() : TOTAL_RECORDS;
+    }
+
+    /**
+     * 获取当前用例的批次大小
+     * 如果未设置，返回 null，调用方应使用 PerformanceTestRunner.BATCH_SIZE
+     */
+    public Integer getBatchSize() {
+        return batchSize;
+    }
+
+    /**
+     * 获取当前用例的初始化阶段全表数据量
+     * 如果未设置，返回 null，调用方应使用 PerformanceTestRunner.INIT_TOTAL_RECORDS
+     */
+    public Integer getInitTotalRecords() {
+        return initTotalRecords;
+    }
     
     public int getPrimaryKeyDuplicateRate() { return primaryKeyDuplicateRate; }
     public int getQps() { return qps; }
@@ -52,8 +113,18 @@ public class TestCase {
 
     @Override
     public String toString() {
-        return String.format("[%s] %s (%s) - %s [数据量: %,d]", 
-            id, name, group, description, TOTAL_RECORDS);
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("[%s] %s (%s) - %s [数据量: %,d",
+            id, name, group, description, getDataSize()));
+
+        if (batchSize != null) {
+            sb.append(", batchSize: ").append(batchSize);
+        }
+        if (initTotalRecords != null) {
+            sb.append(", initTotal: ").append(initTotalRecords);
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     // ─── Builder helper ───────────────────────────────────────────────────────
@@ -62,6 +133,32 @@ public class TestCase {
         Map<String, String> m = new LinkedHashMap<>();
         for (int i = 0; i + 1 < kvs.length; i += 2) m.put(kvs[i], kvs[i + 1]);
         return m;
+    }
+
+    // ─── 用例级别全局参数覆盖的 Builder 方法 ─────────────────────────────────
+
+    /**
+     * 设置当前用例的数据集总大小（覆盖 PerformanceTestRunner.TOTAL_RECORDS）
+     */
+    public TestCase totalRecords(int records) {
+        this.totalRecords = records;
+        return this;
+    }
+
+    /**
+     * 设置当前用例的批次大小（覆盖 PerformanceTestRunner.BATCH_SIZE）
+     */
+    public TestCase batchSize(int size) {
+        this.batchSize = size;
+        return this;
+    }
+
+    /**
+     * 设置当前用例的初始化阶段全表数据量（覆盖 PerformanceTestRunner.INIT_TOTAL_RECORDS）
+     */
+    public TestCase initTotalRecords(int records) {
+        this.initTotalRecords = records;
+        return this;
     }
 
     // ─── 5.1 基础测试用例组 ────────────────────────────────────────────────────
@@ -106,7 +203,24 @@ public class TestCase {
                     "compaction.async.enabled", "true"
                 ),
                 0, 0,
-                "小数据量，验证最小写入场景")
+                "小数据量，验证最小写入场景"),
+
+            // 示例：使用用例级别的参数覆盖全局值
+            new TestCase("TC-04", "用例独立参数覆盖", "基础测试",
+                params(
+                    "write-buffer-size", "256mb",
+                    "target-file-size", "128mb",
+                    "file.format", "parquet",
+                    "file.compression", "zstd",
+                    "bucket", "-1",
+                    "compaction.async.enabled", "true",
+                    "write-only", "false"
+                ),
+                0, 0,
+                "示例：使用 totalRecords()/batchSize()/initTotalRecords() 覆盖全局参数")
+                    .totalRecords(5_000_000)        // 覆盖全局 TOTAL_RECORDS（1亿）
+                    .batchSize(50_000)              // 覆盖全局 BATCH_SIZE（10万）
+                    .initTotalRecords(4_500_000)    // 覆盖全局 INIT_TOTAL_RECORDS（9500万）
         );
     }
 
@@ -227,7 +341,12 @@ public class TestCase {
                 params("write-buffer-size", "512mb", "write-buffer-spillable", "true",
                     "target-file-size", "256mb", "bucket", "32",
                     "compaction.async.enabled", "false", "write-only", "true"),
-                0, 0, "固定32桶，桶数过多时的文件碎片化")
+                0, 0, "固定32桶，桶数过多时的文件碎片化"),
+            new TestCase("TC-36", "分桶-固定1桶", "分桶策略",
+                    params("write-buffer-size", "512mb", "write-buffer-spillable", "true",
+                            "target-file-size", "256mb", "bucket", "1",
+                            "compaction.async.enabled", "false", "write-only", "true"),
+                    0, 0, "固定1桶，桶数少时的文件碎片化")
         );
     }
 
@@ -235,66 +354,152 @@ public class TestCase {
 
     public static List<TestCase> createCompactionTests() {
         return Arrays.asList(
-//            new TestCase("TC-40", "合并-激进(trigger=2)", "合并策略",
-//                params("write-buffer-size", "256mb", "target-file-size", "128mb",
-//                    "bucket", "-1",
-//                    "compaction.async.enabled", "true",
-//                    "num-sorted-run.compaction-trigger", "2",
-//                    "num-sorted-run.stop-trigger", "5",
-//                    "compaction.size-ratio", "1",
-//                    "write-only", "false"),
-//                0, 0, "激进合并：trigger=2，合并最频繁，验证合并开销"),
-//
-//            new TestCase("TC-41", "合并-默认(trigger=5)", "合并策略",
-//                params("write-buffer-size", "256mb", "target-file-size", "128mb",
-//                    "bucket", "-1",
-//                    "compaction.async.enabled", "true",
-//                    "num-sorted-run.compaction-trigger", "5",
-//                    "num-sorted-run.stop-trigger", "8",
-//                    "write-only", "false"),
-//                0, 0, "默认合并参数"),
-//
-//            new TestCase("TC-42", "合并-保守(trigger=10)", "合并策略",
-//                params("write-buffer-size", "256mb", "target-file-size", "128mb",
-//                    "bucket", "-1",
-//                    "compaction.async.enabled", "true",
-//                    "num-sorted-run.compaction-trigger", "10",
-//                    "num-sorted-run.stop-trigger", "20",
-//                    "write-only", "false"),
-//                0, 0, "保守合并：trigger=10，减少合并次数"),
-//
-//            new TestCase("TC-43", "合并-超保守(trigger=100)", "合并策略",
-//                params("write-buffer-size", "512mb", "target-file-size", "256mb",
-//                    "bucket", "-1",
-//                    "compaction.async.enabled", "true",
-//                    "num-sorted-run.compaction-trigger", "100",
-//                    "num-sorted-run.stop-trigger", "200",
-//                    "write-only", "false"),
-//                0, 0, "超保守：trigger=100，几乎不触发合并，接近write-only效果"),
-//
-//            new TestCase("TC-44", "合并-禁用异步", "合并策略",
-//                params("write-buffer-size", "256mb", "target-file-size", "128mb",
-//                    "bucket", "-1",
-//                    "compaction.async.enabled", "false",
-//                    "write-only", "false"),
-//                0, 0, "关闭异步合并，合并仅在写入时同步执行"),
-//
-//            new TestCase("TC-45", "合并-write-only模式", "合并策略",
-//                params("write-buffer-size", "512mb", "write-buffer-spillable", "true",
-//                    "target-file-size", "256mb", "bucket", "-1",
-//                    "compaction.async.enabled", "false",
-//                    "write-only", "true"),
-//                0, 0, "write-only=true：完全跳过合并，最大化写入吞吐"),
-        new TestCase("TC-46", "合并-bucket=-2+full compact模式", "全量完成后，执行full compact让数据可见，最大化写入吞吐",
-                params("write-buffer-size", "512mb", "write-buffer-spillable", "true",
-                    "target-file-size", "256mb", "bucket", "-2",
-                    "compaction.async.enabled", "false",
-                    "full-compaction.delta-commits", "10",
-//                    "compaction.total-size-threshold", "100",
-                    "compaction.optimization-interval", "1s",
-//                    "compaction.force-rewrite-all-files", "true",
-                    "write-only", "false"),
-                0, 0, "合并-bucket=-2+full compact模式，全量完成后，执行full compact让数据可见，最大化写入吞吐")
+//                new TestCase("TC-40", "无小合并|定期大合并|增量写入", "合并策略对比测试",
+//                        params("write-buffer-size", "128mb",
+//                                "write-buffer-spillable", "true",
+//                                "target-file-size", "128mb",
+//                                "bucket", "1",
+//                                "diskMaxSize", "10",
+//                                //sorted runs 过多时 merge 防 OOM:
+//                                "sort-spill-threshold","100",
+//                                "sort-spill-buffer-size","128mb",
+//                                "write-only", "false",
+//                                "compaction.optimization-interval","5min",//10sec
+//                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+//                                "compaction.size-ratio","0",
+//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+//                                "compaction.max-size-amplification-percent","50000",
+//                                "full-compaction.delta-commits", "200",
+////                              "compaction.total-size-threshold", "100",
+////                              "compaction.force-rewrite-all-files", "true",
+//                                "num-sorted-run.compaction-trigger", "200",
+//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+//                                "num-sorted-run.stop-trigger", "2147483647"),
+//                        0, 0,
+//                        "无小合并|定期大合并|增量写入"),
+//                new TestCase("TC-41", "小合并-默认(trigger=5)|定期大合并|增量写入", "合并策略对比测试",
+//                        params("write-buffer-size", "128mb",
+//                                "write-buffer-spillable", "true",
+//                                "target-file-size", "128mb",
+//                                "bucket", "1",
+//                                "diskMaxSize", "10",
+//                                //sorted runs 过多时 merge 防 OOM:
+//                                "sort-spill-threshold","100",
+//                                "sort-spill-buffer-size","128mb",
+//                                "write-only", "false",
+//                                "compaction.optimization-interval","5min",//10sec
+//                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+//                                "compaction.size-ratio","0",
+//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+//                                "compaction.max-size-amplification-percent","50000",
+//                                "full-compaction.delta-commits", "200",
+////                              "compaction.total-size-threshold", "100",
+////                              "compaction.force-rewrite-all-files", "true",
+//                                "num-sorted-run.compaction-trigger", "5",
+//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+//                                "num-sorted-run.stop-trigger", "8"),
+//                        0, 0,
+//                        "小合并-默认(trigger=5)|定期大合并|增量写入：合并最频繁，验证合并开销"),
+//                new TestCase("TC-42", "小合并10|定期大合并|增量写入", "合并策略对比测试",
+//                        params("write-buffer-size", "128mb",
+//                                "write-buffer-spillable", "true",
+//                                "target-file-size", "128mb",
+//                                "bucket", "1",
+//                                "diskMaxSize", "10",
+//                                //sorted runs 过多时 merge 防 OOM:
+//                                "sort-spill-threshold","100",
+//                                "sort-spill-buffer-size","128mb",
+//                                "write-only", "false",
+//                                "compaction.optimization-interval","5min",//10sec
+//                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+//                                "compaction.size-ratio","0",
+//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+//                                "compaction.max-size-amplification-percent","50000",
+//                                "full-compaction.delta-commits", "200",
+////                              "compaction.total-size-threshold", "100",
+////                              "compaction.force-rewrite-all-files", "true",
+//                                "num-sorted-run.compaction-trigger", "10",
+//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+//                                "num-sorted-run.stop-trigger", "20"),
+//                        0, 0,
+//                        "10个文件一次小合并|定期大合并|增量写入"),
+//                new TestCase("TC-43", "保守小合并20|定期大合并|增量写入", "合并策略对比测试",
+//                        params("write-buffer-size", "128mb",
+//                                "write-buffer-spillable", "true",
+//                                "target-file-size", "128mb",
+//                                "bucket", "1",
+//                                "diskMaxSize", "10",
+//                                //sorted runs 过多时 merge 防 OOM:
+//                                "sort-spill-threshold","100",
+//                                "sort-spill-buffer-size","128mb",
+//                                "write-only", "false",
+//                                "compaction.optimization-interval","5min",//10sec
+//                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+//                                "compaction.size-ratio","0",
+//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+//                                "compaction.max-size-amplification-percent","50000",
+//                                "full-compaction.delta-commits", "200",
+////                              "compaction.total-size-threshold", "100",
+////                              "compaction.force-rewrite-all-files", "true",
+//                                "num-sorted-run.compaction-trigger", "20",
+//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+//                                "num-sorted-run.stop-trigger", "30"),
+//                        0, 0,
+//                        "保守小合并20|定期大合并|增量写入"),
+//                new TestCase("TC-44", "合并-write-only模式|增量写入", "合并策略对比测试",
+//                        params("write-buffer-size", "128mb",
+//                                "write-buffer-spillable", "true",
+//                                "target-file-size", "128mb",
+//                                "bucket", "1",
+//                                "diskMaxSize", "10",
+//                                //sorted runs 过多时 merge 防 OOM:
+//                                "sort-spill-threshold","100",
+//                                "sort-spill-buffer-size","128mb",
+//                                "write-only", "true",
+//                                "compaction.optimization-interval","5min",//10sec
+//                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+//                                "compaction.size-ratio","0",
+//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+//                                "compaction.max-size-amplification-percent","50000",
+//                                "full-compaction.delta-commits", "200",
+////                              "compaction.total-size-threshold", "100",
+////                              "compaction.force-rewrite-all-files", "true",
+//                                "num-sorted-run.compaction-trigger", "200",
+//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+//                                "num-sorted-run.stop-trigger", "2147483647"),
+//                        0, 0,
+//                        "write-only=true：完全跳过合并，最大化写入吞吐"),
+                new TestCase("TC-45", "30小合并|1h大合并|增量写入", "合并策略对比测试",
+                        params("write-buffer-size", "128mb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                //bucket越少越好：
+                                "bucket", "1",
+                                "diskMaxSize", "10",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold","100",
+                                "sort-spill-buffer-size","128mb",
+                                "write-only", "false",
+                                "compaction.optimization-interval","60min",//10sec
+                                //保持默认即可：因为新生成的文件（L0）不可能是大文件，只要保证合并都是L0的就没写放大：当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio","1",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent","50000",
+//                                "full-compaction.delta-commits", "200",
+                                //只合并本次待合并的文件总大小没达到158m就合并，而不是所有文件总大小达到158mb才合并：
+//                                "compaction.total-size-threshold", "158mb",
+//                              "compaction.force-rewrite-all-files", "true",
+                                "num-sorted-run.compaction-trigger", "30",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "2147483647",
+                                "snapshot.num-retained.min", "1",
+                                "snapshot.num-retained.max", "1",
+                                "snapshot.time-retained", "30min"),
+                        0, 0,
+                        "30小合并|1h大合并|增量写入")
+                        .batchSize(100_000)
+                        .initTotalRecords(0)
+                        .totalRecords(1_000_000_000)
         );
     }
 
@@ -302,52 +507,135 @@ public class TestCase {
 
     public static List<TestCase> createNoSmallFileTests() {
         return Arrays.asList(
-            new TestCase("TC-50", "无小文件-大缓冲无合并", "无小文件",
-                params("write-buffer-size", "512mb", "write-buffer-spillable", "true",
-                    "target-file-size", "256mb", "bucket", "1",
-                    "compaction.async.enabled", "false", "write-only", "true",
-                    "num-sorted-run.compaction-trigger", "100",
-                    "num-sorted-run.stop-trigger", "200"),
-                0, 0,
-                "大缓冲(512MB)+大目标文件(256MB)+禁止合并，一次性写入验证"),
+                new TestCase("TC-50", "无小文件-大缓冲|无小合并|定期大合并|一次性写入", "无小文件",
+                        params("write-buffer-size", "2gb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                "bucket", "1",
+                                "write-buffer-spillable", "true",
+                                "diskMaxSize", "10",
+                                "compaction.async.enabled111", "true",
+                                "write-only", "false",
+                                "compaction.optimization-interval","5min",//10sec
+                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio","0",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent","50000",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold","100",
+                                "sort-spill-buffer-size","128mb",
+                                "num-sorted-run.compaction-trigger", "200",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "2147483647"),
+                        0, 0,
+                        "大缓冲(512MB)+大目标文件(128MB)+禁止小合并，一次性写入验证")
+                        .batchSize(100_000)
+                        .initTotalRecords(100_000_000)
+                        .totalRecords(100_000_000),
 
-            new TestCase("TC-51", "无小文件-溢写验证", "无小文件",
-                params("write-buffer-size", "128mb", "write-buffer-spillable", "true",
-                    "write-buffer-spill.max-disk-size", "2gb",
-                    "write-buffer-spill.tmp-dirs", BASE_TEST_DIR + "/tmp," + BASE_TEST_DIR + "/tmp2",
-                    "target-file-size", "256mb", "bucket", "1",
-                    "compaction.async.enabled", "false", "write-only", "true"),
-                0, 0,
-                "小缓冲(128MB)+磁盘溢写，验证溢写后文件是否仍然大"),
+                new TestCase("TC-51", "：无小文件-小缓冲|无小合并|定期大合并|全量&增量", "无小文件",
+                        params("write-buffer-size", "128mb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                "bucket", "1",
+                                "write-buffer-spillable", "true",
+                                "diskMaxSize", "1",
+                                "write-only", "false",
+                                "compaction.optimization-interval","5min",//10sec
+                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio","0",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent","50000",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold","100",
+                                "sort-spill-buffer-size","128mb",
+                                "num-sorted-run.compaction-trigger", "200",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "2147483647"),
+                        0, 0,
+                        "小缓冲(128MB)+大目标文件(128MB)+禁止小合并，全量&增量")
+                        .batchSize(100_000)
+                        .initTotalRecords(90_000_000)
+                        .totalRecords(100_000_000),
 
-            new TestCase("TC-52", "无小文件-bucket=-2组合", "无小文件",
-                params("write-buffer-size", "512mb", "write-buffer-spillable", "true",
-                    "target-file-size", "256mb", "bucket", "-2",
-                    "compaction.async.enabled", "false", "write-only", "true"),
-                0, 0,
-                "性能最好配置：bucket=-2+大缓冲+禁止合并，验证延迟分桶的无小文件效果，但需要compaction数据才能可见"),
+                new TestCase("TC-52", "：无小文件-小缓冲|无小合并|定期大合并|全量&增量|bucket=-2", "无小文件",
+                        params("write-buffer-size", "128mb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                //性能最好：
+                                "bucket", "1",
+                                "write-buffer-spillable", "true",
+                                "diskMaxSize", "1",
+                                "write-only", "false",
+                                "compaction.optimization-interval","5min",//10sec
+                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio","0",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent","50000",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold","100",
+                                "sort-spill-buffer-size","128mb",
+                                "num-sorted-run.compaction-trigger", "200",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "2147483647"),
+                        0, 0,
+                        "小缓冲(128MB)+大目标文件(128MB)+禁止小合并，全量&增量，bucket=-2，验证延迟分桶的无小文件效果，但需要Full compaction后才能可见")
+                        .batchSize(100_000)
+                        .initTotalRecords(90_000_000)
+                        .totalRecords(100_000_000),
 
-            new TestCase("TC-53", "无小文件-增加local-merge-buffer", "无小文件",
-                params("write-buffer-size", "512mb", "write-buffer-spillable", "true",
-                    "target-file-size", "512mb", "bucket", "1",
-                    "compaction.async.enabled", "false", "write-only", "true",
-                    "local-merge-buffer-size", "64mb",
-                    "sort-spill-buffer-size", "128mb",
-                    "num-sorted-run.compaction-trigger", "100",
-                    "num-sorted-run.stop-trigger", "200"),
-                0, 0,
-                "多bucket最优生产配置：所有参数协同优化，预期最少文件数、最大文件"),
-            new TestCase("TC-54", "无小文件-去除changelog", "无小文件",
-                params("write-buffer-size", "512mb", "write-buffer-spillable", "true",
-                        "target-file-size", "512mb", "bucket", "1",
-                        "compaction.async.enabled", "false", "write-only", "true",
-                        "local-merge-buffer-size", "64mb",
-                        "sort-spill-buffer-size", "128mb",
-                        "num-sorted-run.compaction-trigger", "100",
-                        "num-sorted-run.stop-trigger", "200",
-                        "changelog-producer", "input"),
-                0, 0,
-                "多bucket最优生产配置：所有参数协同优化，预期最少文件数、最大文件")
+                new TestCase("TC-53", "：无小文件-小缓冲|无小合并|定期大合并|全量&增量|增加local-merge-buffer", "无小文件",
+                        params("local-merge-buffer-size", "64mb",
+                                "write-buffer-size", "128mb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                "bucket", "1",
+                                "write-buffer-spillable", "true",
+                                "diskMaxSize", "1",
+                                "write-only", "false",
+                                "compaction.optimization-interval","5min",//10sec
+                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio","0",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent","50000",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold","100",
+                                "sort-spill-buffer-size","128mb",
+                                "num-sorted-run.compaction-trigger", "200",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "2147483647"),
+                        0, 0,
+                        "小缓冲(128MB)+大目标文件(128MB)+禁止小合并，全量&增量|增加local-merge-buffer")
+                        .batchSize(100_000)
+                        .initTotalRecords(90_000_000)
+                        .totalRecords(100_000_000),
+
+                new TestCase("TC-54", "：无小文件-小缓冲|无小合并|定期大合并|全量&增量|增加local-merge-buffer|changelog-producer", "无小文件",
+                        params("local-merge-buffer-size", "64mb",
+                                "changelog-producer", "input",
+                                "write-buffer-size", "128mb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                "bucket", "1",
+                                "write-buffer-spillable", "true",
+                                "diskMaxSize", "1",
+                                "write-only", "false",
+                                "compaction.optimization-interval","5min",//10sec
+                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio","0",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent","50000",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold","100",
+                                "sort-spill-buffer-size","128mb",
+                                "num-sorted-run.compaction-trigger", "200",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "2147483647"),
+                        0, 0,
+                        "小缓冲(128MB)+大目标文件(128MB)+禁止小合并，全量&增量|增加local-merge-buffer|changelog-producer")
+                        .batchSize(100_000)
+                        .initTotalRecords(90_000_000)
+                        .totalRecords(100_000_000)
         );
     }
 
@@ -369,7 +657,7 @@ public class TestCase {
 
             new TestCase("TC-62", "格式-Parquet+无压缩", "文件格式",
                 params("write-buffer-size", "256mb", "target-file-size", "128mb",
-                    "file.format", "parquet", "file.compression", "none",
+                    "file.format", "parquet", "file.compression", "gzip",
                     "bucket", "-1", "write-only", "true"),
                 0, 0, "Parquet+无压缩，最快写入速度但文件最大"),
 
