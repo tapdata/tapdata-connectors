@@ -12,6 +12,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kafka.AbsSchemaMode;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
@@ -201,7 +202,11 @@ public class RegistryAvroMode extends AbsSchemaMode {
             }
             // 根据列的类型映射为 Avro 模式的类型
             Schema.Field field = getOrCreateAvroField(tapTable, tapField);
-            fieldAssembler.name(columnName).type(field.schema()).withDefault(tapField.getDefaultValue());
+            if (EmptyKit.isNotNull(tapField.getDefaultValue()) && kafkaService.getConfig().getNodeApplyDefault()) {
+                fieldAssembler.name(columnName).type(field.schema()).withDefault(tapField.getDefaultValue());
+            } else {
+                fieldAssembler.name(columnName).type(field.schema()).noDefault();
+            }
         }
         Schema.Parser parser = new Schema.Parser();
         Schema avroSchema = parser.parse(fieldAssembler.endRecord().toString());

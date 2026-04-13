@@ -74,6 +74,9 @@ public class KafkaConfig extends BasicConfig implements
         return StringUtils.isEmpty(schemaMode) ? null : KafkaSchemaMode.fromString(schemaMode);
     }
 
+    public Boolean getNodeApplyDefault() {
+        return nodeConfigGet("applyDefault", false);
+    }
     public KafkaSerialization getConnectionKeySerialization() {
         String keySerializer = connectionConfigGet("keySerialization", KafkaSerialization.BINARY.getType());
         return KafkaSerialization.fromString(keySerializer);
