@@ -219,6 +219,15 @@
     }
   },
   "dataTypes": {
+    "BIGINT": {
+      "to": "TapNumber",
+      "bit": 64,
+      "precision": 19,
+      "value": [
+        -9223372036854775808,
+        9223372036854775807
+      ]
+    },
     "NUMBER[($precision,$scale)]": {
       "precision": [
         1,
@@ -229,8 +238,10 @@
         37
       ],
       "fixed": true,
-      "preferPrecision": 38,
-      "preferScale": 0,
+      "preferPrecision": 12,
+      "preferScale": 4,
+      "defaultPrecision": 38,
+      "defaultScale": 0,
       "priority": 1,
       "to": "TapNumber"
     },

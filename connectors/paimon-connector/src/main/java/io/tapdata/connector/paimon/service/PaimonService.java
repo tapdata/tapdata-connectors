@@ -587,18 +587,17 @@ public class PaimonService implements Closeable {
 		if (config.getEnableAutoCompaction(tableName) != null) {
 			if (config.getEnableAutoCompaction(tableName)) {
 				// Enable full compaction for better query performance
-				schemaBuilder.option("compaction.async.enabled", "true");
 				schemaBuilder.option("compaction.optimization-interval", config.getCompactionIntervalMinutes(tableName) + "min");
 
 				// Set compaction strategy
 				schemaBuilder.option("changelog-producer", "input");
 
 				// Compact small files more aggressively
-				schemaBuilder.option("num-sorted-run.compaction-trigger", "3");
-				schemaBuilder.option("num-sorted-run.stop-trigger", "5");
+				schemaBuilder.option("num-sorted-run.compaction-trigger", "30");
+				schemaBuilder.option("num-sorted-run.stop-trigger", "2147483647");
 			} else {
 				// Disable auto compaction
-				schemaBuilder.option("compaction.optimization-interval", "0");
+				schemaBuilder.option("write-only", "true");
 			}
 		}
 
