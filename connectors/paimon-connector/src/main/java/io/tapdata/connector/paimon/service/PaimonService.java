@@ -1036,7 +1036,7 @@ public class PaimonService implements Closeable {
 						connectorContext.getLog().warn("Failed to write records to table {}, error message: {}, retrying... (attempt {}/{})", tableName, e.getMessage(), retryCount + 1, maxRetries, e);
 					}
 					retryCount++;
-					reinitCatalog();
+//					reinitCatalog();
 					CommonUtils.ignoreAnyError(() -> TimeUnit.SECONDS.sleep(1L), TAG);
 					continue;
 				}

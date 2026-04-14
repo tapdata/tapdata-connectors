@@ -1001,6 +1001,11 @@ public class PerformanceTestRunner {
 
     // ─── 报告生成 ──────────────────────────────────────────────────────────────
 
+    /** 转义 Markdown 表元格中的管道符，防止破坏表格结构 */
+    private static String escapePipe(String s) {
+        return s == null ? "" : s.replace("|", "\\|");
+    }
+
     public String generateReport(List<TestResult> results, String reportPath) throws IOException {
         StringBuilder sb = new StringBuilder();
         String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
@@ -1033,12 +1038,19 @@ public class PerformanceTestRunner {
             sb.append("|--------|------|-----------|---------|--------|--------|----------|------|\n");
             for (TestResult r : entry.getValue()) {
                 String status = r.error == null ? "✅" : "❌";
-                sb.append(String.format("| %s | %s | %.0f | %.2f | %d | %s | %s | %s |\n",
-                    r.testCase.getId(), r.testCase.getName(), r.throughput,
-                    r.durationMs / 1000.0, r.fileCount,
-                    PaimonFileObserver.formatSize(r.totalFileSize),
-                    r.fileCount > 0 ? PaimonFileObserver.formatSize(r.totalFileSize / r.fileCount) : "N/A",
-                    status));
+                String name = escapePipe(r.testCase.getName());
+                // 失败用例显示 '-' 避免误导
+                if (r.error != null) {
+                    sb.append(String.format("| %s | %s | - | - | - | - | - | %s |\n",
+                        r.testCase.getId(), name, status));
+                } else {
+                    sb.append(String.format("| %s | %s | %.0f | %.2f | %d | %s | %s | %s |\n",
+                        r.testCase.getId(), name, r.throughput,
+                        r.durationMs / 1000.0, r.fileCount,
+                        PaimonFileObserver.formatSize(r.totalFileSize),
+                        r.fileCount > 0 ? PaimonFileObserver.formatSize(r.totalFileSize / r.fileCount) : "N/A",
+                        status));
+                }
             }
             sb.append("\n");
         }
@@ -1048,15 +1060,20 @@ public class PerformanceTestRunner {
         sb.append("| 用例ID | <1KB | 1KB-1MB | 1MB-10MB | 10MB-100MB | 100MB-500MB | >500MB |\n");
         sb.append("|--------|------|---------|----------|-----------|-------------|--------|\n");
         for (TestResult r : results) {
-            Map<String, Long> d = r.sizeDistribution;
-            sb.append(String.format("| %s | %d | %d | %d | %d | %d | %d |\n",
-                r.testCase.getId(),
-                d.getOrDefault("< 1KB",       0L),
-                d.getOrDefault("1KB - 1MB",   0L),
-                d.getOrDefault("1MB - 10MB",  0L),
-                d.getOrDefault("10MB-100MB",  0L),
-                d.getOrDefault("100MB-500MB", 0L),
-                d.getOrDefault("> 500MB",     0L)));
+            if (r.error != null) {
+                // 失败用例显示 '-'
+                sb.append(String.format("| %s | - | - | - | - | - | - |\n", r.testCase.getId()));
+            } else {
+                Map<String, Long> d = r.sizeDistribution;
+                sb.append(String.format("| %s | %d | %d | %d | %d | %d | %d |\n",
+                    r.testCase.getId(),
+                    d.getOrDefault("< 1KB",       0L),
+                    d.getOrDefault("1KB - 1MB",   0L),
+                    d.getOrDefault("1MB - 10MB",  0L),
+                    d.getOrDefault("10MB-100MB",  0L),
+                    d.getOrDefault("100MB-500MB", 0L),
+                    d.getOrDefault("> 500MB",     0L)));
+            }
         }
         sb.append("\n");
 
