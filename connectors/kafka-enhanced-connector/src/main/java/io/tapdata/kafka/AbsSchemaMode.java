@@ -34,11 +34,13 @@ public abstract class AbsSchemaMode {
     protected final KafkaSchemaMode kafkaSchemaMode;
     protected final IKafkaService kafkaService;
     protected final Log tapLogger;
+    protected final Boolean applyDefault;
 
     protected AbsSchemaMode(KafkaSchemaMode kafkaSchemaMode, IKafkaService kafkaService) {
         this.kafkaSchemaMode = kafkaSchemaMode;
         this.kafkaService = kafkaService;
         this.tapLogger = kafkaService.getLog();
+        this.applyDefault = kafkaService.getConfig().getNodeApplyDefault();
     }
 
     public KafkaSchemaMode getSchemaMode() {

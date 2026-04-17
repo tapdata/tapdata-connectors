@@ -21,6 +21,7 @@ import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.util.Utf8;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -165,7 +166,13 @@ public class RegistryAvroMode extends AbsSchemaMode {
             return result;
         }
         record.getSchema().getFields().forEach(key -> {
-            result.put(key.name(), record.get(key.name()));
+            String k = key.name();
+            Object v = record.get(k);
+            if (v instanceof Utf8) {
+                result.put(k, v.toString());
+            } else {
+                result.put(k, v);
+            }
         });
         return result;
     }
@@ -202,7 +209,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
             }
             // 根据列的类型映射为 Avro 模式的类型
             Schema.Field field = getOrCreateAvroField(tapTable, tapField);
-            if (EmptyKit.isNotNull(tapField.getDefaultValue()) && kafkaService.getConfig().getNodeApplyDefault()) {
+            if (EmptyKit.isNotNull(tapField.getDefaultValue()) && applyDefault) {
                 fieldAssembler.name(columnName).type(field.schema()).withDefault(tapField.getDefaultValue());
             } else {
                 fieldAssembler.name(columnName).type(field.schema()).noDefault();
@@ -367,7 +374,12 @@ public class RegistryAvroMode extends AbsSchemaMode {
             avroType = baseType;
         }
 
-        Schema.Field field = new Schema.Field(columnName, avroType, null, tapField.getDefaultValue());
+        Schema.Field field;
+        if (applyDefault) {
+            field = new Schema.Field(columnName, avroType, null, tapField.getDefaultValue());
+        } else {
+            field = new Schema.Field(columnName, avroType, null, null);
+        }
         fieldCache.put(tapTable.getId() + "." + columnName, field);
         return field;
     }

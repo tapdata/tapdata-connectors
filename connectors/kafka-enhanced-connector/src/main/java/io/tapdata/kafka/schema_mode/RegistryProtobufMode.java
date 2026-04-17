@@ -15,6 +15,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kafka.AbsSchemaMode;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
+import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
@@ -233,7 +234,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
                         .setNumber(fieldNumber++)
                         .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
                         .setType(mapTapTypeToProtobufType(StringKit.removeParentheses(dataType)));
-                if (null != tapField.getDefaultValue()) {
+                if (EmptyKit.isNotNull(tapField.getDefaultValue()) && applyDefault) {
                     fieldBuilder.setDefaultValue(String.valueOf(tapField.getDefaultValue()));
                 }
                 messageBuilder.addField(fieldBuilder.build());

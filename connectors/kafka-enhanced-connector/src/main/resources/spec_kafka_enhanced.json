@@ -487,6 +487,22 @@
         "OPTIONAL_FIELDS": {
           "type": "void",
           "properties": {
+            "batchMaxDelay": {
+              "required": true,
+              "type": "string",
+              "title": "${batchMaxDelay}",
+              "default": 2000,
+              "x-index": 6,
+              "x-decorator": "FormItem",
+              "x-component": "InputNumber",
+              "x-component-props": {
+                "min": 1000,
+                "max": 30000
+              },
+              "x-decorator-props": {
+                "tooltip": "${batchMaxDelayTooltip}"
+              }
+            },
             "kafkaSaslMechanism": {
               "type": "string",
               "title": "${kafkaSaslMechanism}",
@@ -957,6 +973,8 @@
       "authUserName": "Auth UserName",
       "authPassword": "Auth Password",
       "basicAuth": "Basic Auth",
+      "batchMaxDelay": "Consumption timeout (ms)",
+      "batchMaxDelayTooltip": "When loading the model, it is necessary to test consumption data. If there is significant network latency, it is recommended to extend the consumption timeout period; otherwise, the model may not be loaded successfully.",
       "kafkaSaslMechanism": "SASL Mechanism",
       "acksType": "ACK confirmation mechanism",
       "acksTypeNotSure": "No confirmation",
@@ -1037,6 +1055,8 @@
       "authUserName": "认证用户名",
       "authPassword": "认证密码",
       "basicAuth": "基本认证",
+      "batchMaxDelay": "消费超时(ms)",
+      "batchMaxDelayTooltip": "加载模型时需要试消费数据，如果网络延迟较大，建议延长消费超时时间，否则将加载不到模型",
       "kafkaSaslMechanism": "加密方式",
       "acksType": "ACK 确认机制",
       "acksTypeNotSure": "不确认",
@@ -1117,6 +1137,8 @@
       "authUserName": "認證用戶名",
       "authPassword": "認證密碼",
       "basicAuth": "基本認證",
+      "batchMaxDelay": "消費超時(ms)",
+      "batchMaxDelayTooltip": "載入模型時需要試消費資料，如果網絡延遲較大，建議延長消費超時時間，否則將載入不到模型",
       "kafkaSaslMechanism": "加密方式",
       "acksType": "ACK 確認機制",
       "acksTypeNotSure": "不確認",
