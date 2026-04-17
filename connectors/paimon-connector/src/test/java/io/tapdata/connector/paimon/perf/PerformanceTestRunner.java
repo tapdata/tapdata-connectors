@@ -9,6 +9,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.spec.TapNodeSpecification;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -43,7 +44,7 @@ public class PerformanceTestRunner {
     private static final String TABLE_NAME = "test_table";
     public static final int TOTAL_RECORDS = 5_000_000;   // 数据集总大小
     private static final int BATCH_SIZE = 100_000; // 每批次写入记录数，也是PaimonService 累积批次大小
-    private static final int INIT_TOTAL_RECORDS = 0; //模拟初始化阶段全表数据量
+    private static final int INIT_TOTAL_RECORDS = 5_000_000; //模拟初始化阶段全表数据量
 
     // ─── S3 测试配置 ──────────────────────────────────────────────────────────
 
@@ -605,7 +606,7 @@ public class PerformanceTestRunner {
     // ─── 打印工具 ──────────────────────────────────────────────────────────────
 
     private static void printSeparator(String ch) {
-        System.out.println(ch.repeat(70));
+        System.out.println(StringUtils.repeat(ch, 70));
     }
 
     /**

@@ -33,10 +33,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.StreamTableCommit;
-import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.*;
 import org.apache.paimon.table.source.*;
 import org.apache.paimon.table.source.TableScan.Plan;
 import org.apache.paimon.types.*;
@@ -1251,10 +1248,11 @@ public class PaimonService implements Closeable {
 		StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
 		String tmpDirs = config.getDiskTmpDir(table.name());
 		if (StringUtils.isEmpty(tmpDirs)) {
-			return writeBuilder.newWrite();
+			return new ManagedIOStreamTableWrite(writeBuilder.newWrite(), null);
 		} else {
-			return (StreamTableWrite) writeBuilder.newWrite()
-					.withIOManager(IOManager.create(splitPaths(tmpDirs)));
+			IOManager ioManager = IOManager.create(splitPaths(tmpDirs));
+			StreamTableWrite streamTableWrite = (StreamTableWrite) writeBuilder.newWrite().withIOManager(ioManager);
+			return new ManagedIOStreamTableWrite(streamTableWrite, ioManager);
 		}
 	}
 

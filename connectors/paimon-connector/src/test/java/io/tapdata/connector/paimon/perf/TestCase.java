@@ -354,122 +354,122 @@ public class TestCase {
 
     public static List<TestCase> createCompactionTests() {
         return Arrays.asList(
-//                new TestCase("TC-40", "无小合并|定期大合并|增量写入", "合并策略对比测试",
-//                        params("write-buffer-size", "128mb",
-//                                "write-buffer-spillable", "true",
-//                                "target-file-size", "128mb",
-//                                "bucket", "1",
-//                                "diskMaxSize", "10",
-//                                //sorted runs 过多时 merge 防 OOM:
-//                                "sort-spill-threshold","100",
-//                                "sort-spill-buffer-size","128mb",
-//                                "write-only", "false",
-//                                "compaction.optimization-interval","5min",//10sec
-//                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
-//                                "compaction.size-ratio","0",
-//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
-//                                "compaction.max-size-amplification-percent","50000",
-//                                "full-compaction.delta-commits", "200",
-////                              "compaction.total-size-threshold", "100",
-////                              "compaction.force-rewrite-all-files", "true",
-//                                "num-sorted-run.compaction-trigger", "200",
-//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
-//                                "num-sorted-run.stop-trigger", "2147483647"),
-//                        0, 0,
-//                        "无小合并|定期大合并|增量写入"),
-//                new TestCase("TC-41", "小合并-默认(trigger=5)|定期大合并|增量写入", "合并策略对比测试",
-//                        params("write-buffer-size", "128mb",
-//                                "write-buffer-spillable", "true",
-//                                "target-file-size", "128mb",
-//                                "bucket", "1",
-//                                "diskMaxSize", "10",
-//                                //sorted runs 过多时 merge 防 OOM:
-//                                "sort-spill-threshold","100",
-//                                "sort-spill-buffer-size","128mb",
-//                                "write-only", "false",
-//                                "compaction.optimization-interval","5min",//10sec
-//                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
-//                                "compaction.size-ratio","0",
-//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
-//                                "compaction.max-size-amplification-percent","50000",
-//                                "full-compaction.delta-commits", "200",
-////                              "compaction.total-size-threshold", "100",
-////                              "compaction.force-rewrite-all-files", "true",
-//                                "num-sorted-run.compaction-trigger", "5",
-//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
-//                                "num-sorted-run.stop-trigger", "8"),
-//                        0, 0,
-//                        "小合并-默认(trigger=5)|定期大合并|增量写入：合并最频繁，验证合并开销"),
-//                new TestCase("TC-42", "小合并10|定期大合并|增量写入", "合并策略对比测试",
-//                        params("write-buffer-size", "128mb",
-//                                "write-buffer-spillable", "true",
-//                                "target-file-size", "128mb",
-//                                "bucket", "1",
-//                                "diskMaxSize", "10",
-//                                //sorted runs 过多时 merge 防 OOM:
-//                                "sort-spill-threshold","100",
-//                                "sort-spill-buffer-size","128mb",
-//                                "write-only", "false",
-//                                "compaction.optimization-interval","5min",//10sec
-//                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
-//                                "compaction.size-ratio","0",
-//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
-//                                "compaction.max-size-amplification-percent","50000",
-//                                "full-compaction.delta-commits", "200",
-////                              "compaction.total-size-threshold", "100",
-////                              "compaction.force-rewrite-all-files", "true",
-//                                "num-sorted-run.compaction-trigger", "10",
-//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
-//                                "num-sorted-run.stop-trigger", "20"),
-//                        0, 0,
-//                        "10个文件一次小合并|定期大合并|增量写入"),
-//                new TestCase("TC-43", "保守小合并20|定期大合并|增量写入", "合并策略对比测试",
-//                        params("write-buffer-size", "128mb",
-//                                "write-buffer-spillable", "true",
-//                                "target-file-size", "128mb",
-//                                "bucket", "1",
-//                                "diskMaxSize", "10",
-//                                //sorted runs 过多时 merge 防 OOM:
-//                                "sort-spill-threshold","100",
-//                                "sort-spill-buffer-size","128mb",
-//                                "write-only", "false",
-//                                "compaction.optimization-interval","5min",//10sec
-//                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
-//                                "compaction.size-ratio","0",
-//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
-//                                "compaction.max-size-amplification-percent","50000",
-//                                "full-compaction.delta-commits", "200",
-////                              "compaction.total-size-threshold", "100",
-////                              "compaction.force-rewrite-all-files", "true",
-//                                "num-sorted-run.compaction-trigger", "20",
-//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
-//                                "num-sorted-run.stop-trigger", "30"),
-//                        0, 0,
-//                        "保守小合并20|定期大合并|增量写入"),
-//                new TestCase("TC-44", "合并-write-only模式|增量写入", "合并策略对比测试",
-//                        params("write-buffer-size", "128mb",
-//                                "write-buffer-spillable", "true",
-//                                "target-file-size", "128mb",
-//                                "bucket", "1",
-//                                "diskMaxSize", "10",
-//                                //sorted runs 过多时 merge 防 OOM:
-//                                "sort-spill-threshold","100",
-//                                "sort-spill-buffer-size","128mb",
-//                                "write-only", "true",
-//                                "compaction.optimization-interval","5min",//10sec
-//                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
-//                                "compaction.size-ratio","0",
-//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
-//                                "compaction.max-size-amplification-percent","50000",
-//                                "full-compaction.delta-commits", "200",
-////                              "compaction.total-size-threshold", "100",
-////                              "compaction.force-rewrite-all-files", "true",
-//                                "num-sorted-run.compaction-trigger", "200",
-//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
-//                                "num-sorted-run.stop-trigger", "2147483647"),
-//                        0, 0,
-//                        "write-only=true：完全跳过合并，最大化写入吞吐"),
-                new TestCase("TC-45", "30小合并|1h大合并|增量写入", "合并策略对比测试",
+                new TestCase("TC-40", "无小合并|定期大合并|增量写入", "合并策略对比测试",
+                        params("write-buffer-size", "128mb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                "bucket", "1",
+                                "diskMaxSize", "10",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold", "100",
+                                "sort-spill-buffer-size", "128mb",
+                                "write-only", "false",
+                                "compaction.optimization-interval", "5min",//10sec
+                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio", "0",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent", "50000",
+                                "full-compaction.delta-commits", "200",
+//                              "compaction.total-size-threshold", "100",
+//                              "compaction.force-rewrite-all-files", "true",
+                                "num-sorted-run.compaction-trigger", "200",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "2147483647"),
+                        0, 0,
+                        "无小合并|定期大合并|增量写入"),
+                new TestCase("TC-41", "小合并-默认(trigger=5)|定期大合并|增量写入", "合并策略对比测试",
+                        params("write-buffer-size", "128mb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                "bucket", "1",
+                                "diskMaxSize", "10",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold", "100",
+                                "sort-spill-buffer-size", "128mb",
+                                "write-only", "false",
+                                "compaction.optimization-interval", "5min",//10sec
+                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio", "0",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent", "50000",
+                                "full-compaction.delta-commits", "200",
+//                              "compaction.total-size-threshold", "100",
+//                              "compaction.force-rewrite-all-files", "true",
+                                "num-sorted-run.compaction-trigger", "5",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "8"),
+                        0, 0,
+                        "小合并-默认(trigger=5)|定期大合并|增量写入：合并最频繁，验证合并开销"),
+                new TestCase("TC-42", "小合并10|定期大合并|增量写入", "合并策略对比测试",
+                        params("write-buffer-size", "128mb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                "bucket", "1",
+                                "diskMaxSize", "10",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold", "100",
+                                "sort-spill-buffer-size", "128mb",
+                                "write-only", "false",
+                                "compaction.optimization-interval", "5min",//10sec
+                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio", "0",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent", "50000",
+                                "full-compaction.delta-commits", "200",
+//                              "compaction.total-size-threshold", "100",
+//                              "compaction.force-rewrite-all-files", "true",
+                                "num-sorted-run.compaction-trigger", "10",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "20"),
+                        0, 0,
+                        "10个文件一次小合并|定期大合并|增量写入"),
+                new TestCase("TC-43", "保守小合并20|定期大合并|增量写入", "合并策略对比测试",
+                        params("write-buffer-size", "128mb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                "bucket", "1",
+                                "diskMaxSize", "10",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold", "100",
+                                "sort-spill-buffer-size", "128mb",
+                                "write-only", "false",
+                                "compaction.optimization-interval", "5min",//10sec
+                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio", "0",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent", "50000",
+                                "full-compaction.delta-commits", "200",
+//                              "compaction.total-size-threshold", "100",
+//                              "compaction.force-rewrite-all-files", "true",
+                                "num-sorted-run.compaction-trigger", "20",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "30"),
+                        0, 0,
+                        "保守小合并20|定期大合并|增量写入"),
+                new TestCase("TC-44", "合并-write-only模式|增量写入", "合并策略对比测试",
+                        params("write-buffer-size", "128mb",
+                                "write-buffer-spillable", "true",
+                                "target-file-size", "128mb",
+                                "bucket", "1",
+                                "diskMaxSize", "10",
+                                //sorted runs 过多时 merge 防 OOM:
+                                "sort-spill-threshold", "100",
+                                "sort-spill-buffer-size", "128mb",
+                                "write-only", "true",
+                                "compaction.optimization-interval", "5min",//10sec
+                                //保持默认即可：因为新生成的文件不可能是大文件，当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+                                "compaction.size-ratio", "0",
+                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+                                "compaction.max-size-amplification-percent", "50000",
+                                "full-compaction.delta-commits", "200",
+//                              "compaction.total-size-threshold", "100",
+//                              "compaction.force-rewrite-all-files", "true",
+                                "num-sorted-run.compaction-trigger", "200",
+                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+                                "num-sorted-run.stop-trigger", "2147483647"),
+                        0, 0,
+                        "write-only=true：完全跳过合并，最大化写入吞吐"),
+                new TestCase("TC-45", "参数最佳实践：30小合并|1h大合并|增量10亿数据写入", "合并策略对比测试",
                         params("write-buffer-size", "128mb",
                                 "write-buffer-spillable", "true",
                                 "target-file-size", "128mb",
@@ -484,22 +484,50 @@ public class TestCase {
                                 //保持默认即可：因为新生成的文件（L0）不可能是大文件，只要保证合并都是L0的就没写放大：当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
                                 "compaction.size-ratio","1",
                                 //文件写放大倍数：即使太多小文件也不触发Full compaction：
-                                "compaction.max-size-amplification-percent","50000",
+                                "compaction.max-size-amplification-percent","400",
 //                                "full-compaction.delta-commits", "200",
                                 //只合并本次待合并的文件总大小没达到158m就合并，而不是所有文件总大小达到158mb才合并：
 //                                "compaction.total-size-threshold", "158mb",
 //                              "compaction.force-rewrite-all-files", "true",
                                 "num-sorted-run.compaction-trigger", "30",
                                 //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
-                                "num-sorted-run.stop-trigger", "2147483647",
+                                "num-sorted-run.stop-trigger", "200",
                                 "snapshot.num-retained.min", "1",
                                 "snapshot.num-retained.max", "1",
                                 "snapshot.time-retained", "30min"),
                         0, 0,
-                        "30小合并|1h大合并|增量写入")
-                        .batchSize(100_000)
-                        .initTotalRecords(0)
-                        .totalRecords(1_000_000_000)
+                        "30小合并|1h大合并|增量10亿增量写入")
+//                new TestCase("TC-45", "参数最佳实践：30小合并|1h大合并|增量10亿数据写入", "合并策略对比测试",
+//                        params("write-buffer-size", "128mb",
+//                                "write-buffer-spillable", "true",
+//                                "target-file-size", "128mb",
+//                                //bucket越少越好：
+//                                "bucket", "1",
+//                                "diskMaxSize", "10",
+//                                //sorted runs 过多时 merge 防 OOM:
+//                                "sort-spill-threshold","100",
+//                                "sort-spill-buffer-size","128mb",
+//                                "write-only", "false",
+//                                "compaction.optimization-interval","60min",//10sec
+//                                //保持默认即可：因为新生成的文件（L0）不可能是大文件，只要保证合并都是L0的就没写放大：当前最小的几个 sorted run 加在一起，是否比下一个 sorted run 小到一定比例
+//                                "compaction.size-ratio","1",
+//                                //文件写放大倍数：即使太多小文件也不触发Full compaction：
+//                                "compaction.max-size-amplification-percent","50000",
+////                                "full-compaction.delta-commits", "200",
+//                                //只合并本次待合并的文件总大小没达到158m就合并，而不是所有文件总大小达到158mb才合并：
+////                                "compaction.total-size-threshold", "158mb",
+////                              "compaction.force-rewrite-all-files", "true",
+//                                "num-sorted-run.compaction-trigger", "30",
+//                                //# 写入永不因 sorted runs 过多而暂停（默认 = trigger+3 = 8）
+//                                "num-sorted-run.stop-trigger", "2147483647",
+//                                "snapshot.num-retained.min", "1",
+//                                "snapshot.num-retained.max", "1",
+//                                "snapshot.time-retained", "30min"),
+//                        0, 0,
+//                        "30小合并|1h大合并|增量10亿增量写入")
+//                        .batchSize(100_000)
+//                        .initTotalRecords(0)
+//                        .totalRecords(1_000_000_000)
         );
     }
 
