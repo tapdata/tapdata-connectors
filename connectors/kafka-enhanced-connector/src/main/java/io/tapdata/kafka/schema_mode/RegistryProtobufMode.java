@@ -185,7 +185,7 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             String keyValue = createKafkaKeyValueMap(data, tapTable);
 
             // 创建 ProducerRecord
-            ProducerRecord<Object, Object> producerRecord = new ProducerRecord<>(topic(tapTable, tapEvent), null,
+            ProducerRecord<Object, Object> producerRecord = new ProducerRecord<>(topic(tapTable, tapEvent), computePartition(createKafkaKey(data, tapTable), kafkaService.getConfig().getNodePartitionSize()),
                     tapEvent.getTime(), keyValue, message, new RecordHeaders().add("op", op.name().getBytes()));
 
             return Collections.singletonList(producerRecord);

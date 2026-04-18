@@ -16,9 +16,11 @@ import io.tapdata.pdk.apis.exception.NotSupportedException;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.utils.Utils;
 
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -35,12 +37,14 @@ public abstract class AbsSchemaMode {
     protected final IKafkaService kafkaService;
     protected final Log tapLogger;
     protected final Boolean applyDefault;
+    protected final Map<String, Collection<String>> primaryKeyMap;
 
     protected AbsSchemaMode(KafkaSchemaMode kafkaSchemaMode, IKafkaService kafkaService) {
         this.kafkaSchemaMode = kafkaSchemaMode;
         this.kafkaService = kafkaService;
         this.tapLogger = kafkaService.getLog();
         this.applyDefault = kafkaService.getConfig().getNodeApplyDefault();
+        this.primaryKeyMap = new ConcurrentHashMap<>();
     }
 
     public KafkaSchemaMode getSchemaMode() {
@@ -117,7 +121,7 @@ public abstract class AbsSchemaMode {
     }
 
     protected byte[] createKafkaKey(Map<String, Object> data, TapTable tapTable) {
-        Collection<String> keys = tapTable.primaryKeys(true);
+        Collection<String> keys = primaryKeyMap.computeIfAbsent(tapTable.getId(), k -> tapTable.primaryKeys(true));
         if (EmptyKit.isEmpty(keys)) {
             return null;
         }
@@ -125,13 +129,23 @@ public abstract class AbsSchemaMode {
     }
 
     protected String createKafkaKeyValueMap(Map<String, Object> data, TapTable tapTable) {
-        Collection<String> keys = tapTable.primaryKeys(true);
+        Collection<String> keys = primaryKeyMap.computeIfAbsent(tapTable.getId(), k -> tapTable.primaryKeys(true));
         if (EmptyKit.isEmpty(keys)) {
             return null;
         }
         Map<String, Object> keyValue = new HashMap<>();
         keys.forEach(v -> keyValue.put(v, data.get(v)));
         return TapSimplify.toJson(keyValue);
+    }
+
+    protected Integer computePartition(byte[] key, int partitionNum) {
+        if (key == null) {
+            return null;
+        }
+        if (partitionNum <= 0) {
+            return null;
+        }
+        return Utils.toPositive(Utils.murmur2(key)) % partitionNum;
     }
 
     protected String topic(TapTable table, TapEvent tapEvent) {

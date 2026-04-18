@@ -159,7 +159,7 @@ public class RegistryJsonMode extends AbsSchemaMode {
             // 创建 ProducerRecord
             ProducerRecord<Object, Object> producerRecord = new ProducerRecord<>(
                     topic(tapTable, tapEvent),
-                    null,
+                    computePartition(createKafkaKey(data, tapTable), kafkaService.getConfig().getNodePartitionSize()),
                     tapEvent.getTime(),
                     keyValue,
                     valueNode,  // 使用 JsonNode 而不是硬编码的对象

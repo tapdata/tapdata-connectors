@@ -471,6 +471,9 @@ public class KafkaService implements IKafkaService {
         try {
             logger.info("Deleting topic '{}'...", topic);
             getAdminService().dropTopics(Collections.singleton(topic));
+            if (config.getConnectionSchemaRegister()) {
+
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
