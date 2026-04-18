@@ -115,6 +115,10 @@ public class KafkaConfig extends BasicConfig implements
         return nodeConfigGet("batchMaxDelay", 2000);
     }
 
+    public boolean getSplitUpdatePk() {
+        return nodeConfigGet("splitUpdatePk", true);
+    }
+
     public KafkaConcurrentReadMode getNodeConcurrentReadMode() {
 //        String concurrentReadMode = nodeConfigGet("concurrentReadMode", KafkaConcurrentReadMode.SINGLE.name());
 //        return KafkaConcurrentReadMode.valueOf(concurrentReadMode);

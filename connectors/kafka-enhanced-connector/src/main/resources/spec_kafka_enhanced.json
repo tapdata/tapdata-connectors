@@ -808,6 +808,25 @@
               "x-decorator-props": {
                 "tooltip": "${partitionSizeTip}"
               }
+            },
+            "splitUpdatePk": {
+              "type": "boolean",
+              "title": "${splitUpdatePk}",
+              "default": true,
+              "x-index": 30,
+              "x-decorator": "FormItem",
+              "x-component": "Switch",
+              "x-reactions": {
+                "fulfill": {
+                  "state": {
+                    "visible": "{{$deps[0]!=='source' && $deps[1].length}}"
+                  }
+                },
+                "dependencies": [
+                  "__TAPDATA.connection_type",
+                  "$inputs"
+                ]
+              }
             }
           }
         },
@@ -949,6 +968,7 @@
       "replicasSizeTip": "Used when creating a topic, default: 1",
       "partitionSize": "Number of partitions",
       "partitionSizeTip": "Used when creating a topic, default: 3 (if the number of server partitions is less than this configuration, it will be increased)",
+      "splitUpdatePk": "Split update unique key",
       "useSasl": "Enable SASL",
       "saslMechanism": "Mechanism",
       "saslUserPassword": "User And Password",
@@ -1031,6 +1051,7 @@
       "replicasSizeTip": "创建主题时使用，默认：1",
       "partitionSize": "分区数",
       "partitionSizeTip": "创建主题时使用，默认：3（如果服务端分区数少于此配置，则会进行增加）",
+      "splitUpdatePk": "修改唯一键拆分",
       "useSasl": "启用 SASL",
       "saslMechanism": "安全机制",
       "saslUserPassword": "用户密码",
@@ -1113,6 +1134,7 @@
       "replicasSizeTip": "建立主題時使用，預設：1",
       "partitionSize": "分區數",
       "partitionSizeTip": "建立主題時使用，預設：3（如果服務端分區數少於此配置，則會進行增加）",
+      "splitUpdatePk": "修改唯一鍵拆分",
       "useSasl": "啟用 SASL",
       "saslMechanism": "安全機制",
       "saslUserPassword": "用戶密碼",

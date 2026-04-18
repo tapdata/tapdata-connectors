@@ -55,7 +55,8 @@ public class FlinkSchemaMode extends AbsSchemaMode {
 				beforeValue.put("data", before);
 				beforeValue.put("op", "-U");
 				byte[] beforeKey = createKafkaKey(before, table);
-				producerRecords.add(new ProducerRecord<>(topic, beforeKey, beforeValue));
+				Integer partition = computePartition(beforeKey, kafkaService.getConfig().getNodePartitionSize());
+				producerRecords.add(new ProducerRecord<>(topic, partition, beforeKey, beforeValue));
 			}
 			Map<String, Object> afterValue = new HashMap<>();
 			afterValue.put("data", after);

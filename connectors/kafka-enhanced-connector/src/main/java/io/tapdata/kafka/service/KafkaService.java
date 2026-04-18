@@ -41,6 +41,10 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.errors.SerializationException;
 
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -372,23 +376,42 @@ public class KafkaService implements IKafkaService {
         }
     }
 
+    private List<ProducerRecordWrapper> wrapProduceRecord(TapTable table, TapRecordEvent recordEvent, Collection<String> primaryKey) {
+        List<ProducerRecordWrapper> producerRecords = new ArrayList<>();
+        if (config.getSplitUpdatePk() && recordEvent instanceof TapUpdateRecordEvent updateRecordEvent) {
+            Map<String, Object> after = updateRecordEvent.getAfter();
+            Map<String, Object> before = updateRecordEvent.getBefore();
+            if (!primaryKey.isEmpty() && primaryKey.stream().anyMatch(v -> !Objects.equals(after.get(v), before.get(v)))) {
+                TapDeleteRecordEvent deleteRecordEvent = new TapDeleteRecordEvent();
+                updateRecordEvent.clone(deleteRecordEvent);
+                schemaModeService.fromTapEvent(table, deleteRecordEvent).forEach(record -> {
+                    producerRecords.add(new ProducerRecordWrapper(deleteRecordEvent, record));
+                });
+                TapInsertRecordEvent insertRecordEvent = new TapInsertRecordEvent();
+                updateRecordEvent.clone(insertRecordEvent);
+                schemaModeService.fromTapEvent(table, insertRecordEvent).forEach(record -> {
+                    producerRecords.add(new ProducerRecordWrapper(insertRecordEvent, record));
+                });
+                return producerRecords;
+            }
+        }
+        schemaModeService.fromTapEvent(table, recordEvent).forEach(record -> {
+            producerRecords.add(new ProducerRecordWrapper(recordEvent, record));
+        });
+        return producerRecords;
+    }
+
     @Override
     public void writeRecord(List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) {
         AtomicLong insert = new AtomicLong(0);
         AtomicLong update = new AtomicLong(0);
         AtomicLong delete = new AtomicLong(0);
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
-
+        Collection<String> primaryKey = table.primaryKeys(true);
         List<ProducerRecordWrapper> producerRecords = new ArrayList<>();
         for (TapRecordEvent recordEvent : recordEvents) {
-            List<ProducerRecord<Object, Object>> fromTapEvents = schemaModeService.fromTapEvent(table, recordEvent);
-            if (null != fromTapEvents && !fromTapEvents.isEmpty()) {
-                for (ProducerRecord<Object, Object> fromTapEvent : fromTapEvents) {
-                    producerRecords.add(new ProducerRecordWrapper(recordEvent, fromTapEvent));
-                }
-            }
+            producerRecords.addAll(wrapProduceRecord(table, recordEvent, primaryKey));
         }
-
         CountDownLatch latch = new CountDownLatch(producerRecords.size());
         AtomicReference<RuntimeException> sendEx = new AtomicReference<>();
         for (ProducerRecordWrapper producerRecord : producerRecords) {
@@ -472,7 +495,7 @@ public class KafkaService implements IKafkaService {
             logger.info("Deleting topic '{}'...", topic);
             getAdminService().dropTopics(Collections.singleton(topic));
             if (config.getConnectionSchemaRegister()) {
-
+                deleteTableSchemaRegistryInfo(topic);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -542,6 +565,76 @@ public class KafkaService implements IKafkaService {
             });
             consumer.accept(tapEvents, o);
         };
+    }
+
+    private void deleteTableSchemaRegistryInfo(String topic) {
+        List<String> registryUrls = new ArrayList<>();
+        for (String registryUrl : config.getConnectionSchemaRegisterUrl().split(",")) {
+            if (registryUrl != null) {
+                registryUrl = registryUrl.trim();
+                if (!registryUrl.isEmpty()) {
+                    registryUrls.add(registryUrl);
+                }
+            }
+        }
+        if (registryUrls.isEmpty()) {
+            logger.warn("Schema Registry is enabled but no registry url configured, skip deleting subjects for topic '{}'", topic);
+            return;
+        }
+
+        for (String subject : Arrays.asList(topic + "-key", topic + "-value")) {
+            boolean handled = false;
+            for (String registryUrl : registryUrls) {
+                try {
+                    int code = deleteSchemaRegistrySubject(registryUrl, subject, false);
+                    if (code == HttpURLConnection.HTTP_NOT_FOUND) {
+                        handled = true;
+                        break;
+                    }
+                    if (code >= 200 && code < 300) {
+                        int permanentCode = deleteSchemaRegistrySubject(registryUrl, subject, true);
+                        if (permanentCode != HttpURLConnection.HTTP_NOT_FOUND && (permanentCode < 200 || permanentCode >= 300)) {
+                            logger.warn("Delete schema registry subject '{}' permanently failed, url: {}, code: {}", subject, registryUrl, permanentCode);
+                        }
+                        handled = true;
+                        logger.info("Deleted schema registry subject '{}' for topic '{}'", subject, topic);
+                        break;
+                    }
+                    logger.warn("Delete schema registry subject '{}' failed, url: {}, code: {}", subject, registryUrl, code);
+                } catch (Exception e) {
+                    logger.warn("Delete schema registry subject '{}' failed, url: {}, error: {}", subject, registryUrl, e.getMessage());
+                }
+            }
+            if (!handled) {
+                logger.warn("Failed to delete schema registry subject '{}' for topic '{}' from all configured registry endpoints", subject, topic);
+            }
+        }
+    }
+
+    private int deleteSchemaRegistrySubject(String registryUrl, String subject, boolean permanent) throws Exception {
+        String baseUrl = registryUrl.endsWith("/") ? registryUrl.substring(0, registryUrl.length() - 1) : registryUrl;
+        String url = baseUrl + "/subjects/" + URLEncoder.encode(subject, StandardCharsets.UTF_8.name());
+        if (permanent) {
+            url += "?permanent=true";
+        }
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setRequestMethod("DELETE");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(10000);
+            connection.setDoInput(true);
+            if (config.getConnectionBasicAuth()) {
+                String auth = config.getConnectionAuthUserName() + ":" + config.getConnectionAuthPassword();
+                String encoded = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+                connection.setRequestProperty("Authorization", "Basic " + encoded);
+            }
+            return connection.getResponseCode();
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
     }
 
 }
