@@ -2,8 +2,8 @@ package io.tapdata.kafka.service;
 
 import io.tapdata.connector.error.KafkaErrorCodes;
 import io.tapdata.connector.utils.AsyncBatchPusher;
-import io.tapdata.connector.utils.ErrorHelper;
 import io.tapdata.connector.utils.ConcurrentUtils;
+import io.tapdata.connector.utils.ErrorHelper;
 import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
@@ -36,7 +36,6 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.errors.SerializationException;
@@ -402,7 +401,7 @@ public class KafkaService implements IKafkaService {
     }
 
     @Override
-    public void writeRecord(List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) {
+    public void writeRecord(KafkaProducer<Object, Object> producer, List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) {
         AtomicLong insert = new AtomicLong(0);
         AtomicLong update = new AtomicLong(0);
         AtomicLong delete = new AtomicLong(0);
@@ -415,7 +414,7 @@ public class KafkaService implements IKafkaService {
         CountDownLatch latch = new CountDownLatch(producerRecords.size());
         AtomicReference<RuntimeException> sendEx = new AtomicReference<>();
         for (ProducerRecordWrapper producerRecord : producerRecords) {
-            getProducer().send(producerRecord.getProducerRecord(), (metadata, exception) -> {
+            producer.send(producerRecord.getProducerRecord(), (metadata, exception) -> {
                 try {
                     TapRecordEvent recordEvent = producerRecord.getRecordEvent();
                     if (exception != null) {
@@ -451,6 +450,11 @@ public class KafkaService implements IKafkaService {
         } finally {
             consumer.accept(listResult.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get()));
         }
+    }
+
+    @Override
+    public void writeRecord(List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) {
+        writeRecord(getProducer(), recordEvents, table, consumer);
     }
 
     @Override
