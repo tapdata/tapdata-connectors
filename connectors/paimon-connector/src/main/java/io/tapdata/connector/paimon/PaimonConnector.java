@@ -227,7 +227,7 @@ public class PaimonConnector extends ConnectorBase {
         });
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> (int) (tapDateValue.getValue().getSeconds() / 86400));
-        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().getSeconds().intValue());
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> (int) (tapTimeValue.getValue().getSeconds() * 1000 + tapTimeValue.getValue().getNano() / 1000_000));
         codecRegistry.registerFromTapValue(TapYearValue.class, "CHAR(4)", TapValue::getOriginValue);
     }
 

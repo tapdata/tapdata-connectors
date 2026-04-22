@@ -2423,7 +2423,7 @@ public class PaimonService implements Closeable {
 				return null;
 			}
 			case "TIME_WITHOUT_TIME_ZONE":
-				return LocalTime.ofSecondOfDay(row.getInt(pos)).atDate(LocalDate.ofYearDay(1970, 1));
+				return LocalTime.ofNanoOfDay(row.getInt(pos) * 1000_000L).atDate(LocalDate.ofYearDay(1970, 1));
 			case "BINARY":
 			case "VARBINARY":
 			case "BYTES":
