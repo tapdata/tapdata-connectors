@@ -556,7 +556,7 @@ public class PaimonService implements Closeable {
 		if (config.isDynamicBucketMode()) {
 			// Dynamic bucket mode: set bucket to -1
 			// This mode provides better flexibility
-			schemaBuilder.option("bucket", String.valueOf(config.getBucketCount()));
+			schemaBuilder.option("bucket", "-1");
 		} else {
 			// Fixed bucket mode: set specific bucket count
 			Integer bucketCount = config.getBucketCount(tableName);
@@ -1356,7 +1356,7 @@ public class PaimonService implements Closeable {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
-		if (config.getBucketMode(table.getName()).equals("fixed") || config.getBucketCount() == -2) {
+		if (config.getBucketMode(table.getName()).equals("fixed")) {
 			writer.write(row);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
@@ -1401,7 +1401,7 @@ public class PaimonService implements Closeable {
 				// Convert update to delete + insert
 				// First, write DELETE using before data
 				beforeRow.setRowKind(RowKind.DELETE);
-				if (config.getBucketMode(table.getName()).equals("fixed") || config.getBucketCount() == -2) {
+				if (config.getBucketMode(table.getName()).equals("fixed")) {
 					writer.write(beforeRow);
 				} else {
 					int bucket = selectBucketForDynamic(beforeRow, table);
@@ -1505,7 +1505,7 @@ public class PaimonService implements Closeable {
 		GenericRow row = convertToGenericRow(before, table, identifier);
 		// Set row kind to DELETE
 		row.setRowKind(RowKind.DELETE);
-		if (config.getBucketMode(table.getName()).equals("fixed") || config.getBucketCount() == -2) {
+		if (config.getBucketMode(table.getName()).equals("fixed")) {
 			writer.write(row);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
