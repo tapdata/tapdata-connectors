@@ -162,9 +162,9 @@ public class TestModeConfig {
         
         // 特殊处理 auto 模式
         if (AUTO_MODE_KEY.equals(normalized)) {
-            return "all"; // auto 模式默认运行全量
+            return AUTO_MODE_KEY; // auto 模式默认运行全量
         }
-        
+
         // 遍历所有模式查找匹配
         for (TestModeEntry mode : ALL_MODES) {
             if (mode.getId().equals(normalized) || 

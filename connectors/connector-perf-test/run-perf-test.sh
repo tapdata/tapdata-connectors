@@ -1,9 +1,9 @@
 #!/bin/bash
 ################################################################################
-# Paimon 写入性能参数调优测试 - 一键启动脚本
-# 
+# Paimon 写入性能参数调优测试 - 一键启动脚本（独立工程版）
+#
 # 测试模式配置已统一到 TestModeConfig.java
-# 新增测试模式只需修改 TestModeConfig.ALL_MODES 列表
+# 新增测试模式只需修改 TestModeConfig.java，无需修改此脚本
 #
 # 用法: ./run-perf-test.sh [模式]
 #
@@ -34,14 +34,6 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# ═══════════════════════════════════════════════════════════════════════
-#  测试模式配置（与 TestModeConfig.java 保持一致）
-#  新增模式请修改 TestModeConfig.java，无需修改此脚本
-# ═══════════════════════════════════════════════════════════════════════
-
-# 所有可用的命令行别名（用于帮助提示）
-VALID_MODES="basic all nosmallfile single bucket compaction buffer target format pkupdate parallelism auto"
-
 echo -e "${BLUE}"
 echo "════════════════════════════════════════════════════════════"
 echo "  Paimon 1.3.1  写入性能参数调优测试"
@@ -65,7 +57,7 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     echo "  9  format       - 文件格式压缩测试(TC-60~64)"
     echo "  10 pkupdate     - 主键更新测试(TC-70~73)"
     echo "  11 parallelism  - 写入并行度测试(TC-80~83)"
-    echo "  auto            - 全自动运行(无需交互)"
+    echo "  auto            - 全自动运行(无需按回车)"
     echo ""
     echo "默认模式: basic (1)"
     exit 0
@@ -73,7 +65,7 @@ fi
 
 # ── 环境检查 ──────────────────────────────────────────────────────────────────
 if ! command -v java &>/dev/null; then
-    echo -e "${RED}[ERROR] 未找到 Java，请先安装 JDK 8+${NC}"; exit 1
+    echo -e "${RED}[ERROR] 未找到 Java，请先安装 JDK 11+${NC}"; exit 1
 fi
 echo -e "${GREEN}[INFO] Java : $(java -version 2>&1 | head -1)${NC}"
 
@@ -86,15 +78,15 @@ echo ""
 # ── 获取测试模式 ────────────────────────────────────────────────────────────
 TEST_MODE="${1:-}"
 
-# ── 编译主工程 ──────────────────────────────────────────────────────────────
+# ── 编译 paimon-connector 主工程（兄弟目录） ──────────────────────────────
 echo -e "${YELLOW}[1/3] 编译 paimon-connector 主工程...${NC}"
-mvn clean install -DskipTests -q -f pom.xml
+mvn clean install -DskipTests -q -f ../paimon-connector/pom.xml
 echo -e "${GREEN}      主工程编译完成${NC}"
 echo ""
 
-# ── 编译测试代码 ────────────────────────────────────────────────────────────
+# ── 编译性能测试代码（src/main/java，标准 compile goal） ────────────────────
 echo -e "${YELLOW}[2/3] 编译性能测试代码...${NC}"
-mvn test-compile -q -f pom-perf-test.xml
+mvn compile -q
 echo -e "${GREEN}      测试代码编译完成${NC}"
 echo ""
 
@@ -108,13 +100,11 @@ JVM_OPTS="-Xmx4g -Xms512m -XX:+UseG1GC"
 if [ -n "$TEST_MODE" ]; then
     echo -e "${BLUE}>> 测试模式: ${TEST_MODE}${NC}"
     mvn exec:java \
-        -f pom-perf-test.xml \
-        -Dexec.mainClass="io.tapdata.connector.paimon.perf.PerformanceTestRunner" \
         -Dexec.cleanupDaemonThreads=false \
         -Dexec.args="${TEST_MODE}" \
         -Dexec.jvmArgs="${JVM_OPTS}"
 else
-    # 交互式菜单（与 TestModeConfig.java 保持一致）
+    # 交互式菜单
     echo -e "${BLUE}请选择测试模式 (直接回车默认 1):${NC}"
     echo "  1  basic        - 基础用例组(TC-01~03)"
     echo "  2  all          - 全量测试(所有组)"
@@ -134,8 +124,6 @@ else
     echo ""
     echo -e "${BLUE}>> 测试模式: ${CHOICE}${NC}"
     mvn exec:java \
-        -f pom-perf-test.xml \
-        -Dexec.mainClass="io.tapdata.connector.paimon.perf.PerformanceTestRunner" \
         -Dexec.cleanupDaemonThreads=false \
         -Dexec.args="${CHOICE}" \
         -Dexec.jvmArgs="${JVM_OPTS}"

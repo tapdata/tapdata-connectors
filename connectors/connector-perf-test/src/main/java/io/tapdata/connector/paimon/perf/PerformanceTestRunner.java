@@ -9,6 +9,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.spec.TapNodeSpecification;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -38,12 +39,12 @@ public class PerformanceTestRunner {
 
     // ─── 常量 ─────────────────────────────────────────────────────────────────
 
-    public static final String BASE_TEST_DIR = "/tmp/paimon-perf-test";
+    public static final String BASE_TEST_DIR = "/tmp/paimon-perf-test/";
     private static final String DATABASE = "default";
     private static final String TABLE_NAME = "test_table";
     public static final int TOTAL_RECORDS = 5_000_000;   // 数据集总大小
-    private static final int BATCH_SIZE = 1_000_00; // 每批次写入记录数，也是PaimonService 累积批次大小
-    private static final int INIT_TOTAL_RECORDS = 0; //模拟初始化阶段全表数据量
+    private static final int BATCH_SIZE = 100_000; // 每批次写入记录数，也是PaimonService 累积批次大小
+    private static final int INIT_TOTAL_RECORDS = 5_000_000; //模拟初始化阶段全表数据量
 
     // ─── S3 测试配置 ──────────────────────────────────────────────────────────
 
@@ -52,6 +53,7 @@ public class PerformanceTestRunner {
 
     /** S3 端点地址 */
     private static final String S3_ENDPOINT = "http://192.168.1.184:9080";
+//    private static final String S3_ENDPOINT = "http://113.98.206.142:9080";
 
     /** S3 访问密钥 */
     private static final String S3_ACCESS_KEY = "admin";
@@ -92,7 +94,7 @@ public class PerformanceTestRunner {
 
     private static Log buildConsoleLog() {
         return new Log() {
-            @Override public void debug(String m, Object... p) {}
+            @Override public void debug(String m, Object... p) { print("[DEBUG] ", m, p);}
             @Override public void info(String m, Object... p)  { print("[INFO] ", m, p); }
             @Override public void warn(String m, Object... p)  { print("[WARN] ", m, p); }
             @Override public void error(String m, Object... p) { print("[ERROR]", m, p); }
@@ -117,7 +119,23 @@ public class PerformanceTestRunner {
 
     private PaimonService buildPaimonService(TestCase tc) throws Exception {
         PaimonConfig config = new PaimonConfig();
-        
+
+        // ── 核心参数 → PaimonConfig setters（会自动填充 tableProperties）──────────
+        applyConfigSetters(config, tc);
+        applyConfigSettersGlobal(config, tc);
+
+        PaimonService service = new PaimonService(config, logger);
+        service.init();
+        return service;
+    }
+
+    /**
+     * 全局参数生效：优先级高于TestCase中
+     *
+     * @param config
+     * @param tc
+     */
+    private void applyConfigSettersGlobal(PaimonConfig config, TestCase tc) {
         // ── 存储类型和仓库路径 ──────────────────────────────────────────────
         if (ENABLE_S3) {
             // 使用 S3 存储
@@ -132,37 +150,35 @@ public class PerformanceTestRunner {
             // 使用本地文件系统
             config.setStorageType("local");
             config.setWarehouse(warehouseForCase(tc));
-            System.out.println("  >> 存储类型: 本地文件系统");
+            System.out.println("  >> 存储类型: 本地文件系统，地址：" + config.getWarehouse());
         }
-        
+
         config.setDatabase(database);
-        config.setBatchAccumulationSize(BATCH_SIZE);
-        config.setCommitIntervalMs(0);         // 关闭时间触发，依靠数量触发
-        config.setEnableAsyncCommit(false);    // 测试中关闭异步 commit
+//        config.setBatchAccumulationSize(BATCH_SIZE);
+        //模拟全量+增量模式使用：
         config.setCreateAutoInc(true);
+        config.setDiskTmpDir(BASE_TEST_DIR + "/tmp," + BASE_TEST_DIR + "/tmp2");
+        //为了验证Paimon参数的效果，测试中关闭：
+        config.setEnableAutoCompaction(false);
 
-        // 设置 bucketMode & bucketCount（先给一个安全默认，后续 tableProperties 可覆盖）
+    }
+
+    /**
+     * 将参数 Map 中的所有值自动写入到 PaimonConfig 的对应属性中
+     * 使用反射机制自动匹配参数名和 setter 方法，支持特殊映射和类型转换
+     *
+     * 支持的参数映射规则：
+     * 1. 特殊映射：通过 specialSetters 定义复杂映射关系（如单位转换、多属性设置等）
+     * 2. 反射自动映射：参数名转驼峰命名后匹配 setter 方法
+     * 3. 表属性降级：未匹配的参数放入 tableProperties，用于构建 Paimon 表选项
+     */
+    private void applyConfigSetters(PaimonConfig config, TestCase tc) {
+
+        // 批次累积大小
+        config.setBatchAccumulationSize(tc.getBatchSize());
         Map<String, String> params = tc.getParameters();
-        String bucketStr = params.getOrDefault("bucket", "-1");
-        int bucket;
-        try { bucket = Integer.parseInt(bucketStr); } catch (NumberFormatException e) { bucket = -1; }
 
-        if (bucket > 0) {
-            config.setBucketMode("fixed");
-            config.setBucketCount(bucket);
-        } else if (bucket == -2) {
-//            config.setBucketMode("fixed");
-            config.setBucketCount(bucket);
-        } else {
-            config.setBucketMode("dynamic");
-        }
-
-        // ── 核心参数 → PaimonConfig setters ──────────────────────────────────
-        applyConfigSetters(config, params);
-
-        // ── 所有参数追加到 tableProperties（最高优先级覆盖）─────────────────
-        List<LinkedHashMap<String, String>> tableProps = buildTableProperties(params);
-        config.setTableProperties(tableProps);
+        if (params == null || params.isEmpty()) return;
 
         // ── 写入线程 / 并行度 ─────────────────────────────────────────────────
         String parallelism = params.get("sink.parallelism");
@@ -171,52 +187,203 @@ public class PerformanceTestRunner {
             catch (NumberFormatException ignored) {}
         }
 
-        PaimonService service = new PaimonService(config);
-        service.init();
-        return service;
-    }
+        // 特殊参数映射表：参数名 → Setter 方法调用逻辑
+        Map<String, ConfigSetter> specialSetters = new HashMap<>();
+        
+        // 缓冲区大小（MB）
+        specialSetters.put("write-buffer-size", (cfg, val) -> cfg.setWriteBufferSize(parseSizeMb(val)));
+        // 目标文件大小（MB）
+        specialSetters.put("target-file-size", (cfg, val) -> cfg.setTargetFileSize(parseSizeMb(val)));
+        // 分桶策略
+        specialSetters.put("bucket", (cfg, val) -> {
+            int bucket = Integer.parseInt(val);
+            if (bucket > 0) {
+                cfg.setBucketMode("fixed");
+                cfg.setBucketCount(bucket);
+            } else if (bucket == -1 || bucket == -2) {
+                cfg.setBucketMode("dynamic");
+                cfg.setBucketCount(bucket);
+            }
+        });
+        // 写入线程/并行度
+        specialSetters.put("sink.parallelism", (cfg, val) -> cfg.setWriteThreads(Integer.parseInt(val)));
+        // 仅写入模式（禁用自动合并）:注释掉的原因为可以走下面的反射
+//        specialSetters.put("enableAutoCompaction", (cfg, val) -> cfg.setEnableAutoCompaction(!Boolean.parseBoolean(val)));
+        // 缓冲区溢写
+        specialSetters.put("write-buffer-spillable", (cfg, val) -> cfg.setDiskOverflowWrite(Boolean.parseBoolean(val)));
+        // 溢写最大磁盘大小（GB）
+        specialSetters.put("write-buffer-spill.max-disk-size", (cfg, val) -> cfg.setDiskMaxSize(parseSizeGb(val)));
+        // 溢写临时目录
+        specialSetters.put("write-buffer-spill.tmp-dirs", (cfg, val) -> cfg.setDiskTmpDir(val));
+        // 提交间隔
+        specialSetters.put("commit-interval-ms", (cfg, val) -> cfg.setCommitIntervalMs(Integer.parseInt(val)));
+        // 异步提交
+        specialSetters.put("enable-async-commit", (cfg, val) -> cfg.setEnableAsyncCommit(Boolean.parseBoolean(val)));
+        // 合并间隔
+        specialSetters.put("compaction-interval-minutes", (cfg, val) -> cfg.setCompactionIntervalMinutes(Integer.parseInt(val)));
+        // 主键更新
+        specialSetters.put("enable-primary-key-update", (cfg, val) -> cfg.setEnablePrimaryKeyUpdate(Boolean.parseBoolean(val)));
+        // 分区键（逗号分隔）
+        specialSetters.put("partition-key", (cfg, val) -> cfg.setPartitionKey(Arrays.asList(val.split(","))));
 
-    private void applyConfigSetters(PaimonConfig config, Map<String, String> params) {
-        // write-buffer-size: e.g. "256mb" → 256
-        String wbs = params.get("write-buffer-size");
-        if (wbs != null) {
-            try { config.setWriteBufferSize(parseSizeMb(wbs)); } catch (Exception ignored) {}
-        }
-        String tfs = params.get("target-file-size");
-        if (tfs != null) {
-            try { config.setTargetFileSize(parseSizeMb(tfs)); } catch (Exception ignored) {}
-        }
-        config.setProperties(map2prop(params));
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (value == null || value.isEmpty()) continue;
 
-    }
+            try {
+                // 1. 优先检查特殊映射
+                ConfigSetter specialSetter = specialSetters.get(key);
+                if (specialSetter != null) {
+                    specialSetter.set(config, value);
+                    System.out.println("  [INFO] 参数='" + key + "'，值="+ value +"，通过Tapdata属性设置");
+                    continue;
+                }
 
-    private Properties map2prop(Map<String, String> params) {
-        Properties props = new Properties();
-        for (Map.Entry<String, String> e : params.entrySet()) {
-            props.setProperty(e.getKey(), e.getValue());
+                // 2. 尝试通过反射自动设置
+                if (applyConfigPropertyByReflection(config, key, value)) {
+                    System.out.println("  [WARN] 参数='" + key + "' '，值="+ value +"，尝试通过反射自动设置成功");
+                    continue;
+                }
+
+                // 3. 未匹配的参数放入 tableProperties（用于构建 Paimon 表选项）
+                put2TableProperties(config, key, value);
+            } catch (Exception e) {
+                System.err.println("  [ERROR] 设置配置属性失败: " + key + "=" + value + " - " + e.getMessage());
+            }
         }
-        return props;
     }
 
     /**
-     * 将所有参数转为 tableProperties 键值对列表（最终覆盖 createTable 中的硬编码值）
+     * 通过反射自动调用 PaimonConfig 的 setter 方法
+     * 
+     * @param config PaimonConfig 实例
+     * @param key 参数名（支持横线和下划线分隔，会自动转为驼峰）
+     * @param value 参数值（String 类型，会自动类型转换）
+     * @return true 如果成功找到并调用了对应的 setter 方法
      */
-    private List<LinkedHashMap<String, String>> buildTableProperties(Map<String, String> params) {
-        List<LinkedHashMap<String, String>> props = new ArrayList<>();
-        for (Map.Entry<String, String> e : params.entrySet()) {
-            LinkedHashMap<String, String> m = new LinkedHashMap<>();
-            m.put("propKey",   e.getKey());
-            m.put("propValue", e.getValue());
-            props.add(m);
+    private boolean applyConfigPropertyByReflection(PaimonConfig config, String key, String value) {
+        // 将参数名转为驼峰命名（例：write-buffer-size → writeBufferSize）
+        String camelKey = toCamelCase(key);
+        
+        // 构造 setter 方法名
+        String setterName = "set" + Character.toUpperCase(camelKey.charAt(0)) + camelKey.substring(1);
+        
+        try {
+            // 遍历所有可能的参数类型
+            Class<?>[] paramTypes = {String.class, Integer.class, Boolean.class, List.class};
+            
+            for (Class<?> paramType : paramTypes) {
+                try {
+                    java.lang.reflect.Method method = PaimonConfig.class.getMethod(setterName, paramType);
+                    Object convertedValue = convertValue(value, paramType);
+                    if (convertedValue != null) {
+                        method.invoke(config, convertedValue);
+                        return true;
+                    }
+                } catch (NoSuchMethodException e) {
+                    // 继续尝试下一个类型
+                }
+            }
+        } catch (Exception e) {
+            // 反射调用失败，返回 false 交由上层处理
         }
-        return props;
+        
+        return false;
     }
 
-    /** 解析带单位的大小，返回 MB 数（如 "512mb" → 512，"1gb" → 1024） */
+    /**
+     * 将横线/下划线分隔的字符串转为驼峰命名
+     * 例：write-buffer-size → writeBufferSize
+     *      s3_endpoint → s3Endpoint
+     */
+    private String toCamelCase(String str) {
+        StringBuilder result = new StringBuilder();
+        boolean nextUpper = false;
+        
+        for (int i = 0; i < str.length(); i++) {
+            char c = str.charAt(i);
+            if (c == '-' || c == '_' || c == '.') {
+                nextUpper = true;
+            } else {
+                if (nextUpper) {
+                    result.append(Character.toUpperCase(c));
+                    nextUpper = false;
+                } else {
+                    result.append(c);
+                }
+            }
+        }
+        
+        return result.toString();
+    }
+
+    /**
+     * 将 String 值转换为目标类型
+     */
+    private Object convertValue(String value, Class<?> targetType) {
+        if (targetType == String.class) {
+            return value;
+        } else if (targetType == Integer.class) {
+            try {
+                return Integer.parseInt(value);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        } else if (targetType == Boolean.class) {
+            return Boolean.parseBoolean(value);
+        } else if (targetType == List.class) {
+            return Arrays.asList(value.split(","));
+        }
+        return null;
+    }
+
+    /**
+     * 配置设置器函数式接口
+     */
+    @FunctionalInterface
+    private interface ConfigSetter {
+        void set(PaimonConfig config, String value);
+    }
+
+    /**
+     * 将未匹配的参数放入 PaimonConfig.tableProperties 中
+     * 这些属性将直接写入 Paimon 表的 OPTIONS 中，用于构建表配置
+     * 
+     * @param config PaimonConfig 实例
+     * @param key 参数名
+     * @param value 参数值
+     */
+    private void put2TableProperties(PaimonConfig config, String key, String value) {
+        List<LinkedHashMap<String, String>> tableProperties = config.getTableProperties();
+
+        LinkedHashMap<String, String> kv = new LinkedHashMap<>();
+        // 将参数添加到第一个 LinkedHashMap 中
+        kv.put("propKey", key);
+        kv.put("propValue", value);
+        tableProperties.add(kv);
+        System.out.println("  [INFO] 参数='" + key + "' '，值="+ value +"，通过paimon属性设置");
+    }
+
+    /**
+     * 解析带单位的大小，返回 MB 数（如 "512mb" → 512，"1gb" → 1024）
+     */
     private static int parseSizeMb(String s) {
         s = s.trim().toLowerCase();
-        if (s.endsWith("gb")) return Integer.parseInt(s.replace("gb", "").trim()) * 1024;
+        if (s.endsWith("gb")) return (int) (Double.parseDouble(s.replace("gb", "").trim()) * 1024);
         if (s.endsWith("mb")) return Integer.parseInt(s.replace("mb", "").trim());
+        if (s.endsWith("kb")) return (int) (Double.parseDouble(s.replace("kb", "").trim()) / 1024);
+        return Integer.parseInt(s);
+    }
+
+    /**
+     * 解析带单位的大小，返回 GB 数
+     */
+    private static int parseSizeGb(String s) {
+        s = s.trim().toLowerCase();
+        if (s.endsWith("tb")) return (int) (Double.parseDouble(s.replace("tb", "").trim()) * 1024);
+        if (s.endsWith("gb")) return Integer.parseInt(s.replace("gb", "").trim());
+        if (s.endsWith("mb")) return (int) (Double.parseDouble(s.replace("mb", "").trim()) / 1024);
         return Integer.parseInt(s);
     }
 
@@ -230,7 +397,7 @@ public class PerformanceTestRunner {
     private void createFreshTable(PaimonService service) throws Exception {
         try { service.dropTable(tableName); } catch (Exception ignored) {}
         TapTable table = createTapTable();
-        service.createTable(table, logger);
+        service.createTable(table);
     }
 
     // ─── 核心执行方法 ──────────────────────────────────────────────────────────
@@ -289,18 +456,36 @@ public class PerformanceTestRunner {
                 tc.getDataSize(), tc.getPrimaryKeyDuplicateRate(),
                 tc.getQps() > 0 ? tc.getQps() + "" : "无限制");
 
+            // 显示用例级别的参数覆盖
+            if (tc.getBatchSize() != null || tc.getInitTotalRecords() != null) {
+                System.out.println("  >> 用例级别参数覆盖:");
+                if (tc.getBatchSize() != null) {
+                    System.out.printf("     - batchSize = %,d (全局: %,d)%n", tc.getBatchSize(), BATCH_SIZE);
+                }
+                if (tc.getInitTotalRecords() != null) {
+                    System.out.printf("     - initTotalRecords = %,d (全局: %,d)%n", tc.getInitTotalRecords(), INIT_TOTAL_RECORDS);
+                }
+            }
+
             // 2. 执行写入
             TapTable tapTable = createTapTable();
             DataGenerator gen = new DataGenerator(tc.getPrimaryKeyDuplicateRate(), tableName);
 
+            // 使用 TestCase 独立的参数（如果设置了），否则使用全局常量
+            long totalRecordsToWrite = tc.getDataSize();
+            Integer caseBatchSize = tc.getBatchSize();
+            int effectiveBatchSize = caseBatchSize != null ? caseBatchSize : BATCH_SIZE;
+            Integer caseInitTotal = tc.getInitTotalRecords();
+            int effectiveInitTotal = caseInitTotal != null ? caseInitTotal : INIT_TOTAL_RECORDS;
+
             startMs = System.currentTimeMillis();
-            long total  = tc.getDataSize();
+            long total  = totalRecordsToWrite;
             long remain = total;
             long qpsSlotStartMs = System.currentTimeMillis();
             long qpsSlotWritten = 0;
 
             while (remain > 0) {
-                int batchSz = (int) Math.min(BATCH_SIZE, remain);
+                int batchSz = (int) Math.min(effectiveBatchSize, remain);
                 List<TapRecordEvent> batch = new ArrayList<>(batchSz);
                 for (int i = 0; i < batchSz; i++) {
                     Map<String, Object> rec = gen.generateRecord();
@@ -312,7 +497,7 @@ public class PerformanceTestRunner {
                     info.put("batchOffset",i);
                     evt.setInfo(info);
                     batch.add(evt);
-                    if (qpsSlotWritten + BATCH_SIZE >= INIT_TOTAL_RECORDS) {
+                    if (qpsSlotWritten + effectiveBatchSize >= effectiveInitTotal) {
                         // 模拟 已写数据量 大于 初始化阶段全表数据量 为增量cdc：
                         evt.getInfo().put(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
                     }
@@ -334,7 +519,7 @@ public class PerformanceTestRunner {
 
                 // 进度打印
                 long pct = (written.get() * 100) / total;
-                if (written.get() % (BATCH_SIZE * 10) == 0 || remain == 0) {
+                if (written.get() % (effectiveBatchSize * 10) == 0 || remain == 0) {
                     double elapsed = (System.currentTimeMillis() - startMs) / 1000.0;
                     double throughput = elapsed > 0 ? written.get() / elapsed : 0;
                     System.out.printf("  >> 进度: %,d/%,d (%d%%) | 吞吐: %.0f 条/秒%n",
@@ -421,7 +606,7 @@ public class PerformanceTestRunner {
     // ─── 打印工具 ──────────────────────────────────────────────────────────────
 
     private static void printSeparator(String ch) {
-        System.out.println(ch.repeat(70));
+        System.out.println(StringUtils.repeat(ch, 70));
     }
 
     /**
@@ -817,6 +1002,11 @@ public class PerformanceTestRunner {
 
     // ─── 报告生成 ──────────────────────────────────────────────────────────────
 
+    /** 转义 Markdown 表元格中的管道符，防止破坏表格结构 */
+    private static String escapePipe(String s) {
+        return s == null ? "" : s.replace("|", "\\|");
+    }
+
     public String generateReport(List<TestResult> results, String reportPath) throws IOException {
         StringBuilder sb = new StringBuilder();
         String now = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
@@ -849,12 +1039,19 @@ public class PerformanceTestRunner {
             sb.append("|--------|------|-----------|---------|--------|--------|----------|------|\n");
             for (TestResult r : entry.getValue()) {
                 String status = r.error == null ? "✅" : "❌";
-                sb.append(String.format("| %s | %s | %.0f | %.2f | %d | %s | %s | %s |\n",
-                    r.testCase.getId(), r.testCase.getName(), r.throughput,
-                    r.durationMs / 1000.0, r.fileCount,
-                    PaimonFileObserver.formatSize(r.totalFileSize),
-                    r.fileCount > 0 ? PaimonFileObserver.formatSize(r.totalFileSize / r.fileCount) : "N/A",
-                    status));
+                String name = escapePipe(r.testCase.getName());
+                // 失败用例显示 '-' 避免误导
+                if (r.error != null) {
+                    sb.append(String.format("| %s | %s | - | - | - | - | - | %s |\n",
+                        r.testCase.getId(), name, status));
+                } else {
+                    sb.append(String.format("| %s | %s | %.0f | %.2f | %d | %s | %s | %s |\n",
+                        r.testCase.getId(), name, r.throughput,
+                        r.durationMs / 1000.0, r.fileCount,
+                        PaimonFileObserver.formatSize(r.totalFileSize),
+                        r.fileCount > 0 ? PaimonFileObserver.formatSize(r.totalFileSize / r.fileCount) : "N/A",
+                        status));
+                }
             }
             sb.append("\n");
         }
@@ -864,15 +1061,20 @@ public class PerformanceTestRunner {
         sb.append("| 用例ID | <1KB | 1KB-1MB | 1MB-10MB | 10MB-100MB | 100MB-500MB | >500MB |\n");
         sb.append("|--------|------|---------|----------|-----------|-------------|--------|\n");
         for (TestResult r : results) {
-            Map<String, Long> d = r.sizeDistribution;
-            sb.append(String.format("| %s | %d | %d | %d | %d | %d | %d |\n",
-                r.testCase.getId(),
-                d.getOrDefault("< 1KB",       0L),
-                d.getOrDefault("1KB - 1MB",   0L),
-                d.getOrDefault("1MB - 10MB",  0L),
-                d.getOrDefault("10MB-100MB",  0L),
-                d.getOrDefault("100MB-500MB", 0L),
-                d.getOrDefault("> 500MB",     0L)));
+            if (r.error != null) {
+                // 失败用例显示 '-'
+                sb.append(String.format("| %s | - | - | - | - | - | - |\n", r.testCase.getId()));
+            } else {
+                Map<String, Long> d = r.sizeDistribution;
+                sb.append(String.format("| %s | %d | %d | %d | %d | %d | %d |\n",
+                    r.testCase.getId(),
+                    d.getOrDefault("< 1KB",       0L),
+                    d.getOrDefault("1KB - 1MB",   0L),
+                    d.getOrDefault("1MB - 10MB",  0L),
+                    d.getOrDefault("10MB-100MB",  0L),
+                    d.getOrDefault("100MB-500MB", 0L),
+                    d.getOrDefault("> 500MB",     0L)));
+            }
         }
         sb.append("\n");
 
