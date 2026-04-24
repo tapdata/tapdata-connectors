@@ -295,7 +295,8 @@ public class KafkaConfig extends BasicConfig implements
         }
         mode.setDeserializer(this, props);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, isEarliest ? "earliest" : "latest");
-        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 0);
+        // 不能设为 0：Confluent Cloud 等高延迟集群下 broker 会立刻空返回
+        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 500);
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10);
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         eachConnectionExtParams(props::put, "All", type);

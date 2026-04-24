@@ -348,21 +348,25 @@ public class KafkaService implements IKafkaService {
     public <K, V> void sampleValue(List<String> tables, Object offset, Predicate<ConsumerRecord<K, V>> callback) {
         boolean isEarliest = true;
         long batchMaxDelay = config.getNodeBatchMaxDelay();
-        Duration timeout = Duration.ofMillis(batchMaxDelay);
+        Duration timeout = Duration.ofMillis(Math.max(batchMaxDelay, 3000));
 
         try (KafkaConsumer<K, V> kafkaConsumer = new KafkaConsumer<>(config.buildDiscoverSchemaConfig(isEarliest))) {
-            // 设置断点信息
             Collection<TopicPartition> topicPartitions = getAdminService().getTopicPartitions(tables);
+            if (null == topicPartitions || topicPartitions.isEmpty()) return;
             kafkaConsumer.assign(topicPartitions);
             kafkaConsumer.seekToBeginning(topicPartitions);
 
-            ConsumerRecords<K, V> consumerRecords = kafkaConsumer.poll(timeout);
-            if (null == consumerRecords || consumerRecords.isEmpty()) return;
-
-            for (ConsumerRecord<K, V> consumerRecord : consumerRecords) {
-                if (!callback.test(consumerRecord)) {
-                    return;
+            long deadline = System.currentTimeMillis() + timeout.toMillis();
+            Duration pollOnce = Duration.ofMillis(1000);
+            while (System.currentTimeMillis() < deadline) {
+                ConsumerRecords<K, V> consumerRecords = kafkaConsumer.poll(pollOnce);
+                if (null == consumerRecords || consumerRecords.isEmpty()) continue;
+                for (ConsumerRecord<K, V> consumerRecord : consumerRecords) {
+                    if (!callback.test(consumerRecord)) {
+                        return;
+                    }
                 }
+                return;
             }
         } catch (InterruptedException | org.apache.kafka.common.errors.InterruptException e) {
             Thread.currentThread().interrupt();
