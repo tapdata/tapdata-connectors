@@ -124,7 +124,8 @@ public class MongodbMergeOperate {
 				mergeFilter,
 				topLevel,
 				1,
-				updateKeyDiffInfos
+				updateKeyDiffInfos,
+				extractMainTableKeys(mergeBundle, topLevel)
 		);
 	}
 
@@ -143,6 +144,39 @@ public class MongodbMergeOperate {
 			int loopTime,
 			List<MapDiffUtil.KeyDiffInfo> updateKeyDiffInfos
 	) {
+		recursiveMerge(mergeBundle, properties, mergeResults, mergeLookupResults, mergeResult, unsetResult,
+				updateJoinKeys, sharedJoinKeys, parentProperties, mergeFilter, topLevel, loopTime,
+				updateKeyDiffInfos, extractMainTableKeys(mergeBundle, topLevel));
+	}
+
+	private static Set<String> extractMainTableKeys(MergeBundle mergeBundle, int topLevel) {
+		if (topLevel != 1 || mergeBundle == null) {
+			return Collections.emptySet();
+		}
+		Map<String, Object> after = mergeBundle.getAfter();
+		Map<String, Object> source = MapUtils.isNotEmpty(after) ? after : mergeBundle.getBefore();
+		if (MapUtils.isEmpty(source)) {
+			return Collections.emptySet();
+		}
+		return new HashSet<>(source.keySet());
+	}
+
+	private static void recursiveMerge(
+			MergeBundle mergeBundle,
+			MergeTableProperties properties,
+			List<MergeResult> mergeResults,
+			List<MergeLookupResult> mergeLookupResults,
+			MergeResult mergeResult,
+			MergeResult unsetResult,
+			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
+			Set<String> sharedJoinKeys,
+			MergeTableProperties parentProperties,
+			MergeFilter mergeFilter,
+			int topLevel,
+			int loopTime,
+			List<MapDiffUtil.KeyDiffInfo> updateKeyDiffInfos,
+			Set<String> mainTableKeys
+	) {
 		boolean unsetResultNull = null == unsetResult;
 		MergeResult updateKeyDiff = null;
 		switch (properties.getMergeType()) {
@@ -153,7 +187,7 @@ public class MongodbMergeOperate {
 				}
 				break;
 			case updateWrite:
-				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys, mergeFilter, topLevel);
+				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys, mergeFilter, topLevel, mainTableKeys);
 				if (unsetResultNull) {
 					addUnsetMerge(mergeResults, unsetResult);
 				}
@@ -198,7 +232,8 @@ public class MongodbMergeOperate {
 						mergeFilter,
 						topLevel,
 						privateLoopTime,
-						null
+						null,
+						mainTableKeys
 				);
 				recursiveOnce = true;
 			}
@@ -266,7 +301,8 @@ public class MongodbMergeOperate {
 	private static MergeResult updateWriteUnsetMerge(
 			MergeBundle mergeBundle, MergeTableProperties currentProperty,
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
-			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter, int topLevel) {
+			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter, int topLevel,
+			Set<String> mainTableKeys) {
 		if (null == currentProperty) {
 			return mergeResult;
 		}
@@ -314,7 +350,15 @@ public class MongodbMergeOperate {
 		if (null == mergeResult.getOperation()) {
 			mergeResult.setOperation(MergeResult.Operation.UPDATE);
 		}
-		Document unsetDoc = buildUnsetDocument(sharedJoinKeys, after, targetPath, isArray, firstMergeResult);
+		Set<String> effectiveSharedJoinKeys = sharedJoinKeys;
+		if (EmptyKit.isEmpty(targetPath) && CollectionUtils.isNotEmpty(mainTableKeys)) {
+			effectiveSharedJoinKeys = new HashSet<>();
+			if (sharedJoinKeys != null) {
+				effectiveSharedJoinKeys.addAll(sharedJoinKeys);
+			}
+			effectiveSharedJoinKeys.addAll(mainTableKeys);
+		}
+		Document unsetDoc = buildUnsetDocument(effectiveSharedJoinKeys, after, targetPath, isArray, firstMergeResult);
 		Document update = mergeResult.getUpdate();
 		if (update.containsKey(UNSET_KEY)) {
 			update.get(UNSET_KEY, Document.class).putAll(unsetDoc);
@@ -854,12 +898,7 @@ public class MongodbMergeOperate {
 		Document document = new Document();
 		for (Map<String, String> joinKey : joinKeys) {
 			String key = joinKey.get("target");
-			Object value;
-			if (topLevel == 1) {
-				value = MapUtil.getValueByKey(after, key);
-			} else {
-				value = MapUtil.getValueByKey(before, key);
-			}
+			Object value = MapUtil.getValueByKey(before, key);
 			document.put(key, value);
 		}
 		return document;
