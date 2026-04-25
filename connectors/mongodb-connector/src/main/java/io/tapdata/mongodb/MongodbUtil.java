@@ -34,9 +34,9 @@ import java.security.SecureRandom;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -286,6 +286,28 @@ public class MongodbUtil {
 		return addresses.substring(0, index);
 	}
 
+	private static final String[][] DEFAULT_HA_TIMEOUT_OPTIONS = {
+			{"serverSelectionTimeoutMS", "15000"},
+			{"socketTimeoutMS", "15000"},
+			{"maxIdleTimeMS", "30000"}
+	};
+
+	public static String appendDefaultHaTimeoutOptions(String mongodbUri) {
+		if (EmptyKit.isBlank(mongodbUri)) {
+			return mongodbUri;
+		}
+		StringBuilder result = new StringBuilder(mongodbUri);
+		for (String[] kv : DEFAULT_HA_TIMEOUT_OPTIONS) {
+			String key = kv[0];
+			String value = kv[1];
+			Pattern pattern = Pattern.compile("[?&]" + Pattern.quote(key) + "=", Pattern.CASE_INSENSITIVE);
+			if (!pattern.matcher(result).find()) {
+				result.append(result.indexOf("?") >= 0 ? '&' : '?').append(key).append('=').append(value);
+			}
+		}
+		return result.toString();
+	}
+
 	public static String getMongoDBURIOptions(String databaseUri) {
 		String options = null;
 		try {
@@ -479,6 +501,7 @@ public class MongodbUtil {
 	}
 
 	public static MongoClientSettings.Builder getMongoClientSettingsBuilder(String mongodbUri, MongodbConfig mongodbConfig) {
+		mongodbUri = appendDefaultHaTimeoutOptions(mongodbUri);
 		CodecRegistry defaultCodecRegistry = MongoClientSettings.getDefaultCodecRegistry();
 		CodecRegistry codecRegistry = CodecRegistries.fromRegistries(CodecRegistries.fromCodecs(
 				new TapdataBigDecimalCodec(),
