@@ -6,6 +6,7 @@ import io.tapdata.connector.utils.ConcurrentUtils;
 import io.tapdata.connector.utils.ErrorHelper;
 import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterTableTTLEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
 import io.tapdata.entity.event.dml.*;
@@ -509,6 +510,22 @@ public class KafkaService implements IKafkaService {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             throw new RuntimeException("Delete topic " + topic + " failed, error: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void alterTableTTL(TapAlterTableTTLEvent tableTTLEvent) {
+        String topic = KafkaUtils.pickTopic(config, tableTTLEvent.getDatabase(), tableTTLEvent.getSchema(), tableTTLEvent.getTableId());
+        Duration duration = tableTTLEvent.getDuration();
+        // Kafka 用 retention.ms = -1 表示永不过期；duration 为 null 或非正值时按永不过期处理
+        long retentionMs = (null == duration || duration.isZero() || duration.isNegative()) ? -1L : duration.toMillis();
+        try {
+            logger.info("Altering topic '{}' retention.ms to {}", topic, retentionMs);
+            getAdminService().alterTopicConfig(topic, Collections.singletonMap(org.apache.kafka.common.config.TopicConfig.RETENTION_MS_CONFIG, String.valueOf(retentionMs)));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            throw new RuntimeException("Alter topic " + topic + " retention.ms failed, error: " + e.getMessage(), e);
         }
     }
 

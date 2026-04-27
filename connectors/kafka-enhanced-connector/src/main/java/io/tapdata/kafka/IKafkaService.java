@@ -1,6 +1,7 @@
 package io.tapdata.kafka;
 
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterTableTTLEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -60,6 +61,8 @@ public interface IKafkaService extends AutoCloseable {
     CreateTableOptions createTable(TapCreateTableEvent tapCreateTableEvent);
 
     void deleteTable(TapDropTableEvent tapDropTableEvent);
+
+    void alterTableTTL(TapAlterTableTTLEvent tableTTLEvent);
 
     void queryByAdvanceFilter(TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer);
 }

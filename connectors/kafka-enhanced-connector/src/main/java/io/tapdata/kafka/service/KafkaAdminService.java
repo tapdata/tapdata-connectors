@@ -8,6 +8,7 @@ import org.apache.kafka.clients.admin.*;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
+import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.TopicExistsException;
 
 import java.util.*;
@@ -146,6 +147,19 @@ public class KafkaAdminService implements IKafkaAdminService {
             return topicDescription.partitions();
         }
         return Collections.emptyList();
+    }
+
+    @Override
+    public void alterTopicConfig(String topic, Map<String, String> configs) throws ExecutionException, InterruptedException {
+        if (null == configs || configs.isEmpty()) return;
+        ConfigResource resource = new ConfigResource(ConfigResource.Type.TOPIC, topic);
+        Collection<AlterConfigOp> ops = new ArrayList<>();
+        configs.forEach((k, v) -> ops.add(new AlterConfigOp(new ConfigEntry(k, v), AlterConfigOp.OpType.SET)));
+        Map<ConfigResource, Collection<AlterConfigOp>> alters = new HashMap<>();
+        alters.put(resource, ops);
+        AlterConfigsResult result = getAdminClient().incrementalAlterConfigs(alters);
+        result.all().get();
+        logger.info("Alter topic '{}' configs: {}", topic, configs);
     }
 
     @Override

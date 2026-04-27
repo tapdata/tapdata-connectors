@@ -107,6 +107,7 @@ public class KafkaEnhancedConnector extends ConnectorBase {
         connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
         connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
+        connectorFunctions.supportAlterTableTTLFunction((connectorContext, alterTableTTLEvent) -> kafkaService.alterTableTTL(alterTableTTLEvent));
     }
 
     @Override

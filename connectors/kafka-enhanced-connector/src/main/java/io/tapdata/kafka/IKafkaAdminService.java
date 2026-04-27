@@ -6,6 +6,7 @@ import org.apache.kafka.common.TopicPartitionInfo;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
@@ -34,4 +35,6 @@ public interface IKafkaAdminService extends AutoCloseable {
     List<TopicPartitionInfo> getTopicPartitionInfo(String topic) throws ExecutionException, InterruptedException;
 
     Collection<TopicPartition> getTopicPartitions(Collection<String> topics) throws ExecutionException, InterruptedException;
+
+    void alterTopicConfig(String topic, Map<String, String> configs) throws ExecutionException, InterruptedException;
 }

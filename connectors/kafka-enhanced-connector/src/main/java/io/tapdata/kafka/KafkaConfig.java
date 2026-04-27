@@ -181,11 +181,6 @@ public class KafkaConfig extends BasicConfig implements
         props.put(CommonClientConfigs.CLIENT_ID_CONFIG, getConnectionClientId(type));
         props.put(CommonClientConfigs.REQUEST_TIMEOUT_MS_CONFIG, (int) TimeUnit.SECONDS.toMillis(10L));
 
-        if (useSasl()) {
-            props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_PLAINTEXT");
-
-        }
-
         Protocol securityProtocol = getSecurityProtocol();
         props.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, securityProtocol.name());
         if (useSasl()) {
