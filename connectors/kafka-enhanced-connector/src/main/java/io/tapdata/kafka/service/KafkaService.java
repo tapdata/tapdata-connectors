@@ -37,6 +37,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.errors.SerializationException;
@@ -109,6 +110,18 @@ public class KafkaService implements IKafkaService {
         if (kafkaProducer == null) {
             logger.info("Creating producer for {}", KafkaEnhancedConnector.PDK_ID);
             kafkaProducer = new KafkaProducer<>(config.buildProducerConfig());
+        }
+        return kafkaProducer;
+    }
+
+    @Override
+    public synchronized KafkaProducer<Object, Object> getTransactionProducer() {
+        if (kafkaProducer == null) {
+            logger.info("Creating producer for {}", KafkaEnhancedConnector.PDK_ID);
+            Properties props = config.buildProducerConfig();
+            props.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "tap-transaction");
+            props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
+            kafkaProducer = new KafkaProducer<>(props);
         }
         return kafkaProducer;
     }
@@ -515,7 +528,7 @@ public class KafkaService implements IKafkaService {
 
     @Override
     public void alterTableTTL(TapAlterTableTTLEvent tableTTLEvent) {
-        String topic = KafkaUtils.pickTopic(config, tableTTLEvent.getDatabase(), tableTTLEvent.getSchema(), tableTTLEvent.getTableId());
+        String topic = tableTTLEvent.getTableId();
         Duration duration = tableTTLEvent.getDuration();
         // Kafka 用 retention.ms = -1 表示永不过期；duration 为 null 或非正值时按永不过期处理
         long retentionMs = (null == duration || duration.isZero() || duration.isNegative()) ? -1L : duration.toMillis();

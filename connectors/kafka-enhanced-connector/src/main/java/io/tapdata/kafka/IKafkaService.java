@@ -36,6 +36,8 @@ public interface IKafkaService extends AutoCloseable {
 
     KafkaProducer<Object, Object> getProducer();
 
+    KafkaProducer<Object, Object> getTransactionProducer();
+
     IKafkaAdminService getAdminService();
 
     AbsSchemaMode getSchemaModeService();

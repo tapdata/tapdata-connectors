@@ -151,13 +151,7 @@ public class KafkaEnhancedConnector extends ConnectorBase {
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) {
         if (isTransaction) {
             String threadName = Thread.currentThread().getName();
-            KafkaProducer<Object, Object> producer;
-            if (producerMap.containsKey(threadName)) {
-                producer = producerMap.get(threadName);
-            } else {
-                producer = kafkaService.getProducer();
-                producerMap.put(threadName, producer);
-            }
+            KafkaProducer<Object, Object> producer = producerMap.get(threadName);
             kafkaService.writeRecord(producer, tapRecordEvents, tapTable, writeListResultConsumer);
         } else {
             kafkaService.writeRecord(tapRecordEvents, tapTable, writeListResultConsumer);
@@ -168,12 +162,14 @@ public class KafkaEnhancedConnector extends ConnectorBase {
         producerMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
             v.abortTransaction();
             v.close();
-            v = kafkaService.getProducer();
+            v = kafkaService.getTransactionProducer();
+            v.initTransactions();
             v.beginTransaction();
             return v;
         });
         producerMap.computeIfAbsent(Thread.currentThread().getName(), key -> {
-            KafkaProducer<Object, Object> v = kafkaService.getProducer();
+            KafkaProducer<Object, Object> v = kafkaService.getTransactionProducer();
+            v.initTransactions();
             v.beginTransaction();
             return v;
         });
