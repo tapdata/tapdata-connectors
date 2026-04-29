@@ -115,15 +115,19 @@ public class KafkaService implements IKafkaService {
     }
 
     @Override
-    public synchronized KafkaProducer<Object, Object> getTransactionProducer() {
-        if (kafkaProducer == null) {
-            logger.info("Creating producer for {}", KafkaEnhancedConnector.PDK_ID);
-            Properties props = config.buildProducerConfig();
-            props.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "tap-transaction");
-            props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
-            kafkaProducer = new KafkaProducer<>(props);
-        }
-        return kafkaProducer;
+    public KafkaProducer<Object, Object> getTransactionProducer() {
+        // 每个调用方（线程）拿到独立的 transactional producer：
+        // 1) 共用同一个 KafkaProducer 实例会导致第二次 initTransactions() 抛异常或阻塞
+        // 2) transactional.id 必须唯一，否则会被 broker fence，initTransactions 永久挂起
+        Properties props = config.buildProducerConfig();
+        String txId = String.format("tap-tx-%s-%s", KafkaEnhancedConnector.PDK_ID, UUID.randomUUID().toString().replace("-", ""));
+        props.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, txId);
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
+        // 默认 max.block.ms = 60000 已合理；显式给 transaction.timeout.ms 上限避免依赖 broker 默认
+        props.putIfAbsent(ProducerConfig.MAX_BLOCK_MS_CONFIG, "60000");
+        props.putIfAbsent(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, "60000");
+        logger.info("Creating transaction producer for {} with transactional.id={}", KafkaEnhancedConnector.PDK_ID, txId);
+        return new KafkaProducer<>(props);
     }
 
     @Override
@@ -273,24 +277,48 @@ public class KafkaService implements IKafkaService {
                     try (KafkaConsumer<Object, Object> kafkaConsumer = new KafkaConsumer<>(properties)) {
                         TopicPartition topicPartition = new TopicPartition(topic, partition);
 
-                        // 如果没有数据，则跳过
-                        KafkaOffset currEndOffset = KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, List.of(topicPartition), true);
-                        if (Optional.of(currEndOffset)
-                            .map(m -> m.get(topic))
-                            .map(o -> o.get(partition))
-                            .map(l -> endOffset <= l)
-                            .orElse(true)
-                        ) {
-                            logger.warn("not found any data with topic partition {}-{}, earliest offset {}", topic, partition, currEndOffset);
+                        // 取分区当前实际可消费范围 [beginning, currentEnd)
+                        Long beginningOffset = Optional.ofNullable(KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, List.of(topicPartition), true).get(topic))
+                            .map(o -> o.get(partition)).orElse(null);
+                        Long currentEndOffset = Optional.ofNullable(KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, List.of(topicPartition), false).get(topic))
+                            .map(o -> o.get(partition)).orElse(null);
+
+                        if (null == beginningOffset || null == currentEndOffset || beginningOffset >= currentEndOffset) {
+                            logger.warn("not found any data with topic partition {}-{}, beginning={}, end={}", topic, partition, beginningOffset, currentEndOffset);
+                            return;
+                        }
+
+                        // stateMap 中的 endOffset 可能滞后于实际（topic 被截断/重建），用当前实际 end 钳制，避免 poll 死等
+                        long effectiveEndOffset = endOffset;
+                        if (currentEndOffset < effectiveEndOffset) {
+                            logger.warn("Stored end offset {} for {}-{} exceeds current end offset {}, will use current end offset", effectiveEndOffset, topic, partition, currentEndOffset);
+                            effectiveEndOffset = currentEndOffset;
+                        }
+
+                        // 校正起点到 [beginningOffset, effectiveEndOffset) 区间
+                        long startOffset = concurrentItem.getValue();
+                        if (startOffset < beginningOffset) {
+                            logger.warn("Start offset {} for {}-{} is before beginning offset {}, will use beginning offset", startOffset, topic, partition, beginningOffset);
+                            startOffset = beginningOffset;
+                        }
+                        if (startOffset >= effectiveEndOffset) {
+                            logger.info("Start offset {} >= effective end offset {} for {}-{}, skip", startOffset, effectiveEndOffset, topic, partition);
                             return;
                         }
 
                         kafkaConsumer.assign(Collections.singleton(topicPartition));
-                        kafkaConsumer.seek(topicPartition, concurrentItem.getValue());
+                        kafkaConsumer.seek(topicPartition, startOffset);
 
                         while (!stopping.get() && null == exception.get()) {
                             ConsumerRecords<Object, Object> consumerRecords = kafkaConsumer.poll(timeout);
-                            if (consumerRecords.isEmpty()) continue;
+                            // 即便 poll 返回空，也用 consumer 当前位置和 effectiveEnd 比较，避免无限轮询
+                            if (consumerRecords.isEmpty()) {
+                                if (kafkaConsumer.position(topicPartition) >= effectiveEndOffset) {
+                                    logger.info("Partition {}-{} batch read completed (idle) at position {}", topic, partition, kafkaConsumer.position(topicPartition));
+                                    return;
+                                }
+                                continue;
+                            }
 
                             for (ConsumerRecord<Object, Object> consumerRecord : consumerRecords) {
                                 TapEvent event = schemaModeService.toTapEvent(consumerRecord);
@@ -302,7 +330,7 @@ public class KafkaService implements IKafkaService {
                                 KafkaUtils.convertWithFieldType(fieldTypeConverts, event);
                                 batchPusher.add(consumerRecord, event);
 
-                                if (consumerRecord.offset() + 1 >= endOffset) {
+                                if (consumerRecord.offset() + 1 >= effectiveEndOffset) {
                                     logger.info("Partition {}-{} batch read completed at offset {}", topic, partition, consumerRecord.offset());
                                     return; // 全量完成
                                 }

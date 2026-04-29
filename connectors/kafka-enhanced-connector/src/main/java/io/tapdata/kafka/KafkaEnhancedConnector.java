@@ -39,7 +39,6 @@ public class KafkaEnhancedConnector extends ConnectorBase {
     protected KafkaConfig kafkaConfig;
     protected final AtomicBoolean stopping = new AtomicBoolean(false);
     protected Map<String, KafkaProducer<Object, Object>> producerMap = new ConcurrentHashMap<>();
-    protected boolean isTransaction = false;
 
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Throwable {
@@ -63,6 +62,14 @@ public class KafkaEnhancedConnector extends ConnectorBase {
     public void onStop(TapConnectionContext connectionContext) throws Throwable {
         stopping.compareAndSet(false, true);
         connectionContext.getLog().info("Stopping {}", PDK_ID);
+        // 清理事务 producer，避免泄漏；进行中的事务先 abort（吞异常），再 close
+        producerMap.values().forEach(p -> {
+            try { p.abortTransaction(); } catch (Exception ignore) {}
+            try { p.close(); } catch (Exception e) {
+                connectionContext.getLog().warn("Close transaction producer failed: {}", e.getMessage());
+            }
+        });
+        producerMap.clear();
         ErrorHelper.closeWithNotNull(kafkaService);
         kafkaService = null;
     }
@@ -149,9 +156,9 @@ public class KafkaEnhancedConnector extends ConnectorBase {
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) {
-        if (isTransaction) {
-            String threadName = Thread.currentThread().getName();
-            KafkaProducer<Object, Object> producer = producerMap.get(threadName);
+        // 当前线程若已开启事务，使用对应的 transactional producer；否则走普通 producer
+        KafkaProducer<Object, Object> producer = producerMap.get(Thread.currentThread().getName());
+        if (null != producer) {
             kafkaService.writeRecord(producer, tapRecordEvents, tapTable, writeListResultConsumer);
         } else {
             kafkaService.writeRecord(tapRecordEvents, tapTable, writeListResultConsumer);
@@ -159,35 +166,44 @@ public class KafkaEnhancedConnector extends ConnectorBase {
     }
 
     protected void beginTransaction(TapConnectorContext connectorContext) {
-        producerMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
-            v.abortTransaction();
-            v.close();
-            v = kafkaService.getTransactionProducer();
-            v.initTransactions();
-            v.beginTransaction();
-            return v;
-        });
-        producerMap.computeIfAbsent(Thread.currentThread().getName(), key -> {
-            KafkaProducer<Object, Object> v = kafkaService.getTransactionProducer();
-            v.initTransactions();
-            v.beginTransaction();
-            return v;
-        });
+        // 同一线程的 transactional producer 在整个任务生命周期内复用：
+        // initTransactions() 是 broker 协调器重操作，每个 producer 实例只能、且只需调一次
+        producerMap.computeIfAbsent(Thread.currentThread().getName(), k -> {
+            KafkaProducer<Object, Object> n = kafkaService.getTransactionProducer();
+            n.initTransactions();
+            return n;
+        }).beginTransaction();
     }
 
     protected void commitTransaction(TapConnectorContext connectorContext) {
-        producerMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
-            v.commitTransaction();
-            v.close();
-            return null;
-        });
+        KafkaProducer<Object, Object> producer = producerMap.get(Thread.currentThread().getName());
+        if (null == producer) return;
+        try {
+            producer.commitTransaction();
+        } catch (org.apache.kafka.common.errors.ProducerFencedException
+                 | org.apache.kafka.common.errors.OutOfOrderSequenceException
+                 | org.apache.kafka.common.errors.AuthorizationException e) {
+            // 不可恢复错误：producer 必须关闭重建
+            closeAndRemoveProducer(producer);
+            throw e;
+        }
     }
 
     protected void rollbackTransaction(TapConnectorContext connectorContext) {
-        producerMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
-            v.abortTransaction();
-            v.close();
-            return null;
-        });
+        KafkaProducer<Object, Object> producer = producerMap.get(Thread.currentThread().getName());
+        if (null == producer) return;
+        try {
+            producer.abortTransaction();
+        } catch (org.apache.kafka.common.errors.ProducerFencedException
+                 | org.apache.kafka.common.errors.OutOfOrderSequenceException
+                 | org.apache.kafka.common.errors.AuthorizationException e) {
+            closeAndRemoveProducer(producer);
+            throw e;
+        }
+    }
+
+    private void closeAndRemoveProducer(KafkaProducer<Object, Object> producer) {
+        producerMap.values().remove(producer);
+        try { producer.close(); } catch (Exception ignore) {}
     }
 }
