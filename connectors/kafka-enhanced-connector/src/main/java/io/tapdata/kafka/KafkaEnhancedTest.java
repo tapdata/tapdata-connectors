@@ -36,6 +36,9 @@ public class KafkaEnhancedTest implements AutoCloseable {
         if (kafkaConfig.useKerberos()) {
             testFunctionMap.put("testKerberos", this::testKerberos);
         }
+        if (kafkaConfig.getConnectionSchemaRegister()) {
+            testFunctionMap.put("testSchemaRegistry", this::testSchemaRegistry);
+        }
         testFunctionMap.put("testConnect", this::testConnect);
 //        testFunctionMap.put("testVersion", this::testVersion);
     }
@@ -79,6 +82,18 @@ public class KafkaEnhancedTest implements AutoCloseable {
             consumer.accept(new TestItem(MqTestItem.KAFKA_BASE64_CONNECTION.getContent(), TestItem.RESULT_FAILED, e.getMessage()));
             return false;
         }
+    }
+
+    public Boolean testSchemaRegistry() {
+        try {
+            if (kafkaAdminService.testRegistryConnect()) {
+                consumer.accept(new TestItem(MqTestItem.KAFKA_SCHEMA_REGISTER_CONNECTION.getContent(), TestItem.RESULT_SUCCESSFULLY, null));
+                return true;
+            }
+        } catch (Exception e) {
+            consumer.accept(new TestItem(MqTestItem.KAFKA_SCHEMA_REGISTER_CONNECTION.getContent(), new TapTestItemException(new TapCodeException(KafkaErrorCodes.KAFKA_COMMON_ERROR, e)), TestItem.RESULT_FAILED));
+        }
+        return false;
     }
 
     public Boolean testConnect() {

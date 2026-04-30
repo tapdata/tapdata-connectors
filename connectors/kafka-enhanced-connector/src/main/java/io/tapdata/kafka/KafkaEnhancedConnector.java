@@ -3,7 +3,7 @@ package io.tapdata.kafka;
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.connector.utils.ErrorHelper;
 import io.tapdata.entity.codec.TapCodecsRegistry;
-import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
 import io.tapdata.kafka.service.KafkaService;
@@ -14,14 +14,16 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.Capability;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
+import org.apache.kafka.clients.producer.KafkaProducer;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static io.tapdata.pdk.apis.entity.ConnectionOptions.*;
-import static io.tapdata.pdk.apis.entity.ConnectionOptions.DDL_DROP_FIELD_EVENT;
 
 /**
  * 标准 Kafka 连接器
@@ -36,6 +38,8 @@ public class KafkaEnhancedConnector extends ConnectorBase {
     private IKafkaService kafkaService;
     protected KafkaConfig kafkaConfig;
     protected final AtomicBoolean stopping = new AtomicBoolean(false);
+    protected Map<String, KafkaProducer<Object, Object>> producerMap = new ConcurrentHashMap<>();
+    protected boolean isTransaction = false;
 
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Throwable {
@@ -91,7 +95,7 @@ public class KafkaEnhancedConnector extends ConnectorBase {
         connectorFunctions.supportTimestampToStreamOffset((context, startTime) -> kafkaService.timestampToStreamOffset(startTime));
 
         // Target Capabilities
-        connectorFunctions.supportWriteRecord((context, list, tapTable, consumer) -> kafkaService.writeRecord(list, tapTable, consumer));
+        connectorFunctions.supportWriteRecord(this::writeRecord);
 
         // DDL
         //  - createTable
@@ -100,6 +104,9 @@ public class KafkaEnhancedConnector extends ConnectorBase {
         connectorFunctions.supportDropTable((connectorContext, dropTableEvent) -> kafkaService.deleteTable(dropTableEvent));
         //  - js
         connectorFunctions.supportQueryByAdvanceFilter((connectorContext, filter, table, consumer) -> kafkaService.queryByAdvanceFilter(filter, table, consumer));
+        connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
+        connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
+        connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
     }
 
     @Override
@@ -138,5 +145,52 @@ public class KafkaEnhancedConnector extends ConnectorBase {
         IKafkaAdminService adminService = kafkaService.getAdminService();
         Set<String> topics = adminService.listTopics();
         return topics.size();
+    }
+
+    private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) {
+        if (isTransaction) {
+            String threadName = Thread.currentThread().getName();
+            KafkaProducer<Object, Object> producer;
+            if (producerMap.containsKey(threadName)) {
+                producer = producerMap.get(threadName);
+            } else {
+                producer = kafkaService.getProducer();
+                producerMap.put(threadName, producer);
+            }
+            kafkaService.writeRecord(producer, tapRecordEvents, tapTable, writeListResultConsumer);
+        } else {
+            kafkaService.writeRecord(tapRecordEvents, tapTable, writeListResultConsumer);
+        }
+    }
+
+    protected void beginTransaction(TapConnectorContext connectorContext) {
+        producerMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+            v.abortTransaction();
+            v.close();
+            v = kafkaService.getProducer();
+            v.beginTransaction();
+            return v;
+        });
+        producerMap.computeIfAbsent(Thread.currentThread().getName(), key -> {
+            KafkaProducer<Object, Object> v = kafkaService.getProducer();
+            v.beginTransaction();
+            return v;
+        });
+    }
+
+    protected void commitTransaction(TapConnectorContext connectorContext) {
+        producerMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+            v.commitTransaction();
+            v.close();
+            return null;
+        });
+    }
+
+    protected void rollbackTransaction(TapConnectorContext connectorContext) {
+        producerMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+            v.abortTransaction();
+            v.close();
+            return null;
+        });
     }
 }

@@ -79,7 +79,7 @@ public class StandardSchemaMode extends AbsSchemaMode {
         } else {
             throw new NotSupportedException(String.format("TapEvent type '%s'", tapEvent.getClass().getName()));
         }
-        return Arrays.asList(new ProducerRecord<>(topic, null, ts, createKafkaKey(data, table), tapEvent, headers));
+        return Arrays.asList(new ProducerRecord<>(topic, computePartition(createKafkaKey(data, table), kafkaService.getConfig().getNodePartitionSize()), ts, createKafkaKey(data, table), tapEvent, headers));
     }
 
     @Override

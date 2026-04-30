@@ -77,7 +77,7 @@ public class PaimonConnector extends ConnectorBase {
             connectionContext.getLog().info("Flush offset callback registered for StarRocks connector");
         }
         // Initialize Paimon service
-        paimonService = new PaimonService(paimonConfig);
+        paimonService = new PaimonService(paimonConfig, connectionContext.getLog());
         paimonService.setFlushOffsetCallback(flushOffsetCallback);
         paimonService.init();
         
@@ -227,7 +227,7 @@ public class PaimonConnector extends ConnectorBase {
         });
         codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toTimestamp());
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> (int) (tapDateValue.getValue().getSeconds() / 86400));
-        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().getSeconds().intValue());
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> (int) (tapTimeValue.getValue().getSeconds() * 1000 + tapTimeValue.getValue().getNano() / 1000_000));
         codecRegistry.registerFromTapValue(TapYearValue.class, "CHAR(4)", TapValue::getOriginValue);
     }
 
@@ -248,7 +248,7 @@ public class PaimonConnector extends ConnectorBase {
         TapTable table = createTableEvent.getTable();
         log.info("Creating Paimon table: " + table.getName());
         
-        boolean created = paimonService.createTable(table, log);
+        boolean created = paimonService.createTable(table);
         if (created) {
             log.info("Table created successfully: " + table.getName());
         } else {

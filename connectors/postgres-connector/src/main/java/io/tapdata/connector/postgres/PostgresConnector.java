@@ -1071,7 +1071,12 @@ public class PostgresConnector extends CommonDbConnector {
                         case "timestamp": {
                             String timestampString = resultSet.getString(colName);
                             if (StringUtils.isNotEmpty(timestampString)) {
-                                LocalDateTime localDateTime = LocalDateTime.parse(timestampString.replace(" ", "T"));
+                                LocalDateTime localDateTime;
+                                try {
+                                    localDateTime = LocalDateTime.parse(timestampString.replace(" ", "T"));
+                                } catch (Exception e) {
+                                    localDateTime = resultSet.getTimestamp(colName).toLocalDateTime();
+                                }
                                 dataMap.put(colName, localDateTime.minusHours(postgresConfig.getZoneOffsetHour()));
                             } else {
                                 dataMap.put(colName, null);

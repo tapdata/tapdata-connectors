@@ -94,12 +94,8 @@ public class CanalSchemaMode extends AbsSchemaMode {
 			key = createKafkaKey(data, table);
 		}
 
-		if (null == key) {
-			return Arrays.asList(new ProducerRecord<>(topic, value));
-		} else {
-			return Arrays.asList(new ProducerRecord<>(topic, key, value));
-		}
-	}
+        return List.of(new ProducerRecord<>(topic, computePartition(key, kafkaService.getConfig().getNodePartitionSize()), key, value));
+    }
 
 	@Override
 	public void queryByAdvanceFilter(TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) {

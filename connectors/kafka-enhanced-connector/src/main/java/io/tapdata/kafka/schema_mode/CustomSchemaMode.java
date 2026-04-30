@@ -197,8 +197,8 @@ public class CustomSchemaMode extends AbsSchemaMode {
                 key = String.valueOf(res.get("key"));
             }
         }
-        ProducerRecord<Object, Object> producerRecord = new ProducerRecord<>(topic,
-                null, tapEvent.getTime(), key, body,
+        Integer partition = key == null ? null : computePartition(key.getBytes(), kafkaService.getConfig().getNodePartitionSize());
+        ProducerRecord<Object, Object> producerRecord = new ProducerRecord<>(topic, partition, tapEvent.getTime(), key, body,
                 recordHeaders);
         return List.of(producerRecord);
     }
