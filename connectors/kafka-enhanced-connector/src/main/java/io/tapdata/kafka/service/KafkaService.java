@@ -236,6 +236,9 @@ public class KafkaService implements IKafkaService {
                     for (int i = 0; i < offsetList.size(); i++) {
                         startTopicOffsets.setOffset(i, offsetList.get(i));
                     }
+                } else if (offset instanceof Long startTime) {
+                    KafkaOffset kafkaOffset = KafkaOffsetUtils.timestamp2Offset(kafkaConsumer, topicPartitions, startTime);
+                    startTopicOffsets = kafkaOffset.get(topic);
                 } else {
                     // Get begin offsets from Kafka
                     KafkaOffset kafkaOffset = KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, topicPartitions, isEarliest);
@@ -266,10 +269,7 @@ public class KafkaService implements IKafkaService {
                     int partition = concurrentItem.getKey();
                     Long endOffset = endTopicOffsets.get(partition);
                     if (null == endOffset) {
-                        logger.warn("not found end offset with topic partition {}-{}", topic, partition);
                         return;
-                    } else {
-                        logger.info("end offset with topic partition {}-{}: start={}, end={}", topic, partition, concurrentItem.getValue(), endOffset);
                     }
 
                     Properties properties = config.buildConsumerConfig(isEarliest);
@@ -284,7 +284,6 @@ public class KafkaService implements IKafkaService {
                             .map(o -> o.get(partition)).orElse(null);
 
                         if (null == beginningOffset || null == currentEndOffset || beginningOffset >= currentEndOffset) {
-                            logger.warn("not found any data with topic partition {}-{}, beginning={}, end={}", topic, partition, beginningOffset, currentEndOffset);
                             return;
                         }
 
