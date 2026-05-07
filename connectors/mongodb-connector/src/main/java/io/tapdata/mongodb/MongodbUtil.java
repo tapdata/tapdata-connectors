@@ -292,7 +292,7 @@ public class MongodbUtil {
 			{"maxIdleTimeMS", "30000"}
 	};
 
-	public static String appendDefaultHaTimeoutOptions(String mongodbUri) {
+	public static String appendDefaultHaTimeoutOptions(String mongodbUri,Boolean isStreamRead) {
 		if (EmptyKit.isBlank(mongodbUri)) {
 			return mongodbUri;
 		}
@@ -300,6 +300,9 @@ public class MongodbUtil {
 		for (String[] kv : DEFAULT_HA_TIMEOUT_OPTIONS) {
 			String key = kv[0];
 			String value = kv[1];
+			if (Boolean.TRUE.equals(isStreamRead) && "socketTimeoutMS".equalsIgnoreCase(key)) {
+				value = "0";
+			}
 			Pattern pattern = Pattern.compile("[?&]" + Pattern.quote(key) + "=", Pattern.CASE_INSENSITIVE);
 			if (!pattern.matcher(result).find()) {
 				result.append(result.indexOf("?") >= 0 ? '&' : '?').append(key).append('=').append(value);
@@ -490,18 +493,22 @@ public class MongodbUtil {
 	}
 
 
-	public static MongoClient createMongoClient(MongodbConfig mongodbConfig) {
+	public static MongoClient createMongoClient(MongodbConfig mongodbConfig,Boolean isStreamRead) {
 		String mongodbUri = mongodbConfig.getUri();
 		if (null == mongodbUri || "".equals(mongodbUri)) {
 			throw new RuntimeException("Create MongoDB client failed, error: uri is blank");
 		}
 		// if mongodbUri not contains replicaSet, then only connect to primary node
 		mongodbUri = getPrimaryUri(mongodbUri, mongodbConfig);
-		return MongoClients.create(getMongoClientSettingsBuilder(mongodbUri, mongodbConfig).build());
+		return MongoClients.create(getMongoClientSettingsBuilder(mongodbUri, mongodbConfig,isStreamRead).build());
 	}
 
 	public static MongoClientSettings.Builder getMongoClientSettingsBuilder(String mongodbUri, MongodbConfig mongodbConfig) {
-		mongodbUri = appendDefaultHaTimeoutOptions(mongodbUri);
+		return getMongoClientSettingsBuilder(mongodbUri,mongodbConfig,false);
+	}
+
+	public static MongoClientSettings.Builder getMongoClientSettingsBuilder(String mongodbUri, MongodbConfig mongodbConfig,Boolean isStreamRead) {
+		mongodbUri = appendDefaultHaTimeoutOptions(mongodbUri,isStreamRead);
 		CodecRegistry defaultCodecRegistry = MongoClientSettings.getDefaultCodecRegistry();
 		CodecRegistry codecRegistry = CodecRegistries.fromRegistries(CodecRegistries.fromCodecs(
 				new TapdataBigDecimalCodec(),
