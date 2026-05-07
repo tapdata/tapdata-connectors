@@ -697,13 +697,13 @@ public class PostgresConnector extends CommonDbConnector {
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
                 new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
-                        .watch(tableList, nodeContext.getTableMap())
+                        .watch(new ArrayList<>(tableList), nodeContext.getTableMap())
                         .offset(offsetState)
                         .registerConsumer(consumer, recordSize)
                         .startMiner(this::isAlive);
             } else {
                 new WalLogMinerV2(postgresJdbcContext, tapLogger)
-                        .watch(tableList, nodeContext.getTableMap())
+                        .watch(new ArrayList<>(tableList), nodeContext.getTableMap())
                         .withWalLogDirectory(getWalDirectory())
                         .offset(offsetState)
                         .registerConsumer(consumer, recordSize)
