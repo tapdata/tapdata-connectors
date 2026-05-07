@@ -78,7 +78,7 @@ public class MongodbUtilTest {
         @Test
         void noQueryString_appendsAllThree() {
             String uri = "mongodb://host:27017/db";
-            String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri);
+            String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri,false);
             Assertions.assertEquals(
                     "mongodb://host:27017/db?serverSelectionTimeoutMS=15000&socketTimeoutMS=15000&maxIdleTimeMS=30000",
                     result);
@@ -87,7 +87,7 @@ public class MongodbUtilTest {
         @Test
         void existingAuthSource_appendsWithAmpersand() {
             String uri = "mongodb://u:p@host/db?authSource=admin";
-            String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri);
+            String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri,false);
             Assertions.assertEquals(
                     "mongodb://u:p@host/db?authSource=admin&serverSelectionTimeoutMS=15000&socketTimeoutMS=15000&maxIdleTimeMS=30000",
                     result);
@@ -96,7 +96,7 @@ public class MongodbUtilTest {
         @Test
         void userSocketTimeoutPreserved_otherTwoAdded() {
             String uri = "mongodb://host/db?socketTimeoutMS=5000";
-            String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri);
+            String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri,false);
             Assertions.assertTrue(result.contains("socketTimeoutMS=5000"));
             Assertions.assertFalse(result.contains("socketTimeoutMS=15000"));
             Assertions.assertTrue(result.contains("serverSelectionTimeoutMS=15000"));
@@ -106,22 +106,22 @@ public class MongodbUtilTest {
         @Test
         void allThreeAlreadySet_returnsUnchanged() {
             String uri = "mongodb://host/db?serverSelectionTimeoutMS=20000&socketTimeoutMS=10000&maxIdleTimeMS=45000";
-            String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri);
+            String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri,false);
             Assertions.assertEquals(uri, result);
         }
 
         @Test
         void caseInsensitiveKey_notDuplicated() {
             String uri = "mongodb://host/db?SocketTimeoutMS=5000";
-            String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri);
+            String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri,false);
             Assertions.assertTrue(result.contains("SocketTimeoutMS=5000"));
             Assertions.assertFalse(result.contains("socketTimeoutMS=15000"));
         }
 
         @Test
         void blankUri_returnedAsIs() {
-            Assertions.assertNull(MongodbUtil.appendDefaultHaTimeoutOptions(null));
-            Assertions.assertEquals("", MongodbUtil.appendDefaultHaTimeoutOptions(""));
+            Assertions.assertNull(MongodbUtil.appendDefaultHaTimeoutOptions(null,false));
+            Assertions.assertEquals("", MongodbUtil.appendDefaultHaTimeoutOptions("",false));
         }
     }
 }
