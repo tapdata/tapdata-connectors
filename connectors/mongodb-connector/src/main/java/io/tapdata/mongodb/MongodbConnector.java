@@ -1316,7 +1316,7 @@ public class MongodbConnector extends ConnectorBase {
 			throw new RuntimeException("load mongo config failed from connection config");
 		}
 		if (mongoClient == null) {
-			mongoClient = MongodbUtil.createMongoClient(mongoConfig);
+			mongoClient = MongodbUtil.createMongoClient(mongoConfig,false);
 			mongoDatabase = mongoClient.getDatabase(mongoConfig.getDatabase());
 			mongoVersion = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
 		}
