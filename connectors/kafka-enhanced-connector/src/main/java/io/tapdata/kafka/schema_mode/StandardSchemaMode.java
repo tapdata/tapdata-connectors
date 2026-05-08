@@ -1,6 +1,7 @@
 package io.tapdata.kafka.schema_mode;
 
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
@@ -80,6 +81,10 @@ public class StandardSchemaMode extends AbsSchemaMode {
             throw new NotSupportedException(String.format("TapEvent type '%s'", tapEvent.getClass().getName()));
         }
         return Arrays.asList(new ProducerRecord<>(topic, computePartition(createKafkaKey(data, table), kafkaService.getConfig().getNodePartitionSize()), ts, createKafkaKey(data, table), tapEvent, headers));
+    }
+
+    public ProducerRecord<Object, Object> fromTapDDLEvent(TapDDLEvent ddlEvent) {
+        return new ProducerRecord<>(ddlEvent.getTableId(), null, ddlEvent.getTime(), null, ddlEvent);
     }
 
     @Override

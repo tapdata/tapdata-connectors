@@ -3,6 +3,7 @@ package io.tapdata.kafka;
 import io.tapdata.connector.utils.ConcurrentUtils;
 import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
@@ -82,6 +83,10 @@ public abstract class AbsSchemaMode {
     public abstract TapEvent toTapEvent(ConsumerRecord<?, ?> consumerRecord);
 
     public abstract List<ProducerRecord<Object, Object>> fromTapEvent(TapTable table, TapEvent tapEvent);
+
+    public ProducerRecord<Object, Object> fromTapDDLEvent(TapDDLEvent ddlEvent) {
+        throw new UnsupportedOperationException(String.format("schema mode '%s' not support DDL event", kafkaSchemaMode));
+    }
 
     public abstract void queryByAdvanceFilter(TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer);
 

@@ -3,6 +3,7 @@ package io.tapdata.kafka;
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.connector.utils.ErrorHelper;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
@@ -115,6 +116,10 @@ public class KafkaEnhancedConnector extends ConnectorBase {
         connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
         connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
         connectorFunctions.supportAlterTableTTLFunction((connectorContext, alterTableTTLEvent) -> kafkaService.alterTableTTL(alterTableTTLEvent));
+        connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
+        connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
+        connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
+        connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
     }
 
     @Override
@@ -205,5 +210,16 @@ public class KafkaEnhancedConnector extends ConnectorBase {
     private void closeAndRemoveProducer(KafkaProducer<Object, Object> producer) {
         producerMap.values().remove(producer);
         try { producer.close(); } catch (Exception ignore) {}
+    }
+
+    private void fieldDDLHandler(TapConnectorContext tapConnectorContext, TapFieldBaseEvent tapFieldBaseEvent) {
+        try {
+            kafkaService.processDDL(tapFieldBaseEvent);
+        } catch (Throwable t) {
+//            kafkaExceptionCollector.collectTerminateByServer(t);
+//            kafkaExceptionCollector.collectUserPwdInvalid(kafkaConfig.getMqUsername(), t);
+//            kafkaExceptionCollector.collectWritePrivileges("ddl", Collections.emptyList(), t);
+            throw t;
+        }
     }
 }

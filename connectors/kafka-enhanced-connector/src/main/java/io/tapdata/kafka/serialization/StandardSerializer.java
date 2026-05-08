@@ -2,6 +2,11 @@ package io.tapdata.kafka.serialization;
 
 import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.*;
 import io.tapdata.events.EventOperation;
 import io.tapdata.kafka.utils.KafkaUtils;
@@ -43,6 +48,8 @@ public class StandardSerializer implements Serializer<TapEvent> {
             } else {
                 toUnknownMap(map, data);
             }
+        } else if (data instanceof TapDDLEvent) {
+            toDDLFieldMap(map, (TapDDLEvent) data);
         } else {
             toUnknownMap(map, data);
         }
@@ -73,6 +80,24 @@ public class StandardSerializer implements Serializer<TapEvent> {
     private void toUnknownMap(Map<String, Object> map, TapEvent recordEvent) {
         StandardEventUtils.setOp(map, EventOperation.DML_UNKNOWN);
         StandardEventUtils.setData(map, recordEvent);
+    }
+
+    private void toDDLFieldMap(Map<String, Object> map, TapDDLEvent ddlEvent) {
+        EventOperation op;
+        if (ddlEvent instanceof TapNewFieldEvent) {
+            op = EventOperation.DDL_NEW_FIELD;
+        } else if (ddlEvent instanceof TapAlterFieldNameEvent) {
+            op = EventOperation.DDL_ALTER_FIELD_NAME;
+        } else if (ddlEvent instanceof TapAlterFieldAttributesEvent) {
+            op = EventOperation.DDL_ALTER_FIELD_ATTRIBUTES;
+        } else if (ddlEvent instanceof TapDropFieldEvent) {
+            op = EventOperation.DDL_DROP_FIELD;
+        } else {
+            op = EventOperation.DDL_UNKNOWN;
+        }
+        StandardEventUtils.setOp(map, op);
+        StandardEventUtils.setData(map, ddlEvent);
+        map.put("ddl", ddlEvent.getOriginDDL());
     }
 
     private List<String> getNamespaces(TapBaseEvent tapBaseEvent) {

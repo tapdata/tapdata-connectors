@@ -1,7 +1,9 @@
 package io.tapdata.kafka.serialization;
 
 import com.alibaba.fastjson.JSONObject;
+import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.*;
 import io.tapdata.events.EventOperation;
 import io.tapdata.kafka.utils.KafkaUtils;
@@ -41,6 +43,11 @@ public class StandardDeserializer implements Deserializer<TapEvent> {
                     return toTapDeleteRecordEvent(topic, json);
                 case DML_UNKNOWN:
                     return toTapUnknownRecordEvent(topic, json);
+                case DDL_NEW_FIELD:
+                case DDL_ALTER_FIELD_ATTRIBUTES:
+                case DDL_DROP_FIELD:
+                case DDL_ALTER_FIELD_NAME:
+                    return toTapDDLFieldEvent(topic, op, json);
                 default:
                     return toTapUnknownRecordEvent(topic, bytes);
             }
@@ -90,7 +97,29 @@ public class StandardDeserializer implements Deserializer<TapEvent> {
         }
     }
 
-    private void fillTapRecordEventInfo(String topic, JSONObject json, TapRecordEvent event) {
+    private TapFieldBaseEvent toTapDDLFieldEvent(String topic, EventOperation op, JSONObject json) {
+        TapFieldBaseEvent ddlEvent;
+        switch (op) {
+            case DDL_NEW_FIELD:
+                ddlEvent = StandardEventUtils.getDDLEvent(json, TapNewFieldEvent.class);
+                break;
+            case DDL_ALTER_FIELD_ATTRIBUTES:
+                ddlEvent = StandardEventUtils.getDDLEvent(json, TapAlterFieldAttributesEvent.class);
+                break;
+            case DDL_DROP_FIELD:
+                ddlEvent = StandardEventUtils.getDDLEvent(json, TapDropFieldEvent.class);
+                break;
+            case DDL_ALTER_FIELD_NAME:
+                ddlEvent = StandardEventUtils.getDDLEvent(json, TapAlterFieldNameEvent.class);
+                break;
+            default:
+                return null;
+        }
+        fillTapRecordEventInfo(topic, json, ddlEvent);
+        return ddlEvent;
+    }
+
+    private void fillTapRecordEventInfo(String topic, JSONObject json, TapBaseEvent event) {
         event.setReferenceTime(StandardEventUtils.getOpTs(json));
         event.setTableId(StandardEventUtils.getTable(json));
         event.setNamespaces(StandardEventUtils.getNamespaces(json));

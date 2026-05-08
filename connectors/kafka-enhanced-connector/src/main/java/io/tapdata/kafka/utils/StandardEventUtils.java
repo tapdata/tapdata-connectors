@@ -2,6 +2,7 @@ package io.tapdata.kafka.utils;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
 import io.tapdata.events.EventOperation;
 
 import java.io.Serializable;
@@ -120,6 +121,10 @@ public class StandardEventUtils {
 
     public static Serializable getData(JSONObject json) {
         return json.getObject(KEY_DATA, Serializable.class);
+    }
+
+    public static TapFieldBaseEvent getDDLEvent(JSONObject json, Class<? extends TapFieldBaseEvent> clazz) {
+        return json.getObject(KEY_DATA, clazz);
     }
 
     public static void setData(Map<String, Object> map, Serializable data) {

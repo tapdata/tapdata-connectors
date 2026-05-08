@@ -18,6 +18,11 @@ public enum EventOperation {
     DDL_CREATE_PROCEDURE(EventOperationType.DDL, "CREATE_PROCEDURE"),
     DDL_CREATE_INDEX(EventOperationType.DDL, "CREATE_INDEX"),
     DDL_UNKNOWN(EventOperationType.DDL, "UNKNOWN"),
+
+    DDL_NEW_FIELD(EventOperationType.DDL, "NEW_FIELD"),
+    DDL_ALTER_FIELD_NAME(EventOperationType.DDL, "ALTER_FIELD_NAME"),
+    DDL_ALTER_FIELD_ATTRIBUTES(EventOperationType.DDL, "ALTER_FIELD_ATTRIBUTES"),
+    DDL_DROP_FIELD(EventOperationType.DDL, "DROP_FIELD"),
     ;
 
     private final EventOperationType type;

@@ -6,6 +6,7 @@ import io.tapdata.connector.utils.ConcurrentUtils;
 import io.tapdata.connector.utils.ErrorHelper;
 import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterTableTTLEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
@@ -572,6 +573,36 @@ public class KafkaService implements IKafkaService {
     @Override
     public void queryByAdvanceFilter(TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) {
         schemaModeService.queryByAdvanceFilter(filter, table, consumer);
+    }
+
+    @Override
+    public void processDDL(TapDDLEvent ddlEvent) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        getProducer().send(schemaModeService.fromTapDDLEvent(ddlEvent), (metadata, exception) -> {
+            if (exception != null) {
+                future.completeExceptionally(new TapCodeException(KafkaErrorCodes.KAFKA_COMMON_ERROR, exception));
+            } else {
+                future.complete(null);
+            }
+        });
+        try {
+            while (!stopping.get()) {
+                try {
+                    future.get(500L, TimeUnit.MILLISECONDS);
+                    return;
+                } catch (TimeoutException ignore) {
+                    // keep waiting until ack or shutdown
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            throw new TapCodeException(KafkaErrorCodes.KAFKA_COMMON_ERROR, cause);
+        }
     }
 
     @Override
