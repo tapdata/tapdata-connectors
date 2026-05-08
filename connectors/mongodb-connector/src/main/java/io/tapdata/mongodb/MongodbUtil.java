@@ -288,6 +288,7 @@ public class MongodbUtil {
 
 	private static final String[][] DEFAULT_HA_TIMEOUT_OPTIONS = {
 			{"serverSelectionTimeoutMS", "15000"},
+			{"socketTimeoutMS", "60000"},
 			{"maxIdleTimeMS", "30000"}
 	};
 
