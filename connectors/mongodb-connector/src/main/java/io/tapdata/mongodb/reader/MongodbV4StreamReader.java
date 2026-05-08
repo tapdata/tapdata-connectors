@@ -78,7 +78,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     public void onStart(MongodbConfig mongodbConfig) {
         this.mongodbConfig = mongodbConfig;
         if (mongoClient == null) {
-            mongoClient = MongodbUtil.createMongoClient(mongodbConfig,true);
+            mongoClient = MongodbUtil.createMongoClient(mongodbConfig);
             mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
         }
         running.compareAndSet(false, true);
