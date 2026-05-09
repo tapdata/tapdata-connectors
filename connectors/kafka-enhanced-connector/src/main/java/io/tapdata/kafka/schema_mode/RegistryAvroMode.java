@@ -1,7 +1,17 @@
 package io.tapdata.kafka.schema_mode;
 
+import io.confluent.kafka.schemaregistry.avro.AvroSchema;
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
+import io.tapdata.entity.event.ddl.entity.ValueChange;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
+import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -12,6 +22,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kafka.AbsSchemaMode;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
+import io.tapdata.kafka.utils.KafkaUtils;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.FilterResults;
@@ -37,6 +48,7 @@ import static io.tapdata.constant.DMLType.*;
 public class RegistryAvroMode extends AbsSchemaMode {
 
     private final Map<String, Schema.Field> fieldCache = new ConcurrentHashMap<>();
+    private volatile SchemaRegistryClient schemaRegistryClient;
 
     public RegistryAvroMode(IKafkaService kafkaService) {
         super(KafkaSchemaMode.REGISTRY_AVRO, kafkaService);
@@ -197,26 +209,8 @@ public class RegistryAvroMode extends AbsSchemaMode {
             data = new HashMap<>();
         }
 
-        SchemaBuilder.RecordBuilder<Schema> recordBuilder = SchemaBuilder.record(tapTable.getId());
-        SchemaBuilder.FieldAssembler<Schema> fieldAssembler = recordBuilder.fields();
-
         final Map<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
-        for (final String columnName : nameFieldMap.keySet()) {
-            TapField tapField = nameFieldMap.get(columnName);
-            final String columnType = tapField.getDataType();
-            if (StringUtils.isBlank(columnType)) {
-                continue;
-            }
-            // 根据列的类型映射为 Avro 模式的类型
-            Schema.Field field = getOrCreateAvroField(tapTable, tapField);
-            if (EmptyKit.isNotNull(tapField.getDefaultValue()) && applyDefault) {
-                fieldAssembler.name(columnName).type(field.schema()).withDefault(tapField.getDefaultValue());
-            } else {
-                fieldAssembler.name(columnName).type(field.schema()).noDefault();
-            }
-        }
-        Schema.Parser parser = new Schema.Parser();
-        Schema avroSchema = parser.parse(fieldAssembler.endRecord().toString());
+        Schema avroSchema = buildAvroSchemaFromTable(tapTable);
         GenericRecord record = new GenericData.Record(avroSchema);
 
         // 填充数据，需要进行类型转换以匹配 Avro schema
@@ -382,6 +376,180 @@ public class RegistryAvroMode extends AbsSchemaMode {
         }
         fieldCache.put(tapTable.getId() + "." + columnName, field);
         return field;
+    }
+
+    @Override
+    public ProducerRecord<Object, Object> fromTapDDLEvent(TapDDLEvent ddlEvent) {
+        if (!(ddlEvent instanceof TapFieldBaseEvent)) {
+            return null;
+        }
+        String tableId = ddlEvent.getTableId();
+        if (StringUtils.isBlank(tableId)) {
+            tapLogger.warn("Skip DDL event without tableId: {}", ddlEvent.getClass().getSimpleName());
+            return null;
+        }
+
+        TapFieldBaseEvent fieldEvent = (TapFieldBaseEvent) ddlEvent;
+        invalidateFieldCacheForEvent(tableId, fieldEvent);
+        TapTable tapTable = kafkaService.getConfig().tableMapGet(tableId);
+        if (tapTable == null) {
+            tapLogger.warn("Skip DDL '{}' for table '{}': not found in tableMap", ddlEvent.getClass().getSimpleName(), tableId);
+            return null;
+        }
+
+        // tableMap 中的 TapTable 在引擎应用 DDL 之前可能仍是旧版，需在本地副本上应用事件得到新版 schema
+        TapTable evolvedTable = applyFieldEvent(tapTable, fieldEvent);
+
+        String topic = KafkaUtils.pickTopic(kafkaService.getConfig(), ddlEvent.getDatabase(), ddlEvent.getSchema(), tableId);
+        String subject = topic + "-value";
+        try {
+            Schema avroSchema = buildAvroSchemaFromTable(evolvedTable);
+            int id = getSchemaRegistryClient().register(subject, new AvroSchema(avroSchema));
+            tapLogger.info("Registered avro schema for subject '{}' (id={}) by ddl '{}'", subject, id, ddlEvent.getClass().getSimpleName());
+        } catch (Exception e) {
+            throw new RuntimeException(String.format("Register avro schema failed for subject '%s' (event %s): %s",
+                    subject, ddlEvent.getClass().getSimpleName(), e.getMessage()), e);
+        }
+        return null;
+    }
+
+    private TapTable applyFieldEvent(TapTable original, TapFieldBaseEvent ddlEvent) {
+        LinkedHashMap<String, TapField> source = original.getNameFieldMap();
+        LinkedHashMap<String, TapField> evolved = source == null ? new LinkedHashMap<>() : new LinkedHashMap<>(source);
+        if (ddlEvent instanceof TapNewFieldEvent) {
+            List<TapField> newFields = ((TapNewFieldEvent) ddlEvent).getNewFields();
+            if (newFields != null) {
+                for (TapField nf : newFields) {
+                    if (nf != null && StringUtils.isNotBlank(nf.getName())) {
+                        evolved.put(nf.getName(), nf);
+                    }
+                }
+            }
+        } else if (ddlEvent instanceof TapDropFieldEvent) {
+            String fieldName = ((TapDropFieldEvent) ddlEvent).getFieldName();
+            if (StringUtils.isNotBlank(fieldName)) {
+                evolved.remove(fieldName);
+            }
+        } else if (ddlEvent instanceof TapAlterFieldNameEvent) {
+            ValueChange<String> nc = ((TapAlterFieldNameEvent) ddlEvent).getNameChange();
+            if (nc != null && StringUtils.isNotBlank(nc.getBefore()) && StringUtils.isNotBlank(nc.getAfter())) {
+                TapField field = evolved.remove(nc.getBefore());
+                if (field != null) {
+                    TapField renamed = field.clone();
+                    renamed.setName(nc.getAfter());
+                    evolved.put(nc.getAfter(), renamed);
+                }
+            }
+        } else if (ddlEvent instanceof TapAlterFieldAttributesEvent) {
+            TapAlterFieldAttributesEvent attr = (TapAlterFieldAttributesEvent) ddlEvent;
+            String fieldName = attr.getFieldName();
+            TapField existing = evolved.get(fieldName);
+            if (existing != null) {
+                TapField mutated = existing.clone();
+                if (attr.getDataTypeChange() != null && StringUtils.isNotBlank(attr.getDataTypeChange().getAfter())) {
+                    mutated.setDataType(attr.getDataTypeChange().getAfter());
+                }
+                if (attr.getDefaultChange() != null) {
+                    mutated.setDefaultValue(attr.getDefaultChange().getAfter());
+                }
+                if (attr.getNullableChange() != null && attr.getNullableChange().getAfter() != null) {
+                    mutated.setNullable(attr.getNullableChange().getAfter());
+                }
+                evolved.put(fieldName, mutated);
+            }
+        }
+        TapTable synthetic = new TapTable(original.getId());
+        synthetic.setNameFieldMap(evolved);
+        return synthetic;
+    }
+
+    private Schema buildAvroSchemaFromTable(TapTable tapTable) {
+        SchemaBuilder.RecordBuilder<Schema> recordBuilder = SchemaBuilder.record(tapTable.getId());
+        SchemaBuilder.FieldAssembler<Schema> fieldAssembler = recordBuilder.fields();
+        Map<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
+        if (nameFieldMap != null) {
+            for (final String columnName : nameFieldMap.keySet()) {
+                TapField tapField = nameFieldMap.get(columnName);
+                if (tapField == null || StringUtils.isBlank(tapField.getDataType())) {
+                    continue;
+                }
+                Schema.Field field = getOrCreateAvroField(tapTable, tapField);
+                if (EmptyKit.isNotNull(tapField.getDefaultValue()) && applyDefault) {
+                    fieldAssembler.name(columnName).type(field.schema()).withDefault(tapField.getDefaultValue());
+                } else if (isNullableUnion(field.schema())) {
+                    // 可空字段统一兜底为 null default，保证 Schema Registry BACKWARD 兼容（新增列对旧消费者可读）
+                    fieldAssembler.name(columnName).type(field.schema()).withDefault(null);
+                } else {
+                    fieldAssembler.name(columnName).type(field.schema()).noDefault();
+                }
+            }
+        }
+        return new Schema.Parser().parse(fieldAssembler.endRecord().toString());
+    }
+
+    private boolean isNullableUnion(Schema schema) {
+        if (schema == null || schema.getType() != Schema.Type.UNION) {
+            return false;
+        }
+        List<Schema> types = schema.getTypes();
+        return !types.isEmpty() && types.get(0).getType() == Schema.Type.NULL;
+    }
+
+    private void invalidateFieldCacheForEvent(String tableId, TapFieldBaseEvent ddlEvent) {
+        primaryKeyMap.remove(tableId);
+        if (ddlEvent instanceof TapAlterFieldNameEvent) {
+            ValueChange<String> nameChange = ((TapAlterFieldNameEvent) ddlEvent).getNameChange();
+            if (nameChange != null) {
+                if (StringUtils.isNotBlank(nameChange.getBefore())) {
+                    fieldCache.remove(tableId + "." + nameChange.getBefore());
+                }
+                if (StringUtils.isNotBlank(nameChange.getAfter())) {
+                    fieldCache.remove(tableId + "." + nameChange.getAfter());
+                }
+            }
+        } else if (ddlEvent instanceof TapAlterFieldAttributesEvent) {
+            String fieldName = ((TapAlterFieldAttributesEvent) ddlEvent).getFieldName();
+            if (StringUtils.isNotBlank(fieldName)) {
+                fieldCache.remove(tableId + "." + fieldName);
+            }
+        } else if (ddlEvent instanceof TapDropFieldEvent) {
+            String fieldName = ((TapDropFieldEvent) ddlEvent).getFieldName();
+            if (StringUtils.isNotBlank(fieldName)) {
+                fieldCache.remove(tableId + "." + fieldName);
+            }
+        }
+        // TapNewFieldEvent: 新字段无既有缓存，按需重建即可
+    }
+
+    private SchemaRegistryClient getSchemaRegistryClient() {
+        SchemaRegistryClient client = schemaRegistryClient;
+        if (client != null) {
+            return client;
+        }
+        synchronized (this) {
+            if (schemaRegistryClient != null) {
+                return schemaRegistryClient;
+            }
+            String raw = kafkaService.getConfig().getConnectionSchemaRegisterUrl();
+            if (StringUtils.isBlank(raw)) {
+                throw new IllegalStateException("schema registry url is not configured");
+            }
+            List<String> urls = new ArrayList<>();
+            for (String u : raw.split(",")) {
+                String t = u.trim();
+                if (t.isEmpty()) continue;
+                urls.add(t.startsWith("http://") || t.startsWith("https://") ? t : "http://" + t);
+            }
+            Map<String, Object> configs = new HashMap<>();
+            if (kafkaService.getConfig().getConnectionBasicAuth()) {
+                String source = kafkaService.getConfig().getConnectionAuthCredentialsSource();
+                configs.put("basic.auth.credentials.source", StringUtils.isBlank(source) ? "USER_INFO" : source);
+                configs.put("basic.auth.user.info",
+                        kafkaService.getConfig().getConnectionAuthUserName() + ":" + kafkaService.getConfig().getConnectionAuthPassword());
+            }
+            schemaRegistryClient = new CachedSchemaRegistryClient(urls, 1000, configs);
+            return schemaRegistryClient;
+        }
     }
 
     @Override

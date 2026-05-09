@@ -39,6 +39,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.errors.SerializationException;
@@ -578,7 +579,11 @@ public class KafkaService implements IKafkaService {
     @Override
     public void processDDL(TapDDLEvent ddlEvent) {
         CompletableFuture<Void> future = new CompletableFuture<>();
-        getProducer().send(schemaModeService.fromTapDDLEvent(ddlEvent), (metadata, exception) -> {
+        ProducerRecord<Object, Object> record = schemaModeService.fromTapDDLEvent(ddlEvent);
+        if (config.getConnectionSchemaRegister()) {
+            return;
+        }
+        getProducer().send(record, (metadata, exception) -> {
             if (exception != null) {
                 future.completeExceptionally(new TapCodeException(KafkaErrorCodes.KAFKA_COMMON_ERROR, exception));
             } else {
