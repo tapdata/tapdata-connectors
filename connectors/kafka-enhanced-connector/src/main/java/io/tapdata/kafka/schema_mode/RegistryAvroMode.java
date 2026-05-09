@@ -48,6 +48,8 @@ import static io.tapdata.constant.DMLType.*;
 public class RegistryAvroMode extends AbsSchemaMode {
 
     private final Map<String, Schema.Field> fieldCache = new ConcurrentHashMap<>();
+    // 每个 topic 最近一次见到的 Avro Schema 引用；命中时（==）走快速路径，跳过任何 schema diff 计算
+    private final Map<String, Schema> lastSchemaPerTopic = new ConcurrentHashMap<>();
     private volatile SchemaRegistryClient schemaRegistryClient;
 
     public RegistryAvroMode(IKafkaService kafkaService) {
@@ -117,6 +119,45 @@ public class RegistryAvroMode extends AbsSchemaMode {
     }
 
     @Override
+    public List<TapEvent> toTapEvents(ConsumerRecord<?, ?> consumerRecord) {
+        if (consumerRecord == null || consumerRecord.value() == null) {
+            return Collections.emptyList();
+        }
+        Object value = consumerRecord.value();
+        if (!(value instanceof GenericRecord)) {
+            return super.toTapEvents(consumerRecord);
+        }
+        Schema currentSchema = ((GenericRecord) value).getSchema();
+        String topic = consumerRecord.topic();
+        // 快速路径：与上次见到的 schema 引用相同时，KafkaAvroDeserializer 内部缓存已保证 == 命中，直接产生 DML 事件
+        Schema lastSchema = lastSchemaPerTopic.get(topic);
+        if (lastSchema == currentSchema) {
+            TapEvent dml = toTapEvent(consumerRecord);
+            return dml == null ? Collections.emptyList() : Collections.singletonList(dml);
+        }
+        // 慢速路径：首次见到或 schema 已变化
+        List<TapEvent> events;
+        if (lastSchema == null) {
+            // 首次：与 tableMap 中已知的 TapTable 结构对比，覆盖任务重启后内存缓存丢失、
+            // 但持久化的 TapTable 已落后于实际 schema 的场景；若 tableMap 没有记录则只能基线
+            TapTable knownTable = kafkaService.getConfig().tableMapGet(topic);
+            if (knownTable != null) {
+                events = detectSchemaChangesFromTable(topic, knownTable, currentSchema, consumerRecord.timestamp());
+            } else {
+                events = new ArrayList<>(1);
+            }
+        } else {
+            events = detectSchemaChanges(topic, lastSchema, currentSchema, consumerRecord.timestamp());
+        }
+        lastSchemaPerTopic.put(topic, currentSchema);
+        TapEvent dml = toTapEvent(consumerRecord);
+        if (dml != null) {
+            events.add(dml);
+        }
+        return events;
+    }
+
+    @Override
     public TapEvent toTapEvent(ConsumerRecord<?, ?> consumerRecord) {
         if (consumerRecord == null || consumerRecord.value() == null) {
             return null;
@@ -170,6 +211,278 @@ public class RegistryAvroMode extends AbsSchemaMode {
         } catch (Exception e) {
             throw new RuntimeException("Failed to convert Protobuf message to TapEvent from topic: " + consumerRecord.topic(), e);
         }
+    }
+
+    /**
+     * 比较前后两个 Avro Schema，反向生成对应的 TapFieldBaseEvent。
+     * 规则：
+     * - 别名（{@link Schema.Field#aliases()}）从旧 schema 字段名映射到新名 → {@link TapAlterFieldNameEvent}
+     * - 新增字段（排除 rename 的目标） → {@link TapNewFieldEvent}
+     * - 删除字段（排除 rename 的源） → {@link TapDropFieldEvent}
+     * - 同名字段属性差异（dataType / nullable / default） → {@link TapAlterFieldAttributesEvent}
+     */
+    private List<TapEvent> detectSchemaChanges(String topic, Schema oldSchema, Schema newSchema, long referenceTime) {
+        List<TapEvent> events = new ArrayList<>();
+        Map<String, Schema.Field> oldFields = new LinkedHashMap<>();
+        for (Schema.Field f : oldSchema.getFields()) {
+            oldFields.put(f.name(), f);
+        }
+        Map<String, Schema.Field> newFields = new LinkedHashMap<>();
+        for (Schema.Field f : newSchema.getFields()) {
+            newFields.put(f.name(), f);
+        }
+        // 1) rename：通过 alias 把旧名映射到新名
+        Map<String, String> renameAfterToBefore = new HashMap<>();
+        for (Schema.Field nf : newSchema.getFields()) {
+            if (oldFields.containsKey(nf.name())) {
+                continue;
+            }
+            Set<String> aliases = nf.aliases();
+            if (aliases == null || aliases.isEmpty()) {
+                continue;
+            }
+            for (String alias : aliases) {
+                if (oldFields.containsKey(alias) && !newFields.containsKey(alias) && !renameAfterToBefore.containsValue(alias)) {
+                    renameAfterToBefore.put(nf.name(), alias);
+                    TapAlterFieldNameEvent rename = new TapAlterFieldNameEvent();
+                    rename.setTime(System.currentTimeMillis());
+                    rename.setTableId(topic);
+                    rename.setReferenceTime(referenceTime);
+                    rename.nameChange(ValueChange.create(alias, nf.name()));
+                    events.add(rename);
+                    break;
+                }
+            }
+        }
+        // 2) 新增字段
+        List<TapField> addedFields = new ArrayList<>();
+        for (Schema.Field nf : newSchema.getFields()) {
+            if (oldFields.containsKey(nf.name())) {
+                continue;
+            }
+            if (renameAfterToBefore.containsKey(nf.name())) {
+                continue;
+            }
+            TapField tf = avroFieldToTapField(nf);
+            if (tf != null) {
+                addedFields.add(tf);
+            }
+        }
+        if (!addedFields.isEmpty()) {
+            TapNewFieldEvent add = new TapNewFieldEvent();
+            add.setTime(System.currentTimeMillis());
+            add.setTableId(topic);
+            add.setReferenceTime(referenceTime);
+            add.setNewFields(addedFields);
+            events.add(add);
+        }
+        // 3) 删除字段
+        Set<String> renameSources = new HashSet<>(renameAfterToBefore.values());
+        for (Schema.Field of : oldSchema.getFields()) {
+            if (newFields.containsKey(of.name())) {
+                continue;
+            }
+            if (renameSources.contains(of.name())) {
+                continue;
+            }
+            TapDropFieldEvent drop = new TapDropFieldEvent();
+            drop.setTime(System.currentTimeMillis());
+            drop.setTableId(topic);
+            drop.setReferenceTime(referenceTime);
+            drop.fieldName(of.name());
+            events.add(drop);
+        }
+        // 4) 属性变化
+        for (Schema.Field nf : newSchema.getFields()) {
+            Schema.Field of = oldFields.get(nf.name());
+            if (of == null) {
+                continue;
+            }
+            TapAlterFieldAttributesEvent attr = diffFieldAttributes(topic, of, nf, referenceTime);
+            if (attr != null) {
+                events.add(attr);
+            }
+        }
+        return events;
+    }
+
+    private TapAlterFieldAttributesEvent diffFieldAttributes(String topic, Schema.Field oldField, Schema.Field newField, long referenceTime) {
+        String oldType = avroPrimaryTypeName(oldField.schema());
+        String newType = avroPrimaryTypeName(newField.schema());
+        boolean oldNullable = oldField.schema().isNullable();
+        boolean newNullable = newField.schema().isNullable();
+        Object oldDefault = getDefaultValue(oldField.defaultVal());
+        Object newDefault = getDefaultValue(newField.defaultVal());
+        boolean dataTypeChanged = !Objects.equals(oldType, newType);
+        boolean nullableChanged = oldNullable != newNullable;
+        boolean defaultChanged = !Objects.equals(oldDefault, newDefault);
+        if (!dataTypeChanged && !nullableChanged && !defaultChanged) {
+            return null;
+        }
+        TapAlterFieldAttributesEvent attr = new TapAlterFieldAttributesEvent();
+        attr.setTime(System.currentTimeMillis());
+        attr.setTableId(topic);
+        attr.setReferenceTime(referenceTime);
+        attr.fieldName(newField.name());
+        if (dataTypeChanged) {
+            attr.dataType(ValueChange.create(oldType, newType));
+        }
+        if (nullableChanged) {
+            attr.nullable(ValueChange.create(oldNullable, newNullable));
+        }
+        if (defaultChanged) {
+            attr.defaultChange(ValueChange.create(oldDefault, newDefault));
+        }
+        return attr;
+    }
+
+    /**
+     * 用 {@link TapTable} 作为基线（任务重启后内存中没有上一份 Avro Schema 时使用），与新到的 Avro Schema 比对生成 DDL。
+     * 规则与 {@link #detectSchemaChanges} 保持一致，仅基线来源不同。
+     */
+    private List<TapEvent> detectSchemaChangesFromTable(String topic, TapTable tapTable, Schema newSchema, long referenceTime) {
+        List<TapEvent> events = new ArrayList<>();
+        Map<String, TapField> oldFields = tapTable.getNameFieldMap();
+        if (oldFields == null) {
+            oldFields = Collections.emptyMap();
+        }
+        Map<String, Schema.Field> newFields = new LinkedHashMap<>();
+        for (Schema.Field f : newSchema.getFields()) {
+            newFields.put(f.name(), f);
+        }
+        // 1) rename：通过 alias 把 TapTable 中的旧字段名映射到新名
+        Map<String, String> renameAfterToBefore = new HashMap<>();
+        for (Schema.Field nf : newSchema.getFields()) {
+            if (oldFields.containsKey(nf.name())) {
+                continue;
+            }
+            Set<String> aliases = nf.aliases();
+            if (aliases == null || aliases.isEmpty()) {
+                continue;
+            }
+            for (String alias : aliases) {
+                if (oldFields.containsKey(alias) && !newFields.containsKey(alias) && !renameAfterToBefore.containsValue(alias)) {
+                    renameAfterToBefore.put(nf.name(), alias);
+                    TapAlterFieldNameEvent rename = new TapAlterFieldNameEvent();
+                    rename.setTime(System.currentTimeMillis());
+                    rename.setTableId(topic);
+                    rename.setReferenceTime(referenceTime);
+                    rename.nameChange(ValueChange.create(alias, nf.name()));
+                    events.add(rename);
+                    break;
+                }
+            }
+        }
+        // 2) 新增字段
+        List<TapField> addedFields = new ArrayList<>();
+        for (Schema.Field nf : newSchema.getFields()) {
+            if (oldFields.containsKey(nf.name())) {
+                continue;
+            }
+            if (renameAfterToBefore.containsKey(nf.name())) {
+                continue;
+            }
+            TapField tf = avroFieldToTapField(nf);
+            if (tf != null) {
+                addedFields.add(tf);
+            }
+        }
+        if (!addedFields.isEmpty()) {
+            TapNewFieldEvent add = new TapNewFieldEvent();
+            add.setTime(System.currentTimeMillis());
+            add.setTableId(topic);
+            add.setReferenceTime(referenceTime);
+            add.setNewFields(addedFields);
+            events.add(add);
+        }
+        // 3) 删除字段
+        Set<String> renameSources = new HashSet<>(renameAfterToBefore.values());
+        for (String oldName : oldFields.keySet()) {
+            if (newFields.containsKey(oldName)) {
+                continue;
+            }
+            if (renameSources.contains(oldName)) {
+                continue;
+            }
+            TapDropFieldEvent drop = new TapDropFieldEvent();
+            drop.setTime(System.currentTimeMillis());
+            drop.setTableId(topic);
+            drop.setReferenceTime(referenceTime);
+            drop.fieldName(oldName);
+            events.add(drop);
+        }
+        // 4) 属性变化
+        for (Schema.Field nf : newSchema.getFields()) {
+            TapField of = oldFields.get(nf.name());
+            if (of == null) {
+                continue;
+            }
+            TapAlterFieldAttributesEvent attr = diffFieldAttributesFromTapField(topic, of, nf, referenceTime);
+            if (attr != null) {
+                events.add(attr);
+            }
+        }
+        return events;
+    }
+
+    private TapAlterFieldAttributesEvent diffFieldAttributesFromTapField(String topic, TapField oldField, Schema.Field newField, long referenceTime) {
+        String oldType = oldField.getDataType() == null ? null : StringKit.removeParentheses(oldField.getDataType());
+        String newType = avroPrimaryTypeName(newField.schema());
+        boolean oldNullable = !Boolean.FALSE.equals(oldField.getNullable());
+        boolean newNullable = newField.schema().isNullable();
+        Object oldDefault = oldField.getDefaultValue();
+        Object newDefault = getDefaultValue(newField.defaultVal());
+        boolean dataTypeChanged = !Objects.equals(oldType, newType);
+        boolean nullableChanged = oldNullable != newNullable;
+        boolean defaultChanged = !Objects.equals(oldDefault, newDefault);
+        if (!dataTypeChanged && !nullableChanged && !defaultChanged) {
+            return null;
+        }
+        TapAlterFieldAttributesEvent attr = new TapAlterFieldAttributesEvent();
+        attr.setTime(System.currentTimeMillis());
+        attr.setTableId(topic);
+        attr.setReferenceTime(referenceTime);
+        attr.fieldName(newField.name());
+        if (dataTypeChanged) {
+            attr.dataType(ValueChange.create(oldType, newType));
+        }
+        if (nullableChanged) {
+            attr.nullable(ValueChange.create(oldNullable, newNullable));
+        }
+        if (defaultChanged) {
+            attr.defaultChange(ValueChange.create(oldDefault, newDefault));
+        }
+        return attr;
+    }
+
+    private TapField avroFieldToTapField(Schema.Field avroField) {
+        TapField field = new TapField();
+        field.setName(avroField.name());
+        field.setDataType(avroPrimaryTypeName(avroField.schema()));
+        field.setNullable(avroField.schema().isNullable());
+        field.setDefaultValue(getDefaultValue(avroField.defaultVal()));
+        return field;
+    }
+
+    /**
+     * 返回 Avro Schema 中除 NULL 之外的主要类型名（与 {@link #genericRecordToTapTable} 处理一致）。
+     */
+    private String avroPrimaryTypeName(Schema schema) {
+        if (schema == null) {
+            return "STRING";
+        }
+        if (schema.isUnion()) {
+            List<Schema> types = schema.getTypes();
+            if (types.size() == 2) {
+                for (Schema t : types) {
+                    if (t.getType() != Schema.Type.NULL) {
+                        return toTapType(t.getType().name());
+                    }
+                }
+            }
+            return "STRING";
+        }
+        return toTapType(schema.getType().name());
     }
 
     private Map<String, Object> convertGericRecordToMap(GenericRecord record) {

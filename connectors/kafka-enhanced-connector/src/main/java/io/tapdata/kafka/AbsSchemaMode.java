@@ -82,6 +82,15 @@ public abstract class AbsSchemaMode {
 
     public abstract TapEvent toTapEvent(ConsumerRecord<?, ?> consumerRecord);
 
+    /**
+     * 在转出 DML 事件之前，按需反向生成 schema 变更产生的 DDL 事件。默认实现仅返回 toTapEvent 的单个结果，
+     * 子类（如 {@link io.tapdata.kafka.schema_mode.RegistryAvroMode}）可覆盖以追加 DDL 事件。
+     */
+    public List<TapEvent> toTapEvents(ConsumerRecord<?, ?> consumerRecord) {
+        TapEvent event = toTapEvent(consumerRecord);
+        return event == null ? Collections.emptyList() : Collections.singletonList(event);
+    }
+
     public abstract List<ProducerRecord<Object, Object>> fromTapEvent(TapTable table, TapEvent tapEvent);
 
     public ProducerRecord<Object, Object> fromTapDDLEvent(TapDDLEvent ddlEvent) {

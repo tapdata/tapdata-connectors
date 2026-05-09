@@ -322,14 +322,15 @@ public class KafkaService implements IKafkaService {
                             }
 
                             for (ConsumerRecord<Object, Object> consumerRecord : consumerRecords) {
-                                TapEvent event = schemaModeService.toTapEvent(consumerRecord);
-                                if (TapUnknownRecordEvent.TYPE == event.getType()) {
-                                    TapUnknownRecordEvent unknownRecordEvent = (TapUnknownRecordEvent) event;
-                                    String errorMsg = String.format("unknown event %s(%d-%d): %s", topic, consumerRecord.partition(), consumerRecord.offset(), unknownRecordEvent.getData());
-                                    throw new TapPdkSkippableDataEx(errorMsg, KafkaEnhancedConnector.PDK_ID);
+                                for (TapEvent event : schemaModeService.toTapEvents(consumerRecord)) {
+                                    if (TapUnknownRecordEvent.TYPE == event.getType()) {
+                                        TapUnknownRecordEvent unknownRecordEvent = (TapUnknownRecordEvent) event;
+                                        String errorMsg = String.format("unknown event %s(%d-%d): %s", topic, consumerRecord.partition(), consumerRecord.offset(), unknownRecordEvent.getData());
+                                        throw new TapPdkSkippableDataEx(errorMsg, KafkaEnhancedConnector.PDK_ID);
+                                    }
+                                    KafkaUtils.convertWithFieldType(fieldTypeConverts, event);
+                                    batchPusher.add(consumerRecord, event);
                                 }
-                                KafkaUtils.convertWithFieldType(fieldTypeConverts, event);
-                                batchPusher.add(consumerRecord, event);
 
                                 if (consumerRecord.offset() + 1 >= effectiveEndOffset) {
                                     logger.info("Partition {}-{} batch read completed at offset {}", topic, partition, consumerRecord.offset());

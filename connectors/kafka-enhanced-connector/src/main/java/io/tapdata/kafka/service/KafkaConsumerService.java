@@ -87,8 +87,9 @@ public class KafkaConsumerService implements AutoCloseable {
                     } else {
                         for (ConsumerRecord<Object, Object> consumerRecord : consumerRecords) {
                             offset.setOffset(consumerRecord); // 推进 offset
-                            TapEvent event = service.getSchemaModeService().toTapEvent(consumerRecord);
-                            batchPusher.add(event);
+                            for (TapEvent event : service.getSchemaModeService().toTapEvents(consumerRecord)) {
+                                batchPusher.add(event);
+                            }
                         }
                     }
                 }
@@ -179,8 +180,9 @@ public class KafkaConsumerService implements AutoCloseable {
                         if (consumerRecords.isEmpty()) continue;
 
                         for (ConsumerRecord<Object, Object> consumerRecord : consumerRecords) {
-                            TapEvent event = service.getSchemaModeService().toTapEvent(consumerRecord);
-                            batchPusher.add(consumerRecord, event);
+                            for (TapEvent event : service.getSchemaModeService().toTapEvents(consumerRecord)) {
+                                batchPusher.add(consumerRecord, event);
+                            }
                         }
                     }
                 }
