@@ -2,7 +2,9 @@ package io.tapdata.kafka.schema_mode;
 
 import io.confluent.kafka.schemaregistry.avro.AvroSchema;
 import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import io.confluent.kafka.schemaregistry.client.SchemaMetadata;
 import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
+import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
@@ -38,6 +40,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -254,6 +257,37 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 }
             }
         }
+        // 1.5) 启发式 rename 兜底：alias 未命中时，若剩余 drop / add 各恰好 1 个且数据类型完全一致，视为 rename
+        {
+            List<Schema.Field> remainingDrops = new ArrayList<>();
+            for (Schema.Field of : oldSchema.getFields()) {
+                if (newFields.containsKey(of.name())) continue;
+                if (renameAfterToBefore.containsValue(of.name())) continue;
+                remainingDrops.add(of);
+            }
+            List<Schema.Field> remainingAdds = new ArrayList<>();
+            for (Schema.Field nf : newSchema.getFields()) {
+                if (oldFields.containsKey(nf.name())) continue;
+                if (renameAfterToBefore.containsKey(nf.name())) continue;
+                remainingAdds.add(nf);
+            }
+            if (remainingDrops.size() == 1 && remainingAdds.size() == 1) {
+                Schema.Field d = remainingDrops.get(0);
+                Schema.Field a = remainingAdds.get(0);
+                String dType = avroPrimaryTypeName(d.schema());
+                String aType = avroPrimaryTypeName(a.schema());
+                if (Objects.equals(dType, aType)) {
+                    renameAfterToBefore.put(a.name(), d.name());
+                    TapAlterFieldNameEvent rename = new TapAlterFieldNameEvent();
+                    rename.setTime(System.currentTimeMillis());
+                    rename.setTableId(topic);
+                    rename.setReferenceTime(referenceTime);
+                    rename.nameChange(ValueChange.create(d.name(), a.name()));
+                    events.add(rename);
+                    tapLogger.info("Heuristic rename detected on topic '{}' (alias missing): {} -> {} (type={})", topic, d.name(), a.name(), dType);
+                }
+            }
+        }
         // 2) 新增字段
         List<TapField> addedFields = new ArrayList<>();
         for (Schema.Field nf : newSchema.getFields()) {
@@ -370,6 +404,38 @@ public class RegistryAvroMode extends AbsSchemaMode {
                     rename.nameChange(ValueChange.create(alias, nf.name()));
                     events.add(rename);
                     break;
+                }
+            }
+        }
+        // 1.5) 启发式 rename 兜底：alias 未命中时，若剩余 drop / add 各恰好 1 个且数据类型完全一致，视为 rename
+        {
+            List<String> remainingDropNames = new ArrayList<>();
+            for (String oldName : oldFields.keySet()) {
+                if (newFields.containsKey(oldName)) continue;
+                if (renameAfterToBefore.containsValue(oldName)) continue;
+                remainingDropNames.add(oldName);
+            }
+            List<Schema.Field> remainingAdds = new ArrayList<>();
+            for (Schema.Field nf : newSchema.getFields()) {
+                if (oldFields.containsKey(nf.name())) continue;
+                if (renameAfterToBefore.containsKey(nf.name())) continue;
+                remainingAdds.add(nf);
+            }
+            if (remainingDropNames.size() == 1 && remainingAdds.size() == 1) {
+                String dName = remainingDropNames.get(0);
+                Schema.Field a = remainingAdds.get(0);
+                TapField dField = oldFields.get(dName);
+                String dType = dField == null || dField.getDataType() == null ? null : StringKit.removeParentheses(dField.getDataType());
+                String aType = avroPrimaryTypeName(a.schema());
+                if (dType != null && Objects.equals(dType, aType)) {
+                    renameAfterToBefore.put(a.name(), dName);
+                    TapAlterFieldNameEvent rename = new TapAlterFieldNameEvent();
+                    rename.setTime(System.currentTimeMillis());
+                    rename.setTableId(topic);
+                    rename.setReferenceTime(referenceTime);
+                    rename.nameChange(ValueChange.create(dName, a.name()));
+                    events.add(rename);
+                    tapLogger.info("Heuristic rename detected on topic '{}' (alias missing, baseline=TapTable): {} -> {} (type={})", topic, dName, a.name(), dType);
                 }
             }
         }
@@ -713,10 +779,21 @@ public class RegistryAvroMode extends AbsSchemaMode {
         // tableMap 中的 TapTable 在引擎应用 DDL 之前可能仍是旧版，需在本地副本上应用事件得到新版 schema
         TapTable evolvedTable = applyFieldEvent(tapTable, fieldEvent);
 
+        // 收集本次事件中的直接重命名映射（after -> before），用于在新 schema 中登记 alias
+        Map<String, String> immediateRenames = new HashMap<>();
+        if (fieldEvent instanceof TapAlterFieldNameEvent) {
+            ValueChange<String> nc = ((TapAlterFieldNameEvent) fieldEvent).getNameChange();
+            if (nc != null && StringUtils.isNotBlank(nc.getBefore()) && StringUtils.isNotBlank(nc.getAfter())) {
+                immediateRenames.put(nc.getAfter(), nc.getBefore());
+            }
+        }
+
         String topic = KafkaUtils.pickTopic(kafkaService.getConfig(), ddlEvent.getDatabase(), ddlEvent.getSchema(), tableId);
         String subject = topic + "-value";
         try {
-            Schema avroSchema = buildAvroSchemaFromTable(evolvedTable);
+            // 合并 Registry 中已登记的历史 alias 链 + 本次事件的直接 rename，确保 A -> B -> C 不丢失
+            Map<String, Set<String>> aliasMap = mergeAliasHistory(subject, immediateRenames, evolvedTable);
+            Schema avroSchema = buildAvroSchemaFromTable(evolvedTable, aliasMap);
             int id = getSchemaRegistryClient().register(subject, new AvroSchema(avroSchema));
             tapLogger.info("Registered avro schema for subject '{}' (id={}) by ddl '{}'", subject, id, ddlEvent.getClass().getSimpleName());
         } catch (Exception e) {
@@ -724,6 +801,58 @@ public class RegistryAvroMode extends AbsSchemaMode {
                     subject, ddlEvent.getClass().getSimpleName(), e.getMessage()), e);
         }
         return null;
+    }
+
+    /**
+     * 拉取 Registry 中该 subject 最新版本的 schema，提取每个字段已有的 alias 集合并继承到演进后的字段上。
+     * 同时把本次事件的直接 rename 的 before 名追加为 after 字段的 alias。
+     * <p>
+     * 处理细节：
+     * <ul>
+     *   <li>若 subject 尚未注册（404 / 40401）：返回仅含本次直接 rename 的 alias map。</li>
+     *   <li>历史字段在演进后仍存在：直接继承其 alias。</li>
+     *   <li>历史字段被本次重命名（出现在 immediateRenames 的 value 中）：把它的 alias 转移给新名字。</li>
+     *   <li>历史字段在演进后既不存在也未被 rename（即被 drop）：其 alias 不再继承（避免污染）。</li>
+     * </ul>
+     */
+    private Map<String, Set<String>> mergeAliasHistory(String subject, Map<String, String> immediateRenames, TapTable evolvedTable) {
+        Map<String, Set<String>> aliasMap = new HashMap<>();
+        try {
+            SchemaMetadata meta = getSchemaRegistryClient().getLatestSchemaMetadata(subject);
+            if (meta != null && StringUtils.isNotBlank(meta.getSchema())) {
+                Schema previous = new Schema.Parser().parse(meta.getSchema());
+                Map<String, TapField> evolvedFields = evolvedTable.getNameFieldMap();
+                for (Schema.Field f : previous.getFields()) {
+                    Set<String> aliases = f.aliases();
+                    if (aliases == null || aliases.isEmpty()) {
+                        continue;
+                    }
+                    if (evolvedFields != null && evolvedFields.containsKey(f.name())) {
+                        aliasMap.computeIfAbsent(f.name(), k -> new LinkedHashSet<>()).addAll(aliases);
+                    } else {
+                        // 字段名不在新 schema 中：可能本次被 rename，把 alias 转移给新名字
+                        for (Map.Entry<String, String> e : immediateRenames.entrySet()) {
+                            if (Objects.equals(e.getValue(), f.name())) {
+                                aliasMap.computeIfAbsent(e.getKey(), k -> new LinkedHashSet<>()).addAll(aliases);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (RestClientException re) {
+            // 40401: subject not found；首次注册时正常发生，忽略即可
+            if (re.getStatus() != 404 && re.getErrorCode() != 40401) {
+                tapLogger.warn("Fetch latest schema for subject '{}' failed (status={}, code={}): {}",
+                        subject, re.getStatus(), re.getErrorCode(), re.getMessage());
+            }
+        } catch (IOException ioe) {
+            tapLogger.warn("Fetch latest schema for subject '{}' failed: {}", subject, ioe.getMessage());
+        }
+        // 追加本次事件的直接 rename：after 字段的 alias 中加入 before 名
+        for (Map.Entry<String, String> e : immediateRenames.entrySet()) {
+            aliasMap.computeIfAbsent(e.getKey(), k -> new LinkedHashSet<>()).add(e.getValue());
+        }
+        return aliasMap;
     }
 
     private TapTable applyFieldEvent(TapTable original, TapFieldBaseEvent ddlEvent) {
@@ -777,6 +906,10 @@ public class RegistryAvroMode extends AbsSchemaMode {
     }
 
     private Schema buildAvroSchemaFromTable(TapTable tapTable) {
+        return buildAvroSchemaFromTable(tapTable, null);
+    }
+
+    private Schema buildAvroSchemaFromTable(TapTable tapTable, Map<String, Set<String>> aliasMap) {
         SchemaBuilder.RecordBuilder<Schema> recordBuilder = SchemaBuilder.record(tapTable.getId());
         SchemaBuilder.FieldAssembler<Schema> fieldAssembler = recordBuilder.fields();
         Map<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
@@ -787,13 +920,20 @@ public class RegistryAvroMode extends AbsSchemaMode {
                     continue;
                 }
                 Schema.Field field = getOrCreateAvroField(tapTable, tapField);
+                SchemaBuilder.FieldBuilder<Schema> fb = fieldAssembler.name(columnName);
+                if (aliasMap != null) {
+                    Set<String> aliases = aliasMap.get(columnName);
+                    if (aliases != null && !aliases.isEmpty()) {
+                        fb = fb.aliases(aliases.toArray(new String[0]));
+                    }
+                }
                 if (EmptyKit.isNotNull(tapField.getDefaultValue()) && applyDefault) {
-                    fieldAssembler.name(columnName).type(field.schema()).withDefault(tapField.getDefaultValue());
+                    fb.type(field.schema()).withDefault(tapField.getDefaultValue());
                 } else if (isNullableUnion(field.schema())) {
                     // 可空字段统一兜底为 null default，保证 Schema Registry BACKWARD 兼容（新增列对旧消费者可读）
-                    fieldAssembler.name(columnName).type(field.schema()).withDefault(null);
+                    fb.type(field.schema()).withDefault(null);
                 } else {
-                    fieldAssembler.name(columnName).type(field.schema()).noDefault();
+                    fb.type(field.schema()).noDefault();
                 }
             }
         }
