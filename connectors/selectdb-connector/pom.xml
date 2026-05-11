@@ -15,7 +15,7 @@
 
     <properties>
         <java.version>8</java.version>
-        <tapdata.pdk.api.version>2.0.0-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
         <pdk-error-code.version>1.0-SNAPSHOT</pdk-error-code.version>
     </properties>
 

@@ -386,4 +386,8 @@ public class StringKit {
         Matcher matcher = REGEX_SPECIAL_CHARS.matcher(input);
         return matcher.replaceAll("\\\\$0");
     }
+
+    public static String removeSqlNote(String sql) {
+        return sql.replaceAll("(?s)/\\*.*?\\*/|--.*?\n", "").trim();
+    }
 }

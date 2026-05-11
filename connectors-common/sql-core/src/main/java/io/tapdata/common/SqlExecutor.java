@@ -11,9 +11,10 @@ import java.util.function.Supplier;
 
 public interface SqlExecutor {
 
-	void execute(String sql, TapSupplier<Connection> connectionSupplier, Consumer<Object> consumer, Supplier<Boolean> aliveSupplier, int batchSize) throws Throwable;
+    void execute(String sql, TapSupplier<Connection> connectionSupplier, Consumer<Object> consumer, Supplier<Boolean> aliveSupplier, int batchSize) throws Throwable;
 
-	ExecuteResult<?> execute(String sql, TapSupplier<Connection> connectionSupplier);
+    @Deprecated
+    ExecuteResult<?> execute(String sql, TapSupplier<Connection> connectionSupplier);
 
-	ExecuteResult<?> call(String funcName, List<Map<String, Object>> params, TapSupplier<Connection> connectionSupplier);
+    ExecuteResult<?> call(String funcName, List<Map<String, Object>> params, TapSupplier<Connection> connectionSupplier);
 }

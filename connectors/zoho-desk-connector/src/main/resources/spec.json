@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Zoho-Desk",
+    "realName": "Zoho Desk",
     "icon": "icons/zoho.png",
     "doc" : "${doc}",
     "id": "zoho-desk",

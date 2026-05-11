@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "TDengine",
+    "realName": "TDengine",
     "icon": "icons/tdengine.png",
     "id": "tdengine",
     "doc": "${doc}",

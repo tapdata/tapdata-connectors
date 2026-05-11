@@ -14,6 +14,12 @@ import java.util.function.Consumer;
 public class MariadbConnector extends MysqlConnector {
 
     @Override
+    public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
+        super.onStart(tapConnectionContext);
+        mysqlJdbcContext = new MariadbJdbcContextV2(commonDbConfig);
+    }
+
+    @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
         mysqlConfig = new MysqlConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();

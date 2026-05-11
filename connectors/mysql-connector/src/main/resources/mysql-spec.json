@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Mysql",
+    "realName": "MySQL",
     "icon": "icons/mysql.png",
     "id": "mysql",
     "doc": "${doc}",
@@ -348,6 +349,24 @@
     "node": {
       "type": "object",
       "properties": {
+        "highPerformance": {
+          "type": "boolean",
+          "title": "${highPerformance}",
+          "default": false,
+          "x-index": 4,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "createAutoInc": {
           "type": "boolean",
           "title": "${createAutoInc}",
@@ -580,6 +599,7 @@
       "maximumQueueSize": "Maximum queue size",
       "maximumQueueSizeTip": "The queue size for reading incremental data in MySQL. If the downstream synchronization is slow or individual records in the table are too large, please lower this setting.",
       "lowerCaseTableNames": "Lower Case TableNames",
+      "highPerformance": "High Performance Mode",
       "cdcAcceptBatch": "Incremental event commit batch size",
       "cdcAcceptBatchTip": "The number of batches in the commit rule for incremental log reading can reduce commit frequency and improve CDC performance by saving a batch of log reads for submission. The default batch count in the policy is 100",
       "cdcAcceptDelaySeconds": "Incremental event commit delay (seconds)",
@@ -621,6 +641,7 @@
       "maximumQueueSize": "最大队列大小",
       "maximumQueueSizeTip": "MySql读取增量数据队列大小，如果下游同步较慢或表的单条数据过大，请调低此配置。",
       "lowerCaseTableNames": "大小写敏感",
+      "highPerformance": "高性能模式",
       "cdcAcceptBatch": "从日志读取增量事件提交批数",
       "cdcAcceptBatchTip": "增量日志读取的提交规则中的批数，日志读取攒一批后提交可减少Commit频率，提高cdc性能，默认策略中批次数为100",
       "cdcAcceptDelaySeconds": "从日志读取增量事件提交延时（秒）",
@@ -662,6 +683,7 @@
       "maximumQueueSize": "最大隊列大小",
       "maximumQueueSizeTip": "MySql 讀取增量數據隊列大小。如果下游同步較慢或表的單條數據過大，請調低此配置。",
       "lowerCaseTableNames": "大小寫敏感",
+      "highPerformance": "高性能模式",
       "cdcAcceptBatch": "從日誌讀取增量事件提交批數",
       "cdcAcceptBatchTip": "增量日誌讀取的提交規則中的批數，日誌讀取攢一批後提交可减少Commit頻率，提高cdc效能，默認策略中批次數為100",
       "cdcAcceptDelaySeconds": "從日誌讀取增量事件提交延時（秒）",

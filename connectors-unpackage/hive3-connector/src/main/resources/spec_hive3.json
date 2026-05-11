@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "hive3",
+    "realName": "Apache Hive3",
     "icon": "icons/hive3.png",
     "id": "hive3",
     "doc": "${doc}",

@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "PostgreSQL",
+    "realName": "PostgreSQL",
     "icon": "icons/postgres.png",
     "doc" : "${doc}",
     "id": "postgres",
@@ -1400,6 +1401,8 @@
       "to": "TapMoney",
       "defaultPrecision": 19,
       "defaultScale": 4,
+      "preferPrecision": 10,
+      "preferScale": 4,
       "fixed": true
     }
   }

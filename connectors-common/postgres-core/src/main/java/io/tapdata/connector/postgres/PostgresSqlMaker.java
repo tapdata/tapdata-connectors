@@ -126,7 +126,7 @@ public class PostgresSqlMaker extends CommonSqlMaker {
 
     public void buildOrderClause(StringBuilder builder, TapAdvanceFilter filter) {
         if (EmptyKit.isNotEmpty(filter.getSortOnList())) {
-            builder.append("ORDER BY ");
+            builder.append(" ORDER BY ");
             List<Collate> collateList = filter.getCollateList();
             builder.append(filter.getSortOnList().stream().map(v -> {
                 Collate collate = null;

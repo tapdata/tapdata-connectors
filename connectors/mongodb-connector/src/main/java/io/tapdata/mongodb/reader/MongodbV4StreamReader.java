@@ -77,7 +77,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     public void onStart(MongodbConfig mongodbConfig) {
         this.mongodbConfig = mongodbConfig;
         if (mongoClient == null) {
-            mongoClient = MongodbUtil.createMongoClient(mongodbConfig);
+            mongoClient = MongodbUtil.createMongoClient(mongodbConfig,true);
             mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
         }
         running.compareAndSet(false, true);
@@ -105,7 +105,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 //        List<Bson> pipeline1 = asList(Aggregates.match(Filters.or(collList)));
         FullDocument fullDocumentOption = FullDocument.DEFAULT;
         FullDocumentBeforeChange fullDocumentBeforeChangeOption = FullDocumentBeforeChange.WHEN_AVAILABLE;
-        if (mongodbConfig.isEnableFillingModifiedData()) {
+        if (mongodbConfig.isEnableFillingModifiedData() || isPreImage) {
             fullDocumentOption = FullDocument.UPDATE_LOOKUP;
         }
         while (running.get()) {
@@ -255,7 +255,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     // Queries take a long time and are disabled when not needed, QPS went down from 4000 to 400.
                     // If you need other field data in delete event can't be disabled.
                     TapDeleteRecordEvent recordEvent;
-                    if (mongodbConfig.isEnableFillingModifiedData()) {
+                    if (mongodbConfig.isEnableFillingModifiedData() && !isPreImage) {
                         final Map lookupData = MongodbLookupUtil.findDeleteCacheByOid(connectionString, collectionName, documentKey.get("_id"), globalStateMap);
                         recordEvent = deleteDMLEvent(MapUtils.isNotEmpty(lookupData) && lookupData.containsKey("data") && lookupData.get("data") instanceof Map
                                 ? (Map<String, Object>) lookupData.get("data") : before, collectionName);
@@ -286,12 +286,12 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
                 if (null != updateDescription.getUpdatedFields()) {
                     Document decodeUpdateDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
-                    decodeUpdateDocument.forEach((k, v) -> {
-                        if (k.contains(".")) {
-                            return;
-                        }
-                        after.put(k, v);
-                    });
+                    after.putAll(decodeUpdateDocument);
+					before.forEach((k, v) -> {
+						if (!after.containsKey(k) && after.keySet().stream().noneMatch(ak -> ak.startsWith(k + "."))) {
+							after.put(k, v);
+						}
+					});
                 }
 
                 TapUpdateRecordEvent recordEvent = updateDMLEvent(before, after, collectionName);

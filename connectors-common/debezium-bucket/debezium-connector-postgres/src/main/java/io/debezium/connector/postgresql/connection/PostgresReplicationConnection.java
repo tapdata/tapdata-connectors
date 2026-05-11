@@ -171,7 +171,15 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
                                 Set<TableId> tablesToCapture = determineCapturedTables();
                                 Set<TableId> existsTables = new HashSet<>();
                                 String catalog = connection().getCatalog();
-                                try (ResultSet resultSet = stmt.executeQuery(String.format("select * from pg_publication_tables where pubname='%s'", publicationName))) {
+                                try (ResultSet resultSet = stmt.executeQuery(String.format("select schemaname, tablename from pg_publication_tables pt join pg_publication pp\n" +
+                                        "    on pt.pubname = pp.pubname\n" +
+                                        "where pt.pubname='%s' and pp.pubviaroot='false'\n" +
+                                        "union all\n" +
+                                        "select schemaname, pc.relname from pg_publication_tables pt join pg_publication pp\n" +
+                                        "    on pt.pubname = pp.pubname join pg_class pc on pc.oid in (SELECT inhrelid\n" +
+                                        "    FROM pg_inherits\n" +
+                                        "    WHERE inhparent = (pt.schemaname||'.'||pt.tablename)::regclass)\n" +
+                                        "where pt.pubname='%s' and pp.pubviaroot='true'", publicationName, publicationName))) {
                                     while (resultSet.next()) {
                                         existsTables.add(new TableId(catalog, resultSet.getString("schemaname"), resultSet.getString("tablename")));
                                     }

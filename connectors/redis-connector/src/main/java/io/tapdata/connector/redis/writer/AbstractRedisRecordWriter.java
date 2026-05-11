@@ -27,6 +27,11 @@ public abstract class AbstractRedisRecordWriter {
     protected final CommonJedis jedis;
     protected final RedisConfig redisConfig;
     protected final TapTable tapTable;
+    protected final String valueData;
+    protected final String valueJoinString;
+    protected final Boolean csvFormat;
+    protected final String keyExpression;
+    protected final Boolean oneKey;
     protected final List<String> fieldList;
     protected final List<String> keyFieldList;
     protected static final JsonParser jsonParser = InstanceFactory.instance(JsonParser.class); //json util
@@ -35,6 +40,11 @@ public abstract class AbstractRedisRecordWriter {
         this.redisConfig = redisContext.getRedisConfig();
         this.jedis = redisContext.getJedis();
         this.tapTable = tapTable;
+        this.valueData = redisConfig.getValueData(tapTable.getId());
+        this.valueJoinString = redisConfig.getValueJoinString(tapTable.getId());
+        this.csvFormat = redisConfig.getCsvFormat(tapTable.getId());
+        this.keyExpression = redisConfig.getKeyExpression(tapTable.getId());
+        this.oneKey = redisConfig.getOneKey(tapTable.getId());
         this.fieldList = tapTable.getNameFieldMap().entrySet().stream().sorted(Comparator.comparing(v ->
                 EmptyKit.isNull(v.getValue().getPos()) ? 99999 : v.getValue().getPos())).map(Map.Entry::getKey).collect(Collectors.toList());
         this.keyFieldList = getKeyFieldList();
@@ -92,8 +102,8 @@ public abstract class AbstractRedisRecordWriter {
     protected abstract void handleDeleteEvent(TapDeleteRecordEvent event, RedisPipeline pipelined);
 
     protected String getRedisKey(Map<String, Object> value) {
-        if (EmptyKit.isNotBlank(redisConfig.getKeyExpression())) {
-            String key = redisConfig.getKeyExpression();
+        if (EmptyKit.isNotBlank(keyExpression)) {
+            String key = keyExpression;
             for (String field : fieldList) {
                 Object obj = value.get(field);
                 key = key.replaceAll("\\$\\{" + field + "}", EmptyKit.isNull(obj) ? "null" : String.valueOf(obj));
@@ -117,7 +127,7 @@ public abstract class AbstractRedisRecordWriter {
 
     protected List<String> getKeyFieldList() {
         List<String> keyFieldList = new ArrayList<>();
-        String expression = redisConfig.getKeyExpression();
+        String expression = keyExpression;
         if (EmptyKit.isBlank(expression)) {
             return keyFieldList;
         }
@@ -137,12 +147,12 @@ public abstract class AbstractRedisRecordWriter {
         return fieldList.stream().map(v -> {
             Object obj = value.get(v);
             String str = EmptyKit.isNull(obj) ? "null" : String.valueOf(obj);
-            if (redisConfig.getCsvFormat()) {
-                return csvFormat(str, redisConfig.getValueJoinString());
+            if (csvFormat) {
+                return csvFormat(str, valueJoinString);
             } else {
                 return str;
             }
-        }).collect(Collectors.joining(redisConfig.getValueJoinString()));
+        }).collect(Collectors.joining(valueJoinString));
     }
 
     private String csvFormat(String str, String delimiter) {

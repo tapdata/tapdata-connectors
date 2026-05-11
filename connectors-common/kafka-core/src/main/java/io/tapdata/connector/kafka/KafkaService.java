@@ -81,9 +81,7 @@ public class KafkaService extends AbstractMqService {
         try {
             kafkaProducer = new KafkaProducer<>(producerConfiguration.build());
         } catch (Exception e) {
-            e.printStackTrace();
-            tapLogger.error("Kafka producer error: " + ErrorKit.getLastCause(e).getMessage(), e);
-            throw new RuntimeException(e);
+            tapLogger.warn("Kafka producer error: " + ErrorKit.getLastCause(e).getMessage(), e);
         }
     }
 
@@ -260,7 +258,7 @@ public class KafkaService extends AbstractMqService {
                                 messageBody = (Map<String, Object>) messageBody.get("data");
                             }
                         } catch (Exception e) {
-                            tapLogger.warn("topic[{}] value [{}] can not parse to json, ignore...", record.topic(), new String(record.value()));
+                            tapLogger.warn("topic[{}] value [{}] can not parse to json, ignore...", record.topic(), String.valueOf(record.value()));
                             TapTable tapTable = new TapTable(record.topic());
                             tableList.add(tapTable);
                             topics.remove(record.topic());

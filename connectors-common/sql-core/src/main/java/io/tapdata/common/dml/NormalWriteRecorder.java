@@ -164,7 +164,6 @@ public abstract class NormalWriteRecorder {
                 }
                 preparedStatement.clearBatch();
                 batchCache.clear();
-                batchCacheSize = 0;
             }
         } catch (SQLException e) {
 //            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
@@ -172,6 +171,7 @@ public abstract class NormalWriteRecorder {
             batchCacheSize = 0;
             throw e;
         }
+        batchCacheSize = 0;
         atomicLong.addAndGet(succeed);
     }
 
@@ -385,7 +385,7 @@ public abstract class NormalWriteRecorder {
                 //有字段内容不全情况，不可使用
                 executeBatch(listResult);
                 largeSql = false;
-            } else if (uniqueCondition.stream().anyMatch(v -> !Objects.equals(after.get(v), before.get(v)))) {
+            } else if (EmptyKit.isNotEmpty(before) && uniqueCondition.stream().anyMatch(v -> !Objects.equals(after.get(v), before.get(v)))) {
                 //更新关联条件，不可使用
                 executeBatch(listResult);
                 largeSql = false;
@@ -545,7 +545,10 @@ public abstract class NormalWriteRecorder {
         return value;
     }
 
-    private static final DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS");
+    // SimpleDateFormat 非线程安全，用 ThreadLocal 保证每个线程独立持有一个实例
+    protected static final ThreadLocal<DateFormat> dateFormat =
+            ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS"));
+    // DateTimeFormatter 不可变，天然线程安全
     private static final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
 
     protected String object2String(Object obj) {
@@ -557,7 +560,7 @@ public abstract class NormalWriteRecorder {
         } else if (obj instanceof Number) {
             result = obj.toString();
         } else if (obj instanceof Date) {
-            result = "'" + dateFormat.format(obj) + "'";
+            result = "'" + dateFormat.get().format(obj) + "'";
         } else if (obj instanceof Instant) {
             result = "'" + LocalDateTime.ofInstant((Instant) obj, ZoneId.of("GMT")).format(dateTimeFormatter) + "'";
         } else if (obj instanceof byte[]) {

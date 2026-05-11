@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Clickhouse",
+    "realName": "ClickHouse",
     "icon": "icons/clickhouse.png",
     "id": "clickhouse",
     "doc": "${doc}",
@@ -233,12 +234,14 @@
     },
     "node": {
       "type": "object",
+      "x-tableConfigScope": ["target"],
       "properties": {
         "supportPk": {
           "type": "boolean",
           "title": "${supportPk}",
           "default": true,
           "x-index": 1,
+          "x-perTable": true,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-reactions": [
@@ -258,6 +261,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-index": 2,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${engineExprTooltip}"
           }
@@ -268,6 +272,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-index": 3,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${partitionExprTooltip}"
           }
@@ -278,6 +283,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "x-index": 4,
+          "x-perTable": true,
           "x-decorator-props": {
             "tooltip": "${orderExprTooltip}"
           }
@@ -298,6 +304,7 @@
             }
           ],
           "x-index": 5,
+          "x-perTable": true,
           "items": {
             "type": "object",
             "properties": {
@@ -343,6 +350,28 @@
             }
           }
         },
+        "applyDefault": {
+          "type": "boolean",
+          "title": "${applyDefault}",
+          "default": false,
+          "x-index": 7,
+          "x-perTable": true,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${applyDefaultTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "mergeMinutes": {
           "required": true,
           "type": "string",
@@ -369,6 +398,7 @@
           "title": "${mixFastWrite}",
           "default": false,
           "x-index": 12,
+          "x-perTable": true,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-decorator-props": {
@@ -417,6 +447,8 @@
       "mergeMinutes": "Optimize Interval (Minutes)",
       "mixFastWrite": "Mix Fast Write",
       "mixFastWriteTooltip": "Enable mix fast write, but the target table will create is_deleted, delete_time columns, insert strategy is used for insert, update, delete, greatly improve performance",
+      "applyDefault": "Apply default value",
+      "applyDefaultTooltip": "When the switch is turned on, the default value will be applied to the target. If there are unadapted functions or expressions, it may cause an error",
       "doc": "docs/clickhouse_en_US.md"
     },
     "zh_CN": {
@@ -446,6 +478,8 @@
       "mergeMinutes": "合并分区间隔(分钟)",
       "mixFastWrite": "混合快速写入",
       "mixFastWriteTooltip": "启用混合快速写入，但目标表会多创建is_deleted, delete_time列, 增删改统一使用插入策略大大提升性能",
+      "applyDefault": "应用默认值",
+      "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错",
       "doc": "docs/clickhouse_zh_CN.md"
     },
     "zh_TW": {
@@ -475,6 +509,8 @@
       "mergeMinutes": "合併分區間隔(分鐘)",
       "mixFastWrite": "混合快速寫入",
       "mixFastWriteTooltip": "啟用混合快速寫入，但目標表會多創建is_deleted, delete_time列, 增刪改統一使用插入策略大大提升性能",
+      "applyDefault": "應用默認值",
+      "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未适配的函数或表达式，可能会导致报错",
       "doc": "docs/clickhouse_zh_TW.md"
     }
   },

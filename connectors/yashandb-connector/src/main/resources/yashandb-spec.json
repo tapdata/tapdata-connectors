@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "YashanDB",
+    "realName": "YashanDB",
     "icon": "icons/yashandb.png",
     "id": "yashandb",
     "doc": "${doc}",

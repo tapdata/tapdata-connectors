@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Salesforce",
+    "realName": "Salesforce",
     "icon": "icon/Salesforce-Logo.png",
     "doc" : "${doc}",
     "id": "salesforce",

@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "ActiveMQ",
+    "realName": "Apache ActiveMQ",
     "icon": "icons/activemq.png",
     "doc": "${doc}",
     "id": "activemq",

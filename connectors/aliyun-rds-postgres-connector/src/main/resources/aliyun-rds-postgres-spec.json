@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Aliyun RDS PostgreSQL",
+    "realName": "ApsaraDB RDS for PostgreSQL",
     "icon": "icons/aliyun_rds_postgres.png",
     "doc" : "${doc}",
     "id": "aliyun-rds-postgres",
