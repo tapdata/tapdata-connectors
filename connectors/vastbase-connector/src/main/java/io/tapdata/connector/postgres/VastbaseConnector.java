@@ -16,7 +16,6 @@ import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
 import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
-import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
@@ -30,7 +29,7 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
@@ -111,7 +110,7 @@ public class VastbaseConnector extends CommonDbConnector {
         // source
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
-        connectorFunctions.supportStreamRead(this::streamRead);
+        connectorFunctions.supportOneByOneStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         // query
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
@@ -396,11 +395,11 @@ public class VastbaseConnector extends CommonDbConnector {
         }
     }
 
-    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, StreamReadOneByOneConsumer consumer) throws Throwable {
         cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
         testReplicateIdentity(nodeContext.getTableMap());
         buildSlot(nodeContext, true);
-        cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
+        cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer);
         cdcRunner.startCdcRunner();
         if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
             Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());

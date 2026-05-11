@@ -31,6 +31,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -313,7 +314,7 @@ public class KafkaSRService extends KafkaService {
     }
 
     @Override
-    public void streamConsume(List<String> tableList, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
+    public void streamConsume(List<String> tableList, StreamReadOneByOneConsumer eventsOffsetConsumer) {
         throw new CoreException("The schemaRegister function is not supported as the source for the time being. ");
     }
 

@@ -25,7 +25,7 @@ import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.NumberKit;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -56,8 +56,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private final TapConnectorContext connectorContext;
     private PostgresDebeziumConfig postgresDebeziumConfig;
     private PostgresOffset postgresOffset;
-    private int recordSize;
-    private StreamReadConsumer consumer;
+    private StreamReadOneByOneConsumer consumer;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
     protected TimeZone timeZone;
     private String dropTransactionId = null;
@@ -144,9 +143,10 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         return throwableAtomicReference;
     }
 
-    public void registerConsumer(StreamReadConsumer consumer, int recordSize) {
-        this.recordSize = recordSize;
+    public void registerConsumer(StreamReadOneByOneConsumer consumer) {
         this.consumer = consumer;
+        final int commitBatchSize = postgresConfig.fixValue(postgresConfig.getCdcAcceptBatch(), 100, 1000);
+        final int commitDelaySeconds = postgresConfig.fixValue(postgresConfig.getCdcAcceptDelaySeconds(), 1, 60);
         //build debezium engine
         this.engine = (EmbeddedEngine) EmbeddedEngine.create()
                 .using(postgresDebeziumConfig.create())
@@ -167,7 +167,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 //                .using(Clock.SYSTEM)
 //                .notifying(this::consumeRecord)
                 .using((numberOfMessagesSinceLastCommit, timeSinceLastCommit) ->
-                        numberOfMessagesSinceLastCommit >= recordSize || timeSinceLastCommit.getSeconds() >= 5)
+                        numberOfMessagesSinceLastCommit >= commitBatchSize || timeSinceLastCommit.getSeconds() >= commitDelaySeconds)
                 .notifying(this::consumeRecords).using((result, message, throwable) -> {
                     if (result) {
                         if (StringUtils.isNotBlank(message)) {
@@ -194,7 +194,6 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     @Override
     public void consumeRecords(List<SourceRecord> sourceRecords, DebeziumEngine.RecordCommitter<SourceRecord> committer) throws InterruptedException {
         super.consumeRecords(sourceRecords, committer);
-        List<TapEvent> eventList = TapSimplify.list();
         Map<String, ?> offset = null;
         for (SourceRecord sr : sourceRecords) {
             try {
@@ -206,7 +205,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                     continue;
                 }
                 if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
-                    eventList.add(new HeartbeatEvent().init().referenceTime(((Struct) sr.value()).getInt64("ts_ms")));
+                    consumer.accept(new HeartbeatEvent().init().referenceTime(((Struct) sr.value()).getInt64("ts_ms")), postgresOffset);
                     continue;
                 } else if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
                     continue;
@@ -259,21 +258,12 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                         event.setNamespaces(Lists.newArrayList(schema, table));
                     }
                 }
-                eventList.add(event);
-                if (eventList.size() >= recordSize) {
-                    PostgresOffset postgresOffset = new PostgresOffset();
-                    postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
-                    consumer.accept(eventList, postgresOffset);
-                    eventList = TapSimplify.list();
-                }
+                PostgresOffset postgresOffset = new PostgresOffset();
+                postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
+                consumer.accept(event, postgresOffset);
             } catch (StopConnectorException | StopEngineException ex) {
                 throw ex;
             }
-        }
-        if (EmptyKit.isNotEmpty(eventList)) {
-            PostgresOffset postgresOffset = new PostgresOffset();
-            postgresOffset.setSourceOffset(TapSimplify.toJson(offset));
-            consumer.accept(eventList, postgresOffset);
         }
     }
 

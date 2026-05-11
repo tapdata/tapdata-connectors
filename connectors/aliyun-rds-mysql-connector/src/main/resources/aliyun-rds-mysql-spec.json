@@ -5,7 +5,17 @@
     "icon": "icons/aliyun_rds_mysql.png",
     "id": "aliyun-rds-mysql",
     "doc": "${doc}",
-    "tags": ["Database","ssl"]
+    "tags": ["Database","ssl"],
+    "autoAccumulateBatch": {
+      "batchRead": {
+        "open": false,
+        "maxDelayMs": "1000"
+      },
+      "increaseRead": {
+        "open": true,
+        "maxDelayMs": "1000"
+      }
+    }
   },
   "configOptions": {
     "capabilities": [

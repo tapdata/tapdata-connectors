@@ -11,7 +11,6 @@ import java.util.function.Consumer;
  */
 public class BatchPusher<T> implements AutoCloseable {
 
-    private int batchSize = 100;
     private int maxDelay = 2000;
     private long lastTime;
     private final Consumer<List<T>> submitConsumer;
@@ -21,11 +20,6 @@ public class BatchPusher<T> implements AutoCloseable {
         this.batchList = TapSimplify.list();
         this.lastTime = System.currentTimeMillis();
         this.submitConsumer = submitConsumer;
-    }
-
-    public BatchPusher<T> batchSize(int batchSize) {
-        this.batchSize = batchSize;
-        return this;
     }
 
     public BatchPusher<T> maxDelay(int maxDelay) {
@@ -39,7 +33,7 @@ public class BatchPusher<T> implements AutoCloseable {
     }
 
     public void checkAndSummit() {
-        if (batchList.size() >= batchSize || (System.currentTimeMillis() - lastTime > maxDelay && !batchList.isEmpty())) {
+        if (System.currentTimeMillis() - lastTime > maxDelay && !batchList.isEmpty()) {
             summit();
         }
     }

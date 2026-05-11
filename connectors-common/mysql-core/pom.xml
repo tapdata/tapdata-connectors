@@ -33,7 +33,7 @@
         <java.version>8</java.version>
         <mysql.driver.version>8.0.33</mysql.driver.version>
         <debezium.version>1.5.4.Final</debezium.version>
-        <tapdata.pdk.api.version>2.0.0-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
         <pdk-error-code.version>1.0-SNAPSHOT</pdk-error-code.version>
     </properties>
     <dependencyManagement>

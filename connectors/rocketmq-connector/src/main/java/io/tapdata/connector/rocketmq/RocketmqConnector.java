@@ -13,7 +13,7 @@ import io.tapdata.entity.schema.value.TapRawValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
-import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
@@ -65,7 +65,7 @@ public class RocketmqConnector extends ConnectorBase {
         connectorFunctions.supportCreateTableV2(this::createTableV2);
         connectorFunctions.supportWriteRecord(this::writeRecord);
         connectorFunctions.supportBatchRead(this::batchRead);
-        connectorFunctions.supportStreamRead(this::streamRead);
+        connectorFunctions.supportOneByOneStreamRead(this::streamRead);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
     }
 
@@ -121,8 +121,8 @@ public class RocketmqConnector extends ConnectorBase {
         rocketmqService.consumeOne(tapTable, eventBatchSize, eventsOffsetConsumer);
     }
 
-    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
-        rocketmqService.streamConsume(tableList, recordSize, consumer);
+    private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, StreamReadOneByOneConsumer consumer) throws Throwable {
+        rocketmqService.streamConsume(tableList, consumer);
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) {
