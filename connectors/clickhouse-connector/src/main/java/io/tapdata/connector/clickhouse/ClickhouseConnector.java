@@ -13,7 +13,6 @@ import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
@@ -85,14 +84,26 @@ public class ClickhouseConnector extends CommonDbConnector {
 
     protected void initConnection(TapConnectionContext connectionContext) throws SQLException {
         clickhouseConfig = new ClickhouseConfig().load(connectionContext.getConnectionConfig());
-        isConnectorStarted(connectionContext, connectorContext -> clickhouseConfig.load(connectorContext.getNodeConfig()));
+        isConnectorStarted(connectionContext, connectorContext -> {
+            clickhouseConfig.load(connectorContext.getNodeConfig());
+            clickhouseConfig.setTableConfig(connectionContext.getTableNodeConfig());
+            firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
+        });
+        tapLogger = connectionContext.getLog();
+        if (clickhouseConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            clickhouseConfig.startJdbcLog(firstConnectorId);
+        }
         clickhouseJdbcContext = new ClickhouseJdbcContext(clickhouseConfig);
         commonDbConfig = clickhouseConfig;
         jdbcContext = clickhouseJdbcContext;
         clickhouseVersion = clickhouseJdbcContext.queryVersion();
         dbTimeZone = TimeZone.getTimeZone(clickhouseJdbcContext.queryTimeZone());
         commonSqlMaker = new ClickhouseSqlMaker().withVersion(clickhouseVersion);
-        tapLogger = connectionContext.getLog();
         exceptionCollector = new ClickhouseExceptionCollector();
     }
 
@@ -270,10 +281,10 @@ public class ClickhouseConnector extends CommonDbConnector {
 
         // primary key
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
-        if (EmptyKit.isBlank(clickhouseConfig.getEngineExpr())) {
+        if (EmptyKit.isBlank(clickhouseConfig.getEngineExpr(tapTable.getId()))) {
             if (EmptyKit.isNotEmpty(primaryKeys)) {
                 sql.append(") ENGINE = ReplacingMergeTree");
-                if (clickhouseConfig.getMixFastWrite()) {
+                if (clickhouseConfig.getMixFastWrite(tapTable.getId())) {
                     sql.append("(`version`)");
                 }
                 sql.append(" PRIMARY KEY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
@@ -281,26 +292,26 @@ public class ClickhouseConnector extends CommonDbConnector {
                 sql.append(") ENGINE = MergeTree");
             }
         } else {
-            sql.append(") ENGINE = ").append(clickhouseConfig.getEngineExpr());
-            if (clickhouseConfig.getSupportPk() && EmptyKit.isNotEmpty(primaryKeys)) {
+            sql.append(") ENGINE = ").append(clickhouseConfig.getEngineExpr(tapTable.getId()));
+            if (clickhouseConfig.getSupportPk(tapTable.getId()) && EmptyKit.isNotEmpty(primaryKeys)) {
                 sql.append(" PRIMARY KEY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
             }
         }
-        if (EmptyKit.isNotBlank(clickhouseConfig.getPartitionExpr())) {
-            sql.append(" PARTITION BY ").append(clickhouseConfig.getPartitionExpr());
+        if (EmptyKit.isNotBlank(clickhouseConfig.getPartitionExpr(tapTable.getId()))) {
+            sql.append(" PARTITION BY ").append(clickhouseConfig.getPartitionExpr(tapTable.getId()));
         }
-        if (EmptyKit.isBlank(clickhouseConfig.getOrderExpr())) {
+        if (EmptyKit.isBlank(clickhouseConfig.getOrderExpr(tapTable.getId()))) {
             if (EmptyKit.isNotEmpty(primaryKeys)) {
                 sql.append(" ORDER BY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
             } else {
                 sql.append(" ORDER BY tuple()");
             }
         } else {
-            sql.append(" ORDER BY ").append(clickhouseConfig.getOrderExpr());
+            sql.append(" ORDER BY ").append(clickhouseConfig.getOrderExpr(tapTable.getId()));
         }
-        if (EmptyKit.isNotEmpty(clickhouseConfig.getTableProperties())) {
+        if (EmptyKit.isNotEmpty(clickhouseConfig.getTableProperties(tapTable.getId()))) {
             sql.append(" SETTINGS ");
-            for (Map<String, String> property : clickhouseConfig.getTableProperties()) {
+            for (Map<String, String> property : clickhouseConfig.getTableProperties(tapTable.getId())) {
                 sql.append(property.get("propKey")).append("=").append(property.get("propValue")).append(",");
             }
             sql.setLength(sql.length() - 1);

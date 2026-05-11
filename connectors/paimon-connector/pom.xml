@@ -13,12 +13,13 @@
     <artifactId>paimon-connector</artifactId>
 
     <properties>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
+        <maven.compiler.source>8</maven.compiler.source>
+        <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <java.version>11</java.version>
-        <paimon.version>1.2.0</paimon.version>
+        <java.version>8</java.version>
+        <paimon.version>1.3.1</paimon.version>
         <hadoop.version>3.3.6</hadoop.version>
+        <tapdata.pdk.api.version>2.0.6-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
 
     <dependencies>
@@ -34,17 +35,8 @@
         </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>
-            <artifactId>tapdata-common</artifactId>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.tapdata</groupId>
             <artifactId>sql-core</artifactId>
             <version>1.0-SNAPSHOT</version>
-        </dependency>
-        <dependency>
-            <groupId>io.tapdata</groupId>
-            <artifactId>connector-core</artifactId>
         </dependency>
         <dependency>
             <groupId>io.tapdata</groupId>
@@ -211,6 +203,12 @@
                                         <exclude>**/org/slf4j/**</exclude>
                                     </excludes>
                                 </filter>
+                                <filter>
+                                    <artifact>org.apache.paimon:paimon-api</artifact>
+                                    <excludes>
+                                        <exclude>org/apache/paimon/utils/ThreadUtils</exclude>
+                                    </excludes>
+                                </filter>
                             </filters>
                         </configuration>
                     </execution>
@@ -274,8 +272,8 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.7.0</version>
                 <configuration>
-                    <source>8</source>
-                    <target>8</target>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
                 </configuration>
             </plugin>
             <!--            <plugin>-->
@@ -310,6 +308,33 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>add-source</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>src/main/overwrite/</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>11</source>
+                    <target>11</target>
+                </configuration>
             </plugin>
         </plugins>
     </build>

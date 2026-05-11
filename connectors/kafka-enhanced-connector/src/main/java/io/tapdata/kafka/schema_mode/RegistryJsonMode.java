@@ -52,8 +52,11 @@ public class RegistryJsonMode extends AbsSchemaMode {
                     // 从数据推断 schema
                     List<String> primaryKeys = new ArrayList<>();
                     if (record.key() != null) {
-                        Map<String, Object> keyMap = (Map<String, Object>) TapSimplify.fromJson(record.key());
-                        primaryKeys.addAll(keyMap.keySet());
+                        try {
+                            primaryKeys.addAll(((Map<String, Object>) TapSimplify.fromJson(record.key())).keySet());
+                        } catch (Exception e) {
+                            tapLogger.warn("Failed to parse primary keys: {}", record.key(), e);
+                        }
                     }
 
                     // 构建 TapTable schema
@@ -156,7 +159,7 @@ public class RegistryJsonMode extends AbsSchemaMode {
             // 创建 ProducerRecord
             ProducerRecord<Object, Object> producerRecord = new ProducerRecord<>(
                     topic(tapTable, tapEvent),
-                    null,
+                    computePartition(createKafkaKey(data, tapTable), kafkaService.getConfig().getNodePartitionSize()),
                     tapEvent.getTime(),
                     keyValue,
                     valueNode,  // 使用 JsonNode 而不是硬编码的对象
@@ -199,36 +202,4 @@ public class RegistryJsonMode extends AbsSchemaMode {
             return new HashMap<>();
         }
     }
-
-    /**
-     * 根据值推断 TapData 类型
-     */
-    private String inferTapType(Object value) {
-        if (value == null) {
-            return "STRING";
-        }
-
-        if (value instanceof Boolean) {
-            return "BOOLEAN";
-        } else if (value instanceof Integer || value instanceof Short || value instanceof Byte) {
-            return "INTEGER";
-        } else if (value instanceof Long) {
-            return "BIGINT";
-        } else if (value instanceof Float) {
-            return "FLOAT";
-        } else if (value instanceof Double) {
-            return "DOUBLE";
-        } else if (value instanceof BigDecimal) {
-            return "DOUBLE";
-        } else if (value instanceof String) {
-            return "STRING";
-        } else if (value instanceof List) {
-            return "ARRAY";
-        } else if (value instanceof Map) {
-            return "MAP";
-        } else {
-            return "STRING";
-        }
-    }
-
 }

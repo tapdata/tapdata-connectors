@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "hudi",
+    "realName": "Apache Hudi",
     "icon": "icons/hudi.png",
     "id": "hudi",
     "doc": "${doc}",

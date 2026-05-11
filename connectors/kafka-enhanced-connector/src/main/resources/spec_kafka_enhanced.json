@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Kafka-Enhanced",
+    "realName": "Apache Kafka(Confluent Compatible)",
     "icon": "icons/kafka_enhanced.png",
     "doc": "${doc}",
     "id": "kafka_enhanced",
@@ -10,6 +11,11 @@
     ]
   },
   "configOptions": {
+    "supportDDL": {
+      "events": [
+        "new_field_event", "alter_field_name_event", "alter_field_attributes_event", "drop_field_event"
+      ]
+    },
     "pdkExpansion": [],
     "capabilities": [
       {
@@ -32,28 +38,175 @@
           "x-decorator-props": {
             "tooltip": "${clusterURITip}"
           },
+          "x-index": 1
+        },
+        "schemaRegister": {
+          "type": "boolean",
+          "title": "${schemaRegister}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${schemaRegisterTip}"
+          },
+          "x-component": "Switch",
+          "apiServerKey": "schemaRegister",
+          "x-reactions": [
+            {
+              "target": "*(schemaRegisterUrl,registrySchemaType,basicAuth)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===true}}"
+                }
+              }
+            },
+            {
+              "target": "*(schemaMode)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===false}}"
+                }
+              }
+            }
+          ],
           "x-index": 2
         },
-        "schemaMode": {
+        "schemaRegisterUrl": {
+          "required": true,
           "type": "string",
-          "title": "${schemaMode}",
-          "default": "TAP_STANDARD",
+          "title": "${schemaRegisterUrl}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${schemaRegisterUrlTip}"
+          },
+          "x-component": "Input",
+          "apiServerKey": "schemaRegisterUrl",
+          "x-index": 3
+        },
+        "registrySchemaType": {
+          "type": "string",
+          "title": "${registrySchemaType}",
+          "default": "JSON",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "apiServerKey": "registrySchemaType",
+          "x-index": 4,
+          "enum": [
+            {
+              "label": "JSON",
+              "value": "JSON"
+            },
+            {
+              "label": "AVRO",
+              "value": "AVRO"
+            },
+            {
+              "label": "PROTOBUF",
+              "value": "PROTOBUF"
+            }
+          ]
+        },
+        "basicAuth": {
+          "type": "boolean",
+          "title": "${basicAuth}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "apiServerKey": "basicAuth",
+          "x-reactions": [
+            {
+              "target": "*(authCredentialsSource,authUserName,authPassword)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===true}}"
+                }
+              }
+            }
+          ],
+          "x-index": 5
+        },
+        "authCredentialsSource": {
+          "type": "string",
+          "title": "${authCredentialsSource}",
+          "default": "USER_INFO",
           "x-decorator": "FormItem",
           "x-component": "Radio.Group",
           "x-component-props": {
             "optionType": "button"
           },
-          "x-index": 10,
+          "x-index": 6,
           "enum": [
             {
-              "label": "${schemaModeTapStandard}",
-              "value": "TAP_STANDARD"
+              "label": "USER_INFO",
+              "value": "USER_INFO"
             },
             {
-              "label": "${schemaModeOriginal}",
-              "value": "ORIGINAL"
+              "label": "SASL_INHERIT",
+              "value": "SASL_INHERIT"
             }
           ]
+        },
+        "authUserName": {
+          "required": true,
+          "type": "string",
+          "title": "${authUserName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "database_username",
+          "x-index": 7
+        },
+        "authPassword": {
+          "required": true,
+          "type": "string",
+          "title": "${authPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "database_password",
+          "x-index": 8
+        },
+        "schemaMode": {
+          "type": "string",
+          "title": "${schemaMode}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "default": "TAP_STANDARD",
+          "enum": [
+            {"label": "${schemaModeTapStandard}", "value": "TAP_STANDARD"},
+            {"label": "${schemaModeOriginal}", "value": "ORIGINAL"},
+            {"label": "${schemaModeCanal}", "value": "CANAL"},
+            {"label": "${schemaModeDebezium}", "value": "DEBEZIUM"},
+            {"label": "${schemaModeFlinkCDC}", "value": "FLINK_CDC"},
+            {"label": "${schemaModeCustom}", "value": "CUSTOM"}
+          ],
+          "x-index": 9
+        },
+        "analyzeScript": {
+          "type": "string",
+          "required": false,
+          "default": "function analyze(header, key, value){\n\n\t\/\/ Enter your code at here\n\t return value;\n}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${analyzeScriptTip}"
+          },
+          "x-component": "JsEditor",
+          "x-component-props": {
+            "options": { "showPrintMargin": false, "useWrapMode": true },
+            "includeBeforeAndAfter": true,
+            "before": "function analyze(header, key, value){",
+            "beforeRegexp": "^[^]*function\\s+analyze\\s*\\(header, key, value\\)\\{",
+            "afterRegexp": "}[^}]*$",
+            "after": "}"
+          },
+          "x-index": 15,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]==='CUSTOM'}}"
+              }
+            },
+            "dependencies": [
+              "schemaMode"
+            ]
+          }
         },
         "serialization": {
           "type": "void",
@@ -248,123 +401,107 @@
             }
           }
         },
+        "krb5": {
+          "type": "boolean",
+          "title": "${krb5}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "apiServerKey": "krb5",
+          "x-reactions": [
+            {
+              "target": "*(krb5Keytab,krb5Conf,krb5Principal,krb5ServiceName)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===true}}"
+                }
+              }
+            },
+            {
+              "target": "*(mqUsername,mqPassword,kafkaSaslMechanism)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value===false}}"
+                }
+              }
+            }
+          ],
+          "x-index": 24
+        },
+        "krb5Keytab": {
+          "type": "string",
+          "title": "${krb5Keytab}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "x-component-props": {
+            "base64": true
+          },
+          "x-decorator-props": {
+            "tooltip": "${krb5KeytabTip}"
+          },
+          "apiServerKey": "krb5Keytab",
+          "fileNameField": "krb5KeytabFile",
+          "required": true,
+          "x-index": 25
+        },
+        "krb5Conf": {
+          "type": "string",
+          "title": "${krb5Conf}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "x-component-props": {
+            "base64": true
+          },
+          "x-decorator-props": {
+            "tooltip": "${krb5ConfTip}"
+          },
+          "apiServerKey": "krb5Conf",
+          "fileNameField": "krb5ConfFile",
+          "required": true,
+          "x-index": 26
+        },
+        "krb5Principal": {
+          "type": "string",
+          "title": "${krb5Principal}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "krb5Principal",
+          "x-decorator-props": {
+            "tooltip": "${krb5PrincipalTip}"
+          },
+          "required": true,
+          "x-index": 27
+        },
+        "krb5ServiceName": {
+          "type": "string",
+          "title": "${krb5ServiceName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "krb5ServiceName",
+          "x-decorator-props": {
+            "tooltip": "${krb5ServiceNameTip}"
+          },
+          "required": true,
+          "x-index": 28
+        },
         "OPTIONAL_FIELDS": {
           "type": "void",
           "properties": {
-            "schemaRegister": {
-              "type": "boolean",
-              "title": "${schemaRegister}",
-              "default": false,
-              "x-decorator": "FormItem",
-              "x-decorator-props": {
-                "tooltip": "${schemaRegisterTip}"
-              },
-              "x-component": "Switch",
-              "apiServerKey": "schemaRegister",
-              "x-reactions": [
-                {
-                  "target": "*(schemaRegisterUrl,registrySchemaType,basicAuth)",
-                  "fulfill": {
-                    "state": {
-                      "visible": "{{$self.value===true}}"
-                    }
-                  }
-                }
-              ],
-              "x-index": 1
-            },
-            "schemaRegisterUrl": {
+            "batchMaxDelay": {
               "required": true,
               "type": "string",
-              "title": "${schemaRegisterUrl}",
+              "title": "${batchMaxDelay}",
+              "default": 2000,
+              "x-index": 6,
               "x-decorator": "FormItem",
-              "x-decorator-props": {
-                "tooltip": "${schemaRegisterUrlTip}"
-              },
-              "x-component": "Input",
-              "apiServerKey": "schemaRegisterUrl",
-              "x-index": 2
-            },
-            "registrySchemaType": {
-              "type": "string",
-              "title": "${registrySchemaType}",
-              "default": "JSON",
-              "x-decorator": "FormItem",
-              "x-component": "Select",
-              "apiServerKey": "registrySchemaType",
-              "x-index": 3,
-              "enum": [
-                {
-                  "label": "JSON",
-                  "value": "JSON"
-                },
-                {
-                  "label": "AVRO",
-                  "value": "AVRO"
-                },
-                {
-                  "label": "PROTOBUF",
-                  "value": "PROTOBUF"
-                }
-              ]
-            },
-            "basicAuth": {
-              "type": "boolean",
-              "title": "${basicAuth}",
-              "default": false,
-              "x-decorator": "FormItem",
-              "x-component": "Switch",
-              "apiServerKey": "basicAuth",
-              "x-reactions": [
-                {
-                  "target": "*(authCredentialsSource,authUserName,authPassword)",
-                  "fulfill": {
-                    "state": {
-                      "visible": "{{$self.value===true}}"
-                    }
-                  }
-                }
-              ],
-              "x-index": 4
-            },
-            "authCredentialsSource": {
-              "type": "string",
-              "title": "${authCredentialsSource}",
-              "default": "USER_INFO",
-              "x-decorator": "FormItem",
-              "x-component": "Radio.Group",
+              "x-component": "InputNumber",
               "x-component-props": {
-                "optionType": "button"
+                "min": 1000,
+                "max": 30000
               },
-              "x-index": 5,
-              "enum": [
-                {
-                  "label": "USER_INFO",
-                  "value": "USER_INFO"
-                },
-                {
-                  "label": "SASL_INHERIT",
-                  "value": "SASL_INHERIT"
-                }
-              ]
-            },
-            "authUserName": {
-              "required": true,
-              "type": "string",
-              "title": "${authUserName}",
-              "x-decorator": "FormItem",
-              "x-component": "Input",
-              "apiServerKey": "database_username",
-              "x-index": 6
-            },
-            "authPassword": {
-              "required": true,
-              "type": "string",
-              "title": "${authPassword}",
-              "x-decorator": "FormItem",
-              "x-component": "Password",
-              "apiServerKey": "database_password",
-              "x-index": 7
+              "x-decorator-props": {
+                "tooltip": "${batchMaxDelayTooltip}"
+              }
             },
             "kafkaSaslMechanism": {
               "type": "string",
@@ -539,7 +676,6 @@
                     "properties": {
                       "val": {
                         "type": "string",
-                        "required": true,
                         "x-decorator": "FormItem",
                         "x-component": "Input"
                       }
@@ -672,6 +808,25 @@
               "x-decorator-props": {
                 "tooltip": "${partitionSizeTip}"
               }
+            },
+            "splitUpdatePk": {
+              "type": "boolean",
+              "title": "${splitUpdatePk}",
+              "default": true,
+              "x-index": 30,
+              "x-decorator": "FormItem",
+              "x-component": "Switch",
+              "x-reactions": {
+                "fulfill": {
+                  "state": {
+                    "visible": "{{$deps[0]!=='source' && $deps[1].length}}"
+                  }
+                },
+                "dependencies": [
+                  "__TAPDATA.connection_type",
+                  "$inputs"
+                ]
+              }
             }
           }
         },
@@ -685,7 +840,18 @@
           "x-decorator-props": {
             "tooltip": "${combinePushTopicTip}"
           },
-          "x-index": 2
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]!=='source' && $deps[1].length}}"
+              }
+            },
+            "dependencies": [
+              "__TAPDATA.connection_type",
+              "$inputs"
+            ]
+          },
+          "x-index": 50
         },
         "schemaMode": {
           "type": "string",
@@ -698,7 +864,70 @@
             {"label": "${schemaModeOriginal}", "value": "ORIGINAL"},
             {"label": "${schemaModeCanal}", "value": "CANAL"},
             {"label": "${schemaModeDebezium}", "value": "DEBEZIUM"},
-            {"label": "${schemaModeFlinkCDC}", "value": "FLINK_CDC"}
+            {"label": "${schemaModeFlinkCDC}", "value": "FLINK_CDC"},
+            {"label": "${schemaModeCustom}", "value": "CUSTOM"}
+          ],
+          "x-index": 60,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]!=='source' && $deps[1].length}}"
+              }
+            },
+            "dependencies": [
+              "__TAPDATA.connection_type",
+              "$inputs"
+            ]
+          }
+        },
+        "processScript": {
+          "type": "string",
+          "required": false,
+          "default": "function process(record, op, conditionKeys){\n\n\t\/\/ Enter your code at here\n\t return record;\n}",
+          "x-decorator": "FormItem",
+          "x-decorator-props": {
+            "tooltip": "${processScriptTip}"
+          },
+          "x-component": "JsEditor",
+          "x-component-props": {
+            "options": { "showPrintMargin": false, "useWrapMode": true },
+            "includeBeforeAndAfter": true,
+            "before": "function process(record, op, conditionKeys){",
+            "beforeRegexp": "^[^]*function\\s+process\\s*\\(record, op, conditionKeys\\)\\{",
+            "afterRegexp": "}[^}]*$",
+            "after": "}"
+          },
+          "x-index": 70,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]==='CUSTOM'}}"
+              }
+            },
+            "dependencies": [
+              ".schemaMode"
+            ]
+          }
+        },
+        "applyDefault": {
+          "type": "boolean",
+          "title": "${applyDefault}",
+          "default": false,
+          "x-index": 80,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${applyDefaultTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
           ]
         }
       }
@@ -716,6 +945,7 @@
       "schemaMode": "Structural mode",
       "schemaModeTapStandard": "Standard structure",
       "schemaModeOriginal": "Original structure",
+      "schemaModeCustom": "Custom structure",
       "schemaModeCanal": "Canal",
       "schemaModeDebezium": "Debezium",
       "schemaModeFlinkCDC": "Flink CDC",
@@ -738,11 +968,21 @@
       "replicasSizeTip": "Used when creating a topic, default: 1",
       "partitionSize": "Number of partitions",
       "partitionSizeTip": "Used when creating a topic, default: 3 (if the number of server partitions is less than this configuration, it will be increased)",
+      "splitUpdatePk": "Split update unique key",
       "useSasl": "Enable SASL",
       "saslMechanism": "Mechanism",
       "saslUserPassword": "User And Password",
       "saslUsername": "Username",
       "saslPassword": "Password",
+      "krb5": "kerberos authentication",
+      "krb5Keytab": "Key representation file",
+      "krb5KeytabTip": "Keytab file, which can achieve SSH login free",
+      "krb5Conf": "Configuration file",
+      "krb5ConfTip": "Kerberos configuration file",
+      "krb5Principal": "Body Configuration",
+      "krb5PrincipalTip": "for example: kafka/hostname@REALM",
+      "krb5ServiceName": "Service name",
+      "krb5ServiceNameTip": "Service name, usually kafka",
       "useSsl": "Enable SSL",
       "schemaRegister": "Schema Registry",
       "schemaRegisterTip": "To register a center using third-party mode, an additional address is required. If basic authentication is enabled, authentication information is also required",
@@ -753,6 +993,8 @@
       "authUserName": "Auth UserName",
       "authPassword": "Auth Password",
       "basicAuth": "Basic Auth",
+      "batchMaxDelay": "Consumption timeout (ms)",
+      "batchMaxDelayTooltip": "When loading the model, it is necessary to test consumption data. If there is significant network latency, it is recommended to extend the consumption timeout period; otherwise, the model may not be loaded successfully.",
       "kafkaSaslMechanism": "SASL Mechanism",
       "acksType": "ACK confirmation mechanism",
       "acksTypeNotSure": "No confirmation",
@@ -772,7 +1014,9 @@
       "extParamsTypeConsumer": "Consumer configuration",
       "extParamsTypeProducer": "Production configuration",
       "combinePushTopic": "Combine Push Topic",
-      "combinePushTopicTip": "Control the topic of kafka data push, supports the following wildcard characters, dynamic styling\n - {db_name}: Source database name\n - {schema_name}: Source schema name\n - {table_name}: Table name"
+      "combinePushTopicTip": "Control the topic of kafka data push, supports the following wildcard characters, dynamic styling\n - {db_name}: Source database name\n - {schema_name}: Source schema name\n - {table_name}: Table name",
+      "applyDefault": "Apply default value",
+      "applyDefaultTooltip": "When the switch is turned on, the default value is applied to the target. If there are unadapted functions or expressions, it may cause an error"
     },
     "zh_CN": {
       "doc": "docs/kafka_enhanced_zh_CN.md",
@@ -784,6 +1028,7 @@
       "schemaMode": "结构模式",
       "schemaModeTapStandard": "标准结构",
       "schemaModeOriginal": "原生结构",
+      "schemaModeCustom": "自定义结构",
       "schemaModeCanal": "Canal",
       "schemaModeDebezium": "Debezium",
       "schemaModeFlinkCDC": "Flink CDC",
@@ -806,11 +1051,21 @@
       "replicasSizeTip": "创建主题时使用，默认：1",
       "partitionSize": "分区数",
       "partitionSizeTip": "创建主题时使用，默认：3（如果服务端分区数少于此配置，则会进行增加）",
+      "splitUpdatePk": "修改唯一键拆分",
       "useSasl": "启用 SASL",
       "saslMechanism": "安全机制",
       "saslUserPassword": "用户密码",
       "saslUsername": "用户",
       "saslPassword": "密码",
+      "krb5": "kerberos 认证",
+      "krb5Keytab": "密钥表示文件",
+      "krb5KeytabTip": "keytab文件，可以实现ssh免登录",
+      "krb5Conf": "配置文件",
+      "krb5ConfTip": "krb5的conf配置文件",
+      "krb5Principal": "主体配置",
+      "krb5PrincipalTip": "例如：kafka/hostname@REALM",
+      "krb5ServiceName": "服务名",
+      "krb5ServiceNameTip": "服务名，一般均为kafka",
       "useSsl": "启用 SSL",
       "schemaRegister": "模式注册",
       "schemaRegisterTip": "使用第三方模式注册中心，需要额外提供地址，若打开基本认证还需要提供认证信息等",
@@ -821,6 +1076,8 @@
       "authUserName": "认证用户名",
       "authPassword": "认证密码",
       "basicAuth": "基本认证",
+      "batchMaxDelay": "消费超时(ms)",
+      "batchMaxDelayTooltip": "加载模型时需要试消费数据，如果网络延迟较大，建议延长消费超时时间，否则将加载不到模型",
       "kafkaSaslMechanism": "加密方式",
       "acksType": "ACK 确认机制",
       "acksTypeNotSure": "不确认",
@@ -840,7 +1097,9 @@
       "extParamsTypeConsumer": "消费配置",
       "extParamsTypeProducer": "生产配置",
       "combinePushTopic": "推送Topic",
-      "combinePushTopicTip": "控制kafka数据推送的topic，支持以下通配符，动态拼接\n - {db_name}: 源端库名\n - {schema_name}: 源端模式名称\n - {table_name}: 表名"
+      "combinePushTopicTip": "控制kafka数据推送的topic，支持以下通配符，动态拼接\n - {db_name}: 源端库名\n - {schema_name}: 源端模式名称\n - {table_name}: 表名",
+      "applyDefault": "应用默认值",
+      "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错"
     },
     "zh_TW": {
       "doc": "docs/kafka_enhanced_zh_TW.md",
@@ -852,6 +1111,7 @@
       "schemaMode": "結構模式",
       "schemaModeTapStandard": "標準結構",
       "schemaModeOriginal": "原生結構",
+      "schemaModeCustom": "自定義結構",
       "schemaModeCanal": "Canal",
       "schemaModeDebezium": "Debezium",
       "schemaModeFlinkCDC": "Flink CDC",
@@ -874,11 +1134,21 @@
       "replicasSizeTip": "建立主題時使用，預設：1",
       "partitionSize": "分區數",
       "partitionSizeTip": "建立主題時使用，預設：3（如果服務端分區數少於此配置，則會進行增加）",
+      "splitUpdatePk": "修改唯一鍵拆分",
       "useSasl": "啟用 SASL",
       "saslMechanism": "安全機制",
       "saslUserPassword": "用戶密碼",
       "saslUsername": "用戶",
       "saslPassword": "密碼",
+      "krb5": "kerberos 認證",
+      "krb5Keytab": "密鑰表示文件",
+      "krb5KeytabTip": "keytab文件，可以實現ssh免登錄",
+      "krb5Conf": "配置文件",
+      "krb5ConfTip": "krb5的conf配置文件",
+      "krb5Principal": "主体配置",
+      "krb5PrincipalTip": "例如：kafka/hostname@REALM",
+      "krb5ServiceName": "服務名",
+      "krb5ServiceNameTip": "服務名，一般均為kafka",
       "useSsl": "啟用 SSL",
       "schemaRegister": "模式註冊",
       "schemaRegisterTip": "使用第三方模式註冊中心，需要額外提供地址，若打開基本認證還需要提供認證信息等",
@@ -889,6 +1159,8 @@
       "authUserName": "認證用戶名",
       "authPassword": "認證密碼",
       "basicAuth": "基本認證",
+      "batchMaxDelay": "消費超時(ms)",
+      "batchMaxDelayTooltip": "載入模型時需要試消費資料，如果網絡延遲較大，建議延長消費超時時間，否則將載入不到模型",
       "kafkaSaslMechanism": "加密方式",
       "acksType": "ACK 確認機制",
       "acksTypeNotSure": "不確認",
@@ -908,7 +1180,9 @@
       "extParamsTypeConsumer": "消費配置",
       "extParamsTypeProducer": "生產配置",
       "combinePushTopic": "推送Topic",
-      "combinePushTopicTip": "控制kafka數據推送的topic，支持以下通配符，動態拼接\n - {db_name}: 源端庫名\n - {schema_name}: 源端模式名稱\n - {table_name}: 表名"
+      "combinePushTopicTip": "控制kafka數據推送的topic，支持以下通配符，動態拼接\n - {db_name}: 源端庫名\n - {schema_name}: 源端模式名稱\n - {table_name}: 表名",
+      "applyDefault": "應用默認值",
+      "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯"
     }
   },
   "dataTypes": {

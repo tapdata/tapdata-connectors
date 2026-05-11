@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "HubSpot",
+    "realName": "HubSpot",
     "icon": "icon/hubspot.png",
     "doc" : "${doc}",
     "id": "hubspot",

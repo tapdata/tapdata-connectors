@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Http Receiver",
+    "realName": "HTTP Receiver",
     "icon": "icons/http.png",
     "doc": "${doc}",
     "id": "http-receiver",

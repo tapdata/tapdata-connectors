@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Oceanbase",
+    "realName": "OceanBase",
     "icon": "icons/oceanbase.png",
     "id": "oceanbase",
     "doc": "${doc}",

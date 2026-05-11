@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Zoho-CRM",
+    "realName": "Zoho CRM",
     "icon": "icon/zoho.png",
     "doc" : "${doc}",
     "id": "zoho-crm",

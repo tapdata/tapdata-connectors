@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "XML",
+    "realName": "XML",
     "icon": "icons/xml.png",
     "doc": "${doc}",
     "id": "xml",

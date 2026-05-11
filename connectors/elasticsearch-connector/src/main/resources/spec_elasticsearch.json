@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Elasticsearch",
+    "realName": "Elasticsearch",
     "icon": "icons/elasticsearch.png",
     "doc" : "${doc}",
     "id": "elasticsearch",

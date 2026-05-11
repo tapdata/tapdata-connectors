@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Starrocks",
+    "realName": "StarRocks",
     "icon": "icons/starrocks.png",
     "id": "starrocks",
     "docs": "${docs}",
@@ -14,6 +15,9 @@
           "update_on_exists",
           "just_insert"
         ]
+      },
+      {
+        "id": "flush_offset_callback"
       }
     ],
     "connection": {
@@ -536,7 +540,7 @@
           "type": "int",
           "x-index": 9,
           "title": "${flushTimeoutSeconds}",
-          "default": 300,
+          "default": 30,
           "x-decorator": "FormItem",
           "x-component": "InputNumber",
           "x-decorator-props": {
@@ -865,7 +869,7 @@
     },
     "varbinary[($byte)]": {
       "to": "TapBinary",
-      "byte": "2g",
+      "byte": "1m",
       "defaultByte": 1
     },
     "string": {

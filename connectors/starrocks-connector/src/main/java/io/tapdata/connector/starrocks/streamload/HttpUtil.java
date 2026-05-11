@@ -32,7 +32,12 @@ public class HttpUtil {
                 protected boolean isRedirectable(String method) {
                     return true;
                 }
-            });
+            })
+            .setDefaultRequestConfig(RequestConfig.custom()
+                    .setConnectTimeout(CONNECT_TIMEOUT)
+                    .setSocketTimeout(READ_TIMEOUT)
+                    .setConnectionRequestTimeout(CONNECT_TIMEOUT)
+                    .build());
 
     public CloseableHttpClient getHttpClient() {
         return httpClientBuilder.build();

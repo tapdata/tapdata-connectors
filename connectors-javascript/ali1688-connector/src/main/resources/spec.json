@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Alibaba 1688",
+    "realName": "Alibaba 1688",
     "icon": "icon/alibaba.png",
     "doc" : "${doc}",
     "id": "ali1688",

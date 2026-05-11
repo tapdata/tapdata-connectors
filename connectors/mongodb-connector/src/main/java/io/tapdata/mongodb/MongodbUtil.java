@@ -34,9 +34,9 @@ import java.security.SecureRandom;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -286,6 +286,31 @@ public class MongodbUtil {
 		return addresses.substring(0, index);
 	}
 
+	private static final String[][] DEFAULT_HA_TIMEOUT_OPTIONS = {
+			{"serverSelectionTimeoutMS", "15000"},
+			{"socketTimeoutMS", "60000"},
+			{"maxIdleTimeMS", "30000"}
+	};
+
+	public static String appendDefaultHaTimeoutOptions(String mongodbUri,Boolean isStreamRead) {
+		if (EmptyKit.isBlank(mongodbUri)) {
+			return mongodbUri;
+		}
+		StringBuilder result = new StringBuilder(mongodbUri);
+		for (String[] kv : DEFAULT_HA_TIMEOUT_OPTIONS) {
+			String key = kv[0];
+			String value = kv[1];
+			if (Boolean.TRUE.equals(isStreamRead) && "socketTimeoutMS".equalsIgnoreCase(key)) {
+				value = "0";
+			}
+			Pattern pattern = Pattern.compile("[?&]" + Pattern.quote(key) + "=", Pattern.CASE_INSENSITIVE);
+			if (!pattern.matcher(result).find()) {
+				result.append(result.indexOf("?") >= 0 ? '&' : '?').append(key).append('=').append(value);
+			}
+		}
+		return result.toString();
+	}
+
 	public static String getMongoDBURIOptions(String databaseUri) {
 		String options = null;
 		try {
@@ -361,8 +386,8 @@ public class MongodbUtil {
 		return key;
 	}
 
-	private static boolean isMongoShards(String mongoUri) {
-		try (MongoClient mongoClient = MongoClients.create(mongoUri)) {
+	private static boolean isMongoShards(String mongoUri, MongodbConfig mongodbConfig) {
+		try (MongoClient mongoClient = MongoClients.create(getMongoClientSettingsBuilder(mongoUri, mongodbConfig).build())) {
 			MongoCollection<Document> collection = mongoClient.getDatabase("config").getCollection("shards");
 			final MongoCursor<Document> cursor = collection.find().iterator();
 			if (cursor.hasNext()) {
@@ -375,8 +400,8 @@ public class MongodbUtil {
 	}
 
 	// 写一个方法, 接收 mongoUri, 如果参数里没有包含 replicaSet, 返回 mongoUri, 但是里面只有主节点的地址
-	private static String getPrimaryUri(String mongoUri) {
-		if (mongoUri.contains("replicaSet") || mongoUri.contains("mongodb+srv:") || isMongoShards(mongoUri)) {
+	private static String getPrimaryUri(String mongoUri, MongodbConfig mongodbConfig) {
+		if (mongoUri.contains("replicaSet") || mongoUri.contains("mongodb+srv:") || isMongoShards(mongoUri,mongodbConfig)) {
 			return mongoUri;
 		}
 
@@ -386,10 +411,12 @@ public class MongodbUtil {
 		try {
 			List<String> hosts = connectionString.getHosts();
 			if (EmptyKit.isNotEmpty(hosts)) {
+				String finalMongoUri = mongoUri;
 				hosts.forEach(host -> {
 					MongoClient client = null;
 					try {
-						client = MongoClients.create("mongodb://" + host);
+						String tempUri = buildTempUri(finalMongoUri, host, connectionString);
+						client = MongoClients.create(getMongoClientSettingsBuilder(tempUri, mongodbConfig).build());
 						MongoDatabase database = client.getDatabase("admin");
 						Document result = database.runCommand(new Document("isMaster", 1));
 						if (result.getBoolean("ismaster")) {
@@ -427,70 +454,112 @@ public class MongodbUtil {
 		return mongoUri;
 	}
 
+	private static String buildTempUri(String originalUri, String host, ConnectionString connectionString) {
+		StringBuilder tempUri = new StringBuilder("mongodb://");
 
-		public static MongoClient createMongoClient(MongodbConfig mongodbConfig) {
-			CodecRegistry defaultCodecRegistry = MongoClientSettings.getDefaultCodecRegistry();
-			CodecRegistry codecRegistry = CodecRegistries.fromRegistries(CodecRegistries.fromCodecs(
-					new TapdataBigDecimalCodec(),
-					new TapdataBigIntegerCodec()
-			), defaultCodecRegistry);
-			final MongoClientSettings.Builder builder = MongoClientSettings.builder()
-					.codecRegistry(codecRegistry)
-					.writeConcern(WriteConcern.valueOf(mongodbConfig.getWriteConcern()));
-			String mongodbUri = mongodbConfig.getUri();
-			if (null == mongodbUri || "".equals(mongodbUri)) {
-				throw new RuntimeException("Create MongoDB client failed, error: uri is blank");
-			}
-
-			// if mongodbUri not contains replicaSet, then only connect to primary node
-			mongodbUri = getPrimaryUri(mongodbUri);
-			ConnectionPoolSettings.Builder connectionPoolSettingsBuilder = ConnectionPoolSettings.builder();
-			ConnectionPoolSettings connectionPoolSettings = connectionPoolSettingsBuilder.build();
-			builder.applyToConnectionPoolSettings(settingBuilder -> {
-				settingBuilder.applySettings(connectionPoolSettings);
-			});
-
-			builder.applyConnectionString(new ConnectionString(mongodbUri));
-
-		if (mongodbConfig.isSsl()) {
-			if (EmptyKit.isNotEmpty(mongodbUri) &&
-					(mongodbUri.indexOf("tlsAllowInvalidCertificates=true") > 0 ||
-							mongodbUri.indexOf("sslAllowInvalidCertificates=true") > 0)) {
-				builder.applyToSslSettings(sslSettingBuilder -> {
-					SSLContext sslContext = null;
-					try {
-						sslContext = SSLContext.getInstance("SSL");
-					} catch (NoSuchAlgorithmException e) {
-						throw new RuntimeException(String.format("Create ssl context failed %s", e.getMessage()), e);
+		if (connectionString.getCredential() != null) {
+			MongoCredential credential = connectionString.getCredential();
+			String username = credential.getUserName();
+			char[] password = credential.getPassword();
+			if (username != null && !username.isEmpty()) {
+				try {
+					tempUri.append(URLEncoder.encode(username, "UTF-8"));
+					if (password != null && password.length > 0) {
+						tempUri.append(":").append(URLEncoder.encode(new String(password), "UTF-8"));
 					}
-					try {
-						sslContext.init(null, new TrustManager[]{new X509TrustManager() {
-							@Override
-							public void checkClientTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
-							}
-
-							@Override
-							public void checkServerTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
-							}
-
-							@Override
-							public X509Certificate[] getAcceptedIssuers() {
-								return null;
-							}
-						}}, new SecureRandom());
-					} catch (KeyManagementException e) {
-						throw new RuntimeException(String.format("Initialize ssl context failed %s", e.getMessage()), e);
-					}
-					sslSettingBuilder.enabled(true).context(sslContext).invalidHostNameAllowed(true);
-				});
-
-			} else {
-				sslMongoClientOption(mongodbConfig.isSslValidate(), mongodbConfig.getSslCA(),
-						mongodbConfig.getSslKey(), mongodbConfig.getSslPass(), mongodbConfig.getCheckServerIdentity(), builder);
+					tempUri.append("@");
+				} catch (UnsupportedEncodingException e) {
+					// 如果编码失败，不添加认证信息
+				}
 			}
 		}
 
-		return MongoClients.create(builder.build());
+		tempUri.append(host);
+		String database = connectionString.getDatabase();
+		if (database != null && !database.isEmpty()) {
+			tempUri.append("/").append(database);
+		}
+
+		int queryIndex = originalUri.indexOf("?");
+		if (queryIndex > 0) {
+			String queryParams = originalUri.substring(queryIndex);
+			if (database == null || database.isEmpty()) {
+				tempUri.append("/");
+			}
+			tempUri.append(queryParams);
+		}
+
+		return tempUri.toString();
+	}
+
+
+	public static MongoClient createMongoClient(MongodbConfig mongodbConfig,Boolean isStreamRead) {
+		String mongodbUri = mongodbConfig.getUri();
+		if (null == mongodbUri || "".equals(mongodbUri)) {
+			throw new RuntimeException("Create MongoDB client failed, error: uri is blank");
+		}
+		// if mongodbUri not contains replicaSet, then only connect to primary node
+		mongodbUri = getPrimaryUri(mongodbUri, mongodbConfig);
+		return MongoClients.create(getMongoClientSettingsBuilder(mongodbUri, mongodbConfig,isStreamRead).build());
+	}
+
+	public static MongoClientSettings.Builder getMongoClientSettingsBuilder(String mongodbUri, MongodbConfig mongodbConfig) {
+		return getMongoClientSettingsBuilder(mongodbUri,mongodbConfig,false);
+	}
+
+	public static MongoClientSettings.Builder getMongoClientSettingsBuilder(String mongodbUri, MongodbConfig mongodbConfig,Boolean isStreamRead) {
+		mongodbUri = appendDefaultHaTimeoutOptions(mongodbUri,isStreamRead);
+		CodecRegistry defaultCodecRegistry = MongoClientSettings.getDefaultCodecRegistry();
+		CodecRegistry codecRegistry = CodecRegistries.fromRegistries(CodecRegistries.fromCodecs(
+				new TapdataBigDecimalCodec(),
+				new TapdataBigIntegerCodec()
+		), defaultCodecRegistry);
+		final MongoClientSettings.Builder builder = MongoClientSettings.builder()
+				.codecRegistry(codecRegistry)
+				.writeConcern(WriteConcern.valueOf(mongodbConfig.getWriteConcern()));
+		ConnectionPoolSettings.Builder connectionPoolSettingsBuilder = ConnectionPoolSettings.builder();
+		ConnectionPoolSettings connectionPoolSettings = connectionPoolSettingsBuilder.build();
+		builder.applyToConnectionPoolSettings(settingBuilder -> {
+			settingBuilder.applySettings(connectionPoolSettings);
+		});
+
+		builder.applyConnectionString(new ConnectionString(mongodbUri));
+		if (EmptyKit.isNotEmpty(mongodbUri) &&
+				(mongodbUri.indexOf("tlsAllowInvalidCertificates=true") > 0 ||
+						mongodbUri.indexOf("sslAllowInvalidCertificates=true") > 0)) {
+			builder.applyToSslSettings(sslSettingBuilder -> {
+				SSLContext sslContext = null;
+				try {
+					sslContext = SSLContext.getInstance("SSL");
+				} catch (NoSuchAlgorithmException e) {
+					throw new RuntimeException(String.format("Create ssl context failed %s", e.getMessage()), e);
+				}
+				try {
+					sslContext.init(null, new TrustManager[]{new X509TrustManager() {
+						@Override
+						public void checkClientTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
+						}
+
+						@Override
+						public void checkServerTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
+						}
+
+						@Override
+						public X509Certificate[] getAcceptedIssuers() {
+							return null;
+						}
+					}}, new SecureRandom());
+				} catch (KeyManagementException e) {
+					throw new RuntimeException(String.format("Initialize ssl context failed %s", e.getMessage()), e);
+				}
+				sslSettingBuilder.enabled(true).context(sslContext).invalidHostNameAllowed(true);
+			});
+
+		} else if(mongodbConfig.isSsl()) {
+			sslMongoClientOption(mongodbConfig.isSslValidate(), mongodbConfig.getSslCA(),
+					mongodbConfig.getSslKey(), mongodbConfig.getSslPass(), mongodbConfig.getCheckServerIdentity(), builder);
+		}
+		return builder;
 	}
 
 	public static void sslMongoClientOption(boolean sslValidate, String sslCA, String sslClientPem, String sslPass,

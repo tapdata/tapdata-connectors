@@ -169,11 +169,8 @@ public class MongodbExecuteCommandFunction {
     ExecuteObject executeObject = new ExecuteObject(executeObj);
     String database = executeObject.getDatabase();
     String collection = executeObject.getCollection();
-    if (collection == null || collection.isEmpty()) {
-      throw new RuntimeException(String.format("Process execute %s failed, collection name cannot be blank", executeObject));
-    }
     List<Document> pipelines = executeObject.getPipeline();
-    if (pipelines.isEmpty()) {
+    if (pipelines == null || pipelines.isEmpty()) {
       throw new RuntimeException(String.format("Process execute %s failed, pipeline cannot be blank", executeObject));
     }
     boolean allowDiskUse = true;
@@ -189,7 +186,11 @@ public class MongodbExecuteCommandFunction {
       // ignored
     }
 
-    return mongoClient.getDatabase(database).getCollection(collection).aggregate(pipelines).allowDiskUse(allowDiskUse);
+    MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
+    if (collection == null || collection.isEmpty()) {
+      return mongoDatabase.aggregate(pipelines).allowDiskUse(allowDiskUse);
+    }
+    return mongoDatabase.getCollection(collection).aggregate(pipelines).allowDiskUse(allowDiskUse);
   }
 
   public Object aggregate(Map<String, Object> executeObj, MongoClient mongoClient) {

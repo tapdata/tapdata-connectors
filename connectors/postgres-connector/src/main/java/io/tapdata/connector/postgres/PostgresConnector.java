@@ -37,6 +37,7 @@ import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.exception.TapCodeException;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.*;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -63,10 +64,7 @@ import java.math.BigDecimal;
 import java.sql.*;
 import java.sql.Date;
 import java.text.SimpleDateFormat;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
+import java.time.*;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.CountDownLatch;
@@ -293,17 +291,24 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void dropPublication() throws Throwable {
-        postgresJdbcContext.execute("DROP PUBLICATION " + slotName);
+        if (EmptyKit.isNotNull(slotName)) {
+            postgresJdbcContext.execute("DROP PUBLICATION " + slotName);
+        }
     }
 
     private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
         if (EmptyKit.isNull(slotName)) {
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
             String sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
+            long begin = System.currentTimeMillis();
             try {
-                postgresJdbcContext.execute(sql);
+                postgresJdbcContext.execute(sql, 20);
             } catch (SQLException e) {
-                throw new TapCodeException(PostgresErrorCode.SELECT_PUBLICATION_FAILED, "Select publication failed. Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                if (System.currentTimeMillis() - begin > 18000) {
+                    throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_TIMEOUT, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                } else {
+                    throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                }
             }
             tapLogger.info("new logical replication slot created, slotName:{}", slotName);
             connectorContext.getStateMap().put("tapdata_pg_slot", slotName);
@@ -367,13 +372,93 @@ public class PostgresConnector extends CommonDbConnector {
         }
     }
 
-    private Object getStreamOffsetFromString(TapConnectorContext connectorContext, String offset) {
+    private Object getStreamOffsetFromString(TapConnectorContext connectorContext, String offsetString) {
+        if (EmptyKit.isBlank(offsetString)) {
+            throw new IllegalArgumentException("Offset string cannot be null or empty");
+        }
+
         try {
             PostgresOffset postgresOffset = new PostgresOffset();
-            postgresOffset.setSourceOffset(offset);
+
+            // 尝试解析为 JSON 格式的完整 offset
+            if (offsetString.trim().startsWith("{")) {
+                // 直接使用 JSON 字符串作为 sourceOffset
+                postgresOffset.setSourceOffset(offsetString);
+                tapLogger.info("Using JSON format offset: {}", offsetString);
+                return postgresOffset;
+            }
+
+            // 解析 LSN 值
+            Long lsnValue = parseLsn(offsetString);
+
+            // 构建最小化的 offset JSON
+            // 只包含必要的 lsn 字段，让 Debezium 从这个 LSN 开始读取
+            Map<String, Object> offsetMap = new HashMap<>();
+            offsetMap.put("lsn", lsnValue);
+
+            // 将 Map 转换为 JSON 字符串
+            ObjectMapper objectMapper = new ObjectMapper();
+            String sourceOffset = objectMapper.writeValueAsString(offsetMap);
+            postgresOffset.setSourceOffset(sourceOffset);
+
+            tapLogger.info("Created offset from LSN string '{}', parsed LSN value: {}, offset: {}",
+                    offsetString, lsnValue, sourceOffset);
+
             return postgresOffset;
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to create offset from string: " + offsetString +
+                    ". Error: " + e.getMessage(), e);
         } catch (Exception e) {
-            throw new RuntimeException("Oracle use scn as offset, invalid scn: " + offset, e);
+            throw new RuntimeException("Invalid LSN offset string: " + offsetString +
+                    ". Expected format: '0/1234567' or '19088743' or JSON format. Error: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 解析 LSN 字符串为 Long 值
+     *
+     * @param lsnString LSN 字符串，支持两种格式：
+     *                  1. PostgreSQL 标准格式：0/1234567 (segment/offset)
+     *                  2. 十进制数值：19088743
+     * @return LSN 的 Long 值
+     */
+    private Long parseLsn(String lsnString) {
+        lsnString = lsnString.trim();
+
+        // 格式 1: PostgreSQL 标准格式 "segment/offset" (如 "0/1234567")
+        if (lsnString.contains("/")) {
+            String[] parts = lsnString.split("/");
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("Invalid LSN format: " + lsnString +
+                        ". Expected format: 'segment/offset' (e.g., '0/1234567')");
+            }
+
+            try {
+                // 将十六进制的 segment 和 offset 转换为 Long
+                long segment = Long.parseLong(parts[0], 16);
+                long offset = Long.parseLong(parts[1], 16);
+
+                // LSN = (segment << 32) | offset
+                long lsn = (segment << 32) | offset;
+
+                tapLogger.debug("Parsed LSN from '{}': segment={}, offset={}, lsn={}",
+                        lsnString, segment, offset, lsn);
+
+                return lsn;
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid LSN format: " + lsnString +
+                        ". Segment and offset must be hexadecimal numbers. Error: " + e.getMessage(), e);
+            }
+        }
+
+        // 格式 2: 直接的十进制数值
+        try {
+            long lsn = Long.parseLong(lsnString);
+            tapLogger.debug("Parsed LSN from decimal string '{}': {}", lsnString, lsn);
+            return lsn;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid LSN format: " + lsnString +
+                    ". Expected either 'segment/offset' format or a decimal number. Error: " + e.getMessage(), e);
         }
     }
 
@@ -391,11 +476,7 @@ public class PostgresConnector extends CommonDbConnector {
     //initialize jdbc context, slot name, version
     private void initConnection(TapConnectionContext connectionContext) {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
-        postgresTest = new PostgresTest(postgresConfig, testItem -> {
-        }, null).initContext();
-        postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
-        commonDbConfig = postgresConfig;
-        jdbcContext = postgresJdbcContext;
+        postgresConfig.load(connectionContext.getNodeConfig());
         isConnectorStarted(connectionContext, tapConnectorContext -> {
             firstConnectorId = (String) tapConnectorContext.getStateMap().get("firstConnectorId");
             if (EmptyKit.isNull(firstConnectorId)) {
@@ -403,11 +484,20 @@ public class PostgresConnector extends CommonDbConnector {
                 tapConnectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
             slotName = tapConnectorContext.getStateMap().get("tapdata_pg_slot");
-            postgresConfig.load(tapConnectorContext.getNodeConfig());
             if (EmptyKit.isNull(slotName) && StringUtils.isNotBlank(postgresConfig.getCustomSlotName())) {
                 slotName = postgresConfig.getCustomSlotName();
             }
         });
+        tapLogger = connectionContext.getLog();
+        if (postgresConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            postgresConfig.startJdbcLog(firstConnectorId);
+        }
+        postgresTest = new PostgresTest(postgresConfig, testItem -> {
+        }, null).initContext();
+        postgresJdbcContext = new PostgresJdbcContext(postgresConfig);
+        commonDbConfig = postgresConfig;
+        jdbcContext = postgresJdbcContext;
         postgresVersion = postgresJdbcContext.queryVersion();
         commonSqlMaker = new PostgresSqlMaker()
                 .dbVersion(postgresVersion)
@@ -423,7 +513,6 @@ public class PostgresConnector extends CommonDbConnector {
         postgresJdbcContext.withPostgresVersion(postgresVersion);
         postgresTest.withPostgresVersion(postgresVersion);
         ddlSqlGenerator = new PostgresDDLSqlGenerator();
-        tapLogger = connectionContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();
         fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
@@ -743,7 +832,7 @@ public class PostgresConnector extends CommonDbConnector {
             if ("pgoutput".equals(postgresConfig.getLogPluginName()) && Integer.parseInt(postgresVersion) > 100000) {
                 if (!postgresConfig.getPartPublication()) {
                     createAllPublicationIfNotExist();
-                } else if(EmptyKit.isBlank(postgresConfig.getCustomPublicationName())) {
+                } else if (EmptyKit.isBlank(postgresConfig.getCustomPublicationName())) {
                     List<String> tableList = new ArrayList<>();
                     Iterator<Entry<TapTable>> iterator = connectorContext.getTableMap().iterator();
                     while (iterator.hasNext()) {
@@ -865,7 +954,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void createCustomPublicationIfNotExist(List<String> tableList) {
-        String sql = String.format("CREATE PUBLICATION %s FOR TABLE %s", slotName, tableList.stream().map(this::getSchemaAndTable).collect(Collectors.joining(", ")));
+        String sql = String.format("CREATE PUBLICATION %s FOR TABLE %s %s", slotName, tableList.stream().map(this::getSchemaAndTable).collect(Collectors.joining(", ")), postgresConfig.getPartitionRoot() ? "WITH (publish_via_partition_root = true)" : "");
         try {
             tapLogger.info("Create publication sql: {}", sql);
             postgresJdbcContext.execute(sql);
@@ -984,13 +1073,40 @@ public class PostgresConnector extends CommonDbConnector {
             try {
                 if (null == dataType) {
                     dataMap.put(colName, resultSet.getObject(colName));
-                } else if (dataType.endsWith("without time zone") && "timestamp".equals(resultSet.getMetaData().getColumnTypeName(columnIndex))) {
-                    String tiemstampString = resultSet.getString(colName);
-                    if (StringUtils.isNotEmpty(tiemstampString)) {
-                        LocalDateTime localDateTime = LocalDateTime.parse(tiemstampString.replace(" ", "T"));
-                        dataMap.put(colName, localDateTime.minusHours(postgresConfig.getZoneOffsetHour()));
-                    } else {
+                } else if (dataType.endsWith("without time zone")) {
+                    switch (resultSet.getMetaData().getColumnTypeName(columnIndex)) {
+                        case "timestamp": {
+                            String timestampString = resultSet.getString(colName);
+                            if (StringUtils.isNotEmpty(timestampString)) {
+                                LocalDateTime localDateTime;
+                                try {
+                                    localDateTime = LocalDateTime.parse(timestampString.replace(" ", "T"));
+                                } catch (Exception e) {
+                                    localDateTime = resultSet.getTimestamp(colName).toLocalDateTime();
+                                }
+                                dataMap.put(colName, localDateTime.minusHours(postgresConfig.getZoneOffsetHour()));
+                            } else {
+                                dataMap.put(colName, null);
+                            }
+                            break;
+                        }
+                        case "time": {
+                            LocalTime localTime = resultSet.getObject(colName, LocalTime.class);
+                            if (localTime != null) {
+                                dataMap.put(colName, localTime.atDate(LocalDate.ofYearDay(1970, 1)).minusHours(postgresConfig.getZoneOffsetHour()));
+                            } else {
+                                dataMap.put(colName, null);
+                            }
+                            break;
+                        }
+                    }
+
+                } else if (dataType.equals("money")) {
+                    String money = resultSet.getString(colName);
+                    if (EmptyKit.isBlank(money) || "null".equals(money)) {
                         dataMap.put(colName, null);
+                    } else {
+                        dataMap.put(colName, new BigDecimal(money.replaceAll("[^\\d.-]", "")));
                     }
                 } else {
                     dataMap.put(colName, processData(resultSet.getObject(colName), dataType));

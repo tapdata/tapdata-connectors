@@ -85,12 +85,8 @@ public class DebeziumSchemaMode extends AbsSchemaMode {
 			throw new TapCodeException(KafkaErrorCodes.DEBEZIUM_NOT_SUPPORT_EVENT).dynamicDescriptionParameters(tapEvent.getClass().getSimpleName());
 		}
 
-		if (null == key) {
-			return Arrays.asList(new ProducerRecord<>(topic, value));
-		} else {
-			return Arrays.asList(new ProducerRecord<>(topic, key, value));
-		}
-	}
+        return List.of(new ProducerRecord<>(topic, computePartition(key, kafkaService.getConfig().getNodePartitionSize()), key, value));
+    }
 
 	@Override
 	public void queryByAdvanceFilter(TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) {

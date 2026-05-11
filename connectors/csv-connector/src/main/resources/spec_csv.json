@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "CSV",
+    "realName": "CSV",
     "icon": "icons/csv.png",
     "doc": "${doc}",
     "id": "csv",

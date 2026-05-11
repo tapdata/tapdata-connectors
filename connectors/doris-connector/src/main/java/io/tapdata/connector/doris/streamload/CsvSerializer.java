@@ -6,6 +6,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.type.TapDateTime;
 import org.apache.commons.collections4.MapUtils;
 
 import java.io.IOException;
@@ -56,6 +57,16 @@ public class CsvSerializer implements MessageSerializer {
                     value = values.get(entry.getKey());
                     if (value == null) {
                         value = Constants.NULL_VALUE;
+                    } else {
+                        // Check if field is TapDateTime type and value is ISO 8601 format string
+                        TapField tapField = entry.getValue();
+                        if (tapField != null && tapField.getTapType() instanceof TapDateTime && value instanceof String) {
+                            String dateTimeStr = (String) value;
+                            if (dateTimeStr.contains("T") && dateTimeStr.endsWith("Z")) {
+                                dateTimeStr = dateTimeStr.replace("T", " ").substring(0, 19);
+                                value = dateTimeStr;
+                            }
+                        }
                     }
                     joiner.add(value.toString());
                 }
