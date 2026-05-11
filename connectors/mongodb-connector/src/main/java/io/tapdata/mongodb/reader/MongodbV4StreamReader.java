@@ -23,8 +23,13 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.mongodb.MongodbExceptionCollector;
 import io.tapdata.mongodb.MongodbUtil;
 import io.tapdata.mongodb.entity.MongodbConfig;
+import io.tapdata.mongodb.reader.cdc.v4.NormalV4Acceptor;
+import io.tapdata.mongodb.reader.cdc.v4.OneByOneV4Acceptor;
+import io.tapdata.mongodb.reader.cdc.v4.V4Accept;
 import io.tapdata.mongodb.util.MongodbLookupUtil;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
+import io.tapdata.pdk.apis.consumer.TapStreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.commons.collections4.MapUtils;
 import org.bson.*;
@@ -34,7 +39,6 @@ import org.bson.conversions.Bson;
 import org.bson.io.ByteBufferBsonInput;
 
 import java.nio.ByteBuffer;
-import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -64,6 +68,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     private MongodbExceptionCollector mongodbExceptionCollector;
     private String dropTransactionId;
     private Thread consumeStreamEventThread;
+    private V4Accept<?, ?> v4Acceptor;
 
     public MongodbV4StreamReader setPreImage(boolean isPreImage) {
         this.isPreImage = isPreImage;
@@ -72,6 +77,21 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
     public MongodbV4StreamReader() {
         this.mongodbExceptionCollector = new MongodbExceptionCollector();
+    }
+
+    @Override
+    public MongodbV4StreamReader initAcceptor(int batchSize, TapStreamReadConsumer<?, Object> consumer) {
+        if (consumer instanceof StreamReadConsumer) {
+            this.v4Acceptor = new NormalV4Acceptor()
+                    .setConsumer((StreamReadConsumer) consumer)
+                    .setBatchSize(batchSize);
+        } else if (consumer instanceof StreamReadOneByOneConsumer) {
+            this.v4Acceptor = new OneByOneV4Acceptor()
+                    .setConsumer((StreamReadOneByOneConsumer) consumer);
+        } else {
+            throw new IllegalArgumentException("Unsupported consumer type: " + consumer.getClass().getName());
+        }
+        return this;
     }
 
     @Override
@@ -89,7 +109,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     }
 
     @Override
-    public void read(TapConnectorContext connectorContext, List<String> tableList, Object offset, int eventBatchSize, StreamReadConsumer consumer) throws Exception {
+    public void read(TapConnectorContext connectorContext, List<String> tableList, Object offset) throws Exception {
         openChangeStreamPreAndPostImages(tableList);
         if (Boolean.TRUE.equals(mongodbConfig.getDoubleActive())) {
             tableList.add("_tap_double_active");
@@ -125,38 +145,15 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             if (isPreImage) {
                 changeStream.fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
             }
-            consumer.streamReadStarted();
+            this.v4Acceptor.streamReadStarted();
             AtomicReference<Exception> throwableAtomicReference = new AtomicReference<>();
             try (final MongoChangeStreamCursor<ChangeStreamDocument<RawBsonDocument>> streamCursor = changeStream.cursor()) {
                 consumeStreamEventThread = new Thread(() -> {
-                    List<TapEvent> events = list();
-                    OffsetEvent lastOffsetEvent = null;
-                    long lastSendTime = System.currentTimeMillis();
-                    // Calculate time window based on batch size
-                    // If batch size <= 500, use fixed 50ms window
-                    // If batch size > 500, use dynamic window = batch size / 10 (ms)
-                    long timeWindowMs = eventBatchSize <= 500 ? 50 : eventBatchSize / 10;
+
                     while (running.get()) {
                         try {
                             OffsetEvent event = concurrentProcessor.get(10, TimeUnit.MILLISECONDS);
-                            if (EmptyKit.isNotNull(event)) {
-                                lastOffsetEvent = event;
-                                events.add(event.getEvent());
-                                // Check batch size OR time window
-                                if (events.size() >= eventBatchSize ||
-                                    (System.currentTimeMillis() - lastSendTime > timeWindowMs)) {
-                                    consumer.accept(events, event.getOffset());
-                                    events.clear();
-                                    lastSendTime = System.currentTimeMillis();
-                                }
-                            } else {
-                                // Send remaining events when queue is empty
-                                if (!events.isEmpty() && lastOffsetEvent != null) {
-                                    consumer.accept(events, lastOffsetEvent.getOffset());
-                                    events.clear();
-                                    lastSendTime = System.currentTimeMillis();
-                                }
-                            }
+                            this.v4Acceptor.accept(event);
                         } catch (Exception e) {
                             throwableAtomicReference.set(e);
                             return;
@@ -212,7 +209,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         }
     }
 
-    static class OffsetEvent {
+    public static class OffsetEvent {
         private final Object offset;
         private final TapEvent event;
 

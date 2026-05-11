@@ -3,21 +3,24 @@ package io.tapdata.connector.postgres.cdc;
 import io.tapdata.common.concurrent.ConcurrentProcessor;
 import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
-import io.tapdata.entity.event.TapEvent;
+import io.tapdata.connector.postgres.cdc.accept.LogMinerBatchAccepter;
+import io.tapdata.connector.postgres.cdc.accept.LogMinerOneByOneAccepter;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.exception.TapPdkOffsetOutOfLogEx;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
+import io.tapdata.pdk.apis.consumer.StreamReadOneByOneConsumer;
+import io.tapdata.pdk.apis.consumer.TapStreamReadConsumer;
 
-import java.sql.*;
-import java.util.ArrayList;
-import java.util.List;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.sql.Timestamp;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-
-import static io.tapdata.base.ConnectorBase.list;
 
 public class WalLogMiner extends AbstractWalLogMiner {
 
@@ -27,6 +30,22 @@ public class WalLogMiner extends AbstractWalLogMiner {
 
     public WalLogMiner(PostgresJdbcContext postgresJdbcContext, Log tapLogger) {
         super(postgresJdbcContext, tapLogger);
+    }
+
+    public AbstractWalLogMiner registerCdcConsumer(TapStreamReadConsumer<?, Object> consumer, int recordSize) {
+        if (consumer instanceof StreamReadConsumer) {
+            this.consumer = new LogMinerBatchAccepter()
+                    .setConsumer((StreamReadConsumer) consumer)
+                    .setBatchSize(recordSize)
+                    .setEventCreator(this::createEvent);
+        } else if (consumer instanceof StreamReadOneByOneConsumer) {
+            this.consumer = new LogMinerOneByOneAccepter()
+                    .setConsumer((StreamReadOneByOneConsumer) consumer)
+                    .setEventCreator(this::createEvent);
+        } else {
+            throw new IllegalArgumentException("Unsupported consumer type: " + consumer.getClass().getName());
+        }
+        return this;
     }
 
     public WalLogMiner offset(Object offsetState) {
@@ -64,24 +83,10 @@ public class WalLogMiner extends AbstractWalLogMiner {
             }
             Thread t = new Thread(() -> {
                 consumer.streamReadStarted();
-                NormalRedo lastRedo = null;
-                AtomicReference<List<TapEvent>> events = new AtomicReference<>(list());
                 while (isAlive.get()) {
                     try {
                         NormalRedo redo = concurrentProcessor.get(2, TimeUnit.SECONDS);
-                        if (EmptyKit.isNotNull(redo)) {
-                            lastRedo = redo;
-                            events.get().add(createEvent(redo));
-                            if (events.get().size() >= recordSize) {
-                                consumer.accept(events.get(), redo.getCdcSequenceStr());
-                                events.set(new ArrayList<>());
-                            }
-                        } else {
-                            if (events.get().size() > 0) {
-                                consumer.accept(events.get(), lastRedo.getCdcSequenceStr());
-                                events.set(new ArrayList<>());
-                            }
-                        }
+                        consumer.accept(redo);
                     } catch (Exception e) {
                         threadException.set(e);
                         return;
