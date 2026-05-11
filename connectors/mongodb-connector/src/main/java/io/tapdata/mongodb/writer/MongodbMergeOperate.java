@@ -187,7 +187,7 @@ public class MongodbMergeOperate {
 				}
 				break;
 			case updateWrite:
-				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys, mergeFilter, topLevel, mainTableKeys);
+				unsetResult = updateWriteUnsetMerge(mergeBundle, properties, updateJoinKeys, unsetResult, sharedJoinKeys, mergeFilter, topLevel, loopTime, mainTableKeys);
 				if (unsetResultNull) {
 					addUnsetMerge(mergeResults, unsetResult);
 				}
@@ -302,7 +302,7 @@ public class MongodbMergeOperate {
 			MergeBundle mergeBundle, MergeTableProperties currentProperty,
 			Map<String, MergeInfo.UpdateJoinKey> updateJoinKeys,
 			MergeResult mergeResult, Set<String> sharedJoinKeys, MergeFilter mergeFilter, int topLevel,
-			Set<String> mainTableKeys) {
+			int loopTime, Set<String> mainTableKeys) {
 		if (null == currentProperty) {
 			return mergeResult;
 		}
@@ -325,10 +325,11 @@ public class MongodbMergeOperate {
 			MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
 			Map<String, Object> updateJoinKeyAfter = updateJoinKey.getAfter();
 			Map<String, Object> updateJoinKeyBefore = updateJoinKey.getBefore();
+			Map<String, Object> updateJoinKeyParentBefore = updateJoinKey.getParentBefore();
 			List<Map<String, String>> joinKeys = currentProperty.getJoinKeys();
 			Document filter;
 			mergeResult = new MergeResult();
-			filter = unsetFilter(updateJoinKeyBefore, updateJoinKeyAfter, joinKeys, topLevel);
+			filter = unsetFilterForUpdateJoinKey(updateJoinKeyBefore, updateJoinKeyAfter, joinKeys, topLevel, loopTime,updateJoinKeyParentBefore);
 			if (null != updateJoinKey.getParentBefore()) {
 				filter.putAll(updateJoinKey.getParentBefore());
 			}
@@ -895,13 +896,29 @@ public class MongodbMergeOperate {
 	}
 
 	protected static Document unsetFilter(Map<String, Object> before, Map<String, Object> after, List<Map<String, String>> joinKeys, int topLevel) {
+		return unsetFilter(before, after, joinKeys, topLevel == 1);
+	}
+
+	protected static Document unsetFilterForUpdateJoinKey(Map<String, Object> before, Map<String, Object> after,
+														  List<Map<String, String>> joinKeys, int topLevel, int loopTime,Map<String,Object> updateJoinKeyParentBefore){
+		return unsetFilter(before, after, joinKeys, shouldUseAfterForUpdateJoinKeyUnsetFilter(topLevel, loopTime,updateJoinKeyParentBefore));
+	}
+
+	private static Document unsetFilter(Map<String, Object> before, Map<String, Object> after, List<Map<String, String>> joinKeys, boolean useAfter) {
 		Document document = new Document();
 		for (Map<String, String> joinKey : joinKeys) {
 			String key = joinKey.get("target");
-			Object value = MapUtil.getValueByKey(before, key);
-			document.put(key, value);
+			Map<String, Object> filter = useAfter ? after : before;
+			if(MapUtil.containsKey(filter, key)){
+				Object value = MapUtil.getValueByKey(filter, key);
+				document.put(key, value);
+			}
 		}
 		return document;
+	}
+
+	private static boolean shouldUseAfterForUpdateJoinKeyUnsetFilter(int topLevel, int loopTime,Map<String,Object> updateJoinKeyParentBefore) {
+		return topLevel == 1 && (loopTime > 1 ||  MapUtils.isNotEmpty(updateJoinKeyParentBefore));
 	}
 
 	private static List<Document> arrayFilter(Map<String, Object> data, List<Map<String, String>> joinKeys, String arrayPath) {
