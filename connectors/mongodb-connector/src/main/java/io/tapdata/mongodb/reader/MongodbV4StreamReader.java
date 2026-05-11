@@ -98,7 +98,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     public void onStart(MongodbConfig mongodbConfig) {
         this.mongodbConfig = mongodbConfig;
         if (mongoClient == null) {
-            mongoClient = MongodbUtil.createMongoClient(mongodbConfig);
+            mongoClient = MongodbUtil.createMongoClient(mongodbConfig,true);
             mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
         }
         running.compareAndSet(false, true);
@@ -306,14 +306,9 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
 
                 if (null != updateDescription.getUpdatedFields()) {
                     Document decodeUpdateDocument = new DocumentCodec().decode(new BsonDocumentReader(updateDescription.getUpdatedFields()), DecoderContext.builder().build());
-                    decodeUpdateDocument.forEach((k, v) -> {
-                        if (k.contains(".")) {
-                            return;
-                        }
-                        after.put(k, v);
-                    });
+                    after.putAll(decodeUpdateDocument);
 					before.forEach((k, v) -> {
-						if (!after.containsKey(k)) {
+						if (!after.containsKey(k) && after.keySet().stream().noneMatch(ak -> ak.startsWith(k + "."))) {
 							after.put(k, v);
 						}
 					});

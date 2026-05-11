@@ -8,6 +8,7 @@ import io.tapdata.connector.starrocks.streamload.exception.StarrocksRuntimeExcep
 import io.tapdata.connector.starrocks.streamload.exception.StreamLoadException;
 import io.tapdata.connector.starrocks.streamload.rest.models.RespContent;
 import io.tapdata.connector.starrocks.util.MinuteWriteLimiter;
+import io.tapdata.entity.event.TapCallbackOffset;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -36,6 +37,8 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static io.tapdata.base.ConnectorBase.writeListResult;
+import static io.tapdata.entity.event.TapCallbackOffset.KEY_BATCH_OFFSET;
+import static io.tapdata.entity.event.TapCallbackOffset.KEY_STREAM_OFFSET;
 
 /**
  * @author jarad
@@ -49,7 +52,6 @@ public class StarrocksStreamLoader {
     private static final String LABEL_PREFIX_PATTERN = "tapdata_%s_%s";
 
     private final StarrocksConfig StarrocksConfig;
-    private final Map<String, CloseableHttpClient> httpClientMap;
     private final boolean useHttps;
     private final RecordStream recordStream;
 
@@ -76,6 +78,9 @@ public class StarrocksStreamLoader {
     // 表名到 TapTable 的映射，用于刷新时获取真正的 TapTable
     private final Map<String, TapTable> tableNameToTapTableMap;
 
+    // 保存每个表的第一个 TapOffset，用于在 flush 成功后回调
+    private final Map<String, TapCallbackOffset> firstOffsetByTable;
+
     // 日志打印控制
     private long lastLogTime;
     private static final long LOG_INTERVAL_MS = 30 * 1000; // 30秒
@@ -85,16 +90,20 @@ public class StarrocksStreamLoader {
     private ScheduledExecutorService flushScheduler;
     private ScheduledFuture<?> flushTask;
 
+    // 表级别的锁，用于 finalizeCacheFileForTable 方法
+    private final Map<String, Object> tableLocks = new ConcurrentHashMap<>();
+
     // 内存监控
     private long lastMemoryCheckTime = 0;
     private static final long MEMORY_CHECK_INTERVAL = 30000; // 30秒检查一次内存
     private final Log taplogger;
     private boolean cannotClean;
     private AtomicReference<Exception> globalException = new AtomicReference<>();
+    // 回调 flush offset
+    private Consumer<Object> flushOffsetCallback;
 
-    public StarrocksStreamLoader(StarrocksJdbcContext StarrocksJdbcContext, Map<String, CloseableHttpClient> httpClientMap, boolean useHttps, Log taplogger) {
+    public StarrocksStreamLoader(StarrocksJdbcContext StarrocksJdbcContext, boolean useHttps, Log taplogger) {
         this.StarrocksConfig = (StarrocksConfig) StarrocksJdbcContext.getConfig();
-        this.httpClientMap = httpClientMap;
         this.useHttps = useHttps;
         this.taplogger = taplogger;
         Integer writeByteBufferCapacity = StarrocksConfig.getWriteByteBufferCapacity();
@@ -123,22 +132,19 @@ public class StarrocksStreamLoader {
         this.isFirstRecordByTable = new ConcurrentHashMap<>();
         this.pendingFlushTables = ConcurrentHashMap.newKeySet();
         this.tableNameToTapTableMap = new ConcurrentHashMap<>();
+        this.firstOffsetByTable = Collections.synchronizedMap(new LinkedHashMap<>());
 
         // 初始化定时刷新
         initializeFlushScheduler();
     }
 
-    private CloseableHttpClient getHttpClient(String tableName) {
-        if (httpClientMap.containsKey(tableName)) {
-            return httpClientMap.get(tableName);
-        }
+    private CloseableHttpClient getHttpClient() {
         CloseableHttpClient httpClient;
         if (useHttps) {
             httpClient = HttpUtil.generationHttpClient();
         } else {
             httpClient = new HttpUtil().getHttpClient();
         }
-        httpClientMap.put(tableName, httpClient);
         return httpClient;
     }
 
@@ -425,6 +431,35 @@ public class StarrocksStreamLoader {
             long batchDataSize = 0;
 
             for (TapRecordEvent tapRecordEvent : tapRecordEvents) {
+                // 构建 TapOffset 对象，用于在 flush 成功后回调
+                TapCallbackOffset tapOffset = new TapCallbackOffset();
+
+                // 从 TapRecordEvent.info 中提取 offset 信息
+                // 这些信息由 HazelcastTargetPdkBaseNode.handleTapdataEventDML 方法添加
+                Object batchOffset = tapRecordEvent.getInfo("batchOffset");
+                Object streamOffset = tapRecordEvent.getInfo("streamOffset");
+                Object syncStage = tapRecordEvent.getInfo("syncStage");
+                Object sourceTime = tapRecordEvent.getInfo("sourceTime");
+                Object nodeIds = tapRecordEvent.getInfo("nodeIds");
+
+                // 填充 TapOffset
+                tapOffset.batchOffset(batchOffset)
+                        .streamOffset(streamOffset)
+                        .tableId(tapRecordEvent.getTableId())
+                        .syncStage(syncStage != null ? syncStage.toString() : null)
+                        .sourceTime(sourceTime instanceof Long ? (Long) sourceTime : null)
+                        .eventTime(tapRecordEvent.getReferenceTime())
+                        .nodeIds(nodeIds);
+
+                // 只有当 offset 有效时才保存（避免覆盖之前的有效 offset）
+                if (tapOffset.hasValidOffset()) {
+                    if (!firstOffsetByTable.containsKey(tableName)) {
+                        firstOffsetByTable.put(tableName, tapOffset);
+                        taplogger.debug("Saved first offset for table {}: streamOffset={}, batchOffset={}",
+                                tableName, streamOffset, batchOffset);
+                    }
+                }
+
                 byte[] bytes = messageSerializer.serialize(table, tapRecordEvent, isAgg);
                 batchDataSize += bytes.length;
 
@@ -591,12 +626,14 @@ public class StarrocksStreamLoader {
 
     public RespContent put(final TapTable table) throws StreamLoadException, StarrocksRetryableException {
         StarrocksConfig.WriteFormat writeFormat = StarrocksConfig.getWriteFormatEnum();
+        String tableName = table.getId();
         try {
-            final String loadUrl = buildLoadUrl(StarrocksConfig.getStarrocksHttp(), StarrocksConfig.getDatabase(), table.getId());
-            final String prefix = buildPrefix(table.getId());
-            String tableName = table.getId();
+            final String loadUrl = buildLoadUrl(StarrocksConfig.getStarrocksHttp(), StarrocksConfig.getDatabase(), tableName);
+            final String prefix = buildPrefix(tableName);
 
-            String label = prefix + "-" + UUID.randomUUID();
+            // StarRocks label naming rules: only digits, letters, and underscores are allowed
+            String label = prefix + "_" + UUID.randomUUID().toString().replace("-", "_");
+
             List<String> columns = new ArrayList<>();
 
             // 获取该表的dataColumns
@@ -650,7 +687,10 @@ public class StarrocksStreamLoader {
                 }
             }
             HttpPut httpPut = putBuilder.build();
-            try (CloseableHttpResponse execute = getHttpClient(tableName).execute(httpPut)) {
+            try (
+                    CloseableHttpClient httpClient = getHttpClient();
+                    CloseableHttpResponse execute = httpClient.execute(httpPut)
+            ) {
                 return handlePreCommitResponse(execute);
             }
         } catch (StarrocksRetryableException e) {
@@ -670,7 +710,8 @@ public class StarrocksStreamLoader {
             final String prefix = buildPrefix(table.getId());
             String tableName = table.getId();
 
-            String label = prefix + "-" + UUID.randomUUID();
+            // StarRocks label naming rules: only digits, letters, and underscores are allowed
+            String label = prefix + "_" + UUID.randomUUID().toString().replace("-", "_");
             List<String> columns = new ArrayList<>();
 
             // 获取该表的dataColumns
@@ -750,7 +791,10 @@ public class StarrocksStreamLoader {
             taplogger.info("=====================================");
 
             long requestStartTime = System.currentTimeMillis();
-            try (CloseableHttpResponse execute = getHttpClient(tableName).execute(httpPut)) {
+            try (
+                    CloseableHttpClient client  = getHttpClient();
+                    CloseableHttpResponse execute = client.execute(httpPut)
+            ) {
                 long requestEndTime = System.currentTimeMillis();
                 long requestDuration = requestEndTime - requestStartTime;
 
@@ -859,14 +903,59 @@ public class StarrocksStreamLoader {
             taplogger.info("Updated last flush time for table {}: {} -> {} (diff: {} ms)",
                 tableName, oldFlushTime, newFlushTime, newFlushTime - oldFlushTime);
 
-            // 清理该表的缓存文件
-            cleanupCacheFileForTable(tableName);
+            // 成功：清理该表的缓存文件（删除文件）
+            cleanupCacheFileForTable(tableName, true);
             // 从待刷新列表中移除该表
             pendingFlushTables.remove(tableName);
             // 清理该表的批次大小
             currentBatchSizeByTable.remove(tableName);
-            cannotClean = false;
-            // 注意：刷新时间只在成功时更新，失败时不更新以便重试
+
+            // 数据成功刷新后，主动通知引擎可以保存断点
+            taplogger.debug("Table {} successfully flushed and removed from pending list. " +
+                "Remaining pending tables: {}", tableName, pendingFlushTables.size());
+
+            if (flushOffsetCallback != null) {
+                TapCallbackOffset offsetToSave = null;
+                synchronized (firstOffsetByTable) {
+                    Map.Entry<String, TapCallbackOffset> firstEntry = firstOffsetByTable.entrySet()
+                            .stream()
+                            .findFirst()
+                            .orElse(null);
+
+                    if (firstEntry != null) {
+                        String firstTableName = firstEntry.getKey();
+                        TapCallbackOffset firstOffset = firstEntry.getValue();
+
+                        // 如果当前刷新的表是第一个表
+                        offsetToSave = firstOffset;
+                        if (tableName.equals(firstTableName)) {
+                            firstOffsetByTable.remove(firstTableName);
+                            taplogger.info("Table {} is the first table in queue, saving its latest offset: " +
+                                            "batchOffset={}, streamOffset={}",
+                                    tableName,
+                                    offsetToSave != null ? offsetToSave.get(KEY_BATCH_OFFSET) : null,
+                                    offsetToSave != null ? offsetToSave.get(KEY_STREAM_OFFSET) : null);
+                        } else {
+                            taplogger.info("Table {} is not the first table, saving first table {}'s offset: " +
+                                            "batchOffset={}, streamOffset={}",
+                                    tableName, firstTableName,
+                                    offsetToSave.get(KEY_BATCH_OFFSET),
+                                    offsetToSave.get(KEY_STREAM_OFFSET));
+                        }
+                    }
+                }
+                if (offsetToSave != null && offsetToSave.hasValidOffset()) {
+                    taplogger.info("Table flushed successfully, triggering flush offset callback with TapOffset: {}", offsetToSave);
+                    try {
+                        flushOffsetCallback.accept(offsetToSave);
+                    } catch (Exception e) {
+                        taplogger.warn("Failed to flush offset callback: {}", e.getMessage(), e);
+                    }
+                } else {
+                    taplogger.debug("No valid TapOffset found for table {}, skipping callback", tableName);
+                }
+            }
+
             return respContent;
         } catch (StarrocksRetryableException e) {
             long flushEndTime = System.currentTimeMillis();
@@ -874,7 +963,6 @@ public class StarrocksStreamLoader {
             taplogger.warn("Table {} flush failed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, error={}",
                 tableName, formatBytes(tableDataSize), waitTime, flushDuration, e.getMessage());
-            cannotClean = true;
             throw e;
         } catch (Exception e) {
             long flushEndTime = System.currentTimeMillis();
@@ -882,7 +970,6 @@ public class StarrocksStreamLoader {
             taplogger.warn("Table {} flush failed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, error={}",
                 tableName, formatBytes(tableDataSize), waitTime, flushDuration, e.getMessage());
-            cannotClean = true;
             throw new StarrocksRuntimeException(e);
         } finally {
 
@@ -941,30 +1028,18 @@ public class StarrocksStreamLoader {
                 flushScheduler = null;
             }
 
-            // 关闭HTTP客户端
-            if (this.httpClientMap != null) {
-                httpClientMap.forEach((k, v) -> {
-                    try {
-                        v.close();
-                    } catch (IOException e) {
-                        taplogger.warn("Failed to close http client", e);
-                    }
-                });
-            }
-
             // 清理所有Map，释放内存
             cacheFileStreamsByTable.clear();
-            if (!cannotClean) {
-                // 清理所有表的缓存文件
-                cleanupAllCacheFiles();
 
-                tempCacheFilesByTable.clear();
-                isFirstRecordByTable.clear();
-                dataColumnsByTable.clear();
-                pendingFlushTables.clear();
-                currentBatchSizeByTable.clear();
-                lastFlushTimeByTable.clear();
-            }
+            // 清理所有表的缓存文件
+            cleanupAllCacheFiles();
+
+            tempCacheFilesByTable.clear();
+            isFirstRecordByTable.clear();
+            dataColumnsByTable.clear();
+            pendingFlushTables.clear();
+            currentBatchSizeByTable.clear();
+            lastFlushTimeByTable.clear();
             // 注意：tableNameToTapTableMap 不清理，因为表结构信息需要持久保存
 
             // 强制垃圾回收
@@ -984,7 +1059,26 @@ public class StarrocksStreamLoader {
     }
 
     private String buildPrefix(final String tableName) {
-        return String.format(LABEL_PREFIX_PATTERN, Thread.currentThread().getId(), tableName);
+        // Sanitize table name to comply with StarRocks label naming rules
+        // Only digits, letters, and underscores are allowed
+        String sanitizedTableName = sanitizeLabelComponent(tableName);
+        return String.format(LABEL_PREFIX_PATTERN, Thread.currentThread().getId(), sanitizedTableName);
+    }
+
+    /**
+     * Sanitize a string to comply with StarRocks label naming rules.
+     * Only digits (0-9), letters (a-z, A-Z), and underscores (_) are allowed.
+     * All other characters are replaced with underscores.
+     *
+     * @param input the input string
+     * @return sanitized string
+     */
+    private String sanitizeLabelComponent(final String input) {
+        if (input == null || input.isEmpty()) {
+            return "unknown";
+        }
+        // Replace all characters that are not digits, letters, or underscores with underscores
+        return input.replaceAll("[^a-zA-Z0-9_]", "_");
     }
 
     /**
@@ -1033,37 +1127,91 @@ public class StarrocksStreamLoader {
 
     /**
      * 完成指定表的缓存文件写入
+     * 使用表级别的锁，避免对整个对象加锁影响其他表的操作
      */
     private void finalizeCacheFileForTable(String tableName) throws IOException {
-        try {
-            FileOutputStream cacheFileStream = cacheFileStreamsByTable.get(tableName);
-            Path tempCacheFile = tempCacheFilesByTable.get(tableName);
+        // 获取或创建该表的锁对象
+        Object tableLock = tableLocks.computeIfAbsent(tableName, k -> new Object());
 
-            if (cacheFileStream != null && tempCacheFile != null) {
-                if (!cacheFileStream.getChannel().isOpen()) {
-                    cacheFileStream = new FileOutputStream(tempCacheFile.toFile(), true);
-                    cacheFileStreamsByTable.put(tableName, cacheFileStream);
-                }
-                if(!cannotClean) {
-                    // 写入批次结束标记
-                    cacheFileStream.write(messageSerializer.batchEnd());
-                }
-                cacheFileStream.flush();
-                cacheFileStream.close();
+        synchronized (tableLock) {
+            try {
+                FileOutputStream cacheFileStream = cacheFileStreamsByTable.get(tableName);
+                Path tempCacheFile = tempCacheFilesByTable.get(tableName);
 
-                taplogger.debug("Finalized cache file for table {}: {}, size: {}",
-                    tableName, tempCacheFile.toString(), formatBytes(Files.size(tempCacheFile)));
+                if (cacheFileStream != null && tempCacheFile != null) {
+                    if (!cacheFileStream.getChannel().isOpen()) {
+                        cacheFileStream = new FileOutputStream(tempCacheFile.toFile(), true);
+                        cacheFileStreamsByTable.put(tableName, cacheFileStream);
+                    }
+
+                    // 检查文件是否已经有结束标记
+                    boolean needsEndMarker = true;
+                    if (Files.exists(tempCacheFile) && Files.size(tempCacheFile) > 0) {
+                        // 读取文件最后几个字节，检查是否已经有 ']'
+                        byte[] lastBytes = new byte[10];
+                        try (FileInputStream fis = new FileInputStream(tempCacheFile.toFile())) {
+                            long fileSize = Files.size(tempCacheFile);
+                            long skipBytes = Math.max(0, fileSize - 10);
+                            fis.skip(skipBytes);
+                            int bytesRead = fis.read(lastBytes);
+                            String lastContent = new String(lastBytes, 0, bytesRead, java.nio.charset.StandardCharsets.UTF_8);
+                            needsEndMarker = !lastContent.trim().endsWith("]");
+                        }
+                    }
+
+                    // 只在需要时写入结束标记
+                    if (needsEndMarker) {
+                        cacheFileStream.write(messageSerializer.batchEnd());
+                        taplogger.debug("Added end marker ']' to cache file for table {}", tableName);
+                    } else {
+                        taplogger.debug("Cache file for table {} already has end marker, skipping", tableName);
+                    }
+
+                    cacheFileStream.flush();
+                    cacheFileStream.close();
+
+                    // 验证文件完整性
+                    verifyFileCompleteness(tableName, tempCacheFile);
+
+                    taplogger.debug("Finalized cache file for table {}: {}, size: {}",
+                        tableName, tempCacheFile.toString(), formatBytes(Files.size(tempCacheFile)));
+                }
+            } catch (IOException e) {
+                taplogger.warn("Failed to finalize cache file for table {}: {}", tableName, e.getMessage());
+                throw e;
             }
-        } catch (IOException e) {
-            taplogger.warn("Failed to finalize cache file for table {}: {}", tableName, e.getMessage());
-            throw e;
+        }
+    }
+
+    private void verifyFileCompleteness(String tableName, Path tempCacheFile) {
+        try {
+            if (Files.exists(tempCacheFile) && Files.size(tempCacheFile) > 0) {
+                byte[] lastBytes = new byte[100];
+                try (FileInputStream fis = new FileInputStream(tempCacheFile.toFile())) {
+                    long fileSize = Files.size(tempCacheFile);
+                    long skipBytes = Math.max(0, fileSize - 100);
+                    fis.skip(skipBytes);
+                    int bytesRead = fis.read(lastBytes);
+                    String lastContent = new String(lastBytes, 0, bytesRead, java.nio.charset.StandardCharsets.UTF_8);
+
+                    if (lastContent.trim().endsWith("]")) {
+                        taplogger.info("File verification passed for table {}: JSON is complete", tableName);
+                    } else {
+                        taplogger.warn("File verification FAILED for table {}: JSON is incomplete, last 100 chars: {}", tableName, lastContent);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            taplogger.warn("Failed to verify file completeness for table {}: {}", tableName, e.getMessage());
         }
     }
 
     /**
      * 清理指定表的缓存文件
+     * @param tableName 表名
+     * @param deleteFile 是否删除文件（true=删除，false=仅关闭流但保留文件）
      */
-    private void cleanupCacheFileForTable(String tableName) {
+    private void cleanupCacheFileForTable(String tableName, boolean deleteFile) {
         try {
             FileOutputStream cacheFileStream = cacheFileStreamsByTable.get(tableName);
             Path tempCacheFile = tempCacheFilesByTable.get(tableName);
@@ -1081,18 +1229,31 @@ public class StarrocksStreamLoader {
                 try {
                     long fileSize = Files.size(tempCacheFile);
 
-                    // 直接删除缓存文件
-                    Files.deleteIfExists(tempCacheFile);
-
-                    taplogger.info("=== File Cleanup Completed ===");
-                    taplogger.info("Table: {}", tableName);
-                    taplogger.info("Deleted File: {}", tempCacheFile.toString());
-                    taplogger.info("File Size: {}", formatBytes(fileSize));
-                    taplogger.info("==============================");
+                    if (deleteFile) {
+                        // 成功时删除文件
+                        Files.deleteIfExists(tempCacheFile);
+                        taplogger.info("=== File Cleanup Completed ===");
+                        taplogger.info("Table: {}", tableName);
+                        taplogger.info("Deleted File: {}", tempCacheFile.toString());
+                        taplogger.info("File Size: {}", formatBytes(fileSize));
+                        taplogger.info("==============================");
+                    } else {
+                        // 失败时保留文件
+                        taplogger.warn("=== File Preserved for Debugging ===");
+                        taplogger.warn("Table: {}", tableName);
+                        taplogger.warn("Preserved File: {}", tempCacheFile.toString());
+                        taplogger.warn("File Size: {}", formatBytes(fileSize));
+                        taplogger.warn("Reason: Flush failed, file kept for troubleshooting");
+                        taplogger.warn("=====================================");
+                    }
                 } catch (IOException e) {
-                    taplogger.warn("Failed to delete cache file for table {}: {}", tableName, e.getMessage());
+                    taplogger.warn("Failed to process cache file for table {}: {}", tableName, e.getMessage());
                 }
-                tempCacheFilesByTable.remove(tableName);
+
+                // 只有在删除文件时才从 map 中移除
+                if (deleteFile) {
+                    tempCacheFilesByTable.remove(tableName);
+                }
             }
 
             // 清理相关状态
@@ -1104,6 +1265,13 @@ public class StarrocksStreamLoader {
         } catch (Exception e) {
             taplogger.warn("Failed to cleanup cache file for table {}: {}", tableName, e.getMessage());
         }
+    }
+
+    /**
+     * 清理指定表的缓存文件（默认删除文件）
+     */
+    private void cleanupCacheFileForTable(String tableName) {
+        cleanupCacheFileForTable(tableName, true);
     }
 
     /**
@@ -1305,5 +1473,18 @@ public class StarrocksStreamLoader {
             writeIntoResultList(result);
             return result;
         }
+    }
+
+    /**
+     * 设置 flush offset callback
+     *
+     * @param flushOffsetCallback 回调函数，在数据成功刷新后调用
+     */
+    public void setFlushOffsetCallback(Consumer<Object> flushOffsetCallback) {
+        this.flushOffsetCallback = flushOffsetCallback;
+    }
+
+    public Set<String> getPendingFlushTables() {
+        return pendingFlushTables;
     }
 }

@@ -5,6 +5,7 @@ import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.exception.*;
 import io.tapdata.kit.ErrorKit;
 
+import java.io.IOException;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -153,8 +154,10 @@ public class PostgresExceptionCollector extends AbstractExceptionCollector imple
     public void revealException(Throwable cause) {
         if (cause instanceof SQLException) {
             throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause))
-//                    .withServerErrorCode(((SQLException) cause).getSQLState())
-                    ;
+                    .withServerErrorCode(String.valueOf(((SQLException) cause).getErrorCode()));
+        }
+        if (cause instanceof IOException) {
+            throw new TapPdkRetryableEx(getPdkId(), ErrorKit.getLastCause(cause));
         }
     }
 }

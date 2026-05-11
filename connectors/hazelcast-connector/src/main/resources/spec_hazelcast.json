@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Hazelcast",
+    "realName": "Hazelcast",
     "icon": "icons/hazelcast.png",
     "doc": "${doc}",
     "id": "hazelcast"

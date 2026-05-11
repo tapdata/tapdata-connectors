@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "PolarDB MySQL",
+    "realName": "ApsaraDB PolarDB for MySQL",
     "icon": "icons/polar-db-mysql.png",
     "id": "polar-db-mysql",
     "doc": "${doc}",

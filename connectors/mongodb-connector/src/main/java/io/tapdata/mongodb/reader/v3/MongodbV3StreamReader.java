@@ -88,7 +88,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 	@Override
 	public void onStart(MongodbConfig mongodbConfig) {
 		this.mongodbConfig = mongodbConfig;
-		mongoClient = MongodbUtil.createMongoClient(mongodbConfig);
+		mongoClient = MongodbUtil.createMongoClient(mongodbConfig,true);
 
 		nodesURI = MongodbUtil.nodesURI(mongoClient, mongodbConfig.getUri());
 		running.compareAndSet(false, true);
@@ -145,8 +145,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 					@Override
 					protected void report(BsonTimestamp bsonTimestamp) throws InterruptedException {
 						while (running.get()) {
-							HeartbeatEvent heartbeatEvent = new HeartbeatEvent().referenceTime(bsonTimestamp.getTime() * 1000L);
-							heartbeatEvent.setTime(heartbeatEvent.getReferenceTime());
+							HeartbeatEvent heartbeatEvent = new HeartbeatEvent().init().referenceTime(bsonTimestamp.getTime() * 1000L);
 							if (tapEventQueue.offer(
 								new TapEventOffset(
 									heartbeatEvent,
@@ -238,7 +237,7 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 
 		final Bson fromMigrateFilter = Filters.exists("fromMigrate", false);
 
-		try (MongoClient mongoclient = MongoClients.create(mongodbURI)) {
+		try (MongoClient mongoclient = MongoClients.create(MongodbUtil.appendDefaultHaTimeoutOptions(mongodbURI,true))) {
 			final MongoCollection<Document> oplogCollection = mongoclient.getDatabase(LOCAL_DATABASE).getCollection(OPLOG_COLLECTION);
 			try (final MongoCursor<Document> mongoCursor = oplogCollection.find(fromMigrateFilter).sort(new Document("$natural", 1)).limit(1).cursorType(CursorType.TailableAwait)
 				.noCursorTimeout(true).iterator()) {

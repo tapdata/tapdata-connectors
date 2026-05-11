@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "BigQuery",
+    "realName": "BigQuery",
     "icon": "icons/bigquery.png",
     "doc" : "${doc}",
     "id": "bigquery",

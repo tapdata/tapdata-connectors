@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Vastbase",
+    "realName": "Vastbase G100",
     "icon": "icons/vastbase.png",
     "doc" : "${doc}",
     "id": "vastbase",

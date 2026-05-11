@@ -24,7 +24,7 @@ public class DorisConfig extends CommonDbConfig {
     private List<LinkedHashMap<String, String>> tableProperties = new ArrayList<>();
     private Boolean jdbcCompletion = false;
 
-    private Boolean useHTTPS =false;
+    private Boolean useHTTPS = false;
 
     private Integer backendNum;
 
@@ -38,9 +38,9 @@ public class DorisConfig extends CommonDbConfig {
     public DorisConfig load(Map<String, Object> map) {
         DorisConfig config = (DorisConfig) super.load(map);
         config.setSchema(config.getDatabase());
-        if(Boolean.TRUE.equals(useHTTPS)){
+        if (Boolean.TRUE.equals(useHTTPS)) {
             config.setDorisHttp(getDorisHttp().replace("https://", ""));
-        }else{
+        } else {
             config.setDorisHttp(getDorisHttp().replace("http://", ""));
         }
         return config;
@@ -77,12 +77,20 @@ public class DorisConfig extends CommonDbConfig {
         return duplicateKey;
     }
 
+    public List<String> getDuplicateKey(String key) {
+        return getTableConfigValue(key, "duplicateKey", duplicateKey);
+    }
+
     public void setDuplicateKey(List<String> duplicateKey) {
         this.duplicateKey = duplicateKey;
     }
 
     public List<String> getDistributedKey() {
         return distributedKey;
+    }
+
+    public List<String> getDistributedKey(String key) {
+        return getTableConfigValue(key, "distributedKey", distributedKey);
     }
 
     public void setDistributedKey(List<String> distributedKey) {
@@ -109,12 +117,20 @@ public class DorisConfig extends CommonDbConfig {
         return uniqueKeyType;
     }
 
+    public String getUniqueKeyType(String key) {
+        return getTableConfigValue(key, "uniqueKeyType", uniqueKeyType);
+    }
+
     public void setUniqueKeyType(String uniqueKeyType) {
         this.uniqueKeyType = uniqueKeyType;
     }
 
     public int getBucket() {
         return bucket;
+    }
+
+    public int getBucket(String key) {
+        return getTableConfigValue(key, "bucket", bucket);
     }
 
     public Integer getBackendNum() {
@@ -139,6 +155,10 @@ public class DorisConfig extends CommonDbConfig {
 
     public List<LinkedHashMap<String, String>> getTableProperties() {
         return tableProperties;
+    }
+
+    public List<LinkedHashMap<String, String>> getTableProperties(String key) {
+        return getTableConfigValue(key, "tableProperties", tableProperties);
     }
 
     public void setTableProperties(List<LinkedHashMap<String, String>> tableProperties) {

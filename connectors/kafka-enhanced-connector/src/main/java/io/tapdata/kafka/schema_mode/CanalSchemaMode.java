@@ -12,7 +12,6 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kafka.AbsSchemaMode;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
-import io.tapdata.kafka.utils.KafkaUtils;
 import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import org.apache.commons.lang3.StringUtils;
@@ -95,12 +94,8 @@ public class CanalSchemaMode extends AbsSchemaMode {
 			key = createKafkaKey(data, table);
 		}
 
-		if (null == key) {
-			return Arrays.asList(new ProducerRecord<>(topic, value));
-		} else {
-			return Arrays.asList(new ProducerRecord<>(topic, key, value));
-		}
-	}
+        return List.of(new ProducerRecord<>(topic, computePartition(key, kafkaService.getConfig().getNodePartitionSize()), key, value));
+    }
 
 	@Override
 	public void queryByAdvanceFilter(TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) {

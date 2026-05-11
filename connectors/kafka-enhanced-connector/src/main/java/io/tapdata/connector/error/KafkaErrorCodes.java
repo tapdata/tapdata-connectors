@@ -38,4 +38,15 @@ public interface KafkaErrorCodes {
 			dynamicDescriptionCN = "事件类型: {}"
 	)
 	String DEBEZIUM_NOT_SUPPORT_EVENT = "40002";
+
+	@TapExCode(
+			describe = "Kafka Connection Common Error",
+			describeCN = "Kafka连接通用错误",
+			solution = "Please carefully read the error exception stack information and investigate whether there are any abnormalities in the Kafka connection information",
+			solutionCN = "请仔细阅读错误异常栈信息，排查kafka的连接信息是否有异常",
+			dynamicDescription = "Error: {}",
+			dynamicDescriptionCN = "错误信息: {}"
+	)
+	String KAFKA_COMMON_ERROR = "40003";
+
 }

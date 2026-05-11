@@ -2,7 +2,6 @@ package io.tapdata.kafka;
 
 import io.tapdata.connector.config.BasicConfig;
 import io.tapdata.connector.config.ConnectionClusterURI;
-import io.tapdata.connector.config.ConnectionDatasourceInstanceInfo;
 import io.tapdata.connector.config.ConnectionExtParams;
 import io.tapdata.kafka.config.IConnectionACL;
 import io.tapdata.kafka.config.IConnectionSecurity;
@@ -10,6 +9,7 @@ import io.tapdata.kafka.constants.KafkaAcksType;
 import io.tapdata.kafka.constants.KafkaConcurrentReadMode;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.constants.KafkaSerialization;
+import io.tapdata.kafka.utils.Krb5Util;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -31,12 +31,14 @@ import java.util.concurrent.TimeUnit;
 public class KafkaConfig extends BasicConfig implements
         IConnectionSecurity,
         ConnectionClusterURI,
-        ConnectionDatasourceInstanceInfo,
         IConnectionACL,
         ConnectionExtParams {
 
-    public KafkaConfig(TapConnectionContext context) {
+    private final String connectorId;
+
+    public KafkaConfig(TapConnectionContext context, String connectorId) {
         super(context);
+        this.connectorId = connectorId;
     }
 
     // ---------- 连接配置 ----------
@@ -59,11 +61,22 @@ public class KafkaConfig extends BasicConfig implements
         return KafkaSchemaMode.fromString(schemaMode);
     }
 
+    public String getConnectionScript() {
+        return connectionConfigGet("analyzeScript", "");
+    }
+
+    public String getNodeScript() {
+        return nodeConfigGet("processScript", "");
+    }
+
     public KafkaSchemaMode getNodeSchemaMode() {
         String schemaMode = nodeConfigGet("schemaMode", null);
         return StringUtils.isEmpty(schemaMode) ? null : KafkaSchemaMode.fromString(schemaMode);
     }
 
+    public Boolean getNodeApplyDefault() {
+        return nodeConfigGet("applyDefault", false);
+    }
     public KafkaSerialization getConnectionKeySerialization() {
         String keySerializer = connectionConfigGet("keySerialization", KafkaSerialization.BINARY.getType());
         return KafkaSerialization.fromString(keySerializer);
@@ -100,6 +113,10 @@ public class KafkaConfig extends BasicConfig implements
 
     public int getNodeBatchMaxDelay() {
         return nodeConfigGet("batchMaxDelay", 2000);
+    }
+
+    public boolean getSplitUpdatePk() {
+        return nodeConfigGet("splitUpdatePk", true);
     }
 
     public KafkaConcurrentReadMode getNodeConcurrentReadMode() {
@@ -199,6 +216,10 @@ public class KafkaConfig extends BasicConfig implements
                     " username='" + getSaslUsername() +
                     "' password='" + getSaslPassword() + "';");
         }
+        if (useKerberos()) {
+            String krb5Path = Krb5Util.saveByCatalog("connections-" + connectorId, getKrb5Keytab(), getKrb5Conf(), true);
+            Krb5Util.updateKafkaConf(getKrb5ServiceName(), getKrb5Principal(), krb5Path, getKrb5Conf(), props);
+        }
         if (useSsl()) {
 //            ssl.truststore.location=/path/to/kafka.client.truststore.jks
 //            ssl.truststore.password=truststore_password
@@ -274,7 +295,8 @@ public class KafkaConfig extends BasicConfig implements
         }
         mode.setDeserializer(this, props);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, isEarliest ? "earliest" : "latest");
-        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 0);
+        // 不能设为 0：Confluent Cloud 等高延迟集群下 broker 会立刻空返回
+        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 500);
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10);
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         eachConnectionExtParams(props::put, "All", type);
@@ -312,7 +334,7 @@ public class KafkaConfig extends BasicConfig implements
 
     // ---------- 静态方法 ----------
 
-    public static KafkaConfig valueOf(TapConnectionContext context) {
-        return new KafkaConfig(context);
+    public static KafkaConfig valueOf(TapConnectionContext context, String connectorId) {
+        return new KafkaConfig(context, connectorId);
     }
 }

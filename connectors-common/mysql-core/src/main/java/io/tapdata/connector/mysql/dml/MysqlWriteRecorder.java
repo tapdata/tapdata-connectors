@@ -155,4 +155,16 @@ public class MysqlWriteRecorder extends NormalWriteRecorder {
         }
     }
 
+    protected void setBeforeValue(boolean containsNull, Map<String, Object> before, int pos) throws SQLException {
+        if (!containsNull) {
+            for (String key : before.keySet()) {
+                setPrepareStatement(pos++, before, key);
+            }
+        } else {
+            for (String key : before.keySet()) {
+                setPrepareStatement(pos++, before, key);
+            }
+        }
+    }
+
 }

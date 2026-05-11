@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "TencentDB MongoDB",
+    "realName": "TencentDB for MongoDB",
     "icon": "icons/tencent-db-mongodb.png",
     "doc" : "${doc}",
     "id": "tencent-db-mongodb",

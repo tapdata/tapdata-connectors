@@ -16,4 +16,14 @@ public class StringKitTest {
         result = StringKit.removeParentheses("TIMESTAMP(6) WITH TIME ZONE");
         assertEquals("TIMESTAMP WITH TIME ZONE", result);
     }
+
+    @Test
+    void testRemoveSqlNote() {
+        String result = StringKit.removeSqlNote("-----注释\n" +
+                "alter table\n" +
+                "    ----加注释\n" +
+                "    xxx add /*又来注释*/ aaa int;\n");
+        assertEquals("alter table\n" +
+                "        xxx add  aaa int;", result);
+    }
 }

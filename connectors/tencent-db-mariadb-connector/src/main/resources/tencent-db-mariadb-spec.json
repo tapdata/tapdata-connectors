@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "TencentDB MariaDB",
+    "realName": "TencentDB for MariaDB",
     "icon": "icons/tencent_db_mariadb.png",
     "id": "tencent-db-mariadb",
     "doc": "${doc}",

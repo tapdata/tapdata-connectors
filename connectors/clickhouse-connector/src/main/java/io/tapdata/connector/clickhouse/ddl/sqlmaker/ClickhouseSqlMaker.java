@@ -52,7 +52,7 @@ public class ClickhouseSqlMaker extends CommonSqlMaker {
 
 
             //null to omit
-            if (tapField.getDefaultValue() != null && !"".equals(tapField.getDefaultValue())) {
+            if (Boolean.TRUE.equals(applyDefault) && tapField.getDefaultValue() != null && !"".equals(tapField.getDefaultValue())) {
                 builder.append("DEFAULT").append(' ');
                 if (tapField.getDefaultValue() instanceof Number) {
                     builder.append(tapField.getDefaultValue()).append(' ');

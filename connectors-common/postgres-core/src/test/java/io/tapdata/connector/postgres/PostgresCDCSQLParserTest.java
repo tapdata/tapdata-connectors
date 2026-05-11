@@ -16,4 +16,10 @@ public class PostgresCDCSQLParserTest {
         PostgresCDCSQLParser parser = new PostgresCDCSQLParser();
         parser.from("UPDATE public.pg_all_type SET  WHERE a1=4", false);
     }
+
+    @Test
+    void testSameUpdate() {
+        PostgresCDCSQLParser parser = new PostgresCDCSQLParser();
+        parser.from("UPDATE public.pg_all_type SET a1=a1 WHERE a1=4", false);
+    }
 }

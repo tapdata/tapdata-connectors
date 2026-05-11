@@ -1,0 +1,58 @@
+<configuration>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 本工程 DEBUG 级别 -->
+    <!--    <logger name="com.prototype.paimon" level="DEBUG"/>-->
+
+    <!-- Paimon 源码 INFO 级别 -->
+    <logger name="org.apache.paimon" level="WARN"/>
+
+    <!-- ★ 开启 Paimon Compaction 处理日志（含处理时间） ★ -->
+    <!-- MergeTreeCompactManager: 触发 compaction、文件选择、levels 更新 -->
+    <logger name="org.apache.paimon.mergetree.compact" level="DEBUG"/>
+    <logger name="org.apache.paimon.mergetree.compact.MergeTreeCompactManager" level="DEBUG"/>
+    <!-- CompactTask: 完成时的处理时间日志 "Done compacting N files to M files in Xms" -->
+    <logger name="org.apache.paimon.compact.CompactTask" level="DEBUG"/>
+    <!-- MergeTreeCompactTask: 带升级文件数的增强版处理时间日志 -->
+    <logger name="org.apache.paimon.mergetree.compact.MergeTreeCompactTask" level="DEBUG"/>
+    <!-- UniversalCompaction: 触发原因（size-ratio / size-amp / file-num / optimized compaction interval） -->
+    <logger name="org.apache.paimon.mergetree.compact.UniversalCompaction" level="DEBUG"/>
+    <!-- BucketedAppendCompactManager: append-only 表的 compaction -->
+    <logger name="org.apache.paimon.append.BucketedAppendCompactManager" level="DEBUG"/>
+
+    <!-- 减少 Hadoop 日志噪音 -->
+    <logger name="org.apache.hadoop" level="ERROR"/>
+
+    <!-- 日志存放目录 -->
+    <property name="LOG_PATH" value="./logs"/>
+    <!-- ====================== -->
+    <!-- 文件输出（核心配置） -->
+    <!-- ====================== -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <!-- 日志路径 -->
+        <file>${LOG_PATH}/app.log</file>
+
+        <!-- 滚动策略：按天切分 -->
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/app.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <!-- 保留 15 天日志 -->
+            <maxHistory>15</maxHistory>
+        </rollingPolicy>
+
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+    !-- 日志输出格式 -->
+    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n"/>
+    <!-- 根日志：输出到 文件 + 控制台 -->
+    <root level="ERROR">
+<!--        <appender-ref ref="CONSOLE"/>-->
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>

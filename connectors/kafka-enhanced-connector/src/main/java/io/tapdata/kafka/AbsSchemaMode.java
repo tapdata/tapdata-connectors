@@ -16,8 +16,11 @@ import io.tapdata.pdk.apis.exception.NotSupportedException;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.utils.Utils;
 
+import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -33,11 +36,15 @@ public abstract class AbsSchemaMode {
     protected final KafkaSchemaMode kafkaSchemaMode;
     protected final IKafkaService kafkaService;
     protected final Log tapLogger;
+    protected final Boolean applyDefault;
+    protected final Map<String, Collection<String>> primaryKeyMap;
 
     protected AbsSchemaMode(KafkaSchemaMode kafkaSchemaMode, IKafkaService kafkaService) {
         this.kafkaSchemaMode = kafkaSchemaMode;
         this.kafkaService = kafkaService;
         this.tapLogger = kafkaService.getLog();
+        this.applyDefault = kafkaService.getConfig().getNodeApplyDefault();
+        this.primaryKeyMap = new ConcurrentHashMap<>();
     }
 
     public KafkaSchemaMode getSchemaMode() {
@@ -88,6 +95,8 @@ public abstract class AbsSchemaMode {
                 return new OriginalSchemaMode(kafkaService);
             case STANDARD:
                 return new StandardSchemaMode(kafkaService);
+            case CUSTOM:
+                return new CustomSchemaMode(kafkaService);
             case CANAL:
                 return new CanalSchemaMode(kafkaService);
             case DEBEZIUM:
@@ -112,7 +121,7 @@ public abstract class AbsSchemaMode {
     }
 
     protected byte[] createKafkaKey(Map<String, Object> data, TapTable tapTable) {
-        Collection<String> keys = tapTable.primaryKeys(true);
+        Collection<String> keys = primaryKeyMap.computeIfAbsent(tapTable.getId(), k -> tapTable.primaryKeys(true));
         if (EmptyKit.isEmpty(keys)) {
             return null;
         }
@@ -120,13 +129,23 @@ public abstract class AbsSchemaMode {
     }
 
     protected String createKafkaKeyValueMap(Map<String, Object> data, TapTable tapTable) {
-        Collection<String> keys = tapTable.primaryKeys(true);
+        Collection<String> keys = primaryKeyMap.computeIfAbsent(tapTable.getId(), k -> tapTable.primaryKeys(true));
         if (EmptyKit.isEmpty(keys)) {
             return null;
         }
         Map<String, Object> keyValue = new HashMap<>();
         keys.forEach(v -> keyValue.put(v, data.get(v)));
         return TapSimplify.toJson(keyValue);
+    }
+
+    protected Integer computePartition(byte[] key, int partitionNum) {
+        if (key == null) {
+            return null;
+        }
+        if (partitionNum <= 0) {
+            return null;
+        }
+        return Utils.toPositive(Utils.murmur2(key)) % partitionNum;
     }
 
     protected String topic(TapTable table, TapEvent tapEvent) {
@@ -158,6 +177,37 @@ public abstract class AbsSchemaMode {
                 return "INTEGER";
             default:
                 return dataType;
+        }
+    }
+
+    /**
+     * 根据值推断 TapData 类型
+     */
+    protected String inferTapType(Object value) {
+        if (value == null) {
+            return "STRING";
+        }
+
+        if (value instanceof Boolean) {
+            return "BOOLEAN";
+        } else if (value instanceof Integer || value instanceof Short || value instanceof Byte) {
+            return "INTEGER";
+        } else if (value instanceof Long) {
+            return "BIGINT";
+        } else if (value instanceof Float) {
+            return "FLOAT";
+        } else if (value instanceof Double) {
+            return "DOUBLE";
+        } else if (value instanceof BigDecimal) {
+            return "DOUBLE";
+        } else if (value instanceof String) {
+            return "STRING";
+        } else if (value instanceof List) {
+            return "ARRAY";
+        } else if (value instanceof Map) {
+            return "MAP";
+        } else {
+            return "STRING";
         }
     }
 }
