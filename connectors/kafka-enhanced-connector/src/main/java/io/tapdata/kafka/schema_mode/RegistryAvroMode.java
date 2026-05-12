@@ -157,7 +157,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         if (dml != null) {
             events.add(dml);
         }
-        return events;
+        return filterPrimaryKeyDDL(topic, events);
     }
 
     @Override

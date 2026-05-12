@@ -5,6 +5,11 @@ import com.google.protobuf.Descriptors;
 import com.google.protobuf.DynamicMessage;
 import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.entity.ValueChange;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -40,6 +45,8 @@ public class RegistryProtobufMode extends AbsSchemaMode {
 
     // 缓存表的 Protobuf Descriptor，避免重复构建
     private final Map<String, Descriptors.Descriptor> descriptorCache = new ConcurrentHashMap<>();
+    // 每个 topic 最近一次见到的 Protobuf Descriptor 引用；命中时（==）走快速路径，跳过任何 schema diff 计算
+    private final Map<String, Descriptors.Descriptor> lastDescriptorPerTopic = new ConcurrentHashMap<>();
 
     public RegistryProtobufMode(IKafkaService kafkaService) {
         super(KafkaSchemaMode.REGISTRY_PROTOBUF, kafkaService);
@@ -79,6 +86,46 @@ public class RegistryProtobufMode extends AbsSchemaMode {
             sampleTable.add(field);
         });
     }
+
+    @Override
+    public List<TapEvent> toTapEvents(ConsumerRecord<?, ?> consumerRecord) {
+        if (consumerRecord == null || consumerRecord.value() == null) {
+            return Collections.emptyList();
+        }
+        Object value = consumerRecord.value();
+        if (!(value instanceof DynamicMessage)) {
+            return super.toTapEvents(consumerRecord);
+        }
+        Descriptors.Descriptor currentDescriptor = ((DynamicMessage) value).getDescriptorForType();
+        String topic = consumerRecord.topic();
+        // 快速路径：与上次见到的 descriptor 引用相同时，KafkaProtobufDeserializer 内部缓存已保证 == 命中，直接产生 DML 事件
+        Descriptors.Descriptor lastDescriptor = lastDescriptorPerTopic.get(topic);
+        if (lastDescriptor == currentDescriptor) {
+            TapEvent dml = toTapEvent(consumerRecord);
+            return dml == null ? Collections.emptyList() : Collections.singletonList(dml);
+        }
+        // 慢速路径：首次见到或 descriptor 已变化
+        List<TapEvent> events;
+        if (lastDescriptor == null) {
+            // 首次：与 tableMap 中已知的 TapTable 结构对比，覆盖任务重启后内存缓存丢失、
+            // 但持久化的 TapTable 已落后于实际 schema 的场景；若 tableMap 没有记录则只能基线
+            TapTable knownTable = kafkaService.getConfig().tableMapGet(topic);
+            if (knownTable != null) {
+                events = detectSchemaChangesFromTable(topic, knownTable, currentDescriptor, consumerRecord.timestamp());
+            } else {
+                events = new ArrayList<>(1);
+            }
+        } else {
+            events = detectSchemaChanges(topic, lastDescriptor, currentDescriptor, consumerRecord.timestamp());
+        }
+        lastDescriptorPerTopic.put(topic, currentDescriptor);
+        TapEvent dml = toTapEvent(consumerRecord);
+        if (dml != null) {
+            events.add(dml);
+        }
+        return filterPrimaryKeyDDL(topic, events);
+    }
+
 
     @Override
     public TapEvent toTapEvent(ConsumerRecord<?, ?> consumerRecord) {
@@ -473,4 +520,303 @@ public class RegistryProtobufMode extends AbsSchemaMode {
     public void queryByAdvanceFilter(TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) {
         // 高级过滤查询暂不实现
     }
+
+    /**
+     * 比较前后两个 Protobuf Descriptor，反向生成对应的 TapFieldBaseEvent。
+     * 规则：
+     * - 通过字段编号（field number）将旧字段名映射到新名 → {@link TapAlterFieldNameEvent}
+     * - 新增字段（排除 rename 的目标） → {@link TapNewFieldEvent}
+     * - 删除字段（排除 rename 的源） → {@link TapDropFieldEvent}
+     * - 同名字段属性差异（dataType / nullable / default） → {@link TapAlterFieldAttributesEvent}
+     */
+    private List<TapEvent> detectSchemaChanges(String topic, Descriptors.Descriptor oldDescriptor, Descriptors.Descriptor newDescriptor, long referenceTime) {
+        List<TapEvent> events = new ArrayList<>();
+        Map<String, Descriptors.FieldDescriptor> oldFields = new LinkedHashMap<>();
+        Map<Integer, Descriptors.FieldDescriptor> oldFieldsByNumber = new HashMap<>();
+        for (Descriptors.FieldDescriptor f : oldDescriptor.getFields()) {
+            oldFields.put(f.getName(), f);
+            oldFieldsByNumber.put(f.getNumber(), f);
+        }
+        Map<String, Descriptors.FieldDescriptor> newFields = new LinkedHashMap<>();
+        for (Descriptors.FieldDescriptor f : newDescriptor.getFields()) {
+            newFields.put(f.getName(), f);
+        }
+        // 1) rename：通过字段编号把旧名映射到新名
+        Map<String, String> renameAfterToBefore = new HashMap<>();
+        for (Descriptors.FieldDescriptor nf : newDescriptor.getFields()) {
+            if (oldFields.containsKey(nf.getName())) {
+                continue;
+            }
+            Descriptors.FieldDescriptor of = oldFieldsByNumber.get(nf.getNumber());
+            if (of != null && !newFields.containsKey(of.getName()) && !renameAfterToBefore.containsValue(of.getName())) {
+                renameAfterToBefore.put(nf.getName(), of.getName());
+                TapAlterFieldNameEvent rename = new TapAlterFieldNameEvent();
+                rename.setTime(System.currentTimeMillis());
+                rename.setTableId(topic);
+                rename.setReferenceTime(referenceTime);
+                rename.nameChange(ValueChange.create(of.getName(), nf.getName()));
+                events.add(rename);
+            }
+        }
+        // 1.5) 启发式 rename 兜底：字段编号未命中时，若剩余 drop / add 各恰好 1 个且数据类型完全一致，视为 rename
+        {
+            List<Descriptors.FieldDescriptor> remainingDrops = new ArrayList<>();
+            for (Descriptors.FieldDescriptor of : oldDescriptor.getFields()) {
+                if (newFields.containsKey(of.getName())) continue;
+                if (renameAfterToBefore.containsValue(of.getName())) continue;
+                remainingDrops.add(of);
+            }
+            List<Descriptors.FieldDescriptor> remainingAdds = new ArrayList<>();
+            for (Descriptors.FieldDescriptor nf : newDescriptor.getFields()) {
+                if (oldFields.containsKey(nf.getName())) continue;
+                if (renameAfterToBefore.containsKey(nf.getName())) continue;
+                remainingAdds.add(nf);
+            }
+            if (remainingDrops.size() == 1 && remainingAdds.size() == 1) {
+                Descriptors.FieldDescriptor d = remainingDrops.get(0);
+                Descriptors.FieldDescriptor a = remainingAdds.get(0);
+                String dType = protobufPrimaryTypeName(d);
+                String aType = protobufPrimaryTypeName(a);
+                if (Objects.equals(dType, aType)) {
+                    renameAfterToBefore.put(a.getName(), d.getName());
+                    TapAlterFieldNameEvent rename = new TapAlterFieldNameEvent();
+                    rename.setTime(System.currentTimeMillis());
+                    rename.setTableId(topic);
+                    rename.setReferenceTime(referenceTime);
+                    rename.nameChange(ValueChange.create(d.getName(), a.getName()));
+                    events.add(rename);
+                    tapLogger.info("Heuristic rename detected on topic '{}' (field-number missing): {} -> {} (type={})", topic, d.getName(), a.getName(), dType);
+                }
+            }
+        }
+        // 2) 新增字段
+        List<TapField> addedFields = new ArrayList<>();
+        for (Descriptors.FieldDescriptor nf : newDescriptor.getFields()) {
+            if (oldFields.containsKey(nf.getName())) {
+                continue;
+            }
+            if (renameAfterToBefore.containsKey(nf.getName())) {
+                continue;
+            }
+            TapField tf = protobufFieldToTapField(nf);
+            if (tf != null) {
+                addedFields.add(tf);
+            }
+        }
+        if (!addedFields.isEmpty()) {
+            TapNewFieldEvent add = new TapNewFieldEvent();
+            add.setTime(System.currentTimeMillis());
+            add.setTableId(topic);
+            add.setReferenceTime(referenceTime);
+            add.setNewFields(addedFields);
+            events.add(add);
+        }
+        // 3) 删除字段
+        Set<String> renameSources = new HashSet<>(renameAfterToBefore.values());
+        for (Descriptors.FieldDescriptor of : oldDescriptor.getFields()) {
+            if (newFields.containsKey(of.getName())) {
+                continue;
+            }
+            if (renameSources.contains(of.getName())) {
+                continue;
+            }
+            TapDropFieldEvent drop = new TapDropFieldEvent();
+            drop.setTime(System.currentTimeMillis());
+            drop.setTableId(topic);
+            drop.setReferenceTime(referenceTime);
+            drop.fieldName(of.getName());
+            events.add(drop);
+        }
+        // 4) 属性变化
+        for (Descriptors.FieldDescriptor nf : newDescriptor.getFields()) {
+            Descriptors.FieldDescriptor of = oldFields.get(nf.getName());
+            if (of == null) {
+                continue;
+            }
+            TapAlterFieldAttributesEvent attr = diffFieldAttributes(topic, of, nf, referenceTime);
+            if (attr != null) {
+                events.add(attr);
+            }
+        }
+        return events;
+    }
+
+    /**
+     * 用 {@link TapTable} 作为基线（任务重启后内存中没有上一份 Descriptor 时使用），与新到的 Descriptor 比对生成 DDL。
+     * 规则与 {@link #detectSchemaChanges} 保持一致，仅基线来源不同。
+     * 注：TapTable 不携带 protobuf 字段编号，因此此处只能依赖启发式 rename。
+     */
+    private List<TapEvent> detectSchemaChangesFromTable(String topic, TapTable tapTable, Descriptors.Descriptor newDescriptor, long referenceTime) {
+        List<TapEvent> events = new ArrayList<>();
+        Map<String, TapField> oldFields = tapTable.getNameFieldMap();
+        if (oldFields == null) {
+            oldFields = Collections.emptyMap();
+        }
+        Map<String, Descriptors.FieldDescriptor> newFields = new LinkedHashMap<>();
+        for (Descriptors.FieldDescriptor f : newDescriptor.getFields()) {
+            newFields.put(f.getName(), f);
+        }
+        // 1.5) 启发式 rename 兜底：剩余 drop / add 各恰好 1 个且数据类型完全一致，视为 rename
+        Map<String, String> renameAfterToBefore = new HashMap<>();
+        {
+            List<String> remainingDropNames = new ArrayList<>();
+            for (String oldName : oldFields.keySet()) {
+                if (newFields.containsKey(oldName)) continue;
+                remainingDropNames.add(oldName);
+            }
+            List<Descriptors.FieldDescriptor> remainingAdds = new ArrayList<>();
+            for (Descriptors.FieldDescriptor nf : newDescriptor.getFields()) {
+                if (oldFields.containsKey(nf.getName())) continue;
+                remainingAdds.add(nf);
+            }
+            if (remainingDropNames.size() == 1 && remainingAdds.size() == 1) {
+                String dName = remainingDropNames.get(0);
+                Descriptors.FieldDescriptor a = remainingAdds.get(0);
+                TapField dField = oldFields.get(dName);
+                String dType = dField == null || dField.getDataType() == null ? null : StringKit.removeParentheses(dField.getDataType());
+                String aType = protobufPrimaryTypeName(a);
+                if (dType != null && Objects.equals(dType, aType)) {
+                    renameAfterToBefore.put(a.getName(), dName);
+                    TapAlterFieldNameEvent rename = new TapAlterFieldNameEvent();
+                    rename.setTime(System.currentTimeMillis());
+                    rename.setTableId(topic);
+                    rename.setReferenceTime(referenceTime);
+                    rename.nameChange(ValueChange.create(dName, a.getName()));
+                    events.add(rename);
+                    tapLogger.info("Heuristic rename detected on topic '{}' (baseline=TapTable): {} -> {} (type={})", topic, dName, a.getName(), dType);
+                }
+            }
+        }
+        // 2) 新增字段
+        List<TapField> addedFields = new ArrayList<>();
+        for (Descriptors.FieldDescriptor nf : newDescriptor.getFields()) {
+            if (oldFields.containsKey(nf.getName())) {
+                continue;
+            }
+            if (renameAfterToBefore.containsKey(nf.getName())) {
+                continue;
+            }
+            TapField tf = protobufFieldToTapField(nf);
+            if (tf != null) {
+                addedFields.add(tf);
+            }
+        }
+        if (!addedFields.isEmpty()) {
+            TapNewFieldEvent add = new TapNewFieldEvent();
+            add.setTime(System.currentTimeMillis());
+            add.setTableId(topic);
+            add.setReferenceTime(referenceTime);
+            add.setNewFields(addedFields);
+            events.add(add);
+        }
+        // 3) 删除字段
+        Set<String> renameSources = new HashSet<>(renameAfterToBefore.values());
+        for (String oldName : oldFields.keySet()) {
+            if (newFields.containsKey(oldName)) {
+                continue;
+            }
+            if (renameSources.contains(oldName)) {
+                continue;
+            }
+            TapDropFieldEvent drop = new TapDropFieldEvent();
+            drop.setTime(System.currentTimeMillis());
+            drop.setTableId(topic);
+            drop.setReferenceTime(referenceTime);
+            drop.fieldName(oldName);
+            events.add(drop);
+        }
+        // 4) 属性变化
+        for (Descriptors.FieldDescriptor nf : newDescriptor.getFields()) {
+            TapField of = oldFields.get(nf.getName());
+            if (of == null) {
+                continue;
+            }
+            TapAlterFieldAttributesEvent attr = diffFieldAttributesFromTapField(topic, of, nf, referenceTime);
+            if (attr != null) {
+                events.add(attr);
+            }
+        }
+        return events;
+    }
+
+    private TapAlterFieldAttributesEvent diffFieldAttributes(String topic, Descriptors.FieldDescriptor oldField, Descriptors.FieldDescriptor newField, long referenceTime) {
+        String oldType = protobufPrimaryTypeName(oldField);
+        String newType = protobufPrimaryTypeName(newField);
+        boolean oldNullable = !oldField.isRequired();
+        boolean newNullable = !newField.isRequired();
+        Object oldDefault = oldField.hasDefaultValue() ? oldField.getDefaultValue() : null;
+        Object newDefault = newField.hasDefaultValue() ? newField.getDefaultValue() : null;
+        boolean dataTypeChanged = !Objects.equals(oldType, newType);
+        boolean nullableChanged = oldNullable != newNullable;
+        boolean defaultChanged = !Objects.equals(oldDefault, newDefault);
+        if (!dataTypeChanged && !nullableChanged && !defaultChanged) {
+            return null;
+        }
+        TapAlterFieldAttributesEvent attr = new TapAlterFieldAttributesEvent();
+        attr.setTime(System.currentTimeMillis());
+        attr.setTableId(topic);
+        attr.setReferenceTime(referenceTime);
+        attr.fieldName(newField.getName());
+        if (dataTypeChanged) {
+            attr.dataType(ValueChange.create(oldType, newType));
+        }
+        if (nullableChanged) {
+            attr.nullable(ValueChange.create(oldNullable, newNullable));
+        }
+        if (defaultChanged) {
+            attr.defaultChange(ValueChange.create(oldDefault, newDefault));
+        }
+        return attr;
+    }
+
+    private TapAlterFieldAttributesEvent diffFieldAttributesFromTapField(String topic, TapField oldField, Descriptors.FieldDescriptor newField, long referenceTime) {
+        String oldType = oldField.getDataType() == null ? null : StringKit.removeParentheses(oldField.getDataType());
+        String newType = protobufPrimaryTypeName(newField);
+        boolean oldNullable = !Boolean.FALSE.equals(oldField.getNullable());
+        boolean newNullable = !newField.isRequired();
+        Object oldDefault = oldField.getDefaultValue();
+        Object newDefault = newField.hasDefaultValue() ? newField.getDefaultValue() : null;
+        boolean dataTypeChanged = !Objects.equals(oldType, newType);
+        boolean nullableChanged = oldNullable != newNullable;
+        boolean defaultChanged = !Objects.equals(oldDefault, newDefault);
+        if (!dataTypeChanged && !nullableChanged && !defaultChanged) {
+            return null;
+        }
+        TapAlterFieldAttributesEvent attr = new TapAlterFieldAttributesEvent();
+        attr.setTime(System.currentTimeMillis());
+        attr.setTableId(topic);
+        attr.setReferenceTime(referenceTime);
+        attr.fieldName(newField.getName());
+        if (dataTypeChanged) {
+            attr.dataType(ValueChange.create(oldType, newType));
+        }
+        if (nullableChanged) {
+            attr.nullable(ValueChange.create(oldNullable, newNullable));
+        }
+        if (defaultChanged) {
+            attr.defaultChange(ValueChange.create(oldDefault, newDefault));
+        }
+        return attr;
+    }
+
+    private TapField protobufFieldToTapField(Descriptors.FieldDescriptor f) {
+        TapField field = new TapField();
+        field.setName(f.getName());
+        field.setDataType(protobufPrimaryTypeName(f));
+        field.setNullable(!f.isRequired());
+        field.setDefaultValue(f.hasDefaultValue() ? f.getDefaultValue() : null);
+        return field;
+    }
+
+    /**
+     * 返回 Protobuf 字段的主要类型名（与 {@link #dynamicMessageToTapTable} 处理一致）。
+     */
+    private String protobufPrimaryTypeName(Descriptors.FieldDescriptor f) {
+        if (f == null) {
+            return "STRING";
+        }
+        return toTapType(f.getJavaType().name());
+    }
+
+
 }

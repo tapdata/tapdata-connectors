@@ -4,7 +4,13 @@ import io.tapdata.connector.utils.ConcurrentUtils;
 import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
+import io.tapdata.entity.event.ddl.entity.ValueChange;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
@@ -90,6 +96,84 @@ public abstract class AbsSchemaMode {
         TapEvent event = toTapEvent(consumerRecord);
         return event == null ? Collections.emptyList() : Collections.singletonList(event);
     }
+
+    /**
+     * 过滤掉涉及主键的 DDL 事件，避免下游对主键列做 add/drop/rename/alter 造成约束破坏。
+     * 主键集合取自 {@link KafkaConfig#tableMapGet(String)} 对应 TapTable 的 {@code primaryKeys(true)}。
+     * - {@link TapDropFieldEvent}：fieldName 命中主键 → 整事件丢弃
+     * - {@link TapAlterFieldNameEvent}：before / after 任一命中主键 → 整事件丢弃
+     * - {@link TapAlterFieldAttributesEvent}：fieldName 命中主键 → 整事件丢弃
+     * - {@link TapNewFieldEvent}：仅丢弃 newFields 中命中主键的元素，剩余非空则保留事件
+     * 其他事件原样透传。
+     */
+    protected List<TapEvent> filterPrimaryKeyDDL(String topic, List<TapEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return events;
+        }
+        Set<String> pks = primaryKeysOfTopic(topic);
+        if (pks.isEmpty()) {
+            return events;
+        }
+        List<TapEvent> filtered = new ArrayList<>(events.size());
+        for (TapEvent e : events) {
+            if (e instanceof TapDropFieldEvent) {
+                String f = ((TapDropFieldEvent) e).getFieldName();
+                if (f != null && pks.contains(f)) {
+                    tapLogger.info("Skip primary key DDL (drop): topic={}, field={}", topic, f);
+                    continue;
+                }
+            } else if (e instanceof TapAlterFieldNameEvent) {
+                ValueChange<String> nc = ((TapAlterFieldNameEvent) e).getNameChange();
+                String before = nc == null ? null : nc.getBefore();
+                String after = nc == null ? null : nc.getAfter();
+                if ((before != null && pks.contains(before)) || (after != null && pks.contains(after))) {
+                    tapLogger.info("Skip primary key DDL (rename): topic={}, {} -> {}", topic, before, after);
+                    continue;
+                }
+            } else if (e instanceof TapAlterFieldAttributesEvent) {
+                String f = ((TapAlterFieldAttributesEvent) e).getFieldName();
+                if (f != null && pks.contains(f)) {
+                    tapLogger.info("Skip primary key DDL (attr): topic={}, field={}", topic, f);
+                    continue;
+                }
+            } else if (e instanceof TapNewFieldEvent) {
+                TapNewFieldEvent ne = (TapNewFieldEvent) e;
+                List<TapField> kept = new ArrayList<>();
+                if (ne.getNewFields() != null) {
+                    for (TapField f : ne.getNewFields()) {
+                        if (f != null && f.getName() != null && pks.contains(f.getName())) {
+                            tapLogger.info("Skip primary key DDL (new field): topic={}, field={}", topic, f.getName());
+                            continue;
+                        }
+                        kept.add(f);
+                    }
+                }
+                if (kept.isEmpty()) {
+                    continue;
+                }
+                ne.setNewFields(kept);
+            }
+            filtered.add(e);
+        }
+        return filtered;
+    }
+
+    private Set<String> primaryKeysOfTopic(String topic) {
+        if (topic == null) {
+            return Collections.emptySet();
+        }
+        TapTable known = kafkaService.getConfig().tableMapGet(topic);
+        if (known == null) {
+            return Collections.emptySet();
+        }
+        Collection<String> pks = known.primaryKeys(true);
+        if (pks == null || pks.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return new HashSet<>(pks);
+    }
+
+
 
     public abstract List<ProducerRecord<Object, Object>> fromTapEvent(TapTable table, TapEvent tapEvent);
 
