@@ -193,6 +193,8 @@ public abstract class AbsSchemaMode {
                 return new OriginalSchemaMode(kafkaService);
             case STANDARD:
                 return new StandardSchemaMode(kafkaService);
+            case STANDARD_JSON:
+                return new StandardJsonSchemaMode(kafkaService);
             case CUSTOM:
                 return new CustomSchemaMode(kafkaService);
             case CANAL:

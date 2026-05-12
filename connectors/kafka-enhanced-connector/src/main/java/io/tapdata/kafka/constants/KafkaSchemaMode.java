@@ -40,6 +40,19 @@ public enum KafkaSchemaMode {
             props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StandardDeserializer.class.getName());
         }
     },
+    STANDARD_JSON() {
+        @Override
+        public void setSerializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+            props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        }
+
+        @Override
+        public void setDeserializer(KafkaConfig kafkaConfig, Properties props) {
+            props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+            props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        }
+    },
     ORIGINAL() {
         @Override
         public void setSerializer(KafkaConfig kafkaConfig, Properties props) {

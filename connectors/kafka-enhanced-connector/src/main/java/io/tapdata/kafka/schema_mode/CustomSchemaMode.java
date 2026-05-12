@@ -61,7 +61,7 @@ public class CustomSchemaMode extends AbsSchemaMode {
     public void sampleOneSchema(String table, TapTable sampleTable) {
         kafkaService.<String, String>sampleValue(Collections.singletonList(table), null, record -> {
             if (null != record) {
-                Object eventObj = executeScript(scriptEngine, "analyze", record.headers(), record.key(), record.value());
+                Object eventObj = executeScript(scriptEngine, "analyze", record.headers(), record.key(), record.value(), record.partition());
                 if (eventObj instanceof Map) {
                     Map<String, Object> after = (Map<String, Object>) ((Map<String, Object>) eventObj).get("after");
                     if (after != null) {
@@ -85,7 +85,7 @@ public class CustomSchemaMode extends AbsSchemaMode {
             return null;
         }
         try {
-            Object value = executeScript(scriptEngine, "analyze", consumerRecord.headers(), consumerRecord.key(), consumerRecord.value());
+            Object value = executeScript(scriptEngine, "analyze", consumerRecord.headers(), consumerRecord.key(), consumerRecord.value(), consumerRecord.partition());
             Map<String, Object> after = (Map<String, Object>) ((Map<String, Object>) value).get("after");
             Map<String, Object> before = (Map<String, Object>) ((Map<String, Object>) value).get("before");
             String op = String.valueOf(((Map<String, Object>) value).get("op"));

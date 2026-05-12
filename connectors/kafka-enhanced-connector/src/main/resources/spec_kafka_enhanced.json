@@ -169,9 +169,10 @@
           "title": "${schemaMode}",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "default": "TAP_STANDARD",
+          "default": "STANDARD",
           "enum": [
-            {"label": "${schemaModeTapStandard}", "value": "TAP_STANDARD"},
+            {"label": "${schemaModeTapStandard}", "value": "STANDARD"},
+            {"label": "${schemaModeTapJson}", "value": "STANDARD_JSON"},
             {"label": "${schemaModeOriginal}", "value": "ORIGINAL"},
             {"label": "${schemaModeCanal}", "value": "CANAL"},
             {"label": "${schemaModeDebezium}", "value": "DEBEZIUM"},
@@ -183,7 +184,7 @@
         "analyzeScript": {
           "type": "string",
           "required": false,
-          "default": "function analyze(header, key, value){\n\n\t\/\/ Enter your code at here\n\t return value;\n}",
+          "default": "function analyze(header, key, value, partition){\n\n\t\/\/ Enter your code at here\n\t return value;\n}",
           "x-decorator": "FormItem",
           "x-decorator-props": {
             "tooltip": "${analyzeScriptTip}"
@@ -192,8 +193,8 @@
           "x-component-props": {
             "options": { "showPrintMargin": false, "useWrapMode": true },
             "includeBeforeAndAfter": true,
-            "before": "function analyze(header, key, value){",
-            "beforeRegexp": "^[^]*function\\s+analyze\\s*\\(header, key, value\\)\\{",
+            "before": "function analyze(header, key, value, partition){",
+            "beforeRegexp": "^[^]*function\\s+analyze\\s*\\(header, key, value, partition\\)\\{",
             "afterRegexp": "}[^}]*$",
             "after": "}"
           },
@@ -859,9 +860,10 @@
           "title": "${schemaMode}",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "default": "TAP_STANDARD",
+          "default": "STANDARD",
           "enum": [
-            {"label": "${schemaModeTapStandard}", "value": "TAP_STANDARD"},
+            {"label": "${schemaModeTapStandard}", "value": "STANDARD"},
+            {"label": "${schemaModeTapJson}", "value": "STANDARD_JSON"},
             {"label": "${schemaModeOriginal}", "value": "ORIGINAL"},
             {"label": "${schemaModeCanal}", "value": "CANAL"},
             {"label": "${schemaModeDebezium}", "value": "DEBEZIUM"},
@@ -945,6 +947,7 @@
       "clusterURITip": "Multiple addresses are separated by commas, such as: kafka2:9092,kafka1:9092",
       "schemaMode": "Structural mode",
       "schemaModeTapStandard": "Standard structure",
+      "schemaModeTapJson": "Standard JSON structure",
       "schemaModeOriginal": "Original structure",
       "schemaModeCustom": "Custom structure",
       "schemaModeCanal": "Canal",
@@ -1028,6 +1031,7 @@
       "clusterURITip": "多个地址用逗号分隔，如：kafka2:9092,kafka1:9092",
       "schemaMode": "结构模式",
       "schemaModeTapStandard": "标准结构",
+      "schemaModeTapJson": "标准JSON结构",
       "schemaModeOriginal": "原生结构",
       "schemaModeCustom": "自定义结构",
       "schemaModeCanal": "Canal",
@@ -1111,6 +1115,7 @@
       "clusterURITip": "多個位址以逗號分隔，如：kafka2:9092,kafka1:9092",
       "schemaMode": "結構模式",
       "schemaModeTapStandard": "標準結構",
+      "schemaModeTapJson": "標準JSON結構",
       "schemaModeOriginal": "原生結構",
       "schemaModeCustom": "自定義結構",
       "schemaModeCanal": "Canal",
