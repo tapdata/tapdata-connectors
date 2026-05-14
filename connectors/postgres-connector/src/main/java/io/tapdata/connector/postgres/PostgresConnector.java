@@ -694,6 +694,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+        postgresTest.testHostPortForMasterSlave();
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
                 new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
@@ -768,6 +769,7 @@ public class PostgresConnector extends CommonDbConnector {
                 return tableList;
             });
         }
+        postgresTest.testHostPortForMasterSlave();
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
                 new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
@@ -802,6 +804,7 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
+        postgresTest.testHostPortForMasterSlave();
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotBlank(postgresConfig.getPgtoHost())) {
                 if (EmptyKit.isNotNull(offsetStartTime)) {
