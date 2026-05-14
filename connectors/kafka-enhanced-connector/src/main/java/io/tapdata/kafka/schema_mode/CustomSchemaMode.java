@@ -6,6 +6,7 @@ import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
+import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -34,6 +35,7 @@ import javax.script.Invocable;
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 import static io.tapdata.constant.DMLType.*;
@@ -44,6 +46,8 @@ public class CustomSchemaMode extends AbsSchemaMode {
     // GraalVM JS Context 不允许多线程共享，使用 ThreadLocal 让 discoverSchema 等并发场景每个线程独享一个 Engine
     private final ThreadLocal<ScriptEngine> scriptEngine;
     private final String composedScript;
+    // 每个 topic 已观察到的字段集合（fieldName -> tapType），用于检测新增字段；只增不减
+    private final Map<String, Map<String, String>> lastSchemaPerTopic = new ConcurrentHashMap<>();
 
     public CustomSchemaMode(IKafkaService kafkaService) {
         super(KafkaSchemaMode.CUSTOM, kafkaService);
@@ -142,6 +146,87 @@ public class CustomSchemaMode extends AbsSchemaMode {
     }
 
     @Override
+    public List<TapEvent> toTapEvents(ConsumerRecord<?, ?> consumerRecord) {
+        TapEvent event = toTapEvent(consumerRecord);
+        if (event == null) {
+            return Collections.emptyList();
+        }
+        // 仅基于 INSERT / UPDATE 的 after 推断 schema 增量；DELETE 通常仅含 PK，不参与基线更新
+        Map<String, Object> data = extractAfterForSchema(event);
+        if (data == null || data.isEmpty()) {
+            return Collections.singletonList(event);
+        }
+        String topic = consumerRecord.topic();
+        Map<String, String> currentSchema = deriveSchemaFromMap(data);
+        Map<String, String> lastSchema = lastSchemaPerTopic.get(topic);
+        List<TapEvent> events = new ArrayList<>();
+        if (lastSchema == null) {
+            // 首次：与 tableMap 中已知的 TapTable 字段对比，避免把已有字段当作新增
+            TapTable knownTable = kafkaService.getConfig().tableMapGet(topic);
+            Set<String> knownFieldNames = knownTable == null || knownTable.getNameFieldMap() == null
+                    ? Collections.emptySet() : knownTable.getNameFieldMap().keySet();
+            appendAddedFieldEvent(events, topic, currentSchema, knownFieldNames, consumerRecord.timestamp());
+            // 基线 = 已知字段名 ∪ 当前推断出的 schema；类型只对当前消息的字段记录，避免错误覆盖
+            Map<String, String> baseline = new LinkedHashMap<>();
+            for (String name : knownFieldNames) {
+                baseline.put(name, currentSchema.getOrDefault(name, "STRING"));
+            }
+            baseline.putAll(currentSchema);
+            lastSchemaPerTopic.put(topic, baseline);
+        } else {
+            appendAddedFieldEvent(events, topic, currentSchema, lastSchema.keySet(), consumerRecord.timestamp());
+            // 仅追加新键，已存在的键不动；不缩减、不修改类型，避免类型抖动反复触发
+            for (Map.Entry<String, String> e : currentSchema.entrySet()) {
+                lastSchema.putIfAbsent(e.getKey(), e.getValue());
+            }
+        }
+        events.add(event);
+        return filterPrimaryKeyDDL(topic, events);
+    }
+
+    private Map<String, Object> extractAfterForSchema(TapEvent event) {
+        if (event instanceof TapInsertRecordEvent) {
+            return ((TapInsertRecordEvent) event).getAfter();
+        }
+        if (event instanceof TapUpdateRecordEvent) {
+            return ((TapUpdateRecordEvent) event).getAfter();
+        }
+        return null;
+    }
+
+    private Map<String, String> deriveSchemaFromMap(Map<String, Object> data) {
+        Map<String, String> schema = new LinkedHashMap<>();
+        if (data == null) {
+            return schema;
+        }
+        for (Map.Entry<String, Object> e : data.entrySet()) {
+            schema.put(e.getKey(), inferTapType(e.getValue()));
+        }
+        return schema;
+    }
+
+    private void appendAddedFieldEvent(List<TapEvent> events, String topic, Map<String, String> currentSchema, Set<String> knownNames, long referenceTime) {
+        List<TapField> addedFields = new ArrayList<>();
+        for (Map.Entry<String, String> e : currentSchema.entrySet()) {
+            if (knownNames.contains(e.getKey())) continue;
+            TapField tf = new TapField(e.getKey(), e.getValue());
+            tf.setNullable(true);
+            addedFields.add(tf);
+        }
+        if (addedFields.isEmpty()) {
+            return;
+        }
+        TapNewFieldEvent add = new TapNewFieldEvent();
+        add.setTime(System.currentTimeMillis());
+        add.setTableId(topic);
+        add.setReferenceTime(referenceTime);
+        add.setNewFields(addedFields);
+        events.add(add);
+    }
+
+
+
+    @Override
     public List<ProducerRecord<Object, Object>> fromTapEvent(TapTable table, TapEvent tapEvent) {
         Map<String, Object> record = new HashMap<>();
         Map<String, Object> data;
@@ -187,7 +272,7 @@ public class CustomSchemaMode extends AbsSchemaMode {
             } else {
                 Object obj = res.get("value");
                 if (obj instanceof Map) {
-                    Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("value");
+                    Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) obj;
                     if (map.containsKey("before") && map.get("before").isEmpty()) {
                         map.remove("before");
                     }
@@ -195,7 +280,7 @@ public class CustomSchemaMode extends AbsSchemaMode {
                         map.remove("after");
                     }
                     res.put("value", map);
-                    body = TapSimplify.toJson(res.get("value"), JsonParser.ToJsonFeature.WriteMapNullValue);
+                    body = TapSimplify.toJson(obj, JsonParser.ToJsonFeature.WriteMapNullValue);
                 } else {
                     body = obj.toString();
                 }
@@ -203,7 +288,7 @@ public class CustomSchemaMode extends AbsSchemaMode {
             if (res.containsKey("header")) {
                 Object obj = res.get("header");
                 if (obj instanceof Map) {
-                    Map<String, Object> head = (Map<String, Object>) res.get("header");
+                    Map<String, Object> head = (Map<String, Object>) obj;
                     for (String s : head.keySet()) {
                         recordHeaders.add(s, head.get(s).toString().getBytes());
                     }
@@ -251,7 +336,7 @@ public class CustomSchemaMode extends AbsSchemaMode {
             } else {
                 Object obj = res.get("value");
                 if (obj instanceof Map) {
-                    Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) res.get("value");
+                    Map<String, Map<String, Object>> map = (Map<String, Map<String, Object>>) obj;
                     if (map.containsKey("before") && map.get("before").isEmpty()) {
                         map.remove("before");
                     }
@@ -259,7 +344,7 @@ public class CustomSchemaMode extends AbsSchemaMode {
                         map.remove("after");
                     }
                     res.put("value", map);
-                    body = TapSimplify.toJson(res.get("value"), JsonParser.ToJsonFeature.WriteMapNullValue);
+                    body = TapSimplify.toJson(obj, JsonParser.ToJsonFeature.WriteMapNullValue);
                 } else {
                     body = obj.toString();
                 }
@@ -267,7 +352,7 @@ public class CustomSchemaMode extends AbsSchemaMode {
             if (res.containsKey("header")) {
                 Object obj = res.get("header");
                 if (obj instanceof Map) {
-                    Map<String, Object> head = (Map<String, Object>) res.get("header");
+                    Map<String, Object> head = (Map<String, Object>) obj;
                     for (String s : head.keySet()) {
                         recordHeaders.add(s, head.get(s).toString().getBytes());
                     }
