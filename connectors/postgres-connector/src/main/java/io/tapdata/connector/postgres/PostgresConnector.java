@@ -539,13 +539,13 @@ public class PostgresConnector extends CommonDbConnector {
                     AtomicLong actual = new AtomicLong(0);
                         AtomicReference<String> actualSequenceName = new AtomicReference<>();
                         try {
-                            String tableName = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? commonDbConfig.getSchema() + "." + tapTable.getId() : tapTable.getId();
+                            String tableName = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? "\"" + commonDbConfig.getSchema() + "\".\"" + tapTable.getId() + "\"" : "\"" + tapTable.getId() + "\"";
                             jdbcContext.queryWithNext("select pg_get_serial_sequence('" + tableName + "', '" + k + "')", resultSet -> actualSequenceName.set(resultSet.getString(1)));
                             jdbcContext.queryWithNext("select last_value from " + actualSequenceName.get(), resultSet -> actual.set(resultSet.getLong(1)));
                         } catch (SQLException ignore) {
                             tapLogger.warn("Failed get auto increment value for table {} errormessage:{}", tapTable.getId(),ignore.getMessage());
                         }
-                        if (actual.get() >= (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue())) {
+                        if (actualSequenceName.get() == null || actual.get() >= (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue())) {
                             return;
                         }
                     alterSqls.add("select setval('" + actualSequenceName.get() + "'," + (Long.parseLong(String.valueOf(v)) + postgresConfig.getAutoIncJumpValue()) + ", false) ");
