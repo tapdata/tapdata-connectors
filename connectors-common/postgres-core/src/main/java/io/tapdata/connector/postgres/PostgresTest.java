@@ -4,11 +4,14 @@ import com.google.common.collect.Lists;
 import io.tapdata.common.CommonDbTest;
 import io.tapdata.common.util.FileUtil;
 import io.tapdata.connector.postgres.config.PostgresConfig;
+import io.tapdata.connector.postgres.error.PostgresErrorCode;
 import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
+import io.tapdata.pdk.apis.exception.TapTestItemException;
 import io.tapdata.pdk.apis.exception.testItem.TapTestCurrentTimeConsistentEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestReadPrivilegeEx;
 import io.tapdata.pdk.apis.exception.testItem.TapTestStreamReadEx;
@@ -64,6 +67,7 @@ public class PostgresTest extends CommonDbTest {
                     isMaster.set(!resultSet.getBoolean(1));
                 });
                 if (isMaster.get()) {
+                    masterConnected = true;
                     return;
                 } else {
                     availableHost = commonDbConfig.getHost();
@@ -133,19 +137,24 @@ public class PostgresTest extends CommonDbTest {
         properties.put("password", commonDbConfig.getPassword());
         properties.put("replication", "database");
         properties.put("assumeMinServerVersion", "9.4");
+        List<String> testSqls = TapSimplify.list();
+        long begin = System.currentTimeMillis();
         try {
             Connection connection = new Driver().connect(commonDbConfig.getDatabaseUrl(), properties);
             assert connection != null;
             connection.close();
-            List<String> testSqls = TapSimplify.list();
             String testSlotName = "test_tapdata_" + UUID.randomUUID().toString().replaceAll("-", "_");
             testSqls.add(String.format(PG_LOG_PLUGIN_CREATE_TEST, testSlotName, ((PostgresConfig) commonDbConfig).getLogPluginName()));
             testSqls.add(PG_LOG_PLUGIN_DROP_TEST);
-            jdbcContext.batchExecute(testSqls);
+            jdbcContext.batchExecute(testSqls, 20);
             consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY, "Cdc can work normally"));
             return true;
         } catch (Throwable e) {
-            consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestStreamReadEx(e), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
+            if (System.currentTimeMillis() - begin > 18000) {
+                consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestItemException(new TapCodeException(PostgresErrorCode.CREATE_SLOT_TIMEOUT).dynamicDescriptionParameters(String.join(",", testSqls))), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
+            } else {
+                consumer.accept(new TestItem(TestItem.ITEM_READ_LOG, new TapTestItemException(new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED).dynamicDescriptionParameters(String.join(",", testSqls))), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
+            }
             return null;
         }
     }
@@ -180,7 +189,7 @@ public class PostgresTest extends CommonDbTest {
         }
     }
 
-    private static final String WALMINER_PACKAGE_NAME = "walminer_x86_64_v4.11.2";
+    private static final String WALMINER_PACKAGE_NAME = "walminer_x86_64_v4.12.2";
 
     private boolean deployPgto() {
         String toolPath = FileUtil.paths("run-resources", "pg-db", "walminer");
@@ -240,7 +249,7 @@ public class PostgresTest extends CommonDbTest {
             process = processBuilder.start();
             process.waitFor(60, TimeUnit.SECONDS);
             new File(FileUtil.paths(toolPath, ctlDir)).mkdir();
-            processBuilder.command("/bin/sh", "-c", String.format("walminer pgto -i -c %s -s '%s' -e %s -t 4 --source-connstr1='host=%s port=%s username=%s dbanme=%s password=%s'", toolDir.getAbsolutePath() + "/" + ctlDir, slotName, ((PostgresConfig) commonDbConfig).getPgtoPort(), commonDbConfig.getHost(), commonDbConfig.getPort(), commonDbConfig.getUser(), commonDbConfig.getDatabase(), commonDbConfig.getPassword()));
+            processBuilder.command("/bin/sh", "-c", String.format("walminer pgto init -c %s -s '%s' -e %s -t 4 --source-connstr1='host=%s port=%s username=%s dbanme=%s password=%s'", toolDir.getAbsolutePath() + "/" + ctlDir, slotName, ((PostgresConfig) commonDbConfig).getPgtoPort(), commonDbConfig.getHost(), commonDbConfig.getPort(), commonDbConfig.getUser(), commonDbConfig.getDatabase(), commonDbConfig.getPassword()));
             process = processBuilder.start();
             process.waitFor(60, TimeUnit.SECONDS);
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
@@ -251,7 +260,7 @@ public class PostgresTest extends CommonDbTest {
             }
             int exitCode = process.waitFor();
             System.out.println("exit code: " + exitCode);
-            processBuilder.command("/bin/sh", "-c", String.format("walminer pgto -m -c %s", toolDir.getAbsolutePath() + "/" + ctlDir));
+            processBuilder.command("/bin/sh", "-c", String.format("walminer pgto run -m -c %s", toolDir.getAbsolutePath() + "/" + ctlDir));
             processBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
             process = processBuilder.start();
             process.waitFor(60, TimeUnit.SECONDS);

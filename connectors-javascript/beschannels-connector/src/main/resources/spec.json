@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "BesChannels",
+    "realName": "BesChannels",
     "icon": "icon/bes-channels.png",
     "doc" : "${doc}",
     "id": "bes-channels",

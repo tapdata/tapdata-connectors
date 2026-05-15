@@ -12,7 +12,7 @@
     <artifactId>hudi-connector</artifactId>
 
     <properties>
-        <tapdata.pdk.api.version>2.0.0-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
         <hive.core.version>1.0-SNAPSHOT</hive.core.version>
         <hadoop.version>3.1.1-hw-ei-312005</hadoop.version>
         <maven.compiler.source.version>8</maven.compiler.source.version>
@@ -461,6 +461,28 @@
             <id>hortonworks.other</id>
             <name>Hortonworks Other Dependencies</name>
             <url>http://repo.hortonworks.com/content/groups/public</url>
+        </repository>
+        <repository>
+            <id>nexus-releases</id>
+            <name>nexus-maven-release</name>
+            <url>https://nexus.tapdata.net/repository/maven-releases/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>nexus-snapshots</id>
+            <name>nexus-maven-snapshot</name>
+            <url>https://nexus.tapdata.net/repository/maven-snapshots/</url>
+            <releases>
+                <enabled>false</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
         </repository>
         <repository>
             <id>tapdata-tapdata-maven</id>

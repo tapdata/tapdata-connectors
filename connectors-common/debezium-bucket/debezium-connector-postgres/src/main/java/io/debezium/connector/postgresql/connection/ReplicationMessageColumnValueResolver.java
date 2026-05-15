@@ -40,7 +40,7 @@ public class ReplicationMessageColumnValueResolver {
             return null;
         }
 
-        if (!type.isRootType()) {
+        if (!type.isRootType() && !"rowversion".equals(type.getParentType().getName())) {
             return resolveValue(columnName, type.getParentType(), fullType, value, connection, includeUnknownDatatypes, typeRegistry);
         }
 

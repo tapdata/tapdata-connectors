@@ -3,13 +3,18 @@ package io.tapdata.connector.clickhouse.config;
 import io.tapdata.common.CommonDbConfig;
 
 import java.io.Serializable;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
+import java.util.function.Function;
 
 public class ClickhouseConfig extends CommonDbConfig implements Serializable {
 
     private Integer mergeMinutes = 60;
     private Boolean mixFastWrite = false;
+    private Boolean supportPk = true;
+    private String engineExpr;
+    private String partitionExpr;
+    private String orderExpr;
+    private List<LinkedHashMap<String, String>> tableProperties = new ArrayList<>();
 
     public ClickhouseConfig() {
         setDbType("clickhouse");
@@ -39,8 +44,71 @@ public class ClickhouseConfig extends CommonDbConfig implements Serializable {
         return mixFastWrite;
     }
 
+    public Boolean getMixFastWrite(String key) {
+        return getTableConfigValue(key, "mixFastWrite", mixFastWrite);
+    }
+
     public void setMixFastWrite(Boolean mixFastWrite) {
         this.mixFastWrite = mixFastWrite;
     }
 
+    public Boolean getSupportPk() {
+        return supportPk;
+    }
+
+    public Boolean getSupportPk(String key) {
+        return getTableConfigValue(key, "supportPk", supportPk);
+    }
+
+    public void setSupportPk(Boolean supportPk) {
+        this.supportPk = supportPk;
+    }
+
+    public String getEngineExpr() {
+        return engineExpr;
+    }
+
+    public String getEngineExpr(String key) {
+        return getTableConfigValue(key, "engineExpr", engineExpr);
+    }
+
+    public void setEngineExpr(String engineExpr) {
+        this.engineExpr = engineExpr;
+    }
+
+    public String getPartitionExpr() {
+        return partitionExpr;
+    }
+
+    public String getPartitionExpr(String key) {
+        return getTableConfigValue(key, "partitionExpr", partitionExpr);
+    }
+
+    public void setPartitionExpr(String partitionExpr) {
+        this.partitionExpr = partitionExpr;
+    }
+
+    public String getOrderExpr() {
+        return orderExpr;
+    }
+
+    public String getOrderExpr(String key) {
+        return getTableConfigValue(key, "orderExpr", orderExpr);
+    }
+
+    public void setOrderExpr(String orderExpr) {
+        this.orderExpr = orderExpr;
+    }
+
+    public List<LinkedHashMap<String, String>> getTableProperties() {
+        return tableProperties;
+    }
+
+    public List<LinkedHashMap<String, String>> getTableProperties(String key) {
+        return getTableConfigValue(key, "tableProperties", tableProperties);
+    }
+
+    public void setTableProperties(List<LinkedHashMap<String, String>> tableProperties) {
+        this.tableProperties = tableProperties;
+    }
 }

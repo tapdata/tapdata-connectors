@@ -252,6 +252,7 @@ public class DwsConnector extends PostgresConnector {
                 indexList.stream().filter(i -> !i.isPrimary()).forEach(i ->
                         sqlList.add(getCreateIndexForPartitionTableSql(tapTable, i)));
             }
+            tapLogger.info("Create index sql: {}", sqlList);
             jdbcContext.batchExecute(sqlList);
 
         } else {

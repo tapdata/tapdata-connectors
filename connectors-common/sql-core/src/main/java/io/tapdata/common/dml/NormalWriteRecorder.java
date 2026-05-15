@@ -61,6 +61,7 @@ public abstract class NormalWriteRecorder {
     protected List<String> largeSqlValues;
     protected LinkedHashMap<String, String> largeSqlValuesMap;
     protected boolean largeSql = false;
+    protected DMLType dmlType;
 
     protected final AtomicLong atomicLong = new AtomicLong(0); //record counter
     protected final List<TapRecordEvent> batchCache = TapSimplify.list(); //event cache
@@ -133,7 +134,7 @@ public abstract class NormalWriteRecorder {
         }
         if (largeSql) {
             try (Statement statement = connection.createStatement()) {
-                statement.execute(getLargeInsertSql());
+                statement.execute(getLargeSql());
                 largeSqlValues.clear();
                 largeSqlValuesMap.clear();
                 batchCacheSize = 0;
@@ -173,7 +174,6 @@ public abstract class NormalWriteRecorder {
                 }
                 preparedStatement.clearBatch();
                 batchCache.clear();
-                batchCacheSize = 0;
             }
         } catch (SQLException e) {
 //            Map<TapRecordEvent, Throwable> map = batchCache.stream().collect(Collectors.toMap(Function.identity(), (v) -> e));
@@ -181,6 +181,7 @@ public abstract class NormalWriteRecorder {
             batchCacheSize = 0;
             throw e;
         }
+        batchCacheSize = 0;
         atomicLong.addAndGet(succeed);
     }
 
@@ -395,6 +396,20 @@ public abstract class NormalWriteRecorder {
         if (EmptyKit.isEmpty(after)) {
             return;
         }
+        if (largeSql) {
+            if (after.size() < allColumn.size()) {
+                //有字段内容不全情况，不可使用
+                executeBatch(listResult);
+                largeSql = false;
+            } else if (EmptyKit.isNotEmpty(before) && uniqueCondition.stream().anyMatch(v -> !Objects.equals(after.get(v), before.get(v)))) {
+                //更新关联条件，不可使用
+                executeBatch(listResult);
+                largeSql = false;
+            } else {
+                largeInsert(after);
+                return;
+            }
+        }
         //去除After和Before的多余字段
         Map<String, Object> lastBefore = DbKit.getBeforeForUpdate(after, before, allColumn, uniqueCondition);
         switch (updatePolicy) {
@@ -449,7 +464,7 @@ public abstract class NormalWriteRecorder {
         setBeforeValue(containsNull, before, pos);
     }
 
-    protected String getLargeInsertSql() {
+    protected String getLargeSql() {
         return "INSERT INTO " + getSchemaAndTable() + " ("
                 + allColumn.stream().map(this::quoteAndEscape).collect(Collectors.joining(", ")) + ") VALUES "
                 + String.join(", ", largeSqlValues);
@@ -470,6 +485,10 @@ public abstract class NormalWriteRecorder {
 
     public void addDeleteBatch(Map<String, Object> before, WriteListResult<TapRecordEvent> listResult) throws SQLException {
         if (EmptyKit.isEmpty(before)) {
+            return;
+        }
+        if (largeSql) {
+            largeInsert(before);
             return;
         }
         Map<String, Object> lastBefore = new HashMap<>();
@@ -557,6 +576,10 @@ public abstract class NormalWriteRecorder {
         this.toCharset = toCharset;
     }
     private static final DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS");
+    // SimpleDateFormat 非线程安全，用 ThreadLocal 保证每个线程独立持有一个实例
+    protected static final ThreadLocal<DateFormat> dateFormat =
+            ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS"));
+    // DateTimeFormatter 不可变，天然线程安全
     private static final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
 
     protected String object2String(Object obj) {
@@ -568,7 +591,7 @@ public abstract class NormalWriteRecorder {
         } else if (obj instanceof Number) {
             result = obj.toString();
         } else if (obj instanceof Date) {
-            result = "'" + dateFormat.format(obj) + "'";
+            result = "'" + dateFormat.get().format(obj) + "'";
         } else if (obj instanceof Instant) {
             result = "'" + LocalDateTime.ofInstant((Instant) obj, ZoneId.of("GMT")).format(dateTimeFormatter) + "'";
         } else if (obj instanceof byte[]) {
@@ -585,6 +608,10 @@ public abstract class NormalWriteRecorder {
         return result;
     }
 
+    protected String transferString(String str) {
+        return "'" + str.replace("\\", "\\\\").replace("'", "''") + "'";
+    }
+
     protected String byteArrayToHexString(byte[] bytes) {
         if (bytes == null || bytes.length == 0) {
             return "";
@@ -593,6 +620,6 @@ public abstract class NormalWriteRecorder {
         for (byte b : bytes) {
             sb.append(String.format("%02X", b));
         }
-        return "0x"+ sb;
+        return "0x" + sb;
     }
 }

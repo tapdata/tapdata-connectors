@@ -55,6 +55,8 @@ public interface IKafkaService extends AutoCloseable {
 
     void writeRecord(List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer);
 
+    void writeRecord(KafkaProducer<Object, Object> producer,List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer);
+
     CreateTableOptions createTable(TapCreateTableEvent tapCreateTableEvent);
 
     void deleteTable(TapDropTableEvent tapDropTableEvent);

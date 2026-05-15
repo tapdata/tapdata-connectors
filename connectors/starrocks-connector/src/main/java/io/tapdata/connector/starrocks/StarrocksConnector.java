@@ -5,11 +5,13 @@ import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.starrocks.bean.StarrocksConfig;
 import io.tapdata.connector.starrocks.ddl.StarrocksDDLSqlGenerator;
-import io.tapdata.connector.starrocks.streamload.HttpUtil;
 import io.tapdata.connector.starrocks.streamload.StarrocksStreamLoader;
 import io.tapdata.connector.starrocks.streamload.StarrocksTableType;
 import io.tapdata.connector.starrocks.streamload.exception.StarrocksRetryableException;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.event.TapCallbackOffset;
+import io.tapdata.entity.event.control.ControlEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
@@ -20,6 +22,7 @@ import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -31,7 +34,6 @@ import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
-import org.apache.http.impl.client.CloseableHttpClient;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -54,7 +56,8 @@ public class StarrocksConnector extends CommonDbConnector {
 
     private StarrocksJdbcContext starrocksJdbcContext;
     private StarrocksConfig starrocksConfig;
-    private final Map<String, StarrocksStreamLoader> StarrocksStreamLoaderMap = new ConcurrentHashMap<>();
+    private final Map<String, StarrocksStreamLoader> starrocksStreamLoaderMap = new ConcurrentHashMap<>();
+    private Consumer<Object> flushOffsetCallback;
 
 
     @Override
@@ -77,8 +80,13 @@ public class StarrocksConnector extends CommonDbConnector {
         fieldDDLHandlers = new BiClassHandlers<>();
         fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
-        fieldDDLHandlers.register(TapAlterFieldNameEvent.class, this::alterFieldName);
         fieldDDLHandlers.register(TapDropFieldEvent.class, this::dropField);
+
+        // 保存 flush offset callback
+        this.flushOffsetCallback = tapConnectionContext.getFlushOffsetCallback();
+        if (this.flushOffsetCallback != null) {
+            tapLogger.info("Flush offset callback registered for StarRocks connector");
+        }
     }
 
 
@@ -108,6 +116,7 @@ public class StarrocksConnector extends CommonDbConnector {
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
         connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> starrocksJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportProcessControlFunction(this::processControl);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null)
@@ -157,10 +166,10 @@ public class StarrocksConnector extends CommonDbConnector {
             }
         });
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toSqlDate());
+        codecRegistry.registerFromTapValue(TapMoneyValue.class, "decimal(10,4)", TapValue::getValue);
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);
-        connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
 
@@ -171,6 +180,15 @@ public class StarrocksConnector extends CommonDbConnector {
         if (null != matchThrowable(throwable, StarrocksRetryableException.class)
                 || null != matchThrowable(throwable, IOException.class)) {
             retryOptions.needRetry(true);
+            retryOptions.beforeRetryMethod(() -> {
+                // 重试前等待一段时间，避免立即重试打满日志
+                tapLogger.info("Connection error detected, waiting 5s before retry...");
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            });
             return retryOptions;
         }
         return retryOptions;
@@ -178,18 +196,13 @@ public class StarrocksConnector extends CommonDbConnector {
 
     public StarrocksStreamLoader getStarrocksStreamLoader() {
         String threadName = Thread.currentThread().getName();
-        if (!StarrocksStreamLoaderMap.containsKey(threadName)) {
+        if (!starrocksStreamLoaderMap.containsKey(threadName)) {
             StarrocksJdbcContext context = new StarrocksJdbcContext(starrocksConfig);
-            CloseableHttpClient httpClient;
-            if (Boolean.TRUE.equals(starrocksConfig.getUseHTTPS())) {
-                httpClient = HttpUtil.generationHttpClient();
-            } else {
-                httpClient = new HttpUtil().getHttpClient();
-            }
-            StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, httpClient);
-            StarrocksStreamLoaderMap.put(threadName, StarrocksStreamLoader);
+            StarrocksStreamLoader StarrocksStreamLoader = new StarrocksStreamLoader(context, starrocksConfig.getUseHTTPS(), tapLogger);
+            StarrocksStreamLoader.setFlushOffsetCallback(flushOffsetCallback);
+            starrocksStreamLoaderMap.put(threadName, StarrocksStreamLoader);
         }
-        return StarrocksStreamLoaderMap.get(threadName);
+        return starrocksStreamLoaderMap.get(threadName);
     }
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) throws Throwable {
@@ -200,10 +213,6 @@ public class StarrocksConnector extends CommonDbConnector {
                 // TODO: 2023/4/28 jdbc writeRecord
             }
         } catch (Throwable t) {
-            StarrocksStreamLoaderMap.computeIfPresent(Thread.currentThread().getName(), (key, value) -> {
-                value.shutdown();
-                return null;
-            });
             exceptionCollector.collectWritePrivileges("writeRecord", Collections.emptyList(), t);
             throw t;
         }
@@ -271,6 +280,7 @@ public class StarrocksConnector extends CommonDbConnector {
         stringBuilder.append(")");
         createTableOptions.setTableExists(false);
         try {
+            tapLogger.info("Create table sql: {}" + stringBuilder);
             starrocksJdbcContext.execute(stringBuilder.toString());
             return createTableOptions;
         } catch (Exception e) {
@@ -345,16 +355,16 @@ public class StarrocksConnector extends CommonDbConnector {
     @Override
     public void onStop(TapConnectionContext connectionContext) {
         ErrorKit.ignoreAnyError(() -> {
-            for (StarrocksStreamLoader StarrocksStreamLoader : StarrocksStreamLoaderMap.values()) {
-                if (EmptyKit.isNotNull(StarrocksStreamLoader)) {
+            for (StarrocksStreamLoader starrocksStreamLoader : starrocksStreamLoaderMap.values()) {
+                if (EmptyKit.isNotNull(starrocksStreamLoader)) {
                     // 在停止前先刷新剩余数据
                     try {
-                        StarrocksStreamLoader.flushOnStop();
+                        starrocksStreamLoader.flushOnStop();
                         tapLogger.info("StarrocksConnector", "Flushed remaining data before stopping StarrocksStreamLoader");
                     } catch (Exception e) {
                         tapLogger.warn("StarrocksConnector", "Failed to flush data before stopping: {}", e.getMessage());
                     }
-                    StarrocksStreamLoader.shutdown();
+                    starrocksStreamLoader.shutdown();
                 }
             }
         });
@@ -379,7 +389,24 @@ public class StarrocksConnector extends CommonDbConnector {
         if (null == sqlList) {
             return;
         }
+        //执行ddl前需要将缓存的数据先flush，清空StarrocksStreamLoaderMap对象
+        ErrorKit.ignoreAnyError(() -> {
+            for (StarrocksStreamLoader starrocksStreamLoader : starrocksStreamLoaderMap.values()) {
+                if (EmptyKit.isNotNull(starrocksStreamLoader)) {
+                    // 在停止前先刷新剩余数据
+                    try {
+                        starrocksStreamLoader.flushOnStop();
+                        tapLogger.info("StarrocksConnector", "Flushed remaining data before stopping StarrocksStreamLoader");
+                    } catch (Exception e) {
+                        tapLogger.warn("StarrocksConnector", "Failed to flush data before stopping: {}", e.getMessage());
+                    }
+                    starrocksStreamLoader.shutdown();
+                }
+            }
+            starrocksStreamLoaderMap.clear();
+        });
         try {
+            tapLogger.info("Field ddl sql: {}", sqlList);
             jdbcContext.batchExecute(sqlList);
         } catch (SQLException e) {
             if (e.getErrorCode() == 1105 && e.getMessage().contains("Nothing is changed")) {
@@ -387,6 +414,30 @@ public class StarrocksConnector extends CommonDbConnector {
             }
             exceptionCollector.collectWritePrivileges("execute sqls: " + TapSimplify.toJson(sqlList), Collections.emptyList(), e);
             throw e;
+        }
+    }
+
+    protected void processControl(TapConnectorContext tapConnectorContext, ControlEvent controlEvent) {
+        if (controlEvent instanceof HeartbeatEvent) {
+            if (starrocksStreamLoaderMap.entrySet().stream().allMatch(v -> EmptyKit.isEmpty(v.getValue().getPendingFlushTables()))) {
+                TapCallbackOffset tapOffset = new TapCallbackOffset();
+                // 从 TapRecordEvent.info 中提取 offset 信息
+                // 这些信息由 HazelcastTargetPdkBaseNode.handleTapdataEventDML 方法添加
+                Object batchOffset = controlEvent.getInfo("batchOffset");
+                Object streamOffset = controlEvent.getInfo("streamOffset");
+                Object syncStage = controlEvent.getInfo("syncStage");
+                Object sourceTime = controlEvent.getInfo("sourceTime");
+                Object nodeIds = controlEvent.getInfo("nodeIds");
+
+                // 填充 TapOffset
+                tapOffset.batchOffset(batchOffset)
+                        .streamOffset(streamOffset)
+                        .syncStage(syncStage != null ? syncStage.toString() : null)
+                        .sourceTime(sourceTime instanceof Long ? (Long) sourceTime : null)
+                        .eventTime(((HeartbeatEvent) controlEvent).getReferenceTime())
+                        .nodeIds(nodeIds);
+                tapConnectorContext.getFlushOffsetCallback().accept(tapOffset);
+            }
         }
     }
 
@@ -402,8 +453,13 @@ public class StarrocksConnector extends CommonDbConnector {
                     entry.setValue(((LocalDateTime) value).minusHours(starrocksConfig.getZoneOffsetHour()));
                 } else if (value instanceof java.sql.Date) {
                     entry.setValue(Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
-                } else if (value instanceof String && tapTable.getNameFieldMap().get(entry.getKey()).getDataType().equals("largeint")) {
-                    entry.setValue(new BigDecimal((String) value));
+                } else if (value instanceof String) {
+                    String dataType = StringKit.removeParentheses(tapTable.getNameFieldMap().get(entry.getKey()).getDataType());
+                    if (dataType.equals("largeint")) {
+                        entry.setValue(new BigDecimal((String) value));
+                    } else if (dataType.contains("binary")) {
+                        entry.setValue(((String) value).getBytes());
+                    }
                 }
             }
         }

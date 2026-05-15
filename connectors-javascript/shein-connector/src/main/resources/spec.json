@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "Shein",
+    "realName": "Shein",
     "icon": "icon/shein.png",
     "doc" : "${doc}",
     "id": "shein",

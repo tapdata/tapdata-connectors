@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "mrs-hive3",
+    "realName": "Mrs Hive3",
     "icon": "icons/mrshive3.png",
     "id": "mrs-hive3",
     "doc": "${doc}",

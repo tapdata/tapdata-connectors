@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "AWS RDS MySQL",
+    "realName": "Amazon RDS for MySQL",
     "icon": "icons/aws_rds_mysql.png",
     "id": "aws-rds-mysql",
     "doc": "${doc}",

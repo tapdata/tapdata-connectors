@@ -63,7 +63,19 @@ public class TDengineConnector extends CommonDbConnector {
     @Override
     public void onStart(TapConnectionContext connectionContext) throws Exception {
         tdengineConfig = (TDengineConfig) new TDengineConfig().load(connectionContext.getConnectionConfig());
-        isConnectorStarted(connectionContext, connectorContext -> tdengineConfig.load(connectorContext.getNodeConfig()));
+        isConnectorStarted(connectionContext, connectorContext -> {
+            tdengineConfig.load(connectorContext.getNodeConfig());
+            firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
+        });
+        tapLogger = connectionContext.getLog();
+        if (tdengineConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            tdengineConfig.startJdbcLog(firstConnectorId);
+        }
         tdengineJdbcContext = new TDengineJdbcContext(tdengineConfig);
         this.connectionTimezone = connectionContext.getConnectionConfig().getString("timezone");
         if ("Database Timezone".equals(this.connectionTimezone) || StringUtils.isBlank(this.connectionTimezone)) {
@@ -74,7 +86,6 @@ public class TDengineConnector extends CommonDbConnector {
         jdbcContext = tdengineJdbcContext;
         commonSqlMaker = new CommonSqlMaker(tdengineConfig.getEscapeChar());
         ddlSqlGenerator = new TDengineDDLSqlGenerator();
-        tapLogger = connectionContext.getLog();
         fieldDDLHandlers = new BiClassHandlers<>();
         fieldDDLHandlers.register(TapNewFieldEvent.class, this::newField);
         fieldDDLHandlers.register(TapAlterFieldAttributesEvent.class, this::alterFieldAttr);
@@ -217,6 +228,7 @@ public class TDengineConnector extends CommonDbConnector {
             if (EmptyKit.isNotNull(tapTable.getComment())) {
                 sqls.add(" COMMENT '" + tapTable.getComment() + "'");
             }
+            tapLogger.info("Create table sql: {}", sqls);
             tdengineJdbcContext.batchExecute(sqls);
         } catch (Throwable e) {
             e.printStackTrace();
@@ -228,6 +240,7 @@ public class TDengineConnector extends CommonDbConnector {
 
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() == 1) {
+            tapLogger.info("Clear table sql: DELETE FROM " + getSchemaAndTable(tapClearTableEvent.getTableId()));
             jdbcContext.execute("DELETE FROM " + getSchemaAndTable(tapClearTableEvent.getTableId()));
         }
     }
@@ -237,6 +250,7 @@ public class TDengineConnector extends CommonDbConnector {
         List<String> dropSqls = new ArrayList<>();
         dropSqls.add(String.format("DROP TABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId));
         dropSqls.add(String.format("DROP STABLE IF EXISTS `%s`.`%s`", tdengineConfig.getDatabase(), tableId));
+        tapLogger.info("Drop table sql: {}", dropSqls);
         tdengineJdbcContext.batchExecute(dropSqls);
     }
 
@@ -303,6 +317,7 @@ public class TDengineConnector extends CommonDbConnector {
             }
             createSqls.add(String.format("create topic if not exists `%s` as select * from `%s`", topic, tableName));
         }
+        tapLogger.info("Create topic sql: {}", createSqls);
         tdengineJdbcContext.batchExecute(createSqls);
     }
 
@@ -315,6 +330,7 @@ public class TDengineConnector extends CommonDbConnector {
             String topic = "tap_topic_" + tableName;
             dropSqls.add(String.format("drop topic if exists `%s`", topic));
         }
+        tapLogger.info("Drop topic sql: {}", dropSqls);
         tdengineJdbcContext.batchExecute(dropSqls);
     }
 

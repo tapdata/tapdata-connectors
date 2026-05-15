@@ -6,6 +6,7 @@ import io.tapdata.common.dml.NormalWriteRecorder;
 import io.tapdata.common.exception.AbstractExceptionCollector;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.entity.TapConstraintException;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.constraint.TapCreateConstraintEvent;
 import io.tapdata.entity.event.ddl.constraint.TapDropConstraintEvent;
@@ -24,17 +25,17 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
-import io.tapdata.pdk.apis.entity.FilterResult;
-import io.tapdata.pdk.apis.entity.FilterResults;
-import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
-import io.tapdata.pdk.apis.entity.TapFilter;
+import io.tapdata.pdk.apis.entity.*;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
+import io.tapdata.util.DateUtil;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.SQLRecoverableException;
+import java.sql.*;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -61,6 +62,14 @@ public abstract class CommonDbConnector extends ConnectorBase {
     protected static final String HAS_AUTO_INCR = "HAS_AUTO_INCR";
     protected static final String HAS_REMOVED_COLUMN = "HAS_REMOVED_COLUMN";
     protected static final String CANNOT_CLOSE_CONSTRAINT = "CANNOT_CLOSE_CONSTRAINT";
+    private static final String PARAMS_NAME = "name";
+    private static final String PARAMS_TYPE = "type";
+    private static final String PARAMS_MODE = "mode";
+    private static final String PARAMS_VALUE = "value";
+    private static final String MODE_IN = "in";
+    private static final String MODE_OUT = "out";
+    private static final String MODE_IN_OUT = "in/out";
+    private static final String MODE_RETURN = "return";
     //ddlHandlers which for ddl collection
     protected BiClassHandlers<TapFieldBaseEvent, TapConnectorContext, List<String>> fieldDDLHandlers;
     //ddlSqlMaker which for ddl execution
@@ -110,6 +119,11 @@ public abstract class CommonDbConnector extends ConnectorBase {
             TapTable tapTable = table(table);
             tapTable.setTableAttr(getSpecificAttr(subTable));
             tapTable.setComment(subTable.getString("tableComment"));
+            String tableCollation = subTable.getString("tableCollation");
+            if (StringUtils.isNotBlank(tableCollation)) {
+                String charset = tableCollation.split("_")[0];
+                tapTable.setCharset(charset);
+            }
             //3、primary key and table index
             List<String> primaryKey = TapSimplify.list();
             List<TapIndex> tapIndexList = TapSimplify.list();
@@ -118,15 +132,19 @@ public abstract class CommonDbConnector extends ConnectorBase {
             AtomicInteger keyPos = new AtomicInteger(0);
             columnList.stream().filter(col -> table.equals(col.getString("tableName")))
                     .forEach(col -> {
-                        TapField tapField = makeTapField(col);
-                        if (null == tapField) return;
-                        tapField.setPos(keyPos.incrementAndGet());
-                        tapField.setPrimaryKey(primaryKey.contains(tapField.getName()));
-                        tapField.setPrimaryKeyPos(primaryKey.indexOf(tapField.getName()) + 1);
-                        if (tapField.getPrimaryKey()) {
-                            tapField.setNullable(false);
+                        try {
+                            TapField tapField = makeTapField(col);
+                            if (null == tapField) return;
+                            tapField.setPos(keyPos.incrementAndGet());
+                            tapField.setPrimaryKey(primaryKey.contains(tapField.getName()));
+                            tapField.setPrimaryKeyPos(primaryKey.indexOf(tapField.getName()) + 1);
+                            if (tapField.getPrimaryKey()) {
+                                tapField.setNullable(false);
+                            }
+                            tapTable.add(tapField);
+                        } catch (Exception e) {
+                            throw new CoreException("Construct field failed, table: " + table + ", column: " + col + ", error: " + e.getMessage());
                         }
-                        tapTable.add(tapField);
                     });
             tapTable.setIndexList(tapIndexList);
             tapTable.setConstraintList(makeForeignKey(fkList, table));
@@ -205,6 +223,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             }
         }
         try {
+            tapLogger.info("Create table sqls: {}", sqlList);
             jdbcContext.batchExecute(sqlList);
         } catch (SQLException e) {
             exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
@@ -226,9 +245,13 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected void createDoubleActiveTempTable() throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList("_tap_double_active")).size() < 1) {
-            jdbcContext.execute(String.format("create table %s (%s int primary key, %s varchar(50))", getSchemaAndTable("_tap_double_active"),
-                    commonDbConfig.getEscapeChar() + "c1" + commonDbConfig.getEscapeChar(), commonDbConfig.getEscapeChar() + "c2" + commonDbConfig.getEscapeChar()));
-            jdbcContext.execute(String.format("insert into %s values (1, null)", getSchemaAndTable("_tap_double_active")));
+            String create = String.format("create table %s (%s int primary key, %s varchar(50))", getSchemaAndTable("_tap_double_active"),
+                    commonDbConfig.getEscapeChar() + "c1" + commonDbConfig.getEscapeChar(), commonDbConfig.getEscapeChar() + "c2" + commonDbConfig.getEscapeChar());
+            tapLogger.info("Create double active table sql: {}", create);
+            jdbcContext.execute(create);
+            String insert = String.format("insert into %s values (1, null)", getSchemaAndTable("_tap_double_active"));
+            tapLogger.info("Insert one initial record into double active table: {}", insert);
+            jdbcContext.execute(insert);
         }
     }
 
@@ -374,7 +397,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected void clearTable(TapConnectorContext tapConnectorContext, TapClearTableEvent tapClearTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapClearTableEvent.getTableId())).size() >= 1) {
-            jdbcContext.execute("truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId()));
+            String clear = "truncate table " + getSchemaAndTable(tapClearTableEvent.getTableId());
+            tapLogger.info("Truncate table sql: {}", clear);
+            jdbcContext.execute(clear);
         } else {
             tapLogger.warn("Table {} not exists, skip truncate", tapClearTableEvent.getTableId());
         }
@@ -382,7 +407,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected void dropTable(TapConnectorContext tapConnectorContext, TapDropTableEvent tapDropTableEvent) throws SQLException {
         if (jdbcContext.queryAllTables(Collections.singletonList(tapDropTableEvent.getTableId())).size() >= 1) {
-            jdbcContext.execute("drop table " + getSchemaAndTable(tapDropTableEvent.getTableId()));
+            String drop = "drop table " + getSchemaAndTable(tapDropTableEvent.getTableId());
+            tapLogger.info("Drop table sql: {}", drop);
+            jdbcContext.execute(drop);
         } else {
             tapLogger.warn("Table {} not exists, skip drop", tapDropTableEvent.getTableId());
         }
@@ -435,6 +462,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             indexList.stream().filter(i -> !i.isPrimary()).forEach(i -> {
                 String sql = getCreateIndexSql(tapTable, i);
                 try {
+                    tapLogger.info("Create index sql: {}", sql);
                     jdbcContext.execute(sql);
                 } catch (SQLException e) {
                     if (!exceptionCollector.violateIndexName(e)) {
@@ -445,6 +473,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                         i.setName(rename);
                         sql = getCreateIndexSql(tapTable, i);
                         try {
+                            tapLogger.info("Recreate index sql: {}", sql);
                             jdbcContext.execute(sql);
                         } catch (SQLException e1) {
                             tapLogger.warn("Create index failed again {}, please execute it manually [{}]", e1.getMessage(), sql);
@@ -456,6 +485,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             if (EmptyKit.isNotEmpty(afterUniqueAutoIncrementSql)) {
                 afterUniqueAutoIncrementSql.forEach(sql -> {
                     try {
+                        tapLogger.info("Update auto-increment column sql: {}", sql);
                         jdbcContext.execute(sql);
                     } catch (SQLException e) {
                         tapLogger.warn("Failed to update auto-increment column {}, please execute it manually [{}]", e.getMessage(), sql);
@@ -478,6 +508,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                 String sql = getCreateConstraintSql(tapTable, c);
                 if (create) {
                     try {
+                        tapLogger.info("Create constraint sql: {}", sql);
                         jdbcContext.execute(sql);
                     } catch (Exception e) {
                         if (!exceptionCollector.violateConstraintName(e)) {
@@ -487,6 +518,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                             c.setName(rename);
                             sql = getCreateConstraintSql(tapTable, c);
                             try {
+                                tapLogger.info("Recreate constraint sql: {}", sql);
                                 jdbcContext.execute(sql);
                             } catch (Exception e1) {
                                 exception.addException(c, sql, e1);
@@ -575,6 +607,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             return;
         }
         try {
+            tapLogger.info("Field ddl sqls: {}", sqlList);
             jdbcContext.batchExecute(sqlList);
         } catch (SQLException e) {
             exceptionCollector.collectWritePrivileges("execute sqls: " + TapSimplify.toJson(sqlList), Collections.emptyList(), e);
@@ -843,8 +876,8 @@ public abstract class CommonDbConnector extends ConnectorBase {
         jdbcContext.query(sql, resultSet -> {
             FilterResults filterResults = new FilterResults();
             try {
+                List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
                 while (resultSet.next()) {
-                    List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
                     DataMap dataMap = DbKit.getRowFromResultSet(resultSet, allColumn);
                     processDataMap(dataMap, table);
                     filterResults.add(dataMap);
@@ -871,9 +904,37 @@ public abstract class CommonDbConnector extends ConnectorBase {
         jdbcContext.query(sql, resultSet -> {
             FilterResults filterResults = new FilterResults();
             try {
+                List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
                 while (resultSet.next()) {
-                    List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
                     allColumn.remove("ROWNO_");
+                    DataMap dataMap = DbKit.getRowFromResultSet(resultSet, allColumn);
+                    processDataMap(dataMap, table);
+                    filterResults.add(dataMap);
+                    if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
+                        consumer.accept(filterResults);
+                        filterResults = new FilterResults();
+                    }
+                }
+            } catch (SQLException e) {
+                exceptionCollector.collectTerminateByServer(e);
+                exceptionCollector.collectReadPrivileges("batchReadWithoutOffset", Collections.emptyList(), e);
+                exceptionCollector.revealException(e);
+                throw e;
+            }
+            if (EmptyKit.isNotEmpty(filterResults.getResults())) {
+                consumer.accept(filterResults);
+            }
+        });
+    }
+
+    //for SQL Server type (with OFFSET-FETCH)
+    protected void queryByAdvanceFilterWithOffsetFetch(TapConnectorContext connectorContext, TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) throws Throwable {
+        String sql = commonSqlMaker.buildSelectClause(table, filter, false) + getSchemaAndTable(table.getId()) + commonSqlMaker.buildSqlByAdvanceFilterWithOffsetFetch(filter);
+        jdbcContext.query(sql, resultSet -> {
+            FilterResults filterResults = new FilterResults();
+            try {
+                List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
+                while (resultSet.next()) {
                     DataMap dataMap = DbKit.getRowFromResultSet(resultSet, allColumn);
                     processDataMap(dataMap, table);
                     filterResults.add(dataMap);
@@ -899,26 +960,26 @@ public abstract class CommonDbConnector extends ConnectorBase {
     }
 
     protected void commitTransaction(TapConnectorContext connectorContext) throws Throwable {
-        for (Map.Entry<String, Connection> entry : transactionConnectionMap.entrySet()) {
+        transactionConnectionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
             try {
-                entry.getValue().commit();
-            } finally {
-                EmptyKit.closeQuietly(entry.getValue());
+                v.commit();
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
             }
-        }
-        transactionConnectionMap.clear();
+            return null;
+        });
         isTransaction = false;
     }
 
     protected void rollbackTransaction(TapConnectorContext connectorContext) throws Throwable {
-        for (Map.Entry<String, Connection> entry : transactionConnectionMap.entrySet()) {
+        transactionConnectionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
             try {
-                entry.getValue().rollback();
-            } finally {
-                EmptyKit.closeQuietly(entry.getValue());
+                v.rollback();
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
             }
-        }
-        transactionConnectionMap.clear();
+            return null;
+        });
         isTransaction = false;
     }
 
@@ -934,6 +995,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         char escapeChar = commonDbConfig.getEscapeChar();
         List<String> dropIndexesSql = new ArrayList<>();
         deleteIndexEvent.getIndexNames().forEach(idx -> dropIndexesSql.add("drop index " + getSchemaAndTable(table.getId()) + "." + escapeChar + idx + escapeChar));
+        if (EmptyKit.isNotEmpty(dropIndexesSql)) {
+            tapLogger.info("Drop indexes sql: {}", dropIndexesSql);
+        }
         jdbcContext.batchExecute(dropIndexesSql);
     }
 
@@ -941,6 +1005,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         char escapeChar = commonDbConfig.getEscapeChar();
         List<String> dropConstraintsSql = new ArrayList<>();
         tapDropConstraintEvent.getConstraintList().forEach(fk -> dropConstraintsSql.add("alter table " + getSchemaAndTable(table.getId()) + " drop constraint " + escapeChar + fk.getName() + escapeChar));
+        if (EmptyKit.isNotEmpty(dropConstraintsSql)) {
+            tapLogger.info("Drop constraints sql: {}", dropConstraintsSql);
+        }
         jdbcContext.batchExecute(dropConstraintsSql);
     }
 
@@ -978,8 +1045,326 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return count.get();
     }
 
+    protected long countByAdvanceFilterWithOffsetFetch(TapConnectorContext connectorContext, TapTable tapTable, TapAdvanceFilter tapAdvanceFilter) throws SQLException {
+        AtomicLong count = new AtomicLong(0);
+        String sql = "SELECT COUNT(1) FROM " + getSchemaAndTable(tapTable.getId()) + commonSqlMaker.buildSqlByAdvanceFilterWithOffsetFetch(tapAdvanceFilter);
+        jdbcContext.query(sql, resultSet -> {
+            if (resultSet.next()) {
+                count.set(resultSet.getLong(1));
+            }
+        });
+        return count.get();
+    }
+
     protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
         return new ArrayList<>();
+    }
+
+    protected void executeCommand(TapConnectorContext connectorContext, TapExecuteCommand executeCommand, Consumer<ExecuteResult> consumer) throws Throwable {
+        try {
+            Map<String, Object> params = executeCommand.getParams();
+            String command = executeCommand.getCommand();
+            switch (command) {
+                case "execute":
+                case "executeQuery":
+                    String sql = (String) params.get("sql");
+                    int batchSize = params.get("batchSize") != null ? (int) params.get("batchSize") : 1000;
+                    execute(sql, list -> consumer.accept(new ExecuteResult().result(list)), batchSize);
+                    break;
+                case "call":
+                    String funcName = (String) params.get("funcName");
+                    List<Map<String, Object>> callParams = (List<Map<String, Object>>) params.get("params");
+                    consumer.accept(call(funcName, callParams));
+                    break;
+                default:
+                    consumer.accept(new ExecuteResult<>().error(new IllegalArgumentException("Not supported command: " + command)));
+            }
+        } catch (Throwable e) {
+            consumer.accept(new ExecuteResult<>().error(e));
+        }
+    }
+
+    protected void execute(String sql, Consumer<Object> consumer, int batchSize) throws Throwable {
+        try (Connection connection = jdbcContext.getConnection();
+             Statement sqlStatement = connection.createStatement()) {
+            boolean hasResult = sqlStatement.execute(sql);
+            if (!hasResult) {
+                consumer.accept((long) sqlStatement.getUpdateCount());
+            } else {
+                while (isAlive() && hasResult) {
+                    try (ResultSet resultSet = sqlStatement.getResultSet()) {
+                        List<Map<String, Object>> list = TapSimplify.list();
+                        String[] columnNames = DbKit.getColumnsFromResultSet(resultSet).toArray(new String[0]);
+                        Integer[] columnTypes = DbKit.getColumnTypeNumbersFromResultSet(resultSet).toArray(new Integer[0]);
+                        while (isAlive() && resultSet.next()) {
+                            DataMap dataMap = filterData(resultSet, columnNames, columnTypes);
+                            list.add(dataMap);
+                            if (list.size() == batchSize) {
+                                consumer.accept(list);
+                                list = TapSimplify.list();
+                            }
+                        }
+                        if (EmptyKit.isNotEmpty(list)) {
+                            consumer.accept(list);
+                        }
+                    }
+                    hasResult = sqlStatement.getMoreResults();
+                }
+            }
+            connection.commit();
+        }
+    }
+
+    public ExecuteResult<?> call(String funcName, List<Map<String, Object>> params) {
+        if (EmptyKit.isEmpty(funcName)) {
+            throw new IllegalArgumentException("procedure/function is null");
+        }
+
+        ExecuteResult<?> executeResult;
+
+        funcName = funcName.trim();
+        List<JdbcProcedureParam> outList = new ArrayList<>();
+
+        try (Connection connection = jdbcContext.getConnection();
+             CallableStatement callableStatement = createCallableStatement(funcName, params, connection, outList)) {
+            if (callableStatement == null) {
+                throw new RuntimeException("create callableStatement error");
+            }
+            boolean hasResult = callableStatement.execute();
+            executeResult = new ExecuteResult<>().result(getOutputFromCall(outList, callableStatement, hasResult));
+        } catch (Throwable e) {
+            executeResult = new ExecuteResult<>().error(new RuntimeException(String.format("Execute database procedure/function %s error, message: %s", funcName, e.getMessage()), e));
+        }
+        return executeResult;
+    }
+
+    private CallableStatement createCallableStatement(String funcName, List<Map<String, Object>> params, Connection connection, List<JdbcProcedureParam> outList) throws Exception {
+
+        CallableStatement callableStatement;
+        boolean hasReturn = hasReturn(params);
+        StringBuilder callStr = new StringBuilder();
+
+        if (hasReturn) {
+            callStr.append("{?=call ")
+                    .append(funcName)
+                    .append("(")
+                    .append(StringKit.copyString("?", params.size() - 1, ","))
+                    .append(")}");
+        } else {
+            callStr.append("{call ")
+                    .append(funcName)
+                    .append("(")
+                    .append(StringKit.copyString("?", params.size(), ","))
+                    .append(")}");
+        }
+
+        callableStatement = connection.prepareCall(callStr.toString());
+
+        if (callableStatement == null) {
+            return null;
+        }
+
+        setCallableStatementParameters(callableStatement, params, outList, connection);
+
+        return callableStatement;
+    }
+
+    protected void setCallableStatementParameters(CallableStatement callableStatement, List<Map<String, Object>> params, List<JdbcProcedureParam> outList, Connection connection) throws Exception {
+        if (callableStatement == null || params == null || params.size() == 0) {
+            return;
+        }
+        for (int paramIndex = 1; paramIndex <= params.size(); paramIndex++) {
+            Map<String, Object> paramMap = params.get(paramIndex - 1);
+            if (paramMap == null || paramMap.isEmpty()) {
+                throw new Exception("parameter wrong: cannot be empty");
+            }
+
+            Object objMode = paramMap.get(PARAMS_MODE);
+            String mode = objMode == null ? MODE_IN : objMode.toString();
+            Object value = paramMap.get(PARAMS_VALUE);
+            Object objName = paramMap.get(PARAMS_NAME);
+            String name = objName == null ? "param" + paramIndex : objName.toString().trim();
+            Object objType = paramMap.get(PARAMS_TYPE);
+            String type = objType == null ? "" : objType.toString();
+            int jdbcType = type2JdbcType(type);
+
+            if (mode.equalsIgnoreCase(MODE_IN) || mode.equalsIgnoreCase(MODE_IN_OUT)) {
+                //帮我完善不同的setObject
+                if (jdbcType == Types.TIMESTAMP) {
+                    String dateFormat = DateUtil.determineDateFormat(value.toString());
+                    if (dateFormat != null) {
+                        Instant instant = LocalDateTime.parse(value.toString(), DateTimeFormatter.ofPattern(dateFormat))
+                                .atZone(ZoneId.systemDefault())
+                                .toInstant();
+                        callableStatement.setTimestamp(paramIndex, Timestamp.from(instant));
+                    } else {
+                        callableStatement.setTimestamp(paramIndex, Timestamp.valueOf(value.toString()));
+                    }
+                } else {
+                    callableStatement.setObject(paramIndex, value, jdbcType);
+                }
+            }
+
+            if (mode.equalsIgnoreCase(MODE_OUT) || mode.equalsIgnoreCase(MODE_IN_OUT)) {
+                JdbcProcedureParam jdbcProcedureParam = new JdbcProcedureParam(name, paramIndex, type, jdbcType);
+                outList.add(jdbcProcedureParam);
+                callableStatement.registerOutParameter(paramIndex, jdbcType);
+            }
+            if (mode.equalsIgnoreCase(MODE_RETURN)) {
+                JdbcProcedureParam jdbcProcedureParam = new JdbcProcedureParam(name, 1, type, jdbcType);
+                outList.add(jdbcProcedureParam);
+                callableStatement.registerOutParameter(1, jdbcType);
+            }
+        }
+    }
+
+    private Object getOutputFromCall(List<JdbcProcedureParam> outList, CallableStatement callableStatement, boolean hasResult) throws Exception {
+        if (outList == null || callableStatement == null) {
+            return null;
+        }
+        Map<String, Object> res = new HashMap<>();
+        int resIndex = 1;
+        while (hasResult) {
+            try (ResultSet resultSet = callableStatement.getResultSet()) {
+                List<Map<String, Object>> list = TapSimplify.list();
+                String[] columnNames = DbKit.getColumnsFromResultSet(resultSet).toArray(new String[0]);
+                Integer[] columnTypes = DbKit.getColumnTypeNumbersFromResultSet(resultSet).toArray(new Integer[0]);
+                while (resultSet.next()) {
+                    DataMap dataMap = filterData(resultSet, columnNames, columnTypes);
+                    list.add(dataMap);
+                }
+                res.put("result" + resIndex++, list);
+            }
+            hasResult = callableStatement.getMoreResults();
+        }
+        for (JdbcProcedureParam param : outList) {
+            String name = param.getName();
+            int paramIndex = param.getIndex();
+            String type = param.getType();
+
+            try {
+                Object out = callableStatement.getObject(paramIndex);
+                out = handleValue(out);
+                res.put(name, out);
+            } catch (SQLException e) {
+                throw new Exception("get value {param name: " + name + ", param index: " + paramIndex + ", param type: " + type + "} error: " + e.getMessage());
+            }
+        }
+
+        return res;
+    }
+
+    private Object handleValue(Object value) {
+        try {
+            if (value instanceof Clob) {
+                value = DbKit.clobToString((Clob) value);
+            } else if (value instanceof Blob) {
+                value = DbKit.blobToBytes((Blob) value);
+            } else if (value instanceof byte[]) {
+                value = new String((byte[]) value);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("handle value error: " + e.getMessage());
+        }
+
+        return value;
+    }
+
+    private boolean hasReturn(List<Map<String, Object>> params) {
+        if (params == null) {
+            return false;
+        }
+        return params.stream().anyMatch(v -> v != null && MODE_RETURN.equalsIgnoreCase(String.valueOf(v.get(PARAMS_MODE))));
+    }
+
+    protected int type2JdbcType(String type) {
+
+        switch (type) {
+            case "varchar":
+            case "varchar2":
+            case "nvarchar2":
+            case "tinytext":
+            case "mediumtext":
+            case "longtext":
+            case "text":
+                return Types.VARCHAR;
+            case "char":
+            case "nchar":
+            case "enum":
+            case "set":
+                return Types.CHAR;
+            case "long":
+                return Types.LONGVARCHAR;
+            case "number":
+            case "numeric":
+                return Types.NUMERIC;
+            case "raw":
+            case "varbinary":
+                return Types.VARBINARY;
+            case "longraw":
+                return Types.LONGVARBINARY;
+            case "date":
+            case "time":
+            case "datetime":
+            case "timestamp":
+                return Types.TIMESTAMP;
+            case "clob":
+                return Types.CLOB;
+            case "bit":
+                return Types.BIT;
+            case "tinyint":
+            case "bool":
+            case "boolean":
+                return Types.TINYINT;
+            case "smallint":
+                return Types.SMALLINT;
+            case "mediumint":
+            case "int":
+            case "integer":
+                return Types.INTEGER;
+            case "bigint":
+                return Types.BIGINT;
+            case "float":
+                return Types.FLOAT;
+            case "double":
+                return Types.DOUBLE;
+            case "decimal":
+                return Types.DECIMAL;
+            case "binary":
+                return Types.BINARY;
+            case "tinyblob":
+            case "mediumblob":
+            case "longblob":
+            case "blob":
+                return Types.BLOB;
+            default:
+                throw new IllegalArgumentException("Not supported:" + type);
+        }
+    }
+
+    protected void filterColumns(TapTable tapTable, List<String> columns, List<Integer> columnTypes) {
+        Iterator<String> columnIterator = columns.iterator();
+        Iterator<Integer> typeIterator = columnTypes.iterator();
+        while (columnIterator.hasNext() && typeIterator.hasNext()) {
+            String column = columnIterator.next();
+            typeIterator.next();
+            if (!tapTable.getNameFieldMap().containsKey(column)) {
+                columnIterator.remove();
+                typeIterator.remove();
+            }
+        }
+    }
+
+    protected DataMap filterData(ResultSet resultSet, String[] fields, Integer[] columnTypes) throws SQLException {
+        DataMap dataMap = new DataMap();
+        for (int i = 0; i < fields.length; i++) {
+            dataMap.put(fields[i], filterData(resultSet.getObject(fields[i]), columnTypes[i]));
+        }
+        return dataMap;
+    }
+
+    protected Object filterData(Object obj, int columnType) {
+        return obj;
     }
 
     protected void executeCommandV2(TapConnectionContext connectionContext, String sqlType, String sql, Consumer<List<DataMap>> consumer) throws Throwable {

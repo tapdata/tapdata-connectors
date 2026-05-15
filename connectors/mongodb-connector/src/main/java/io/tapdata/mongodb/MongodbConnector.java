@@ -65,6 +65,8 @@ import java.io.Closeable;
 import java.math.BigDecimal;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -93,6 +95,7 @@ public class MongodbConnector extends ConnectorBase {
 	protected MongodbConfig mongoConfig;
 	protected MongoClient mongoClient;
 	protected MongoDatabase mongoDatabase;
+	protected int mongoVersion;
 	private MongoBatchOffset batchOffset = null;
 	protected MongodbExceptionCollector exceptionCollector;
 	private MongodbStreamReader mongodbStreamReader;
@@ -105,6 +108,7 @@ public class MongodbConnector extends ConnectorBase {
 	private final MongodbExecuteCommandFunction mongodbExecuteCommandFunction = new MongodbExecuteCommandFunction();
 	protected ThreadPoolExecutor sourceRunner;
 	protected Future<?> sourceRunnerFuture;
+	protected Map<String, ClientSession> transactionSessionMap = new ConcurrentHashMap<>();
 	/**
 	 * Reference：<a href="https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml">error_codes.yml</a>
 	 * connectors/mongodb-connector/src/main/resources/mongo-error-codes.yml
@@ -158,6 +162,7 @@ public class MongodbConnector extends ConnectorBase {
 	public void discoverSchema(TapConnectionContext connectionContext, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) throws Throwable {
 		final String database = mongoConfig.getDatabase();
 		final String version = MongodbUtil.getVersionString(mongoClient, database);
+		Map<String, String> collectionTypeMap = getCollectionTypeMap(tables);
 		MongoIterable<String> collectionNames = mongoDatabase.listCollectionNames();
 		TableFieldTypesGenerator tableFieldTypesGenerator = InstanceFactory.instance(TableFieldTypesGenerator.class);
 		this.stringTypeValueMap = new HashMap<>();
@@ -191,8 +196,14 @@ public class MongodbConnector extends ConnectorBase {
 					//List all the tables under the database.
 					List<TapTable> list = list();
 					nameList.forEach(name -> {
+						String collectionType = collectionTypeMap.get(name);
+						boolean isView = isViewCollection(collectionType);
 						TapTable table = new TapTable(name);
-						table.defaultPrimaryKeys("_id");
+						if(!isView){
+							table.defaultPrimaryKeys("_id");
+						}else{
+							table.setType(collectionType);
+						}
 						MongoCollection<?> collection = documentMap.get(name);
 						try {
 							MongodbUtil.sampleDataRow(collection, sampleSizeBatchSize, (dataRow) -> {
@@ -211,46 +222,48 @@ public class MongodbConnector extends ConnectorBase {
 									MongodbUtil.maskUriPassword(mongoConfig.getUri()), name, e.getMessage(), e);
 						}
 
-						collection.listIndexes().forEach((index) -> {
-							Object keyObj = index.get("key");
-							if (!(keyObj instanceof Document)) {
-								return;
-							}
-							Document keys = (Document) keyObj;
+						if(!isView){
+							collection.listIndexes().forEach((index) -> {
+								Object keyObj = index.get("key");
+								if (!(keyObj instanceof Document)) {
+									return;
+								}
+								Document keys = (Document) keyObj;
 
-							TapIndex tapIndex = new TapIndex();
-							// TODO: TapIndex struct not enough to represent index, so we encode index info in name
-							tapIndex.setName("__t__" + ((Document) index).toJson());
+								TapIndex tapIndex = new TapIndex();
+								// TODO: TapIndex struct not enough to represent index, so we encode index info in name
+								tapIndex.setName("__t__" + ((Document) index).toJson());
 
-							AtomicBoolean haveOid = new AtomicBoolean();
-							AtomicInteger keyCounter = new AtomicInteger();
-							keys.forEach((k, v) -> {
-								TapIndexField tapIndexField = new TapIndexField().name(k);
-								if (v instanceof Integer) {
-									tapIndexField.fieldAsc(v.equals(1));
+								AtomicBoolean haveOid = new AtomicBoolean();
+								AtomicInteger keyCounter = new AtomicInteger();
+								keys.forEach((k, v) -> {
+									TapIndexField tapIndexField = new TapIndexField().name(k);
+									if (v instanceof Integer) {
+										tapIndexField.fieldAsc(v.equals(1));
+									} else {
+										tapIndexField.fieldAsc(true);
+									}
+									tapIndex.indexField(tapIndexField);
+									if (k.equals("_id")) {
+										haveOid.set(true);
+									}
+									keyCounter.incrementAndGet();
+								});
+								if (Boolean.TRUE.equals(index.get(UNIQUE_KEY))) {
+									tapIndex.unique(true);
 								} else {
-									tapIndexField.fieldAsc(true);
+									tapIndex.unique(false);
 								}
-								tapIndex.indexField(tapIndexField);
-								if (k.equals("_id")) {
-									haveOid.set(true);
+								if (haveOid.get() && keyCounter.get() == 1) {
+									tapIndex.unique(true);
 								}
-								keyCounter.incrementAndGet();
+								TapLogger.info(TAG, "MongodbConnector discoverSchema table: {} index {}", name, ((Document) index).toJson());
+								table.add(tapIndex);
 							});
-							if (Boolean.TRUE.equals(index.get(UNIQUE_KEY))) {
-								tapIndex.unique(true);
-							} else {
-								tapIndex.unique(false);
-							}
-							if (haveOid.get() && keyCounter.get() == 1) {
-								tapIndex.unique(true);
-							}
-							TapLogger.info(TAG, "MongodbConnector discoverSchema table: {} index {}", name, ((Document) index).toJson());
-							table.add(tapIndex);
-						});
-						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
-						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
-						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table);
+							Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
+							MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
+							MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table);
+						}
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -274,8 +287,14 @@ public class MongodbConnector extends ConnectorBase {
 					//List all the tables under the database.
 					List<TapTable> list = list();
 					nameList.forEach(name -> {
+						String collectionType = collectionTypeMap.get(name);
+						boolean isView = isViewCollection(collectionType);
 						TapTable table = new TapTable(name);
-						table.defaultPrimaryKeys(singletonList(COLLECTION_ID_FIELD));
+						if(!isView){
+							table.defaultPrimaryKeys(singletonList(COLLECTION_ID_FIELD));
+						}else{
+							table.setType(collectionType);
+						}
 						// save collection info which include capped info
 						try (MongoCursor<BsonDocument> cursor = documentMap.get(name).find().iterator()) {
 							while (cursor.hasNext()) {
@@ -288,9 +307,11 @@ public class MongodbConnector extends ConnectorBase {
 								break;
 							}
 						}
-						Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
-						MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
-						MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table);
+						if(!isView){
+							Map<String, Object> sharkedKeys = MongodbUtil.getCollectionSharkedKeys(mongoClient, database, name);
+							MongoShardUtil.saveCollectionStats(table, MongodbUtil.getCollectionStatus(mongoClient, database, name), sharkedKeys);
+							MongodbUtil.getTimeSeriesCollectionStatus(mongoClient, database, name,table);
+						}
 						if (!Objects.isNull(table.getNameFieldMap()) && !table.getNameFieldMap().isEmpty()) {
 							list.add(table);
 						}
@@ -513,7 +534,14 @@ public class MongodbConnector extends ConnectorBase {
 			Symbol symbol = (Symbol) value;
 			return new TapStringValue(symbol.getSymbol());
 		});
-
+		codecRegistry.registerToTapValue(BsonTimestamp.class, (value, tapType) -> {
+			BsonTimestamp bsonTimestamp = (BsonTimestamp) value;
+			return new TapDateTimeValue(new DateTime(Instant.ofEpochMilli(bsonTimestamp.getTime()).atZone(ZoneOffset.UTC)));
+		});
+		codecRegistry.registerToTapValue(BsonRegularExpression.class, (value, tapType) -> {
+			BsonRegularExpression bsonRegularExpression = (BsonRegularExpression) value;
+			return new TapStringValue("/" + bsonRegularExpression.getPattern() + "/" + bsonRegularExpression.getOptions());
+		});
 		//TapTimeValue, TapDateTimeValue and TapDateValue's value is DateTime, need convert into Date object.
 		codecRegistry.registerFromTapValue(TapTimeValue.class, "DATE_TIME", tapTimeValue -> tapTimeValue.getValue().toDate());
 		codecRegistry.registerFromTapValue(TapDateTimeValue.class, "DATE_TIME", tapDateTimeValue -> tapDateTimeValue.getValue().toDate());
@@ -563,6 +591,9 @@ public class MongodbConnector extends ConnectorBase {
 		connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
 		connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
 		connectorFunctions.supportQueryIndexes(this::queryIndexes);
+		connectorFunctions.supportTransactionBeginFunction(this::beginTransaction);
+		connectorFunctions.supportTransactionCommitFunction(this::commitTransaction);
+		connectorFunctions.supportTransactionRollbackFunction(this::rollbackTransaction);
 	}
 
 	protected void queryIndexes(TapConnectorContext tapConnectorContext, TapTable tapTable, Consumer<List<TapIndex>> listConsumer) {
@@ -656,11 +687,45 @@ public class MongodbConnector extends ConnectorBase {
 		//created capped collection
 		createCappedCollection(table, isShardCollection, log);
 
+		// open pre image
+		openPreImage(table, nodeConfig);
+
 		return createTableOptions;
+	}
+
+	private void openPreImage(TapTable table, DataMap nodeConfig) {
+		if (null == nodeConfig) {
+			return;
+		}
+		Object preImage4SinkObj = nodeConfig.get("preImage4Sink");
+		if (!Boolean.TRUE.equals(preImage4SinkObj)) {
+			return;
+		}
+		// changeStreamPreAndPostImages is only supported in MongoDB 6.0+
+		if (mongoVersion < 6) {
+			return;
+		}
+		String tableName = table.getId();
+		BsonDocument bsonDocument = new BsonDocument();
+		bsonDocument.put("collMod", new BsonString(tableName));
+		bsonDocument.put("changeStreamPreAndPostImages", new BsonDocument("enabled", new BsonBoolean(true)));
+		try {
+			mongoDatabase.runCommand(bsonDocument);
+		} catch (MongoException e) {
+			if (e.getCode() == 26) {
+				// Collection doesn't exist (NamespaceNotFound), create it and try again
+				mongoDatabase.createCollection(tableName);
+				mongoDatabase.runCommand(bsonDocument);
+			} else {
+				throw e;
+			}
+		}
 	}
 
 	protected void createIndex(TapTable table, List<TapIndex> indexList, Log log) {
 		if (null == indexList || indexList.isEmpty()) return;
+		List<IndexModel> indexModels = new ArrayList<>();
+		MongoCollection<Document> targetCollection = mongoDatabase.getCollection(table.getName());
 		indexList.forEach(index -> {
 			log.info("find index: {}" + index.getName());
 			try {
@@ -674,7 +739,6 @@ public class MongodbConnector extends ConnectorBase {
 				if (dIndex == null) {
 					return;
 				}
-				MongoCollection<Document> targetCollection = mongoDatabase.getCollection(table.getName());
 				IndexOptions indexOptions = new IndexOptions();
 				// 1. 遍历 index, 生成 indexOptions
 				dIndex.forEach((key, value) -> {
@@ -716,17 +780,37 @@ public class MongodbConnector extends ConnectorBase {
 						indexOptions.version((Integer) value);
 					}
 				});
-                try {
-                    targetCollection.createIndex(dIndex.get("key", Document.class), indexOptions);
-                } catch (Exception ignored) {
-                    log.warn("create index failed 1: " + ignored.getMessage());
-                }
+				indexModels.add(new IndexModel(dIndex.get("key", Document.class), indexOptions));
             } catch (Exception ignored) {
                 log.warn("create index failed 2: " + ignored.getMessage());
                 // TODO: 如果解码失败, 说明这个索引不应该在这里创建, 忽略掉
             }
 		});
+		try {
+			if (isCommitQuorumSupported()) {
+				CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
+				targetCollection.createIndexes(indexModels, createIndexOptions);
+			} else {
+				targetCollection.createIndexes(indexModels);
+			}
+		} catch (Exception e) {
+			log.warn("create index failed 1: " + e.getMessage());
+		}
 	}
+
+		// Check if MongoDB server supports commitQuorum option (available since MongoDB 4.4)
+		private boolean isCommitQuorumSupported() {
+			try {
+				String versionStr = MongodbUtil.getVersionString(mongoClient, mongoConfig.getDatabase());
+				String[] parts = versionStr.split("\\.");
+				int major = Integer.parseInt(parts[0]);
+				int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+				return major > 4 || (major == 4 && minor >= 4);
+			} catch (Throwable ignored) {
+				return false;
+			}
+		}
+
 
 	private boolean createSharedCollection(DataMap nodeConfig, TapTable table, Collection<String> pks, String database, Log log) {
 		Object shardCollection = nodeConfig.get("shardCollection");
@@ -1177,6 +1261,8 @@ public class MongodbConnector extends ConnectorBase {
 		final List<TapIndex> indexList = tapCreateIndexEvent.getIndexList();
 		if (CollectionUtils.isNotEmpty(indexList)) {
 			Document keys = new Document();
+			List<IndexModel> indexModels = new ArrayList<>();
+			MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
 			for (TapIndex tapIndex : indexList) {
 				try {
 					final List<TapIndexField> indexFields = tapIndex.getIndexFields();
@@ -1184,7 +1270,6 @@ public class MongodbConnector extends ConnectorBase {
 						if (indexFields.size() == 1 && "_id".equals(indexFields.stream().findFirst().get().getName())) {
 							continue;
 						}
-						final MongoCollection<Document> collection = mongoDatabase.getCollection(table.getName());
 						keys = new Document();
 						for (TapIndexField indexField : indexFields) {
 							keys.append(indexField.getName(), 1);
@@ -1197,7 +1282,13 @@ public class MongodbConnector extends ConnectorBase {
 						if (EmptyKit.isNotEmpty(tapIndex.getName())) {
 							indexOptions.name(tapIndex.getName());
 						}
-						collection.createIndex(keys, indexOptions);
+						indexModels.add(new IndexModel(keys, indexOptions));
+					}
+					if (isCommitQuorumSupported()) {
+						CreateIndexOptions createIndexOptions = new CreateIndexOptions().commitQuorum(CreateIndexCommitQuorum.MAJORITY);
+						collection.createIndexes(indexModels, createIndexOptions);
+					} else {
+						collection.createIndexes(indexModels);
 					}
 				} catch (Exception e) {
 					if (e instanceof MongoCommandException) {
@@ -1242,8 +1333,9 @@ public class MongodbConnector extends ConnectorBase {
 			throw new RuntimeException("load mongo config failed from connection config");
 		}
 		if (mongoClient == null) {
-			mongoClient = MongodbUtil.createMongoClient(mongoConfig);
+			mongoClient = MongodbUtil.createMongoClient(mongoConfig,false);
 			mongoDatabase = mongoClient.getDatabase(mongoConfig.getDatabase());
+			mongoVersion = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
 		}
 		mongodbExecuteCommandFunction.setLog(connectionContext.getLog());
 	}
@@ -1308,7 +1400,7 @@ public class MongodbConnector extends ConnectorBase {
 		String threadName = Thread.currentThread().getName();
 		MongodbWriter mongodbWriter = writerMap.get(threadName);
 		if (EmptyKit.isNull(mongodbWriter)) {
-			mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap);
+			mongodbWriter = new MongodbWriter(connectorContext.getGlobalStateMap(), mongoConfig, mongoClient, connectorContext.getLog(), shardKeyMap, transactionSessionMap);
 			writerMap.put(threadName, mongodbWriter);
 		}
 		try {
@@ -1659,8 +1751,7 @@ public class MongodbConnector extends ConnectorBase {
 	protected MongodbStreamReader createStreamReader() {
 		MongodbStreamReader mongodbStreamReader = null;
 		try {
-			final int version = MongodbUtil.getVersion(mongoClient, mongoConfig.getDatabase());
-			if (version >= 4) {
+			if (mongoVersion >= 4) {
 				mongodbStreamReader = new MongodbV4StreamReader().setPreImage(mongoConfig.getPreImage());
 			} else {
 				mongodbStreamReader = new MongodbV3StreamReader();
@@ -1678,13 +1769,9 @@ public class MongodbConnector extends ConnectorBase {
 		String database = mongoConfig.getDatabase();
 		List<String> temp = new ArrayList<>();
 		for (Document collection : mongoClient.getDatabase(database).listCollections()) {
-			// 去除视图表
-			if (collection.get("type", "").equals("view")) {
-				continue;
-			}
 			String tableName = collection.getString("name");
 			// 如果 tableName 以 "system." 开头, 则跳过(这是一些系统表)
-			if (tableName.startsWith("system.")) {
+			if (StringUtils.isBlank(tableName) || tableName.startsWith("system.")) {
 				continue;
 			}
 			temp.add(tableName);
@@ -1754,16 +1841,30 @@ public class MongodbConnector extends ConnectorBase {
 			MongoDatabase mongoDatabase = mongoClient.getDatabase(database);
 			Document collStats = mongoDatabase.runCommand(new Document("collStats", tableName));
 			tableInfo = TableInfo.create();
-			BigDecimal numOfRows = new BigDecimal(String.valueOf(collStats.get("count")));
-			tableInfo.setNumOfRows(numOfRows.longValue());
-			BigDecimal storageSize = new BigDecimal(String.valueOf(collStats.get("size")));
-			tableInfo.setStorageSize(storageSize.longValue());
+			tableInfo.setNumOfRows(getLongFromDocument(collStats, "count"));
+			tableInfo.setStorageSize(getLongFromDocument(collStats, "size"));
+			tableInfo.setAvgObjSize(getLongFromDocument(collStats, "avgObjSize"));
 		}catch (Exception e){
 			exceptionCollector.collectTerminateByServer(e);
 			exceptionCollector.collectReadPrivileges(e);
 			throw e;
 		}
 		return tableInfo;
+	}
+
+	private long getLongFromDocument(Document document, String key) {
+		Object value = document.get(key);
+		if (value == null) {
+			return 0L;
+		}
+		if (value instanceof Number) {
+			return ((Number) value).longValue();
+		}
+		try {
+			return new BigDecimal(String.valueOf(value)).longValue();
+		} catch (NumberFormatException e) {
+			return 0L;
+		}
 	}
 
 	protected void errorHandle(Throwable throwable, TapConnectorContext connectorContext) {
@@ -1799,5 +1900,62 @@ public class MongodbConnector extends ConnectorBase {
 		Integer integer = config.getInteger("mongodbLoadSchemaSampleSize");
 		if (null == integer || integer <= 0) return SAMPLE_SIZE_BATCH_SIZE;
 		return integer;
+	}
+
+	protected void beginTransaction(TapConnectorContext connectorContext) {
+		transactionSessionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+			v.abortTransaction();
+			v.close();
+			v = mongoClient.startSession();
+			v.startTransaction();
+			return v;
+		});
+		transactionSessionMap.computeIfAbsent(Thread.currentThread().getName(), key -> {
+			ClientSession v = mongoClient.startSession();
+			v.startTransaction();
+			return v;
+		});
+	}
+
+	protected void commitTransaction(TapConnectorContext connectorContext) {
+		transactionSessionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+			v.commitTransaction();
+			v.close();
+			return null;
+		});
+	}
+
+	protected void rollbackTransaction(TapConnectorContext connectorContext) {
+		transactionSessionMap.computeIfPresent(Thread.currentThread().getName(), (k, v) -> {
+			v.abortTransaction();
+			v.close();
+			return null;
+		});
+	}
+
+	private Map<String, String> getCollectionTypeMap(List<String> tables) {
+		Map<String, String> collectionTypeMap = new HashMap<>();
+		ListCollectionsIterable<Document> listCollections;
+		if (CollectionUtils.isNotEmpty(tables)) {
+			listCollections = mongoDatabase.listCollections().filter(new Document("name", new Document("$in", tables)));
+		} else {
+			listCollections = mongoDatabase.listCollections();
+		}
+		for (Document collection : listCollections) {
+			String name = collection.getString("name");
+			if (StringUtils.isBlank(name) || name.startsWith("system.")) {
+				continue;
+			}
+			String type = collection.getString("type");
+			if (StringUtils.isBlank(type)) {
+				type = "collection";
+			}
+			collectionTypeMap.put(name, type);
+		}
+		return collectionTypeMap;
+	}
+
+	private boolean isViewCollection(String collectionType) {
+		return "view".equalsIgnoreCase(collectionType);
 	}
 }

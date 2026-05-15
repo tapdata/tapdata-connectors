@@ -1,6 +1,7 @@
 {
   "properties": {
     "name": "GaussDB(DWS)",
+    "realName": "GaussDB(DWS)",
     "icon": "icons/dws.png",
     "doc" : "${doc}",
     "id": "dws",

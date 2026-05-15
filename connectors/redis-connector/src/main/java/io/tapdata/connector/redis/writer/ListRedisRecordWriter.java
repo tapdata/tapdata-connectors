@@ -24,8 +24,8 @@ public class ListRedisRecordWriter extends AbstractRedisRecordWriter {
     @Override
     protected void handleInsertEvent(TapInsertRecordEvent event, RedisPipeline pipelined) {
         Map<String, Object> value = event.getAfter();
-        String strValue = ValueDataEnum.JSON.getType().equals(redisConfig.getValueData()) ? getJsonValue(value) : getTextValue(value);
-        if (!redisConfig.getOneKey()) {
+        String strValue = ValueDataEnum.JSON.getType().equals(valueData) ? getJsonValue(value) : getTextValue(value);
+        if (!oneKey) {
             keyName = getRedisKey(value);
         }
         pipelined.rpush(keyName, strValue);
@@ -34,7 +34,7 @@ public class ListRedisRecordWriter extends AbstractRedisRecordWriter {
     @Override
     protected void handleUpdateEvent(TapUpdateRecordEvent event, RedisPipeline pipelined) throws Exception {
         Map<String, Object> afterValue = event.getAfter();
-        String newValue = ValueDataEnum.JSON.getType().equals(redisConfig.getValueData()) ? getJsonValue(afterValue) : getTextValue(afterValue);
+        String newValue = ValueDataEnum.JSON.getType().equals(valueData) ? getJsonValue(afterValue) : getTextValue(afterValue);
         if (null == event.getBefore()) {
             throw new Exception("Redis update failed  reason before data is null");
         }
@@ -45,8 +45,8 @@ public class ListRedisRecordWriter extends AbstractRedisRecordWriter {
         } else {
             keyFieldList.forEach(v -> lastBefore.put(v, afterValue.get(v)));
         }
-        String oldValue = ValueDataEnum.JSON.getType().equals(redisConfig.getValueData()) ? getJsonValue(lastBefore) : getTextValue(lastBefore);
-        if (!redisConfig.getOneKey()) {
+        String oldValue = ValueDataEnum.JSON.getType().equals(valueData) ? getJsonValue(lastBefore) : getTextValue(lastBefore);
+        if (!oneKey) {
             String newKeyName = getRedisKey(afterValue);
             String oldKeyName = getRedisKey(lastBefore);
             if (newKeyName.equals(oldKeyName)) {
@@ -63,8 +63,8 @@ public class ListRedisRecordWriter extends AbstractRedisRecordWriter {
     @Override
     protected void handleDeleteEvent(TapDeleteRecordEvent event, RedisPipeline pipelined) {
         Map<String, Object> value = event.getBefore();
-        String oldValue = ValueDataEnum.JSON.getType().equals(redisConfig.getValueData()) ? getJsonValue(value) : getTextValue(value);
-        if (redisConfig.getOneKey()) {
+        String oldValue = ValueDataEnum.JSON.getType().equals(valueData) ? getJsonValue(value) : getTextValue(value);
+        if (oneKey) {
             pipelined.lrem(keyName, 1, oldValue);
         } else {
             pipelined.lrem(getRedisKey(value), 1, oldValue);

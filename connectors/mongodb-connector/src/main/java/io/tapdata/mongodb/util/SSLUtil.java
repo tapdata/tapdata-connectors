@@ -2,6 +2,12 @@ package io.tapdata.mongodb.util;
 
 import io.tapdata.kit.EmptyKit;
 import org.apache.commons.collections4.CollectionUtils;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+import org.bouncycastle.openssl.jcajce.JceOpenSSLPKCS8DecryptorProviderBuilder;
+import org.bouncycastle.operator.InputDecryptorProvider;
+import org.bouncycastle.pkcs.PKCS8EncryptedPrivateKeyInfo;
 
 import javax.net.ssl.*;
 import javax.xml.bind.DatatypeConverter;
@@ -90,7 +96,7 @@ public class SSLUtil {
     final KeyStore keystore = KeyStore.getInstance("JKS");
     keystore.load(null);
     // Import private key
-    final PrivateKey key = createPrivateKey(privateKey);
+    final PrivateKey key = createPrivateKey(privateKey, password);
     keystore.setKeyEntry("", key, password.toCharArray(), x509Certificates);
     return keystore;
   }
@@ -198,10 +204,49 @@ public class SSLUtil {
     return b.toString();
   }
 
+  @Deprecated
   private static PrivateKey createPrivateKey(String privateKey) throws Exception {
+    return createPrivateKey(privateKey, null);
+  }
 
-    final byte[] bytes = DatatypeConverter.parseBase64Binary(privateKey);
-    return generatePrivateKeyFromDER(bytes);
+  protected static PrivateKey createPrivateKey(String privateKey, String password) throws Exception {
+    final byte[] keyBytes = DatatypeConverter.parseBase64Binary(privateKey);
+
+    if (password != null && !password.isEmpty()) {
+      java.security.Security.addProvider(
+              new org.bouncycastle.jce.provider.BouncyCastleProvider()
+      );
+      String pemContent = "-----BEGIN ENCRYPTED PRIVATE KEY-----\n"
+              + privateKey + "\n"
+              + "-----END ENCRYPTED PRIVATE KEY-----";
+
+      try (PEMParser pemParser = new PEMParser(new StringReader(pemContent))) {
+        Object object = pemParser.readObject();
+
+        if (object instanceof PKCS8EncryptedPrivateKeyInfo) {
+          PKCS8EncryptedPrivateKeyInfo encryptedInfo = (PKCS8EncryptedPrivateKeyInfo) object;
+
+          InputDecryptorProvider decryptorProvider =
+                  new JceOpenSSLPKCS8DecryptorProviderBuilder()
+                          .setProvider("BC")
+                          .build(password.toCharArray());
+
+          PrivateKeyInfo privateKeyInfo = encryptedInfo.decryptPrivateKeyInfo(decryptorProvider);
+
+          return new JcaPEMKeyConverter()
+                  .setProvider("BC")
+                  .getPrivateKey(privateKeyInfo);
+        } else if (object instanceof PrivateKeyInfo) {
+          return new JcaPEMKeyConverter()
+                  .setProvider("BC")
+                  .getPrivateKey((PrivateKeyInfo) object);
+        }
+      } catch (Exception e) {
+        throw new Exception("Failed to decrypt private key: " + e.getMessage(), e);
+      }
+    }
+
+    return generatePrivateKeyFromDER(keyBytes);
   }
 
   private static X509Certificate[] createCertificates(List<String> certificates) throws Exception {

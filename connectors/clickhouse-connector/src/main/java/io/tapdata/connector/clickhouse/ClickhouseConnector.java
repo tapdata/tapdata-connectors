@@ -13,7 +13,6 @@ import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapRecordEvent;
-import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapIndexField;
@@ -85,14 +84,26 @@ public class ClickhouseConnector extends CommonDbConnector {
 
     protected void initConnection(TapConnectionContext connectionContext) throws SQLException {
         clickhouseConfig = new ClickhouseConfig().load(connectionContext.getConnectionConfig());
-        isConnectorStarted(connectionContext, connectorContext -> clickhouseConfig.load(connectorContext.getNodeConfig()));
+        isConnectorStarted(connectionContext, connectorContext -> {
+            clickhouseConfig.load(connectorContext.getNodeConfig());
+            clickhouseConfig.setTableConfig(connectionContext.getTableNodeConfig());
+            firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
+            if (EmptyKit.isNull(firstConnectorId)) {
+                firstConnectorId = UUID.randomUUID().toString().replace("-", "");
+                connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
+            }
+        });
+        tapLogger = connectionContext.getLog();
+        if (clickhouseConfig.getFileLog()) {
+            tapLogger.info("Starting Jdbc Logging, connectorId: {}", firstConnectorId);
+            clickhouseConfig.startJdbcLog(firstConnectorId);
+        }
         clickhouseJdbcContext = new ClickhouseJdbcContext(clickhouseConfig);
         commonDbConfig = clickhouseConfig;
         jdbcContext = clickhouseJdbcContext;
         clickhouseVersion = clickhouseJdbcContext.queryVersion();
         dbTimeZone = TimeZone.getTimeZone(clickhouseJdbcContext.queryTimeZone());
         commonSqlMaker = new ClickhouseSqlMaker().withVersion(clickhouseVersion);
-        tapLogger = connectionContext.getLog();
         exceptionCollector = new ClickhouseExceptionCollector();
     }
 
@@ -248,6 +259,7 @@ public class ClickhouseConnector extends CommonDbConnector {
             sqlList = new ArrayList<>(sqlList);
         }
         sqlList.add("OPTIMIZE TABLE `" + clickhouseConfig.getDatabase() + "`.`" + tapFieldBaseEvent.getTableId() + "` FINAL");
+        tapLogger.info("Field ddl sqls: {}", sqlList);
         jdbcContext.batchExecute(sqlList);
     }
 
@@ -269,23 +281,41 @@ public class ClickhouseConnector extends CommonDbConnector {
 
         // primary key
         Collection<String> primaryKeys = tapTable.primaryKeys(true);
-        if (EmptyKit.isNotEmpty(primaryKeys)) {
-            sql.append(") ENGINE = ReplacingMergeTree");
-            if (clickhouseConfig.getMixFastWrite()) {
-                sql.append("(`version`)");
+        if (EmptyKit.isBlank(clickhouseConfig.getEngineExpr(tapTable.getId()))) {
+            if (EmptyKit.isNotEmpty(primaryKeys)) {
+                sql.append(") ENGINE = ReplacingMergeTree");
+                if (clickhouseConfig.getMixFastWrite(tapTable.getId())) {
+                    sql.append("(`version`)");
+                }
+                sql.append(" PRIMARY KEY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
+            } else {
+                sql.append(") ENGINE = MergeTree");
             }
-            sql.append(" PRIMARY KEY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
         } else {
-            sql.append(") ENGINE = MergeTree");
+            sql.append(") ENGINE = ").append(clickhouseConfig.getEngineExpr(tapTable.getId()));
+            if (clickhouseConfig.getSupportPk(tapTable.getId()) && EmptyKit.isNotEmpty(primaryKeys)) {
+                sql.append(" PRIMARY KEY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
+            }
         }
-
-        // sorting key
-        if (EmptyKit.isNotEmpty(primaryKeys)) {
-            sql.append(" ORDER BY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
+        if (EmptyKit.isNotBlank(clickhouseConfig.getPartitionExpr(tapTable.getId()))) {
+            sql.append(" PARTITION BY ").append(clickhouseConfig.getPartitionExpr(tapTable.getId()));
+        }
+        if (EmptyKit.isBlank(clickhouseConfig.getOrderExpr(tapTable.getId()))) {
+            if (EmptyKit.isNotEmpty(primaryKeys)) {
+                sql.append(" ORDER BY (").append(TapTableWriter.sqlQuota(",", primaryKeys)).append(")");
+            } else {
+                sql.append(" ORDER BY tuple()");
+            }
         } else {
-            sql.append(" ORDER BY tuple()");
+            sql.append(" ORDER BY ").append(clickhouseConfig.getOrderExpr(tapTable.getId()));
         }
-
+        if (EmptyKit.isNotEmpty(clickhouseConfig.getTableProperties(tapTable.getId()))) {
+            sql.append(" SETTINGS ");
+            for (Map<String, String> property : clickhouseConfig.getTableProperties(tapTable.getId())) {
+                sql.append(property.get("propKey")).append("=").append(property.get("propValue")).append(",");
+            }
+            sql.setLength(sql.length() - 1);
+        }
         if (clickhouseConfig.getMixFastWrite()) {
             sql.append(" TTL delete_time + INTERVAL 1 SECOND DELETE WHERE is_deleted = 1");
         }
@@ -293,7 +323,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         try {
             List<String> sqlList = TapSimplify.list();
             sqlList.add(sql.toString());
-            TapLogger.info("table :", "table -> {}", tapTable.getId());
+            tapLogger.info("Create table sqls: {}", sqlList);
             clickhouseJdbcContext.batchExecute(sqlList);
         } catch (Throwable e) {
             exceptionCollector.collectWritePrivileges("createTable", Collections.emptyList(), e);
@@ -369,6 +399,7 @@ public class ClickhouseConnector extends CommonDbConnector {
                                 (EmptyKit.isNotNull(i.getName()) ? "IF NOT EXISTS " + TapTableWriter.sqlQuota(i.getName()) : "") + " ON " + TapTableWriter.sqlQuota(".", clickhouseConfig.getDatabase(), tapTable.getId()) + "(" +
                                 i.getIndexFields().stream().map(f -> TapTableWriter.sqlQuota(f.getName()) + " " + (f.getFieldAsc() ? "ASC" : "DESC"))
                                         .collect(Collectors.joining(",")) + ')'));
+                tapLogger.info("Create index sql: {}", sqls);
             }
             clickhouseJdbcContext.batchExecute(sqls);
         } catch (Throwable e) {

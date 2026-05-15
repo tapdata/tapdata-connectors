@@ -30,12 +30,6 @@ public class FlinkSchemaMode extends AbsSchemaMode {
 	}
 
 	@Override
-	public void discoverSchema(IKafkaService kafkaService, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) {
-		// todo
-		throw new UnsupportedOperationException();
-	}
-
-	@Override
 	public TapEvent toTapEvent(ConsumerRecord<?, ?> consumerRecord) {
 		// todo
 		throw new UnsupportedOperationException();
@@ -51,7 +45,8 @@ public class FlinkSchemaMode extends AbsSchemaMode {
 			value.put("data", data);
 			value.put("op", "+I");
 			byte[] key = createKafkaKey(data, table);
-			producerRecords.add(new ProducerRecord<>(topic, key, value));
+			Integer partition = computePartition(key, kafkaService.getConfig().getNodePartitionSize());
+			producerRecords.add(new ProducerRecord<>(topic, partition, key, value));
 		} else if (tapEvent instanceof TapUpdateRecordEvent) {
 			Map<String, Object> before = ((TapUpdateRecordEvent) tapEvent).getBefore();
 			Map<String, Object> after = ((TapUpdateRecordEvent) tapEvent).getAfter();
@@ -60,20 +55,23 @@ public class FlinkSchemaMode extends AbsSchemaMode {
 				beforeValue.put("data", before);
 				beforeValue.put("op", "-U");
 				byte[] beforeKey = createKafkaKey(before, table);
-				producerRecords.add(new ProducerRecord<>(topic, beforeKey, beforeValue));
+				Integer partition = computePartition(beforeKey, kafkaService.getConfig().getNodePartitionSize());
+				producerRecords.add(new ProducerRecord<>(topic, partition, beforeKey, beforeValue));
 			}
 			Map<String, Object> afterValue = new HashMap<>();
 			afterValue.put("data", after);
 			afterValue.put("op", "+U");
 			byte[] afterKey = createKafkaKey(after, table);
-			producerRecords.add(new ProducerRecord<>(topic, afterKey, afterValue));
+			Integer partition = computePartition(afterKey, kafkaService.getConfig().getNodePartitionSize());
+			producerRecords.add(new ProducerRecord<>(topic, partition, afterKey, afterValue));
 		} else if (tapEvent instanceof TapDeleteRecordEvent) {
 			Map<String, Object> before = ((TapDeleteRecordEvent) tapEvent).getBefore();
 			Map<String, Object> value = new HashMap<>();
 			value.put("data", before);
 			value.put("op", "-D");
 			byte[] key = createKafkaKey(before, table);
-			producerRecords.add(new ProducerRecord<>(topic, key, value));
+			Integer partition = computePartition(key, kafkaService.getConfig().getNodePartitionSize());
+			producerRecords.add(new ProducerRecord<>(topic, partition, key, value));
 		}
 		return producerRecords;
 	}

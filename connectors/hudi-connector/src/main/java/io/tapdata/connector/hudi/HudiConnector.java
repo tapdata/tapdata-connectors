@@ -78,6 +78,7 @@ public class HudiConnector extends HiveConnector {
         hiveJdbcContext = hudiJdbcContext = new HudiJdbcContext(hudiConfig);
         commonDbConfig = hiveConfig;
         jdbcContext = hiveJdbcContext;
+        tapLogger = connectionContext.getLog();
         commonSqlMaker = new CommonSqlMaker('`');
     }
 
@@ -215,11 +216,13 @@ public class HudiConnector extends HiveConnector {
                 } else {
                     tableConfig = " ROW FORMAT DELIMITED FIELDS TERMINATED BY ','";
                 }
-                jdbcContext.execute(String.format(HudiJdbcContext.CREATE_TABLE_SQL,
+                String createSQL = String.format(HudiJdbcContext.CREATE_TABLE_SQL,
                         formatTable(database, tapTable.getId()),
                         commonSqlMaker.buildColumnDefinition(tapTable, true),
                         tableConfig
-                ));
+                );
+                tapLogger.info("Create table sql: {}", createSQL);
+                jdbcContext.execute(createSQL);
             }
         } catch (Exception e) {
             if (e instanceof SQLFeatureNotSupportedException) {

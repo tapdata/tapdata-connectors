@@ -2,8 +2,8 @@ package io.tapdata.kafka.service;
 
 import io.tapdata.connector.error.KafkaErrorCodes;
 import io.tapdata.connector.utils.AsyncBatchPusher;
-import io.tapdata.connector.utils.ErrorHelper;
 import io.tapdata.connector.utils.ConcurrentUtils;
+import io.tapdata.connector.utils.ErrorHelper;
 import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
@@ -20,6 +20,7 @@ import io.tapdata.exception.TapPdkTerminateByServerEx;
 import io.tapdata.exception.TapRuntimeException;
 import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
 import io.tapdata.kafka.*;
+import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.constants.ProducerRecordWrapper;
 import io.tapdata.kafka.data.KafkaOffset;
 import io.tapdata.kafka.data.KafkaTopicOffset;
@@ -35,10 +36,14 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
+import org.apache.kafka.common.errors.SerializationException;
 
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -76,7 +81,11 @@ public class KafkaService implements IKafkaService {
             thread.setName(String.format("%s-executor-%s", KafkaEnhancedConnector.PDK_ID, thread.getId()));
             return thread;
         });
-        this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
+        if (config.getConnectionSchemaRegister()) {
+            this.schemaModeService = AbsSchemaMode.create(KafkaSchemaMode.fromString("REGISTRY_" + config.getConnectionRegistrySchemaType()), this);
+        } else {
+            this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
+        }
     }
 
     @Override
@@ -193,14 +202,31 @@ public class KafkaService implements IKafkaService {
 
             // offset 设置
             KafkaTopicOffset endTopicOffsets;
-            List<Long> concurrentOffset;
+            KafkaTopicOffset startTopicOffsets;
             Queue<TapEntry<Integer, Long>> concurrentQueue = new ConcurrentLinkedQueue<>();
             try (KafkaConsumer<?, ?> kafkaConsumer = new KafkaConsumer<>(config.buildConsumerConfig(isEarliest))) {
                 Collection<TopicPartition> topicPartitions = getAdminService().getTopicPartitions(Collections.singleton(topic));
                 endTopicOffsets = KafkaBatchReadOffsetUtils.topicOffsetFromStateMap(topic, config, kafkaConsumer, topicPartitions);
-                concurrentOffset = (offset instanceof List) ? (List<Long>) offset : KafkaOffsetUtils.beginOffsets(kafkaConsumer, topicPartitions);
-                for (int i = 0; i < concurrentOffset.size(); i++) {
-                    concurrentQueue.add(new TapEntry<>(i, concurrentOffset.get(i)));
+
+                // Get start offsets - use KafkaTopicOffset instead of List to maintain partition number mapping
+                if (offset instanceof KafkaTopicOffset) {
+                    startTopicOffsets = (KafkaTopicOffset) offset;
+                } else if (offset instanceof List) {
+                    // Legacy support for List offset - convert to KafkaTopicOffset
+                    List<Long> offsetList = (List<Long>) offset;
+                    startTopicOffsets = new KafkaTopicOffset();
+                    for (int i = 0; i < offsetList.size(); i++) {
+                        startTopicOffsets.setOffset(i, offsetList.get(i));
+                    }
+                } else {
+                    // Get begin offsets from Kafka
+                    KafkaOffset kafkaOffset = KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, topicPartitions, isEarliest);
+                    startTopicOffsets = kafkaOffset.get(topic);
+                }
+
+                // Build concurrent queue with actual partition numbers
+                for (Map.Entry<Integer, Long> entry : startTopicOffsets.entrySet()) {
+                    concurrentQueue.add(new TapEntry<>(entry.getKey(), entry.getValue()));
                 }
             }
             List<TapEntry<String, Function<Object, Object>>> fieldTypeConverts = KafkaUtils.setFieldTypeConvert(table, new ArrayList<>());
@@ -220,27 +246,39 @@ public class KafkaService implements IKafkaService {
                 // 并发消费数据
                 ConcurrentUtils.runWithQueue(getExecutorService(), exception, executorGroup, concurrentQueue, concurrentSize, stopping::get, concurrentItem -> {
                     int partition = concurrentItem.getKey();
-                    Long endOffset = endTopicOffsets.get(concurrentItem.getKey());
+                    Long endOffset = endTopicOffsets.get(partition);
                     if (null == endOffset) {
-                        logger.warn("not found end offset with topic partition {}-{}", topic, concurrentItem.getKey());
+                        logger.warn("not found end offset with topic partition {}-{}", topic, partition);
                         return;
                     } else {
-                        logger.info("end offset with topic partition {}-{}", topic, concurrentItem.getKey());
+                        logger.info("end offset with topic partition {}-{}: start={}, end={}", topic, partition, concurrentItem.getValue(), endOffset);
                     }
 
                     Properties properties = config.buildConsumerConfig(isEarliest);
                     properties.put(ConsumerConfig.GROUP_ID_CONFIG, String.format("%s-%s", executorGroup, index.incrementAndGet()));
                     try (KafkaConsumer<Object, Object> kafkaConsumer = new KafkaConsumer<>(properties)) {
-                        TopicPartition topicPartition = new TopicPartition(topic, concurrentItem.getKey());
+                        TopicPartition topicPartition = new TopicPartition(topic, partition);
+
+                        // 如果没有数据，则跳过
+                        KafkaOffset currEndOffset = KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, List.of(topicPartition), true);
+                        if (Optional.of(currEndOffset)
+                            .map(m -> m.get(topic))
+                            .map(o -> o.get(partition))
+                            .map(l -> endOffset <= l)
+                            .orElse(true)
+                        ) {
+                            logger.warn("not found any data with topic partition {}-{}, earliest offset {}", topic, partition, currEndOffset);
+                            return;
+                        }
+
                         kafkaConsumer.assign(Collections.singleton(topicPartition));
                         kafkaConsumer.seek(topicPartition, concurrentItem.getValue());
 
-                        while (!stopping.get()) {
+                        while (!stopping.get() && null == exception.get()) {
                             ConsumerRecords<Object, Object> consumerRecords = kafkaConsumer.poll(timeout);
                             if (consumerRecords.isEmpty()) continue;
 
                             for (ConsumerRecord<Object, Object> consumerRecord : consumerRecords) {
-                                concurrentOffset.set(partition, consumerRecord.offset()); // offset 推进
                                 TapEvent event = schemaModeService.toTapEvent(consumerRecord);
                                 if (TapUnknownRecordEvent.TYPE == event.getType()) {
                                     TapUnknownRecordEvent unknownRecordEvent = (TapUnknownRecordEvent) event;
@@ -250,7 +288,10 @@ public class KafkaService implements IKafkaService {
                                 KafkaUtils.convertWithFieldType(fieldTypeConverts, event);
                                 batchPusher.add(consumerRecord, event);
 
-                                if (consumerRecord.offset() + 1 >= endOffset) return; // 全量完成
+                                if (consumerRecord.offset() + 1 >= endOffset) {
+                                    logger.info("Partition {}-{} batch read completed at offset {}", topic, partition, consumerRecord.offset());
+                                    return; // 全量完成
+                                }
                             }
                         }
                     }
@@ -307,24 +348,30 @@ public class KafkaService implements IKafkaService {
     public <K, V> void sampleValue(List<String> tables, Object offset, Predicate<ConsumerRecord<K, V>> callback) {
         boolean isEarliest = true;
         long batchMaxDelay = config.getNodeBatchMaxDelay();
-        Duration timeout = Duration.ofMillis(batchMaxDelay);
+        Duration timeout = Duration.ofMillis(Math.max(batchMaxDelay, 3000));
 
         try (KafkaConsumer<K, V> kafkaConsumer = new KafkaConsumer<>(config.buildDiscoverSchemaConfig(isEarliest))) {
-            // 设置断点信息
             Collection<TopicPartition> topicPartitions = getAdminService().getTopicPartitions(tables);
+            if (null == topicPartitions || topicPartitions.isEmpty()) return;
             kafkaConsumer.assign(topicPartitions);
             kafkaConsumer.seekToBeginning(topicPartitions);
 
-            ConsumerRecords<K, V> consumerRecords = kafkaConsumer.poll(timeout);
-            if (null == consumerRecords || consumerRecords.isEmpty()) return;
-
-            for (ConsumerRecord<K, V> consumerRecord : consumerRecords) {
-                if (!callback.test(consumerRecord)) {
-                    return;
+            long deadline = System.currentTimeMillis() + timeout.toMillis();
+            Duration pollOnce = Duration.ofMillis(1000);
+            while (System.currentTimeMillis() < deadline) {
+                ConsumerRecords<K, V> consumerRecords = kafkaConsumer.poll(pollOnce);
+                if (null == consumerRecords || consumerRecords.isEmpty()) continue;
+                for (ConsumerRecord<K, V> consumerRecord : consumerRecords) {
+                    if (!callback.test(consumerRecord)) {
+                        return;
+                    }
                 }
+                return;
             }
         } catch (InterruptedException | org.apache.kafka.common.errors.InterruptException e) {
             Thread.currentThread().interrupt();
+        } catch (SerializationException e) {
+            logger.warn(e.getMessage(), e);
         } catch (TapRuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -332,27 +379,46 @@ public class KafkaService implements IKafkaService {
         }
     }
 
+    private List<ProducerRecordWrapper> wrapProduceRecord(TapTable table, TapRecordEvent recordEvent, Collection<String> primaryKey) {
+        List<ProducerRecordWrapper> producerRecords = new ArrayList<>();
+        if (config.getSplitUpdatePk() && recordEvent instanceof TapUpdateRecordEvent updateRecordEvent) {
+            Map<String, Object> after = updateRecordEvent.getAfter();
+            Map<String, Object> before = updateRecordEvent.getBefore();
+            if (!primaryKey.isEmpty() && primaryKey.stream().anyMatch(v -> !Objects.equals(after.get(v), before.get(v)))) {
+                TapDeleteRecordEvent deleteRecordEvent = new TapDeleteRecordEvent();
+                updateRecordEvent.clone(deleteRecordEvent);
+                schemaModeService.fromTapEvent(table, deleteRecordEvent).forEach(record -> {
+                    producerRecords.add(new ProducerRecordWrapper(deleteRecordEvent, record));
+                });
+                TapInsertRecordEvent insertRecordEvent = new TapInsertRecordEvent();
+                updateRecordEvent.clone(insertRecordEvent);
+                schemaModeService.fromTapEvent(table, insertRecordEvent).forEach(record -> {
+                    producerRecords.add(new ProducerRecordWrapper(insertRecordEvent, record));
+                });
+                return producerRecords;
+            }
+        }
+        schemaModeService.fromTapEvent(table, recordEvent).forEach(record -> {
+            producerRecords.add(new ProducerRecordWrapper(recordEvent, record));
+        });
+        return producerRecords;
+    }
+
     @Override
-    public void writeRecord(List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) {
+    public void writeRecord(KafkaProducer<Object, Object> producer, List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) {
         AtomicLong insert = new AtomicLong(0);
         AtomicLong update = new AtomicLong(0);
         AtomicLong delete = new AtomicLong(0);
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
-
+        Collection<String> primaryKey = table.primaryKeys(true);
         List<ProducerRecordWrapper> producerRecords = new ArrayList<>();
         for (TapRecordEvent recordEvent : recordEvents) {
-            List<ProducerRecord<Object, Object>> fromTapEvents = schemaModeService.fromTapEvent(table, recordEvent);
-            if (null != fromTapEvents && !fromTapEvents.isEmpty()) {
-                for (ProducerRecord<Object, Object> fromTapEvent : fromTapEvents) {
-                    producerRecords.add(new ProducerRecordWrapper(recordEvent, fromTapEvent));
-                }
-            }
+            producerRecords.addAll(wrapProduceRecord(table, recordEvent, primaryKey));
         }
-
         CountDownLatch latch = new CountDownLatch(producerRecords.size());
         AtomicReference<RuntimeException> sendEx = new AtomicReference<>();
         for (ProducerRecordWrapper producerRecord : producerRecords) {
-            getProducer().send(producerRecord.getProducerRecord(), (metadata, exception) -> {
+            producer.send(producerRecord.getProducerRecord(), (metadata, exception) -> {
                 try {
                     TapRecordEvent recordEvent = producerRecord.getRecordEvent();
                     if (exception != null) {
@@ -388,6 +454,11 @@ public class KafkaService implements IKafkaService {
         } finally {
             consumer.accept(listResult.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get()));
         }
+    }
+
+    @Override
+    public void writeRecord(List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) {
+        writeRecord(getProducer(), recordEvents, table, consumer);
     }
 
     @Override
@@ -431,6 +502,9 @@ public class KafkaService implements IKafkaService {
         try {
             logger.info("Deleting topic '{}'...", topic);
             getAdminService().dropTopics(Collections.singleton(topic));
+            if (config.getConnectionSchemaRegister()) {
+                deleteTableSchemaRegistryInfo(topic);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
@@ -499,6 +573,76 @@ public class KafkaService implements IKafkaService {
             });
             consumer.accept(tapEvents, o);
         };
+    }
+
+    private void deleteTableSchemaRegistryInfo(String topic) {
+        List<String> registryUrls = new ArrayList<>();
+        for (String registryUrl : config.getConnectionSchemaRegisterUrl().split(",")) {
+            if (registryUrl != null) {
+                registryUrl = registryUrl.trim();
+                if (!registryUrl.isEmpty()) {
+                    registryUrls.add(registryUrl);
+                }
+            }
+        }
+        if (registryUrls.isEmpty()) {
+            logger.warn("Schema Registry is enabled but no registry url configured, skip deleting subjects for topic '{}'", topic);
+            return;
+        }
+
+        for (String subject : Arrays.asList(topic + "-key", topic + "-value")) {
+            boolean handled = false;
+            for (String registryUrl : registryUrls) {
+                try {
+                    int code = deleteSchemaRegistrySubject(registryUrl, subject, false);
+                    if (code == HttpURLConnection.HTTP_NOT_FOUND) {
+                        handled = true;
+                        break;
+                    }
+                    if (code >= 200 && code < 300) {
+                        int permanentCode = deleteSchemaRegistrySubject(registryUrl, subject, true);
+                        if (permanentCode != HttpURLConnection.HTTP_NOT_FOUND && (permanentCode < 200 || permanentCode >= 300)) {
+                            logger.warn("Delete schema registry subject '{}' permanently failed, url: {}, code: {}", subject, registryUrl, permanentCode);
+                        }
+                        handled = true;
+                        logger.info("Deleted schema registry subject '{}' for topic '{}'", subject, topic);
+                        break;
+                    }
+                    logger.warn("Delete schema registry subject '{}' failed, url: {}, code: {}", subject, registryUrl, code);
+                } catch (Exception e) {
+                    logger.warn("Delete schema registry subject '{}' failed, url: {}, error: {}", subject, registryUrl, e.getMessage());
+                }
+            }
+            if (!handled) {
+                logger.warn("Failed to delete schema registry subject '{}' for topic '{}' from all configured registry endpoints", subject, topic);
+            }
+        }
+    }
+
+    private int deleteSchemaRegistrySubject(String registryUrl, String subject, boolean permanent) throws Exception {
+        String baseUrl = registryUrl.endsWith("/") ? registryUrl.substring(0, registryUrl.length() - 1) : registryUrl;
+        String url = baseUrl + "/subjects/" + URLEncoder.encode(subject, StandardCharsets.UTF_8.name());
+        if (permanent) {
+            url += "?permanent=true";
+        }
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setRequestMethod("DELETE");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(10000);
+            connection.setDoInput(true);
+            if (config.getConnectionBasicAuth()) {
+                String auth = config.getConnectionAuthUserName() + ":" + config.getConnectionAuthPassword();
+                String encoded = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+                connection.setRequestProperty("Authorization", "Basic " + encoded);
+            }
+            return connection.getResponseCode();
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
     }
 
 }

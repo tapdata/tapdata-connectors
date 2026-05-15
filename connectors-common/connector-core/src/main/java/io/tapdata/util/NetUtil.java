@@ -3,8 +3,8 @@ package io.tapdata.util;
 import io.tapdata.kit.EmptyKit;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.Socket;
+import java.net.*;
+import java.util.Enumeration;
 
 /**
  * @author samuel
@@ -26,13 +26,13 @@ public class NetUtil {
      */
     public static void validateHostPortWithSocket(String host, int port, int timeoutMs) throws IOException, IllegalArgumentException {
         if (EmptyKit.isEmpty(host)) throw new IllegalArgumentException("Host cannot be empty");
-        if (port <= 0 || port >= 65536)
+        if (port < 0 || port >= 65536)
             throw new IllegalArgumentException("Port must greater than 0 and smaller then 65536");
         timeoutMs = timeoutMs <= 1000 ? DEFAULT_SOCKET_TIMEOUT_MS : timeoutMs;
-        try {
-            Socket s = new Socket();
-            s.connect(new InetSocketAddress(host, port), timeoutMs);
-            s.close();
+        try (Socket s = new Socket()) {
+            if (port > 0) {
+                s.connect(new InetSocketAddress(host, port), timeoutMs);
+            }
         } catch (IOException e) {
             throw new IOException("Unable connect to " + host + ":" + port + ", reason: " + e.getMessage(), e);
         }
@@ -40,5 +40,28 @@ public class NetUtil {
 
     public static void validateHostPortWithSocket(String host, int port) throws IOException, IllegalArgumentException {
         validateHostPortWithSocket(host, port, DEFAULT_SOCKET_TIMEOUT_MS);
+    }
+
+    public static String getLocalIP() {
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                NetworkInterface ni = interfaces.nextElement();
+                // 跳过回环接口、未启用或虚拟网卡
+                if (ni.isLoopback() || !ni.isUp() || ni.isVirtual()) continue;
+
+                Enumeration<InetAddress> addresses = ni.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    InetAddress addr = addresses.nextElement();
+                    // 只取 IPv4 地址，跳过 IPv6
+                    if (addr instanceof Inet4Address && !addr.isLoopbackAddress()) {
+                        return addr.getHostAddress();
+                    }
+                }
+            }
+            return InetAddress.getLocalHost().getHostAddress();
+        } catch (Exception e) {
+            return "127.0.0.1";
+        }
     }
 }

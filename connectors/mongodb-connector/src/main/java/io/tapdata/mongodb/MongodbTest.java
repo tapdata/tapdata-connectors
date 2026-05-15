@@ -206,7 +206,7 @@ public class MongodbTest extends CommonDbTest {
         MongoDatabase mongoDatabase = mongoClient.getDatabase(mongodbConfig.getDatabase());
         Document connectionStatus = mongoDatabase.runCommand(new Document("connectionStatus", 1).append("showPrivileges", 1));
         if (!validateReadOrWriteDatabase(connectionStatus, mongodbConfig.getDatabase(), READ_WRITE_PRIVILEGE_ACTIONS)) {
-            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestItemException(new TapCodeException(MongodbErrorCode.WRITE_PRIVILEGES_MISSING, "Missing write privileges")), TestItem.RESULT_FAILED));
+            consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestItemException(new TapCodeException(MongodbErrorCode.WRITE_PRIVILEGES_MISSING, "Missing write privileges")), TestItem.RESULT_SUCCESSFULLY_WITH_WARN));
             return false;
         }
         Document isMaster = mongoDatabase.runCommand(new Document("isMaster", 1));

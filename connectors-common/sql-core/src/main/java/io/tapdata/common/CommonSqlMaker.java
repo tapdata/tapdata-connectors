@@ -268,7 +268,7 @@ public class CommonSqlMaker {
 
     public void buildOrderClause(StringBuilder builder, TapAdvanceFilter filter) {
         if (EmptyKit.isNotEmpty(filter.getSortOnList())) {
-            builder.append("ORDER BY ");
+            builder.append(" ORDER BY ");
             builder.append(filter.getSortOnList().stream().map(v -> v.toString(String.valueOf(escapeChar))).collect(Collectors.joining(", "))).append(' ');
         }
     }
@@ -276,10 +276,10 @@ public class CommonSqlMaker {
 
     public void buildLimitOffsetClause(StringBuilder builder, TapAdvanceFilter filter) {
         if (EmptyKit.isNotNull(filter.getLimit())) {
-            builder.append("LIMIT ").append(filter.getLimit()).append(' ');
+            builder.append(" LIMIT ").append(filter.getLimit()).append(' ');
         }
         if (EmptyKit.isNotNull(filter.getSkip())) {
-            builder.append("OFFSET ").append(filter.getSkip()).append(' ');
+            builder.append(" OFFSET ").append(filter.getSkip()).append(' ');
         }
     }
 
@@ -312,6 +312,33 @@ public class CommonSqlMaker {
                 skip = filter.getSkip();
             }
             builder.append(escapeChar).append("ROWNO_").append(escapeChar).append(" <= ").append(filter.getLimit() + skip).append(' ');
+        }
+    }
+
+    /**
+     * build subSql after where for advance query using OFFSET-FETCH syntax
+     *
+     * @param filter condition of advance query
+     * @return where substring
+     */
+    public String buildSqlByAdvanceFilterWithOffsetFetch(TapAdvanceFilter filter) {
+        StringBuilder builder = new StringBuilder();
+        buildWhereClause(builder, filter);
+        buildOrderClause(builder, filter);
+        buildOffsetFetchClause(builder, filter);
+        return builder.toString();
+    }
+
+    public void buildOffsetFetchClause(StringBuilder builder, TapAdvanceFilter filter) {
+        if (EmptyKit.isNotNull(filter.getSkip())) {
+            builder.append(" OFFSET ").append(filter.getSkip()).append(" ROWS ");
+        } else if (EmptyKit.isNotNull(filter.getLimit())) {
+            // FETCH requires OFFSET, so add OFFSET 0 if only LIMIT is specified
+            builder.append(" OFFSET 0 ROWS ");
+        }
+
+        if (EmptyKit.isNotNull(filter.getLimit())) {
+            builder.append(" FETCH FIRST ").append(filter.getLimit()).append(" ROWS ONLY ");
         }
     }
 

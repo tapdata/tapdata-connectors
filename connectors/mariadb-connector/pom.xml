@@ -16,7 +16,7 @@
         <hikari.version>4.0.3</hikari.version>
         <debezium.version>1.5.4.Final</debezium.version>
         <jsqlparser.version>4.4</jsqlparser.version>
-        <tapdata.pdk.api.version>2.0.0-SNAPSHOT</tapdata.pdk.api.version>
+        <tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
 
     <dependencies>
@@ -216,6 +216,25 @@
                         <goals>
                             <goal>report</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>add-source</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>src/main/overwrite/</source>
+                            </sources>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

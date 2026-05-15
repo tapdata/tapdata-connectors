@@ -96,6 +96,16 @@ public class DbKit {
         return columnTypeNames;
     }
 
+    public static List<Integer> getColumnTypeNumbersFromResultSet(ResultSet resultSet) throws SQLException {
+        //get all column typeNames
+        List<Integer> columnTypeNumbers = new ArrayList<>();
+        ResultSetMetaData resultSetMetaData = resultSet.getMetaData();
+        for (int i = 1; i <= resultSetMetaData.getColumnCount(); i++) {
+            columnTypeNumbers.add(resultSetMetaData.getColumnType(i));
+        }
+        return columnTypeNumbers;
+    }
+
     public static List<Object> getDataArrayByColumnName(ResultSet resultSet, String columnName) throws SQLException {
         List<Object> list = TapSimplify.list();
         while (resultSet.next()) {

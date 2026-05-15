@@ -70,12 +70,14 @@
 		<module>vastbase-connector</module>
 		<module>highgo-connector</module>
 		<module>file-stream-connector</module>
+		<module>paimon-connector</module>
+		<module>snowflake-connector</module>
 	</modules>
 	<properties>
 		<connector.file.name>${project.artifactId}-v${project.version}</connector.file.name>
 		<java.version>8</java.version>
-		<tapdata.pdk.runner.version>2.0-SNAPSHOT</tapdata.pdk.runner.version>
-		<tapdata.pdk.api.version>2.0.0-SNAPSHOT</tapdata.pdk.api.version>
+		<tapdata.pdk.runner.version>2.5-SNAPSHOT</tapdata.pdk.runner.version>
+		<tapdata.pdk.api.version>2.0.5-SNAPSHOT</tapdata.pdk.api.version>
 		<tapdata.pdk.connector.core.version>1.0-SNAPSHOT</tapdata.pdk.connector.core.version>
 		<junit.jupiter.version>5.8.1</junit.jupiter.version>
 		<junit.platform.version>1.8.1</junit.platform.version>
@@ -138,6 +140,11 @@
 			<dependency>
 				<groupId>io.tapdata</groupId>
 				<artifactId>tapdata-pdk-runner</artifactId>
+				<version>${tapdata.pdk.runner.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.tapdata</groupId>
+				<artifactId>tapdata-common</artifactId>
 				<version>${tapdata.pdk.runner.version}</version>
 			</dependency>
 			<dependency>
@@ -270,6 +277,28 @@
 		</pluginManagement>
     </build>
 	<repositories>
+		<repository>
+			<id>nexus-releases</id>
+			<name>nexus-maven-release</name>
+			<url>https://nexus.tapdata.net/repository/maven-releases/</url>
+			<releases>
+				<enabled>true</enabled>
+			</releases>
+			<snapshots>
+				<enabled>false</enabled>
+			</snapshots>
+		</repository>
+		<repository>
+			<id>nexus-snapshots</id>
+			<name>nexus-maven-snapshot</name>
+			<url>https://nexus.tapdata.net/repository/maven-snapshots/</url>
+			<releases>
+				<enabled>false</enabled>
+			</releases>
+			<snapshots>
+				<enabled>true</enabled>
+			</snapshots>
+		</repository>
 		<repository>
 			<id>tapdata-tapdata-maven</id>
 			<name>maven</name>
