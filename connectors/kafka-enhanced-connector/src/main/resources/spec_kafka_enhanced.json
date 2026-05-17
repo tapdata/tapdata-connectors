@@ -883,6 +883,75 @@
             ]
           }
         },
+        "compatibility": {
+          "type": "void",
+          "title": "${compatibility}",
+          "x-component": "FormGrid",
+          "x-component-props": {
+            "minColumns": [
+              2
+            ]
+          },
+          "x-index": 65,
+          "x-reactions": {
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]!=='source' && $deps[1].length}}"
+              }
+            },
+            "dependencies": [
+              "__TAPDATA.connection_type",
+              "$inputs"
+            ]
+          },
+          "properties": {
+            "compatibilityMode": {
+              "type": "string",
+              "title": "${compatibilityMode}",
+              "x-decorator": "FormItem",
+              "x-component": "Select",
+              "default": "NONE",
+              "enum": [
+                {"label": "${none}", "value": "NONE"},
+                {"label": "${backward}", "value": "BACKWARD"},
+                {"label": "${forward}", "value": "FORWARD"},
+                {"label": "${full}", "value": "FULL"}
+              ],
+              "x-index": 10,
+              "x-reactions": {
+                "fulfill": {
+                  "state": {
+                    "visible": "{{$deps[0]!=='source' && $deps[1].length}}"
+                  }
+                },
+                "dependencies": [
+                  "__TAPDATA.connection_type",
+                  "$inputs"
+                ]
+              }
+            },
+            "transitive": {
+              "type": "boolean",
+              "title": "${transitive}",
+              "default": false,
+              "x-index": 20,
+              "x-decorator": "FormItem",
+              "x-component": "Switch",
+              "x-reactions": {
+                "fulfill": {
+                  "state": {
+                    "visible": "{{$deps[0]!=='source' && $deps[1].length && $deps[2]!=='NONE'}}"
+                  }
+                },
+                "dependencies": [
+                  "__TAPDATA.connection_type",
+                  "$inputs",
+                  ".compatibilityMode"
+                ]
+              }
+            }
+          }
+        },
         "processScript": {
           "type": "string",
           "required": false,
@@ -1019,6 +1088,13 @@
       "extParamsTypeProducer": "Production configuration",
       "combinePushTopic": "Combine Push Topic",
       "combinePushTopicTip": "Control the topic of kafka data push, supports the following wildcard characters, dynamic styling\n - {db_name}: Source database name\n - {schema_name}: Source schema name\n - {table_name}: Table name",
+      "compatibility": "Schema Compatibility",
+      "compatibilityMode": "Compatibility Mode",
+      "none": "None",
+      "backward": "backward",
+      "forward": "forward",
+      "full": "full",
+      "transitive": "transitive",
       "applyDefault": "Apply default value",
       "applyDefaultTooltip": "When the switch is turned on, the default value is applied to the target. If there are unadapted functions or expressions, it may cause an error"
     },
@@ -1103,6 +1179,13 @@
       "extParamsTypeProducer": "生产配置",
       "combinePushTopic": "推送Topic",
       "combinePushTopicTip": "控制kafka数据推送的topic，支持以下通配符，动态拼接\n - {db_name}: 源端库名\n - {schema_name}: 源端模式名称\n - {table_name}: 表名",
+      "compatibility": "Schema兼容",
+      "compatibilityMode": "兼容模式",
+      "none": "无",
+      "backward": "向后兼容（默认）",
+      "forward": "向前兼容",
+      "full": "全兼容",
+      "transitive": "传递兼容",
       "applyDefault": "应用默认值",
       "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错"
     },
@@ -1187,6 +1270,13 @@
       "extParamsTypeProducer": "生產配置",
       "combinePushTopic": "推送Topic",
       "combinePushTopicTip": "控制kafka數據推送的topic，支持以下通配符，動態拼接\n - {db_name}: 源端庫名\n - {schema_name}: 源端模式名稱\n - {table_name}: 表名",
+      "compatibility": "Schema兼容",
+      "compatibilityMode": "兼容模式",
+      "none": "無",
+      "backward": "向后兼容（默认）",
+      "forward": "向前兼容",
+      "full": "全兼容",
+      "transitive": "传递兼容",
       "applyDefault": "應用默認值",
       "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯"
     }

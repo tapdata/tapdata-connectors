@@ -173,6 +173,14 @@ public class KafkaConfig extends BasicConfig implements
         return connectionConfigGet("basicAuth", Boolean.FALSE);
     }
 
+    public String getNodeCompatibilityMode() {
+        return nodeConfigGet("compatibilityMode", "NONE");
+    }
+
+    public Boolean getNodeTransitive() {
+        return nodeConfigGet("transitive", false);
+    }
+
     // ---------- 生成配置 ----------
 
     private Properties buildProperties(String type) {

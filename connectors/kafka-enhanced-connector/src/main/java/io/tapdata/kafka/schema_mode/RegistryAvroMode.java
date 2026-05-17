@@ -1,19 +1,13 @@
 package io.tapdata.kafka.schema_mode;
 
 import io.confluent.kafka.schemaregistry.avro.AvroSchema;
-import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.SchemaMetadata;
-import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
 import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.ddl.entity.ValueChange;
-import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
-import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
-import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
-import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
-import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
+import io.tapdata.entity.event.ddl.table.*;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -53,7 +47,6 @@ public class RegistryAvroMode extends AbsSchemaMode {
     private final Map<String, Schema.Field> fieldCache = new ConcurrentHashMap<>();
     // 每个 topic 最近一次见到的 Avro Schema 引用；命中时（==）走快速路径，跳过任何 schema diff 计算
     private final Map<String, Schema> lastSchemaPerTopic = new ConcurrentHashMap<>();
-    private volatile SchemaRegistryClient schemaRegistryClient;
 
     public RegistryAvroMode(IKafkaService kafkaService) {
         super(KafkaSchemaMode.REGISTRY_AVRO, kafkaService);
@@ -794,7 +787,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
             // 合并 Registry 中已登记的历史 alias 链 + 本次事件的直接 rename，确保 A -> B -> C 不丢失
             Map<String, Set<String>> aliasMap = mergeAliasHistory(subject, immediateRenames, evolvedTable);
             Schema avroSchema = buildAvroSchemaFromTable(evolvedTable, aliasMap);
-            int id = getSchemaRegistryClient().register(subject, new AvroSchema(avroSchema));
+            int id = kafkaService.getSchemaRegistryClient().register(subject, new AvroSchema(avroSchema));
             tapLogger.info("Registered avro schema for subject '{}' (id={}) by ddl '{}'", subject, id, ddlEvent.getClass().getSimpleName());
         } catch (Exception e) {
             throw new RuntimeException(String.format("Register avro schema failed for subject '%s' (event %s): %s",
@@ -818,7 +811,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
     private Map<String, Set<String>> mergeAliasHistory(String subject, Map<String, String> immediateRenames, TapTable evolvedTable) {
         Map<String, Set<String>> aliasMap = new HashMap<>();
         try {
-            SchemaMetadata meta = getSchemaRegistryClient().getLatestSchemaMetadata(subject);
+            SchemaMetadata meta = kafkaService.getSchemaRegistryClient().getLatestSchemaMetadata(subject);
             if (meta != null && StringUtils.isNotBlank(meta.getSchema())) {
                 Schema previous = new Schema.Parser().parse(meta.getSchema());
                 Map<String, TapField> evolvedFields = evolvedTable.getNameFieldMap();
@@ -972,37 +965,6 @@ public class RegistryAvroMode extends AbsSchemaMode {
             }
         }
         // TapNewFieldEvent: 新字段无既有缓存，按需重建即可
-    }
-
-    private SchemaRegistryClient getSchemaRegistryClient() {
-        SchemaRegistryClient client = schemaRegistryClient;
-        if (client != null) {
-            return client;
-        }
-        synchronized (this) {
-            if (schemaRegistryClient != null) {
-                return schemaRegistryClient;
-            }
-            String raw = kafkaService.getConfig().getConnectionSchemaRegisterUrl();
-            if (StringUtils.isBlank(raw)) {
-                throw new IllegalStateException("schema registry url is not configured");
-            }
-            List<String> urls = new ArrayList<>();
-            for (String u : raw.split(",")) {
-                String t = u.trim();
-                if (t.isEmpty()) continue;
-                urls.add(t.startsWith("http://") || t.startsWith("https://") ? t : "http://" + t);
-            }
-            Map<String, Object> configs = new HashMap<>();
-            if (kafkaService.getConfig().getConnectionBasicAuth()) {
-                String source = kafkaService.getConfig().getConnectionAuthCredentialsSource();
-                configs.put("basic.auth.credentials.source", StringUtils.isBlank(source) ? "USER_INFO" : source);
-                configs.put("basic.auth.user.info",
-                        kafkaService.getConfig().getConnectionAuthUserName() + ":" + kafkaService.getConfig().getConnectionAuthPassword());
-            }
-            schemaRegistryClient = new CachedSchemaRegistryClient(urls, 1000, configs);
-            return schemaRegistryClient;
-        }
     }
 
     @Override

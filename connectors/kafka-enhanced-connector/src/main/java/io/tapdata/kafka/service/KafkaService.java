@@ -1,5 +1,7 @@
 package io.tapdata.kafka.service;
 
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.tapdata.connector.error.KafkaErrorCodes;
 import io.tapdata.connector.utils.AsyncBatchPusher;
 import io.tapdata.connector.utils.ConcurrentUtils;
@@ -33,6 +35,7 @@ import io.tapdata.pdk.apis.entity.FilterResults;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -74,6 +77,7 @@ public class KafkaService implements IKafkaService {
     private final AbsSchemaMode schemaModeService;
     private KafkaProducer<Object, Object> kafkaProducer;
     private IKafkaAdminService adminService;
+    private volatile SchemaRegistryClient schemaRegistryClient;
 
     public KafkaService(KafkaConfig config, AtomicBoolean stopping) {
         this.config = config;
@@ -257,12 +261,12 @@ public class KafkaService implements IKafkaService {
             AtomicReference<Exception> exception = new AtomicReference<>();
             String executorGroup = String.format("%s-%s-batchRead", KafkaEnhancedConnector.PDK_ID, config.getStateMapFirstConnectorId());
             try (AsyncBatchPusher<ConsumerRecord<Object, Object>, TapEvent> batchPusher = AsyncBatchPusher.<ConsumerRecord<Object, Object>, TapEvent>create(
-                exception,
-                String.format("%s-batchPusher", executorGroup),
-                consumerRecord -> {
-                },
-                tapEvents -> consumer.accept(tapEvents, null),
-                () -> !stopping.get()
+                    exception,
+                    String.format("%s-batchPusher", executorGroup),
+                    consumerRecord -> {
+                    },
+                    tapEvents -> consumer.accept(tapEvents, null),
+                    () -> !stopping.get()
             ).batchSize(batchSize).maxDelay(batchMaxDelay)) {
                 getExecutorService().execute(batchPusher); // 开始推送数据
 
@@ -281,9 +285,9 @@ public class KafkaService implements IKafkaService {
 
                         // 取分区当前实际可消费范围 [beginning, currentEnd)
                         Long beginningOffset = Optional.ofNullable(KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, List.of(topicPartition), true).get(topic))
-                            .map(o -> o.get(partition)).orElse(null);
+                                .map(o -> o.get(partition)).orElse(null);
                         Long currentEndOffset = Optional.ofNullable(KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, List.of(topicPartition), false).get(topic))
-                            .map(o -> o.get(partition)).orElse(null);
+                                .map(o -> o.get(partition)).orElse(null);
 
                         if (null == beginningOffset || null == currentEndOffset || beginningOffset >= currentEndOffset) {
                             return;
@@ -516,6 +520,13 @@ public class KafkaService implements IKafkaService {
             if (!existTopics.contains(topic)) {
                 createTableOptions.setTableExists(false);
                 getAdminService().createTopic(Collections.singleton(topic), partitionNum, replicasSize);
+                if (config.getConnectionSchemaRegister()) {
+                    String mode = config.getNodeCompatibilityMode();
+                    if (!"NONE".equals(mode)) {
+                        mode += config.getNodeTransitive() ? "_TRANSITIVE" : "";
+                    }
+                    getSchemaRegistryClient().updateCompatibility(topic + "-value", mode);
+                }
             } else {
                 List<TopicPartitionInfo> topicPartitionInfos = getAdminService().getTopicPartitionInfo(topic);
                 int existTopicPartition = topicPartitionInfos.size();
@@ -736,6 +747,37 @@ public class KafkaService implements IKafkaService {
             if (connection != null) {
                 connection.disconnect();
             }
+        }
+    }
+
+    public SchemaRegistryClient getSchemaRegistryClient() {
+        SchemaRegistryClient client = schemaRegistryClient;
+        if (client != null) {
+            return client;
+        }
+        synchronized (this) {
+            if (schemaRegistryClient != null) {
+                return schemaRegistryClient;
+            }
+            String raw = config.getConnectionSchemaRegisterUrl();
+            if (StringUtils.isBlank(raw)) {
+                throw new IllegalStateException("schema registry url is not configured");
+            }
+            List<String> urls = new ArrayList<>();
+            for (String u : raw.split(",")) {
+                String t = u.trim();
+                if (t.isEmpty()) continue;
+                urls.add(t.startsWith("http://") || t.startsWith("https://") ? t : "http://" + t);
+            }
+            Map<String, Object> configs = new HashMap<>();
+            if (config.getConnectionBasicAuth()) {
+                String source = config.getConnectionAuthCredentialsSource();
+                configs.put("basic.auth.credentials.source", StringUtils.isBlank(source) ? "USER_INFO" : source);
+                configs.put("basic.auth.user.info",
+                        config.getConnectionAuthUserName() + ":" + config.getConnectionAuthPassword());
+            }
+            schemaRegistryClient = new CachedSchemaRegistryClient(urls, 1000, configs);
+            return schemaRegistryClient;
         }
     }
 

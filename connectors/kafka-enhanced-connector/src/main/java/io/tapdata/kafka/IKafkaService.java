@@ -1,5 +1,6 @@
 package io.tapdata.kafka;
 
+import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.ddl.table.TapAlterTableTTLEvent;
@@ -62,6 +63,8 @@ public interface IKafkaService extends AutoCloseable {
     void writeRecord(KafkaProducer<Object, Object> producer,List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer);
 
     CreateTableOptions createTable(TapCreateTableEvent tapCreateTableEvent);
+
+    SchemaRegistryClient getSchemaRegistryClient();
 
     void deleteTable(TapDropTableEvent tapDropTableEvent);
 
