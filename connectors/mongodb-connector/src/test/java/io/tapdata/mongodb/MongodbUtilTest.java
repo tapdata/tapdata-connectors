@@ -80,7 +80,7 @@ public class MongodbUtilTest {
             String uri = "mongodb://host:27017/db";
             String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri,false);
             Assertions.assertEquals(
-                    "mongodb://host:27017/db?serverSelectionTimeoutMS=15000&socketTimeoutMS=15000&maxIdleTimeMS=30000",
+                    "mongodb://host:27017/db?serverSelectionTimeoutMS=15000&socketTimeoutMS=60000&maxIdleTimeMS=30000",
                     result);
         }
 
@@ -89,7 +89,7 @@ public class MongodbUtilTest {
             String uri = "mongodb://u:p@host/db?authSource=admin";
             String result = MongodbUtil.appendDefaultHaTimeoutOptions(uri,false);
             Assertions.assertEquals(
-                    "mongodb://u:p@host/db?authSource=admin&serverSelectionTimeoutMS=15000&socketTimeoutMS=15000&maxIdleTimeMS=30000",
+                    "mongodb://u:p@host/db?authSource=admin&serverSelectionTimeoutMS=15000&socketTimeoutMS=60000&maxIdleTimeMS=30000",
                     result);
         }
 
