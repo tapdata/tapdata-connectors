@@ -76,6 +76,7 @@ public class ExcelConnector extends FileConnector {
                     Map<CellRangeAddress, Cell> mergedDataMap = ExcelUtil.getMergedDataMap(sheet);
                     fileOffset.setSheetNum(sheets.get(i));
                     fileOffset.setDataLine(excelConfig.getDataStartLine());
+                    Map<Integer, CellType> cellTypeMap = new HashMap<>();
                     for (int j = fileOffset.getDataLine() - 1; isAlive() && j <= sheet.getLastRowNum(); j++) {
                         Row row = sheet.getRow(j);
                         if (EmptyKit.isNull(row)) {
@@ -84,11 +85,13 @@ public class ExcelConnector extends FileConnector {
                         Map<String, Object> after = new HashMap<>();
                         if (j > lastMergedRow) {
                             for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
+                                checkCellType(k, row.getCell(k), cellTypeMap);
                                 Object val = ExcelUtil.getCellValue(row.getCell(k), formulaEvaluator);
                                 after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? (EmptyKit.isNull(val) ? "null" : String.valueOf(val)) : val);
                             }
                         } else {
                             for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
+                                checkCellType(k, row.getCell(k), cellTypeMap);
                                 Object val = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, row.getCell(k), formulaEvaluator);
                                 after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? (EmptyKit.isNull(val) ? "null" : String.valueOf(val)) : val);
                             }
@@ -106,6 +109,33 @@ public class ExcelConnector extends FileConnector {
                 TapLogger.warn(TAG, String.format("Reading file %s occurs error, skip it", fileOffset.getPath()), e);
             }
         });
+    }
+
+    private void checkCellType(Integer col, Cell cell, Map<Integer, CellType> cellTypeMap) {
+        if (!cellTypeMap.containsKey(col)) {
+            cellTypeMap.put(col, cell.getCellType());
+            return;
+        }
+        if (cell == null) {
+            return;
+        }
+        CellType cellType = cellTypeMap.get(col);
+        if (checkLevel(cellType) != checkLevel(cell.getCellType())) {
+            tapLogger.warn(String.format("The data type of line %s, column %s is inconsistent, please check the data in the excel file", cell.getRowIndex() + 1, col + 1));
+        }
+    }
+
+    private int checkLevel(CellType type) {
+        switch (type) {
+            case BOOLEAN:
+                return 1;
+            case FORMULA:
+                return 2;
+            case NUMERIC:
+                return 3;
+            default:
+                return 0;
+        }
     }
 
     @Override
