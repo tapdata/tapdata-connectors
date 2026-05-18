@@ -1095,7 +1095,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
                     try (ResultSet resultSet = sqlStatement.getResultSet()) {
                         List<Map<String, Object>> list = TapSimplify.list();
                         String[] columnNames = DbKit.getColumnsFromResultSet(resultSet).toArray(new String[0]);
-                        Integer[] columnTypes = DbKit.getColumnTypeNumbersFromResultSet(resultSet).toArray(new Integer[0]);
+                        String[] columnTypes = DbKit.getColumnTypesFromResultSet(resultSet).toArray(new String[0]);
                         while (isAlive() && resultSet.next()) {
                             DataMap dataMap = filterData(resultSet, columnNames, columnTypes);
                             list.add(dataMap);
@@ -1228,7 +1228,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
             try (ResultSet resultSet = callableStatement.getResultSet()) {
                 List<Map<String, Object>> list = TapSimplify.list();
                 String[] columnNames = DbKit.getColumnsFromResultSet(resultSet).toArray(new String[0]);
-                Integer[] columnTypes = DbKit.getColumnTypeNumbersFromResultSet(resultSet).toArray(new Integer[0]);
+                String[] columnTypes = DbKit.getColumnTypesFromResultSet(resultSet).toArray(new String[0]);
                 while (resultSet.next()) {
                     DataMap dataMap = filterData(resultSet, columnNames, columnTypes);
                     list.add(dataMap);
@@ -1342,9 +1342,9 @@ public abstract class CommonDbConnector extends ConnectorBase {
         }
     }
 
-    protected void filterColumns(TapTable tapTable, List<String> columns, List<Integer> columnTypes) {
+    protected void filterColumns(TapTable tapTable, List<String> columns, List<String> columnTypes) {
         Iterator<String> columnIterator = columns.iterator();
-        Iterator<Integer> typeIterator = columnTypes.iterator();
+        Iterator<String> typeIterator = columnTypes.iterator();
         while (columnIterator.hasNext() && typeIterator.hasNext()) {
             String column = columnIterator.next();
             typeIterator.next();
@@ -1355,7 +1355,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         }
     }
 
-    protected <T> DataMap filterData(ResultSet resultSet, String[] fields, T[] columnTypes) throws SQLException {
+    protected DataMap filterData(ResultSet resultSet, String[] fields, String[] columnTypes) throws SQLException {
         DataMap dataMap = new DataMap();
         for (int i = 0; i < fields.length; i++) {
             dataMap.put(fields[i], filterData(resultSet.getObject(fields[i]), columnTypes[i]));
@@ -1363,7 +1363,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return dataMap;
     }
 
-    protected <T> Object filterData(Object obj, T columnType) {
+    protected Object filterData(Object obj, String columnType) {
         return obj;
     }
 
