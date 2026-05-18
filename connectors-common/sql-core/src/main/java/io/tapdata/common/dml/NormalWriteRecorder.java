@@ -68,7 +68,7 @@ public abstract class NormalWriteRecorder {
     protected int batchCacheSize = 0;
     protected Log tapLogger;
     protected List<String> autoIncFields;
-    protected DMLType dmlType;
+
 
     public void setAutoIncFields(List<String> autoIncFields) {
         this.autoIncFields = autoIncFields;
@@ -575,7 +575,6 @@ public abstract class NormalWriteRecorder {
     public void setToCharset(String toCharset) {
         this.toCharset = toCharset;
     }
-    private static final DateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS");
     // SimpleDateFormat 非线程安全，用 ThreadLocal 保证每个线程独立持有一个实例
     protected static final ThreadLocal<DateFormat> dateFormat =
             ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS"));

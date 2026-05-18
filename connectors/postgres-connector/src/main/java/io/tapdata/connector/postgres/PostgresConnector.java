@@ -1074,6 +1074,7 @@ public class PostgresConnector extends CommonDbConnector {
                 }
             });
         }
+    }
 
     private Map<String, Object> filterTimeForPG(ResultSet resultSet, Map<String, String> typeAndName, List<String> allColumn) {
         DataMap dataMap = DataMap.create();
