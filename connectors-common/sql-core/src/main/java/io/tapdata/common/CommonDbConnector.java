@@ -1218,7 +1218,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         }
     }
 
-    private Object getOutputFromCall(List<JdbcProcedureParam> outList, CallableStatement callableStatement, boolean hasResult) throws Exception {
+    protected Object getOutputFromCall(List<JdbcProcedureParam> outList, CallableStatement callableStatement, boolean hasResult) throws Exception {
         if (outList == null || callableStatement == null) {
             return null;
         }
@@ -1254,7 +1254,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return res;
     }
 
-    private Object handleValue(Object value) {
+    protected Object handleValue(Object value) {
         try {
             if (value instanceof Clob) {
                 value = DbKit.clobToString((Clob) value);
@@ -1270,7 +1270,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return value;
     }
 
-    private boolean hasReturn(List<Map<String, Object>> params) {
+    protected boolean hasReturn(List<Map<String, Object>> params) {
         if (params == null) {
             return false;
         }
@@ -1355,7 +1355,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         }
     }
 
-    protected DataMap filterData(ResultSet resultSet, String[] fields, Integer[] columnTypes) throws SQLException {
+    protected <T> DataMap filterData(ResultSet resultSet, String[] fields, T[] columnTypes) throws SQLException {
         DataMap dataMap = new DataMap();
         for (int i = 0; i < fields.length; i++) {
             dataMap.put(fields[i], filterData(resultSet.getObject(fields[i]), columnTypes[i]));
@@ -1363,7 +1363,7 @@ public abstract class CommonDbConnector extends ConnectorBase {
         return dataMap;
     }
 
-    protected Object filterData(Object obj, int columnType) {
+    protected <T> Object filterData(Object obj, T columnType) {
         return obj;
     }
 
