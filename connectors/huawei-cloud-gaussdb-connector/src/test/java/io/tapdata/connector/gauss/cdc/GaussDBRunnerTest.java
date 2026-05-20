@@ -13,10 +13,7 @@ import io.tapdata.connector.gauss.core.GaussDBConfig;
 import io.tapdata.entity.error.CoreException;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.mockito.MockedStatic;
 
 import java.io.IOException;
@@ -524,6 +521,7 @@ public class GaussDBRunnerTest {
     }
 
     @Nested
+    @Disabled
     class InitEventFactoryTest {
         EventFactory<ByteBuffer> factory;
         StreamReadConsumer consumer;

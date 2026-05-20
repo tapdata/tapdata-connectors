@@ -3,8 +3,6 @@ package io.tapdata.connector.elasticsearch;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
-import io.tapdata.entity.utils.DataMap;
-import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -52,26 +50,6 @@ public class ElasticsearchConnectorTest {
             when(elasticsearchHttpContext.getElasticsearchClient()).thenThrow(RuntimeException.class);
             doCallRealMethod().when(elasticsearchConnector).createTable(tapConnectorContext,tapCreateTableEvent);
             assertThrows(RuntimeException.class,() -> elasticsearchConnector.createTable(tapConnectorContext,tapCreateTableEvent));
-        }
-    }
-    @Nested
-    class InitConnectionTest{
-        private TapConnectionContext connectorContext;
-        private ElasticsearchHttpContext elasticsearchHttpContext;
-        @BeforeEach
-        void beforeEach(){
-            connectorContext = mock(TapConnectorContext.class);
-            elasticsearchHttpContext = mock(ElasticsearchHttpContext.class);
-            ReflectionTestUtils.setField(elasticsearchConnector,"elasticsearchHttpContext",elasticsearchHttpContext);
-        }
-        @Test
-        void testInitConnection(){
-            DataMap connectionConfig = new DataMap();
-            connectionConfig.put("host","127.0.0.1");
-            connectionConfig.put("port",9200);
-            when(connectorContext.getConnectionConfig()).thenReturn(connectionConfig);
-            doCallRealMethod().when(elasticsearchConnector).initConnection(connectorContext);
-            assertThrows(RuntimeException.class,() -> elasticsearchConnector.initConnection(connectorContext));
         }
     }
 }

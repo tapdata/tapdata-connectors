@@ -334,12 +334,12 @@ public abstract class NormalWriteRecorder {
 
     public String getDeleteSql(Map<String, Object> before) throws SQLException {
         boolean containsNull = !hasPk && before.containsValue(null);
-        String sql = getDeleteSql(before,containsNull);
-        if(!containsNull){
+        String sql = getDeleteSql(before, containsNull);
+        if (!containsNull) {
             for (String key : before.keySet()) {
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
             }
-        }else{
+        } else {
             for (String key : before.keySet()) {
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));
                 sql = sql.replaceFirst("\\?", formatValueForSql(before.get(key), columnTypeMap.get(key)));

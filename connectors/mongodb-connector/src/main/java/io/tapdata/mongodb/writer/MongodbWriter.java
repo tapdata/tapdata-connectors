@@ -135,7 +135,7 @@ public class MongodbWriter {
 		write(table, tapRecordEvents, writeListResultConsumer, session);
 	}
 
-    private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
+	private void write(TapTable table, List<TapRecordEvent> tapRecordEvents, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer, ClientSession session) throws Throwable {
 		AtomicLong inserted = new AtomicLong(0); //insert count
 		AtomicLong updated = new AtomicLong(0); //update count
 		AtomicLong deleted = new AtomicLong(0); //delete count
