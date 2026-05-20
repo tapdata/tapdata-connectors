@@ -1,6 +1,7 @@
 package io.tapdata.connector.tidb.stage;
 
 import io.tapdata.entity.error.CoreException;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -20,14 +21,31 @@ public class NetworkUtils {
     private NetworkUtils() {}
 
     public static boolean check(String ipAddress, int pdServerPort, int tikKVHost) {
+        return check(ipAddress, pdServerPort, null, tikKVHost);
+    }
+
+    public static boolean check(String ipAddress, int pdServerPort, String tiKVAddress, int tikKVPort) {
         try {
+            boolean sameIp = false;
+            if (StringUtils.isBlank(tiKVAddress)) {
+                tiKVAddress = ipAddress;
+            }
+            if (StringUtils.equals(ipAddress, tiKVAddress)) {
+                sameIp = true;
+            }
             InetAddress targetAddress = InetAddress.getByName(ipAddress);
             if (!isSameSubnet(targetAddress)) {
                 if (!isServerReachable(ipAddress, pdServerPort)) {
                     throw new CoreException(CODE, "Can not connect TiServer {}:{}, network cannot be connected and CDC incremental data cannot be obtained. Please deploy TiDB or configure network routing in the same network segment", ipAddress, pdServerPort);
                 }
-                if (!isServerReachable(ipAddress, tikKVHost)) {
-                    throw new CoreException(CODE, "Can not connect TiKV {}:{}, network cannot be connected and CDC incremental data cannot be obtained. Please deploy TiDB or configure network routing in the same network segment", ipAddress, tikKVHost);
+                if (sameIp && !isServerReachable(tiKVAddress, tikKVPort)) {
+                    throw new CoreException(CODE, "Can not connect TiKV {}:{}, network cannot be connected and CDC incremental data cannot be obtained. Please deploy TiDB or configure network routing in the same network segment", tiKVAddress, tikKVPort);
+                }
+            }
+            if (!sameIp) {
+                InetAddress kvAddress = InetAddress.getByName(tiKVAddress);
+                if (!isSameSubnet(kvAddress) && !isServerReachable(tiKVAddress, tikKVPort)) {
+                    throw new CoreException(CODE, "Can not connect TiKV {}:{}, network cannot be connected and CDC incremental data cannot be obtained. Please deploy TiDB or configure network routing in the same network segment", tiKVAddress, tikKVPort);
                 }
             }
             return true;
@@ -60,7 +78,7 @@ public class NetworkUtils {
 
     /**
      * 判断给定的 IP 地址是否和当前机器在同一个子网下
-     * 
+     *
      * @param targetAddress 给定的 IP 地址
      * @return 如果在同一个子网下返回 true，否则返回 false
      * @throws SocketException
@@ -91,7 +109,7 @@ public class NetworkUtils {
 
     /**
      * 判断两个 IP 地址是否在同一个子网下
-     * 
+     *
      * @param localAddress 本地 IP 地址
      * @param targetAddress 目标 IP 地址
      * @param prefixLength 子网前缀长度
