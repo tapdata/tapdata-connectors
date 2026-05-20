@@ -1,7 +1,5 @@
 package io.tapdata.constant;
 
-
-
 import org.apache.commons.lang3.StringUtils;
 
 public enum DMLType {

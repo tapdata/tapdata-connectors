@@ -3,7 +3,6 @@ package io.tapdata.connector.postgres;
 import io.tapdata.common.CommonSqlMaker;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.entity.schema.TapField;
-import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.entity.Collate;
@@ -33,7 +32,7 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         if (closeNotNull) {
             nullable = true;
         }
-        if (!nullable || tapField.getPrimaryKey()) {
+        if (!nullable || (null != tapField.getPrimaryKeyPos() && tapField.getPrimaryKeyPos() > 0)) {
             builder.append("NOT NULL").append(' ');
         }
     }
@@ -148,15 +147,6 @@ public class PostgresSqlMaker extends CommonSqlMaker {
             }).collect(Collectors.joining(", "))).append(' ');
         }
     }
-
-    @Override
-    public String buildValueString(Object value) {
-        if (value instanceof String) {
-            value = ((String) value).replace("\u0000", "");
-        }
-        return super.buildValueString(value);
-    }
-
     private static String buildNullSortClause(SortOn v) {
         if (v.getNullSort() == 1) {
             return ' ' + "NULLS" + ' ' + "FIRST";

@@ -69,6 +69,10 @@ public class MysqlMaker implements SqlMaker {
             fieldSql += ",\n  " + createTableAppendPrimaryKey(tapTable);
         }
         String tablePropertiesSql = "";
+        // table collation
+        if (StringUtils.isNotBlank(tapTable.getCharset())) {
+            tablePropertiesSql += "DEFAULT CHARSET= '" + tapTable.getCharset().replace("'", "''").replaceAll("\\\\", "\\\\\\\\") + "'";
+        }
         // table comment
         if (StringUtils.isNotBlank(tapTable.getComment())) {
             tablePropertiesSql += " COMMENT='" + tapTable.getComment().replace("'", "''").replaceAll("\\\\", "\\\\\\\\") + "'";

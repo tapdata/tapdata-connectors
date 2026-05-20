@@ -9,6 +9,7 @@ import io.tapdata.pdk.apis.entity.TestItem;
 import io.tapdata.pdk.apis.exception.testItem.TapTestVersionEx;
 import io.tapdata.util.NetUtil;
 
+import java.util.List;
 import java.util.function.Consumer;
 
 import static io.tapdata.base.ConnectorBase.testItem;
@@ -30,6 +31,10 @@ public class OceanbaseTest extends MysqlConnectionTest implements AutoCloseable 
             consumer.accept(new TestItem(TestItem.ITEM_VERSION, new TapTestVersionEx(e), TestItem.RESULT_FAILED));
         }
         return true;
+    }
+
+    public boolean testWriteOrReadPrivilegeV2(String grantSql, List<String> tableList, String databaseName, String mark) {
+        return super.testWriteOrReadPrivilege(grantSql, tableList, databaseName, mark);
     }
 
     public Boolean testObLogProxy() {

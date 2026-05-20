@@ -57,24 +57,27 @@ public class AsyncBatchPusher<O, T> implements Runnable, AutoCloseable {
 
     @Override
     public void run() {
+        List<T> batchList = new ArrayList<>(batchSize);
         try {
             Thread.currentThread().setName(name);
             LOGGER.info("Starting async batch pusher for {}", name);
             TapEntry<O, T> v;
-            List<T> batchList = new ArrayList<>(batchSize);
             while (isRunning.getAsBoolean()) {
                 try {
-                    if (stopping.get()) {
-                        v = batchQueue.poll(maxDelay, TimeUnit.MILLISECONDS);
-                        if (null == v) return;
-                    } else {
-                        v = batchQueue.poll(maxDelay, TimeUnit.MILLISECONDS);
-                        if (null != v) {
-                            offsetConsumer.accept(v.getKey());
-                            batchList.add(v.getValue());
-                        }
+                    v = batchQueue.poll(maxDelay, TimeUnit.MILLISECONDS);
+
+                    // If stopping and no more data in queue, exit the loop
+                    if (stopping.get() && null == v) {
+                        break;
                     }
 
+                    // Process the polled data
+                    if (null != v) {
+                        offsetConsumer.accept(v.getKey());
+                        batchList.add(v.getValue());
+                    }
+
+                    // Push batch if size threshold or time threshold is reached
                     if (batchList.size() >= batchSize || (System.currentTimeMillis() - lastTime > maxDelay && !batchList.isEmpty())) {
                         batchList = push(batchList);
                     }
@@ -88,6 +91,18 @@ public class AsyncBatchPusher<O, T> implements Runnable, AutoCloseable {
                 }
             }
         } finally {
+            // Flush remaining data in batchList before completing
+            if (!batchList.isEmpty()) {
+                try {
+                    LOGGER.info("Flushing {} remaining records for {}", batchList.size(), name);
+                    push(batchList);
+                } catch (Exception e) {
+                    LOGGER.error("Error flushing remaining data for {}", name, e);
+                    if (!exception.compareAndSet(null, e)) {
+                        exception.get().addSuppressed(e);
+                    }
+                }
+            }
             completed.set(true);
             LOGGER.info("Completed async batch pusher for {}", name);
         }
@@ -119,10 +134,14 @@ public class AsyncBatchPusher<O, T> implements Runnable, AutoCloseable {
     @Override
     public void close() throws Exception {
         stopping.set(true);
-        LOGGER.info("Stopping async batch pusher for {}", name);
+        LOGGER.info("Stopping async batch pusher for {}, queue size: {}", name, batchQueue.size());
+
+        // Wait for the run thread to complete (which will flush remaining data)
         while (!completed.get()) {
             TimeUnit.MILLISECONDS.sleep(50);
         }
+
+        LOGGER.info("Async batch pusher for {} stopped, final queue size: {}", name, batchQueue.size());
     }
 
     public static <O, T> AsyncBatchPusher<O, T> create(AtomicReference<Exception> exception, String name, Consumer<O> offsetConsumer, Consumer<List<T>> submitConsumer, BooleanSupplier isRunning) {

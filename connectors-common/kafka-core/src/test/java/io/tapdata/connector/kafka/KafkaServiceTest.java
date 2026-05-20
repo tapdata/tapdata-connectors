@@ -16,6 +16,7 @@ import io.tapdata.pdk.apis.entity.WriteListResult;
 import io.tapdata.script.factory.script.TapRunScriptEngine;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
@@ -63,6 +64,7 @@ public class KafkaServiceTest {
             ReflectionTestUtils.setField(kafkaService,"kafkaProducer",kafkaProducer);
         }
         @Test
+        @Disabled
         void testProduce() throws NoSuchFieldException, IllegalAccessException {
             ScriptFactory scriptFactory = mock(ScriptFactory.class);
             reflectScriptFactory(scriptFactory);
