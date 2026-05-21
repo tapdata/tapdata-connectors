@@ -53,6 +53,15 @@
           "apiServerKey": "schemaRegisterUrl",
           "x-index": 3
         },
+        "attunity": {
+          "type": "boolean",
+          "title": "${attunity}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "apiServerKey": "attunity",
+          "x-index": 4
+        },
         "basicAuth": {
           "type": "boolean",
           "title": "${basicAuth}",
@@ -772,6 +781,7 @@
       "authCredentialsSource": "Auth Credentials Source",
       "authUserName": "Auth UserName",
       "authPassword": "Auth Password",
+      "attunity": "Attunity compatibility",
       "basicAuth": "Basic Auth",
       "batchMaxDelay": "Consumption timeout (ms)",
       "batchMaxDelayTooltip": "When loading the model, it is necessary to test consumption data. If there is significant network latency, it is recommended to extend the consumption timeout period; otherwise, the model may not be loaded successfully.",
@@ -863,6 +873,7 @@
       "authCredentialsSource": "认证凭据来源",
       "authUserName": "认证用户名",
       "authPassword": "认证密码",
+      "attunity": "Attunity兼容",
       "basicAuth": "基本认证",
       "batchMaxDelay": "消费超时(ms)",
       "batchMaxDelayTooltip": "加载模型时需要试消费数据，如果网络延迟较大，建议延长消费超时时间，否则将加载不到模型",
@@ -954,6 +965,7 @@
       "authCredentialsSource": "認證憑據來源",
       "authUserName": "認證用戶名",
       "authPassword": "認證密碼",
+      "attunity": "Attunity兼容",
       "basicAuth": "基本認證",
       "batchMaxDelay": "消費超時(ms)",
       "batchMaxDelayTooltip": "載入模型時需要試消費資料，如果網絡延遲較大，建議延長消費超時時間，否則將載入不到模型",

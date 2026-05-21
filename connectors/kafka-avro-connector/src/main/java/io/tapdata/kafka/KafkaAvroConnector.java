@@ -6,6 +6,7 @@ import io.tapdata.entity.schema.value.TapDateValue;
 import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
+import io.tapdata.kafka.schema_mode.AvroAttunityMode;
 import io.tapdata.kafka.schema_mode.AvroEnhanceMode;
 import io.tapdata.kafka.service.KafkaService;
 import io.tapdata.kit.EmptyKit;
@@ -14,7 +15,7 @@ import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -32,7 +33,11 @@ public class KafkaAvroConnector extends KafkaEnhancedCoreConnector {
         connectionContext.getLog().info("Starting {}", PDK_ID);
         DataMap dataMap = connectionContext.getConnectionConfig();
         dataMap.put("schemaRegister", true);
-        dataMap.put("registrySchemaType", "AVRO");
+        if (Boolean.TRUE.equals(dataMap.get("attunity"))) {
+            dataMap.put("registrySchemaType", "AVRO_ATTUNITY");
+        } else {
+            dataMap.put("registrySchemaType", "AVRO");
+        }
         isConnectorStarted(connectionContext, connectorContext -> {
             String firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
             if (EmptyKit.isNull(firstConnectorId)) {
@@ -58,7 +63,10 @@ public class KafkaAvroConnector extends KafkaEnhancedCoreConnector {
 
     @Override
     protected Map<KafkaSchemaMode, AbsSchemaMode.Factory> schemaModeOverrides() {
-        return Collections.singletonMap(KafkaSchemaMode.REGISTRY_AVRO, AvroEnhanceMode::new);
+        Map<KafkaSchemaMode, AbsSchemaMode.Factory> map = new HashMap<>();
+        map.put(KafkaSchemaMode.REGISTRY_AVRO, AvroEnhanceMode::new);
+        map.put(KafkaSchemaMode.REGISTRY_AVRO_ATTUNITY, AvroAttunityMode::new);
+        return map;
     }
 
 }
