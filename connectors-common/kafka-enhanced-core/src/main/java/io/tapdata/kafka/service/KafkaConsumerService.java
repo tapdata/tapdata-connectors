@@ -7,7 +7,6 @@ import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.exception.TapPdkConfigEx;
 import io.tapdata.kafka.KafkaConfig;
-import io.tapdata.kafka.KafkaEnhancedConnector;
 import io.tapdata.kafka.constants.KafkaConcurrentReadMode;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kafka.data.KafkaOffset;
@@ -62,7 +61,7 @@ public class KafkaConsumerService implements AutoCloseable {
                 runWithPartitionMode(offset, batchSize, consumer);
                 break;
             default:
-                throw new TapPdkConfigEx(String.format("not supported concurrentReadMode of type '%s'", nodeConcurrentReadMode), KafkaEnhancedConnector.PDK_ID);
+                throw new TapPdkConfigEx(String.format("not supported concurrentReadMode of type '%s'", nodeConcurrentReadMode), "kafka_enhanced");
         }
     }
 
@@ -150,7 +149,7 @@ public class KafkaConsumerService implements AutoCloseable {
     }
 
     private void run(KafkaOffset offset, List<Map<TopicPartition, Long>> concurrentItems, int batchSize, BiConsumer<List<TapEvent>, Object> consumer) throws Exception {
-        String executorGroup = String.format("%s-%s-consumer", KafkaEnhancedConnector.PDK_ID, config.getStateMapFirstConnectorId());
+        String executorGroup = String.format("%s-%s-consumer", "kafka_enhanced", config.getStateMapFirstConnectorId());
         AtomicReference<Exception> exception = new AtomicReference<>();
         try (
             AsyncBatchPusher<ConsumerRecord<Object, Object>, TapEvent> batchPusher = AsyncBatchPusher.<ConsumerRecord<Object, Object>, TapEvent>create(

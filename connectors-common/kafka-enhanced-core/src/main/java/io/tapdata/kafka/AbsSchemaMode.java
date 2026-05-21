@@ -66,7 +66,7 @@ public abstract class AbsSchemaMode {
         Queue<String> toBeLoadTables = tables.stream().filter(Objects::nonNull).distinct().collect(Collectors.toCollection(ConcurrentLinkedQueue::new));
         List<TapTable> results = new LinkedList<>();
         try {
-            String executorGroup = String.format("%s-discoverSchema", KafkaEnhancedConnector.PDK_ID);
+            String executorGroup = String.format("%s-discoverSchema", "kafka_enhanced");
             ConcurrentUtils.runWithQueue(kafkaService.getExecutorService(), executorGroup, toBeLoadTables, 20, table -> {
                 TapTable sampleTable = new TapTable(table);
                 try {
