@@ -963,7 +963,6 @@ public class StarrocksStreamLoader {
             taplogger.warn("Table {} flush failed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, error={}",
                 tableName, formatBytes(tableDataSize), waitTime, flushDuration, e.getMessage());
-            cannotClean = true;
             throw e;
         } catch (Exception e) {
             long flushEndTime = System.currentTimeMillis();
@@ -971,7 +970,6 @@ public class StarrocksStreamLoader {
             taplogger.warn("Table {} flush failed: flushed_size={}, waiting_time={} ms, " +
                 "flush_duration={} ms, error={}",
                 tableName, formatBytes(tableDataSize), waitTime, flushDuration, e.getMessage());
-            cannotClean = true;
             throw new StarrocksRuntimeException(e);
         } finally {
 
