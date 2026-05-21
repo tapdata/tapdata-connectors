@@ -1,5 +1,9 @@
 package io.tapdata.kafka;
 
+import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.schema.value.TapDateTimeValue;
+import io.tapdata.entity.schema.value.TapDateValue;
+import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.schema_mode.AvroEnhanceMode;
@@ -8,6 +12,7 @@ import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
+import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 
 import java.util.Collections;
 import java.util.Map;
@@ -41,6 +46,14 @@ public class KafkaAvroConnector extends KafkaEnhancedCoreConnector {
         }
         stopping.compareAndSet(true, false);
         kafkaService = new KafkaService(kafkaConfig, stopping, schemaModeOverrides());
+    }
+
+    @Override
+    public void registerCapabilities(ConnectorFunctions connectorFunctions, TapCodecsRegistry codecRegistry) {
+        super.registerCapabilities(connectorFunctions, codecRegistry);
+        codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toLocalDateTime().toLocalTime());
+        codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().toLocalDateTime().toLocalDate());
+        codecRegistry.registerFromTapValue(TapDateTimeValue.class, tapDateTimeValue -> tapDateTimeValue.getValue().toInstant());
     }
 
     @Override

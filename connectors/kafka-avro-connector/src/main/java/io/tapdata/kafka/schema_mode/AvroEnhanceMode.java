@@ -1,5 +1,6 @@
 package io.tapdata.kafka.schema_mode;
 
+import com.alibaba.fastjson.JSON;
 import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
@@ -9,21 +10,28 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kit.StringKit;
-import org.apache.avro.LogicalType;
+import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.math.RoundingMode;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static io.tapdata.constant.DMLType.*;
 
@@ -130,7 +138,7 @@ public class AvroEnhanceMode extends RegistryAvroMode {
             // 转换值以匹配 Avro schema 类型
             TapField tapField = nameFieldMap.get(fieldName);
             if (tapField != null) {
-                Object convertedValue = convertToAvroType(value, StringKit.removeParentheses(tapField.getDataType()));
+                Object convertedValue = convertToAvroType(value, tapField);
                 record.put(fieldName, convertedValue);
             } else {
                 record.put(fieldName, value);
@@ -151,19 +159,15 @@ public class AvroEnhanceMode extends RegistryAvroMode {
         }
 
         final String columnType = StringKit.removeParentheses(tapField.getDataType());
-        Schema avroType;
-
-        // 判断字段是否可为 null
         boolean nullable = !Boolean.FALSE.equals(tapField.getNullable());
 
-        // 根据类型创建基础 Schema
+        // 根据类型创建基础 Schema，必要时附加 logicalType
         Schema baseType;
         switch (columnType) {
             case "BOOLEAN":
                 baseType = SchemaBuilder.builder().booleanType();
                 break;
             case "INTEGER":
-            case "SHORT":
                 baseType = SchemaBuilder.builder().intType();
                 break;
             case "LONG":
@@ -175,35 +179,46 @@ public class AvroEnhanceMode extends RegistryAvroMode {
             case "DOUBLE":
                 baseType = SchemaBuilder.builder().doubleType();
                 break;
-            case "NUMBER":
-                baseType = new LogicalType.DecimalConversion()
+            case "DECIMAL":
+                baseType = decimalSchema(tapField);
                 break;
-            case "BINARY":
-            case "STRING":
-            case "TEXT":
-            case "CHAR":
-            case "VARCHAR":
             case "DATE":
+                baseType = LogicalTypes.date().addToSchema(SchemaBuilder.builder().intType());
+                break;
             case "TIME":
-            case "DATETIME":
+                baseType = timeSchema(tapField);
+                break;
             case "TIMESTAMP":
+                baseType = timestampSchema(tapField);
+                break;
+            case "BYTES":
+                baseType = SchemaBuilder.builder().bytesType();
+                break;
+            case "CHAR":
+                baseType = charSchema(tapField);
+                break;
+            case "VARCHAR":
+                baseType = varcharSchema(tapField);
+                break;
             case "ARRAY":
+                baseType = arraySchema();
+                break;
             case "MAP":
-            case "OBJECT":
+                baseType = mapSchema();
+                break;
+            case "RECORD":
+                baseType = recordSchema();
+                break;
+            case "STRING":
             default:
                 baseType = SchemaBuilder.builder().stringType();
                 break;
         }
 
-        // 如果字段可为 null，创建 union [null, type] schema
-        if (nullable) {
-            avroType = SchemaBuilder.builder().unionOf()
-                    .nullType().and()
-                    .type(baseType)
-                    .endUnion();
-        } else {
-            avroType = baseType;
-        }
+        // nullable -> union [null, type]
+        Schema avroType = nullable
+                ? Schema.createUnion(Schema.create(Schema.Type.NULL), baseType)
+                : baseType;
 
         Schema.Field field;
         if (applyDefault) {
@@ -213,5 +228,252 @@ public class AvroEnhanceMode extends RegistryAvroMode {
         }
         fieldCache.put(tapTable.getId() + "." + columnName, field);
         return field;
+    }
+
+    /**
+     * NUMBER -> bytes + decimal(precision, scale)。
+     * 若 precision 缺失或不合法，退化为 double，避免 LogicalTypes.decimal 校验失败。
+     */
+    private Schema decimalSchema(TapField tapField) {
+        Pair<Integer, Integer> precisionScale = getFieldPrecisionAndScale(tapField.getDataType());
+        Integer precision = precisionScale.getLeft();
+        Integer scale = precisionScale.getRight();
+        if (precision == null || precision <= 0) {
+            return SchemaBuilder.builder().doubleType();
+        }
+        int s = scale == null || scale < 0 ? 0 : scale;
+        if (s > precision) {
+            s = precision;
+        }
+        return LogicalTypes.decimal(precision, s).addToSchema(SchemaBuilder.builder().bytesType());
+    }
+
+    /**
+     * TIME -> int + time-millis；scale >= 4 时使用 long + time-micros 保留亚毫秒精度。
+     */
+    private Schema timeSchema(TapField tapField) {
+        Integer scale = getFieldFraction(tapField.getDataType());
+        if (scale != null && scale >= 4) {
+            return LogicalTypes.timeMicros().addToSchema(SchemaBuilder.builder().longType());
+        }
+        return LogicalTypes.timeMillis().addToSchema(SchemaBuilder.builder().intType());
+    }
+
+    /**
+     * DATETIME / TIMESTAMP -> long + timestamp-millis；scale >= 4 时升级为 timestamp-micros。
+     */
+    private Schema timestampSchema(TapField tapField) {
+        Integer scale = getFieldFraction(tapField.getDataType());
+        if (scale != null && scale >= 4) {
+            return LogicalTypes.timestampMicros().addToSchema(SchemaBuilder.builder().longType());
+        }
+        return LogicalTypes.timestampMillis().addToSchema(SchemaBuilder.builder().longType());
+    }
+
+    /**
+     * CHAR -> string，自定义 logicalType=char，并附 length，便于下游还原定长语义。
+     */
+    private Schema charSchema(TapField tapField) {
+        Schema schema = SchemaBuilder.builder().stringType();
+        schema.addProp("logicalType", "char");
+        Integer length = resolveLength(tapField);
+        if (length != null && length > 0) {
+            schema.addProp("length", length);
+        }
+        return schema;
+    }
+
+    /**
+     * VARCHAR -> string，自定义 logicalType=varchar，并附 maxLength。
+     */
+    private Schema varcharSchema(TapField tapField) {
+        Schema schema = SchemaBuilder.builder().stringType();
+        schema.addProp("logicalType", "varchar");
+        Integer length = resolveLength(tapField);
+        if (length != null && length > 0) {
+            schema.addProp("maxLength", length);
+        }
+        return schema;
+    }
+
+    /**
+     * ARRAY -> Avro array。元素类型未知，按 nullable string 兜底，保持与父类 stringify 写入一致。
+     */
+    private Schema arraySchema() {
+        Schema element = Schema.createUnion(Schema.create(Schema.Type.NULL), Schema.create(Schema.Type.STRING));
+        return Schema.createArray(element);
+    }
+
+    /**
+     * MAP -> Avro map（key 固定 string）。value 类型未知，按 nullable string 兜底。
+     */
+    private Schema mapSchema() {
+        Schema value = Schema.createUnion(Schema.create(Schema.Type.NULL), Schema.create(Schema.Type.STRING));
+        return Schema.createMap(value);
+    }
+
+    /**
+     * RECORD -> string + logicalType=json。嵌套结构在 TapField 中不可见，按 JSON 编码兜底。
+     */
+    private Schema recordSchema() {
+        Schema schema = SchemaBuilder.builder().stringType();
+        schema.addProp("logicalType", "json");
+        return schema;
+    }
+
+    /**
+     * 优先取 TapField.length；缺失时从 dataType 中解析括号里的第一个数字。
+     */
+    private Integer resolveLength(TapField tapField) {
+        Integer length = tapField.getLength();
+        if (length != null && length > 0) {
+            return length;
+        }
+        return getFieldLength(tapField.getDataType());
+    }
+
+    public Integer getFieldLength(String dataType) {
+        //提取括号里的值
+        Pattern pattern = Pattern.compile("\\(([^)]+)\\)");
+        Matcher matcher = pattern.matcher(dataType);
+        if (matcher.find()) {
+            long length = Long.parseLong(matcher.group(1));
+            if (length > Integer.MAX_VALUE) {
+                return Integer.MAX_VALUE;
+            } else {
+                return (int) length;
+            }
+        }
+        return Integer.MAX_VALUE;
+    }
+
+    public Integer getFieldFraction(String dataType) {
+        //提取括号里的值
+        Pattern pattern = Pattern.compile("\\(([^)]+)\\)");
+        Matcher matcher = pattern.matcher(dataType);
+        if (matcher.find()) {
+            return Integer.parseInt(matcher.group(1));
+        }
+        return 6;
+    }
+
+    public Pair<Integer, Integer> getFieldPrecisionAndScale(String dataType) {
+        //提取括号里的值,逗号的前一个和后一个
+        Pattern pattern = Pattern.compile("\\(([^,]+),([^)]+)\\)");
+        Matcher matcher = pattern.matcher(dataType);
+        if (matcher.find()) {
+            return Pair.of(Integer.parseInt(matcher.group(1).trim()), Integer.parseInt(matcher.group(2).trim()));
+        }
+        return Pair.of(38, 10);
+    }
+
+    /**
+     * 与 {@link #getOrCreateAvroField} 的 logical type 选择保持一一对应。
+     * 父类 {@code convertToAvroType(Object, String)} 在 DECIMAL/DATE/TIME/TIMESTAMP/BYTES/ARRAY/MAP/RECORD
+     * 上会退化为字符串，与新 schema 不兼容；此处按 logical type 的运行时表示重新转换。
+     */
+    protected Object convertToAvroType(Object value, TapField tapField) {
+        if (value == null) {
+            return null;
+        }
+        String dataType = StringKit.removeParentheses(tapField.getDataType());
+        switch (dataType) {
+            case "DECIMAL":
+                return toDecimal(value, tapField);
+            case "DATE":
+                return toEpochDays(value);
+            case "TIME":
+                return toTimeOfDay(value, tapField);
+            case "TIMESTAMP":
+            case "DATETIME":
+                return toEpochInstant(value, tapField);
+            case "BYTES":
+                return toByteBuffer(value);
+            case "ARRAY":
+                return toAvroArray(value);
+            case "MAP":
+                return toAvroMap(value);
+            case "RECORD":
+                return value instanceof String ? value : JSON.toJSONString(value);
+            default:
+                return super.convertToAvroType(value, dataType);
+        }
+    }
+
+    private Object toDecimal(Object value, TapField tapField) {
+        Pair<Integer, Integer> ps = getFieldPrecisionAndScale(tapField.getDataType());
+        Integer precision = ps.getLeft();
+        // schema 在 precision 缺失时退化为 double，conversion 必须对齐
+        if (precision == null || precision <= 0) {
+            if (value instanceof Number) return ((Number) value).doubleValue();
+            return Double.parseDouble(value.toString());
+        }
+        int scale = ps.getRight() == null || ps.getRight() < 0 ? 0 : ps.getRight();
+        if (scale > precision) scale = precision;
+        BigDecimal bd;
+        if (value instanceof BigDecimal) {
+            bd = (BigDecimal) value;
+        } else if (value instanceof BigInteger) {
+            bd = new BigDecimal((BigInteger) value);
+        } else if (value instanceof Number) {
+            bd = BigDecimal.valueOf(((Number) value).doubleValue());
+        } else {
+            bd = new BigDecimal(value.toString());
+        }
+        BigInteger unscaled = bd.setScale(scale, RoundingMode.HALF_UP).unscaledValue();
+        return ByteBuffer.wrap(unscaled.toByteArray());
+    }
+
+    private Integer toEpochDays(Object value) {
+        return (int) ((LocalDate) value).toEpochDay();
+    }
+
+    private Object toTimeOfDay(Object value, TapField tapField) {
+        Integer scale = getFieldFraction(tapField.getDataType());
+        boolean micros = scale != null && scale >= 4;
+        long nanoOfDay = ((LocalTime) value).toNanoOfDay();
+        return micros ? nanoOfDay / 1_000L : (int) (nanoOfDay / 1_000_000L);
+    }
+
+    private Long toEpochInstant(Object value, TapField tapField) {
+        Integer scale = getFieldFraction(tapField.getDataType());
+        boolean micros = scale != null && scale >= 4;
+        Instant instant = (Instant) value;
+        return micros
+                ? Math.multiplyExact(instant.getEpochSecond(), 1_000_000L) + instant.getNano() / 1_000L
+                : instant.toEpochMilli();
+    }
+
+    private ByteBuffer toByteBuffer(Object value) {
+        if (value instanceof ByteBuffer) return (ByteBuffer) value;
+        if (value instanceof byte[]) return ByteBuffer.wrap((byte[]) value);
+        return ByteBuffer.wrap(value.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private List<Object> toAvroArray(Object value) {
+        if (value instanceof Collection) {
+            Collection<?> src = (Collection<?>) value;
+            List<Object> out = new ArrayList<>(src.size());
+            for (Object e : src) out.add(e == null ? null : e.toString());
+            return out;
+        }
+        List<Object> out = new ArrayList<>(1);
+        out.add(value.toString());
+        return out;
+    }
+
+    private Map<String, Object> toAvroMap(Object value) {
+        if (value instanceof Map) {
+            Map<?, ?> src = (Map<?, ?>) value;
+            Map<String, Object> out = new LinkedHashMap<>(src.size());
+            for (Map.Entry<?, ?> e : src.entrySet()) {
+                if (e.getKey() == null) continue;
+                out.put(e.getKey().toString(), e.getValue() == null ? null : e.getValue().toString());
+            }
+            return out;
+        }
+        Map<String, Object> out = new LinkedHashMap<>(1);
+        out.put("value", value.toString());
+        return out;
     }
 }
