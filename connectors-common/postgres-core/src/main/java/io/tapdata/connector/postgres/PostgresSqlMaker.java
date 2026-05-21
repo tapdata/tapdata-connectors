@@ -157,6 +157,15 @@ public class PostgresSqlMaker extends CommonSqlMaker {
         }
     }
 
+    @Override
+    public String buildValueString(Object value) {
+        if (value instanceof String) {
+            value = ((String) value).replace("\u0000", "");
+        }
+        return super.buildValueString(value);
+    }
+
+
     protected String getOrderByFieldClauseWithCollate(SortOn sortOn, Collate collate) {
         StringBuilder sb = new StringBuilder();
         sb.append(escapeChar).append(sortOn.getKey()).append(escapeChar);
