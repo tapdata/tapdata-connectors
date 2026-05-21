@@ -7,6 +7,7 @@ import io.tapdata.entity.event.ddl.table.TapFieldBaseEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
+import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.service.KafkaService;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
@@ -54,7 +55,15 @@ public class KafkaEnhancedCoreConnector extends ConnectorBase {
             kafkaConfig = KafkaConfig.valueOf(connectionContext, "");
         }
         stopping.compareAndSet(true, false);
-        kafkaService = new KafkaService(kafkaConfig, stopping);
+        kafkaService = new KafkaService(kafkaConfig, stopping, schemaModeOverrides());
+    }
+
+    /**
+     * 子类可重写返回 schema mode 的工厂覆盖表，作用域仅限本连接器实例，
+     * 不会污染同 JVM 内其他 Kafka 连接器实例。默认无覆盖。
+     */
+    protected Map<KafkaSchemaMode, AbsSchemaMode.Factory> schemaModeOverrides() {
+        return Collections.emptyMap();
     }
 
     @Override

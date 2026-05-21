@@ -1,12 +1,16 @@
 package io.tapdata.kafka;
 
 import io.tapdata.entity.utils.DataMap;
+import io.tapdata.kafka.constants.KafkaSchemaMode;
+import io.tapdata.kafka.schema_mode.AvroEnhanceMode;
 import io.tapdata.kafka.service.KafkaService;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 
+import java.util.Collections;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -36,7 +40,12 @@ public class KafkaAvroConnector extends KafkaEnhancedCoreConnector {
             kafkaConfig = KafkaConfig.valueOf(connectionContext, "");
         }
         stopping.compareAndSet(true, false);
-        kafkaService = new KafkaService(kafkaConfig, stopping);
+        kafkaService = new KafkaService(kafkaConfig, stopping, schemaModeOverrides());
+    }
+
+    @Override
+    protected Map<KafkaSchemaMode, AbsSchemaMode.Factory> schemaModeOverrides() {
+        return Collections.singletonMap(KafkaSchemaMode.REGISTRY_AVRO, AvroEnhanceMode::new);
     }
 
 }

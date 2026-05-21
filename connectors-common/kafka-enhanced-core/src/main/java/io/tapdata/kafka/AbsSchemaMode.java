@@ -183,35 +183,54 @@ public abstract class AbsSchemaMode {
 
     public abstract void queryByAdvanceFilter(TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer);
 
-    public static AbsSchemaMode create(KafkaSchemaMode schemaMode, IKafkaService kafkaService) {
+    /**
+     * 用于创建 {@link AbsSchemaMode} 子类实例的工厂。外部模块通过给传入
+     * overrides map（参见 {@link io.tapdata.kafka.KafkaEnhancedCoreConnector#schemaModeOverrides()}）
+     * 让 {@link #create(KafkaSchemaMode, IKafkaService, Map)} 返回扩展子类，作用域仅限本连接器实例，
+     * 不污染同 JVM 内的其他连接器。
+     */
+    @FunctionalInterface
+    public interface Factory {
+        AbsSchemaMode create(IKafkaService kafkaService);
+    }
 
+    private static final Map<KafkaSchemaMode, Factory> DEFAULTS;
+
+    static {
+        Map<KafkaSchemaMode, Factory> m = new EnumMap<>(KafkaSchemaMode.class);
+        m.put(KafkaSchemaMode.ORIGINAL, OriginalSchemaMode::new);
+        m.put(KafkaSchemaMode.STANDARD, StandardSchemaMode::new);
+        m.put(KafkaSchemaMode.STANDARD_JSON, StandardJsonSchemaMode::new);
+        m.put(KafkaSchemaMode.CUSTOM, CustomSchemaMode::new);
+        m.put(KafkaSchemaMode.CANAL, CanalSchemaMode::new);
+        m.put(KafkaSchemaMode.DEBEZIUM, DebeziumSchemaMode::new);
+        m.put(KafkaSchemaMode.FLINK_CDC, FlinkSchemaMode::new);
+        m.put(KafkaSchemaMode.REGISTRY_AVRO, RegistryAvroMode::new);
+        m.put(KafkaSchemaMode.REGISTRY_PROTOBUF, RegistryProtobufMode::new);
+        m.put(KafkaSchemaMode.REGISTRY_JSON, RegistryJsonMode::new);
+        DEFAULTS = Collections.unmodifiableMap(m);
+    }
+
+    public static AbsSchemaMode create(KafkaSchemaMode schemaMode, IKafkaService kafkaService) {
+        return create(schemaMode, kafkaService, null);
+    }
+
+    /**
+     * 创建指定 {@link KafkaSchemaMode} 的实现；overrides 优先于内建默认，
+     * 仅在本次调用生效，不修改全局状态，因此多个连接器子类各自的 overrides 互不影响。
+     */
+    public static AbsSchemaMode create(KafkaSchemaMode schemaMode, IKafkaService kafkaService, Map<KafkaSchemaMode, Factory> overrides) {
         if (null == schemaMode) {
             throw new IllegalArgumentException("Connection schemaMode is required");
         }
-        switch (schemaMode) {
-            case ORIGINAL:
-                return new OriginalSchemaMode(kafkaService);
-            case STANDARD:
-                return new StandardSchemaMode(kafkaService);
-            case STANDARD_JSON:
-                return new StandardJsonSchemaMode(kafkaService);
-            case CUSTOM:
-                return new CustomSchemaMode(kafkaService);
-            case CANAL:
-                return new CanalSchemaMode(kafkaService);
-            case DEBEZIUM:
-                return new DebeziumSchemaMode(kafkaService);
-            case FLINK_CDC:
-                return new FlinkSchemaMode(kafkaService);
-            case REGISTRY_AVRO:
-                return new RegistryAvroMode(kafkaService);
-            case REGISTRY_PROTOBUF:
-                return new RegistryProtobufMode(kafkaService);
-            case REGISTRY_JSON:
-                return new RegistryJsonMode(kafkaService);
-            default:
-                throw new NotSupportedException(String.format("schema mode '%s'", schemaMode));
+        Factory factory = overrides == null ? null : overrides.get(schemaMode);
+        if (factory == null) {
+            factory = DEFAULTS.get(schemaMode);
         }
+        if (factory == null) {
+            throw new NotSupportedException(String.format("schema mode '%s'", schemaMode));
+        }
+        return factory.create(kafkaService);
     }
 
     protected void processIfStringNotBlank(Object param, Consumer<String> consumer) {

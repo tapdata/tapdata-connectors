@@ -44,7 +44,7 @@ import static io.tapdata.constant.DMLType.*;
 
 public class RegistryAvroMode extends AbsSchemaMode {
 
-    private final Map<String, Schema.Field> fieldCache = new ConcurrentHashMap<>();
+    protected final Map<String, Schema.Field> fieldCache = new ConcurrentHashMap<>();
     // 每个 topic 最近一次见到的 Avro Schema 引用；命中时（==）走快速路径，跳过任何 schema diff 计算
     private final Map<String, Schema> lastSchemaPerTopic = new ConcurrentHashMap<>();
 
@@ -617,7 +617,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
      * 将值转换为 Avro 兼容的类型
      * Avro 要求类型严格匹配，例如 Integer 不能自动转换为 Long
      */
-    private Object convertToAvroType(Object value, String dataType) {
+    protected Object convertToAvroType(Object value, String dataType) {
         if (value == null) {
             return null;
         }
@@ -681,7 +681,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         }
     }
 
-    private Schema.Field getOrCreateAvroField(TapTable tapTable, TapField tapField) {
+    protected Schema.Field getOrCreateAvroField(TapTable tapTable, TapField tapField) {
         final String columnName = tapField.getName();
         if (fieldCache.containsKey(tapTable.getId() + "." + columnName)) {
             return fieldCache.get(tapTable.getId() + "." + columnName);
@@ -898,7 +898,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         return synthetic;
     }
 
-    private Schema buildAvroSchemaFromTable(TapTable tapTable) {
+    protected Schema buildAvroSchemaFromTable(TapTable tapTable) {
         return buildAvroSchemaFromTable(tapTable, null);
     }
 

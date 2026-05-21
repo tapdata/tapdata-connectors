@@ -80,6 +80,10 @@ public class KafkaService implements IKafkaService {
     private volatile SchemaRegistryClient schemaRegistryClient;
 
     public KafkaService(KafkaConfig config, AtomicBoolean stopping) {
+        this(config, stopping, null);
+    }
+
+    public KafkaService(KafkaConfig config, AtomicBoolean stopping, Map<KafkaSchemaMode, AbsSchemaMode.Factory> schemaModeOverrides) {
         this.config = config;
         this.stopping = stopping;
 
@@ -90,9 +94,9 @@ public class KafkaService implements IKafkaService {
             return thread;
         });
         if (config.getConnectionSchemaRegister()) {
-            this.schemaModeService = AbsSchemaMode.create(KafkaSchemaMode.fromString("REGISTRY_" + config.getConnectionRegistrySchemaType()), this);
+            this.schemaModeService = AbsSchemaMode.create(KafkaSchemaMode.fromString("REGISTRY_" + config.getConnectionRegistrySchemaType()), this, schemaModeOverrides);
         } else {
-            this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this);
+            this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this, schemaModeOverrides) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this, schemaModeOverrides);
         }
     }
 
