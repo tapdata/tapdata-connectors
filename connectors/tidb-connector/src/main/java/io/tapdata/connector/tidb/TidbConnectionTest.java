@@ -82,8 +82,9 @@ public class TidbConnectionTest extends CommonDbTest {
                     : "http://" + tidbConfig.getPdServer();
             URI uri = URI.create(pdServer);
             NetUtil.validateHostPortWithSocket(uri.getHost(), uri.getPort());
+            String tiKVAddress = tidbConfig.getTiKvAddress();
             try {
-                NetworkUtils.check(uri.getHost(), uri.getPort(), tidbConfig.getTiKvPort());
+                NetworkUtils.check(uri.getHost(), uri.getPort(), tiKVAddress, tidbConfig.getTiKvPort());
                 consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_SUCCESSFULLY, "Smooth connection between PDServer and TiKV"));
             } catch (Exception e) {
                 consumer.accept(testItem(PB_SERVER_SUCCESS, TestItem.RESULT_SUCCESSFULLY_WITH_WARN, String.format("Unable to connect to network %s, %s", tidbConfig.getPdServer(), e.getMessage())));
