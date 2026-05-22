@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Timeout;
 
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -449,6 +448,29 @@ class DataGeneratorTest {
         }
 
         @Test
+        @DisplayName("before为空分区、after有值的更新事件")
+        void beforeNullAfterHasPartitionValue() {
+            DataGenerator gen = new DataGenerator(100, "test_table", true, DataGenerator.PartitionScenario.UPDATE_BEFORE_NULL_AFTER_VALUE);
+
+            // 预热到可以生成更新事件
+            for (int i = 0; i < 20; i++) {
+                gen.generateRecord();
+            }
+
+            TapUpdateRecordEvent event = gen.generateUpdateEvent();
+            assertNotNull(event, "应生成更新事件");
+            assertNotNull(event.getBefore(), "应包含 before 数据");
+            assertNotNull(event.getAfter(), "应包含 after 数据");
+
+            assertTrue(event.getBefore().get(DataGenerator.PARTITION_FIELD) == null
+                            || String.valueOf(event.getBefore().get(DataGenerator.PARTITION_FIELD)).isEmpty(),
+                    "before 分区值应为空");
+            assertNotNull(event.getAfter().get(DataGenerator.PARTITION_FIELD), "after 分区值应有值");
+            assertFalse(String.valueOf(event.getAfter().get(DataGenerator.PARTITION_FIELD)).isEmpty(),
+                    "after 分区值不应为空字符串");
+        }
+
+        @Test
         @DisplayName("更新事件的ID来自历史生成范围")
         void updateEventIdsFromHistory() {
             DataGenerator gen = new DataGenerator(0);
@@ -533,6 +555,19 @@ class DataGeneratorTest {
             assertEquals("test_table", table.getName());
             assertEquals("test_table", table.getId());
             assertTrue(table.primaryKeys().contains("id"), "id 应为主键");
+        }
+
+        @Test
+        @DisplayName("generateTapTable 生成联合主键表结构")
+        void generateCompositePrimaryKeyTapTable() {
+            DataGenerator gen = new DataGenerator(0, "test_table", true);
+            var table = gen.generateTapTable(true);
+
+            assertNotNull(table);
+            assertEquals("test_table", table.getName());
+            assertEquals("test_table", table.getId());
+            assertTrue(table.primaryKeys().containsAll(Arrays.asList("id", DataGenerator.PARTITION_FIELD)),
+                    "应同时包含 id 和分区字段作为主键");
         }
 
         @Test

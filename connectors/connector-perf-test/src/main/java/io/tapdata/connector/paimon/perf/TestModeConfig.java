@@ -131,6 +131,12 @@ public class TestModeConfig {
             "11", "parallelism", "parallelism",
             "写入并行度测试", "TC-80~83"
         ));
+
+        // 并行度测试
+        modes.add(new TestModeEntry(
+                "12", "partition", "partition",
+                "写入分区表测试", "TC-90~99"
+        ));
         
         ALL_MODES = Collections.unmodifiableList(modes);
     }
