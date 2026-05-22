@@ -181,6 +181,26 @@ public class KafkaConfig extends BasicConfig implements
         return nodeConfigGet("transitive", false);
     }
 
+    public String getNodeAttunityRecordName() {
+        return nodeConfigGet("attunityRecordName", "");
+    }
+
+    public String getNodeAttunityDataName() {
+        return nodeConfigGet("attunityDataName", "");
+    }
+
+    public String getNodeAttunityBeforeDataName() {
+        return nodeConfigGet("attunityBeforeDataName", "");
+    }
+
+    public String getNodeAttunityHeadersName() {
+        return nodeConfigGet("attunityHeadersName", "");
+    }
+
+    public String getNodeAttunityKeyName() {
+        return nodeConfigGet("attunityKeyName", "");
+    }
+
     // ---------- 生成配置 ----------
 
     private Properties buildProperties(String type) {

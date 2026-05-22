@@ -10,7 +10,6 @@ import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.kafka.clients.producer.ProducerRecord;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;

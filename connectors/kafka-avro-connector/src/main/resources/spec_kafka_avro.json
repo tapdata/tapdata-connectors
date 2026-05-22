@@ -717,6 +717,51 @@
               }
             }
           ]
+        },
+        "attunityRecordName": {
+          "required": true,
+          "type": "string",
+          "title": "${attunityRecordName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "DataRecord",
+          "x-index": 85
+        },
+        "attunityDataName": {
+          "required": true,
+          "type": "string",
+          "title": "${attunityDataName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "data",
+          "x-index": 90
+        },
+        "attunityBeforeDataName": {
+          "required": true,
+          "type": "string",
+          "title": "${attunityBeforeDataName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "beforeData",
+          "x-index": 95
+        },
+        "attunityHeadersName": {
+          "required": true,
+          "type": "string",
+          "title": "${attunityHeadersName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "headers",
+          "x-index": 100
+        },
+        "attunityKeyName": {
+          "required": true,
+          "type": "string",
+          "title": "${attunityKeyName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "keyRecord",
+          "x-index": 105
         }
       }
     }
@@ -813,7 +858,12 @@
       "full": "full",
       "transitive": "transitive",
       "applyDefault": "Apply default value",
-      "applyDefaultTooltip": "When the switch is turned on, the default value is applied to the target. If there are unadapted functions or expressions, it may cause an error"
+      "applyDefaultTooltip": "When the switch is turned on, the default value is applied to the target. If there are unadapted functions or expressions, it may cause an error",
+      "attunityRecordName": "Attunity Record Name",
+      "attunityDataName": "Attunity Data Name",
+      "attunityBeforeDataName": "Attunity Before Data Name",
+      "attunityHeadersName": "Attunity Headers Name",
+      "attunityKeyName": "Attunity Key Name"
     },
     "zh_CN": {
       "doc": "docs/kafka_avro_zh_CN.md",
@@ -905,7 +955,12 @@
       "full": "全兼容",
       "transitive": "传递兼容",
       "applyDefault": "应用默认值",
-      "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错"
+      "applyDefaultTooltip": "开关打开时会将默认值应用到目标，如果有未适配的函数或表达式，可能会导致报错",
+      "attunityRecordName": "Attunity Record Name",
+      "attunityDataName": "Attunity Data Name",
+      "attunityBeforeDataName": "Attunity Before Data Name",
+      "attunityHeadersName": "Attunity Headers Name",
+      "attunityKeyName": "Attunity Key Name"
     },
     "zh_TW": {
       "doc": "docs/kafka_avro_zh_TW.md",
@@ -997,7 +1052,12 @@
       "full": "全兼容",
       "transitive": "传递兼容",
       "applyDefault": "應用默認值",
-      "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯"
+      "applyDefaultTooltip": "開關打開時會將默認值應用到目標，如果有未適配的函數或表達式，可能會導致報錯",
+      "attunityRecordName": "Attunity Record Name",
+      "attunityDataName": "Attunity Data Name",
+      "attunityBeforeDataName": "Attunity Before Data Name",
+      "attunityHeadersName": "Attunity Headers Name",
+      "attunityKeyName": "Attunity Key Name"
     }
   },
   "dataTypes": {

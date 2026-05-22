@@ -902,7 +902,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         return buildAvroSchemaFromTable(tapTable, null);
     }
 
-    private Schema buildAvroSchemaFromTable(TapTable tapTable, Map<String, Set<String>> aliasMap) {
+    protected Schema buildAvroSchemaFromTable(TapTable tapTable, Map<String, Set<String>> aliasMap) {
         SchemaBuilder.RecordBuilder<Schema> recordBuilder = SchemaBuilder.record(tapTable.getId());
         SchemaBuilder.FieldAssembler<Schema> fieldAssembler = recordBuilder.fields();
         Map<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
