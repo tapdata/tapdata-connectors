@@ -181,24 +181,24 @@ public class KafkaConfig extends BasicConfig implements
         return nodeConfigGet("transitive", false);
     }
 
-    public String getNodeAttunityRecordName() {
-        return nodeConfigGet("attunityRecordName", "");
+    public String getConnectionAttunityRecordName() {
+        return connectionConfigGet("attunityRecordName", "DataRecord");
     }
 
-    public String getNodeAttunityDataName() {
-        return nodeConfigGet("attunityDataName", "");
+    public String getConnectionAttunityDataName() {
+        return connectionConfigGet("attunityDataName", "data");
     }
 
-    public String getNodeAttunityBeforeDataName() {
-        return nodeConfigGet("attunityBeforeDataName", "");
+    public String getConnectionAttunityBeforeDataName() {
+        return connectionConfigGet("attunityBeforeDataName", "beforeData");
     }
 
-    public String getNodeAttunityHeadersName() {
-        return nodeConfigGet("attunityHeadersName", "");
+    public String getConnectionAttunityHeadersName() {
+        return connectionConfigGet("attunityHeadersName", "headers");
     }
 
-    public String getNodeAttunityKeyName() {
-        return nodeConfigGet("attunityKeyName", "");
+    public String getConnectionAttunityKeyName() {
+        return connectionConfigGet("attunityKeyName", "keyRecord");
     }
 
     // ---------- 生成配置 ----------

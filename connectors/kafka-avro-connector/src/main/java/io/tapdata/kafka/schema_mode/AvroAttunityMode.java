@@ -38,7 +38,7 @@ import static io.tapdata.constant.DMLType.*;
  * </pre>
  * 其中 {@code <tableId>_Data} 复用父类按列生成的 record，BeforeData 通过名字引用同一份。
  */
-public class AvroAttunityMode extends AvroEnhanceMode {
+public class AvroAttunityMode extends AvroEnhancedMode {
 
     private static final String DATA_RECORD = "Data";
     private static final String HEADERS_RECORD = "Headers";
@@ -47,6 +47,38 @@ public class AvroAttunityMode extends AvroEnhanceMode {
 
     public AvroAttunityMode(IKafkaService kafkaService) {
         super(kafkaService);
+    }
+
+    /**
+     * Attunity envelope 顶层 schema 永远是 [Data, BeforeData, headers] 三件套，
+     * 父类 {@link AvroEnhancedMode#sampleOneSchema} 直接拿这三个字段建表是错的。
+     * 这里改为：
+     * <ol>
+     *     <li>从 envelope schema 中取出 inner Data 子记录 schema（来自 schema 定义，不依赖运行时 Data 是否为空）</li>
+     *     <li>用 {@link AvroEnhancedMode#populateTapTableFromAvroFields} 复用父类按 logical type 推 dataType 的逻辑</li>
+     *     <li>PK 仍按消息 key（{@code createKafkaKeyValueMap} 写入的 JSON）解析，与 envelope 解耦</li>
+     * </ol>
+     * 若采样到的恰好是 DELETE（Data=null，BeforeData=before），envelope schema 仍带有 Data 字段定义，
+     * inner schema 不丢失。
+     */
+    @Override
+    public void sampleOneSchema(String table, TapTable sampleTable) {
+        kafkaService.<String, Object>sampleValue(Collections.singletonList(table), null, record -> {
+            if (record == null || !(record.value() instanceof GenericRecord)) {
+                return true;
+            }
+            GenericRecord envelope = (GenericRecord) record.value();
+            Schema innerSchema = innerDataSchema(envelope.getSchema());
+            if (innerSchema == null) {
+                tapLogger.warn("Attunity envelope missing inner Data record schema, fallback to envelope flat fields for table {}", table);
+                List<String> pkFromKey = extractPrimaryKeys(record.key());
+                populateTapTableFromAvroFields(sampleTable, envelope.getSchema().getFields(), pkFromKey);
+                return false;
+            }
+            List<String> primaryKeys = extractPrimaryKeys(record.key());
+            populateTapTableFromAvroFields(sampleTable, innerSchema.getFields(), primaryKeys);
+            return false;
+        });
     }
 
     /**
@@ -60,11 +92,11 @@ public class AvroAttunityMode extends AvroEnhanceMode {
         Schema dataRecord = renameRecord(inner, DATA_RECORD, inner.getNamespace());
         Schema headersRecord = buildHeadersSchema(HEADERS_RECORD, inner.getNamespace());
 
-        Schema envelope = Schema.createRecord(kafkaService.getConfig().getNodeAttunityRecordName(), null, inner.getNamespace(), false);
+        Schema envelope = Schema.createRecord(kafkaService.getConfig().getConnectionAttunityRecordName(), null, inner.getNamespace(), false);
         List<Schema.Field> fields = new ArrayList<>(3);
-        fields.add(nullableField(kafkaService.getConfig().getNodeAttunityDataName(), dataRecord));
-        fields.add(nullableField(kafkaService.getConfig().getNodeAttunityBeforeDataName(), dataRecord));
-        fields.add(nullableField(kafkaService.getConfig().getNodeAttunityHeadersName(), headersRecord));
+        fields.add(nullableField(kafkaService.getConfig().getConnectionAttunityDataName(), dataRecord));
+        fields.add(nullableField(kafkaService.getConfig().getConnectionAttunityBeforeDataName(), dataRecord));
+        fields.add(nullableField(kafkaService.getConfig().getConnectionAttunityHeadersName(), headersRecord));
         envelope.setFields(fields);
         return envelope;
     }
@@ -98,17 +130,17 @@ public class AvroAttunityMode extends AvroEnhanceMode {
 
         Schema envelope = buildAvroSchemaFromTable(tapTable);
         // envelope 的 Data / BeforeData 字段都是 ["null", dataRecord]，索引 1 即 dataRecord
-        Schema dataRecord = envelope.getField(kafkaService.getConfig().getNodeAttunityDataName()).schema().getTypes().get(1);
-        Schema headersRecord = envelope.getField(kafkaService.getConfig().getNodeAttunityHeadersName()).schema().getTypes().get(1);
+        Schema dataRecord = envelope.getField(kafkaService.getConfig().getConnectionAttunityDataName()).schema().getTypes().get(1);
+        Schema headersRecord = envelope.getField(kafkaService.getConfig().getConnectionAttunityHeadersName()).schema().getTypes().get(1);
 
         GenericRecord envelopeRec = new GenericData.Record(envelope);
         if (after != null && !after.isEmpty()) {
-            envelopeRec.put(kafkaService.getConfig().getNodeAttunityDataName(), buildDataRecord(dataRecord, after, tapTable));
+            envelopeRec.put(kafkaService.getConfig().getConnectionAttunityDataName(), buildDataRecord(dataRecord, after, tapTable));
         }
         if (before != null && !before.isEmpty()) {
-            envelopeRec.put(kafkaService.getConfig().getNodeAttunityBeforeDataName(), buildDataRecord(dataRecord, before, tapTable));
+            envelopeRec.put(kafkaService.getConfig().getConnectionAttunityBeforeDataName(), buildDataRecord(dataRecord, before, tapTable));
         }
-        envelopeRec.put(kafkaService.getConfig().getNodeAttunityHeadersName(), buildHeadersRecord(headersRecord, op, tapEvent));
+        envelopeRec.put(kafkaService.getConfig().getConnectionAttunityHeadersName(), buildHeadersRecord(headersRecord, op, tapEvent));
 
         // key / partition 路由仍按业务数据走：INSERT/UPDATE 用 after，DELETE 用 before
         Map<String, Object> routing = after != null ? after : (before != null ? before : new HashMap<>());
@@ -132,7 +164,7 @@ public class AvroAttunityMode extends AvroEnhanceMode {
             }
             TapField tapField = nameFieldMap == null ? null : nameFieldMap.get(fieldName);
             if (tapField != null) {
-                // 复用父类 AvroEnhanceMode 的 logical-type 感知转换
+                // 复用父类 AvroEnhancedMode 的 logical-type 感知转换
                 rec.put(fieldName, convertToAvroType(entry.getValue(), tapField));
             } else {
                 rec.put(fieldName, entry.getValue());
@@ -248,7 +280,7 @@ public class AvroAttunityMode extends AvroEnhanceMode {
      *     <li>INSERT/UPDATE: after = Data；UPDATE 同时 before = BeforeData</li>
      *     <li>DELETE: before = BeforeData</li>
      * </ul>
-     * inner 子记录交给 {@link AvroEnhanceMode#convertGericRecordToMap}，logical type 自动还原。
+     * inner 子记录交给 {@link AvroEnhancedMode#convertGericRecordToMap}，logical type 自动还原。
      */
     @Override
     public TapEvent toTapEvent(ConsumerRecord<?, ?> consumerRecord) {
@@ -260,8 +292,8 @@ public class AvroAttunityMode extends AvroEnhanceMode {
         if (op == null) {
             op = getOperationType(consumerRecord);
         }
-        GenericRecord data = nestedRecord(envelope, kafkaService.getConfig().getNodeAttunityDataName());
-        GenericRecord beforeData = nestedRecord(envelope, kafkaService.getConfig().getNodeAttunityBeforeDataName());
+        GenericRecord data = nestedRecord(envelope, kafkaService.getConfig().getConnectionAttunityDataName());
+        GenericRecord beforeData = nestedRecord(envelope, kafkaService.getConfig().getConnectionAttunityBeforeDataName());
 
         TapRecordEvent event;
         switch (op) {
@@ -297,7 +329,7 @@ public class AvroAttunityMode extends AvroEnhanceMode {
         if (envelopeSchema == null || envelopeSchema.getType() != Schema.Type.RECORD) {
             return null;
         }
-        Schema.Field dataField = envelopeSchema.getField(kafkaService.getConfig().getNodeAttunityDataName());
+        Schema.Field dataField = envelopeSchema.getField(kafkaService.getConfig().getConnectionAttunityDataName());
         if (dataField == null) return null;
         Schema fs = dataField.schema();
         if (fs.getType() == Schema.Type.UNION) {
@@ -320,7 +352,7 @@ public class AvroAttunityMode extends AvroEnhanceMode {
      * 与父类按 Kafka header 取 op 的约定不同，这里优先走 envelope 自身的语义。
      */
     private DMLType readOperationFromEnvelope(GenericRecord envelope) {
-        GenericRecord headers = nestedRecord(envelope, kafkaService.getConfig().getNodeAttunityHeadersName());
+        GenericRecord headers = nestedRecord(envelope, kafkaService.getConfig().getConnectionAttunityHeadersName());
         if (headers == null) return null;
         if (headers.getSchema().getField("operation") == null) return null;
         Object opVal = headers.get("operation");

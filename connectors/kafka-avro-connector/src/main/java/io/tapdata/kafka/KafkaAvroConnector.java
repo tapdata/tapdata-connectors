@@ -7,7 +7,7 @@ import io.tapdata.entity.schema.value.TapTimeValue;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kafka.constants.KafkaSchemaMode;
 import io.tapdata.kafka.schema_mode.AvroAttunityMode;
-import io.tapdata.kafka.schema_mode.AvroEnhanceMode;
+import io.tapdata.kafka.schema_mode.AvroEnhancedMode;
 import io.tapdata.kafka.service.KafkaService;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -64,7 +64,7 @@ public class KafkaAvroConnector extends KafkaEnhancedCoreConnector {
     @Override
     protected Map<KafkaSchemaMode, AbsSchemaMode.Factory> schemaModeOverrides() {
         Map<KafkaSchemaMode, AbsSchemaMode.Factory> map = new HashMap<>();
-        map.put(KafkaSchemaMode.REGISTRY_AVRO, AvroEnhanceMode::new);
+        map.put(KafkaSchemaMode.REGISTRY_AVRO, AvroEnhancedMode::new);
         map.put(KafkaSchemaMode.REGISTRY_AVRO_ATTUNITY, AvroAttunityMode::new);
         return map;
     }

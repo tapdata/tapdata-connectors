@@ -39,7 +39,7 @@
           "x-decorator-props": {
             "tooltip": "${clusterURITip}"
           },
-          "x-index": 1
+          "x-index": 10
         },
         "schemaRegisterUrl": {
           "required": true,
@@ -51,7 +51,7 @@
           },
           "x-component": "Input",
           "apiServerKey": "schemaRegisterUrl",
-          "x-index": 3
+          "x-index": 20
         },
         "attunity": {
           "type": "boolean",
@@ -60,7 +60,60 @@
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "apiServerKey": "attunity",
-          "x-index": 4
+          "x-index": 30,
+          "x-reactions": {
+            "target": "*(attunityRecordName,attunityDataName,attunityBeforeDataName,attunityHeadersName,attunityKeyName)",
+            "fulfill": {
+              "state": {
+                "visible": "{{$self.value===true}}"
+              }
+            }
+          }
+        },
+        "attunityRecordName": {
+          "required": true,
+          "type": "string",
+          "title": "${attunityRecordName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "DataRecord",
+          "x-index": 32
+        },
+        "attunityDataName": {
+          "required": true,
+          "type": "string",
+          "title": "${attunityDataName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "data",
+          "x-index": 34
+        },
+        "attunityBeforeDataName": {
+          "required": true,
+          "type": "string",
+          "title": "${attunityBeforeDataName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "beforeData",
+          "x-index": 36
+        },
+        "attunityHeadersName": {
+          "required": true,
+          "type": "string",
+          "title": "${attunityHeadersName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "headers",
+          "x-index": 38
+        },
+        "attunityKeyName": {
+          "required": true,
+          "type": "string",
+          "title": "${attunityKeyName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "default": "keyRecord",
+          "x-index": 40
         },
         "basicAuth": {
           "type": "boolean",
@@ -79,7 +132,7 @@
               }
             }
           ],
-          "x-index": 5
+          "x-index": 50
         },
         "authCredentialsSource": {
           "type": "string",
@@ -90,7 +143,7 @@
           "x-component-props": {
             "optionType": "button"
           },
-          "x-index": 6,
+          "x-index": 60,
           "enum": [
             {
               "label": "USER_INFO",
@@ -109,7 +162,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_username",
-          "x-index": 7
+          "x-index": 70
         },
         "authPassword": {
           "required": true,
@@ -118,7 +171,7 @@
           "x-decorator": "FormItem",
           "x-component": "Password",
           "apiServerKey": "database_password",
-          "x-index": 8
+          "x-index": 80
         },
         "useSasl": {
           "type": "boolean",
@@ -126,7 +179,7 @@
           "default": false,
           "x-decorator": "FormItem",
           "x-component": "Switch",
-          "x-index": 21
+          "x-index": 90
         },
         "saslMechanism": {
           "type": "string",
@@ -137,7 +190,7 @@
           "x-component-props": {
             "optionType": "button"
           },
-          "x-index": 22,
+          "x-index": 100,
           "enum": [
             {
               "label": "PLAIN",
@@ -171,7 +224,7 @@
               2
             ]
           },
-          "x-index": 23,
+          "x-index": 110,
           "x-reactions": {
             "fulfill": {
               "state": {
@@ -224,7 +277,7 @@
               }
             }
           ],
-          "x-index": 24
+          "x-index": 120
         },
         "krb5Keytab": {
           "type": "string",
@@ -240,7 +293,7 @@
           "apiServerKey": "krb5Keytab",
           "fileNameField": "krb5KeytabFile",
           "required": true,
-          "x-index": 25
+          "x-index": 130
         },
         "krb5Conf": {
           "type": "string",
@@ -256,7 +309,7 @@
           "apiServerKey": "krb5Conf",
           "fileNameField": "krb5ConfFile",
           "required": true,
-          "x-index": 26
+          "x-index": 140
         },
         "krb5Principal": {
           "type": "string",
@@ -268,7 +321,7 @@
             "tooltip": "${krb5PrincipalTip}"
           },
           "required": true,
-          "x-index": 27
+          "x-index": 150
         },
         "krb5ServiceName": {
           "type": "string",
@@ -280,7 +333,7 @@
             "tooltip": "${krb5ServiceNameTip}"
           },
           "required": true,
-          "x-index": 28
+          "x-index": 160
         },
         "OPTIONAL_FIELDS": {
           "type": "void",
@@ -717,51 +770,6 @@
               }
             }
           ]
-        },
-        "attunityRecordName": {
-          "required": true,
-          "type": "string",
-          "title": "${attunityRecordName}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "default": "DataRecord",
-          "x-index": 85
-        },
-        "attunityDataName": {
-          "required": true,
-          "type": "string",
-          "title": "${attunityDataName}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "default": "data",
-          "x-index": 90
-        },
-        "attunityBeforeDataName": {
-          "required": true,
-          "type": "string",
-          "title": "${attunityBeforeDataName}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "default": "beforeData",
-          "x-index": 95
-        },
-        "attunityHeadersName": {
-          "required": true,
-          "type": "string",
-          "title": "${attunityHeadersName}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "default": "headers",
-          "x-index": 100
-        },
-        "attunityKeyName": {
-          "required": true,
-          "type": "string",
-          "title": "${attunityKeyName}",
-          "x-decorator": "FormItem",
-          "x-component": "Input",
-          "default": "keyRecord",
-          "x-index": 105
         }
       }
     }

@@ -4,8 +4,10 @@ import com.alibaba.fastjson.JSON;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kit.StringKit;
+import org.apache.avro.JsonProperties;
 import org.apache.avro.LogicalType;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
@@ -15,6 +17,8 @@ import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.util.Utf8;
 import org.apache.commons.lang3.tuple.Pair;
+
+import java.io.Serializable;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -35,10 +39,167 @@ import java.util.regex.Pattern;
  * <p>
  * 作用域仅限本连接器实例，不影响同 JVM 内的其他 Kafka 连接器。
  */
-public class AvroEnhanceMode extends RegistryAvroMode {
+public class AvroEnhancedMode extends RegistryAvroMode {
 
-    public AvroEnhanceMode(IKafkaService kafkaService) {
+    public AvroEnhancedMode(IKafkaService kafkaService) {
         super(kafkaService);
+    }
+
+    /**
+     * 父类 {@code sampleOneSchema} 仅按 Avro 主类型映射，DECIMAL/DATE/TIME/TIMESTAMP/CHAR/VARCHAR
+     * 全部退化成 BYTES/INT/LONG/STRING，与 {@link #getOrCreateAvroField} 的写入语义不闭环。
+     * 这里改成按 logical type / 自定义 prop 反推，使得 discoverSchema 能产出与写入完全对称的 TapField。
+     */
+    @Override
+    public void sampleOneSchema(String table, TapTable sampleTable) {
+        kafkaService.<String, Object>sampleValue(Collections.singletonList(table), null, record -> {
+            if (record == null || !(record.value() instanceof GenericRecord)) {
+                return true;
+            }
+            GenericRecord genericRecord = (GenericRecord) record.value();
+            List<String> primaryKeys = extractPrimaryKeys(record.key());
+            populateTapTableFromAvroFields(sampleTable, genericRecord.getSchema().getFields(), primaryKeys);
+            return false;
+        });
+    }
+
+    /**
+     * 解析 Kafka 消息 key（约定为 JSON 编码的 PK 名 → 值 map），返回 PK 列名顺序。
+     */
+    @SuppressWarnings("unchecked")
+    protected List<String> extractPrimaryKeys(Object key) {
+        if (key == null) return Collections.emptyList();
+        try {
+            Map<String, Object> map = (Map<String, Object>) TapSimplify.fromJson(key.toString());
+            return map == null ? Collections.emptyList() : new ArrayList<>(map.keySet());
+        } catch (Exception e) {
+            tapLogger.warn("Failed to parse primary keys from key: {}", key, e);
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 把一组 Avro Field 按顺序灌入 {@link TapTable}，PK 标记按传入的 primaryKeys 顺序确定。
+     * Attunity 等带 envelope 的子类可以传入 inner Data 子记录的 fields 复用此处。
+     */
+    protected void populateTapTableFromAvroFields(TapTable sampleTable, List<Schema.Field> avroFields, List<String> primaryKeys) {
+        for (Schema.Field f : avroFields) {
+            sampleTable.add(avroFieldToTapField(f, primaryKeys));
+        }
+    }
+
+    /**
+     * 单个 Avro Field → TapField。dataType 由 {@link #avroSchemaToTapDataType} 推导，
+     * 与 {@link #getOrCreateAvroField} 的写入选择严格对称。
+     */
+    protected TapField avroFieldToTapField(Schema.Field avroField, List<String> primaryKeys) {
+        TapField field = new TapField();
+        field.setName(avroField.name());
+        field.setDataType(avroSchemaToTapDataType(avroField.schema()));
+        field.setNullable(avroField.schema().isNullable());
+        field.setDefaultValue(sanitizeDefault(avroField.defaultVal()));
+        if (primaryKeys != null && primaryKeys.contains(avroField.name())) {
+            field.setPrimaryKey(true);
+            field.setPrimaryKeyPos(primaryKeys.indexOf(avroField.name()) + 1);
+        }
+        return field;
+    }
+
+    /**
+     * Avro Schema → TapData dataType 字符串。顺序：
+     * <ol>
+     *     <li>nullable union 取非 null 分支；多分支 union 兜底 STRING</li>
+     *     <li>标准 logical type（decimal / date / time-* / timestamp-*）</li>
+     *     <li>自定义 prop logicalType（char / varchar / json）+ length</li>
+     *     <li>基础 Avro Type</li>
+     * </ol>
+     */
+    protected String avroSchemaToTapDataType(Schema schema) {
+        if (schema == null) return "STRING";
+        Schema actual = unwrapNullableForSchema(schema);
+        if (actual == null) return "STRING";
+
+        LogicalType lt = actual.getLogicalType();
+        if (lt != null) {
+            switch (lt.getName()) {
+                case "decimal":
+                    LogicalTypes.Decimal dec = (LogicalTypes.Decimal) lt;
+                    return "DECIMAL(" + dec.getPrecision() + "," + dec.getScale() + ")";
+                case "date":
+                    return "DATE";
+                case "time-millis":
+                    return "TIME(3)";
+                case "time-micros":
+                    return "TIME(6)";
+                case "timestamp-millis":
+                    return "TIMESTAMP(3)";
+                case "timestamp-micros":
+                    return "TIMESTAMP(6)";
+                default:
+                    break;
+            }
+        }
+        // 自定义 prop 形式（writer 端用 addProp 注入）
+        Object customLT = actual.getObjectProp("logicalType");
+        if (customLT instanceof String) {
+            switch ((String) customLT) {
+                case "char":
+                    return withLength("CHAR", actual);
+                case "varchar":
+                    return withLength("VARCHAR", actual);
+                case "json":
+                    return "RECORD";
+                default:
+                    break;
+            }
+        }
+        switch (actual.getType()) {
+            case BOOLEAN: return "BOOLEAN";
+            case INT:     return "INTEGER";
+            case LONG:    return "LONG";
+            case FLOAT:   return "FLOAT";
+            case DOUBLE:  return "DOUBLE";
+            case BYTES:
+            case FIXED:   return "BYTES";
+            case ARRAY:   return "ARRAY";
+            case MAP:     return "MAP";
+            case RECORD:  return "RECORD";
+            case ENUM:
+            case STRING:
+            default:      return "STRING";
+        }
+    }
+
+    private String withLength(String base, Schema schema) {
+        Object len = schema.getObjectProp("length");
+        if (len instanceof Number) {
+            int n = ((Number) len).intValue();
+            if (n > 0) return base + "(" + n + ")";
+        }
+        return base;
+    }
+
+    /**
+     * 与父类 {@code unwrapNullable} 等价，但接受 null 兜底；nullable union 取非 NULL 分支，
+     * 多分支 union 返回 null 让上层按 STRING 兜底，避免误判类型。
+     */
+    private Schema unwrapNullableForSchema(Schema schema) {
+        if (schema.getType() != Schema.Type.UNION) return schema;
+        List<Schema> types = schema.getTypes();
+        if (types.size() == 2) {
+            for (Schema t : types) {
+                if (t.getType() != Schema.Type.NULL) return t;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 与父类 {@code getDefaultValue} 一致：JsonProperties.Null 视作 null，非 Serializable 转字符串。
+     */
+    private Object sanitizeDefault(Object obj) {
+        if (obj == null || obj instanceof JsonProperties.Null) return null;
+        return obj instanceof Serializable ? obj : String.valueOf(obj);
     }
 
     protected Schema.Field getOrCreateAvroField(TapTable tapTable, TapField tapField) {
