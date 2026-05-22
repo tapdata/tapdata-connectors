@@ -4,27 +4,22 @@ import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kafka.IKafkaService;
+import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
-import static io.tapdata.constant.DMLType.DELETE;
-import static io.tapdata.constant.DMLType.INSERT;
-import static io.tapdata.constant.DMLType.UPDATE;
+import static io.tapdata.constant.DMLType.*;
 
 /**
  * 以 Attunity / Qlik Replicate 的 Avro 信封结构包裹父类生成的表 schema：
@@ -61,7 +56,7 @@ public class AvroAttunityMode extends AvroEnhanceMode {
         Schema dataRecord = renameRecord(inner, DATA_RECORD, inner.getNamespace());
         Schema headersRecord = buildHeadersSchema(HEADERS_RECORD, inner.getNamespace());
 
-        Schema envelope = Schema.createRecord(tapTable.getId(), null, inner.getNamespace(), false);
+        Schema envelope = Schema.createRecord(kafkaService.getConfig().getNodeAttunityRecordName(), null, inner.getNamespace(), false);
         List<Schema.Field> fields = new ArrayList<>(3);
         fields.add(nullableField(kafkaService.getConfig().getNodeAttunityDataName(), dataRecord));
         fields.add(nullableField(kafkaService.getConfig().getNodeAttunityBeforeDataName(), dataRecord));
@@ -144,9 +139,16 @@ public class AvroAttunityMode extends AvroEnhanceMode {
 
     private GenericRecord buildHeadersRecord(Schema headersSchema, DMLType op, TapEvent tapEvent) {
         GenericRecord rec = new GenericData.Record(headersSchema);
-        rec.put("operation", op.name());
-        long ts = tapEvent.getTime() == null ? System.currentTimeMillis() : tapEvent.getTime();
-        rec.put("timestamp", Instant.ofEpochMilli(ts).toString());
+        Schema opSchema = headersSchema.getField("operation").schema();
+        rec.put("operation", new GenericData.EnumSymbol(opSchema, op.name()));
+        if (tapEvent instanceof TapRecordEvent recordEvent) {
+            rec.put("timestamp", recordEvent.getReferenceTime());
+            rec.put("changeSequence", recordEvent.getExactlyOnceId());
+            if (recordEvent.getInfo() != null) {
+                rec.put("streamPosition", TapSimplify.toJson(recordEvent.getInfo().get("streamOffset")));
+            }
+        }
+
         return rec;
     }
 
@@ -173,10 +175,12 @@ public class AvroAttunityMode extends AvroEnhanceMode {
      */
     private Schema buildHeadersSchema(String name, String namespace) {
         Schema headers = Schema.createRecord(name, null, namespace, false);
+        Schema operationEnum = Schema.createEnum("operation", null, namespace,
+                Arrays.asList(INSERT.name(), UPDATE.name(), DELETE.name()));
         List<Schema.Field> fields = new ArrayList<>();
-        fields.add(new Schema.Field("operation", Schema.create(Schema.Type.STRING), null, (Object) null));
+        fields.add(new Schema.Field("operation", operationEnum, null, null));
         fields.add(nullableField("changeSequence", Schema.create(Schema.Type.STRING)));
-        fields.add(nullableField("timestamp", Schema.create(Schema.Type.STRING)));
+        fields.add(nullableField("timestamp", LogicalTypes.timestampMillis().addToSchema(Schema.create(Schema.Type.LONG))));
         fields.add(nullableField("streamPosition", Schema.create(Schema.Type.STRING)));
         fields.add(nullableField("transactionId", Schema.create(Schema.Type.STRING)));
         fields.add(nullableField("changeMask", Schema.create(Schema.Type.BYTES)));
