@@ -169,7 +169,7 @@ public class KafkaEnhancedCoreConnector extends ConnectorBase {
 
     private void writeRecord(TapConnectorContext connectorContext, List<TapRecordEvent> tapRecordEvents, TapTable tapTable, Consumer<WriteListResult<TapRecordEvent>> writeListResultConsumer) {
         // 当前线程若已开启事务，使用对应的 transactional producer；否则走普通 producer
-        KafkaProducer<Object, Object> producer = producerMap.get(Thread.currentThread().getName());
+         KafkaProducer<Object, Object> producer = producerMap.get(Thread.currentThread().getName());
         if (null != producer) {
             kafkaService.writeRecord(producer, tapRecordEvents, tapTable, writeListResultConsumer);
         } else {

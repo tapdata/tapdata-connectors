@@ -14,10 +14,12 @@ import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static io.tapdata.constant.DMLType.*;
 
@@ -40,6 +42,8 @@ public class AvroAttunityMode extends AvroEnhanceMode {
 
     private static final String DATA_RECORD = "Data";
     private static final String HEADERS_RECORD = "Headers";
+    // 消费侧 DDL 检测以 inner Data 子记录 schema 为基线，envelope 自身字段固定不变化
+    private final Map<String, Schema> lastInnerSchemaPerTopic = new ConcurrentHashMap<>();
 
     public AvroAttunityMode(IKafkaService kafkaService) {
         super(kafkaService);
@@ -194,6 +198,138 @@ public class AvroAttunityMode extends AvroEnhanceMode {
     private Schema.Field nullableField(String name, Schema type) {
         Schema nullable = Schema.createUnion(Schema.create(Schema.Type.NULL), type);
         return new Schema.Field(name, nullable, null, Schema.Field.NULL_DEFAULT_VALUE);
+    }
+
+    // ---------------- 消费侧：拆 envelope，DDL 检测落在 inner Data 子记录 ----------------
+
+    /**
+     * 父类 {@link RegistryAvroMode#toTapEvents} 直接拿 GenericRecord 的 schema 做 DDL diff，
+     * 对 envelope 来说 schema 永远是固定的 [Data, BeforeData, headers]，不会变化，DDL 检测会漏掉。
+     * 这里改成对 inner {@code Data} 子记录的 schema 做 diff。
+     */
+    @Override
+    public List<TapEvent> toTapEvents(ConsumerRecord<?, ?> consumerRecord) {
+        if (consumerRecord == null || !(consumerRecord.value() instanceof GenericRecord)) {
+            return super.toTapEvents(consumerRecord);
+        }
+        GenericRecord envelope = (GenericRecord) consumerRecord.value();
+        Schema innerSchema = innerDataSchema(envelope.getSchema());
+        if (innerSchema == null) {
+            // envelope 结构异常，回落到父类裸路径
+            return super.toTapEvents(consumerRecord);
+        }
+        String topic = consumerRecord.topic();
+        List<TapEvent> events;
+        Schema lastInner = lastInnerSchemaPerTopic.get(topic);
+        if (lastInner == innerSchema) {
+            TapEvent dml = toTapEvent(consumerRecord);
+            return dml == null ? Collections.emptyList() : Collections.singletonList(dml);
+        }
+        if (lastInner == null) {
+            TapTable knownTable = kafkaService.getConfig().tableMapGet(topic);
+            events = knownTable != null
+                    ? detectSchemaChangesFromTable(topic, knownTable, innerSchema, consumerRecord.timestamp())
+                    : new ArrayList<>(1);
+        } else {
+            events = detectSchemaChanges(topic, lastInner, innerSchema, consumerRecord.timestamp());
+        }
+        lastInnerSchemaPerTopic.put(topic, innerSchema);
+        TapEvent dml = toTapEvent(consumerRecord);
+        if (dml != null) {
+            events.add(dml);
+        }
+        return filterPrimaryKeyDDL(topic, events);
+    }
+
+    /**
+     * 拆 envelope：
+     * <ul>
+     *     <li>op 优先取 {@code headers.operation} enum，回落到父类 Kafka header "op"</li>
+     *     <li>INSERT/UPDATE: after = Data；UPDATE 同时 before = BeforeData</li>
+     *     <li>DELETE: before = BeforeData</li>
+     * </ul>
+     * inner 子记录交给 {@link AvroEnhanceMode#convertGericRecordToMap}，logical type 自动还原。
+     */
+    @Override
+    public TapEvent toTapEvent(ConsumerRecord<?, ?> consumerRecord) {
+        if (consumerRecord == null || !(consumerRecord.value() instanceof GenericRecord)) {
+            return null;
+        }
+        GenericRecord envelope = (GenericRecord) consumerRecord.value();
+        DMLType op = readOperationFromEnvelope(envelope);
+        if (op == null) {
+            op = getOperationType(consumerRecord);
+        }
+        GenericRecord data = nestedRecord(envelope, kafkaService.getConfig().getNodeAttunityDataName());
+        GenericRecord beforeData = nestedRecord(envelope, kafkaService.getConfig().getNodeAttunityBeforeDataName());
+
+        TapRecordEvent event;
+        switch (op) {
+            case DELETE:
+                TapDeleteRecordEvent del = TapDeleteRecordEvent.create();
+                if (beforeData != null) del.setBefore(convertGericRecordToMap(beforeData));
+                else if (data != null) del.setBefore(convertGericRecordToMap(data));
+                event = del;
+                break;
+            case UPDATE:
+                TapUpdateRecordEvent upd = TapUpdateRecordEvent.create();
+                if (data != null) upd.setAfter(convertGericRecordToMap(data));
+                if (beforeData != null) upd.setBefore(convertGericRecordToMap(beforeData));
+                event = upd;
+                break;
+            case INSERT:
+            default:
+                TapInsertRecordEvent ins = TapInsertRecordEvent.create();
+                if (data != null) ins.setAfter(convertGericRecordToMap(data));
+                event = ins;
+                break;
+        }
+        event.setTableId(consumerRecord.topic());
+        event.setReferenceTime(consumerRecord.timestamp());
+        return event;
+    }
+
+    /**
+     * 从 envelope schema 中取出 Data 字段引用的 inner record schema。
+     * Data 字段 schema 形如 ["null", innerRecord]，从 union 里挑非 NULL 分支。
+     */
+    private Schema innerDataSchema(Schema envelopeSchema) {
+        if (envelopeSchema == null || envelopeSchema.getType() != Schema.Type.RECORD) {
+            return null;
+        }
+        Schema.Field dataField = envelopeSchema.getField(kafkaService.getConfig().getNodeAttunityDataName());
+        if (dataField == null) return null;
+        Schema fs = dataField.schema();
+        if (fs.getType() == Schema.Type.UNION) {
+            for (Schema t : fs.getTypes()) {
+                if (t.getType() == Schema.Type.RECORD) return t;
+            }
+            return null;
+        }
+        return fs.getType() == Schema.Type.RECORD ? fs : null;
+    }
+
+    private GenericRecord nestedRecord(GenericRecord envelope, String fieldName) {
+        if (envelope.getSchema().getField(fieldName) == null) return null;
+        Object v = envelope.get(fieldName);
+        return v instanceof GenericRecord ? (GenericRecord) v : null;
+    }
+
+    /**
+     * 读 headers.operation enum。Attunity envelope 把 op 写在子记录里，
+     * 与父类按 Kafka header 取 op 的约定不同，这里优先走 envelope 自身的语义。
+     */
+    private DMLType readOperationFromEnvelope(GenericRecord envelope) {
+        GenericRecord headers = nestedRecord(envelope, kafkaService.getConfig().getNodeAttunityHeadersName());
+        if (headers == null) return null;
+        if (headers.getSchema().getField("operation") == null) return null;
+        Object opVal = headers.get("operation");
+        if (opVal == null) return null;
+        try {
+            return DMLType.valueOf(opVal.toString().toUpperCase());
+        } catch (IllegalArgumentException ignore) {
+            return null;
+        }
     }
 
 }

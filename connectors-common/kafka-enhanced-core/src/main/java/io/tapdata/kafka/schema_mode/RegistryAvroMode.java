@@ -217,7 +217,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
      * - 删除字段（排除 rename 的源） → {@link TapDropFieldEvent}
      * - 同名字段属性差异（dataType / nullable / default） → {@link TapAlterFieldAttributesEvent}
      */
-    private List<TapEvent> detectSchemaChanges(String topic, Schema oldSchema, Schema newSchema, long referenceTime) {
+    protected List<TapEvent> detectSchemaChanges(String topic, Schema oldSchema, Schema newSchema, long referenceTime) {
         List<TapEvent> events = new ArrayList<>();
         Map<String, Schema.Field> oldFields = new LinkedHashMap<>();
         for (Schema.Field f : oldSchema.getFields()) {
@@ -367,7 +367,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
      * 用 {@link TapTable} 作为基线（任务重启后内存中没有上一份 Avro Schema 时使用），与新到的 Avro Schema 比对生成 DDL。
      * 规则与 {@link #detectSchemaChanges} 保持一致，仅基线来源不同。
      */
-    private List<TapEvent> detectSchemaChangesFromTable(String topic, TapTable tapTable, Schema newSchema, long referenceTime) {
+    protected List<TapEvent> detectSchemaChangesFromTable(String topic, TapTable tapTable, Schema newSchema, long referenceTime) {
         List<TapEvent> events = new ArrayList<>();
         Map<String, TapField> oldFields = tapTable.getNameFieldMap();
         if (oldFields == null) {
@@ -544,7 +544,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         return toTapType(schema.getType().name());
     }
 
-    private Map<String, Object> convertGericRecordToMap(GenericRecord record) {
+    protected Map<String, Object> convertGericRecordToMap(GenericRecord record) {
         Map<String, Object> result = new HashMap<>();
         if (record == null) {
             return result;

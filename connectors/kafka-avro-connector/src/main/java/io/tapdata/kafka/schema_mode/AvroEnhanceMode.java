@@ -6,9 +6,14 @@ import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kit.StringKit;
+import org.apache.avro.LogicalType;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
+import org.apache.avro.generic.GenericEnumSymbol;
+import org.apache.avro.generic.GenericFixed;
+import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.util.Utf8;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.math.BigDecimal;
@@ -362,6 +367,135 @@ public class AvroEnhanceMode extends RegistryAvroMode {
         }
         Map<String, Object> out = new LinkedHashMap<>(1);
         out.put("value", value.toString());
+        return out;
+    }
+
+    /**
+     * 消费侧反向解码：父类按裸值塞回 Map（仅做 Utf8 → String），logical type 全部丢失。
+     * 这里按字段 schema 把 ByteBuffer/Integer/Long 还原为 BigDecimal/LocalDate/LocalTime/Instant，
+     * 与 {@link #convertToAvroType(Object, TapField)} 的写入方向一一对应。
+     */
+    @Override
+    protected Map<String, Object> convertGericRecordToMap(GenericRecord record) {
+        Map<String, Object> result = new HashMap<>();
+        if (record == null) {
+            return result;
+        }
+        for (Schema.Field f : record.getSchema().getFields()) {
+            result.put(f.name(), decodeAvroValue(f.schema(), record.get(f.name())));
+        }
+        return result;
+    }
+
+    /**
+     * 按 Avro Schema 把运行时值解码成 Java 标准类型。union 取非 null 分支递归。
+     */
+    protected Object decodeAvroValue(Schema schema, Object value) {
+        if (value == null) {
+            return null;
+        }
+        Schema actual = unwrapNullable(schema);
+        LogicalType lt = actual.getLogicalType();
+        if (lt != null) {
+            switch (lt.getName()) {
+                case "decimal":
+                    return decodeDecimal((LogicalTypes.Decimal) lt, value);
+                case "date":
+                    return value instanceof Number ? LocalDate.ofEpochDay(((Number) value).longValue()) : value;
+                case "time-millis":
+                    return value instanceof Number ? LocalTime.ofNanoOfDay(((Number) value).longValue() * 1_000_000L) : value;
+                case "time-micros":
+                    return value instanceof Number ? LocalTime.ofNanoOfDay(((Number) value).longValue() * 1_000L) : value;
+                case "timestamp-millis":
+                    return value instanceof Number ? Instant.ofEpochMilli(((Number) value).longValue()) : value;
+                case "timestamp-micros":
+                    return value instanceof Number ? microsToInstant(((Number) value).longValue()) : value;
+                default:
+                    // char / varchar / json 等自定义 logicalType 落回原始字符串
+                    break;
+            }
+        }
+        switch (actual.getType()) {
+            case STRING:
+            case ENUM:
+                return value instanceof Utf8 || value instanceof GenericEnumSymbol ? value.toString() : value;
+            case BYTES:
+                if (value instanceof ByteBuffer) {
+                    ByteBuffer bb = ((ByteBuffer) value).duplicate();
+                    byte[] bytes = new byte[bb.remaining()];
+                    bb.get(bytes);
+                    return bytes;
+                }
+                if (value instanceof GenericFixed) return ((GenericFixed) value).bytes();
+                return value;
+            case FIXED:
+                return value instanceof GenericFixed ? ((GenericFixed) value).bytes() : value;
+            case ARRAY:
+                return decodeArray(actual.getElementType(), value);
+            case MAP:
+                return decodeMap(actual.getValueType(), value);
+            case RECORD:
+                return value instanceof GenericRecord ? convertGericRecordToMap((GenericRecord) value) : value;
+            default:
+                return value;
+        }
+    }
+
+    private Schema unwrapNullable(Schema schema) {
+        if (schema.getType() != Schema.Type.UNION) return schema;
+        for (Schema t : schema.getTypes()) {
+            if (t.getType() != Schema.Type.NULL) return t;
+        }
+        return schema;
+    }
+
+    private BigDecimal decodeDecimal(LogicalTypes.Decimal dec, Object value) {
+        byte[] bytes;
+        if (value instanceof ByteBuffer) {
+            ByteBuffer bb = ((ByteBuffer) value).duplicate();
+            bytes = new byte[bb.remaining()];
+            bb.get(bytes);
+        } else if (value instanceof GenericFixed) {
+            bytes = ((GenericFixed) value).bytes();
+        } else if (value instanceof byte[]) {
+            bytes = (byte[]) value;
+        } else if (value instanceof Number) {
+            // precision 缺失时父类降级为 double，直接按 double 还原
+            return BigDecimal.valueOf(((Number) value).doubleValue());
+        } else {
+            return new BigDecimal(value.toString());
+        }
+        return new BigDecimal(new BigInteger(bytes), dec.getScale());
+    }
+
+    private Instant microsToInstant(long micros) {
+        long seconds = Math.floorDiv(micros, 1_000_000L);
+        long nanos = Math.floorMod(micros, 1_000_000L) * 1_000L;
+        return Instant.ofEpochSecond(seconds, nanos);
+    }
+
+    private List<Object> decodeArray(Schema elementSchema, Object value) {
+        if (!(value instanceof Collection)) {
+            return Collections.singletonList(decodeAvroValue(elementSchema, value));
+        }
+        Collection<?> src = (Collection<?>) value;
+        List<Object> out = new ArrayList<>(src.size());
+        for (Object e : src) out.add(decodeAvroValue(elementSchema, e));
+        return out;
+    }
+
+    private Map<String, Object> decodeMap(Schema valueSchema, Object value) {
+        if (!(value instanceof Map)) {
+            Map<String, Object> out = new LinkedHashMap<>(1);
+            out.put("value", value);
+            return out;
+        }
+        Map<?, ?> src = (Map<?, ?>) value;
+        Map<String, Object> out = new LinkedHashMap<>(src.size());
+        for (Map.Entry<?, ?> e : src.entrySet()) {
+            if (e.getKey() == null) continue;
+            out.put(e.getKey().toString(), decodeAvroValue(valueSchema, e.getValue()));
+        }
         return out;
     }
 }
