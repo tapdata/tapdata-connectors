@@ -562,11 +562,11 @@ public class AvroEnhancedMode extends RegistryAvroMode {
                 case "decimal":
                     return decodeDecimal((LogicalTypes.Decimal) lt, value);
                 case "date":
-                    return value instanceof Number ? LocalDate.ofEpochDay(((Number) value).longValue()) : value;
+                    return value instanceof Number ? LocalDate.ofEpochDay(((Number) value).longValue()).atStartOfDay() : value;
                 case "time-millis":
-                    return value instanceof Number ? LocalTime.ofNanoOfDay(((Number) value).longValue() * 1_000_000L) : value;
+                    return value instanceof Number ? LocalTime.ofNanoOfDay(((Number) value).longValue() * 1_000_000L).atDate(LocalDate.ofYearDay(1970, 1)) : value;
                 case "time-micros":
-                    return value instanceof Number ? LocalTime.ofNanoOfDay(((Number) value).longValue() * 1_000L) : value;
+                    return value instanceof Number ? LocalTime.ofNanoOfDay(((Number) value).longValue() * 1_000L).atDate(LocalDate.ofYearDay(1970, 1)) : value;
                 case "timestamp-millis":
                     return value instanceof Number ? Instant.ofEpochMilli(((Number) value).longValue()) : value;
                 case "timestamp-micros":
@@ -658,5 +658,35 @@ public class AvroEnhancedMode extends RegistryAvroMode {
             out.put(e.getKey().toString(), decodeAvroValue(valueSchema, e.getValue()));
         }
         return out;
+    }
+
+    protected String avroPrimaryTypeName(Schema schema) {
+        if (schema == null) {
+            return "STRING";
+        }
+        if (schema.isUnion()) {
+            List<Schema> types = schema.getTypes();
+            if (types.size() == 2) {
+                for (Schema t : types) {
+                    if (t.getType() != Schema.Type.NULL) {
+                        return toTapType(t);
+                    }
+                }
+            }
+            return "STRING";
+        }
+        return toTapType(schema);
+    }
+
+    protected String toTapType(Schema schema) {
+        String dataType;
+        if (schema.getLogicalType() != null) {
+            dataType = schema.getLogicalType().getName().toUpperCase();
+        } else if (schema.hasProps() && schema.getProp("logicalType") != null) {
+            dataType = schema.getProp("logicalType").toUpperCase();
+        } else {
+            dataType = schema.getType().name();
+        }
+        return toTapType(dataType);
     }
 }

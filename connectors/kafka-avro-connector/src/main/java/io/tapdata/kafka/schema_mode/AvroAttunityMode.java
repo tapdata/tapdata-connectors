@@ -50,35 +50,83 @@ public class AvroAttunityMode extends AvroEnhancedMode {
     }
 
     /**
-     * Attunity envelope 顶层 schema 永远是 [Data, BeforeData, headers] 三件套，
-     * 父类 {@link AvroEnhancedMode#sampleOneSchema} 直接拿这三个字段建表是错的。
-     * 这里改为：
+     * Attunity envelope 顶层 schema 永远是 [Data, BeforeData, headers] 三件套（字段名由 ConnectionConfig
+     * 的 attunityDataName / attunityBeforeDataName / attunityHeadersName 决定）。父类
+     * {@link AvroEnhancedMode#sampleOneSchema} 直接拿这三个字段建表是错的，会把 Data/BeforeData/headers
+     * 当成业务列。这里穿透到内层：
      * <ol>
-     *     <li>从 envelope schema 中取出 inner Data 子记录 schema（来自 schema 定义，不依赖运行时 Data 是否为空）</li>
-     *     <li>用 {@link AvroEnhancedMode#populateTapTableFromAvroFields} 复用父类按 logical type 推 dataType 的逻辑</li>
-     *     <li>PK 仍按消息 key（{@code createKafkaKeyValueMap} 写入的 JSON）解析，与 envelope 解耦</li>
+     *     <li>优先从 envelope schema 取 {@code <DataName>} 字段的 inner record schema</li>
+     *     <li>缺失时回落到 {@code <BeforeDataName>} 字段（DELETE-only 历史样本场景）</li>
+     *     <li>两个都缺失，warn + 回落到 envelope flat fields，避免 discoverSchema 直接空表</li>
+     *     <li>字段映射复用 {@link AvroEnhancedMode#populateTapTableFromAvroFields} 的 logical type 推导</li>
+     *     <li>PK 由 {@link #extractAttunityPrimaryKeys} 兼容两种 key 格式：</li>
+     *     <li>&nbsp;&nbsp;a) 我们自己写入的 JSON 字符串（{@code createKafkaKeyValueMap}）</li>
+     *     <li>&nbsp;&nbsp;b) 真实 Attunity topic 的 Avro {@code keyRecord} GenericRecord</li>
      * </ol>
-     * 若采样到的恰好是 DELETE（Data=null，BeforeData=before），envelope schema 仍带有 Data 字段定义，
-     * inner schema 不丢失。
+     * inner schema 走 schema 定义而非 runtime 值，DELETE 样本（Data=null）也能拿到完整字段。
      */
     @Override
     public void sampleOneSchema(String table, TapTable sampleTable) {
-        kafkaService.<String, Object>sampleValue(Collections.singletonList(table), null, record -> {
+        kafkaService.sampleValue(Collections.singletonList(table), null, record -> {
             if (record == null || !(record.value() instanceof GenericRecord)) {
                 return true;
             }
             GenericRecord envelope = (GenericRecord) record.value();
-            Schema innerSchema = innerDataSchema(envelope.getSchema());
+            Schema envelopeSchema = envelope.getSchema();
+            Schema innerSchema = nestedRecordSchema(envelopeSchema, kafkaService.getConfig().getConnectionAttunityDataName());
             if (innerSchema == null) {
-                tapLogger.warn("Attunity envelope missing inner Data record schema, fallback to envelope flat fields for table {}", table);
-                List<String> pkFromKey = extractPrimaryKeys(record.key());
-                populateTapTableFromAvroFields(sampleTable, envelope.getSchema().getFields(), pkFromKey);
+                innerSchema = nestedRecordSchema(envelopeSchema, kafkaService.getConfig().getConnectionAttunityBeforeDataName());
+            }
+            List<String> primaryKeys = extractAttunityPrimaryKeys(record.key());
+            if (innerSchema == null) {
+                tapLogger.warn("Attunity envelope for topic '{}' has neither '{}' nor '{}' inner record; falling back to envelope flat fields",
+                        table,
+                        kafkaService.getConfig().getConnectionAttunityDataName(),
+                        kafkaService.getConfig().getConnectionAttunityBeforeDataName());
+                populateTapTableFromAvroFields(sampleTable, envelopeSchema.getFields(), primaryKeys);
                 return false;
             }
-            List<String> primaryKeys = extractPrimaryKeys(record.key());
             populateTapTableFromAvroFields(sampleTable, innerSchema.getFields(), primaryKeys);
             return false;
         });
+    }
+
+    /**
+     * Attunity 真实环境里 Kafka 消息 key 通常是 Avro {@code keyRecord} GenericRecord，
+     * 而我们 sink 写入的 key 是 {@code createKafkaKeyValueMap} 生成的 JSON 字符串。
+     * 这里两种都接：GenericRecord 取 schema field 顺序，String/byte[] 当 JSON 解析。
+     */
+    @SuppressWarnings("unchecked")
+    protected List<String> extractAttunityPrimaryKeys(Object key) {
+        if (key == null) return Collections.emptyList();
+        if (key instanceof GenericRecord) {
+            List<String> pks = new ArrayList<>();
+            for (Schema.Field f : ((GenericRecord) key).getSchema().getFields()) {
+                pks.add(f.name());
+            }
+            return pks;
+        }
+        return extractPrimaryKeys(key);
+    }
+
+    /**
+     * 通用版 inner record schema 提取：给定 envelope schema 与字段名，
+     * 返回该字段引用的非 NULL record schema；适配 {@code [null, record]} 与裸 record 两种。
+     */
+    private Schema nestedRecordSchema(Schema envelopeSchema, String fieldName) {
+        if (envelopeSchema == null || envelopeSchema.getType() != Schema.Type.RECORD) {
+            return null;
+        }
+        Schema.Field f = envelopeSchema.getField(fieldName);
+        if (f == null) return null;
+        Schema fs = f.schema();
+        if (fs.getType() == Schema.Type.UNION) {
+            for (Schema t : fs.getTypes()) {
+                if (t.getType() == Schema.Type.RECORD) return t;
+            }
+            return null;
+        }
+        return fs.getType() == Schema.Type.RECORD ? fs : null;
     }
 
     /**
@@ -326,19 +374,7 @@ public class AvroAttunityMode extends AvroEnhancedMode {
      * Data 字段 schema 形如 ["null", innerRecord]，从 union 里挑非 NULL 分支。
      */
     private Schema innerDataSchema(Schema envelopeSchema) {
-        if (envelopeSchema == null || envelopeSchema.getType() != Schema.Type.RECORD) {
-            return null;
-        }
-        Schema.Field dataField = envelopeSchema.getField(kafkaService.getConfig().getConnectionAttunityDataName());
-        if (dataField == null) return null;
-        Schema fs = dataField.schema();
-        if (fs.getType() == Schema.Type.UNION) {
-            for (Schema t : fs.getTypes()) {
-                if (t.getType() == Schema.Type.RECORD) return t;
-            }
-            return null;
-        }
-        return fs.getType() == Schema.Type.RECORD ? fs : null;
+        return nestedRecordSchema(envelopeSchema, kafkaService.getConfig().getConnectionAttunityDataName());
     }
 
     private GenericRecord nestedRecord(GenericRecord envelope, String fieldName) {

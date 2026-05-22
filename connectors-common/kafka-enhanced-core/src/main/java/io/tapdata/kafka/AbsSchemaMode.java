@@ -294,6 +294,12 @@ public abstract class AbsSchemaMode {
         switch (dataType) {
             case "INT":
                 return "INTEGER";
+            case "TIME-MILLIS":
+            case "TIME-MICROS":
+                return "TIME";
+            case "TIMESTAMP-MILLIS":
+            case "TIMESTAMP-MICROS":
+                return "TIMESTAMP";
             default:
                 return dataType;
         }

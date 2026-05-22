@@ -526,7 +526,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
     /**
      * 返回 Avro Schema 中除 NULL 之外的主要类型名（与 {@link #genericRecordToTapTable} 处理一致）。
      */
-    private String avroPrimaryTypeName(Schema schema) {
+    protected String avroPrimaryTypeName(Schema schema) {
         if (schema == null) {
             return "STRING";
         }

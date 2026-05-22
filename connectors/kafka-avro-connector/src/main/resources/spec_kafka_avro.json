@@ -1130,7 +1130,7 @@
       "preferPrecision": 12,
       "preferScale": 4
     },
-    "FIXED[($byte)]": {
+    "CHAR[($byte)]": {
       "byte": 65535,
       "to": "TapString",
       "byteRatio": 3,
