@@ -283,6 +283,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         }
         // 2) 新增字段
         List<TapField> addedFields = new ArrayList<>();
+        int pos = oldSchema.getFields().stream().max(Comparator.comparing(Schema.Field::pos)).orElseThrow().pos() + 1;
         for (Schema.Field nf : newSchema.getFields()) {
             if (oldFields.containsKey(nf.name())) {
                 continue;
@@ -292,7 +293,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
             }
             TapField tf = avroFieldToTapField(nf);
             if (tf != null) {
-                addedFields.add(tf);
+                addedFields.add(tf.pos(pos++));
             }
         }
         if (!addedFields.isEmpty()) {
@@ -418,7 +419,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
                 String dName = remainingDropNames.get(0);
                 Schema.Field a = remainingAdds.get(0);
                 TapField dField = oldFields.get(dName);
-                String dType = dField == null || dField.getDataType() == null ? null : StringKit.removeParentheses(dField.getDataType());
+                String dType = dField == null || dField.getDataType() == null ? null : dField.getDataType();
                 String aType = avroPrimaryTypeName(a.schema());
                 if (dType != null && Objects.equals(dType, aType)) {
                     renameAfterToBefore.put(a.name(), dName);
@@ -434,6 +435,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         }
         // 2) 新增字段
         List<TapField> addedFields = new ArrayList<>();
+        int pos = tapTable.getMaxPos() + 1;
         for (Schema.Field nf : newSchema.getFields()) {
             if (oldFields.containsKey(nf.name())) {
                 continue;
@@ -443,7 +445,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
             }
             TapField tf = avroFieldToTapField(nf);
             if (tf != null) {
-                addedFields.add(tf);
+                addedFields.add(tf.pos(pos++));
             }
         }
         if (!addedFields.isEmpty()) {
@@ -485,7 +487,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
     }
 
     private TapAlterFieldAttributesEvent diffFieldAttributesFromTapField(String topic, TapField oldField, Schema.Field newField, long referenceTime) {
-        String oldType = oldField.getDataType() == null ? null : StringKit.removeParentheses(oldField.getDataType());
+        String oldType = oldField.getDataType() == null ? null : oldField.getDataType();
         String newType = avroPrimaryTypeName(newField.schema());
         boolean oldNullable = !Boolean.FALSE.equals(oldField.getNullable());
         boolean newNullable = newField.schema().isNullable();
@@ -514,7 +516,7 @@ public class RegistryAvroMode extends AbsSchemaMode {
         return attr;
     }
 
-    private TapField avroFieldToTapField(Schema.Field avroField) {
+    protected TapField avroFieldToTapField(Schema.Field avroField) {
         TapField field = new TapField();
         field.setName(avroField.name());
         field.setDataType(avroPrimaryTypeName(avroField.schema()));

@@ -1171,10 +1171,10 @@
       ],
       "pattern": "HH:mm:ss",
       "fraction": [
-        0,
+        3,
         6
       ],
-      "defaultFraction": 0,
+      "defaultFraction": 3,
       "to": "TapTime"
     },
     "DATE": {
@@ -1193,10 +1193,10 @@
       ],
       "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSS",
       "fraction": [
-        0,
+        3,
         6
       ],
-      "defaultFraction": 0
+      "defaultFraction": 3
     },
     "ENUM($enums)": {
       "name": "enum",

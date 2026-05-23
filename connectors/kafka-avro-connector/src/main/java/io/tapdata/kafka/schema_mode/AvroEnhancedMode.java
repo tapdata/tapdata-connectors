@@ -1,25 +1,32 @@
 package io.tapdata.kafka.schema_mode;
 
 import com.alibaba.fastjson.JSON;
+import io.tapdata.constant.DMLType;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.entity.ValueChange;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
+import io.tapdata.entity.event.dml.TapInsertRecordEvent;
+import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.kafka.IKafkaService;
 import io.tapdata.kit.StringKit;
-import org.apache.avro.JsonProperties;
-import org.apache.avro.LogicalType;
-import org.apache.avro.LogicalTypes;
-import org.apache.avro.Schema;
-import org.apache.avro.SchemaBuilder;
+import org.apache.avro.*;
+import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericEnumSymbol;
 import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.util.Utf8;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.internals.RecordHeaders;
 
 import java.io.Serializable;
-
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.RoundingMode;
@@ -31,6 +38,8 @@ import java.time.LocalTime;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static io.tapdata.constant.DMLType.*;
 
 /**
  * {@link RegistryAvroMode} 的扩展范例：在父类生成的事件之上，把 Kafka 消息的元数据
@@ -63,6 +72,58 @@ public class AvroEnhancedMode extends RegistryAvroMode {
         });
     }
 
+    @Override
+    public List<ProducerRecord<Object, Object>> fromTapEvent(TapTable tapTable, TapEvent tapEvent) {
+        Map<String, Object> data;
+        DMLType op = INSERT;
+        if (tapEvent instanceof TapInsertRecordEvent) {
+            data = ((TapInsertRecordEvent) tapEvent).getAfter();
+        } else if (tapEvent instanceof TapUpdateRecordEvent) {
+            data = ((TapUpdateRecordEvent) tapEvent).getAfter();
+            op = UPDATE;
+        } else if (tapEvent instanceof TapDeleteRecordEvent) {
+            data = ((TapDeleteRecordEvent) tapEvent).getBefore();
+            op = DELETE;
+        } else {
+            data = new HashMap<>();
+        }
+
+        if (data == null || data.isEmpty()) {
+            data = new HashMap<>();
+        }
+
+        final Map<String, TapField> nameFieldMap = tapTable.getNameFieldMap();
+        Schema avroSchema = buildAvroSchemaFromTable(tapTable);
+        GenericRecord record = new GenericData.Record(avroSchema);
+
+        // 填充数据，需要进行类型转换以匹配 Avro schema
+        for (Map.Entry<String, Object> entry : data.entrySet()) {
+            String fieldName = entry.getKey();
+            Object value = entry.getValue();
+
+            // 获取字段的 schema 信息
+            Schema.Field schemaField = avroSchema.getField(fieldName);
+            if (schemaField == null) {
+                continue; // 跳过 schema 中不存在的字段
+            }
+
+            // 转换值以匹配 Avro schema 类型
+            TapField tapField = nameFieldMap.get(fieldName);
+            if (tapField != null) {
+                Object convertedValue = convertToAvroType(value, tapField);
+                record.put(fieldName, convertedValue);
+            } else {
+                record.put(fieldName, value);
+            }
+        }
+
+        String keyValue = createKafkaKeyValueMap(data, tapTable);
+        // 创建 ProducerRecord
+        ProducerRecord<Object, Object> producerRecord = new ProducerRecord<>(topic(tapTable, tapEvent), computePartition(createKafkaKey(data, tapTable), kafkaService.getConfig().getNodePartitionSize()),
+                tapEvent.getTime(), keyValue, record, new RecordHeaders().add("op", op.name().getBytes()));
+        return List.of(producerRecord);
+    }
+
     /**
      * 解析 Kafka 消息 key（约定为 JSON 编码的 PK 名 → 值 map），返回 PK 列名顺序。
      */
@@ -89,13 +150,13 @@ public class AvroEnhancedMode extends RegistryAvroMode {
     }
 
     /**
-     * 单个 Avro Field → TapField。dataType 由 {@link #avroSchemaToTapDataType} 推导，
+     * 单个 Avro Field → TapField。dataType 由 {@link #avroPrimaryTypeName} 推导，
      * 与 {@link #getOrCreateAvroField} 的写入选择严格对称。
      */
     protected TapField avroFieldToTapField(Schema.Field avroField, List<String> primaryKeys) {
         TapField field = new TapField();
         field.setName(avroField.name());
-        field.setDataType(avroSchemaToTapDataType(avroField.schema()));
+        field.setDataType(avroPrimaryTypeName(avroField.schema()));
         field.setNullable(avroField.schema().isNullable());
         field.setDefaultValue(sanitizeDefault(avroField.defaultVal()));
         if (primaryKeys != null && primaryKeys.contains(avroField.name())) {
@@ -114,7 +175,8 @@ public class AvroEnhancedMode extends RegistryAvroMode {
      *     <li>基础 Avro Type</li>
      * </ol>
      */
-    protected String avroSchemaToTapDataType(Schema schema) {
+    @Override
+    protected String avroPrimaryTypeName(Schema schema) {
         if (schema == null) return "STRING";
         Schema actual = unwrapNullableForSchema(schema);
         if (actual == null) return "STRING";
@@ -154,19 +216,29 @@ public class AvroEnhancedMode extends RegistryAvroMode {
             }
         }
         switch (actual.getType()) {
-            case BOOLEAN: return "BOOLEAN";
-            case INT:     return "INTEGER";
-            case LONG:    return "LONG";
-            case FLOAT:   return "FLOAT";
-            case DOUBLE:  return "DOUBLE";
+            case BOOLEAN:
+                return "BOOLEAN";
+            case INT:
+                return "INTEGER";
+            case LONG:
+                return "LONG";
+            case FLOAT:
+                return "FLOAT";
+            case DOUBLE:
+                return "DOUBLE";
             case BYTES:
-            case FIXED:   return "BYTES";
-            case ARRAY:   return "ARRAY";
-            case MAP:     return "MAP";
-            case RECORD:  return "RECORD";
+            case FIXED:
+                return "BYTES";
+            case ARRAY:
+                return "ARRAY";
+            case MAP:
+                return "MAP";
+            case RECORD:
+                return "RECORD";
             case ENUM:
             case STRING:
-            default:      return "STRING";
+            default:
+                return "STRING";
         }
     }
 
@@ -658,35 +730,5 @@ public class AvroEnhancedMode extends RegistryAvroMode {
             out.put(e.getKey().toString(), decodeAvroValue(valueSchema, e.getValue()));
         }
         return out;
-    }
-
-    protected String avroPrimaryTypeName(Schema schema) {
-        if (schema == null) {
-            return "STRING";
-        }
-        if (schema.isUnion()) {
-            List<Schema> types = schema.getTypes();
-            if (types.size() == 2) {
-                for (Schema t : types) {
-                    if (t.getType() != Schema.Type.NULL) {
-                        return toTapType(t);
-                    }
-                }
-            }
-            return "STRING";
-        }
-        return toTapType(schema);
-    }
-
-    protected String toTapType(Schema schema) {
-        String dataType;
-        if (schema.getLogicalType() != null) {
-            dataType = schema.getLogicalType().getName().toUpperCase();
-        } else if (schema.hasProps() && schema.getProp("logicalType") != null) {
-            dataType = schema.getProp("logicalType").toUpperCase();
-        } else {
-            dataType = schema.getType().name();
-        }
-        return toTapType(dataType);
     }
 }
