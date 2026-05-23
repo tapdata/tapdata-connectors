@@ -6,6 +6,7 @@ import io.tapdata.connector.excel.config.ExcelConfig;
 import io.tapdata.connector.excel.util.ExcelUtil;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
@@ -96,7 +97,11 @@ public class ExcelConnector extends FileConnector {
                                 after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? (EmptyKit.isNull(val) ? "null" : String.valueOf(val)) : val);
                             }
                         }
-                        tapEvents.get().add(insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified));
+                        TapRecordEvent recordEvent = insertRecordEvent(after, tapTable.getId()).referenceTime(lastModified);
+                        recordEvent.addInfo("lastModified", lastModified);
+                        recordEvent.addInfo("filePath", fileOffset.getPath());
+                        recordEvent.addInfo("fileName", fileOffset.getPath().substring(fileOffset.getPath().lastIndexOf("/") + 1));
+                        tapEvents.get().add(recordEvent);
                         if (tapEvents.get().size() == eventBatchSize) {
                             fileOffset.setDataLine(fileOffset.getDataLine() + eventBatchSize);
                             fileOffset.setPath(fileOffset.getPath());
