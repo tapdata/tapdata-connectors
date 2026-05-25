@@ -1357,10 +1357,10 @@ public class PaimonService implements Closeable {
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
 		if (config.getBucketMode(table.getName()).equals("fixed")) {
-			writer.write(row);
+			writeRow(writer, event, row, table, null, after);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
-			writer.write(row, bucket);
+			writeRow(writer, event, row, table, bucket, after);
 		}
 	}
 
@@ -1402,19 +1402,19 @@ public class PaimonService implements Closeable {
 				// First, write DELETE using before data
 				beforeRow.setRowKind(RowKind.DELETE);
 				if (config.getBucketMode(table.getName()).equals("fixed")) {
-					writer.write(beforeRow);
+					writeRow(writer, event, beforeRow, table, null, before);
 				} else {
 					int bucket = selectBucketForDynamic(beforeRow, table);
-					writer.write(beforeRow, bucket);
+					writeRow(writer, event, beforeRow, table, bucket, before);
 				}
 
 				// Then, write INSERT using after data
 				afterRow.setRowKind(RowKind.INSERT);
 				if (config.getBucketMode(table.getName()).equals("fixed")) {
-					writer.write(afterRow);
+					writeRow(writer, event, afterRow, table, null, after);
 				} else {
 					int bucket = selectBucketForDynamic(afterRow, table);
-					writer.write(afterRow, bucket);
+					writeRow(writer, event, afterRow, table, bucket, after);
 				}
 				return;
 			}
@@ -1424,20 +1424,20 @@ public class PaimonService implements Closeable {
 		if (beforeRow != null) {
 			beforeRow.setRowKind(RowKind.UPDATE_BEFORE);
 			if (config.getBucketMode(table.getName()).equals("fixed")) {
-				writer.write(beforeRow);
+				writeRow(writer, event, beforeRow, table, null, before);
 			} else {
 				int bucket = selectBucketForDynamic(beforeRow, table);
-				writer.write(beforeRow, bucket);
+				writeRow(writer, event, beforeRow, table, bucket, before);
 			}
 		}
 
 		// Write U+ (UPDATE_AFTER) using after data
 		afterRow.setRowKind(RowKind.UPDATE_AFTER);
 		if (config.getBucketMode(table.getName()).equals("fixed")) {
-			writer.write(afterRow);
+			writeRow(writer, event, afterRow, table, null, after);
 		} else {
 			int bucket = selectBucketForDynamic(afterRow, table);
-			writer.write(afterRow, bucket);
+			writeRow(writer, event, afterRow, table, bucket, after);
 		}
 	}
 
@@ -1506,11 +1506,182 @@ public class PaimonService implements Closeable {
 		// Set row kind to DELETE
 		row.setRowKind(RowKind.DELETE);
 		if (config.getBucketMode(table.getName()).equals("fixed")) {
-			writer.write(row);
+			writeRow(writer, event, row, table, null, before);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
-			writer.write(row, bucket);
+			writeRow(writer, event, row, table, bucket, before);
 		}
+	}
+
+	/**
+	 * Unified write entry with exception capture and row logging.
+	 *
+	 * @param writer stream writer
+	 * @param event CDC event being written
+	 * @param row row to write
+	 * @param table table definition
+	 * @param bucket bucket id, null for fixed bucket mode
+	 * @throws Exception if write fails
+	 */
+	private void writeRow(StreamTableWrite writer, TapRecordEvent event, GenericRow row, TapTable table, Integer bucket, Map<String, Object> sourceData) throws Exception {
+		try {
+			if (bucket == null) {
+				writer.write(row);
+			} else {
+				writer.write(row, bucket);
+			}
+		} catch (Exception e) {
+			log.error("Failed to write row to Paimon. table={}, bucket={}, sourceData={}, event={}, row={}",
+					table == null ? null : table.getName(), bucket, formatSourceDataForLog(sourceData), formatEventForLog(event), formatRowForLog(row, table), e);
+			throw e;
+		}
+	}
+
+	/**
+	 * Format row content for human-friendly error logging.
+	 *
+	 * @param row   Paimon row
+	 * @param table table definition
+	 * @return readable row string
+	 */
+	private String formatRowForLog(GenericRow row, TapTable table) {
+		if (row == null) {
+			return "null";
+		}
+
+		StringBuilder builder = new StringBuilder("GenericRow{");
+		builder.append("rowKind=").append(row.getRowKind());
+		builder.append(", fieldCount=").append(row.getFieldCount());
+		builder.append(", fieldMapping=").append(formatFieldMappingForLog(table, row.getFieldCount()));
+		builder.append(", values=");
+
+		List<String> fieldNames = resolveRowFieldNames(table, row.getFieldCount());
+		builder.append('{');
+		for (int i = 0; i < row.getFieldCount(); i++) {
+			if (i > 0) {
+				builder.append(", ");
+			}
+			String fieldName = i < fieldNames.size() ? fieldNames.get(i) : "field_" + i;
+			builder.append(i).append(':').append(fieldName).append('=').append(formatLogValue(row.getField(i)));
+		}
+		builder.append('}');
+		builder.append('}');
+		return builder.toString();
+	}
+
+	/**
+	 * Format field index to field name mapping for human-friendly error logging.
+	 *
+	 * @param table table definition
+	 * @param fieldCount row field count
+	 * @return readable field mapping string
+	 */
+	private String formatFieldMappingForLog(TapTable table, int fieldCount) {
+		List<String> fieldNames = resolveRowFieldNames(table, fieldCount);
+		if (fieldNames.isEmpty()) {
+			return "[]";
+		}
+
+		StringBuilder builder = new StringBuilder("[");
+		for (int i = 0; i < fieldNames.size(); i++) {
+			if (i > 0) {
+				builder.append(", ");
+			}
+			builder.append(i).append(':').append(fieldNames.get(i));
+		}
+		builder.append(']');
+		return builder.toString();
+	}
+
+	/**
+	 * Resolve row field names from cached Paimon schema if available.
+	 *
+	 * @param table table definition
+	 * @param fieldCount row field count
+	 * @return field names aligned with row order
+	 */
+	private List<String> resolveRowFieldNames(TapTable table, int fieldCount) {
+		if (table == null || fieldCount <= 0) {
+			return Collections.emptyList();
+		}
+
+		String cacheKey = config.getDatabase() + "." + table.getName();
+		List<DataField> paimonFields = paimonFieldCache.get(cacheKey);
+		if (paimonFields == null || paimonFields.isEmpty()) {
+			return Collections.emptyList();
+		}
+
+		List<String> fieldNames = new ArrayList<>(paimonFields.size());
+		for (DataField field : paimonFields) {
+			fieldNames.add(field.name());
+		}
+		return fieldNames;
+	}
+
+	/**
+	 * Format log value to a compact readable string.
+	 *
+	 * @param value field value
+	 * @return formatted string
+	 */
+	private String formatLogValue(Object value) {
+		if (value == null) {
+			return "null";
+		}
+		if (value instanceof BinaryString) {
+			return quoteAndTruncate(value.toString());
+		}
+		if (value instanceof byte[]) {
+			return "byte[" + ((byte[]) value).length + "]";
+		}
+		if (value instanceof Collection) {
+			return truncate(String.valueOf(value));
+		}
+		if (value instanceof Map) {
+			return truncate(String.valueOf(value));
+		}
+		if (value.getClass().isArray()) {
+			return truncate(String.valueOf(value));
+		}
+		return truncate(String.valueOf(value));
+	}
+
+	private String formatSourceDataForLog(Map<String, Object> sourceData) {
+		if (sourceData == null) {
+			return "null";
+		}
+		StringBuilder builder = new StringBuilder("{");
+		int index = 0;
+		for (Map.Entry<String, Object> entry : sourceData.entrySet()) {
+			if (index++ > 0) {
+				builder.append(", ");
+			}
+			builder.append(entry.getKey()).append('=').append(formatLogValue(entry.getValue()));
+		}
+		builder.append('}');
+		return builder.toString();
+	}
+
+	private String formatEventForLog(TapRecordEvent event) {
+		if (event == null) {
+			return "null";
+		}
+		return truncate(event.toString());
+	}
+
+	private String quoteAndTruncate(String value) {
+		return '"' + truncate(value) + '"';
+	}
+
+	private String truncate(String value) {
+		if (value == null) {
+			return "null";
+		}
+		int maxLength = 256;
+		if (value.length() <= maxLength) {
+			return value;
+		}
+		return value.substring(0, maxLength) + "...(len=" + value.length() + ")";
 	}
 
 	/**
