@@ -1,6 +1,7 @@
 package io.tapdata.connector.paimon.service;
 
 import io.tapdata.connector.paimon.config.PaimonConfig;
+import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
@@ -43,7 +44,7 @@ class PaimonServiceWriteErrorLogTest {
     private static final String TABLE_NAME = "customer_table";
     private static final String CACHE_KEY = DATABASE + "." + TABLE_NAME;
     private static final long REFERENCE_TIME = 123456789L;
-    private static final String LONG_NAME = repeat('x', 300);
+    private static final String LONG_NAME = "x".repeat(300);
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("writeFailureScenarios")
@@ -81,13 +82,18 @@ class PaimonServiceWriteErrorLogTest {
         String errorMessage = log.getLastErrorMessage();
         assertNotNull(errorMessage);
         System.out.println(errorMessage);
-        assertTrue(errorMessage.contains("Failed to write row to Paimon. table=customer_table, bucket=null"));
-        assertTrue(errorMessage.contains(scenario.expectedSourceDataFragment()));
-        assertTrue(errorMessage.contains("fieldMapping=[0:id, 1:name]"));
-        assertTrue(errorMessage.contains(scenario.expectedRowValuesFragment()));
-        assertTrue(errorMessage.contains("rowKind=" + scenario.expectedRowKind()));
+        assertLogContains(errorMessage, "Failed to write row to Paimon.");
+        assertLogContains(errorMessage, "table=customer_table");
+        assertLogContains(errorMessage, "bucket=null");
+        assertLogContains(errorMessage, scenario.expectedSourceDataFragment());
+        assertLogContains(errorMessage, "event=" + scenario.expectedEventClassFragment());
+        assertLogContains(errorMessage, scenario.expectedEventDetailFragment());
+        assertLogContains(errorMessage, "row=GenericRow{");
+        assertLogContains(errorMessage, "fieldMapping=[0:id, 1:name]");
+        assertLogContains(errorMessage, "rowKind=" + scenario.expectedRowKind());
+        assertLogContains(errorMessage, scenario.expectedRowValuesFragment());
         if (scenario.expectedTruncationFragment() != null) {
-            assertTrue(errorMessage.contains(scenario.expectedTruncationFragment()));
+            assertLogContains(errorMessage, scenario.expectedTruncationFragment());
         }
     }
 
@@ -96,8 +102,13 @@ class PaimonServiceWriteErrorLogTest {
                 Arguments.of(Scenario.insertNullRequiredField()),
                 Arguments.of(Scenario.updateBeforeNullRequiredField()),
                 Arguments.of(Scenario.updateAfterNullRequiredField()),
-                Arguments.of(Scenario.insertNullRequiredFieldWithLongValue())
+                Arguments.of(Scenario.insertNullRequiredFieldWithLongValue()),
+                Arguments.of(Scenario.deleteMissingRequiredField())
         );
+    }
+
+    private static void assertLogContains(String errorMessage, String fragment) {
+        assertTrue(errorMessage.contains(fragment), "Missing log fragment: " + fragment + "\nActual: " + errorMessage);
     }
 
     private void seedFieldCache(PaimonService service, List<DataField> fields) throws Exception {
@@ -148,6 +159,22 @@ class PaimonServiceWriteErrorLogTest {
         }
     }
 
+    private static void invokeHandleStreamDelete(PaimonService service, TapDeleteRecordEvent event,
+                                            StreamTableWrite writer, TapTable table) throws Exception {
+        Method method = PaimonService.class.getDeclaredMethod("handleStreamDelete", TapDeleteRecordEvent.class,
+                StreamTableWrite.class, TapTable.class);
+        method.setAccessible(true);
+        try {
+            method.invoke(service, event, writer, table);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            throw new RuntimeException(cause);
+        }
+    }
+
     private static TapInsertRecordEvent buildInsertEvent(Map<String, Object> after) {
         return new TapInsertRecordEvent()
                 .init()
@@ -165,12 +192,12 @@ class PaimonServiceWriteErrorLogTest {
                 .referenceTime(REFERENCE_TIME);
     }
 
-    private static String repeat(char value, int count) {
-        StringBuilder builder = new StringBuilder(count);
-        for (int i = 0; i < count; i++) {
-            builder.append(value);
-        }
-        return builder.toString();
+    private static TapDeleteRecordEvent buildDeleteEvent(Map<String, Object> before) {
+        return new TapDeleteRecordEvent()
+                .init()
+                .table(TABLE_NAME)
+                .before(before)
+                .referenceTime(REFERENCE_TIME);
     }
 
     @FunctionalInterface
@@ -186,6 +213,8 @@ class PaimonServiceWriteErrorLogTest {
         private final String expectedSecondFieldValue;
         private final String expectedExceptionMessage;
         private final String expectedSourceDataFragment;
+        private final String expectedEventClassFragment;
+        private final String expectedEventDetailFragment;
         private final String expectedRowValuesFragment;
         private final String expectedTruncationFragment;
         private final int failOnWriteCall;
@@ -197,6 +226,8 @@ class PaimonServiceWriteErrorLogTest {
                          String expectedSecondFieldValue,
                          String expectedExceptionMessage,
                          String expectedSourceDataFragment,
+                         String expectedEventClassFragment,
+                         String expectedEventDetailFragment,
                          String expectedRowValuesFragment,
                          String expectedTruncationFragment,
                          int failOnWriteCall) {
@@ -207,6 +238,8 @@ class PaimonServiceWriteErrorLogTest {
             this.expectedSecondFieldValue = expectedSecondFieldValue;
             this.expectedExceptionMessage = expectedExceptionMessage;
             this.expectedSourceDataFragment = expectedSourceDataFragment;
+            this.expectedEventClassFragment = expectedEventClassFragment;
+            this.expectedEventDetailFragment = expectedEventDetailFragment;
             this.expectedRowValuesFragment = expectedRowValuesFragment;
             this.expectedTruncationFragment = expectedTruncationFragment;
             this.failOnWriteCall = failOnWriteCall;
@@ -216,7 +249,7 @@ class PaimonServiceWriteErrorLogTest {
             Map<String, Object> after = new LinkedHashMap<>();
             after.put("id", null);
             after.put("name", "Alice");
-            TapInsertRecordEvent event = new PaimonServiceWriteErrorLogTest().buildInsertEvent(after);
+            TapInsertRecordEvent event = buildInsertEvent(after);
             return new Scenario(
                     "insert-null-id",
                     (service, writer, table) -> invokeHandleStreamInsert(service, event, writer, table),
@@ -225,6 +258,8 @@ class PaimonServiceWriteErrorLogTest {
                     "Alice",
                     "Required field id cannot be null",
                     "sourceData={id=null, name=Alice}",
+                    "io.tapdata.entity.event.dml.TapInsertRecordEvent@",
+                    "\"after\":{\"name\":\"Alice\"}",
                     "values={0:id=null, 1:name=\"Alice\"}",
                     null,
                     1
@@ -238,7 +273,7 @@ class PaimonServiceWriteErrorLogTest {
             Map<String, Object> after = new LinkedHashMap<>();
             after.put("id", 1001L);
             after.put("name", "AfterUpdate");
-            TapUpdateRecordEvent event = new PaimonServiceWriteErrorLogTest().buildUpdateEvent(before, after);
+            TapUpdateRecordEvent event = buildUpdateEvent(before, after);
             return new Scenario(
                     "update-before-null-id",
                     (service, writer, table) -> invokeHandleStreamUpdate(service, event, writer, table),
@@ -247,6 +282,8 @@ class PaimonServiceWriteErrorLogTest {
                     "BeforeUpdate",
                     "Required field id cannot be null",
                     "sourceData={id=null, name=BeforeUpdate}",
+                    "io.tapdata.entity.event.dml.TapUpdateRecordEvent@",
+                    "\"after\":{\"id\":1001,\"name\":\"AfterUpdate\"},\"before\":{\"name\":\"BeforeUpdate\"}",
                     "values={0:id=null, 1:name=\"BeforeUpdate\"}",
                     null,
                     1
@@ -260,7 +297,7 @@ class PaimonServiceWriteErrorLogTest {
             Map<String, Object> after = new LinkedHashMap<>();
             after.put("id", null);
             after.put("name", "AfterUpdate");
-            TapUpdateRecordEvent event = new PaimonServiceWriteErrorLogTest().buildUpdateEvent(before, after);
+            TapUpdateRecordEvent event = buildUpdateEvent(before, after);
             return new Scenario(
                     "update-after-null-id",
                     (service, writer, table) -> invokeHandleStreamUpdate(service, event, writer, table),
@@ -269,6 +306,8 @@ class PaimonServiceWriteErrorLogTest {
                     "AfterUpdate",
                     "Required field id cannot be null",
                     "sourceData={id=null, name=AfterUpdate}",
+                    "io.tapdata.entity.event.dml.TapUpdateRecordEvent@",
+                    "\"after\":{\"name\":\"AfterUpdate\"},\"before\":{\"id\":1001,\"name\":\"BeforeUpdate\"}",
                     "values={0:id=null, 1:name=\"AfterUpdate\"}",
                     null,
                     2
@@ -279,7 +318,7 @@ class PaimonServiceWriteErrorLogTest {
             Map<String, Object> after = new LinkedHashMap<>();
             after.put("id", null);
             after.put("name", LONG_NAME);
-            TapInsertRecordEvent event = new PaimonServiceWriteErrorLogTest().buildInsertEvent(after);
+            TapInsertRecordEvent event = buildInsertEvent(after);
             return new Scenario(
                     "insert-null-id-long-name",
                     (service, writer, table) -> invokeHandleStreamInsert(service, event, writer, table),
@@ -288,8 +327,31 @@ class PaimonServiceWriteErrorLogTest {
                     LONG_NAME,
                     "Required field id cannot be null",
                     "sourceData={id=null, name=" + LONG_NAME.substring(0, 32),
+                    "io.tapdata.entity.event.dml.TapInsertRecordEvent@",
+                    "\"after\":{\"name\":\"" + LONG_NAME.substring(0, 32),
                     "values={0:id=null, 1:name=\"" + LONG_NAME.substring(0, 32),
                     "...(len=300)",
+                    1
+            );
+        }
+
+        static Scenario deleteMissingRequiredField() {
+            Map<String, Object> before = new LinkedHashMap<>();
+            before.put("id", null);
+            before.put("name", "DeleteTarget");
+            TapDeleteRecordEvent event = buildDeleteEvent(before);
+            return new Scenario(
+                    "delete-null-id",
+                    (service, writer, table) -> invokeHandleStreamDelete(service, event, writer, table),
+                    "DELETE",
+                    1,
+                    "DeleteTarget",
+                    "Required field id cannot be null",
+                    "sourceData={id=null, name=DeleteTarget}",
+                    "io.tapdata.entity.event.dml.TapDeleteRecordEvent@",
+                    "\"before\":{\"name\":\"DeleteTarget\"}",
+                    "values={0:id=null, 1:name=\"DeleteTarget\"}",
+                    null,
                     1
             );
         }
@@ -316,6 +378,14 @@ class PaimonServiceWriteErrorLogTest {
 
         String expectedSourceDataFragment() {
             return expectedSourceDataFragment;
+        }
+
+        String expectedEventClassFragment() {
+            return expectedEventClassFragment;
+        }
+
+        String expectedEventDetailFragment() {
+            return expectedEventDetailFragment;
         }
 
         String expectedRowValuesFragment() {
