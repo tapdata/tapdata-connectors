@@ -1702,6 +1702,13 @@ public class MongodbConnector extends ConnectorBase {
 				streamReader.onDestroy();
 			} catch (Exception exception) {
 				connectorContext.getLog().debug("Close Stream reader failed, message: {}", exception.getMessage());
+			} finally {
+				if (streamReader == mongodbStreamReader) {
+					mongodbStreamReader = null;
+				}
+				if (streamReader == opLogStreamReader) {
+					opLogStreamReader = null;
+				}
 			}
 			exceptionCollector.revealException(e);
 			errorHandle(e, connectorContext);
@@ -1793,22 +1800,81 @@ public class MongodbConnector extends ConnectorBase {
 
 	@Override
 	public void onStop(TapConnectionContext connectionContext) throws Throwable {
-		try {
 		isShutDown.set(true);
-		if (mongodbStreamReader != null) {
-			mongodbStreamReader.onDestroy();
-			mongodbStreamReader = null;
+		Throwable firstError = null;
+		try {
+			if (mongodbStreamReader != null) {
+				try {
+					mongodbStreamReader.onDestroy();
+				} finally {
+					mongodbStreamReader = null;
+				}
+			}
+		} catch (Throwable t) {
+			firstError = t;
+			connectionContext.getLog().warn("Destroy mongodbStreamReader failed: {}", t.getMessage());
 		}
 
-		if (mongoClient != null) {
-			mongoClient.close();
-			mongoClient = null;
+		try {
+			if (opLogStreamReader != null) {
+				try {
+					opLogStreamReader.onDestroy();
+				} finally {
+					opLogStreamReader = null;
+				}
+			}
+		} catch (Throwable t) {
+			if (firstError == null) firstError = t;
+			connectionContext.getLog().warn("Destroy opLogStreamReader failed: {}", t.getMessage());
 		}
 
-		closeOpLogThreadSource();
-		}catch (Exception e){
-			exceptionCollector.collectTerminateByServer(e);
-			throw e;
+		if (!transactionSessionMap.isEmpty()) {
+			for (Map.Entry<String, ClientSession> entry : transactionSessionMap.entrySet()) {
+				ClientSession session = entry.getValue();
+				if (session == null) continue;
+				try {
+					if (session.hasActiveTransaction()) {
+						session.abortTransaction();
+					}
+				} catch (Throwable t) {
+					connectionContext.getLog().warn("Abort transaction for {} failed: {}", entry.getKey(), t.getMessage());
+				}
+				try {
+					session.close();
+				} catch (Throwable t) {
+					connectionContext.getLog().warn("Close client session for {} failed: {}", entry.getKey(), t.getMessage());
+				}
+			}
+			transactionSessionMap.clear();
+		}
+
+		if (!writerMap.isEmpty()) {
+			writerMap.clear();
+		}
+
+		try {
+			if (mongoClient != null) {
+				try {
+					mongoClient.close();
+				} finally {
+					mongoClient = null;
+				}
+			}
+		} catch (Throwable t) {
+			if (firstError == null) firstError = t;
+			connectionContext.getLog().warn("Close mongoClient failed: {}", t.getMessage());
+		}
+
+		try {
+			closeOpLogThreadSource();
+		} catch (Throwable t) {
+			if (firstError == null) firstError = t;
+			connectionContext.getLog().warn("Close oplog thread source failed: {}", t.getMessage());
+		}
+
+		if (firstError != null) {
+			exceptionCollector.collectTerminateByServer(firstError);
+			throw firstError;
 		}
 	}
 	protected void closeOpLogThreadSource() {
