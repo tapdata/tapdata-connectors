@@ -449,8 +449,12 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
             consumeStreamEventThread.interrupt();
         }
         if (mongoClient != null) {
-            mongoClient.close();
-            mongoClient = null;
+            try {
+                mongoClient.close();
+            } finally {
+                mongoClient = null;
+                mongoDatabase = null;
+            }
         }
     }
 
