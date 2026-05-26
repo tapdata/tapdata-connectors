@@ -3,7 +3,6 @@ package io.tapdata.connector.paimon.perf;
 import java.util.*;
 
 import static io.tapdata.connector.paimon.perf.PerformanceTestRunner.TOTAL_RECORDS;
-import static io.tapdata.connector.paimon.perf.PerformanceTestRunner.BASE_TEST_DIR;
 
 /**
  * 性能测试用例定义
@@ -43,6 +42,8 @@ import static io.tapdata.connector.paimon.perf.PerformanceTestRunner.BASE_TEST_D
  * </ul>
  */
 public class TestCase {
+    private DataGenerator.PartitionScenario partitionScenario;
+    private boolean compositePrimaryKey;
     private final String id;
     private final String name;
     private final String group;
@@ -67,6 +68,23 @@ public class TestCase {
                     Map<String, String> parameters,
                     int primaryKeyDuplicateRate, int qps,
                     String description) {
+        this(id, name, group, parameters, primaryKeyDuplicateRate, qps, description, DataGenerator.PartitionScenario.BASELINE, false);
+    }
+
+    public TestCase(String id, String name, String group,
+                    Map<String, String> parameters,
+                    int primaryKeyDuplicateRate, int qps,
+                    String description,
+                    DataGenerator.PartitionScenario partitionScenario) {
+        this(id, name, group, parameters, primaryKeyDuplicateRate, qps, description, partitionScenario, false);
+    }
+
+    public TestCase(String id, String name, String group,
+                    Map<String, String> parameters,
+                    int primaryKeyDuplicateRate, int qps,
+                    String description,
+                    DataGenerator.PartitionScenario partitionScenario,
+                    boolean compositePrimaryKey) {
         this.id = id;
         this.name = name;
         this.group = group;
@@ -74,8 +92,11 @@ public class TestCase {
         this.primaryKeyDuplicateRate = primaryKeyDuplicateRate;
         this.qps = qps;
         this.description = description;
+        this.partitionScenario = partitionScenario == null ? DataGenerator.PartitionScenario.BASELINE : partitionScenario;
+        this.compositePrimaryKey = compositePrimaryKey;
     }
 
+    // ─── Accessors ────────────────────────────────────────────────────────────
     // ─── Accessors ────────────────────────────────────────────────────────────
 
     public String getId() { return id; }
@@ -110,6 +131,8 @@ public class TestCase {
     public int getPrimaryKeyDuplicateRate() { return primaryKeyDuplicateRate; }
     public int getQps() { return qps; }
     public String getDescription() { return description; }
+    public DataGenerator.PartitionScenario getPartitionScenario() { return partitionScenario; }
+    public boolean isCompositePrimaryKey() { return compositePrimaryKey; }
 
     @Override
     public String toString() {
@@ -158,6 +181,22 @@ public class TestCase {
      */
     public TestCase initTotalRecords(int records) {
         this.initTotalRecords = records;
+        return this;
+    }
+
+    /**
+     * 设置分区场景模式（仅用于分区表测试用例）
+     */
+    public TestCase partitionScenario(DataGenerator.PartitionScenario scenario) {
+        this.partitionScenario = scenario == null ? DataGenerator.PartitionScenario.BASELINE : scenario;
+        return this;
+    }
+
+    /**
+     * 设置是否使用联合主键（id + partition-key）
+     */
+    public TestCase compositePrimaryKey(boolean compositePrimaryKey) {
+        this.compositePrimaryKey = compositePrimaryKey;
         return this;
     }
 
@@ -763,6 +802,129 @@ public class TestCase {
         );
     }
 
+    // ─── 5.10 分区表写入测试组 ─────────────────────────────────────────────────
+
+    public static List<TestCase> createPartitionTests() {
+        return Arrays.asList(
+//            new TestCase("TC-90", "分区表-动态桶", "分区表写入",
+//                params("write-buffer-size", "512mb", "target-file-size", "256mb",
+//                    "file.format", "parquet", "file.compression", "zstd",
+//                    "bucket", "-1", "partition-key", "pt_date",
+//                    "compaction.async.enabled", "false", "write-only", "true"),
+//                0, 0, "分区表写入基线：动态桶 + 7天循环分区")
+//                .batchSize(100_000)
+//                .totalRecords(5_000_000)
+//                .partitionScenario(DataGenerator.PartitionScenario.BASELINE),
+
+//            new TestCase("TC-91", "分区表-固定4桶", "分区表写入",
+//                params("write-buffer-size", "512mb", "target-file-size", "256mb",
+//                    "file.format", "parquet", "file.compression", "zstd",
+//                    "bucket", "4", "partition-key", "pt_date",
+//                    "compaction.async.enabled", "false", "write-only", "true"),
+//                0, 0, "分区表写入：固定4桶，观察分区+固定桶的文件分布")
+//                .batchSize(100_000)
+//                .totalRecords(5_000_000)
+//                .partitionScenario(DataGenerator.PartitionScenario.BASELINE),
+
+//            new TestCase("TC-92", "分区表-固定8桶", "分区表写入",
+//                params("write-buffer-size", "512mb", "target-file-size", "256mb",
+//                    "file.format", "parquet", "file.compression", "zstd",
+//                    "bucket", "8", "partition-key", "pt_date",
+//                    "compaction.async.enabled", "false", "write-only", "true"),
+//                0, 0, "分区表写入：固定8桶，验证更高桶数下的写入表现")
+//                .batchSize(100_000)
+//                .totalRecords(5_000_000)
+//                .partitionScenario(DataGenerator.PartitionScenario.BASELINE),
+
+            new TestCase("TC-93", "分区表-单分区热点写入", "分区表写入",
+                params("write-buffer-size", "512mb",
+                    "target-file-size", "256mb",
+//                    "file.format", "parquet",
+//                    "file.compression", "zstd",
+                    "bucket", "-1",
+                    "partition-key", "pt_date",
+                    "enable-async-commit", "true",
+                    "commit-interval-ms", "50",
+                    "write-threads", "4",
+                    "compaction.async.enabled", "true",
+                    "num-sorted-run.compaction-trigger", "5",
+                    "num-sorted-run.stop-trigger", "8",
+                    "write-only", "false"),
+                100, 0, "单分区热点写入：所有数据集中到同一分区，观察热点压力")
+                .batchSize(2)
+                .totalRecords(2)
+                .initTotalRecords(0)
+//                .partitionScenario(DataGenerator.PartitionScenario.HOT_PARTITION)
+                .partitionScenario(DataGenerator.PartitionScenario.UPDATE_BEFORE_NULL_AFTER_VALUE)
+//
+//            new TestCase("TC-94", "分区表-多分区均匀写入", "分区表写入",
+//                params("write-buffer-size", "512mb", "target-file-size", "256mb",
+//                    "file.format", "parquet", "file.compression", "zstd",
+//                    "bucket", "-1", "partition-key", "pt_date",
+//                    "compaction.async.enabled", "false", "write-only", "true"),
+//                0, 0, "多分区均匀写入：数据分散到更多分区，观察吞吐对比")
+//                .batchSize(100_000)
+//                .totalRecords(5_000_000)
+//                .partitionScenario(DataGenerator.PartitionScenario.UNIFORM_PARTITION),
+
+//            new TestCase("TC-95", "分区表-50%更新+分区更新", "分区表写入",
+//                params("write-buffer-size", "512mb", "target-file-size", "256mb",
+//                    "file.format", "parquet", "file.compression", "zstd",
+//                    "bucket", "-1", "partition-key", "pt_date",
+//                    "compaction.async.enabled", "true", "write-only", "false"),
+//                50, 0, "50%主键更新 + 分区键漂移，观察 update-heavy 下的分区写入表现")
+//                .batchSize(10)
+//                .totalRecords(100)
+//                .initTotalRecords(0)
+//                .partitionScenario(DataGenerator.PartitionScenario.UPDATE_HEAVY),
+//
+//            new TestCase("TC-97", "分区表-50%更新+分区不变", "分区表写入",
+//                params("write-buffer-size", "512mb", "target-file-size", "256mb",
+//                    "file.format", "parquet", "file.compression", "zstd",
+//                    "bucket", "-1", "partition-key", "pt_date",
+//                    "compaction.async.enabled", "true", "write-only", "false"),
+//                50, 0, "50%主键更新 + before/after 分区键不变，观察稳定分区更新成本")
+//                .batchSize(10)
+//                .totalRecords(100)
+//                .initTotalRecords(0)
+//                .partitionScenario(DataGenerator.PartitionScenario.UPDATE_HEAVY_STABLE_PARTITION),
+//
+//            new TestCase("TC-98", "分区表-50%更新+联合主键", "分区表写入",
+//                params("write-buffer-size", "512mb", "target-file-size", "256mb",
+//                    "file.format", "parquet", "file.compression", "zstd",
+//                    "bucket", "-1", "partition-key", "pt_date",
+//                    "compaction.async.enabled", "true", "write-only", "false"),
+//                50, 0, "50%主键更新 + id/partition 作为联合主键，观察联合主键更新成本")
+//                .batchSize(10)
+//                .totalRecords(100)
+//                .initTotalRecords(0)
+//                .partitionScenario(DataGenerator.PartitionScenario.UPDATE_HEAVY_STABLE_PARTITION)
+//                .compositePrimaryKey(true),
+//
+//            new TestCase("TC-99", "分区表-before空分区-after有值", "分区表写入",
+//                params("write-buffer-size", "512mb", "target-file-size", "256mb",
+//                    "file.format", "parquet", "file.compression", "zstd",
+//                    "bucket", "-1", "partition-key", "pt_date",
+//                    "compaction.async.enabled", "true", "write-only", "false"),
+//                50, 0, "update 场景下 before 分区为空、after 分区有值，验证空分区更新路径")
+//                .batchSize(10)
+//                .totalRecords(100)
+//                .initTotalRecords(0)
+//                .partitionScenario(DataGenerator.PartitionScenario.UPDATE_BEFORE_NULL_AFTER_VALUE),
+//
+//            new TestCase("TC-96", "分区表-空分区值", "分区表写入",
+//                params("write-buffer-size", "512mb", "target-file-size", "256mb",
+//                    "file.format", "parquet", "file.compression", "zstd",
+//                    "bucket", "-1", "partition-key", "pt_date",
+//                    "compaction.async.enabled", "false", "write-only", "true"),
+//                0, 0, "分区值为空（null），验证 Paimon 对空分区键的处理")
+//                .batchSize(10)
+//                .totalRecords(100)
+//                .initTotalRecords(0)
+//                .partitionScenario(DataGenerator.PartitionScenario.NULL_PARTITION)
+        );
+    }
+
     // ─── 组合工厂方法 ─────────────────────────────────────────────────────────
 
     public static List<TestCase> createAllTests() {
@@ -776,6 +938,7 @@ public class TestCase {
         all.addAll(createFormatCompressionTests());
         all.addAll(createPrimaryKeyUpdateTests());
         all.addAll(createParallelismTests());
+        all.addAll(createPartitionTests());
         return all;
     }
 
@@ -793,6 +956,7 @@ public class TestCase {
         m.put("format",      "文件格式&压缩测试(TC-60~64) - parquet/orc + zstd/lz4");
         m.put("pkupdate",    "主键更新测试(TC-70~73) - 重复率 0%/10%/30%/50%");
         m.put("parallelism", "写入并行度测试(TC-80~83) - sink.parallelism");
+        m.put("partition",   "分区表写入测试(TC-90~99) - partition-key=pt_date");
         m.put("all",         "全量测试(所有组)");
         return m;
     }

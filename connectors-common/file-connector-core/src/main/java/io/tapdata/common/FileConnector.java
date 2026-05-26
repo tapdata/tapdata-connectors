@@ -4,6 +4,7 @@ import com.amazonaws.transform.MapEntry;
 import io.tapdata.base.ConnectorBase;
 import io.tapdata.common.util.MatchUtil;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
@@ -36,8 +37,10 @@ public abstract class FileConnector extends ConnectorBase {
     protected ExecutorService executorService;
     protected String firstConnectorId;
     private static final String TAG = FileConnector.class.getSimpleName();
+    protected Log tapLogger;
 
     protected void initConnection(TapConnectionContext connectionContext) throws Exception {
+        tapLogger = connectionContext.getLog();
         isConnectorStarted(connectionContext, connectorContext -> {
             firstConnectorId = (String) connectorContext.getStateMap().get("firstConnectorId");
             if (EmptyKit.isNull(firstConnectorId)) {

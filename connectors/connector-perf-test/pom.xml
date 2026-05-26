@@ -168,6 +168,27 @@
         </plugins>
     </build>
 
+    <profiles>
+        <!-- mvn exec:java -Pnew to run the new generic benchmark framework -->
+        <profile>
+            <id>new</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <configuration>
+                            <mainClass>io.tapdata.perftest.ConnectorPerfTestMain</mainClass>
+                            <cleanupDaemonThreads>false</cleanupDaemonThreads>
+                            <classpathScope>compile</classpathScope>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
     <!-- 从 connectors/pom.xml 复制的仓库配置（standalone 工程无法继承父 POM） -->
     <repositories>
         <repository>

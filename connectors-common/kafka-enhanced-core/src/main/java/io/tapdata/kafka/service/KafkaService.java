@@ -1,0 +1,788 @@
+package io.tapdata.kafka.service;
+
+import io.confluent.kafka.schemaregistry.client.CachedSchemaRegistryClient;
+import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
+import io.tapdata.connector.error.KafkaErrorCodes;
+import io.tapdata.connector.utils.AsyncBatchPusher;
+import io.tapdata.connector.utils.ConcurrentUtils;
+import io.tapdata.connector.utils.ErrorHelper;
+import io.tapdata.entity.event.TapBaseEvent;
+import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterTableTTLEvent;
+import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
+import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
+import io.tapdata.entity.event.dml.*;
+import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.mapping.TapEntry;
+import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.utils.cache.Entry;
+import io.tapdata.entity.utils.cache.Iterator;
+import io.tapdata.exception.TapCodeException;
+import io.tapdata.exception.TapPdkConfigEx;
+import io.tapdata.exception.TapPdkTerminateByServerEx;
+import io.tapdata.exception.TapRuntimeException;
+import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
+import io.tapdata.kafka.*;
+import io.tapdata.kafka.constants.KafkaSchemaMode;
+import io.tapdata.kafka.constants.ProducerRecordWrapper;
+import io.tapdata.kafka.data.KafkaOffset;
+import io.tapdata.kafka.data.KafkaTopicOffset;
+import io.tapdata.kafka.utils.KafkaBatchReadOffsetUtils;
+import io.tapdata.kafka.utils.KafkaOffsetUtils;
+import io.tapdata.kafka.utils.KafkaUtils;
+import io.tapdata.pdk.apis.entity.FilterResults;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.entity.WriteListResult;
+import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.TopicPartitionInfo;
+import org.apache.kafka.common.errors.SerializationException;
+
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
+
+/**
+ * Kafka 连接器服务实现
+ *
+ * @author <a href="mailto:harsen_lin@163.com">Harsen</a>
+ * @version v1.0 2024/8/27 14:57 Create
+ */
+public class KafkaService implements IKafkaService {
+    private final Log logger;
+    private final AtomicBoolean stopping;
+    private final KafkaConfig config;
+    private final ExecutorService executorService;
+    private final AbsSchemaMode schemaModeService;
+    private KafkaProducer<Object, Object> kafkaProducer;
+    private IKafkaAdminService adminService;
+    private volatile SchemaRegistryClient schemaRegistryClient;
+
+    public KafkaService(KafkaConfig config, AtomicBoolean stopping) {
+        this(config, stopping, null);
+    }
+
+    public KafkaService(KafkaConfig config, AtomicBoolean stopping, Map<KafkaSchemaMode, AbsSchemaMode.Factory> schemaModeOverrides) {
+        this.config = config;
+        this.stopping = stopping;
+
+        this.logger = config.tapConnectionContext().getLog();
+        this.executorService = Executors.newFixedThreadPool(200, r -> {
+            Thread thread = new Thread(r);
+            thread.setName(String.format("%s-executor-%s", "kafka_enhanced", thread.getId()));
+            return thread;
+        });
+        if (config.getConnectionSchemaRegister()) {
+            this.schemaModeService = AbsSchemaMode.create(KafkaSchemaMode.fromString("REGISTRY_" + config.getConnectionRegistrySchemaType()), this, schemaModeOverrides);
+        } else {
+            this.schemaModeService = null != config.getNodeSchemaMode() ? AbsSchemaMode.create(config.getNodeSchemaMode(), this, schemaModeOverrides) : AbsSchemaMode.create(config.getConnectionSchemaMode(), this, schemaModeOverrides);
+        }
+    }
+
+    @Override
+    public Log getLog() {
+        return logger;
+    }
+
+    @Override
+    public KafkaConfig getConfig() {
+        return config;
+    }
+
+    @Override
+    public ExecutorService getExecutorService() {
+        return executorService;
+    }
+
+    @Override
+    public synchronized KafkaProducer<Object, Object> getProducer() {
+        if (kafkaProducer == null) {
+            logger.info("Creating producer for {}", "kafka_enhanced");
+            kafkaProducer = new KafkaProducer<>(config.buildProducerConfig());
+        }
+        return kafkaProducer;
+    }
+
+    @Override
+    public KafkaProducer<Object, Object> getTransactionProducer() {
+        // 每个调用方（线程）拿到独立的 transactional producer：
+        // 1) 共用同一个 KafkaProducer 实例会导致第二次 initTransactions() 抛异常或阻塞
+        // 2) transactional.id 必须唯一，否则会被 broker fence，initTransactions 永久挂起
+        Properties props = config.buildProducerConfig();
+        String txId = String.format("tap-tx-%s-%s", "kafka_enhanced", UUID.randomUUID().toString().replace("-", ""));
+        props.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, txId);
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, "true");
+        // 默认 max.block.ms = 60000 已合理；显式给 transaction.timeout.ms 上限避免依赖 broker 默认
+        props.putIfAbsent(ProducerConfig.MAX_BLOCK_MS_CONFIG, "60000");
+        props.putIfAbsent(ProducerConfig.TRANSACTION_TIMEOUT_CONFIG, "60000");
+        logger.info("Creating transaction producer for {} with transactional.id={}", "kafka_enhanced", txId);
+        return new KafkaProducer<>(props);
+    }
+
+    @Override
+    public synchronized IKafkaAdminService getAdminService() {
+        if (adminService == null) {
+            logger.info("Creating adminService for {}", "kafka_enhanced");
+            adminService = new KafkaAdminService(config, logger);
+        }
+        return adminService;
+    }
+
+    @Override
+    public AbsSchemaMode getSchemaModeService() {
+        return this.schemaModeService;
+    }
+
+    @Override
+    public void tableNames(int batchSize, Consumer<List<String>> consumer) {
+        try {
+            List<String> tableNames = new ArrayList<>();
+            Set<String> topics = getAdminService().listTopics();
+            int i = 0;
+            for (String topic : topics) {
+                tableNames.add(topic);
+                if (0 != i && i % batchSize == 0) {
+                    consumer.accept(tableNames);
+                    tableNames = new ArrayList<>();
+                }
+                i++;
+            }
+            if (!tableNames.isEmpty()) {
+                consumer.accept(tableNames);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public void discoverSchema(List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) {
+        if (null == tables || tables.isEmpty()) return;
+        schemaModeService.discoverSchema(this, tables, tableSize, consumer);
+    }
+
+    @Override
+    public long batchCount(TapTable table) {
+        boolean isEarliest = true;
+        String topic = table.getName();
+        try (KafkaConsumer<?, ?> kafkaConsumer = new KafkaConsumer<>(config.buildConsumerConfig(isEarliest))) {
+            Collection<TopicPartition> topicPartitions = getAdminService().getTopicPartitions(Collections.singleton(topic));
+
+            long beginTotals = 0;
+            kafkaConsumer.assign(topicPartitions);
+            kafkaConsumer.seekToBeginning(topicPartitions);
+            for (TopicPartition topicPartition : topicPartitions) {
+                long position = kafkaConsumer.position(topicPartition);
+                beginTotals += position;
+            }
+
+            long endTotals = 0;
+            kafkaConsumer.assign(topicPartitions);
+            kafkaConsumer.seekToEnd(topicPartitions);
+            for (TopicPartition topicPartition : topicPartitions) {
+                long position = kafkaConsumer.position(topicPartition);
+                endTotals += position;
+            }
+
+            return endTotals - beginTotals;
+        } catch (InterruptedException | org.apache.kafka.common.errors.InterruptException e) {
+            Thread.currentThread().interrupt();
+            return 0;
+        } catch (TapRuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new TapPdkTerminateByServerEx("kafka_enhanced", e);
+        }
+    }
+
+    @Override
+    public void batchRead(TapTable table, Object offset, int batchSize, BiConsumer<List<TapEvent>, Object> consumer) {
+        try {
+            // 参数设置
+            boolean isEarliest = true;
+            String topic = table.getId();
+            int concurrentSize = config.getNodeMaxConcurrentSize();
+            long batchMaxDelay = config.getNodeBatchMaxDelay();
+            Duration timeout = Duration.ofMillis(batchMaxDelay);
+
+            // offset 设置
+            KafkaTopicOffset endTopicOffsets;
+            KafkaTopicOffset startTopicOffsets;
+            Queue<TapEntry<Integer, Long>> concurrentQueue = new ConcurrentLinkedQueue<>();
+            try (KafkaConsumer<?, ?> kafkaConsumer = new KafkaConsumer<>(config.buildConsumerConfig(isEarliest))) {
+                Collection<TopicPartition> topicPartitions = getAdminService().getTopicPartitions(Collections.singleton(topic));
+                endTopicOffsets = KafkaBatchReadOffsetUtils.topicOffsetFromStateMap(topic, config, kafkaConsumer, topicPartitions);
+
+                // Get start offsets - use KafkaTopicOffset instead of List to maintain partition number mapping
+                if (offset instanceof KafkaTopicOffset) {
+                    startTopicOffsets = (KafkaTopicOffset) offset;
+                } else if (offset instanceof List) {
+                    // Legacy support for List offset - convert to KafkaTopicOffset
+                    List<Long> offsetList = (List<Long>) offset;
+                    startTopicOffsets = new KafkaTopicOffset();
+                    for (int i = 0; i < offsetList.size(); i++) {
+                        startTopicOffsets.setOffset(i, offsetList.get(i));
+                    }
+                } else if (offset instanceof Long startTime) {
+                    KafkaOffset kafkaOffset = KafkaOffsetUtils.timestamp2Offset(kafkaConsumer, topicPartitions, startTime);
+                    startTopicOffsets = kafkaOffset.get(topic);
+                } else {
+                    // Get begin offsets from Kafka
+                    KafkaOffset kafkaOffset = KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, topicPartitions, isEarliest);
+                    startTopicOffsets = kafkaOffset.get(topic);
+                }
+
+                // Build concurrent queue with actual partition numbers
+                for (Map.Entry<Integer, Long> entry : startTopicOffsets.entrySet()) {
+                    concurrentQueue.add(new TapEntry<>(entry.getKey(), entry.getValue()));
+                }
+            }
+            List<TapEntry<String, Function<Object, Object>>> fieldTypeConverts = KafkaUtils.setFieldTypeConvert(table, new ArrayList<>());
+            AtomicInteger index = new AtomicInteger(0);
+            AtomicReference<Exception> exception = new AtomicReference<>();
+            String executorGroup = String.format("%s-%s-batchRead", "kafka_enhanced", config.getStateMapFirstConnectorId());
+            try (AsyncBatchPusher<ConsumerRecord<Object, Object>, TapEvent> batchPusher = AsyncBatchPusher.<ConsumerRecord<Object, Object>, TapEvent>create(
+                    exception,
+                    String.format("%s-batchPusher", executorGroup),
+                    consumerRecord -> {
+                    },
+                    tapEvents -> consumer.accept(tapEvents, null),
+                    () -> !stopping.get()
+            ).batchSize(batchSize).maxDelay(batchMaxDelay)) {
+                getExecutorService().execute(batchPusher); // 开始推送数据
+
+                // 并发消费数据
+                ConcurrentUtils.runWithQueue(getExecutorService(), exception, executorGroup, concurrentQueue, concurrentSize, stopping::get, concurrentItem -> {
+                    int partition = concurrentItem.getKey();
+                    Long endOffset = endTopicOffsets.get(partition);
+                    if (null == endOffset) {
+                        return;
+                    }
+
+                    Properties properties = config.buildConsumerConfig(isEarliest);
+                    properties.put(ConsumerConfig.GROUP_ID_CONFIG, String.format("%s-%s", executorGroup, index.incrementAndGet()));
+                    try (KafkaConsumer<Object, Object> kafkaConsumer = new KafkaConsumer<>(properties)) {
+                        TopicPartition topicPartition = new TopicPartition(topic, partition);
+
+                        // 取分区当前实际可消费范围 [beginning, currentEnd)
+                        Long beginningOffset = Optional.ofNullable(KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, List.of(topicPartition), true).get(topic))
+                                .map(o -> o.get(partition)).orElse(null);
+                        Long currentEndOffset = Optional.ofNullable(KafkaOffsetUtils.getKafkaOffset(kafkaConsumer, List.of(topicPartition), false).get(topic))
+                                .map(o -> o.get(partition)).orElse(null);
+
+                        if (null == beginningOffset || null == currentEndOffset || beginningOffset >= currentEndOffset) {
+                            return;
+                        }
+
+                        // stateMap 中的 endOffset 可能滞后于实际（topic 被截断/重建），用当前实际 end 钳制，避免 poll 死等
+                        long effectiveEndOffset = endOffset;
+                        if (currentEndOffset < effectiveEndOffset) {
+                            logger.warn("Stored end offset {} for {}-{} exceeds current end offset {}, will use current end offset", effectiveEndOffset, topic, partition, currentEndOffset);
+                            effectiveEndOffset = currentEndOffset;
+                        }
+
+                        // 校正起点到 [beginningOffset, effectiveEndOffset) 区间
+                        long startOffset = concurrentItem.getValue();
+                        if (startOffset < beginningOffset) {
+                            logger.warn("Start offset {} for {}-{} is before beginning offset {}, will use beginning offset", startOffset, topic, partition, beginningOffset);
+                            startOffset = beginningOffset;
+                        }
+                        if (startOffset >= effectiveEndOffset) {
+                            logger.info("Start offset {} >= effective end offset {} for {}-{}, skip", startOffset, effectiveEndOffset, topic, partition);
+                            return;
+                        }
+
+                        kafkaConsumer.assign(Collections.singleton(topicPartition));
+                        kafkaConsumer.seek(topicPartition, startOffset);
+
+                        while (!stopping.get() && null == exception.get()) {
+                            ConsumerRecords<Object, Object> consumerRecords = kafkaConsumer.poll(timeout);
+                            // 即便 poll 返回空，也用 consumer 当前位置和 effectiveEnd 比较，避免无限轮询
+                            if (consumerRecords.isEmpty()) {
+                                if (kafkaConsumer.position(topicPartition) >= effectiveEndOffset) {
+                                    logger.info("Partition {}-{} batch read completed (idle) at position {}", topic, partition, kafkaConsumer.position(topicPartition));
+                                    return;
+                                }
+                                continue;
+                            }
+
+                            for (ConsumerRecord<Object, Object> consumerRecord : consumerRecords) {
+                                for (TapEvent event : schemaModeService.toTapEvents(consumerRecord)) {
+                                    if (TapUnknownRecordEvent.TYPE == event.getType()) {
+                                        TapUnknownRecordEvent unknownRecordEvent = (TapUnknownRecordEvent) event;
+                                        String errorMsg = String.format("unknown event %s(%d-%d): %s", topic, consumerRecord.partition(), consumerRecord.offset(), unknownRecordEvent.getData());
+                                        throw new TapPdkSkippableDataEx(errorMsg, "kafka_enhanced");
+                                    }
+                                    KafkaUtils.convertWithFieldType(fieldTypeConverts, event);
+                                    batchPusher.add(consumerRecord, event);
+                                }
+
+                                if (consumerRecord.offset() + 1 >= effectiveEndOffset) {
+                                    logger.info("Partition {}-{} batch read completed at offset {}", topic, partition, consumerRecord.offset());
+                                    return; // 全量完成
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        } catch (InterruptedException | org.apache.kafka.common.errors.InterruptException e) {
+            Thread.currentThread().interrupt();
+        } catch (TapRuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new TapPdkTerminateByServerEx("kafka_enhanced", e);
+        }
+    }
+
+    @Override
+    public Object timestampToStreamOffset(Long startTime) throws Throwable {
+        try (KafkaConsumer<?, ?> kafkaConsumer = new KafkaConsumer<>(config.buildConsumerConfig(true))) {
+            Collection<String> allTables = getAllSyncTables();
+            Collection<TopicPartition> topicPartitions = getAdminService().getTopicPartitions(allTables);
+            KafkaOffset streamOffset = KafkaOffsetUtils.timestamp2Offset(kafkaConsumer, topicPartitions, startTime);
+            KafkaBatchReadOffsetUtils.toStateMap(config, streamOffset);
+            return streamOffset;
+        }
+    }
+
+    @Override
+    public void streamRead(List<String> tables, Object offset, int batchSize, BiConsumer<List<TapEvent>, Object> consumer) {
+        try {
+            KafkaOffset streamOffset = Optional.ofNullable(offset).map(o -> {
+                if (offset instanceof KafkaOffset) {
+                    return (KafkaOffset) o;
+                }
+                throw new TapPdkConfigEx("streamOffset must be of type KafkaOffset: " + o.getClass().getName(), "kafka_enhanced");
+            }).orElseThrow(() -> new TapPdkConfigEx("streamRead offset is null", "kafka_enhanced"));
+
+            // 补全分区信息（如：全量过程为主题添加了分区）
+            KafkaOffsetUtils.fillPartitions(this, tables, streamOffset, true);
+
+            BiConsumer<List<TapEvent>, Object> convertConsumer = getFieldTypeConverterConsumer(consumer);
+
+            try (KafkaConsumerService consumerService = new KafkaConsumerService(this, stopping)) {
+                consumerService.start(streamOffset, batchSize, convertConsumer);
+            }
+        } catch (InterruptedException | org.apache.kafka.common.errors.InterruptException e) {
+            Thread.currentThread().interrupt();
+        } catch (TapRuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new TapPdkTerminateByServerEx("kafka_enhanced", e);
+        }
+    }
+
+    @Override
+    public <K, V> void sampleValue(List<String> tables, Object offset, Predicate<ConsumerRecord<K, V>> callback) {
+        boolean isEarliest = true;
+        long batchMaxDelay = config.getNodeBatchMaxDelay();
+        Duration timeout = Duration.ofMillis(Math.max(batchMaxDelay, 3000));
+
+        try (KafkaConsumer<K, V> kafkaConsumer = new KafkaConsumer<>(config.buildDiscoverSchemaConfig(isEarliest))) {
+            Collection<TopicPartition> topicPartitions = getAdminService().getTopicPartitions(tables);
+            if (null == topicPartitions || topicPartitions.isEmpty()) return;
+            kafkaConsumer.assign(topicPartitions);
+            kafkaConsumer.seekToBeginning(topicPartitions);
+
+            long deadline = System.currentTimeMillis() + timeout.toMillis();
+            Duration pollOnce = Duration.ofMillis(1000);
+            while (System.currentTimeMillis() < deadline) {
+                ConsumerRecords<K, V> consumerRecords = kafkaConsumer.poll(pollOnce);
+                if (null == consumerRecords || consumerRecords.isEmpty()) continue;
+                for (ConsumerRecord<K, V> consumerRecord : consumerRecords) {
+                    if (!callback.test(consumerRecord)) {
+                        return;
+                    }
+                }
+                return;
+            }
+        } catch (InterruptedException | org.apache.kafka.common.errors.InterruptException e) {
+            Thread.currentThread().interrupt();
+        } catch (SerializationException e) {
+            logger.warn(e.getMessage(), e);
+        } catch (TapRuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new TapPdkTerminateByServerEx("kafka_enhanced", e);
+        }
+    }
+
+    private List<ProducerRecordWrapper> wrapProduceRecord(TapTable table, TapRecordEvent recordEvent, Collection<String> primaryKey) {
+        List<ProducerRecordWrapper> producerRecords = new ArrayList<>();
+        if (config.getSplitUpdatePk() && recordEvent instanceof TapUpdateRecordEvent updateRecordEvent) {
+            Map<String, Object> after = updateRecordEvent.getAfter();
+            Map<String, Object> before = updateRecordEvent.getBefore();
+            if (!primaryKey.isEmpty() && primaryKey.stream().anyMatch(v -> !Objects.equals(after.get(v), before.get(v)))) {
+                TapDeleteRecordEvent deleteRecordEvent = new TapDeleteRecordEvent();
+                updateRecordEvent.clone(deleteRecordEvent);
+                schemaModeService.fromTapEvent(table, deleteRecordEvent).forEach(record -> {
+                    producerRecords.add(new ProducerRecordWrapper(deleteRecordEvent, record));
+                });
+                TapInsertRecordEvent insertRecordEvent = new TapInsertRecordEvent();
+                updateRecordEvent.clone(insertRecordEvent);
+                schemaModeService.fromTapEvent(table, insertRecordEvent).forEach(record -> {
+                    producerRecords.add(new ProducerRecordWrapper(insertRecordEvent, record));
+                });
+                return producerRecords;
+            }
+        }
+        schemaModeService.fromTapEvent(table, recordEvent).forEach(record -> {
+            producerRecords.add(new ProducerRecordWrapper(recordEvent, record));
+        });
+        return producerRecords;
+    }
+
+    @Override
+    public void writeRecord(KafkaProducer<Object, Object> producer, List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) {
+        AtomicLong insert = new AtomicLong(0);
+        AtomicLong update = new AtomicLong(0);
+        AtomicLong delete = new AtomicLong(0);
+        WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
+        Collection<String> primaryKey = table.primaryKeys(true);
+        List<ProducerRecordWrapper> producerRecords = new ArrayList<>();
+        for (TapRecordEvent recordEvent : recordEvents) {
+            producerRecords.addAll(wrapProduceRecord(table, recordEvent, primaryKey));
+        }
+        CountDownLatch latch = new CountDownLatch(producerRecords.size());
+        AtomicReference<RuntimeException> sendEx = new AtomicReference<>();
+        for (ProducerRecordWrapper producerRecord : producerRecords) {
+            producer.send(producerRecord.getProducerRecord(), (metadata, exception) -> {
+                try {
+                    TapRecordEvent recordEvent = producerRecord.getRecordEvent();
+                    if (exception != null) {
+                        listResult.addError(recordEvent, exception);
+                        sendEx.set(new TapCodeException(KafkaErrorCodes.INVALID_TOPIC, exception.getMessage(), exception).dynamicDescriptionParameters(producerRecord.getProducerRecord().topic()));
+                    }
+
+                    if (recordEvent instanceof TapInsertRecordEvent) {
+                        insert.incrementAndGet();
+                    } else if (recordEvent instanceof TapUpdateRecordEvent) {
+                        update.incrementAndGet();
+                    } else if (recordEvent instanceof TapDeleteRecordEvent) {
+                        delete.incrementAndGet();
+                    } else {
+                        logger.error("Unexpected record type: {}", recordEvent.getClass().getName());
+                    }
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+        try {
+            while (!stopping.get()) {
+                if (latch.await(500L, TimeUnit.MILLISECONDS)) {
+                    break;
+                }
+            }
+            if (null != sendEx.get()) {
+                throw sendEx.get();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            consumer.accept(listResult.insertedCount(insert.get()).modifiedCount(update.get()).removedCount(delete.get()));
+        }
+    }
+
+    @Override
+    public void writeRecord(List<TapRecordEvent> recordEvents, TapTable table, Consumer<WriteListResult<TapRecordEvent>> consumer) {
+        writeRecord(getProducer(), recordEvents, table, consumer);
+    }
+
+    @Override
+    public CreateTableOptions createTable(TapCreateTableEvent tapCreateTableEvent) {
+        CreateTableOptions createTableOptions = new CreateTableOptions();
+        short replicasSize = config.getNodeReplicasSize();
+        int partitionNum = config.getNodePartitionSize();
+        String topic = KafkaUtils.pickTopic(config, tapCreateTableEvent.getDatabase(), tapCreateTableEvent.getSchema(), tapCreateTableEvent.getTable());
+        try {
+            Set<String> existTopics = getAdminService().listTopics();
+            if (!existTopics.contains(topic)) {
+                createTableOptions.setTableExists(false);
+                getAdminService().createTopic(Collections.singleton(topic), partitionNum, replicasSize);
+                if (config.getConnectionSchemaRegister()) {
+                    String mode = config.getNodeCompatibilityMode();
+                    if (!"NONE".equals(mode)) {
+                        mode += config.getNodeTransitive() ? "_TRANSITIVE" : "";
+                    }
+                    getSchemaRegistryClient().updateCompatibility(topic + "-value", mode);
+                }
+            } else {
+                List<TopicPartitionInfo> topicPartitionInfos = getAdminService().getTopicPartitionInfo(topic);
+                int existTopicPartition = topicPartitionInfos.size();
+                int existReplicasSize = topicPartitionInfos.get(0).replicas().size();
+                if (existReplicasSize != replicasSize) {
+                    logger.warn("cannot change the number of replicasSize of an existing table, will skip");
+                }
+                if (partitionNum < existTopicPartition) {
+                    logger.warn("The number of partitions set is less than to the number of partitions of the existing table，will skip");
+                } else if (partitionNum == existTopicPartition) {
+                    logger.info("The number of partitions set is equal to the number of partitions of the existing table");
+                } else {
+                    getAdminService().increaseTopicPartitions(topic, partitionNum);
+                }
+                createTableOptions.setTableExists(true);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            throw new RuntimeException("Create topic " + topic + " failed, error: " + e.getMessage(), e);
+        }
+        return createTableOptions;
+    }
+
+    @Override
+    public void deleteTable(TapDropTableEvent tapDropTableEvent) {
+        String topic = KafkaUtils.pickTopic(config, tapDropTableEvent.getDatabase(), tapDropTableEvent.getSchema(), tapDropTableEvent.getTableId());
+        try {
+            logger.info("Deleting topic '{}'...", topic);
+            getAdminService().dropTopics(Collections.singleton(topic));
+            if (config.getConnectionSchemaRegister()) {
+                deleteTableSchemaRegistryInfo(topic);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            throw new RuntimeException("Delete topic " + topic + " failed, error: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void alterTableTTL(TapAlterTableTTLEvent tableTTLEvent) {
+        String topic = tableTTLEvent.getTableId();
+        Duration duration = tableTTLEvent.getDuration();
+        // Kafka 用 retention.ms = -1 表示永不过期；duration 为 null 或非正值时按永不过期处理
+        long retentionMs = (null == duration || duration.isZero() || duration.isNegative()) ? -1L : duration.toMillis();
+        try {
+            logger.info("Altering topic '{}' retention.ms to {}", topic, retentionMs);
+            getAdminService().alterTopicConfig(topic, Collections.singletonMap(org.apache.kafka.common.config.TopicConfig.RETENTION_MS_CONFIG, String.valueOf(retentionMs)));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            throw new RuntimeException("Alter topic " + topic + " retention.ms failed, error: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void queryByAdvanceFilter(TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer) {
+        schemaModeService.queryByAdvanceFilter(filter, table, consumer);
+    }
+
+    @Override
+    public void processDDL(TapDDLEvent ddlEvent) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        ProducerRecord<Object, Object> record = schemaModeService.fromTapDDLEvent(ddlEvent);
+        if (config.getConnectionSchemaRegister()) {
+            return;
+        }
+        getProducer().send(record, (metadata, exception) -> {
+            if (exception != null) {
+                future.completeExceptionally(new TapCodeException(KafkaErrorCodes.KAFKA_COMMON_ERROR, exception));
+            } else {
+                future.complete(null);
+            }
+        });
+        try {
+            while (!stopping.get()) {
+                try {
+                    future.get(500L, TimeUnit.MILLISECONDS);
+                    return;
+                } catch (TimeoutException ignore) {
+                    // keep waiting until ack or shutdown
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            throw new TapCodeException(KafkaErrorCodes.KAFKA_COMMON_ERROR, cause);
+        }
+    }
+
+    @Override
+    public void close() throws Exception {
+        if (stopping.compareAndSet(false, true)) {
+            logger.info("Shutting down...");
+        }
+        ErrorHelper.closeAndCheck(() -> {
+            if (null == executorService) return;
+
+            executorService.shutdown();
+            long currentTime = System.currentTimeMillis();
+            AtomicInteger tryTotal = new AtomicInteger(0);
+            while (!executorService.awaitTermination(2, TimeUnit.SECONDS)) {
+                if (tryTotal.getAndIncrement() % 5 == 0) {
+                    logger.info("Waiting for executor shutdown: {}ms", System.currentTimeMillis() - currentTime);
+                }
+                executorService.shutdown();
+            }
+        }, adminService, kafkaProducer);
+    }
+
+
+    // ---------- 内部方法 ----------
+
+    private Collection<String> getAllSyncTables() {
+        Set<String> allTables = config.tableMap(tableMap -> {
+            Set<String> list = new LinkedHashSet<>();
+            Iterator<Entry<TapTable>> iterator = tableMap.iterator();
+            while (iterator.hasNext()) {
+                Entry<TapTable> entry = iterator.next();
+                list.add(entry.getKey());
+            }
+            if (list.isEmpty()) return null;
+            return list;
+        }, null);
+
+        if (null == allTables || allTables.isEmpty()) {
+            throw new IllegalArgumentException("not found any topics");
+        }
+        return allTables;
+    }
+
+    private BiConsumer<List<TapEvent>, Object> getFieldTypeConverterConsumer(BiConsumer<List<TapEvent>, Object> consumer) {
+        Map<String, List<TapEntry<String, Function<Object, Object>>>> allTableConvert = new ConcurrentHashMap<>();
+        return (tapEvents, o) -> {
+            tapEvents.forEach(tapEvent -> {
+                if (tapEvent instanceof TapBaseEvent) {
+                    TapBaseEvent baseEvent = (TapBaseEvent) tapEvent;
+                    List<TapEntry<String, Function<Object, Object>>> converts = allTableConvert.computeIfAbsent(baseEvent.getTableId(), k -> {
+                        TapTable tapTable = getConfig().tapConnectorContext().getTableMap().get(k);
+                        return KafkaUtils.setFieldTypeConvert(tapTable, new ArrayList<>());
+                    });
+                    KafkaUtils.convertWithFieldType(converts, tapEvent);
+                }
+            });
+            consumer.accept(tapEvents, o);
+        };
+    }
+
+    private void deleteTableSchemaRegistryInfo(String topic) {
+        List<String> registryUrls = new ArrayList<>();
+        for (String registryUrl : config.getConnectionSchemaRegisterUrl().split(",")) {
+            if (registryUrl != null) {
+                registryUrl = registryUrl.trim();
+                if (!registryUrl.isEmpty()) {
+                    registryUrls.add(registryUrl);
+                }
+            }
+        }
+        if (registryUrls.isEmpty()) {
+            logger.warn("Schema Registry is enabled but no registry url configured, skip deleting subjects for topic '{}'", topic);
+            return;
+        }
+
+        for (String subject : Arrays.asList(topic + "-key", topic + "-value")) {
+            boolean handled = false;
+            for (String registryUrl : registryUrls) {
+                try {
+                    int code = deleteSchemaRegistrySubject(registryUrl, subject, false);
+                    if (code == HttpURLConnection.HTTP_NOT_FOUND) {
+                        handled = true;
+                        break;
+                    }
+                    if (code >= 200 && code < 300) {
+                        int permanentCode = deleteSchemaRegistrySubject(registryUrl, subject, true);
+                        if (permanentCode != HttpURLConnection.HTTP_NOT_FOUND && (permanentCode < 200 || permanentCode >= 300)) {
+                            logger.warn("Delete schema registry subject '{}' permanently failed, url: {}, code: {}", subject, registryUrl, permanentCode);
+                        }
+                        handled = true;
+                        logger.info("Deleted schema registry subject '{}' for topic '{}'", subject, topic);
+                        break;
+                    }
+                    logger.warn("Delete schema registry subject '{}' failed, url: {}, code: {}", subject, registryUrl, code);
+                } catch (Exception e) {
+                    logger.warn("Delete schema registry subject '{}' failed, url: {}, error: {}", subject, registryUrl, e.getMessage());
+                }
+            }
+            if (!handled) {
+                logger.warn("Failed to delete schema registry subject '{}' for topic '{}' from all configured registry endpoints", subject, topic);
+            }
+        }
+    }
+
+    private int deleteSchemaRegistrySubject(String registryUrl, String subject, boolean permanent) throws Exception {
+        String baseUrl = registryUrl.endsWith("/") ? registryUrl.substring(0, registryUrl.length() - 1) : registryUrl;
+        String url = baseUrl + "/subjects/" + URLEncoder.encode(subject, StandardCharsets.UTF_8.name());
+        if (permanent) {
+            url += "?permanent=true";
+        }
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setRequestMethod("DELETE");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(10000);
+            connection.setDoInput(true);
+            if (config.getConnectionBasicAuth()) {
+                String auth = config.getConnectionAuthUserName() + ":" + config.getConnectionAuthPassword();
+                String encoded = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+                connection.setRequestProperty("Authorization", "Basic " + encoded);
+            }
+            return connection.getResponseCode();
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    public SchemaRegistryClient getSchemaRegistryClient() {
+        SchemaRegistryClient client = schemaRegistryClient;
+        if (client != null) {
+            return client;
+        }
+        synchronized (this) {
+            if (schemaRegistryClient != null) {
+                return schemaRegistryClient;
+            }
+            String raw = config.getConnectionSchemaRegisterUrl();
+            if (StringUtils.isBlank(raw)) {
+                throw new IllegalStateException("schema registry url is not configured");
+            }
+            List<String> urls = new ArrayList<>();
+            for (String u : raw.split(",")) {
+                String t = u.trim();
+                if (t.isEmpty()) continue;
+                urls.add(t.startsWith("http://") || t.startsWith("https://") ? t : "http://" + t);
+            }
+            Map<String, Object> configs = new HashMap<>();
+            if (config.getConnectionBasicAuth()) {
+                String source = config.getConnectionAuthCredentialsSource();
+                configs.put("basic.auth.credentials.source", StringUtils.isBlank(source) ? "USER_INFO" : source);
+                configs.put("basic.auth.user.info",
+                        config.getConnectionAuthUserName() + ":" + config.getConnectionAuthPassword());
+            }
+            schemaRegistryClient = new CachedSchemaRegistryClient(urls, 1000, configs);
+            return schemaRegistryClient;
+        }
+    }
+
+}

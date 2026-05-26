@@ -54,7 +54,7 @@ public class PostgresTest extends CommonDbTest {
         return this;
     }
 
-    private void testHostPortForMasterSlave() {
+    public void testHostPortForMasterSlave() {
         AtomicBoolean isMaster = new AtomicBoolean();
         String availableHost = null;
         int availablePort = 0;

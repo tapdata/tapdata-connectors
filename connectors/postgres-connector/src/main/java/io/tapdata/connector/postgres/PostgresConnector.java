@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.util.concurrent.AtomicDouble;
 import io.tapdata.common.CommonDbConnector;
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.dml.NormalRecordWriter;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
@@ -37,7 +36,6 @@ import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.exception.TapCodeException;
-import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.*;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -156,7 +154,7 @@ public class PostgresConnector extends CommonDbConnector {
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportGetTableNamesFunction(this::getTableNames);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> postgresJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
         connectorFunctions.supportExecuteCommandV2Function(this::executeCommandV2);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
         connectorFunctions.supportCountRawCommandFunction(this::countRawCommand);
@@ -685,16 +683,19 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
+        if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
+            postgresTest.testHostPortForMasterSlave();
+        }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
                 new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
-                        .watch(tableList, nodeContext.getTableMap())
+                        .watch(new ArrayList<>(tableList), nodeContext.getTableMap())
                         .offset(offsetState)
                         .registerConsumer(consumer, recordSize)
                         .startMiner(this::isAlive);
             } else {
                 new WalLogMinerV2(postgresJdbcContext, tapLogger)
-                        .watch(tableList, nodeContext.getTableMap())
+                        .watch(new ArrayList<>(tableList), nodeContext.getTableMap())
                         .withWalLogDirectory(getWalDirectory())
                         .offset(offsetState)
                         .registerConsumer(consumer, recordSize)
@@ -774,6 +775,9 @@ public class PostgresConnector extends CommonDbConnector {
                 return tableList;
             });
         }
+        if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
+            postgresTest.testHostPortForMasterSlave();
+        }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
                 new WalPgtoMiner(postgresJdbcContext, firstConnectorId, tapLogger)
@@ -808,6 +812,9 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
+        if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
+            postgresTest.testHostPortForMasterSlave();
+        }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotBlank(postgresConfig.getPgtoHost())) {
                 if (EmptyKit.isNotNull(offsetStartTime)) {
@@ -1048,7 +1055,7 @@ public class PostgresConnector extends CommonDbConnector {
                     }
                 }
             }
-            jdbcContext.query(connection,sql, resultSet -> {
+            jdbcContext.query(sql, resultSet -> {
                 FilterResults filterResults = new FilterResults();
                 try {
                     Map<String, String> typeAndName = new HashMap<>();
@@ -1056,8 +1063,10 @@ public class PostgresConnector extends CommonDbConnector {
                         typeAndName.put(key, value.getDataType());
                     });
                     List<String> allColumn = DbKit.getColumnsFromResultSet(resultSet);
+                    List<String> columnTypes = DbKit.getColumnTypesFromResultSet(resultSet);
+                    filterColumns(table, allColumn, columnTypes);
                     while (resultSet.next()) {
-                        filterResults.add(filterTimeForPG(resultSet, typeAndName, allColumn));
+                        filterResults.add(filterData(resultSet, allColumn.toArray(new String[0]), columnTypes.toArray(new String[0])));
                         if (filterResults.getResults().size() == BATCH_ADVANCE_READ_LIMIT) {
                             consumer.accept(filterResults);
                             filterResults = new FilterResults();
@@ -1279,6 +1288,64 @@ public class PostgresConnector extends CommonDbConnector {
                     }
                 }
             }
+        }
+    }
+
+    protected DataMap filterData(ResultSet resultSet, String[] fields, String[] columnTypes) throws SQLException {
+        DataMap dataMap = new DataMap();
+        for (int i = 0; i < fields.length; i++) {
+            switch (columnTypes[i]) {
+                case "timestamp":
+                    String timestampString = resultSet.getString(fields[i]);
+                    if (StringUtils.isNotEmpty(timestampString)) {
+                        LocalDateTime localDateTime;
+                        try {
+                            localDateTime = LocalDateTime.parse(timestampString.replace(" ", "T"));
+                        } catch (Exception e) {
+                            localDateTime = resultSet.getTimestamp(fields[i]).toLocalDateTime();
+                        }
+                        dataMap.put(fields[i], localDateTime.minusHours(postgresConfig.getZoneOffsetHour()));
+                    } else {
+                        dataMap.put(fields[i], null);
+                    }
+                    break;
+                case "money":
+                    String money = resultSet.getString(fields[i]);
+                    if (EmptyKit.isBlank(money) || "null".equals(money)) {
+                        dataMap.put(fields[i], null);
+                    } else {
+                        dataMap.put(fields[i], new BigDecimal(money.replaceAll("[^\\d.-]", "")));
+                    }
+                    break;
+                default:
+                    dataMap.put(fields[i], filterData(resultSet.getObject(fields[i]), columnTypes[i]));
+                    break;
+            }
+        }
+        return dataMap;
+    }
+
+    @Override
+    protected Object filterData(Object obj, String columnType) {
+        if (obj == null) {
+            return null;
+        }
+        if (postgresConfig.getOldVersionTimezone()) {
+            return obj;
+        }
+        switch (columnType) {
+            case "timestamp":
+                return ((Timestamp) obj).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour());
+            case "time":
+                return Instant.ofEpochMilli(((Time) obj).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour());
+            case "timestamptz":
+                return ((Timestamp) obj).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC);
+            case "timetz":
+                return Instant.ofEpochMilli(((Time) obj).getTime()).atZone(ZoneOffset.UTC);
+            case "date":
+                return Instant.ofEpochMilli(((Date) obj).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
+            default:
+                return obj;
         }
     }
 

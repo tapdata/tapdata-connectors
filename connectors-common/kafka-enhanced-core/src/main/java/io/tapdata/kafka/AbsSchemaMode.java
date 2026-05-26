@@ -1,0 +1,338 @@
+package io.tapdata.kafka;
+
+import io.tapdata.connector.utils.ConcurrentUtils;
+import io.tapdata.constant.DMLType;
+import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
+import io.tapdata.entity.event.ddl.entity.ValueChange;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
+import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.simplify.TapSimplify;
+import io.tapdata.kafka.constants.KafkaSchemaMode;
+import io.tapdata.kafka.schema_mode.*;
+import io.tapdata.kafka.utils.KafkaUtils;
+import io.tapdata.kit.EmptyKit;
+import io.tapdata.pdk.apis.entity.FilterResults;
+import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
+import io.tapdata.pdk.apis.exception.NotSupportedException;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.utils.Utils;
+
+import java.math.BigDecimal;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
+/**
+ * Kafka 结构模式服务接口
+ *
+ * @author <a href="mailto:harsen_lin@163.com">Harsen</a>
+ * @version v1.0 2024/9/3 17:00 Create
+ */
+public abstract class AbsSchemaMode {
+
+    protected final KafkaSchemaMode kafkaSchemaMode;
+    protected final IKafkaService kafkaService;
+    protected final Log tapLogger;
+    protected final Boolean applyDefault;
+    protected final Map<String, Collection<String>> primaryKeyMap;
+
+    protected AbsSchemaMode(KafkaSchemaMode kafkaSchemaMode, IKafkaService kafkaService) {
+        this.kafkaSchemaMode = kafkaSchemaMode;
+        this.kafkaService = kafkaService;
+        this.tapLogger = kafkaService.getLog();
+        this.applyDefault = kafkaService.getConfig().getNodeApplyDefault();
+        this.primaryKeyMap = new ConcurrentHashMap<>();
+    }
+
+    public KafkaSchemaMode getSchemaMode() {
+        return kafkaSchemaMode;
+    }
+
+    public IKafkaService getKafkaService() {
+        return kafkaService;
+    }
+
+    public void discoverSchema(IKafkaService kafkaService, List<String> tables, int tableSize, Consumer<List<TapTable>> consumer) {
+        Queue<String> toBeLoadTables = tables.stream().filter(Objects::nonNull).distinct().collect(Collectors.toCollection(ConcurrentLinkedQueue::new));
+        List<TapTable> results = new LinkedList<>();
+        try {
+            String executorGroup = String.format("%s-discoverSchema", "kafka_enhanced");
+            ConcurrentUtils.runWithQueue(kafkaService.getExecutorService(), executorGroup, toBeLoadTables, 20, table -> {
+                TapTable sampleTable = new TapTable(table);
+                try {
+                    sampleOneSchema(table, sampleTable);
+                } catch (Exception e) {
+                    tapLogger.warn("topic: {} sample failed!");
+                }
+                results.add(sampleTable);
+            });
+            consumer.accept(results);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public void sampleOneSchema(String table, TapTable sampleTable) {
+
+    }
+
+    public abstract TapEvent toTapEvent(ConsumerRecord<?, ?> consumerRecord);
+
+    /**
+     * 在转出 DML 事件之前，按需反向生成 schema 变更产生的 DDL 事件。默认实现仅返回 toTapEvent 的单个结果，
+     * 子类（如 {@link io.tapdata.kafka.schema_mode.RegistryAvroMode}）可覆盖以追加 DDL 事件。
+     */
+    public List<TapEvent> toTapEvents(ConsumerRecord<?, ?> consumerRecord) {
+        TapEvent event = toTapEvent(consumerRecord);
+        return event == null ? Collections.emptyList() : Collections.singletonList(event);
+    }
+
+    /**
+     * 过滤掉涉及主键的 DDL 事件，避免下游对主键列做 add/drop/rename/alter 造成约束破坏。
+     * 主键集合取自 {@link KafkaConfig#tableMapGet(String)} 对应 TapTable 的 {@code primaryKeys(true)}。
+     * - {@link TapDropFieldEvent}：fieldName 命中主键 → 整事件丢弃
+     * - {@link TapAlterFieldNameEvent}：before / after 任一命中主键 → 整事件丢弃
+     * - {@link TapAlterFieldAttributesEvent}：fieldName 命中主键 → 整事件丢弃
+     * - {@link TapNewFieldEvent}：仅丢弃 newFields 中命中主键的元素，剩余非空则保留事件
+     * 其他事件原样透传。
+     */
+    protected List<TapEvent> filterPrimaryKeyDDL(String topic, List<TapEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return events;
+        }
+        Set<String> pks = primaryKeysOfTopic(topic);
+        if (pks.isEmpty()) {
+            return events;
+        }
+        List<TapEvent> filtered = new ArrayList<>(events.size());
+        for (TapEvent e : events) {
+            if (e instanceof TapDropFieldEvent) {
+                String f = ((TapDropFieldEvent) e).getFieldName();
+                if (f != null && pks.contains(f)) {
+                    tapLogger.info("Skip primary key DDL (drop): topic={}, field={}", topic, f);
+                    continue;
+                }
+            } else if (e instanceof TapAlterFieldNameEvent) {
+                ValueChange<String> nc = ((TapAlterFieldNameEvent) e).getNameChange();
+                String before = nc == null ? null : nc.getBefore();
+                String after = nc == null ? null : nc.getAfter();
+                if ((before != null && pks.contains(before)) || (after != null && pks.contains(after))) {
+                    tapLogger.info("Skip primary key DDL (rename): topic={}, {} -> {}", topic, before, after);
+                    continue;
+                }
+            } else if (e instanceof TapAlterFieldAttributesEvent) {
+                String f = ((TapAlterFieldAttributesEvent) e).getFieldName();
+                if (f != null && pks.contains(f)) {
+                    tapLogger.info("Skip primary key DDL (attr): topic={}, field={}", topic, f);
+                    continue;
+                }
+            } else if (e instanceof TapNewFieldEvent) {
+                TapNewFieldEvent ne = (TapNewFieldEvent) e;
+                List<TapField> kept = new ArrayList<>();
+                if (ne.getNewFields() != null) {
+                    for (TapField f : ne.getNewFields()) {
+                        if (f != null && f.getName() != null && pks.contains(f.getName())) {
+                            tapLogger.info("Skip primary key DDL (new field): topic={}, field={}", topic, f.getName());
+                            continue;
+                        }
+                        kept.add(f);
+                    }
+                }
+                if (kept.isEmpty()) {
+                    continue;
+                }
+                ne.setNewFields(kept);
+            }
+            filtered.add(e);
+        }
+        return filtered;
+    }
+
+    private Set<String> primaryKeysOfTopic(String topic) {
+        if (topic == null) {
+            return Collections.emptySet();
+        }
+        TapTable known = kafkaService.getConfig().tableMapGet(topic);
+        if (known == null) {
+            return Collections.emptySet();
+        }
+        Collection<String> pks = known.primaryKeys(true);
+        if (pks == null || pks.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return new HashSet<>(pks);
+    }
+
+
+
+    public abstract List<ProducerRecord<Object, Object>> fromTapEvent(TapTable table, TapEvent tapEvent);
+
+    public ProducerRecord<Object, Object> fromTapDDLEvent(TapDDLEvent ddlEvent) {
+        throw new UnsupportedOperationException(String.format("schema mode '%s' not support DDL event", kafkaSchemaMode));
+    }
+
+    public abstract void queryByAdvanceFilter(TapAdvanceFilter filter, TapTable table, Consumer<FilterResults> consumer);
+
+    /**
+     * 用于创建 {@link AbsSchemaMode} 子类实例的工厂。外部模块通过给传入
+     * overrides map（参见 {@link io.tapdata.kafka.KafkaEnhancedCoreConnector#schemaModeOverrides()}）
+     * 让 {@link #create(KafkaSchemaMode, IKafkaService, Map)} 返回扩展子类，作用域仅限本连接器实例，
+     * 不污染同 JVM 内的其他连接器。
+     */
+    @FunctionalInterface
+    public interface Factory {
+        AbsSchemaMode create(IKafkaService kafkaService);
+    }
+
+    private static final Map<KafkaSchemaMode, Factory> DEFAULTS;
+
+    static {
+        Map<KafkaSchemaMode, Factory> m = new EnumMap<>(KafkaSchemaMode.class);
+        m.put(KafkaSchemaMode.ORIGINAL, OriginalSchemaMode::new);
+        m.put(KafkaSchemaMode.STANDARD, StandardSchemaMode::new);
+        m.put(KafkaSchemaMode.STANDARD_JSON, StandardJsonSchemaMode::new);
+        m.put(KafkaSchemaMode.CUSTOM, CustomSchemaMode::new);
+        m.put(KafkaSchemaMode.CANAL, CanalSchemaMode::new);
+        m.put(KafkaSchemaMode.DEBEZIUM, DebeziumSchemaMode::new);
+        m.put(KafkaSchemaMode.FLINK_CDC, FlinkSchemaMode::new);
+        m.put(KafkaSchemaMode.REGISTRY_AVRO, RegistryAvroMode::new);
+        m.put(KafkaSchemaMode.REGISTRY_PROTOBUF, RegistryProtobufMode::new);
+        m.put(KafkaSchemaMode.REGISTRY_JSON, RegistryJsonMode::new);
+        DEFAULTS = Collections.unmodifiableMap(m);
+    }
+
+    public static AbsSchemaMode create(KafkaSchemaMode schemaMode, IKafkaService kafkaService) {
+        return create(schemaMode, kafkaService, null);
+    }
+
+    /**
+     * 创建指定 {@link KafkaSchemaMode} 的实现；overrides 优先于内建默认，
+     * 仅在本次调用生效，不修改全局状态，因此多个连接器子类各自的 overrides 互不影响。
+     */
+    public static AbsSchemaMode create(KafkaSchemaMode schemaMode, IKafkaService kafkaService, Map<KafkaSchemaMode, Factory> overrides) {
+        if (null == schemaMode) {
+            throw new IllegalArgumentException("Connection schemaMode is required");
+        }
+        Factory factory = overrides == null ? null : overrides.get(schemaMode);
+        if (factory == null) {
+            factory = DEFAULTS.get(schemaMode);
+        }
+        if (factory == null) {
+            throw new NotSupportedException(String.format("schema mode '%s'", schemaMode));
+        }
+        return factory.create(kafkaService);
+    }
+
+    protected void processIfStringNotBlank(Object param, Consumer<String> consumer) {
+        if (null != param && StringUtils.isNotBlank(param.toString())) {
+            consumer.accept(param.toString());
+        }
+    }
+
+    protected byte[] createKafkaKey(Map<String, Object> data, TapTable tapTable) {
+        Collection<String> keys = primaryKeyMap.computeIfAbsent(tapTable.getId(), k -> tapTable.primaryKeys(true));
+        if (EmptyKit.isEmpty(keys)) {
+            return null;
+        }
+        return keys.stream().map(key -> String.valueOf(data.get(key))).collect(Collectors.joining("_")).getBytes();
+    }
+
+    protected String createKafkaKeyValueMap(Map<String, Object> data, TapTable tapTable) {
+        Collection<String> keys = primaryKeyMap.computeIfAbsent(tapTable.getId(), k -> tapTable.primaryKeys(true));
+        if (EmptyKit.isEmpty(keys)) {
+            return null;
+        }
+        Map<String, Object> keyValue = new HashMap<>();
+        keys.forEach(v -> keyValue.put(v, data.get(v)));
+        return TapSimplify.toJson(keyValue);
+    }
+
+    protected Integer computePartition(byte[] key, int partitionNum) {
+        if (key == null) {
+            return null;
+        }
+        if (partitionNum <= 0) {
+            return null;
+        }
+        return Utils.toPositive(Utils.murmur2(key)) % partitionNum;
+    }
+
+    protected String topic(TapTable table, TapEvent tapEvent) {
+        return KafkaUtils.pickTopic(kafkaService.getConfig(), tapEvent.getDatabase(), tapEvent.getSchema(), table);
+    }
+
+    /**
+     * 从 ConsumerRecord 的 header 中获取操作类型
+     */
+    protected DMLType getOperationType(ConsumerRecord<?, ?> consumerRecord) {
+        if (consumerRecord.headers() != null) {
+            org.apache.kafka.common.header.Header opHeader = consumerRecord.headers().lastHeader("op");
+            if (opHeader != null && opHeader.value() != null) {
+                String opValue = new String(opHeader.value());
+                try {
+                    return DMLType.valueOf(opValue.toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    // 如果无法解析，返回默认值
+                }
+            }
+        }
+        // 默认为 INSERT
+        return DMLType.INSERT;
+    }
+
+    protected String toTapType(String dataType) {
+        switch (dataType) {
+            case "INT":
+                return "INTEGER";
+            case "TIME-MILLIS":
+            case "TIME-MICROS":
+                return "TIME";
+            case "TIMESTAMP-MILLIS":
+            case "TIMESTAMP-MICROS":
+                return "TIMESTAMP";
+            default:
+                return dataType;
+        }
+    }
+
+    /**
+     * 根据值推断 TapData 类型
+     */
+    protected String inferTapType(Object value) {
+        if (value == null) {
+            return "STRING";
+        }
+
+        if (value instanceof Boolean) {
+            return "BOOLEAN";
+        } else if (value instanceof Integer || value instanceof Short || value instanceof Byte) {
+            return "INTEGER";
+        } else if (value instanceof Long) {
+            return "BIGINT";
+        } else if (value instanceof Float) {
+            return "FLOAT";
+        } else if (value instanceof Double) {
+            return "DOUBLE";
+        } else if (value instanceof BigDecimal) {
+            return "DOUBLE";
+        } else if (value instanceof String) {
+            return "STRING";
+        } else if (value instanceof List) {
+            return "ARRAY";
+        } else if (value instanceof Map) {
+            return "MAP";
+        } else {
+            return "STRING";
+        }
+    }
+}
