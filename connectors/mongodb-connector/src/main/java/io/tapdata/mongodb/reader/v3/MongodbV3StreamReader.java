@@ -76,7 +76,9 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 	@Override
 	public void onStart(MongodbConfig mongodbConfig) {
 		this.mongodbConfig = mongodbConfig;
-		mongoClient = MongodbUtil.createMongoClient(mongodbConfig,true);
+		if (mongoClient == null) {
+			mongoClient = MongodbUtil.createMongoClient(mongodbConfig,true);
+		}
 
 		nodesURI = MongodbUtil.nodesURI(mongoClient, mongodbConfig.getUri());
 		running.compareAndSet(false, true);
@@ -191,7 +193,11 @@ public class MongodbV3StreamReader implements MongodbStreamReader {
 	public void onDestroy() {
 		running.compareAndSet(true, false);
 		if (mongoClient != null) {
-			mongoClient.close();
+			try {
+				mongoClient.close();
+			} finally {
+				mongoClient = null;
+			}
 		}
 
 		if (replicaSetReadThreadPool != null) {

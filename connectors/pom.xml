@@ -18,6 +18,7 @@
         <module>doris-connector</module>
         <module>starrocks-connector</module>
         <module>oceanbase-mysql-connector</module>
+		<module>kafka-avro-connector</module>
 		<module>kafka-connector</module>
 		<module>kafka-enhanced-connector</module>
         <module>rabbitmq-connector</module>

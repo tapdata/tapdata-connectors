@@ -3,8 +3,8 @@ package io.tapdata.connector.mysql;
 import com.mysql.cj.exceptions.StatementIsClosedException;
 import io.debezium.type.TapIllegalDate;
 import io.tapdata.common.CommonDbConnector;
+import io.tapdata.common.JdbcProcedureParam;
 import io.tapdata.common.ResultSetConsumer;
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.ddl.type.DDLParserType;
 import io.tapdata.common.dml.NormalRecordWriter;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
@@ -40,6 +40,7 @@ import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -300,7 +301,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportGetTableNamesFunction(this::getTableNames);
         connectorFunctions.supportErrorHandleFunction(this::errorHandle);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> mysqlJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
         connectorFunctions.supportExecuteCommandV2Function(this::executeCommandV2);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
         //connectorFunctions.supportQueryFieldMinMaxValueFunction(this::minMaxValue);
@@ -620,61 +621,77 @@ public class MysqlConnector extends CommonDbConnector {
     }
 
     protected Map<String, Object> filterTimeForMysql(
-            ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet) throws SQLException {
-        return filterTimeForMysql(resultSet, metaData, dateTypeSet, null, null);
+            ResultSet resultSet, ResultSetMetaData metaData) throws SQLException {
+        return filterTimeForMysql(resultSet, metaData, null, null);
     }
 
     protected Map<String, Object> filterTimeForMysql(
-            ResultSet resultSet, ResultSetMetaData metaData, Set<String> dateTypeSet, TapRecordEvent recordEvent,
+            ResultSet resultSet, ResultSetMetaData metaData, TapRecordEvent recordEvent,
             IllegalDateConsumer illegalDateConsumer) throws SQLException {
         Map<String, Object> data = new HashMap<>();
         List<String> illegalDateFieldName = new ArrayList<>();
         for (int i = 0; i < metaData.getColumnCount(); i++) {
             String columnName = metaData.getColumnName(i + 1);
-            if (!dateTypeSet.contains(columnName)) {
-                data.put(columnName, resultSet.getObject(i + 1));
-            } else {
-                Object value;
-                try {
-                    value = resultSet.getObject(i + 1);
-                } catch (Exception e) {
-                    value = null;
-                }
-                String string = resultSet.getString(i + 1);
-                //非法时间
-                if (EmptyKit.isNull(value) && EmptyKit.isNotNull(string)) {
-                    if (null == illegalDateConsumer || null == recordEvent) {
+            String columnType = metaData.getColumnTypeName(i + 1);
+            switch (columnType) {
+                case "TIME":
+                case "TIMESTAMP":
+                case "DATE":
+                case "DATETIME":
+                case "YEAR":
+                    Object value;
+                    try {
+                        value = resultSet.getObject(i + 1);
+                    } catch (Exception e) {
+                        value = null;
+                    }
+                    String string = resultSet.getString(i + 1);
+                    //非法时间
+                    if (EmptyKit.isNull(value) && EmptyKit.isNotNull(string)) {
+                        if (null == illegalDateConsumer || null == recordEvent) {
+                            data.put(columnName, null);
+                        } else {
+                            data.put(columnName, buildIllegalDate(recordEvent, illegalDateConsumer, string, illegalDateFieldName, columnName));
+                        }
+                    } else if (null == value) {
                         data.put(columnName, null);
                     } else {
-                        data.put(columnName, buildIllegalDate(recordEvent, illegalDateConsumer, string, illegalDateFieldName, columnName));
-                    }
-                } else if (null == value) {
-                    data.put(columnName, null);
-                } else {
-                    if ("TIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                        data.put(columnName, string);
-                    } else if ("YEAR".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                        data.put(columnName, resultSet.getInt(i + 1));
-                    } else if ("TIMESTAMP".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                        data.put(columnName, ((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
-                    } else if ("DATE".equalsIgnoreCase(metaData.getColumnTypeName(i + 1))) {
-                        if (mysqlConfig.getOldVersionTimezone()) {
-                            data.put(columnName, resultSet.getString(i + 1));
-                        } else if (value instanceof java.sql.Date) {
-                            data.put(columnName, ((java.sql.Date) value).toLocalDate().atStartOfDay());
-                        } else {
-                            data.put(columnName, value);
+                        switch (columnType) {
+                            case "TIME":
+                                data.put(columnName, string);
+                                break;
+                            case "YEAR":
+                                data.put(columnName, resultSet.getInt(i + 1));
+                                break;
+                            case "TIMESTAMP":
+                                data.put(columnName, ((Timestamp) value).toLocalDateTime().atZone(ZoneOffset.UTC));
+                                break;
+                            case "DATE":
+                                if (mysqlConfig.getOldVersionTimezone()) {
+                                    data.put(columnName, resultSet.getString(i + 1));
+                                } else if (value instanceof java.sql.Date) {
+                                    data.put(columnName, ((java.sql.Date) value).toLocalDate().atStartOfDay());
+                                } else {
+                                    data.put(columnName, value);
+                                }
+                                break;
+                            case "DATETIME":
+                                if (value instanceof LocalDateTime) {
+                                    if (mysqlConfig.getOldVersionTimezone()) {
+                                        data.put(columnName, ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000)));
+                                    } else {
+                                        data.put(columnName, ((LocalDateTime) value).minusHours(zoneOffsetHour));
+                                    }
+                                } else {
+                                    data.put(columnName, value);
+                                }
+                                break;
                         }
-                    } else if ("DATETIME".equalsIgnoreCase(metaData.getColumnTypeName(i + 1)) && value instanceof LocalDateTime) {
-                        if (mysqlConfig.getOldVersionTimezone()) {
-                            data.put(columnName, ((LocalDateTime) value).toInstant(ZoneOffset.ofTotalSeconds(TimeZone.getDefault().getRawOffset() / 1000)));
-                        } else {
-                            data.put(columnName, ((LocalDateTime) value).minusHours(zoneOffsetHour));
-                        }
-                    } else {
-                        data.put(columnName, value);
                     }
-                }
+                    break;
+                default:
+                    data.put(columnName, resultSet.getObject(i + 1));
+                    break;
             }
         }
         if (null != illegalDateConsumer && null != recordEvent && !EmptyKit.isEmpty(illegalDateFieldName)) {
@@ -723,12 +740,10 @@ public class MysqlConnector extends CommonDbConnector {
     protected ResultSetConsumer resultSetConsumer(TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) {
         return resultSet -> {
             List<TapEvent> tapEvents = list();
-            //get all column names
-            Set<String> dateTypeSet = dateFields(tapTable);
             ResultSetMetaData metaData = resultSet.getMetaData();
             while (isAlive() && resultSet.next()) {
                 TapInsertRecordEvent tapInsertRecordEvent = new TapInsertRecordEvent().init();
-                Map<String, Object> data = filterTimeForMysql(resultSet, metaData, dateTypeSet, tapInsertRecordEvent, new IllegalDateConsumer() {
+                Map<String, Object> data = filterTimeForMysql(resultSet, metaData, tapInsertRecordEvent, new IllegalDateConsumer() {
                     @Override
                     public void containsIllegalDate(TapRecordEvent event, boolean containsIllegalDate) {
                         event.setContainsIllegalDate(containsIllegalDate);
@@ -813,10 +828,9 @@ public class MysqlConnector extends CommonDbConnector {
         mysqlJdbcContext.queryWithStream(sql, resultSet -> {
             FilterResults filterResults = new FilterResults();
             //get all column names
-            Set<String> dateTypeSet = dateFields(table);
             ResultSetMetaData metaData = resultSet.getMetaData();
             while (isAlive() && resultSet.next()) {
-                filterResults.add(filterTimeForMysql(resultSet, metaData, dateTypeSet));
+                filterResults.add(filterTimeForMysql(resultSet, metaData));
                 if (filterResults.getResults().size() == batchSize) {
                     consumer.accept(filterResults);
                     filterResults = new FilterResults();
@@ -828,24 +842,6 @@ public class MysqlConnector extends CommonDbConnector {
             }
         });
     }
-
-    protected Set<String> dateFields(TapTable tapTable) {
-        Set<String> dateTypeSet = new HashSet<>();
-        tapTable.getNameFieldMap().forEach((n, v) -> {
-            switch (v.getTapType().getType()) {
-                case TapType.TYPE_DATE:
-                case TapType.TYPE_DATETIME:
-                case TapType.TYPE_TIME:
-                case TapType.TYPE_YEAR:
-                    dateTypeSet.add(n);
-                    break;
-                default:
-                    break;
-            }
-        });
-        return dateTypeSet;
-    }
-
 
     private void streamRead(TapConnectorContext tapConnectorContext, List<String> tables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
@@ -1099,4 +1095,121 @@ public class MysqlConnector extends CommonDbConnector {
         return exportEventSql(writeRecorder, connectorContext, tapEvent, table);
     }
 
+    protected void execute(String sql, Consumer<Object> consumer, int batchSize) throws Throwable {
+        try (Connection connection = jdbcContext.getConnection();
+             Statement sqlStatement = connection.createStatement()) {
+            sqlStatement.setFetchSize(Integer.MIN_VALUE);
+            boolean hasResult = sqlStatement.execute(sql);
+            if (!hasResult) {
+                consumer.accept((long) sqlStatement.getUpdateCount());
+            } else {
+                while (isAlive() && hasResult) {
+                    try (ResultSet resultSet = sqlStatement.getResultSet()) {
+                        List<Map<String, Object>> list = TapSimplify.list();
+                        ResultSetMetaData metaData = resultSet.getMetaData();
+                        while (isAlive() && resultSet.next()) {
+                            Map<String, Object> dataMap = filterTimeForMysql(resultSet, metaData);
+                            list.add(dataMap);
+                            if (list.size() == batchSize) {
+                                consumer.accept(list);
+                                list = TapSimplify.list();
+                            }
+                        }
+                        if (EmptyKit.isNotEmpty(list)) {
+                            consumer.accept(list);
+                        }
+                    }
+                    hasResult = sqlStatement.getMoreResults();
+                }
+            }
+            connection.commit();
+        }
+    }
+
+    public ExecuteResult<?> call(String funcName, List<Map<String, Object>> params) {
+        if (EmptyKit.isEmpty(funcName)) {
+            throw new IllegalArgumentException("procedure/function is null");
+        }
+
+        ExecuteResult<?> executeResult;
+
+        funcName = funcName.trim();
+        List<JdbcProcedureParam> outList = new ArrayList<>();
+
+        try (Connection connection = jdbcContext.getConnection();
+             CallableStatement callableStatement = createCallableStatement(funcName, params, connection, outList)) {
+            if (callableStatement == null) {
+                throw new RuntimeException("create callableStatement error");
+            }
+            callableStatement.setFetchSize(Integer.MIN_VALUE);
+            boolean hasResult = callableStatement.execute();
+            executeResult = new ExecuteResult<>().result(getOutputFromCall(outList, callableStatement, hasResult));
+        } catch (Throwable e) {
+            executeResult = new ExecuteResult<>().error(new RuntimeException(String.format("Execute database procedure/function %s error, message: %s", funcName, e.getMessage()), e));
+        }
+        return executeResult;
+    }
+
+    private CallableStatement createCallableStatement(String funcName, List<Map<String, Object>> params, Connection connection, List<JdbcProcedureParam> outList) throws Exception {
+
+        CallableStatement callableStatement;
+        boolean hasReturn = hasReturn(params);
+        StringBuilder callStr = new StringBuilder();
+
+        if (hasReturn) {
+            callStr.append("{?=call ")
+                    .append(funcName)
+                    .append("(")
+                    .append(StringKit.copyString("?", params.size() - 1, ","))
+                    .append(")}");
+        } else {
+            callStr.append("{call ")
+                    .append(funcName)
+                    .append("(")
+                    .append(StringKit.copyString("?", params.size(), ","))
+                    .append(")}");
+        }
+
+        callableStatement = connection.prepareCall(callStr.toString());
+        callableStatement.setFetchSize(Integer.MIN_VALUE);
+
+        setCallableStatementParameters(callableStatement, params, outList, connection);
+
+        return callableStatement;
+    }
+
+    protected Object getOutputFromCall(List<JdbcProcedureParam> outList, CallableStatement callableStatement, boolean hasResult) throws Exception {
+        if (outList == null || callableStatement == null) {
+            return null;
+        }
+        Map<String, Object> res = new HashMap<>();
+        int resIndex = 1;
+        while (hasResult) {
+            try (ResultSet resultSet = callableStatement.getResultSet()) {
+                List<Map<String, Object>> list = TapSimplify.list();
+                ResultSetMetaData metaData = resultSet.getMetaData();
+                while (resultSet.next()) {
+                    Map<String, Object> dataMap = filterTimeForMysql(resultSet, metaData);
+                    list.add(dataMap);
+                }
+                res.put("result" + resIndex++, list);
+            }
+            hasResult = callableStatement.getMoreResults();
+        }
+        for (JdbcProcedureParam param : outList) {
+            String name = param.getName();
+            int paramIndex = param.getIndex();
+            String type = param.getType();
+
+            try {
+                Object out = callableStatement.getObject(paramIndex);
+                out = handleValue(out);
+                res.put(name, out);
+            } catch (SQLException e) {
+                throw new Exception("get value {param name: " + name + ", param index: " + paramIndex + ", param type: " + type + "} error: " + e.getMessage());
+            }
+        }
+
+        return res;
+    }
 }

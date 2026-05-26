@@ -8,6 +8,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.value.*;
 
 import java.sql.Timestamp;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -49,8 +50,38 @@ import java.util.function.Consumer;
  * </pre>
  */
 public class DataGenerator {
+    private static class RecordIdentity {
+        final long idLong;
+        final boolean duplicateRecord;
+        final long currentUniqueCount;
+
+        RecordIdentity(long idLong, boolean duplicateRecord, long currentUniqueCount) {
+            this.idLong = idLong;
+            this.duplicateRecord = duplicateRecord;
+            this.currentUniqueCount = currentUniqueCount;
+        }
+    }
+
+    public enum PartitionScenario {
+        BASELINE,
+        HOT_PARTITION,
+        UNIFORM_PARTITION,
+        UPDATE_HEAVY,
+        UPDATE_HEAVY_STABLE_PARTITION,
+        UPDATE_BEFORE_NULL_AFTER_VALUE,
+        NULL_PARTITION
+    }
+
+    /**
+     * Default partition column used by partitioned perf test cases.
+     * Kept deterministic so partition distribution is stable across runs.
+     */
+    public static final String PARTITION_FIELD = "pt_date";
+
     private final Random random;
     private final AtomicLong idGenerator;
+    private final boolean includePartitionField;
+    private final PartitionScenario partitionScenario;
 
     /**
      * 确定性重复 ID 生成的种子（固定值保证可重现）
@@ -69,14 +100,24 @@ public class DataGenerator {
     private final String tableName;
 
     public DataGenerator(int primaryKeyDuplicateRate) {
-        this(primaryKeyDuplicateRate, "test_table");
+        this(primaryKeyDuplicateRate, "test_table", false, PartitionScenario.BASELINE);
     }
 
     public DataGenerator(int primaryKeyDuplicateRate, String tableName) {
+        this(primaryKeyDuplicateRate, tableName, false, PartitionScenario.BASELINE);
+    }
+
+    public DataGenerator(int primaryKeyDuplicateRate, String tableName, boolean includePartitionField) {
+        this(primaryKeyDuplicateRate, tableName, includePartitionField, PartitionScenario.BASELINE);
+    }
+
+    public DataGenerator(int primaryKeyDuplicateRate, String tableName, boolean includePartitionField, PartitionScenario partitionScenario) {
         this.random = new Random(System.currentTimeMillis());
         this.idGenerator = new AtomicLong(1);
         this.primaryKeyDuplicateRate = Math.max(0, Math.min(100, primaryKeyDuplicateRate));
         this.tableName = tableName;
+        this.includePartitionField = includePartitionField;
+        this.partitionScenario = partitionScenario == null ? PartitionScenario.BASELINE : partitionScenario;
     }
 
     /**
@@ -121,33 +162,90 @@ public class DataGenerator {
      * 生成单个记录
      */
     public Map<String, Object> generateRecord() {
-        Map<String, Object> record = new HashMap<>();
+        RecordIdentity identity = nextIdentity();
+        return buildRecord(identity.idLong, identity.duplicateRecord, identity.currentUniqueCount, false);
+    }
 
-        // 生成主键
-        long idLong;
-        long currentUniqueCount = idGenerator.get(); // 当前已生成的唯一 ID 数（未包含本次）
-
-        if (primaryKeyDuplicateRate > 0 && currentUniqueCount > 1
-                && random.nextInt(100) < primaryKeyDuplicateRate) {
-            // 生成重复主键（用于 UPDATE 场景）
-            // 使用确定性伪随机映射，无需存储历史 ID
-            long poolSize = Math.min(currentUniqueCount - 1, MAX_DUPLICATE_POOL);
-            // 使用当前时间戳 + 随机值作为种子，确保每次调用有不同的哈希输入
-            long seed = System.nanoTime() ^ random.nextLong();
-            idLong = deterministicDuplicateId(seed, poolSize);
-            // 注意：不增加 idGenerator，因为这是重复 ID
-        } else {
-            // 生成新主键
-            idLong = idGenerator.getAndIncrement();
+    /**
+     * Generate a mixed DML event: INSERT for unique primary keys, UPDATE for duplicate primary keys.
+     */
+    public TapRecordEvent generateDmlEvent() {
+        RecordIdentity identity = nextIdentity();
+        if (identity.duplicateRecord) {
+            return buildUpdateEvent(identity);
         }
 
+        TapInsertRecordEvent event = new TapInsertRecordEvent();
+        event.setAfter(buildRecord(identity.idLong, identity.duplicateRecord, identity.currentUniqueCount, false));
+        event.setTableId(tableName);
+        event.setReferenceTime(System.currentTimeMillis());
+        return event;
+    }
+
+    private RecordIdentity nextIdentity() {
+        long currentUniqueCount = idGenerator.get(); // 当前已生成的唯一 ID 数（未包含本次）
+        if (primaryKeyDuplicateRate > 0 && currentUniqueCount > 1
+                && random.nextInt(100) < primaryKeyDuplicateRate) {
+            long poolSize = Math.min(currentUniqueCount - 1, MAX_DUPLICATE_POOL);
+            long seed = System.nanoTime() ^ random.nextLong();
+            long idLong = deterministicDuplicateId(seed, poolSize);
+            return new RecordIdentity(idLong, true, currentUniqueCount);
+        }
+        return new RecordIdentity(idGenerator.getAndIncrement(), false, currentUniqueCount);
+    }
+
+    private Map<String, Object> buildRecord(long idLong, boolean duplicateRecord, long currentUniqueCount, boolean updatedRecord) {
+        Map<String, Object> record = new HashMap<>();
         String id = idToString(idLong);
         record.put("id", id);
-        record.put("name", "name-" + id + "-" + System.currentTimeMillis());
+        record.put("name", updatedRecord ? "name-" + id + "-updated-" + System.currentTimeMillis() : "name-" + id + "-" + System.currentTimeMillis());
         record.put("value", random.nextInt(1000000));
         record.put("ts", new Timestamp(System.currentTimeMillis()));
-
+        if (includePartitionField) {
+            record.put(PARTITION_FIELD, generatePartitionValue(idLong, duplicateRecord, currentUniqueCount, updatedRecord));
+        }
         return record;
+    }
+
+    /**
+     * Generate a stable partition value for perf tests.
+     *
+     * <p>We cycle through a 7-day window to keep partition cardinality low
+     * while still exercising partitioned writes.</p>
+     */
+    private String generatePartitionValue(long idLong, boolean duplicateRecord, long currentUniqueCount, boolean updatedRecord) {
+        LocalDate base = LocalDate.of(2026, 4, 1);
+
+        switch (partitionScenario) {
+            case HOT_PARTITION:
+                // 单分区热点：绝大多数记录都写入同一分区
+                return base.toString();
+            case UNIFORM_PARTITION:
+                // 多分区均匀：扩大分区窗口，稳定分散到更多分区
+                return base.plusDays(Math.floorMod(idLong - 1, 31)).toString();
+            case UPDATE_HEAVY:
+                // 更新场景：重复主键时让分区键也发生漂移，模拟 partition update
+                if (duplicateRecord && updatedRecord) {
+                    long shift = Math.floorMod(idLong + currentUniqueCount, 16);
+                    return base.plusDays(shift).toString();
+                }
+                return base.plusDays(Math.floorMod(idLong - 1, 7)).toString();
+            case UPDATE_HEAVY_STABLE_PARTITION:
+                // 更新场景：before/after 保持同一分区键，仅主键重复与行内容更新
+                return base.plusDays(Math.floorMod(idLong - 1, 7)).toString();
+            case UPDATE_BEFORE_NULL_AFTER_VALUE:
+                // 更新场景：before 为空分区，after 恢复为正常分区值
+                if (duplicateRecord && !updatedRecord) {
+                    return null;
+                }
+                return base.plusDays(Math.floorMod(idLong - 1, 7)).toString();
+            case NULL_PARTITION:
+                return null;
+            case BASELINE:
+            default:
+                // 默认沿用当前 7 天循环，保证原有基准可比
+                return base.plusDays(Math.floorMod(idLong - 1, 7)).toString();
+        }
     }
 
     /**
@@ -172,28 +270,32 @@ public class DataGenerator {
      * 生成更新事件
      */
     public TapUpdateRecordEvent generateUpdateEvent() {
+        RecordIdentity identity = nextUpdateIdentity();
+        if (identity == null) {
+            return null;
+        }
+        return buildUpdateEvent(identity);
+    }
+
+    private RecordIdentity nextUpdateIdentity() {
         long currentUniqueCount = idGenerator.get();
         if (currentUniqueCount <= 1) {
             return null;
         }
-
-        // 使用确定性伪随机生成重复 ID
         long poolSize = Math.min(currentUniqueCount - 1, MAX_DUPLICATE_POOL);
         long dummyId = random.nextLong();
         long idLong = deterministicDuplicateId(dummyId, poolSize);
-        String id = idToString(idLong);
+        return new RecordIdentity(idLong, true, currentUniqueCount);
+    }
 
-        Map<String, Object> before = new HashMap<>();
-        before.put("id", id);
+    private TapUpdateRecordEvent buildUpdateEvent(RecordIdentity identity) {
+        String id = idToString(identity.idLong);
+
+        Map<String, Object> before = buildRecord(identity.idLong, true, identity.currentUniqueCount, false);
         before.put("name", "name-" + id);
-        before.put("value", random.nextInt(1000000));
         before.put("ts", new Timestamp(System.currentTimeMillis() - 86400000L));
 
-        Map<String, Object> after = new HashMap<>();
-        after.put("id", id);
-        after.put("name", "name-" + id + "-updated-" + System.currentTimeMillis());
-        after.put("value", random.nextInt(1000000));
-        after.put("ts", new Timestamp(System.currentTimeMillis()));
+        Map<String, Object> after = buildRecord(identity.idLong, true, identity.currentUniqueCount, true);
 
         TapUpdateRecordEvent event = new TapUpdateRecordEvent();
         event.setBefore(before);
@@ -208,6 +310,15 @@ public class DataGenerator {
      * 生成TapTable结构
      */
     public TapTable generateTapTable() {
+        return generateTapTable(false);
+    }
+
+    /**
+     * 生成TapTable结构
+     *
+     * @param compositePrimaryKey 是否将分区字段加入联合主键
+     */
+    public TapTable generateTapTable(boolean compositePrimaryKey) {
         TapTable table = new TapTable();
         table.setName(tableName);
         table.setId(tableName);
@@ -239,8 +350,24 @@ public class DataGenerator {
         tsField.setNullable(true);
         table.add(tsField);
 
+        if (includePartitionField) {
+            TapField partitionField = new TapField();
+            partitionField.setName(PARTITION_FIELD);
+            partitionField.setDataType("VARCHAR");
+            partitionField.setNullable(!compositePrimaryKey);
+            partitionField.setPrimaryKey(compositePrimaryKey);
+            if (compositePrimaryKey) {
+                partitionField.setPrimaryKeyPos(2);
+            }
+            table.add(partitionField);
+        }
+
         // 设置主键
-        table.setDefaultPrimaryKeys(Collections.singletonList("id"));
+        if (compositePrimaryKey && includePartitionField) {
+            table.setDefaultPrimaryKeys(Arrays.asList("id", PARTITION_FIELD));
+        } else {
+            table.setDefaultPrimaryKeys(Collections.singletonList("id"));
+        }
 
         return table;
     }

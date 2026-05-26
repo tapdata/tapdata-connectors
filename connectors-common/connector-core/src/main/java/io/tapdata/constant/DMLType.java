@@ -3,7 +3,7 @@ package io.tapdata.constant;
 import org.apache.commons.lang3.StringUtils;
 
 public enum DMLType {
-    INSERT,UPDATE,DELETE,UN_KNOW;
+    INSERT,UPDATE,DELETE,DDL,UN_KNOW;
 
     public static DMLType parse(String type) {
         if (StringUtils.isBlank(type)) return UN_KNOW;

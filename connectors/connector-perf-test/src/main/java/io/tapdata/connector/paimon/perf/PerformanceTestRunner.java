@@ -2,7 +2,6 @@ package io.tapdata.connector.paimon.perf;
 
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.connector.paimon.service.PaimonService;
-import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
@@ -43,13 +42,13 @@ public class PerformanceTestRunner {
     private static final String DATABASE = "default";
     private static final String TABLE_NAME = "test_table";
     public static final int TOTAL_RECORDS = 5_000_000;   // 数据集总大小
-    private static final int BATCH_SIZE = 100_000; // 每批次写入记录数，也是PaimonService 累积批次大小
-    private static final int INIT_TOTAL_RECORDS = 5_000_000; //模拟初始化阶段全表数据量
+    private static final int BATCH_SIZE = 1_000; // 每批次写入记录数，也是PaimonService 累积批次大小
+    private static final int INIT_TOTAL_RECORDS = 0; //模拟初始化阶段全表数据量
 
     // ─── S3 测试配置 ──────────────────────────────────────────────────────────
 
     /** 是否启用 S3 存储（false = 使用本地文件系统） */
-    private static final boolean ENABLE_S3 = true;
+    private static final boolean ENABLE_S3 = false;
 
     /** S3 端点地址 */
     private static final String S3_ENDPOINT = "http://192.168.1.184:9080";
@@ -154,13 +153,12 @@ public class PerformanceTestRunner {
         }
 
         config.setDatabase(database);
-//        config.setBatchAccumulationSize(BATCH_SIZE);
+        config.setBatchAccumulationSize(BATCH_SIZE);
         //模拟全量+增量模式使用：
         config.setCreateAutoInc(true);
         config.setDiskTmpDir(BASE_TEST_DIR + "/tmp," + BASE_TEST_DIR + "/tmp2");
         //为了验证Paimon参数的效果，测试中关闭：
         config.setEnableAutoCompaction(false);
-
     }
 
     /**
@@ -389,14 +387,13 @@ public class PerformanceTestRunner {
 
     // ─── 创建测试表 ────────────────────────────────────────────────────────────
 
-    private TapTable createTapTable() {
-        DataGenerator dg = new DataGenerator(0, tableName);
-        return dg.generateTapTable();
+    private TapTable createTapTable(boolean includePartitionField, boolean compositePrimaryKey) {
+        DataGenerator dg = new DataGenerator(0, tableName, includePartitionField);
+        return dg.generateTapTable(compositePrimaryKey);
     }
 
-    private void createFreshTable(PaimonService service) throws Exception {
+    private void createFreshTable(PaimonService service, TapTable table) throws Exception {
         try { service.dropTable(tableName); } catch (Exception ignored) {}
-        TapTable table = createTapTable();
         service.createTable(table);
     }
 
@@ -443,7 +440,9 @@ public class PerformanceTestRunner {
             // 1. 初始化服务并创建表
             System.out.println("\n  >> 初始化 PaimonService...");
             service = buildPaimonService(tc);
-            createFreshTable(service);
+            boolean partitionTest = isPartitionTestCase(tc);
+            TapTable tapTable = createTapTable(partitionTest, tc.isCompositePrimaryKey());
+            createFreshTable(service, tapTable);
 
             // 2. 验证表参数是否生效
             System.out.println("  >> 验证表配置参数...");
@@ -468,8 +467,7 @@ public class PerformanceTestRunner {
             }
 
             // 2. 执行写入
-            TapTable tapTable = createTapTable();
-            DataGenerator gen = new DataGenerator(tc.getPrimaryKeyDuplicateRate(), tableName);
+            DataGenerator gen = new DataGenerator(tc.getPrimaryKeyDuplicateRate(), tableName, partitionTest, tc.getPartitionScenario());
 
             // 使用 TestCase 独立的参数（如果设置了），否则使用全局常量
             long totalRecordsToWrite = tc.getDataSize();
@@ -488,9 +486,7 @@ public class PerformanceTestRunner {
                 int batchSz = (int) Math.min(effectiveBatchSize, remain);
                 List<TapRecordEvent> batch = new ArrayList<>(batchSz);
                 for (int i = 0; i < batchSz; i++) {
-                    Map<String, Object> rec = gen.generateRecord();
-                    TapInsertRecordEvent evt = new TapInsertRecordEvent();
-                    evt.setAfter(rec);
+                    TapRecordEvent evt = gen.generateDmlEvent();
                     evt.setTableId(tableName);
                     evt.setReferenceTime(System.currentTimeMillis());
                     Map<String, Object> info = new HashMap<>(1);
@@ -583,6 +579,7 @@ public class PerformanceTestRunner {
             case "format":      cases = TestCase.createFormatCompressionTests(); break;
             case "pkupdate":    cases = TestCase.createPrimaryKeyUpdateTests(); break;
             case "parallelism": cases = TestCase.createParallelismTests(); break;
+            case "partition":   cases = TestCase.createPartitionTests(); break;
             case "all":         cases = TestCase.createAllTests(); break;
             default:
                 System.out.println("  [WARN] 未知测试组: " + groupName);
@@ -687,7 +684,7 @@ public class PerformanceTestRunner {
 
         // 分类验证
         List<String> serviceOnlyParams = Arrays.asList(
-            "write-buffer-spillable", "write-buffer-spill.max-disk-size"
+            "write-buffer-spillable", "write-buffer-spill.max-disk-size", "partition-key"
         );
 
         System.out.println("  参数验证结果:");
@@ -811,12 +808,13 @@ public class PerformanceTestRunner {
         // 定义参数分组及其元数据
         String[][] paramGroups = {
             // 组名 | 作用目标分类
-            {"[1/6] 写入缓冲区配置", "Service 配置"},
-            {"[2/6] 文件大小与格式", "Paimon 表选项"},
-            {"[3/6] 分桶策略", "混合（Service + 表选项）"},
-            {"[4/6] Compaction 合并控制", "Paimon 表选项"},
-            {"[5/6] 排序与合并优化", "Paimon 表选项"},
-            {"[6/6] 并行度与线程", "Service 配置 → 表选项"},
+            {"[1/7] 写入缓冲区配置", "Service 配置"},
+            {"[2/7] 文件大小与格式", "Paimon 表选项"},
+            {"[3/7] 分桶策略", "混合（Service + 表选项）"},
+            {"[4/7] Compaction 合并控制", "Paimon 表选项"},
+            {"[5/7] 排序与合并优化", "Paimon 表选项"},
+            {"[6/7] 并行度与线程", "Service 配置 → 表选项"},
+            {"[7/7] 分区表配置", "Paimon 表选项"},
         };
 
         String[][][] groupParams = {
@@ -849,6 +847,9 @@ public class PerformanceTestRunner {
             },
             {
                 {"sink.parallelism", "写入并行度（线程数）", "4", "影响并发写入能力"},
+            },
+            {
+                {"partition-key", "分区列（逗号分隔）", "pt_date", "要求字段存在于 TapTable schema 中"},
             },
         };
 
@@ -933,7 +934,8 @@ public class PerformanceTestRunner {
         
         long serviceCount = params.keySet().stream()
             .filter(k -> k.equals("write-buffer-size") || k.equals("write-buffer-spillable") || 
-                        k.equals("write-buffer-spill.max-disk-size") || k.equals("sink.parallelism"))
+                        k.equals("write-buffer-spill.max-disk-size") || k.equals("sink.parallelism") ||
+                        k.equals("partition-key"))
             .count();
         long tableOptionCount = params.size() - serviceCount;
         
@@ -1085,6 +1087,10 @@ public class PerformanceTestRunner {
         // ── 推荐配置 ──────────────────────────────────────────────────────────
         sb.append("## 生产推荐配置\n\n");
         appendRecommendedConfig(sb, results);
+
+        // ── 分区表写入 ────────────────────────────────────────────────────────
+        sb.append("## 分区表写入\n\n");
+        appendPartitionAnalysis(sb, results);
 
         // ── 核心结论 ──────────────────────────────────────────────────────────
         sb.append("## 核心结论\n\n");
@@ -1283,7 +1289,8 @@ public class PerformanceTestRunner {
             "write-buffer-size", "write-buffer-spillable", "write-buffer-spill.max-disk-size",
             "target-file-size", "file.format", "file.compression", "spill-compression",
             "bucket", "dynamic-bucket.target-row-num",
-            "compaction.async.enabled", "num-sorted-run.compaction-trigger", 
+            "partition-key",
+            "compaction.async.enabled", "num-sorted-run.compaction-trigger",
             "num-sorted-run.stop-trigger", "compaction.size-ratio",
             "commit.force-compact", "write-only",
             "local-merge-buffer-size", "sort-spill-buffer-size",
@@ -1372,11 +1379,103 @@ public class PerformanceTestRunner {
                 sb.append(String.format("固定 %s 桶，适合已知数据量的场景\n", bucket));
             }
         }
-        
+
+        if (params.containsKey("partition-key")) {
+            sb.append(String.format("- **partition-key=%s**: 分区列配置；当出现热点、更新漂移或空值时，分区文件数量和写入路径会显著变化\n",
+                params.get("partition-key")));
+        }
+
         // 并行度说明
         if (params.containsKey("sink.parallelism")) {
             sb.append(String.format("- **sink.parallelism=%s**: 写入并行度，影响并发线程数\n", 
                 params.get("sink.parallelism")));
+        }
+    }
+
+    /**
+     * 分区表专项分析与推荐配置
+     */
+    private void appendPartitionAnalysis(StringBuilder sb, List<TestResult> results) {
+        List<TestResult> partitionResults = results.stream()
+            .filter(r -> r != null && r.testCase != null && "分区表写入".equals(r.testCase.getGroup()))
+            .collect(Collectors.toList());
+
+        if (partitionResults.isEmpty()) {
+            sb.append("> 未检测到分区表写入测试结果，请先运行 partition 测试组\n\n");
+            return;
+        }
+
+        long successCount = partitionResults.stream().filter(r -> r.error == null).count();
+        sb.append(String.format("- 分区表测试用例数：%d，成功：%d，失败：%d\n",
+            partitionResults.size(), successCount, partitionResults.size() - successCount));
+        sb.append("- 关注维度：热点分区、均匀分区、更新漂移、空分区值\n\n");
+
+        sb.append("### 分区场景对比\n\n");
+        sb.append("| 用例ID | 场景 | 吞吐(条/s) | 文件数 | 平均大小 | 状态 |\n");
+        sb.append("|--------|------|-----------|--------|----------|------|\n");
+        for (TestResult r : partitionResults) {
+            String status = r.error == null ? "✅" : "❌";
+            String scenario = displayPartitionScenario(r.testCase);
+            if (r.error != null) {
+                sb.append(String.format("| %s | %s | - | - | - | %s |\n",
+                    r.testCase.getId(), scenario, status));
+            } else {
+                sb.append(String.format("| %s | %s | %.0f | %d | %s | %s |\n",
+                    r.testCase.getId(), scenario, r.throughput, r.fileCount,
+                    r.fileCount > 0 ? PaimonFileObserver.formatSize(r.totalFileSize / r.fileCount) : "N/A", status));
+            }
+        }
+
+        List<TestResult> successful = partitionResults.stream().filter(r -> r.error == null).collect(Collectors.toList());
+        if (successful.isEmpty()) {
+            sb.append("\n> ⚠️ 分区表测试全部失败，无法生成推荐配置\n\n");
+            return;
+        }
+
+        TestResult bestThroughput = successful.stream().max(Comparator.comparingDouble(r -> r.throughput)).orElse(successful.get(0));
+        TestResult leastFiles = successful.stream().filter(r -> r.fileCount > 0).min(Comparator.comparingInt(r -> r.fileCount)).orElse(bestThroughput);
+
+        sb.append("\n### 分区表写入推荐配置\n\n");
+        sb.append(String.format("**推荐用例**：%s - %s（%s）\n\n",
+            bestThroughput.testCase.getId(), bestThroughput.testCase.getName(),
+            displayPartitionScenario(bestThroughput.testCase)));
+        sb.append(String.format("**实测吞吐**：%.0f 条/秒 | **文件数**：%d | **总大小**：%s\n\n",
+            bestThroughput.throughput, bestThroughput.fileCount,
+            PaimonFileObserver.formatSize(bestThroughput.totalFileSize)));
+        appendConfigBlock(sb, bestThroughput.testCase.getParameters(), "分区表写入推荐配置（基于当前测试中的最优结果）");
+        sb.append("\n**分区表专项建议**:\n");
+        sb.append("- 热点分区场景下，优先降低单分区集中度，必要时增加更细粒度分区或重写分区键。\n");
+        sb.append("- 均匀分区更容易获得稳定吞吐，适合常规导入和批量回灌。\n");
+        sb.append("- 50% 更新 + 分区漂移场景会放大合并和文件重写成本，建议尽量避免频繁更新分区键。\n");
+        sb.append("- 空分区值场景请重点确认上游是否需要默认值/兜底值；若 Paimon 拒绝空值，应在写入前归一化。\n");
+        sb.append(String.format("- 文件数最少用例：**%s**，更适合后续读取和 compaction 压力控制。\n",
+            leastFiles.testCase.getId()));
+        sb.append("\n**配置解释**:\n");
+        appendConfigExplanation(sb, new ScenarioRecommendation(bestThroughput, "分区表写入推荐配置"));
+    }
+
+    private String displayPartitionScenario(TestCase testCase) {
+        if (testCase == null) {
+            return "BASELINE";
+        }
+        DataGenerator.PartitionScenario scenario = testCase.getPartitionScenario();
+        String suffix = testCase.isCompositePrimaryKey() ? " + 联合主键" : "";
+        switch (scenario) {
+            case HOT_PARTITION:
+                return "单分区热点写入" + suffix;
+            case UNIFORM_PARTITION:
+                return "多分区均匀写入" + suffix;
+            case UPDATE_HEAVY:
+                return "50%主键更新+分区更新" + suffix;
+            case UPDATE_HEAVY_STABLE_PARTITION:
+                return "50%主键更新+分区不变" + suffix;
+            case UPDATE_BEFORE_NULL_AFTER_VALUE:
+                return "before空分区/after有值" + suffix;
+            case NULL_PARTITION:
+                return "分区值为空" + suffix;
+            case BASELINE:
+            default:
+                return "基线分区循环" + suffix;
         }
     }
 
@@ -1648,5 +1747,9 @@ public class PerformanceTestRunner {
 
     private static String truncate(String s, int max) {
         return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+    }
+
+    private boolean isPartitionTestCase(TestCase tc) {
+        return tc != null && "分区表写入".equals(tc.getGroup());
     }
 }
