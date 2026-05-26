@@ -78,7 +78,7 @@ public class NetworkUtils {
 
     /**
      * 判断给定的 IP 地址是否和当前机器在同一个子网下
-     * 
+     *
      * @param targetAddress 给定的 IP 地址
      * @return 如果在同一个子网下返回 true，否则返回 false
      * @throws SocketException
@@ -109,7 +109,7 @@ public class NetworkUtils {
 
     /**
      * 判断两个 IP 地址是否在同一个子网下
-     * 
+     *
      * @param localAddress 本地 IP 地址
      * @param targetAddress 目标 IP 地址
      * @param prefixLength 子网前缀长度
