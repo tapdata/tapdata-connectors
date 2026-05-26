@@ -191,4 +191,16 @@ public interface MongodbErrorCode {
             seeAlso = {"https://docs.mongodb.com/manual/changeStreams/", "https://docs.mongodb.com/manual/tutorial/deploy-replica-set/"}
     )
     String NO_REPLICA_SET = "370009";
+
+    @TapExCode(
+            describe = "MongoDB CDC relies on resume tokens to track the progress of data changes. If the resume token is missing or invalid, it may cause CDC to not work properly.",
+            describeCN = "MongoDB CDC 依赖于 resume token 来跟踪数据变化的进度，如果 resume token 不存在或无效，可能会导致 CDC 无法正常工作。",
+            solution = "use the correct Mongo connection string and ensure that the scope of the token is valid. If this error has already been triggered, specify an old point in time to reset and restart the task.",
+            solutionCN = "使用正确的Mongo连接串，保证token的scope合法，如果已经触发该错误，请指定一个旧的时间点来重置重启任务",
+            level = TapExLevel.NORMAL,
+            type = TapExType.RUNTIME,
+            dynamicDescription = "Offset: {}",
+            dynamicDescriptionCN = "断点：{}"
+    )
+    String RESUME_TOKEN_MISSING = "370010";
 }
