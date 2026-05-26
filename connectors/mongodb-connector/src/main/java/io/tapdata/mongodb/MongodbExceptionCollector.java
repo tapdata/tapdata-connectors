@@ -7,7 +7,7 @@ import com.mongodb.MongoException;
 import com.mongodb.MongoSecurityException;
 import com.mongodb.bulk.BulkWriteError;
 import io.tapdata.common.exception.AbstractExceptionCollector;
-import io.tapdata.entity.event.dml.TapRecordEvent;
+import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.exception.*;
 import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
 import io.tapdata.kit.ErrorKit;
@@ -84,6 +84,9 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
     public void collectOffsetInvalid(Object offset, Throwable cause) {
         if (cause instanceof MongoCommandException && (((MongoCommandException) cause).getCode()) == 286) {
             throw new TapPdkOffsetOutOfLogEx(getPdkId(), offset, ErrorKit.getLastCause(cause));
+        }
+        if (cause instanceof MongoCommandException && (((MongoCommandException) cause).getCode()) == 280) {
+            throw new TapCodeException(MongodbErrorCode.RESUME_TOKEN_MISSING, "Resume token is missing. This can occur if the oplog entries that the change stream relies on have been overwritten due to oplog size constraints or if the resume token has expired.").dynamicDescriptionParameters(TapSimplify.toJson(offset), ErrorKit.getLastCause(cause));
         }
     }
 
