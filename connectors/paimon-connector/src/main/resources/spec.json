@@ -125,57 +125,12 @@
         "s3Properties": {
           "type": "array",
           "title": "${s3Properties}",
-          "x-decorator": "FormItem",
+          "x-component": "KeyValueEditor",
+          "x-index": 65,
           "default": [
             {"propKey": "fs.s3a.connection.maximum", "propValue": "1000"},
             {"propKey": "fs.s3a.connection.establish.timeout", "propValue": "5000"}
-          ],
-          "x-component": "ArrayItems",
-          "x-index": 65,
-          "items": {
-            "type": "object",
-            "properties": {
-              "space": {
-                "type": "void",
-                "x-component": "Space",
-                "properties": {
-                  "propKey": {
-                    "type": "string",
-                    "x-decorator": "FormItem",
-                    "x-component": "Input",
-                    "x-component-props": {
-                      "placeholder": "${propKey}"
-                    },
-                    "x-index": 1
-                  },
-                  "propValue": {
-                    "type": "number",
-                    "x-decorator": "FormItem",
-                    "x-component": "Input",
-                    "x-component-props": {
-                      "placeholder": "${propValue}"
-                    },
-                    "x-index": 2
-                  },
-                  "remove": {
-                    "type": "void",
-                    "x-decorator": "FormItem",
-                    "x-component": "ArrayItems.Remove"
-                  }
-                }
-              }
-            }
-          },
-          "properties": {
-            "add": {
-              "type": "void",
-              "title": "${prompt}",
-              "x-component": "ArrayItems.Addition",
-              "x-component-props": {
-                "defaultValue": { "propKey": "", "propValue": "" }
-              }
-            }
-          }
+          ]
         },
         "hdfsHost": {
           "type": "string",
@@ -450,58 +405,13 @@
         "tableProperties": {
           "type": "array",
           "title": "${tableProperties}",
-          "x-decorator": "FormItem",
-          "x-decorator-props": {
+          "x-component": "KeyValueEditor",
+          "x-component-props": {
             "tooltip": "${tablePropertiesTip}"
           },
-          "x-component": "ArrayItems",
           "x-index": 55,
           "x-perTable": true,
-          "default": [],
-          "items": {
-            "type": "object",
-            "properties": {
-              "space": {
-                "type": "void",
-                "x-component": "Space",
-                "properties": {
-                  "propKey": {
-                    "type": "string",
-                    "x-decorator": "FormItem",
-                    "x-component": "Input",
-                    "x-component-props": {
-                      "placeholder": "${propKey}"
-                    },
-                    "x-index": 1
-                  },
-                  "propValue": {
-                    "type": "number",
-                    "x-decorator": "FormItem",
-                    "x-component": "Input",
-                    "x-component-props": {
-                      "placeholder": "${propValue}"
-                    },
-                    "x-index": 2
-                  },
-                  "remove": {
-                    "type": "void",
-                    "x-decorator": "FormItem",
-                    "x-component": "ArrayItems.Remove"
-                  }
-                }
-              }
-            }
-          },
-          "properties": {
-            "add": {
-              "type": "void",
-              "title": "${prompt}",
-              "x-component": "ArrayItems.Addition",
-              "x-component-props": {
-                "defaultValue": { "propKey": "", "propValue": "" }
-              }
-            }
-          }
+          "default": []
         },
         "writeBufferSize": {
           "type": "number",
