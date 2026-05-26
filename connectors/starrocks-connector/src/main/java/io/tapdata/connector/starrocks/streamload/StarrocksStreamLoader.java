@@ -1363,7 +1363,7 @@ public class StarrocksStreamLoader {
                 timeSinceLastFlush, flushTimeoutMs, formatBytes(getTotalBatchSize()));
             return true;
         }
-        
+
         return false;
     }
 
