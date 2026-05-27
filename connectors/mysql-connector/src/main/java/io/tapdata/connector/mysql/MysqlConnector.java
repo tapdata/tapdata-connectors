@@ -859,7 +859,9 @@ public class MysqlConnector extends CommonDbConnector {
     private void streamReadMultiConnection(TapConnectorContext tapConnectorContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
         throwNonSupportWhenLightInit();
         if (mysqlConfig.getHighPerformance()) {
-            throw new RuntimeException("Shared mining (merged log collector) is not supported when 'highPerformance' is enabled");
+            MysqlReaderV2 mysqlReaderV2 = new MysqlReaderV2(mysqlJdbcContext, tapLogger, dbTimeZone);
+            mysqlReaderV2.multiInit(connectionConfigWithTables, tapConnectorContext.getTableMap(), offset, batchSize, consumer);
+            mysqlReaderV2.startMiner(this::isAlive);
         }
         Set<String> databases = new LinkedHashSet<>();
         List<String> dbTables = new ArrayList<>();
