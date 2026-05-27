@@ -100,6 +100,7 @@ public class PaimonService implements Closeable {
 	private ScheduledExecutorService asyncCommitExecutor;
 	private final Map<String, TapCallbackOffset> firstOffsetByTable;
 	private Consumer<Object> flushOffsetCallback;
+	private volatile TapConnectorContext activeConnectorContext;
 
 	// ===== Paimon Field Cache for Performance =====
 	// LRU cache for Paimon field mappings: Key = "database.tableName", Value = Map<fieldName, DataType>
@@ -197,10 +198,22 @@ public class PaimonService implements Closeable {
 					}
 				} catch (Exception e) {
 					// Log error but don't stop the scheduler
-					log.error("Error in async commit: {}", e.getMessage(), e);
+					getAsyncCommitLog().warn("Error in async commit: {}", e.getMessage(), e);
 				}
 			}, commitInterval, commitInterval, TimeUnit.MILLISECONDS);
 		}
+	}
+
+	private Log getAsyncCommitLog() {
+		TapConnectorContext connectorContext = activeConnectorContext;
+		if (connectorContext != null) {
+			connectorContext.configContext();
+			Log currentLog = connectorContext.getLog();
+			if (currentLog != null) {
+				return currentLog;
+			}
+		}
+		return log;
 	}
 
 	/**
@@ -909,6 +922,9 @@ public class PaimonService implements Closeable {
 	private WriteListResult<TapRecordEvent> writeRecordsWithStreamWriteInternal(List<TapRecordEvent> recordEvents,
 																				TapTable table,
 																				TapConnectorContext connectorContext) throws Exception {
+		connectorContext.configContext();
+		activeConnectorContext = connectorContext;
+		Log currentLog = connectorContext.getLog();
 		String database = config.getDatabase();
 		String tableName = table.getName();
 		String tableKey = database + "." + tableName;
@@ -951,13 +967,13 @@ public class PaimonService implements Closeable {
 							}
 						}
 						if (event instanceof TapInsertRecordEvent) {
-							handleStreamInsert((TapInsertRecordEvent) event, writer, table);
+							handleStreamInsert((TapInsertRecordEvent) event, writer, table, currentLog);
 							result.incrementInserted(1);
 						} else if (event instanceof TapUpdateRecordEvent) {
-							handleStreamUpdate((TapUpdateRecordEvent) event, writer, table);
+							handleStreamUpdate((TapUpdateRecordEvent) event, writer, table, currentLog);
 							result.incrementModified(1);
 						} else if (event instanceof TapDeleteRecordEvent) {
-							handleStreamDelete((TapDeleteRecordEvent) event, writer, table);
+							handleStreamDelete((TapDeleteRecordEvent) event, writer, table, currentLog);
 							result.incrementRemove(1);
 						}
 					}
@@ -1013,9 +1029,9 @@ public class PaimonService implements Closeable {
 							recordCount.set(0);
 							lastCommit.set(System.currentTimeMillis());
 
-							long commitDuration = System.currentTimeMillis() - commitStartTime;
-							connectorContext.getLog().debug("Committed {} accumulated records for table {} in {} ms",
-									finalCount, tableKey, commitDuration);
+										long commitDuration = System.currentTimeMillis() - commitStartTime;
+										currentLog.debug("Committed {} accumulated records for table {} in {} ms",
+												finalCount, tableKey, commitDuration);
 						}
 					}
 				}
@@ -1026,11 +1042,11 @@ public class PaimonService implements Closeable {
 			} catch (Exception e) {
 				if (retryCount < maxRetries) {
 					if (isThreadGroupDestroyedError(e)) {
-						connectorContext.getLog().warn("ThreadGroup destroyed in stream write, retrying... (attempt {}/{})", retryCount + 1, maxRetries, e);
+						currentLog.warn("ThreadGroup destroyed in stream write, retrying... (attempt {}/{})", retryCount + 1, maxRetries, e);
 					} else if (isPaimonConflict(e)) {
-						connectorContext.getLog().warn("Commit conflict detected, retrying... (attempt {}/{})", retryCount + 1, maxRetries, e);
+						currentLog.warn("Commit conflict detected, retrying... (attempt {}/{})", retryCount + 1, maxRetries, e);
 					} else {
-						connectorContext.getLog().warn("Failed to write records to table {}, error message: {}, retrying... (attempt {}/{})", tableName, e.getMessage(), retryCount + 1, maxRetries, e);
+						currentLog.warn("Failed to write records to table {}, error message: {}, retrying... (attempt {}/{})", tableName, e.getMessage(), retryCount + 1, maxRetries, e);
 					}
 					retryCount++;
 					reinitCatalog();
@@ -1351,16 +1367,16 @@ public class PaimonService implements Closeable {
 	 * @param table  table definition
 	 * @throws Exception if insert fails
 	 */
-	private void handleStreamInsert(TapInsertRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
+	private void handleStreamInsert(TapInsertRecordEvent event, StreamTableWrite writer, TapTable table, Log currentLog) throws Exception {
 		Map<String, Object> after = event.getAfter();
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
 		if (config.getBucketMode(table.getName()).equals("fixed")) {
-			writeRow(writer, event, row, table, null, after);
+			writeRow(writer, event, row, table, null, after, currentLog);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
-			writeRow(writer, event, row, table, bucket, after);
+			writeRow(writer, event, row, table, bucket, after, currentLog);
 		}
 	}
 
@@ -1373,7 +1389,7 @@ public class PaimonService implements Closeable {
 	 * @param table  table definition
 	 * @throws Exception if update fails
 	 */
-	private void handleStreamUpdate(TapUpdateRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
+	private void handleStreamUpdate(TapUpdateRecordEvent event, StreamTableWrite writer, TapTable table, Log currentLog) throws Exception {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 
@@ -1402,19 +1418,19 @@ public class PaimonService implements Closeable {
 				// First, write DELETE using before data
 				beforeRow.setRowKind(RowKind.DELETE);
 				if (config.getBucketMode(table.getName()).equals("fixed")) {
-					writeRow(writer, event, beforeRow, table, null, before);
+					writeRow(writer, event, beforeRow, table, null, before, currentLog);
 				} else {
 					int bucket = selectBucketForDynamic(beforeRow, table);
-					writeRow(writer, event, beforeRow, table, bucket, before);
+					writeRow(writer, event, beforeRow, table, bucket, before, currentLog);
 				}
 
 				// Then, write INSERT using after data
 				afterRow.setRowKind(RowKind.INSERT);
 				if (config.getBucketMode(table.getName()).equals("fixed")) {
-					writeRow(writer, event, afterRow, table, null, after);
+					writeRow(writer, event, afterRow, table, null, after, currentLog);
 				} else {
 					int bucket = selectBucketForDynamic(afterRow, table);
-					writeRow(writer, event, afterRow, table, bucket, after);
+					writeRow(writer, event, afterRow, table, bucket, after, currentLog);
 				}
 				return;
 			}
@@ -1424,20 +1440,20 @@ public class PaimonService implements Closeable {
 		if (beforeRow != null) {
 			beforeRow.setRowKind(RowKind.UPDATE_BEFORE);
 			if (config.getBucketMode(table.getName()).equals("fixed")) {
-				writeRow(writer, event, beforeRow, table, null, before);
+				writeRow(writer, event, beforeRow, table, null, before, currentLog);
 			} else {
 				int bucket = selectBucketForDynamic(beforeRow, table);
-				writeRow(writer, event, beforeRow, table, bucket, before);
+				writeRow(writer, event, beforeRow, table, bucket, before, currentLog);
 			}
 		}
 
 		// Write U+ (UPDATE_AFTER) using after data
 		afterRow.setRowKind(RowKind.UPDATE_AFTER);
 		if (config.getBucketMode(table.getName()).equals("fixed")) {
-			writeRow(writer, event, afterRow, table, null, after);
+			writeRow(writer, event, afterRow, table, null, after, currentLog);
 		} else {
 			int bucket = selectBucketForDynamic(afterRow, table);
-			writeRow(writer, event, afterRow, table, bucket, after);
+			writeRow(writer, event, afterRow, table, bucket, after, currentLog);
 		}
 	}
 
@@ -1498,7 +1514,7 @@ public class PaimonService implements Closeable {
 	 * @param table  table definition
 	 * @throws Exception if delete fails
 	 */
-	private void handleStreamDelete(TapDeleteRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
+	private void handleStreamDelete(TapDeleteRecordEvent event, StreamTableWrite writer, TapTable table, Log currentLog) throws Exception {
 		Map<String, Object> before = event.getBefore();
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
@@ -1506,10 +1522,10 @@ public class PaimonService implements Closeable {
 		// Set row kind to DELETE
 		row.setRowKind(RowKind.DELETE);
 		if (config.getBucketMode(table.getName()).equals("fixed")) {
-			writeRow(writer, event, row, table, null, before);
+			writeRow(writer, event, row, table, null, before, currentLog);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
-			writeRow(writer, event, row, table, bucket, before);
+			writeRow(writer, event, row, table, bucket, before, currentLog);
 		}
 	}
 
@@ -1523,7 +1539,7 @@ public class PaimonService implements Closeable {
 	 * @param bucket bucket id, null for fixed bucket mode
 	 * @throws Exception if write fails
 	 */
-	private void writeRow(StreamTableWrite writer, TapRecordEvent event, GenericRow row, TapTable table, Integer bucket, Map<String, Object> sourceData) throws Exception {
+	private void writeRow(StreamTableWrite writer, TapRecordEvent event, GenericRow row, TapTable table, Integer bucket, Map<String, Object> sourceData, Log currentLog) throws Exception {
 		try {
 			if (bucket == null) {
 				writer.write(row);
@@ -1531,7 +1547,7 @@ public class PaimonService implements Closeable {
 				writer.write(row, bucket);
 			}
 		} catch (Exception e) {
-			log.error("Failed to write row to Paimon. table={}, bucket={}, sourceData={}, event={}, row={}",
+			currentLog.warn("Failed to write row to Paimon. table={}, bucket={}, sourceData={}, event={}, row={}",
 					table == null ? null : table.getName(), bucket, formatSourceDataForLog(sourceData), formatEventForLog(event), formatRowForLog(row, table), e);
 			throw e;
 		}
