@@ -100,6 +100,7 @@ public class PaimonService implements Closeable {
 	private ScheduledExecutorService asyncCommitExecutor;
 	private final Map<String, TapCallbackOffset> firstOffsetByTable;
 	private Consumer<Object> flushOffsetCallback;
+	private volatile TapConnectorContext activeConnectorContext;
 
 	// ===== Paimon Field Cache for Performance =====
 	// LRU cache for Paimon field mappings: Key = "database.tableName", Value = Map<fieldName, DataType>
@@ -197,10 +198,22 @@ public class PaimonService implements Closeable {
 					}
 				} catch (Exception e) {
 					// Log error but don't stop the scheduler
-					log.error("Error in async commit: {}", e.getMessage(), e);
+					getAsyncCommitLog().warn("Error in async commit: {}", e.getMessage(), e);
 				}
 			}, commitInterval, commitInterval, TimeUnit.MILLISECONDS);
 		}
+	}
+
+	private Log getAsyncCommitLog() {
+		TapConnectorContext connectorContext = activeConnectorContext;
+		if (connectorContext != null) {
+			connectorContext.configContext();
+			Log currentLog = connectorContext.getLog();
+			if (currentLog != null) {
+				return currentLog;
+			}
+		}
+		return log;
 	}
 
 	/**
@@ -909,6 +922,9 @@ public class PaimonService implements Closeable {
 	private WriteListResult<TapRecordEvent> writeRecordsWithStreamWriteInternal(List<TapRecordEvent> recordEvents,
 																				TapTable table,
 																				TapConnectorContext connectorContext) throws Exception {
+		connectorContext.configContext();
+		activeConnectorContext = connectorContext;
+		Log currentLog = connectorContext.getLog();
 		String database = config.getDatabase();
 		String tableName = table.getName();
 		String tableKey = database + "." + tableName;
@@ -951,13 +967,13 @@ public class PaimonService implements Closeable {
 							}
 						}
 						if (event instanceof TapInsertRecordEvent) {
-							handleStreamInsert((TapInsertRecordEvent) event, writer, table);
+							handleStreamInsert((TapInsertRecordEvent) event, writer, table, currentLog);
 							result.incrementInserted(1);
 						} else if (event instanceof TapUpdateRecordEvent) {
-							handleStreamUpdate((TapUpdateRecordEvent) event, writer, table);
+							handleStreamUpdate((TapUpdateRecordEvent) event, writer, table, currentLog);
 							result.incrementModified(1);
 						} else if (event instanceof TapDeleteRecordEvent) {
-							handleStreamDelete((TapDeleteRecordEvent) event, writer, table);
+							handleStreamDelete((TapDeleteRecordEvent) event, writer, table, currentLog);
 							result.incrementRemove(1);
 						}
 					}
@@ -1014,7 +1030,7 @@ public class PaimonService implements Closeable {
 							lastCommit.set(System.currentTimeMillis());
 
 							long commitDuration = System.currentTimeMillis() - commitStartTime;
-							connectorContext.getLog().debug("Committed {} accumulated records for table {} in {} ms",
+							currentLog.debug("Committed {} accumulated records for table {} in {} ms",
 									finalCount, tableKey, commitDuration);
 						}
 					}
@@ -1026,14 +1042,14 @@ public class PaimonService implements Closeable {
 			} catch (Exception e) {
 				if (retryCount < maxRetries) {
 					if (isThreadGroupDestroyedError(e)) {
-						connectorContext.getLog().warn("ThreadGroup destroyed in stream write, retrying... (attempt {}/{})", retryCount + 1, maxRetries, e);
+						currentLog.warn("ThreadGroup destroyed in stream write, retrying... (attempt {}/{})", retryCount + 1, maxRetries, e);
 					} else if (isPaimonConflict(e)) {
-						connectorContext.getLog().warn("Commit conflict detected, retrying... (attempt {}/{})", retryCount + 1, maxRetries, e);
+						currentLog.warn("Commit conflict detected, retrying... (attempt {}/{})", retryCount + 1, maxRetries, e);
 					} else {
-						connectorContext.getLog().warn("Failed to write records to table {}, error message: {}, retrying... (attempt {}/{})", tableName, e.getMessage(), retryCount + 1, maxRetries, e);
+						currentLog.warn("Failed to write records to table {}, error message: {}, retrying... (attempt {}/{})", tableName, e.getMessage(), retryCount + 1, maxRetries, e);
 					}
 					retryCount++;
-//					reinitCatalog();
+					reinitCatalog();
 					CommonUtils.ignoreAnyError(() -> TimeUnit.SECONDS.sleep(1L), TAG);
 					continue;
 				}
@@ -1351,16 +1367,16 @@ public class PaimonService implements Closeable {
 	 * @param table  table definition
 	 * @throws Exception if insert fails
 	 */
-	private void handleStreamInsert(TapInsertRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
+	private void handleStreamInsert(TapInsertRecordEvent event, StreamTableWrite writer, TapTable table, Log currentLog) throws Exception {
 		Map<String, Object> after = event.getAfter();
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
 		if (config.getBucketMode(table.getName()).equals("fixed")) {
-			writer.write(row);
+			writeRow(writer, event, row, table, null, after, currentLog);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
-			writer.write(row, bucket);
+			writeRow(writer, event, row, table, bucket, after, currentLog);
 		}
 	}
 
@@ -1373,7 +1389,7 @@ public class PaimonService implements Closeable {
 	 * @param table  table definition
 	 * @throws Exception if update fails
 	 */
-	private void handleStreamUpdate(TapUpdateRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
+	private void handleStreamUpdate(TapUpdateRecordEvent event, StreamTableWrite writer, TapTable table, Log currentLog) throws Exception {
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 
@@ -1402,19 +1418,19 @@ public class PaimonService implements Closeable {
 				// First, write DELETE using before data
 				beforeRow.setRowKind(RowKind.DELETE);
 				if (config.getBucketMode(table.getName()).equals("fixed")) {
-					writer.write(beforeRow);
+					writeRow(writer, event, beforeRow, table, null, before, currentLog);
 				} else {
 					int bucket = selectBucketForDynamic(beforeRow, table);
-					writer.write(beforeRow, bucket);
+					writeRow(writer, event, beforeRow, table, bucket, before, currentLog);
 				}
 
 				// Then, write INSERT using after data
 				afterRow.setRowKind(RowKind.INSERT);
 				if (config.getBucketMode(table.getName()).equals("fixed")) {
-					writer.write(afterRow);
+					writeRow(writer, event, afterRow, table, null, after, currentLog);
 				} else {
 					int bucket = selectBucketForDynamic(afterRow, table);
-					writer.write(afterRow, bucket);
+					writeRow(writer, event, afterRow, table, bucket, after, currentLog);
 				}
 				return;
 			}
@@ -1424,20 +1440,20 @@ public class PaimonService implements Closeable {
 		if (beforeRow != null) {
 			beforeRow.setRowKind(RowKind.UPDATE_BEFORE);
 			if (config.getBucketMode(table.getName()).equals("fixed")) {
-				writer.write(beforeRow);
+				writeRow(writer, event, beforeRow, table, null, before, currentLog);
 			} else {
 				int bucket = selectBucketForDynamic(beforeRow, table);
-				writer.write(beforeRow, bucket);
+				writeRow(writer, event, beforeRow, table, bucket, before, currentLog);
 			}
 		}
 
 		// Write U+ (UPDATE_AFTER) using after data
 		afterRow.setRowKind(RowKind.UPDATE_AFTER);
 		if (config.getBucketMode(table.getName()).equals("fixed")) {
-			writer.write(afterRow);
+			writeRow(writer, event, afterRow, table, null, after, currentLog);
 		} else {
 			int bucket = selectBucketForDynamic(afterRow, table);
-			writer.write(afterRow, bucket);
+			writeRow(writer, event, afterRow, table, bucket, after, currentLog);
 		}
 	}
 
@@ -1498,7 +1514,7 @@ public class PaimonService implements Closeable {
 	 * @param table  table definition
 	 * @throws Exception if delete fails
 	 */
-	private void handleStreamDelete(TapDeleteRecordEvent event, StreamTableWrite writer, TapTable table) throws Exception {
+	private void handleStreamDelete(TapDeleteRecordEvent event, StreamTableWrite writer, TapTable table, Log currentLog) throws Exception {
 		Map<String, Object> before = event.getBefore();
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
@@ -1506,11 +1522,182 @@ public class PaimonService implements Closeable {
 		// Set row kind to DELETE
 		row.setRowKind(RowKind.DELETE);
 		if (config.getBucketMode(table.getName()).equals("fixed")) {
-			writer.write(row);
+			writeRow(writer, event, row, table, null, before, currentLog);
 		} else {
 			int bucket = selectBucketForDynamic(row, table);
-			writer.write(row, bucket);
+			writeRow(writer, event, row, table, bucket, before, currentLog);
 		}
+	}
+
+	/**
+	 * Unified write entry with exception capture and row logging.
+	 *
+	 * @param writer stream writer
+	 * @param event CDC event being written
+	 * @param row row to write
+	 * @param table table definition
+	 * @param bucket bucket id, null for fixed bucket mode
+	 * @throws Exception if write fails
+	 */
+	private void writeRow(StreamTableWrite writer, TapRecordEvent event, GenericRow row, TapTable table, Integer bucket, Map<String, Object> sourceData, Log currentLog) throws Exception {
+		try {
+			if (bucket == null) {
+				writer.write(row);
+			} else {
+				writer.write(row, bucket);
+			}
+		} catch (Exception e) {
+			currentLog.warn("Failed to write row to Paimon. table={}, bucket={}, sourceData={}, event={}, row={}",
+					table == null ? null : table.getName(), bucket, formatSourceDataForLog(sourceData), formatEventForLog(event), formatRowForLog(row, table), e);
+			throw e;
+		}
+	}
+
+	/**
+	 * Format row content for human-friendly error logging.
+	 *
+	 * @param row   Paimon row
+	 * @param table table definition
+	 * @return readable row string
+	 */
+	private String formatRowForLog(GenericRow row, TapTable table) {
+		if (row == null) {
+			return "null";
+		}
+
+		StringBuilder builder = new StringBuilder("GenericRow{");
+		builder.append("rowKind=").append(row.getRowKind());
+		builder.append(", fieldCount=").append(row.getFieldCount());
+		builder.append(", fieldMapping=").append(formatFieldMappingForLog(table, row.getFieldCount()));
+		builder.append(", values=");
+
+		List<String> fieldNames = resolveRowFieldNames(table, row.getFieldCount());
+		builder.append('{');
+		for (int i = 0; i < row.getFieldCount(); i++) {
+			if (i > 0) {
+				builder.append(", ");
+			}
+			String fieldName = i < fieldNames.size() ? fieldNames.get(i) : "field_" + i;
+			builder.append(i).append(':').append(fieldName).append('=').append(formatLogValue(row.getField(i)));
+		}
+		builder.append('}');
+		builder.append('}');
+		return builder.toString();
+	}
+
+	/**
+	 * Format field index to field name mapping for human-friendly error logging.
+	 *
+	 * @param table table definition
+	 * @param fieldCount row field count
+	 * @return readable field mapping string
+	 */
+	private String formatFieldMappingForLog(TapTable table, int fieldCount) {
+		List<String> fieldNames = resolveRowFieldNames(table, fieldCount);
+		if (fieldNames.isEmpty()) {
+			return "[]";
+		}
+
+		StringBuilder builder = new StringBuilder("[");
+		for (int i = 0; i < fieldNames.size(); i++) {
+			if (i > 0) {
+				builder.append(", ");
+			}
+			builder.append(i).append(':').append(fieldNames.get(i));
+		}
+		builder.append(']');
+		return builder.toString();
+	}
+
+	/**
+	 * Resolve row field names from cached Paimon schema if available.
+	 *
+	 * @param table table definition
+	 * @param fieldCount row field count
+	 * @return field names aligned with row order
+	 */
+	private List<String> resolveRowFieldNames(TapTable table, int fieldCount) {
+		if (table == null || fieldCount <= 0) {
+			return Collections.emptyList();
+		}
+
+		String cacheKey = config.getDatabase() + "." + table.getName();
+		List<DataField> paimonFields = paimonFieldCache.get(cacheKey);
+		if (paimonFields == null || paimonFields.isEmpty()) {
+			return Collections.emptyList();
+		}
+
+		List<String> fieldNames = new ArrayList<>(paimonFields.size());
+		for (DataField field : paimonFields) {
+			fieldNames.add(field.name());
+		}
+		return fieldNames;
+	}
+
+	/**
+	 * Format log value to a compact readable string.
+	 *
+	 * @param value field value
+	 * @return formatted string
+	 */
+	private String formatLogValue(Object value) {
+		if (value == null) {
+			return "null";
+		}
+		if (value instanceof BinaryString) {
+			return quoteAndTruncate(value.toString());
+		}
+		if (value instanceof byte[]) {
+			return "byte[" + ((byte[]) value).length + "]";
+		}
+		if (value instanceof Collection) {
+			return truncate(String.valueOf(value));
+		}
+		if (value instanceof Map) {
+			return truncate(String.valueOf(value));
+		}
+		if (value.getClass().isArray()) {
+			return truncate(String.valueOf(value));
+		}
+		return truncate(String.valueOf(value));
+	}
+
+	private String formatSourceDataForLog(Map<String, Object> sourceData) {
+		if (sourceData == null) {
+			return "null";
+		}
+		StringBuilder builder = new StringBuilder("{");
+		int index = 0;
+		for (Map.Entry<String, Object> entry : sourceData.entrySet()) {
+			if (index++ > 0) {
+				builder.append(", ");
+			}
+			builder.append(entry.getKey()).append('=').append(formatLogValue(entry.getValue()));
+		}
+		builder.append('}');
+		return builder.toString();
+	}
+
+	private String formatEventForLog(TapRecordEvent event) {
+		if (event == null) {
+			return "null";
+		}
+		return truncate(event.toString());
+	}
+
+	private String quoteAndTruncate(String value) {
+		return '"' + truncate(value) + '"';
+	}
+
+	private String truncate(String value) {
+		if (value == null) {
+			return "null";
+		}
+		int maxLength = 256;
+		if (value.length() <= maxLength) {
+			return value;
+		}
+		return value.substring(0, maxLength) + "...(len=" + value.length() + ")";
 	}
 
 	/**
