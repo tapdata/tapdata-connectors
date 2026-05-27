@@ -20,7 +20,6 @@ import io.tapdata.entity.event.ddl.TapDDLEvent;
 import io.tapdata.entity.event.ddl.TapDDLUnknownEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
-import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
@@ -337,12 +336,12 @@ public class MysqlReaderV2 {
         if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive()) && "_tap_double_active".equals(table)) {
             return;
         }
-        LinkedHashMap<String, String> dataTypes = tableMap.get(database + "." + table).getNameFieldMap().entrySet().stream()
+        LinkedHashMap<String, String> dataTypes = tableMap.get(escapeDatabaseAndTable(database, table)).getNameFieldMap().entrySet().stream()
                 .collect(Collectors.toMap(Map.Entry::getKey, e -> StringKit.removeParentheses(e.getValue().getDataType()),
                         (existing, replacement) -> existing, LinkedHashMap::new));
-        dataTypeMap.put(database + "." + table, dataTypes);
-        Map<String, Object[]> enumMap = generateEnumMap(tableMap.get(database + "." + table).getNameFieldMap().entrySet().stream().filter(v -> v.getValue().getDataType().startsWith("enum")));
-        enumDataTypeMap.put(database + "." + table, enumMap);
+        dataTypeMap.put(escapeDatabaseAndTable(database, table), dataTypes);
+        Map<String, Object[]> enumMap = generateEnumMap(tableMap.get(escapeDatabaseAndTable(database, table)).getNameFieldMap().entrySet().stream().filter(v -> v.getValue().getDataType().startsWith("enum")));
+        enumDataTypeMap.put(escapeDatabaseAndTable(database, table), enumMap);
     }
 
     private Map<String, Object[]> generateEnumMap(Stream<Map.Entry<String, TapField>> stream) {
@@ -435,15 +434,15 @@ public class MysqlReaderV2 {
             return null;
         }
 
-        TapTable tapTable = withSchema ? tableMap.get(database + "." + tableName) : tableMap.get(tableName);
+        TapTable tapTable = withSchema ? tableMap.get(escapeDatabaseAndTable(database, tableName)) : tableMap.get(tableName);
         if (tapTable == null) {
             tapLogger.warn("Table {} not found in tableMap", tableName);
             return null;
         }
 
         return new RowChangeContext(database, tableName,
-                (withSchema ? dataTypeMap.get(database + "." + tableName) : dataTypeMap.get(tableName)),
-                (withSchema ? enumDataTypeMap.get(database + "." + tableName) : enumDataTypeMap.get(tableName)),
+                (withSchema ? dataTypeMap.get(escapeDatabaseAndTable(database, tableName)) : dataTypeMap.get(tableName)),
+                (withSchema ? enumDataTypeMap.get(escapeDatabaseAndTable(database, tableName)) : enumDataTypeMap.get(tableName)),
                 event.getHeader().getTimestamp());
     }
 
@@ -531,6 +530,10 @@ public class MysqlReaderV2 {
     private Pair<String, String> getDatabaseTableName(long tableId) {
         TableMapEventData eventData = tableMapEventByTableId.get(tableId);
         return Pair.of(eventData.getDatabase(), eventData.getTable());
+    }
+
+    private String escapeDatabaseAndTable(String database, String table) {
+        return StringKit.escape(database, '.') + "." + StringKit.escape(table, '.');
     }
 
     /**
