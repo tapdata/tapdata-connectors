@@ -62,7 +62,11 @@ public class ExcelConnector extends FileConnector {
     protected void readOneFile(FileOffset fileOffset, TapTable tapTable, int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer, AtomicReference<List<TapEvent>> tapEvents) throws Exception {
         ExcelConfig excelConfig = (ExcelConfig) fileConfig;
         Object[] headers = tapTable.getNameFieldMap().values().stream().map(TapField::getName).toArray();
-        long lastModified = storage.getFile(fileOffset.getPath()).getLastModified();
+        TapFile file = storage.getFile(fileOffset.getPath());
+        if (file == null) {
+            return;
+        }
+        long lastModified = file.getLastModified();
         storage.readFile(fileOffset.getPath(), is -> {
             try (
                     Workbook wb = WorkbookFactory.create(is, excelConfig.getExcelPassword())
