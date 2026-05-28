@@ -2,6 +2,7 @@ package io.tapdata.connector.mariadb;
 
 import io.tapdata.connector.mysql.MysqlConnector;
 import io.tapdata.connector.mysql.config.MysqlConfig;
+import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
@@ -29,6 +30,10 @@ public class MariadbConnector extends MysqlConnector {
         ) {
             mariadbTest.testOneByOne();
         }
+        connectionOptions.setInstanceUniqueId(StringKit.md5(String.join("|"
+                , mysqlConfig.getHost()
+                , String.valueOf(mysqlConfig.getPort())
+        )));
         return connectionOptions;
     }
 }
