@@ -121,11 +121,11 @@ public class ExcelConnector extends FileConnector {
     }
 
     private void checkCellType(Integer col, Cell cell, Map<Integer, CellType> cellTypeMap) {
-        if (!cellTypeMap.containsKey(col)) {
-            cellTypeMap.put(col, cell.getCellType());
+        if (cell == null) {
             return;
         }
-        if (cell == null) {
+        if (!cellTypeMap.containsKey(col)) {
+            cellTypeMap.put(col, cell.getCellType());
             return;
         }
         CellType cellType = cellTypeMap.get(col);
