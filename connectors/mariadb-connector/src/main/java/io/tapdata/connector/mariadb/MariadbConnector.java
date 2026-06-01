@@ -1,6 +1,7 @@
 package io.tapdata.connector.mariadb;
 
 import io.tapdata.connector.mysql.MysqlConnector;
+import io.tapdata.connector.mysql.MysqlJdbcContextV2;
 import io.tapdata.connector.mysql.config.MysqlConfig;
 import io.tapdata.kit.StringKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
@@ -17,7 +18,16 @@ public class MariadbConnector extends MysqlConnector {
     @Override
     public void onStart(TapConnectionContext tapConnectionContext) throws Throwable {
         super.onStart(tapConnectionContext);
+        MysqlJdbcContextV2 fromSuper = mysqlJdbcContext;
         mysqlJdbcContext = new MariadbJdbcContextV2(commonDbConfig);
+        jdbcContext = mysqlJdbcContext;
+        if (fromSuper != null) {
+            try {
+                fromSuper.close();
+            } catch (Exception e) {
+                tapLogger.error("Release connector failed, error: " + e.getMessage() + "\n" + getStackString(e));
+            }
+        }
     }
 
     @Override
