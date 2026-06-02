@@ -1,6 +1,5 @@
 package io.tapdata.connector.opengauss;
 
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.postgres.PostgresConnector;
 import io.tapdata.entity.codec.TapCodecsRegistry;
 import io.tapdata.entity.error.CoreException;
@@ -45,7 +44,7 @@ public class OpenGaussConnector extends PostgresConnector {
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportGetTableNamesFunction(this::getTableNames);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> postgresJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {

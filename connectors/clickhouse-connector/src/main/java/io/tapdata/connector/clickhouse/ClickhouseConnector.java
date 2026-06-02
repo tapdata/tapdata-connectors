@@ -1,7 +1,6 @@
 package io.tapdata.connector.clickhouse;
 
 import io.tapdata.common.CommonDbConnector;
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.clickhouse.bean.ClickhouseColumn;
 import io.tapdata.connector.clickhouse.config.ClickhouseConfig;
 import io.tapdata.connector.clickhouse.ddl.sqlmaker.ClickhouseDDLSqlGenerator;
@@ -244,7 +243,7 @@ public class ClickhouseConnector extends CommonDbConnector {
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
 
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> clickhouseJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
         connectorFunctions.supportCountRawCommandFunction(this::countRawCommand);
         connectorFunctions.supportGetTableInfoFunction(this::getTableInfo);
@@ -455,6 +454,35 @@ public class ClickhouseConnector extends CommonDbConnector {
                 }
             }
         }
+    }
+
+    @Override
+    protected Object filterData(Object obj, String columnType) {
+        if (obj == null) {
+            return null;
+        }
+        if (clickhouseConfig.getOldVersionTimezone()) {
+            return obj;
+        }
+        if (obj instanceof java.sql.Date) {
+            return Instant.ofEpochMilli(((Date) obj).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
+        } else if (obj instanceof Timestamp) {
+            return Instant.ofEpochMilli(((Timestamp) obj).getTime()).atZone(dbTimeZone.toZoneId()).toLocalDateTime().minusHours(clickhouseConfig.getZoneOffsetHour());
+        } else if (obj instanceof String) {
+            if (columnType.startsWith("Date32")) {
+                return LocalDate.parse((String) obj).atStartOfDay();
+            } else if (columnType.startsWith("DateTime64")) {
+                String dataFormat = dataFormatMap.get(columnType);
+                if (EmptyKit.isNull(dataFormat)) {
+                    dataFormat = DateUtil.determineDateFormat((String) obj);
+                    dataFormatMap.put(columnType, dataFormat);
+                }
+                return DateUtil.parseInstantWithHour((String) obj, dataFormat, clickhouseConfig.getZoneOffsetHour());
+            } else if (columnType.startsWith("FixedString")) {
+                return StringKit.trimTailBlank(obj);
+            }
+        }
+        return obj;
     }
 
 }
