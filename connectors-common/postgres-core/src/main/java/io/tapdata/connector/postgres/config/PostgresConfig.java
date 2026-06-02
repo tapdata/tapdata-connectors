@@ -6,7 +6,6 @@ import io.tapdata.kit.EmptyKit;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.net.URLEncoder;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -43,6 +42,10 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
         setDbType("postgresql");
         setJdbcDriver("org.postgresql.Driver");
         setMaxIndexNameLength(63);
+        Properties properties = new Properties();
+        properties.put("stringtype", "unspecified");
+        properties.put("prepareThreshold", "0");
+        setProperties(properties);
     }
 
     public String getConnectionString() {
@@ -84,15 +87,6 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
         if (EmptyKit.isNotBlank(getSslKeyPassword())) {
             properties.setProperty("sslpassword", getSslKeyPassword());
         }
-    }
-    public String getDatabaseUrl() {
-        if (EmptyKit.isBlank(this.getExtParams())) {
-            this.setExtParams("?stringtype=unspecified&prepareThreshold=0");
-        }
-        if (EmptyKit.isNotBlank(this.getExtParams()) && !this.getExtParams().startsWith("?") && !this.getExtParams().startsWith(":")) {
-            this.setExtParams("?" + this.getExtParams()+"&stringtype=unspecified&prepareThreshold=0");
-        }
-        return String.format(this.getDatabaseUrlPattern(), this.getHost(), this.getPort(), URLEncoder.encode(this.getDatabase()), this.getExtParams());
     }
 
     public String getLogPluginName() {

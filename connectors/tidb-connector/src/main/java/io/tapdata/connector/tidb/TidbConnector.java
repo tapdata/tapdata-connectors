@@ -2,7 +2,6 @@ package io.tapdata.connector.tidb;
 
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonSqlMaker;
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.util.FileUtil;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.mysql.entity.MysqlBinlogPosition;
@@ -140,7 +139,7 @@ public class TidbConnector extends CommonDbConnector {
         connectorFunctions.supportAlterFieldNameFunction(this::fieldDDLHandler);
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> tidbJdbcContext.getConnection(), c));
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
 
         // source functions
         connectorFunctions.supportBatchCount(this::batchCount);
@@ -394,6 +393,30 @@ public class TidbConnector extends CommonDbConnector {
             } else if (value instanceof Time) {
                 entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour()));
             }
+        }
+    }
+
+    @Override
+    protected Object filterData(Object obj, String columnType) {
+        if (obj == null) {
+            return null;
+        }
+        switch (columnType) {
+            case "TIMESTAMP":
+                return ((Timestamp) obj).toLocalDateTime().atZone(ZoneOffset.UTC);
+            case "TIME":
+                return Instant.ofEpochMilli(((Time) obj).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour());
+            case "DATE":
+                return ((Date) obj).toLocalDate().atStartOfDay();
+            case "YEAR":
+                return ((Date) obj).toLocalDate().getYear();
+            case "DATETIME":
+                if (obj instanceof Timestamp) {
+                    return ((Timestamp) obj).toLocalDateTime().minusHours(tidbConfig.getZoneOffsetHour());
+                }
+                return ((LocalDateTime) obj).minusHours(tidbConfig.getZoneOffsetHour());
+            default:
+                return obj;
         }
     }
 }

@@ -1,7 +1,6 @@
 package io.tapdata.connector.starrocks;
 
 import io.tapdata.common.CommonDbConnector;
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.mysql.bean.MysqlColumn;
 import io.tapdata.connector.starrocks.bean.StarrocksConfig;
 import io.tapdata.connector.starrocks.ddl.StarrocksDDLSqlGenerator;
@@ -115,7 +114,7 @@ public class StarrocksConnector extends CommonDbConnector {
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> starrocksJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
         connectorFunctions.supportProcessControlFunction(this::processControl);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
@@ -462,6 +461,24 @@ public class StarrocksConnector extends CommonDbConnector {
                     }
                 }
             }
+        }
+    }
+
+    @Override
+    protected Object filterData(Object obj, String columnType) {
+        if (obj == null) {
+            return null;
+        }
+        if (starrocksConfig.getOldVersionTimezone()) {
+            return obj;
+        }
+        switch (columnType) {
+            case "DATETIME":
+                return ((LocalDateTime) obj).minusHours(starrocksConfig.getZoneOffsetHour());
+            case "DATE":
+                return Instant.ofEpochMilli(((Date) obj).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
+            default:
+                return obj;
         }
     }
 }
