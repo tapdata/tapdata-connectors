@@ -168,6 +168,9 @@ public class SnowflakeConnector extends CommonDbConnector {
     @Override
     public void onStop(TapConnectionContext connectionContext) {
         EmptyKit.closeQuietly(snowflakeJdbcContext);
+        if (EmptyKit.isNotNull(snowflakeConfig)) {
+            snowflakeConfig.deletePrivateKeyFile();
+        }
     }
 
     private void initConnection(TapConnectionContext connectionContext) {

@@ -53,14 +53,62 @@
           "x-component": "Password",
           "apiServerKey": "database_password",
           "x-index": 3,
-          "required": true
+          "x-reactions": {
+            "dependencies": ["useKeyPair"],
+            "fulfill": {
+              "state": {
+                "visible": "{{!$deps[0]}}",
+                "required": "{{!$deps[0]}}"
+              }
+            }
+          }
+        },
+        "useKeyPair": {
+          "type": "boolean",
+          "title": "${useKeyPair}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-index": 4
+        },
+        "privateKey": {
+          "type": "string",
+          "title": "${privateKey}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "fileNameField": "privateKeyFile",
+          "x-index": 5,
+          "x-reactions": {
+            "dependencies": ["useKeyPair"],
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]===true}}",
+                "required": "{{$deps[0]===true}}"
+              }
+            }
+          }
+        },
+        "privateKeyPassword": {
+          "type": "string",
+          "title": "${privateKeyPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "x-index": 6,
+          "x-reactions": {
+            "dependencies": ["useKeyPair"],
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]===true}}"
+              }
+            }
+          }
         },
         "warehouse": {
           "type": "string",
           "title": "${warehouse}",
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "x-index": 4,
+          "x-index": 7,
           "required": true
         },
         "database": {
@@ -69,7 +117,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_name",
-          "x-index": 5,
+          "x-index": 8,
           "required": true
         },
         "schema": {
@@ -79,7 +127,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_owner",
-          "x-index": 6,
+          "x-index": 9,
           "required": true
         },
         "role": {
@@ -87,7 +135,7 @@
           "title": "${role}",
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "x-index": 7
+          "x-index": 10
         },
         "timezone": {
           "type": "string",
@@ -95,7 +143,7 @@
           "default": "+00:00",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "x-index": 8,
+          "x-index": 11,
           "enum": [
             {
               "label": "UTC -11",
@@ -189,6 +237,9 @@
       "account": "Account",
       "user": "User",
       "password": "Password",
+      "useKeyPair": "Use Key Pair Authentication",
+      "privateKey": "Private Key",
+      "privateKeyPassword": "Private Key Password",
       "warehouse": "Warehouse",
       "database": "Database",
       "schema": "Schema",
@@ -200,6 +251,9 @@
       "account": "账户",
       "user": "用户名",
       "password": "密码",
+      "useKeyPair": "使用密钥对认证",
+      "privateKey": "私钥",
+      "privateKeyPassword": "私钥密码",
       "warehouse": "仓库",
       "database": "数据库",
       "schema": "模式",
@@ -211,6 +265,9 @@
       "account": "賬戶",
       "user": "用戶名",
       "password": "密碼",
+      "useKeyPair": "使用密鑰對認證",
+      "privateKey": "私鑰",
+      "privateKeyPassword": "私鑰密碼",
       "warehouse": "倉庫",
       "database": "數據庫",
       "schema": "模式",
