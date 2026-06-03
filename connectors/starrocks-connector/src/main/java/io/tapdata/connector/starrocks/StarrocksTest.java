@@ -84,14 +84,30 @@ public class StarrocksTest extends CommonDbTest {
                     }
                 }
             }
+            boolean isComputeNode = false;
+            if (beCount.get() == 0) {
+                try {
+                    jdbcContext.normalQuery("show compute nodes", resultSet -> {
+                        while (resultSet.next()) {
+                            beCount.incrementAndGet();
+                        }
+                    });
+                    if (beCount.get() > 0) {
+                        isComputeNode = true;
+                    }
+                } catch (SQLException e) {
+                    consumer.accept(new TestItem(TestItem.ITEM_WRITE, new TapTestWritePrivilegeEx(e), TestItem.RESULT_FAILED));
+                }
+            }
 
             List<String> sqls = new ArrayList<>();
             String schemaPrefix = EmptyKit.isNotEmpty(commonDbConfig.getSchema()) ? ("`" + commonDbConfig.getSchema() + "`.") : "";
             if (jdbcContext.queryAllTables(Arrays.asList(TEST_WRITE_TABLE, TEST_WRITE_TABLE.toUpperCase())).size() > 0) {
                 sqls.add(String.format(TEST_DROP_TABLE, schemaPrefix + TEST_WRITE_TABLE));
             }
+            int replicationNum = isComputeNode ? 1 : Math.min(beCount.get(), 3);
             //create
-            sqls.add(String.format(TEST_Starrocks_CREATE_TABLE, schemaPrefix + TEST_WRITE_TABLE, Math.min(beCount.get(), 3)));
+            sqls.add(String.format(TEST_Starrocks_CREATE_TABLE, schemaPrefix + TEST_WRITE_TABLE, replicationNum));
             //insert
             sqls.add(String.format(TEST_Starrocks_WRITE_RECORD, schemaPrefix + TEST_WRITE_TABLE));
             //update
