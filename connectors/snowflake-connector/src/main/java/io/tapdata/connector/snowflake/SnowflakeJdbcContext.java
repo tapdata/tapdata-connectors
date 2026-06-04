@@ -93,16 +93,36 @@ public class SnowflakeJdbcContext extends JdbcContext {
         return pkList;
     }
 
+    /**
+     * Query all indexes for hybrid tables in batch via INFORMATION_SCHEMA.
+     * <p>
+     * INFORMATION_SCHEMA.TABLE_CONSTRAINTS only exposes PRIMARY KEY / UNIQUE constraints,
+     * so hybrid table indexes (including the PRIMARY KEY backed index and indexes created via
+     * CREATE INDEX) are read by joining INFORMATION_SCHEMA.INDEXES and INDEX_COLUMNS, with a
+     * LEFT JOIN to TABLE_CONSTRAINTS to flag the PRIMARY KEY backed index via isPk. The output
+     * is already in the format expected by {@code makeTapIndex}: one DataMap per
+     * (indexName, columnName) with isPk/isUnique/isAsc flags.
+     */
     @Override
-    protected String queryAllIndexesSql(String schema, List<String> tableNames) {
-        String tableSql = EmptyKit.isNotEmpty(tableNames) ?
-                "AND tc.TABLE_NAME IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')" : "";
-
-        return String.format(SNOWFLAKE_ALL_INDEXES,
+    public synchronized List<DataMap> queryAllIndexes(List<String> tableNames) {
+        List<DataMap> result = list();
+        if (EmptyKit.isEmpty(tableNames)) {
+            return result;
+        }
+        String tableSql = "AND ic.TABLE_NAME IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'")).collect(Collectors.joining("','")) + "')";
+        String sql = String.format(SNOWFLAKE_ALL_INDEXES,
                 StringKit.escape(getConfig().getDatabase(), "'"),
-                StringKit.escape(schema, "'"),
+                StringKit.escape(getConfig().getSchema(), "'"),
                 tableSql);
+        try {
+            query(sql, resultSet -> result.addAll(DbKit.getDataFromResultSet(resultSet)));
+        } catch (Throwable e) {
+            // INFORMATION_SCHEMA.INDEXES / INDEX_COLUMNS are only available on AWS/Azure accounts with hybrid tables; ignore otherwise
+            TapLogger.warn(TAG, "Query indexes failed, ignore: " + e.getMessage());
+        }
+        return result;
     }
+
 
     @Override
     protected String queryAllForeignKeysSql(String schema, List<String> tableNames) {
@@ -182,21 +202,25 @@ public class SnowflakeJdbcContext extends JdbcContext {
 
     protected final static String SNOWFLAKE_ALL_INDEXES =
             "SELECT " +
-                    "  tc.TABLE_NAME AS \"tableName\", " +
-                    "  tc.CONSTRAINT_NAME AS \"indexName\", " +
-                    "  kcu.COLUMN_NAME AS \"columnName\", " +
-                    "  CASE WHEN tc.CONSTRAINT_TYPE = 'PRIMARY KEY' THEN '1' ELSE '0' END AS \"isPk\", " +
-                    "  CASE WHEN tc.CONSTRAINT_TYPE IN ('PRIMARY KEY', 'UNIQUE') THEN '1' ELSE '0' END AS \"isUnique\" " +
-                    "FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc " +
-                    "JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu " +
-                    "  ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME " +
-                    "  AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA " +
-                    "  AND tc.TABLE_NAME = kcu.TABLE_NAME " +
-                    "WHERE tc.TABLE_CATALOG = '%s' " +
-                    "  AND tc.TABLE_SCHEMA = '%s' " +
-                    "  AND tc.CONSTRAINT_TYPE IN ('PRIMARY KEY', 'UNIQUE') " +
+                    "  ic.TABLE_NAME AS \"tableName\", " +
+                    "  ic.INDEX_NAME AS \"indexName\", " +
+                    "  ic.\"NAME\" AS \"columnName\", " +
+                    "  CASE WHEN c.CONSTRAINT_TYPE = 'PRIMARY KEY' THEN '1' ELSE '0' END AS \"isPk\", " +
+                    "  CASE WHEN i.IS_UNIQUE = 'YES' THEN '1' ELSE '0' END AS \"isUnique\", " +
+                    "  '1' AS \"isAsc\" " +
+                    "FROM INFORMATION_SCHEMA.INDEX_COLUMNS ic " +
+                    "JOIN INFORMATION_SCHEMA.INDEXES i " +
+                    "  ON i.TABLE_SCHEMA = ic.TABLE_SCHEMA " +
+                    "  AND i.TABLE_NAME = ic.TABLE_NAME " +
+                    "  AND i.\"NAME\" = ic.INDEX_NAME " +
+                    "LEFT JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS c " +
+                    "  ON i.TABLE_SCHEMA = c.CONSTRAINT_SCHEMA " +
+                    "  AND i.CONSTRAINT_NAME = c.CONSTRAINT_NAME " +
+                    "WHERE ic.TABLE_CATALOG = '%s' " +
+                    "  AND ic.TABLE_SCHEMA = '%s' " +
                     "  %s " +
-                    "ORDER BY tc.TABLE_NAME, tc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION";
+                    "ORDER BY ic.TABLE_NAME, ic.INDEX_NAME, ic.KEY_SEQUENCE";
+
 
     protected final static String SNOWFLAKE_ALL_FOREIGN_KEYS =
             "SELECT " +

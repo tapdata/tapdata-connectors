@@ -8,6 +8,7 @@ import org.apache.commons.io.FileUtils;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -22,10 +23,15 @@ public class SnowflakeConfig extends CommonDbConfig {
     private String account;
     private String warehouse;
     private String role;
+    private String authMethod = "password"; //password | pat | keyPair
+    private String patToken;
     private Boolean useKeyPair = false;
     private String privateKey;
     private String privateKeyPassword;
     private String privateKeyRandomPath;
+    private String tableType = "STANDARD";
+    private String dynamicTableLag;
+    private String dynamicTableQuery;
 
     public SnowflakeConfig() {
         setDbType("snowflake");
@@ -34,8 +40,28 @@ public class SnowflakeConfig extends CommonDbConfig {
     }
 
     @Override
+    public SnowflakeConfig load(Map<String, Object> map) {
+        SnowflakeConfig config = (SnowflakeConfig) super.load(map);
+        //backward compatibility with the deprecated useKeyPair switch
+        if (EmptyKit.isBlank(config.authMethod) || "password".equalsIgnoreCase(config.authMethod)) {
+            if (Boolean.TRUE.equals(config.useKeyPair)) {
+                config.authMethod = "keyPair";
+            }
+        }
+        return config;
+    }
+
+    @Override
     public String getConnectionString() {
         return "jdbc:snowflake://" + account + ".snowflakecomputing.com:443";
+    }
+
+    @Override
+    public String getPassword() {
+        if ("pat".equalsIgnoreCase(authMethod)) {
+            return patToken;
+        }
+        return super.getPassword();
     }
 
     public String getDatabaseUrl() {
@@ -47,7 +73,7 @@ public class SnowflakeConfig extends CommonDbConfig {
     @Override
     public Properties getProperties() {
         Properties props = super.getProperties();
-        if (Boolean.TRUE.equals(useKeyPair) && EmptyKit.isNotBlank(privateKey)) {
+        if ("keyPair".equalsIgnoreCase(authMethod) && EmptyKit.isNotBlank(privateKey)) {
             if (null == props) {
                 props = new Properties();
                 setProperties(props);
@@ -109,6 +135,22 @@ public class SnowflakeConfig extends CommonDbConfig {
         this.role = role;
     }
 
+    public String getAuthMethod() {
+        return authMethod;
+    }
+
+    public void setAuthMethod(String authMethod) {
+        this.authMethod = authMethod;
+    }
+
+    public String getPatToken() {
+        return patToken;
+    }
+
+    public void setPatToken(String patToken) {
+        this.patToken = patToken;
+    }
+
     public Boolean getUseKeyPair() {
         return useKeyPair;
     }
@@ -131,6 +173,42 @@ public class SnowflakeConfig extends CommonDbConfig {
 
     public void setPrivateKeyPassword(String privateKeyPassword) {
         this.privateKeyPassword = privateKeyPassword;
+    }
+
+    public String getTableType() {
+        return tableType;
+    }
+
+    public String getTableType(String key) {
+        return getTableConfigValue(key, "tableType", tableType);
+    }
+
+    public void setTableType(String tableType) {
+        this.tableType = tableType;
+    }
+
+    public String getDynamicTableLag() {
+        return dynamicTableLag;
+    }
+
+    public String getDynamicTableLag(String key) {
+        return getTableConfigValue(key, "dynamicTableLag", dynamicTableLag);
+    }
+
+    public void setDynamicTableLag(String dynamicTableLag) {
+        this.dynamicTableLag = dynamicTableLag;
+    }
+
+    public String getDynamicTableQuery() {
+        return dynamicTableQuery;
+    }
+
+    public String getDynamicTableQuery(String key) {
+        return getTableConfigValue(key, "dynamicTableQuery", dynamicTableQuery);
+    }
+
+    public void setDynamicTableQuery(String dynamicTableQuery) {
+        this.dynamicTableQuery = dynamicTableQuery;
     }
 }
 
