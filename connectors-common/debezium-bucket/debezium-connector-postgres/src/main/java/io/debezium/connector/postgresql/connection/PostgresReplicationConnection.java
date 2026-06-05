@@ -173,7 +173,7 @@ public class PostgresReplicationConnection extends JdbcConnection implements Rep
                                 String catalog = connection().getCatalog();
                                 try (ResultSet resultSet = stmt.executeQuery(String.format("select schemaname, tablename from pg_publication_tables pt join pg_publication pp\n" +
                                         "    on pt.pubname = pp.pubname\n" +
-                                        "where pt.pubname='%s' and pp.pubviaroot='false'\n" +
+                                        "where pt.pubname='%s'\n" +
                                         "union all\n" +
                                         "select schemaname, pc.relname from pg_publication_tables pt join pg_publication pp\n" +
                                         "    on pt.pubname = pp.pubname join pg_class pc on pc.oid in (SELECT inhrelid\n" +
