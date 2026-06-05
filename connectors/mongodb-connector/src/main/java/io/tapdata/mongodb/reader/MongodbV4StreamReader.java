@@ -11,6 +11,7 @@ import com.mongodb.client.model.changestream.*;
 import io.tapdata.common.concurrent.ConcurrentProcessor;
 import io.tapdata.common.concurrent.TapExecutors;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -34,7 +35,6 @@ import org.bson.conversions.Bson;
 import org.bson.io.ByteBufferBsonInput;
 
 import java.nio.ByteBuffer;
-import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -60,7 +60,7 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
     private DocumentCodec codec;
     private DecoderContext decoderContext;
     private ConnectionString connectionString;
-    private ConcurrentProcessor<ChangeStreamDocument<RawBsonDocument>, OffsetEvent> concurrentProcessor;
+    private ConcurrentProcessor<AtomicReference<ChangeStreamDocument<RawBsonDocument>>, OffsetEvent> concurrentProcessor;
     private MongodbExceptionCollector mongodbExceptionCollector;
     private String dropTransactionId;
     private Thread consumeStreamEventThread;
@@ -109,18 +109,19 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
         if (mongodbConfig.isEnableFillingModifiedData() || isPreImage) {
             fullDocumentOption = FullDocument.UPDATE_LOOKUP;
         }
+        MongoDatabase streamDatabase = mongoDatabase.withReadConcern(ReadConcern.MAJORITY);
         while (running.get()) {
             ChangeStreamIterable<RawBsonDocument> changeStream;
             if (offset != null) {
                 //报错之后， 再watch一遍
                 //如果完全没事件， 就需要从当前时间开始watch
                 if (offset instanceof Integer) {
-                    changeStream = mongoDatabase.watch(pipeline, RawBsonDocument.class).startAtOperationTime(new BsonTimestamp((Integer) offset, 0)).fullDocument(fullDocumentOption);
+                    changeStream = streamDatabase.watch(pipeline, RawBsonDocument.class).startAtOperationTime(new BsonTimestamp((Integer) offset, 0)).fullDocument(fullDocumentOption);
                 } else {
-                    changeStream = mongoDatabase.watch(pipeline, RawBsonDocument.class).resumeAfter((BsonDocument) offset).fullDocument(fullDocumentOption);
+                    changeStream = streamDatabase.watch(pipeline, RawBsonDocument.class).startAfter((BsonDocument) offset).fullDocument(fullDocumentOption);
                 }
             } else {
-                changeStream = mongoDatabase.watch(pipeline, RawBsonDocument.class).fullDocument(fullDocumentOption);
+                changeStream = streamDatabase.watch(pipeline, RawBsonDocument.class).fullDocument(fullDocumentOption);
             }
             if (isPreImage) {
                 changeStream.fullDocumentBeforeChange(fullDocumentBeforeChangeOption);
@@ -169,13 +170,24 @@ public class MongodbV4StreamReader implements MongodbStreamReader {
                     if (EmptyKit.isNotNull(throwableAtomicReference.get())) {
                         throw throwableAtomicReference.get();
                     }
+                    BsonDocument document = streamCursor.getResumeToken();
                     ChangeStreamDocument<RawBsonDocument> event = streamCursor.tryNext();
                     if (event == null) {
+                        if (document != null && document.get("_data") != null) {
+                            concurrentProcessor.runAsync(new AtomicReference<>(), e -> {
+                                try {
+                                    return new OffsetEvent(new HeartbeatEvent().init().referenceTime(Long.parseLong(document.get("_data").asString().getValue().substring(2, 10), 16) * 1000), document);
+                                } catch (Exception er) {
+                                    throwableAtomicReference.set(er);
+                                    return null;
+                                }
+                            });
+                        }
                         continue;
                     }
-                    concurrentProcessor.runAsync(event, e -> {
+                    concurrentProcessor.runAsync(new AtomicReference<>(event), e -> {
                         try {
-                            return emit(e);
+                            return emit(e.get());
                         } catch (Exception er) {
                             throwableAtomicReference.set(er);
                             return null;
