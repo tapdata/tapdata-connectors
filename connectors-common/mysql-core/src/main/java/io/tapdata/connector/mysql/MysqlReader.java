@@ -103,6 +103,7 @@ public class MysqlReader implements Closeable {
     protected Log tapLogger;
     private long diff = 0;
     private TapConnectorContext tapConnectorContext;
+    private Collection<String> overrideDatabases;
 
     public MysqlReader(MysqlJdbcContextV2 mysqlJdbcContext, Log tapLogger, Supplier<Boolean> isAlive) {
         this.mysqlJdbcContext = mysqlJdbcContext;
@@ -302,12 +303,7 @@ public class MysqlReader implements Closeable {
 //            if (EmptyKit.isNotBlank(mysqlConfig.getTimezone())) {
 //                builder.with("database.serverTimezone", mysqlJdbcContext.queryTimeZone());
 //            }
-            List<String> dbTableNames = tables.stream().map(t -> StringKit.escapeRegex(mysqlConfig.getDatabase()) + "." + StringKit.escapeRegex(t)).collect(Collectors.toList());
-            if (mysqlConfig.getDoubleActive()) {
-                dbTableNames.add(StringKit.escapeRegex(mysqlConfig.getDatabase()) + "._tap_double_active");
-            }
-            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, StringKit.escapeRegex(mysqlConfig.getDatabase()));
-            builder.with(MySqlConnectorConfig.TABLE_INCLUDE_LIST, String.join(",", dbTableNames));
+            applyIncludeListConfig(builder, tables);
             builder.with(EmbeddedEngine.OFFSET_STORAGE, "io.tapdata.connector.mysql.PdkPersistenceOffsetBackingStore");
             if (StringUtils.isNotBlank(offsetStr)) {
                 builder.with("pdk.offset.string", offsetStr);
@@ -398,6 +394,39 @@ public class MysqlReader implements Closeable {
             tapLogger.info("Mysql binlog reader stopped");
         }
     }
+
+    public void readBinlog(TapConnectorContext tapConnectorContext, List<String> tables,
+                           Collection<String> overrideDatabases, Object offset, int batchSize, DDLParserType ddlParserType,
+                           StreamReadConsumer consumer, HashMap<String, MysqlJdbcContextV2> contextMapForMasterSlave) throws Throwable {
+        this.overrideDatabases = overrideDatabases;
+        try {
+            readBinlog(tapConnectorContext, tables, offset, batchSize, ddlParserType, consumer, contextMapForMasterSlave);
+        } finally {
+            this.overrideDatabases = null;
+        }
+    }
+
+    protected void applyIncludeListConfig(Configuration.Builder builder, List<String> tables) {
+        if (null != overrideDatabases && !overrideDatabases.isEmpty()) {
+            List<String> dbTableNames = tables.stream().map(t -> {
+                int idx = t.indexOf('.');
+                return idx > 0
+                        ? StringKit.escapeRegex(t.substring(0, idx)) + "." + StringKit.escapeRegex(t.substring(idx + 1))
+                        : StringKit.escapeRegex(t);
+            }).collect(Collectors.toList());
+            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST,
+                    overrideDatabases.stream().map(StringKit::escapeRegex).collect(Collectors.joining(",")));
+            builder.with(MySqlConnectorConfig.TABLE_INCLUDE_LIST, String.join(",", dbTableNames));
+        } else {
+            List<String> dbTableNames = tables.stream().map(t -> StringKit.escapeRegex(mysqlConfig.getDatabase()) + "." + StringKit.escapeRegex(t)).collect(Collectors.toList());
+            if (mysqlConfig.getDoubleActive()) {
+                dbTableNames.add(StringKit.escapeRegex(mysqlConfig.getDatabase()) + "._tap_double_active");
+            }
+            builder.with(MySqlConnectorConfig.DATABASE_INCLUDE_LIST, StringKit.escapeRegex(mysqlConfig.getDatabase()));
+            builder.with(MySqlConnectorConfig.TABLE_INCLUDE_LIST, String.join(",", dbTableNames));
+        }
+    }
+
 
     private void handleFailed(Throwable throwable) {
         throwableAtomicReference.set(new RuntimeException(throwable));
@@ -567,6 +596,9 @@ public class MysqlReader implements Closeable {
         Struct source = value.getStruct("source");
         Long eventTime = source.getInt64("ts_ms");
         String table = source.getString("table");
+        String database = null != source.schema().field("db") ? source.getString("db") : null;
+        boolean multiDb = null != overrideDatabases && !overrideDatabases.isEmpty();
+        String tableKey = multiDb && EmptyKit.isNotBlank(database) ? database + "." + table : table;
         //双活情形下，需要过滤_tap_double_active记录的同事务数据
         if (Boolean.TRUE.equals(mysqlConfig.getDoubleActive())) {
             if ("_tap_double_active".equals(table)) {
@@ -629,7 +661,7 @@ public class MysqlReader implements Closeable {
                 tapRecordEvent = new TapInsertRecordEvent().init();
                 if (null == valueSchema.field("after"))
                     throw new RuntimeException("Found insert record does not have after: " + record);
-                after = struct2Map(value.getStruct("after"), table);
+                after = struct2Map(value.getStruct("after"), tableKey);
                 if (!EmptyKit.isEmpty(afterInvalidMap)) {
                     after.putAll(afterInvalidMap);
                     tapRecordEvent.setContainsIllegalDate(true);
@@ -640,7 +672,7 @@ public class MysqlReader implements Closeable {
             case UPDATE:
                 tapRecordEvent = new TapUpdateRecordEvent().init();
                 if (null != valueSchema.field("before")) {
-                    before = struct2Map(value.getStruct("before"), table);
+                    before = struct2Map(value.getStruct("before"), tableKey);
                     if (!EmptyKit.isEmpty(beforeInvalidMap)) {
                         before.putAll(beforeInvalidMap);
                         tapRecordEvent.setContainsIllegalDate(true);
@@ -650,7 +682,7 @@ public class MysqlReader implements Closeable {
                 }
                 if (null == valueSchema.field("after"))
                     throw new RuntimeException("Found update record does not have after: " + record);
-                after = struct2Map(value.getStruct("after"), table);
+                after = struct2Map(value.getStruct("after"), tableKey);
                 if (!EmptyKit.isEmpty(beforeInvalidMap) || !EmptyKit.isEmpty(afterInvalidMap)) {
                     before.putAll(beforeInvalidMap);
                     after.putAll(afterInvalidMap);
@@ -664,7 +696,7 @@ public class MysqlReader implements Closeable {
                 tapRecordEvent = new TapDeleteRecordEvent().init();
                 if (null == valueSchema.field("before"))
                     throw new RuntimeException("Found delete record does not have before: " + record);
-                before = struct2Map(value.getStruct("before"), table);
+                before = struct2Map(value.getStruct("before"), tableKey);
                 ((TapDeleteRecordEvent) tapRecordEvent).setBefore(before);
                 if (!EmptyKit.isEmpty(beforeInvalidMap)) {
                     before.putAll(beforeInvalidMap);
@@ -676,6 +708,9 @@ public class MysqlReader implements Closeable {
                 break;
         }
         tapRecordEvent.setTableId(table);
+        if (multiDb && EmptyKit.isNotBlank(database)) {
+            tapRecordEvent.setNamespaces(Arrays.asList(database, table));
+        }
         tapRecordEvent.setReferenceTime(eventTime);
         tapRecordEvent.setExactlyOnceId(getExactlyOnceId(record));
         MysqlStreamOffset mysqlStreamOffset = getMysqlStreamOffset(record);
@@ -694,6 +729,8 @@ public class MysqlReader implements Closeable {
         Struct structValue = (Struct) value;
         Struct source = structValue.getStruct("source");
         Long eventTime = source.getInt64("ts_ms");
+        String database = null != source.schema().field("db") ? source.getString("db") : null;
+        boolean multiDb = null != overrideDatabases && !overrideDatabases.isEmpty();
         String ddlStr = structValue.getString(SOURCE_RECORD_DDL_KEY);
         MysqlStreamOffset mysqlStreamOffset = getMysqlStreamOffset(record);
         if (StringUtils.isNotBlank(ddlStr)) {
@@ -709,6 +746,9 @@ public class MysqlReader implements Closeable {
                             tapDDLEvent.setReferenceTime(eventTime);
                             tapDDLEvent.setOriginDDL(ddlStr);
                             tapDDLEvent.setExactlyOnceId(getExactlyOnceId(record));
+                            if (multiDb && EmptyKit.isNotBlank(database) && EmptyKit.isNotBlank(tapDDLEvent.getTableId())) {
+                                tapDDLEvent.setNamespaces(Arrays.asList(database, tapDDLEvent.getTableId()));
+                            }
                             mysqlStreamEvents.add(mysqlStreamEvent);
                             tapLogger.info("Read DDL: " + ddlStr + ", about to be packaged as some event(s)");
                         }
@@ -721,6 +761,9 @@ public class MysqlReader implements Closeable {
                 tapDDLEvent.setOriginDDL(ddlStr);
                 tapDDLEvent.setExactlyOnceId(getExactlyOnceId(record));
                 mysqlStreamEvents.add(mysqlStreamEvent);
+                if (multiDb && EmptyKit.isNotBlank(database) && EmptyKit.isNotBlank(tapDDLEvent.getTableId())) {
+                    tapDDLEvent.setNamespaces(Arrays.asList(database, tapDDLEvent.getTableId()));
+                }
 //                throw new RuntimeException("Handle ddl failed: " + ddlStr + ", error: " + e.getMessage(), e);
             }
         }

@@ -38,6 +38,7 @@ import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.StringKit;
 import io.tapdata.partition.DatabaseReadPartitionSplitter;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -49,6 +50,7 @@ import io.tapdata.pdk.apis.functions.PDKMethod;
 import io.tapdata.pdk.apis.functions.connection.RetryOptions;
 import io.tapdata.pdk.apis.functions.connection.TableInfo;
 import io.tapdata.pdk.apis.functions.connector.common.vo.TapHashResult;
+import io.tapdata.pdk.apis.functions.connector.source.ConnectionConfigWithTables;
 import io.tapdata.pdk.apis.functions.connector.source.GetReadPartitionOptions;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 import io.tapdata.pdk.apis.partition.FieldMinMaxValue;
@@ -270,6 +272,7 @@ public class MysqlConnector extends CommonDbConnector {
         connectorFunctions.supportBatchCount(this::batchCount);
         connectorFunctions.supportBatchRead(this::batchReadWithoutOffset);
         connectorFunctions.supportStreamRead(this::streamRead);
+        connectorFunctions.supportStreamReadMultiConnectionFunction(this::streamReadMultiConnection);
         connectorFunctions.supportTimestampToStreamOffset(this::timestampToStreamOffset);
         connectorFunctions.supportQueryByAdvanceFilter(this::queryByAdvanceFilterWithOffset);
         connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
@@ -835,6 +838,24 @@ public class MysqlConnector extends CommonDbConnector {
         mysqlReader.readBinlog(tapConnectorContext, tables, offset, batchSize, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, contextMapForMasterSlave);
     }
 
+    private void streamReadMultiConnection(TapConnectorContext tapConnectorContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offset, int batchSize, StreamReadConsumer consumer) throws Throwable {
+        throwNonSupportWhenLightInit();
+        Set<String> databases = new LinkedHashSet<>();
+        List<String> dbTables = new ArrayList<>();
+        for (ConnectionConfigWithTables item : connectionConfigWithTables) {
+            String database = null == item.getConnectionConfig() ? null : item.getConnectionConfig().getString("database");
+            if (EmptyKit.isBlank(database)) {
+                throw new RuntimeException("Merged log collector: 'database' is missing in one of the merged connection configs");
+            }
+            databases.add(database);
+            if (null != item.getTables()) {
+                for (String t : item.getTables()) {
+                    dbTables.add(database + "." + t);
+                }
+            }
+        }
+        mysqlReader.readBinlog(tapConnectorContext, dbTables, databases, offset, batchSize, DDLParserType.MYSQL_CCJ_SQL_PARSER, consumer, contextMapForMasterSlave);
+    }
 
     @Override
     public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
@@ -843,6 +864,11 @@ public class MysqlConnector extends CommonDbConnector {
         MysqlUtil.buildMasterNode(mysqlConfig, contextMapForMasterSlave);
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(mysqlConfig.getConnectionString());
+        connectionOptions.setInstanceUniqueId(StringKit.md5(String.join("|"
+                , mysqlConfig.getHost()
+                , String.valueOf(mysqlConfig.getPort())
+        )));
+        connectionOptions.namespaces(Collections.singletonList(mysqlConfig.getDatabase()));
         try (
                 MysqlConnectionTest mysqlConnectionTest = new MysqlConnectionTest(mysqlConfig, consumer, connectionOptions)
         ) {
@@ -991,43 +1017,6 @@ public class MysqlConnector extends CommonDbConnector {
                 throw exception;
             }
         }
-    }
-
-    protected TapIndex makeTapIndex(String key, List<DataMap> value) {
-        TapIndex index = new TapIndex();
-        index.setName(key);
-        List<TapIndexField> fieldList = TapSimplify.list();
-        value.forEach(v -> {
-            TapIndexField field = new TapIndexField();
-            field.setFieldAsc("1".equals(v.getString("isAsc")));
-            field.setName(v.getString("columnName"));
-            field.setSubPosition(v.getInteger("subPosition"));
-            fieldList.add(field);
-        });
-        index.setUnique(value.stream().anyMatch(v -> ("1".equals(v.getString("isUnique")))));
-        index.setPrimary(value.stream().anyMatch(v -> ("1".equals(v.getString("isPk")))));
-        index.setIndexFields(fieldList);
-        return index;
-    }
-
-    protected String getCreateIndexSql(TapTable tapTable, TapIndex tapIndex) {
-        StringBuilder sb = new StringBuilder("create ");
-        char escapeChar = commonDbConfig.getEscapeChar();
-        if (tapIndex.isUnique()) {
-            sb.append("unique ");
-        }
-        sb.append("index ");
-        if (EmptyKit.isNotBlank(tapIndex.getName())) {
-            sb.append(escapeChar).append(tapIndex.getName()).append(escapeChar);
-        } else {
-            String indexName = DbKit.buildIndexName(tapTable.getId());
-            tapIndex.setName(indexName);
-            sb.append(escapeChar).append(indexName).append(escapeChar);
-        }
-        sb.append(" on ").append(getSchemaAndTable(tapTable.getId())).append('(')
-                .append(tapIndex.getIndexFields().stream().map(f -> escapeChar + f.getName() + escapeChar + (EmptyKit.isNotNull(f.getSubPosition()) ? "(" + f.getSubPosition() + ")" : " ") + (f.getFieldAsc() ? "asc" : "desc"))
-                        .collect(Collectors.joining(","))).append(')');
-        return sb.toString();
     }
 
     protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
