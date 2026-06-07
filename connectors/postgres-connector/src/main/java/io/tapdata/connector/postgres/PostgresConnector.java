@@ -9,6 +9,7 @@ import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
 import io.tapdata.connector.postgres.cdc.WalLogMinerV2;
 import io.tapdata.connector.postgres.cdc.WalPgtoMiner;
+import io.tapdata.connector.postgres.cdc.physical.PhysicalWalLogMiner;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
@@ -294,7 +295,12 @@ public class PostgresConnector extends CommonDbConnector {
     private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
         if (EmptyKit.isNull(slotName)) {
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
-            String sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
+            String sql;
+            if ("physical".equals(postgresConfig.getLogPluginName())) {
+                sql = "SELECT pg_create_physical_replication_slot('" + slotName + "')";
+            } else {
+                sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
+            }
             long begin = System.currentTimeMillis();
             try {
                 postgresJdbcContext.execute(sql, 20);
@@ -701,6 +707,15 @@ public class PostgresConnector extends CommonDbConnector {
                         .registerConsumer(consumer, recordSize)
                         .startMiner(this::isAlive);
             }
+        } else if ("physical".equals(postgresConfig.getLogPluginName())) {
+            testReplicateIdentity(nodeContext.getTableMap());
+            buildSlot(nodeContext, true);
+            new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
+                    .useSlot(slotName.toString())
+                    .watch(new ArrayList<>(tableList), nodeContext.getTableMap())
+                    .offset(offsetState)
+                    .registerConsumer(consumer, recordSize)
+                    .startMiner(this::isAlive);
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
@@ -790,6 +805,15 @@ public class PostgresConnector extends CommonDbConnector {
                         .registerConsumer(consumer, batchSize)
                         .startMiner(this::isAlive);
             }
+        } else if ("physical".equals(postgresConfig.getLogPluginName())) {
+            testReplicateIdentity(nodeContext.getTableMap());
+            buildSlot(nodeContext, true);
+            new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
+                    .useSlot(slotName.toString())
+                    .watch(schemaTableMap, nodeContext.getTableMap())
+                    .offset(offsetState)
+                    .registerConsumer(consumer, batchSize)
+                    .startMiner(this::isAlive);
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
@@ -823,6 +847,17 @@ public class PostgresConnector extends CommonDbConnector {
             String timestamp = timestampToWalLsnV2(offsetStartTime);
             tapLogger.info("timestampToStreamOffset start at {}", timestamp);
             return timestamp;
+        }
+        if ("physical".equals(postgresConfig.getLogPluginName())) {
+            if (EmptyKit.isNotNull(offsetStartTime)) {
+                tapLogger.warn("Postgres physical CDC does not support a specified start time, using the current wal lsn");
+            }
+            buildSlot(connectorContext, false);
+            AtomicReference<String> lsn = new AtomicReference<>();
+            // recovery-aware: a standby cannot run pg_current_wal_lsn(), use the last replayed lsn there
+            postgresJdbcContext.queryWithNext("SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_lsn() END", resultSet -> lsn.set(resultSet.getString(1)));
+            tapLogger.info("physical timestampToStreamOffset start at {}", lsn.get());
+            return lsn.get();
         }
         if (EmptyKit.isNotNull(offsetStartTime)) {
             tapLogger.warn("Postgres specified time start increment is not supported except walminer, use the current time as the start increment");

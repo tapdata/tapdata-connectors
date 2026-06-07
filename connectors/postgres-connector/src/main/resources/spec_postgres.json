@@ -263,6 +263,10 @@
             {
               "label": "WALMINER",
               "value": "walminer"
+            },
+            {
+              "label": "PHYSICAL",
+              "value": "physical"
             }
           ],
           "x-reactions": {
