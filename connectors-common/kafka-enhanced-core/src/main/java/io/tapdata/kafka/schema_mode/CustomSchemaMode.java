@@ -116,6 +116,9 @@ public class CustomSchemaMode extends AbsSchemaMode {
         }
         try {
             Object value = covertData(executeScript(scriptEngine.get(), "analyze", consumerRecord.headers(), consumerRecord.key(), consumerRecord.value(), consumerRecord.partition()));
+            if (value == null) {
+                return null;
+            }
             Map<String, Object> after = (Map<String, Object>) ((Map<String, Object>) value).get("after");
             Map<String, Object> before = (Map<String, Object>) ((Map<String, Object>) value).get("before");
             String op = String.valueOf(((Map<String, Object>) value).get("op"));
