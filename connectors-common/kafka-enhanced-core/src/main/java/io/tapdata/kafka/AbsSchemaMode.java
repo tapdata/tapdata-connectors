@@ -38,13 +38,17 @@ import java.util.stream.Collectors;
  * @author <a href="mailto:harsen_lin@163.com">Harsen</a>
  * @version v1.0 2024/9/3 17:00 Create
  */
-public abstract class AbsSchemaMode {
+public abstract class AbsSchemaMode implements AutoCloseable {
 
     protected final KafkaSchemaMode kafkaSchemaMode;
     protected final IKafkaService kafkaService;
     protected final Log tapLogger;
     protected final Boolean applyDefault;
     protected final Map<String, Collection<String>> primaryKeyMap;
+
+    @Override
+    public void close() throws Exception {
+    }
 
     protected AbsSchemaMode(KafkaSchemaMode kafkaSchemaMode, IKafkaService kafkaService) {
         this.kafkaSchemaMode = kafkaSchemaMode;
