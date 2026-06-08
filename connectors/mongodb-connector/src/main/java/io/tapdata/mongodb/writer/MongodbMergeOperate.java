@@ -387,18 +387,41 @@ public class MongodbMergeOperate {
 		} else if (null != parentProperties && MergeTableProperties.MergeType.updateWrite.equals(parentProperties.getMergeType())) {
 			mergeBundle.setOperation(MergeBundle.EventOperation.INSERT);
 			String targetPath = currentProperty.getTargetPath();
-			if (StringUtils.isNotBlank(targetPath)) {
-				Document update = null == mergeResult ? new Document() : mergeResult.getUpdate();
-				Document unsetDoc = new Document(targetPath, true);
-				if (update.containsKey(UNSET_KEY)) {
-					update.get(UNSET_KEY, Document.class).putAll(unsetDoc);
-				} else {
-					update.put(UNSET_KEY, unsetDoc);
-				}
-				return mergeResult;
-			} else {
+			if (StringUtils.isBlank(targetPath)) {
 				return null;
 			}
+			MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
+			if (null == updateJoinKey || MapUtils.isEmpty(updateJoinKey.getBefore())) {
+				return mergeResult;
+			}
+			Document pullCondition = buildJoinKeyPullCondition(currentProperty.getJoinKeys(), updateJoinKey.getBefore());
+			if (pullCondition.isEmpty()) {
+				return mergeResult;
+			}
+			boolean newResult = (null == mergeResult);
+			if (newResult) {
+				mergeResult = new MergeResult();
+			}
+			Document parentFilters = null != mergeFilter ? mergeFilter.appendFilters() : null;
+			if (null != parentFilters) {
+				Document filter = mergeResult.getFilter();
+				for (Map.Entry<String, Object> entry : parentFilters.entrySet()) {
+					if (MergeFilterManager.test(entry)) {
+						continue;
+					}
+					if (!filter.containsKey(entry.getKey())) {
+						filter.put(entry.getKey(), entry.getValue());
+					}
+				}
+			}
+			if (MapUtils.isEmpty(mergeResult.getFilter())) {
+				return newResult ? null : mergeResult;
+			}
+			appendPullToUpdate(mergeResult.getUpdate(), targetPath, pullCondition);
+			if (null == mergeResult.getOperation()) {
+				mergeResult.setOperation(MergeResult.Operation.UPDATE);
+			}
+			return mergeResult;
 		}
 		MergeInfo.UpdateJoinKey updateJoinKey = updateJoinKeys.get(id);
 		if (null == updateJoinKey) {
@@ -434,13 +457,27 @@ public class MongodbMergeOperate {
 		if (mergeResult.getOperation() == null) {
 			mergeResult.setOperation(MergeResult.Operation.UPDATE);
 		}
-		Document updateOpDoc;
 		if (StringUtils.isNotBlank(targetPath)) {
-			updateOpDoc = new Document(targetPath, new ArrayList<>());
-			if (mergeResult.getUpdate().containsKey("$set")) {
-				mergeResult.getUpdate().get("$set", Document.class).putAll(updateOpDoc);
+			if (!array) {
+				Document pullCondition;
+				if (CollectionUtils.isNotEmpty(arrayKeys)) {
+					pullCondition = buildArrayKeysPullCondition(arrayKeys, mergeBundle.getBefore());
+					if (pullCondition.isEmpty()) {
+						pullCondition = buildJoinKeyPullCondition(currentProperty.getJoinKeys(), updateJoinKeyBefore);
+					}
+				} else {
+					pullCondition = buildJoinKeyPullCondition(currentProperty.getJoinKeys(), updateJoinKeyBefore);
+				}
+				if (!pullCondition.isEmpty()) {
+					appendPullToUpdate(mergeResult.getUpdate(), targetPath, pullCondition);
+				}
 			} else {
-				mergeResult.getUpdate().put("$set", updateOpDoc);
+				Document updateOpDoc = new Document(targetPath, new ArrayList<>());
+				if (mergeResult.getUpdate().containsKey("$set")) {
+					mergeResult.getUpdate().get("$set", Document.class).putAll(updateOpDoc);
+				} else {
+					mergeResult.getUpdate().put("$set", updateOpDoc);
+				}
 			}
 		}
 		return mergeResult;
@@ -666,7 +703,7 @@ public class MongodbMergeOperate {
 			List<Document> arrayFilter;
 			if (operation == MergeBundle.EventOperation.UPDATE) {
 				arrayFilter = arrayFilter(
-						filterMap,
+						overrideArrayKeysFromBefore(filterMap, before, arrayKeys),
 						currentProperty.getJoinKeys(),
 						arrayKeys,
 						currentProperty.getArrayPath()
@@ -684,7 +721,7 @@ public class MongodbMergeOperate {
 
 			if (operation == MergeBundle.EventOperation.UPDATE) {
 				List<Document> arrayFilter = arrayFilterForArrayMerge(
-						filterMap,
+						overrideArrayKeysFromBefore(filterMap, before, arrayKeys),
 						currentProperty.getArrayKeys(),
 						currentProperty.getTargetPath(),
 						currentProperty.getArrayPath()
@@ -965,6 +1002,88 @@ public class MongodbMergeOperate {
 			arrayFilter.add(filter);
 		}
 		return arrayFilter;
+	}
+
+	protected static Document buildJoinKeyPullCondition(List<Map<String, String>> joinKeys, Map<String, Object> beforeJoinKey) {
+		Document pullCondition = new Document();
+		if (CollectionUtils.isEmpty(joinKeys) || MapUtils.isEmpty(beforeJoinKey)) {
+			return pullCondition;
+		}
+		for (Map<String, String> joinKey : joinKeys) {
+			String sourceField = joinKey.get("source");
+			String targetField = joinKey.get("target");
+			if (StringUtils.isBlank(sourceField) || StringUtils.isBlank(targetField)) {
+				continue;
+			}
+			Object oldValue = MapUtil.getValueByKey(beforeJoinKey, sourceField);
+			if (oldValue == null) {
+				oldValue = MapUtil.getValueByKey(beforeJoinKey, targetField);
+			}
+			if (oldValue == null) {
+				continue;
+			}
+			pullCondition.put(sourceField, oldValue);
+		}
+		return pullCondition;
+	}
+
+	protected static Map<String, Object> overrideArrayKeysFromBefore(Map<String, Object> base, Map<String, Object> before, List<String> arrayKeys) {
+		if (CollectionUtils.isEmpty(arrayKeys) || MapUtils.isEmpty(before)) {
+			return base;
+		}
+		Map<String, Object> result = null;
+		for (String arrayKey : arrayKeys) {
+			if (StringUtils.isBlank(arrayKey)) {
+				continue;
+			}
+			if (!MapUtil.containsKey(before, arrayKey)) {
+				continue;
+			}
+			Object oldValue = MapUtil.getValueByKey(before, arrayKey);
+			Object currentValue = null == base ? null : MapUtil.getValueByKey(base, arrayKey);
+			if (Objects.equals(oldValue, currentValue)) {
+				continue;
+			}
+			if (null == result) {
+				result = null == base ? new HashMap<>() : new HashMap<>(base);
+			}
+			result.put(arrayKey, oldValue);
+		}
+		return null == result ? base : result;
+	}
+
+	protected static Document buildArrayKeysPullCondition(List<String> arrayKeys, Map<String, Object> beforeImage) {
+		Document pullCondition = new Document();
+		if (CollectionUtils.isEmpty(arrayKeys) || MapUtils.isEmpty(beforeImage)) {
+			return pullCondition;
+		}
+		for (String arrayKey : arrayKeys) {
+			if (StringUtils.isBlank(arrayKey)) {
+				continue;
+			}
+			Object value = MapUtil.getValueByKey(beforeImage, arrayKey);
+			if (value == null) {
+				continue;
+			}
+			pullCondition.put(arrayKey, value);
+		}
+		return pullCondition;
+	}
+
+	protected static void appendPullToUpdate(Document update, String targetPath, Document pullCondition) {
+		Document pullDoc;
+		if (update.containsKey("$pull")) {
+			pullDoc = update.get("$pull", Document.class);
+		} else {
+			pullDoc = new Document();
+			update.put("$pull", pullDoc);
+		}
+		Object existing = pullDoc.get(targetPath);
+		if (existing instanceof Document) {
+			((Document) existing).putAll(pullCondition);
+		} else {
+			pullDoc.put(targetPath, pullCondition);
+		}
 	}
 
 	protected static void appendAllParentMergeFilters(MergeResult mergeResult, MergeFilter mergeFilter) {
