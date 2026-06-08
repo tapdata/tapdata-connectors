@@ -534,7 +534,7 @@ public class KafkaService implements IKafkaService {
                 }
                 executorService.shutdown();
             }
-        }, adminService, kafkaProducer);
+        }, adminService, kafkaProducer, schemaModeService);
     }
 
 

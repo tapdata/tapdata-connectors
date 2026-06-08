@@ -58,10 +58,20 @@ public class CustomSchemaMode extends AbsSchemaMode {
     }
 
     @Override
+    public void close() throws Exception {
+        if (scriptEngine instanceof AutoCloseable) {
+            try {
+                ((AutoCloseable) scriptEngine).close();
+            } catch (Exception ignore) {
+            }
+        }
+    }
+
+    @Override
     public void sampleOneSchema(String table, TapTable sampleTable) {
         kafkaService.<String, String>sampleValue(Collections.singletonList(table), null, record -> {
             if (null != record) {
-                Object eventObj = executeScript(scriptEngine, "analyze", record.headers(), record.key(), record.value());
+                Object eventObj = covertData(executeScript(scriptEngine, "analyze", record.headers(), record.key(), record.value()));
                 if (eventObj instanceof Map) {
                     Map<String, Object> after = (Map<String, Object>) ((Map<String, Object>) eventObj).get("after");
                     if (after != null) {
@@ -85,7 +95,7 @@ public class CustomSchemaMode extends AbsSchemaMode {
             return null;
         }
         try {
-            Object value = executeScript(scriptEngine, "analyze", consumerRecord.headers(), consumerRecord.key(), consumerRecord.value());
+            Object value = covertData(executeScript(scriptEngine, "analyze", consumerRecord.headers(), consumerRecord.key(), consumerRecord.value()));
             Map<String, Object> after = (Map<String, Object>) ((Map<String, Object>) value).get("after");
             Map<String, Object> before = (Map<String, Object>) ((Map<String, Object>) value).get("before");
             String op = String.valueOf(((Map<String, Object>) value).get("op"));
