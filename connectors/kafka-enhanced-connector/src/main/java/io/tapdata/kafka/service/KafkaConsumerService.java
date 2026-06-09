@@ -88,6 +88,9 @@ public class KafkaConsumerService implements AutoCloseable {
                         for (ConsumerRecord<Object, Object> consumerRecord : consumerRecords) {
                             offset.setOffset(consumerRecord); // 推进 offset
                             TapEvent event = service.getSchemaModeService().toTapEvent(consumerRecord);
+                            if (event == null) {
+                                continue;
+                            }
                             batchPusher.add(event);
                         }
                     }
@@ -180,6 +183,9 @@ public class KafkaConsumerService implements AutoCloseable {
 
                         for (ConsumerRecord<Object, Object> consumerRecord : consumerRecords) {
                             TapEvent event = service.getSchemaModeService().toTapEvent(consumerRecord);
+                            if (event == null) {
+                                continue;
+                            }
                             batchPusher.add(consumerRecord, event);
                         }
                     }
