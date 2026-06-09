@@ -331,6 +331,9 @@ public class KafkaService implements IKafkaService {
 
                             for (ConsumerRecord<Object, Object> consumerRecord : consumerRecords) {
                                 for (TapEvent event : schemaModeService.toTapEvents(consumerRecord)) {
+                                    if (event == null) {
+                                        continue;
+                                    }
                                     if (TapUnknownRecordEvent.TYPE == event.getType()) {
                                         TapUnknownRecordEvent unknownRecordEvent = (TapUnknownRecordEvent) event;
                                         String errorMsg = String.format("unknown event %s(%d-%d): %s", topic, consumerRecord.partition(), consumerRecord.offset(), unknownRecordEvent.getData());
