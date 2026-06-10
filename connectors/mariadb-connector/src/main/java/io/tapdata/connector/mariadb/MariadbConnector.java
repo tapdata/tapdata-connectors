@@ -24,10 +24,7 @@ import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.ConnectionOptions;
 import io.tapdata.pdk.apis.entity.TestItem;
 
-import java.util.ArrayList;
-import java.util.Map;
-import java.util.TimeZone;
-import java.util.UUID;
+import java.util.*;
 import java.util.function.Consumer;
 
 
@@ -120,6 +117,7 @@ public class MariadbConnector extends MysqlConnector {
                 , mysqlConfig.getHost()
                 , String.valueOf(mysqlConfig.getPort())
         )));
+        connectionOptions.setNamespaces(Collections.singletonList(mysqlConfig.getDatabase()));
         return connectionOptions;
     }
 }

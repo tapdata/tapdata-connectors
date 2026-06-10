@@ -892,6 +892,7 @@ public class MysqlConnector extends CommonDbConnector {
                 , mysqlConfig.getHost()
                 , String.valueOf(mysqlConfig.getPort())
         )));
+        connectionOptions.setNamespaces(Collections.singletonList(mysqlConfig.getDatabase()));
         try (
                 MysqlConnectionTest mysqlConnectionTest = new MysqlConnectionTest(mysqlConfig, consumer, connectionOptions)
         ) {
