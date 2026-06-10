@@ -14,6 +14,7 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
     private String cdcPassword;
     private String rawLogServerHost;
     private int rawLogServerPort;
+    private Boolean useNativeCdc = false;
 
     //customize
     public OceanbaseConfig() {
@@ -76,6 +77,14 @@ public class OceanbaseConfig extends MysqlConfig implements Serializable {
 
     public void setRawLogServerPort(int rawLogServerPort) {
         this.rawLogServerPort = rawLogServerPort;
+    }
+
+    public Boolean getUseNativeCdc() {
+        return useNativeCdc;
+    }
+
+    public void setUseNativeCdc(Boolean useNativeCdc) {
+        this.useNativeCdc = useNativeCdc;
     }
 
 }

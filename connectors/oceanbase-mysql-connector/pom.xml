@@ -160,6 +160,103 @@
             <version>2.9.0</version>
         </dependency>
     </dependencies>
+
+    <profiles>
+        <!-- obcdc-helper 构建：仅在安装了 obcdc 模块（设置了 OBCDC_HOME，指向
+             /home/admin/oceanbase 这类目录，含 include/ 与 lib64/libobcdc.so.4）
+             的主机上激活，避免在没有 obcdc 头文件/库的环境下破坏常规构建。
+             产物是独立可执行文件，运行时通过 rpath 动态加载已安装的 libobcdc。 -->
+        <profile>
+            <id>obcdc-native</id>
+            <activation>
+                <property>
+                    <name>env.OBCDC_HOME</name>
+                </property>
+            </activation>
+            <properties>
+                <obcdc.helper.name>obcdc-helper</obcdc.helper.name>
+                <obcdc.cpp.dir>${project.basedir}/src/main/cpp/obcdchelper</obcdc.cpp.dir>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <!-- 编译 obcdc-helper（链接 libobcdc.so.4；-D_GLIBCXX_USE_CXX11_ABI=0
+                                 与 -DOB_USE_DRCMSG 是 libobcdc 的 ABI 约定，不可省略） -->
+                            <execution>
+                                <id>compile-native-obcdc-helper</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>g++</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <!-- libobcdc.so 静态打包并导出了自己的 libstdc++（std::cin、
+                                         operator new/delete、COW string 单例等），若 helper 动态依赖
+                                         系统 libstdc++ 会发生符号抢占、两份运行时状态混用而崩溃
+                                         （free(): invalid pointer）。因此 helper 静态链接 libstdc++，
+                                         且静态归档必须排在 -l:libobcdc.so.4 之前，否则符号会被
+                                         libobcdc 先满足、归档不生效。 -->
+                                    <commandlineArgs>
+                                        -std=c++14
+                                        -O2
+                                        -D_GLIBCXX_USE_CXX11_ABI=0
+                                        -DOB_USE_DRCMSG
+                                        -I${env.OBCDC_HOME}/include
+                                        -I${env.OBCDC_HOME}/include/libobcdc
+                                        -I${env.OBCDC_HOME}/include/drcmsg
+                                        -I${obcdc.cpp.dir}
+                                        -static-libstdc++
+                                        -static-libgcc
+                                        -o ${project.build.directory}/${obcdc.helper.name}
+                                        ${obcdc.cpp.dir}/obcdc_helper.cpp
+                                        -Wl,--push-state -Wl,-Bstatic -lstdc++ -Wl,--pop-state
+                                        -L${env.OBCDC_HOME}/lib64
+                                        -l:libobcdc.so.4
+                                        -lpthread
+                                        -Wl,-rpath,/home/admin/oceanbase/lib64
+                                        -Wl,--enable-new-dtags
+                                    </commandlineArgs>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- 将 obcdc-helper 复制到类路径，随 jar 分发 -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <execution>
+                                <id>copy-native-obcdc-helper</id>
+                                <phase>process-classes</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.outputDirectory}</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${project.build.directory}</directory>
+                                            <includes>
+                                                <include>${obcdc.helper.name}</include>
+                                            </includes>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
     <build>
         <!-- os系统信息插件, protobuf-maven-plugin需要获取系统信息下载相应的protobuf程序 -->
         <extensions>
