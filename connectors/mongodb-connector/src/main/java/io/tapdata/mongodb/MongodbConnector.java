@@ -747,7 +747,7 @@ public class MongodbConnector extends ConnectorBase {
 					} else if ("sparse".equals(key)) {
 						indexOptions.sparse((Boolean) value);
 					} else if ("expireAfterSeconds".equals(key)) {
-						indexOptions.expireAfter(((Double) value).longValue(), java.util.concurrent.TimeUnit.SECONDS);
+						indexOptions.expireAfter(((Integer) value).longValue(), java.util.concurrent.TimeUnit.SECONDS);
 					} else if ("background".equals(key)) {
 						indexOptions.background((Boolean) value);
 					} else if ("partialFilterExpression".equals(key)) {
