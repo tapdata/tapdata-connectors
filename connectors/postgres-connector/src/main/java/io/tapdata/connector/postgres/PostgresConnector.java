@@ -705,7 +705,7 @@ public class PostgresConnector extends CommonDbConnector {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            cdcRunner.useSlot(slotName.toString()).watch(tableList).offset(offsetState).registerConsumer(consumer, recordSize);
+            cdcRunner.useSlot(slotName.toString()).watch(new ArrayList<>(tableList)).offset(offsetState).registerConsumer(consumer, recordSize);
             beforeCdc(tableList,nodeContext.getTableMap());
             cdcRunner.startCdcRunner();
             if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {

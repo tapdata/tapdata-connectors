@@ -1,7 +1,6 @@
 package io.tapdata.connector.postgres;
 
 import io.tapdata.common.CommonDbConnector;
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
@@ -16,7 +15,6 @@ import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
 import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.schema.TapField;
-import io.tapdata.entity.schema.TapIndex;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapType;
 import io.tapdata.entity.schema.value.*;
@@ -122,7 +120,7 @@ public class VastbaseConnector extends CommonDbConnector {
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportGetTableNamesFunction(this::getTableNames);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> postgresJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
         connectorFunctions.supportCountRawCommandFunction(this::countRawCommand);
         connectorFunctions.supportCountByPartitionFilterFunction(this::countByAdvanceFilter);
@@ -517,6 +515,26 @@ public class VastbaseConnector extends CommonDbConnector {
                     entry.setValue(Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getZoneId()));
                 }
             }
+        }
+    }
+
+    @Override
+    protected Object filterData(Object obj, String columnType) {
+        if (obj == null) {
+            return null;
+        }
+        if (postgresConfig.getOldVersionTimezone()) {
+            return obj;
+        }
+        switch (columnType) {
+            case "timestamp":
+                return ((Timestamp) obj).toLocalDateTime().atZone(postgresConfig.getZoneId());
+            case "date":
+                return Instant.ofEpochMilli(((Date) obj).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getZoneId());
+            case "time":
+                return Instant.ofEpochMilli(((Time) obj).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().atZone(postgresConfig.getZoneId());
+            default:
+                return obj;
         }
     }
 

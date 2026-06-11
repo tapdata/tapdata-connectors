@@ -696,6 +696,8 @@
     },
     "largeint": {
       "bit": 128,
+      "precision": 39,
+      "scale": 0,
       "to": "TapNumber"
     },
     "float": {

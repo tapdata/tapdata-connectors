@@ -46,21 +46,99 @@
           "x-index": 2,
           "required": true
         },
+        "authMethod": {
+          "type": "string",
+          "title": "${authMethod}",
+          "default": "password",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 3,
+          "enum": [
+            {
+              "label": "${authMethodPassword}",
+              "value": "password"
+            },
+            {
+              "label": "${authMethodPat}",
+              "value": "pat"
+            },
+            {
+              "label": "${authMethodKeyPair}",
+              "value": "keyPair"
+            }
+          ]
+        },
         "password": {
           "type": "string",
           "title": "${password}",
           "x-decorator": "FormItem",
           "x-component": "Password",
           "apiServerKey": "database_password",
-          "x-index": 3,
-          "required": true
+          "x-index": 4,
+          "x-reactions": {
+            "dependencies": ["authMethod"],
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]==='password'}}",
+                "required": "{{$deps[0]==='password'}}"
+              }
+            }
+          }
+        },
+        "patToken": {
+          "type": "string",
+          "title": "${patToken}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "x-index": 5,
+          "x-reactions": {
+            "dependencies": ["authMethod"],
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]==='pat'}}",
+                "required": "{{$deps[0]==='pat'}}"
+              }
+            }
+          }
+        },
+        "privateKey": {
+          "type": "string",
+          "title": "${privateKey}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "fileNameField": "privateKeyFile",
+          "x-index": 6,
+          "x-reactions": {
+            "dependencies": ["authMethod"],
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]==='keyPair'}}",
+                "required": "{{$deps[0]==='keyPair'}}"
+              }
+            }
+          }
+        },
+        "privateKeyPassword": {
+          "type": "string",
+          "title": "${privateKeyPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "x-index": 7,
+          "x-reactions": {
+            "dependencies": ["authMethod"],
+            "fulfill": {
+              "state": {
+                "visible": "{{$deps[0]==='keyPair'}}"
+              }
+            }
+          }
         },
         "warehouse": {
           "type": "string",
           "title": "${warehouse}",
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "x-index": 4,
+          "x-index": 8,
           "required": true
         },
         "database": {
@@ -69,7 +147,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_name",
-          "x-index": 5,
+          "x-index": 9,
           "required": true
         },
         "schema": {
@@ -79,7 +157,7 @@
           "x-decorator": "FormItem",
           "x-component": "Input",
           "apiServerKey": "database_owner",
-          "x-index": 6,
+          "x-index": 10,
           "required": true
         },
         "role": {
@@ -87,7 +165,7 @@
           "title": "${role}",
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "x-index": 7
+          "x-index": 11
         },
         "timezone": {
           "type": "string",
@@ -95,7 +173,7 @@
           "default": "+00:00",
           "x-decorator": "FormItem",
           "x-component": "Select",
-          "x-index": 8,
+          "x-index": 12,
           "enum": [
             {
               "label": "UTC -11",
@@ -180,6 +258,91 @@
           ]
         }
       }
+    },
+    "node": {
+      "type": "object",
+      "x-tableConfigScope": ["target"],
+      "properties": {
+        "tableType": {
+          "type": "string",
+          "title": "${tableType}",
+          "default": "STANDARD",
+          "x-index": 1,
+          "x-perTable": true,
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-decorator-props": {
+            "tooltip": "${tableTypeTooltip}"
+          },
+          "enum": [
+            {
+              "label": "${tableTypeStandard}",
+              "value": "STANDARD"
+            },
+            {
+              "label": "${tableTypeHybrid}",
+              "value": "HYBRID"
+            },
+            {
+              "label": "${tableTypeDynamic}",
+              "value": "DYNAMIC"
+            }
+          ],
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "dynamicTableLag": {
+          "type": "string",
+          "title": "${dynamicTableLag}",
+          "default": "1 minute",
+          "x-index": 2,
+          "x-perTable": true,
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${dynamicTableLagTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": [".tableType"],
+              "fulfill": {
+                "state": {
+                  "visible": "{{$deps[0]==='DYNAMIC'}}"
+                }
+              }
+            }
+          ]
+        },
+        "dynamicTableQuery": {
+          "type": "string",
+          "title": "${dynamicTableQuery}",
+          "x-index": 3,
+          "x-perTable": true,
+          "x-decorator": "FormItem",
+          "x-component": "Input.TextArea",
+          "x-decorator-props": {
+            "tooltip": "${dynamicTableQueryTooltip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": [".tableType"],
+              "fulfill": {
+                "state": {
+                  "visible": "{{$deps[0]==='DYNAMIC'}}"
+                }
+              }
+            }
+          ]
+        }
+      }
     }
   },
   "messages": {
@@ -189,33 +352,81 @@
       "account": "Account",
       "user": "User",
       "password": "Password",
+      "authMethod": "Authentication Method",
+      "authMethodPassword": "Password",
+      "authMethodPat": "PAT Token",
+      "authMethodKeyPair": "Key Pair",
+      "patToken": "PAT Token",
+      "privateKey": "Private Key",
+      "privateKeyPassword": "Private Key Password",
       "warehouse": "Warehouse",
       "database": "Database",
       "schema": "Schema",
       "role": "Role",
-      "timezone": "Timezone"
+      "timezone": "Timezone",
+      "tableType": "Table Type",
+      "tableTypeTooltip": "The table type used when creating the target table. Hybrid tables require a primary key and support secondary indexes; Dynamic tables require a target lag and a query.",
+      "tableTypeStandard": "Standard Table",
+      "tableTypeHybrid": "Hybrid Table",
+      "tableTypeDynamic": "Dynamic Table",
+      "dynamicTableLag": "Target Lag",
+      "dynamicTableLagTooltip": "The target lag for the dynamic table, for example: '1 minute' or 'DOWNSTREAM'",
+      "dynamicTableQuery": "Dynamic Table Query",
+      "dynamicTableQueryTooltip": "The AS SELECT query used to define the dynamic table content"
     },
     "zh_CN": {
       "doc": "docs/snowflake_zh_CN.md",
       "account": "账户",
       "user": "用户名",
       "password": "密码",
+      "authMethod": "认证方式",
+      "authMethodPassword": "普通密码",
+      "authMethodPat": "PAT 令牌",
+      "authMethodKeyPair": "密钥对",
+      "patToken": "PAT 令牌",
+      "privateKey": "私钥",
+      "privateKeyPassword": "私钥密码",
       "warehouse": "仓库",
       "database": "数据库",
       "schema": "模式",
       "role": "角色",
-      "timezone": "时区"
+      "timezone": "时区",
+      "tableType": "建表类型",
+      "tableTypeTooltip": "创建目标表时使用的表类型。混合表(Hybrid)需要主键并支持二级索引；动态表(Dynamic)需要目标延迟和查询语句。",
+      "tableTypeStandard": "标准表",
+      "tableTypeHybrid": "混合表",
+      "tableTypeDynamic": "动态表",
+      "dynamicTableLag": "目标延迟",
+      "dynamicTableLagTooltip": "动态表的目标延迟，例如：'1 minute' 或 'DOWNSTREAM'",
+      "dynamicTableQuery": "动态表查询",
+      "dynamicTableQueryTooltip": "用于定义动态表内容的 AS SELECT 查询语句"
     },
     "zh_TW": {
       "doc": "docs/snowflake_zh_TW.md",
       "account": "賬戶",
       "user": "用戶名",
       "password": "密碼",
+      "authMethod": "認證方式",
+      "authMethodPassword": "普通密碼",
+      "authMethodPat": "PAT 令牌",
+      "authMethodKeyPair": "密鑰對",
+      "patToken": "PAT 令牌",
+      "privateKey": "私鑰",
+      "privateKeyPassword": "私鑰密碼",
       "warehouse": "倉庫",
       "database": "數據庫",
       "schema": "模式",
       "role": "角色",
-      "timezone": "時區"
+      "timezone": "時區",
+      "tableType": "建表類型",
+      "tableTypeTooltip": "創建目標表時使用的表類型。混合表(Hybrid)需要主鍵並支持二級索引；動態表(Dynamic)需要目標延遲和查詢語句。",
+      "tableTypeStandard": "標準表",
+      "tableTypeHybrid": "混合表",
+      "tableTypeDynamic": "動態表",
+      "dynamicTableLag": "目標延遲",
+      "dynamicTableLagTooltip": "動態表的目標延遲，例如：'1 minute' 或 'DOWNSTREAM'",
+      "dynamicTableQuery": "動態表查詢",
+      "dynamicTableQueryTooltip": "用於定義動態表內容的 AS SELECT 查詢語句"
     }
   },
   "dataTypes": {

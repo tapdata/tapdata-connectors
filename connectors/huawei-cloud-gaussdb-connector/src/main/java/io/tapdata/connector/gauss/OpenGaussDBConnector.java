@@ -8,7 +8,6 @@ import com.huawei.opengauss.jdbc.util.PGInterval;
 import com.huawei.opengauss.jdbc.util.PGobject;
 import io.tapdata.common.CommonDbConnector;
 import io.tapdata.common.CommonDbTest;
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.common.exception.ExceptionCollector;
 import io.tapdata.connector.gauss.cdc.CdcOffset;
 import io.tapdata.connector.gauss.cdc.GaussDBRunner;
@@ -470,7 +469,7 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                 .supportAlterFieldAttributesFunction(this::fieldDDLHandler)
                 .supportDropFieldFunction(this::fieldDDLHandler)
                 .supportGetTableNamesFunction(this::getTableNames)
-                .supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> gaussJdbcContext.getConnection(), this::isAlive, c))
+                .supportExecuteCommandFunction(this::executeCommand)
                 .supportRunRawCommandFunction(this::runRawCommand)
                 .supportCountRawCommandFunction(this::countRawCommand)
                 .supportCountByPartitionFilterFunction(this::countByAdvanceFilter)
@@ -661,6 +660,28 @@ public class OpenGaussDBConnector extends CommonDbConnector {
                     entry.setValue(((PGobject) value).getValue().getBytes());
                 }
             }
+        }
+    }
+
+    @Override
+    protected Object filterData(Object obj, String columnType) {
+        if (obj == null) {
+            return null;
+        }
+        switch (columnType) {
+            case "timestamp":
+                return ((Timestamp) obj).toLocalDateTime().minusHours(gaussDBConfig.getZoneOffsetHour());
+            case "timestamptz":
+                return ((Timestamp) obj).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC);
+            case "time":
+                return Instant.ofEpochMilli(((Time) obj).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(gaussDBConfig.getZoneOffsetHour());
+            case "timetz":
+                return Instant.ofEpochMilli(((Time) obj).getTime()).atZone(ZoneOffset.UTC);
+            default:
+                if (obj instanceof PGobject) {
+                    return ((PGobject) obj).getValue().getBytes();
+                }
+                return obj;
         }
     }
 }

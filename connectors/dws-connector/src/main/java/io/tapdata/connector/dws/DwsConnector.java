@@ -1,6 +1,5 @@
 package io.tapdata.connector.dws;
 
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.postgres.PostgresConnector;
 import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.config.PostgresConfig;
@@ -101,7 +100,7 @@ public class DwsConnector extends PostgresConnector {
         connectorFunctions.supportAlterFieldAttributesFunction(this::fieldDDLHandler);
         connectorFunctions.supportDropFieldFunction(this::fieldDDLHandler);
         connectorFunctions.supportGetTableNamesFunction(this::getTableNames);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> postgresJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {

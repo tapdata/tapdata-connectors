@@ -1,7 +1,6 @@
 package io.tapdata.oceanbase.connector;
 
 import io.tapdata.common.CommonSqlMaker;
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.mysql.MysqlConnector;
 import io.tapdata.connector.mysql.MysqlExceptionCollector;
 import io.tapdata.connector.mysql.ddl.sqlmaker.MysqlDDLSqlGenerator;
@@ -139,7 +138,7 @@ public class OceanbaseConnector extends MysqlConnector {
         codecRegistry.registerFromTapValue(TapDateValue.class, tapDateValue -> tapDateValue.getValue().isContainsIllegal() ? tapDateValue.getValue().getIllegalDate() : tapDateValue.getValue().toInstant());
         codecRegistry.registerFromTapValue(TapTimeValue.class, tapTimeValue -> tapTimeValue.getValue().toTimeStr());
         codecRegistry.registerFromTapValue(TapYearValue.class, TapValue::getOriginValue);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> mysqlJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
         connectorFunctions.supportRunRawCommandFunction(this::runRawCommand);
         //ddl
         connectorFunctions.supportNewFieldFunction(this::fieldDDLHandler);

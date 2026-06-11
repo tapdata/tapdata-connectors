@@ -1,7 +1,6 @@
 package io.tapdata.connector.doris;
 
 import io.tapdata.common.CommonDbConnector;
-import io.tapdata.common.SqlExecuteCommandFunction;
 import io.tapdata.connector.doris.bean.DorisConfig;
 import io.tapdata.connector.doris.ddl.DorisDDLSqlGenerator;
 import io.tapdata.connector.doris.streamload.DorisStreamLoader;
@@ -114,7 +113,7 @@ public class DorisConnector extends CommonDbConnector {
         connectorFunctions.supportClearTable(this::clearTable);
         connectorFunctions.supportDropTable(this::dropTable);
         connectorFunctions.supportQueryByFilter(this::queryByFilter);
-        connectorFunctions.supportExecuteCommandFunction((a, b, c) -> SqlExecuteCommandFunction.executeCommand(a, b, () -> dorisJdbcContext.getConnection(), this::isAlive, c));
+        connectorFunctions.supportExecuteCommandFunction(this::executeCommand);
 
         codecRegistry.registerFromTapValue(TapRawValue.class, "text", tapRawValue -> {
             if (tapRawValue != null && tapRawValue.getValue() != null)
@@ -402,6 +401,24 @@ public class DorisConnector extends CommonDbConnector {
                     entry.setValue(new BigDecimal((String) value));
                 }
             }
+        }
+    }
+
+    @Override
+    protected Object filterData(Object obj, String columnType) {
+        if (obj == null) {
+            return null;
+        }
+        if (dorisConfig.getOldVersionTimezone()) {
+            return obj;
+        }
+        switch (columnType) {
+            case "DATETIME":
+                return ((LocalDateTime) obj).minusHours(dorisConfig.getZoneOffsetHour());
+            case "DATE":
+                return Instant.ofEpochMilli(((Date) obj).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
+            default:
+                return obj;
         }
     }
 }
