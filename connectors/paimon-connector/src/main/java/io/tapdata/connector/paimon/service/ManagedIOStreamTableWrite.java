@@ -22,10 +22,12 @@ public class ManagedIOStreamTableWrite implements StreamTableWrite {
 
     private final StreamTableWrite delegate;
     private final IOManager ioManager;
+    private final List<String> spillDirs;
 
-    public ManagedIOStreamTableWrite(StreamTableWrite delegate, IOManager ioManager) {
+    public ManagedIOStreamTableWrite(StreamTableWrite delegate, IOManager ioManager, List<String> spillDirs) {
         this.delegate = delegate;
         this.ioManager = ioManager;
+        this.spillDirs = spillDirs;
     }
 
     @Override
@@ -102,6 +104,9 @@ public class ManagedIOStreamTableWrite implements StreamTableWrite {
                 ioManager.close();
             } catch (Exception e) {
                 ioManagerError = e;
+            } finally {
+                // Drop from the JVM-wide live registry; the dir is already deleted by ioManager.close().
+                PaimonSpillDirCleaner.unregisterLiveDirs(spillDirs);
             }
         }
 

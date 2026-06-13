@@ -42,6 +42,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
+import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
@@ -147,6 +148,11 @@ public class PaimonService implements Closeable {
 	public void init() throws Exception {
 		config.validate();
 
+		// Clean up stale paimon-io-* spill dirs left by abnormally terminated JVMs (OOM/crash/SIGKILL),
+		// which would otherwise accumulate and exhaust local disk. Live dirs owned by active sibling
+		// tasks in this JVM are protected and never deleted.
+		cleanupStaleSpillDirs();
+
 		Options options = new Options();
 		options.set("warehouse", config.getFullWarehousePath());
 
@@ -162,6 +168,29 @@ public class PaimonService implements Closeable {
 
 		// Initialize async commit if enabled
 		initAsyncCommit();
+	}
+
+	/**
+	 * Remove stale {@code paimon-io-*} spill directories under the configured temp roots that were
+	 * left behind by abnormally terminated JVMs. Best-effort: failures are logged, never thrown.
+	 */
+	private void cleanupStaleSpillDirs() {
+		try {
+			String tmpDirs = config.getDiskTmpDir();
+			if (StringUtils.isEmpty(tmpDirs)) {
+				return;
+			}
+			String[] roots = splitPaths(tmpDirs);
+			int deleted = PaimonSpillDirCleaner.cleanupStaleSpillDirs(
+					roots,
+					PaimonSpillDirCleaner.DEFAULT_STALE_GRACE_MS,
+					(path, bytes) -> log.info("Removed stale Paimon spill dir {} ({} bytes)", path, bytes));
+			if (deleted > 0) {
+				log.info("Cleaned up {} stale Paimon spill dir(s) under {}", deleted, tmpDirs);
+			}
+		} catch (Exception e) {
+			log.warn("Failed to clean up stale Paimon spill dirs: {}", e.getMessage());
+		}
 	}
 
 	/**
@@ -310,6 +339,25 @@ public class PaimonService implements Closeable {
 			conf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
 			conf.set("fs.s3a.impl.disable.cache", "true");
 			conf.set("fs.AbstractFileSystem.s3a.impl", "org.apache.hadoop.fs.s3a.S3A");
+			// S3A fast-upload buffers each upload block to a local directory before sending to S3.
+			// Defaults to ${hadoop.tmp.dir}/s3a under /tmp, which can run out of space and fail with
+			// "Could not find any valid local directory for s3ablock-...". Redirect the buffer to the
+			// configured scratch dir (the same disk used for Paimon spill) and ensure it exists.
+			String s3aBufferDir = config.getDiskTmpDir();
+			if (StringUtils.isBlank(s3aBufferDir)) {
+				s3aBufferDir = System.getProperty("java.io.tmpdir", "/tmp");
+			}
+			for (String p : s3aBufferDir.split(",")) {
+				String dir = p.trim();
+				if (!dir.isEmpty()) {
+					try {
+						new File(dir).mkdirs();
+					} catch (Exception ignore) {
+						// best-effort directory creation
+					}
+				}
+			}
+			conf.set("fs.s3a.buffer.dir", s3aBufferDir);
 			if (EmptyKit.isNotEmpty(config.getS3Properties())) {
 				config.getS3Properties().forEach(v -> conf.set(v.get("propKey"), v.get("propValue")));
 			}
@@ -1264,11 +1312,13 @@ public class PaimonService implements Closeable {
 		StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
 		String tmpDirs = config.getDiskTmpDir(table.name());
 		if (StringUtils.isEmpty(tmpDirs)) {
-			return new ManagedIOStreamTableWrite(writeBuilder.newWrite(), null);
+			return new ManagedIOStreamTableWrite(writeBuilder.newWrite(), null, null);
 		} else {
 			IOManager ioManager = IOManager.create(splitPaths(tmpDirs));
 			StreamTableWrite streamTableWrite = (StreamTableWrite) writeBuilder.newWrite().withIOManager(ioManager);
-			return new ManagedIOStreamTableWrite(streamTableWrite, ioManager);
+			// Materialize and register this writer's spill dirs so startup cleanup never deletes them while in use.
+			List<String> spillDirs = PaimonSpillDirCleaner.registerLiveDirs(ioManager);
+			return new ManagedIOStreamTableWrite(streamTableWrite, ioManager, spillDirs);
 		}
 	}
 
