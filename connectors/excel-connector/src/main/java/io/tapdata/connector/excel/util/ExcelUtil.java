@@ -4,6 +4,8 @@ import io.tapdata.kit.EmptyKit;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
 
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -77,7 +79,7 @@ public class ExcelUtil {
 
             case NUMERIC:
                 if (DateUtil.isCellDateFormatted(cell) || cell.getCellStyle().getDataFormat() == 58) {
-                    return cell.getDateCellValue();
+                    return Instant.ofEpochMilli((cell.getDateCellValue()).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
                 } else {
                     return cell.getNumericCellValue();
                 }
@@ -103,7 +105,7 @@ public class ExcelUtil {
 
                         case NUMERIC:
                             if (DateUtil.isCellDateFormatted(cell)) {
-                                return cell.getDateCellValue();
+                                return Instant.ofEpochMilli((cell.getDateCellValue()).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
                             } else {
                                 return cell.getNumericCellValue();
                             }
