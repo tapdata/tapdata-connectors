@@ -30,6 +30,9 @@ public final class HeapTupleDecoder {
 
     public static Map<String, Object> decode(byte[] tuple, List<ColumnInfo> columns) {
         Map<String, Object> out = new LinkedHashMap<>();
+        if (tuple == null || tuple.length < SIZE_OF_HEAP_HEADER) {
+            return out;
+        }
         WalByteReader h = new WalByteReader(tuple);
         int infomask2 = h.readUInt16();
         int infomask = h.readUInt16();
@@ -37,14 +40,20 @@ public final class HeapTupleDecoder {
         int natts = infomask2 & HEAP_NATTS_MASK;
         boolean hasNull = (infomask & HEAP_HASNULL) != 0;
 
+        int colDataStart = SIZE_OF_HEAP_HEADER + (tHoff - SIZE_OF_HEAP_TUPLE_HEADER);
+        if (colDataStart < SIZE_OF_HEAP_HEADER || colDataStart > tuple.length) {
+            return out;
+        }
         byte[] nullBitmap = null;
         if (hasNull) {
             int bitmapLen = (natts + 7) / 8;
+            if (SIZE_OF_HEAP_HEADER + bitmapLen > tuple.length) {
+                return out;
+            }
             nullBitmap = new byte[bitmapLen];
             System.arraycopy(tuple, SIZE_OF_HEAP_HEADER, nullBitmap, 0, bitmapLen);
         }
 
-        int colDataStart = SIZE_OF_HEAP_HEADER + (tHoff - SIZE_OF_HEAP_TUPLE_HEADER);
         WalByteReader r = new WalByteReader(tuple, colDataStart, tuple.length - colDataStart);
 
         for (int i = 0; i < columns.size(); i++) {
@@ -62,7 +71,21 @@ public final class HeapTupleDecoder {
                 }
                 continue;
             }
-            Object value = readAttr(r, col);
+            Object value;
+            try {
+                value = readAttr(r, col);
+            } catch (RuntimeException ex) {
+                // Malformed/garbage tuple bytes (typically a stale cache page or
+                // an unrecoverable delta-only update): abort the rest of the row
+                // with nulls rather than killing the whole miner.
+                for (int j = i; j < columns.size(); j++) {
+                    ColumnInfo c = columns.get(j);
+                    if (!c.dropped) {
+                        out.put(c.name, null);
+                    }
+                }
+                return out;
+            }
             if (!col.dropped) {
                 out.put(col.name, value);
             }
@@ -113,6 +136,10 @@ public final class HeapTupleDecoder {
         r.align(col.typAlign);
         long header = r.peekUInt32();
         int total = (int) ((header >> 2) & 0x3FFFFFFF);     // includes 4-byte header
+        if (total < 4 || total - 4 > r.remaining() - 4) {
+            throw new IllegalStateException("implausible varlena length " + total
+                    + " for column " + col.name + " (remaining=" + r.remaining() + ")");
+        }
         boolean compressed = (header & 0x03) == 0x02;
         if (compressed) {
             r.skip(4);

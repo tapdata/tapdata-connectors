@@ -84,7 +84,18 @@ public final class WalConstants {
     public static final int XLOG_HEAP_INPLACE = 0x70;
 
     /* heap2 opcodes */
+    public static final int XLOG_HEAP2_PRUNE = 0x10;
+    public static final int XLOG_HEAP2_VACUUM = 0x20;
+    public static final int XLOG_HEAP2_FREEZE_PAGE = 0x30;
+    public static final int XLOG_HEAP2_VISIBLE = 0x40;
     public static final int XLOG_HEAP2_MULTI_INSERT = 0x50;
+
+    /* xlog rmgr opcodes (subset) */
+    public static final int XLOG_CHECKPOINT_SHUTDOWN = 0x00;
+    public static final int XLOG_CHECKPOINT_ONLINE = 0x10;
+    public static final int XLOG_SWITCH = 0x40;
+    public static final int XLOG_FPI = 0xA0;
+    public static final int XLOG_FPI_FOR_HINT = 0xB0;
 
     /* ---- transaction rmgr opcodes ---- */
     public static final int XLOG_XACT_COMMIT = 0x00;

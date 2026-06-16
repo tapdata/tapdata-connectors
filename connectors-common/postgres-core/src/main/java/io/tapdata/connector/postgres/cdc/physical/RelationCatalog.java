@@ -25,7 +25,7 @@ public class RelationCatalog {
     private final Map<Long, Boolean> negative = new ConcurrentHashMap<>();
 
     private static final String REL_BY_FILENODE =
-            "SELECT c.oid, n.nspname, c.relname FROM pg_class c " +
+            "SELECT c.oid, n.nspname, c.relname, c.relreplident FROM pg_class c " +
                     "JOIN pg_namespace n ON c.relnamespace = n.oid " +
                     "WHERE c.relfilenode = %d AND c.relkind IN ('r','m','p') LIMIT 1";
     private static final String COLUMNS =
@@ -70,11 +70,14 @@ public class RelationCatalog {
         try {
             long[] oid = {0};
             String[] name = new String[2];
+            boolean[] riFull = {false};
             jdbcContext.query(String.format(REL_BY_FILENODE, relNumber), rs -> {
                 if (rs.next()) {
                     oid[0] = rs.getLong("oid");
                     name[0] = rs.getString("nspname");
                     name[1] = rs.getString("relname");
+                    String r = rs.getString("relreplident");
+                    riFull[0] = r != null && !r.isEmpty() && r.charAt(0) == 'f';
                 }
             });
             if (oid[0] == 0) {
@@ -99,7 +102,7 @@ public class RelationCatalog {
                     keys.add(rs.getString("attname"));
                 }
             });
-            return new RelationInfo(name[0], name[1], columns, keys);
+            return new RelationInfo(name[0], name[1], columns, keys, riFull[0]);
         } catch (Throwable e) {
             log.warn("Failed to resolve relation for relfilenode {}: {}", relNumber, e.getMessage());
             return null;

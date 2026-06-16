@@ -297,7 +297,11 @@ public class PostgresConnector extends CommonDbConnector {
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
             String sql;
             if ("physical".equals(postgresConfig.getLogPluginName())) {
-                sql = "SELECT pg_create_physical_replication_slot('" + slotName + "')";
+                // immediately_reserve=true so restart_lsn is pinned at creation and WAL
+                // is retained from here through the snapshot stage; otherwise the page-
+                // cache warm-up anchor (and even the emit LSN) could be recycled before
+                // the stream starts after the full sync, losing full-stage changes.
+                sql = "SELECT pg_create_physical_replication_slot('" + slotName + "', true)";
             } else {
                 sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
             }
@@ -853,11 +857,16 @@ public class PostgresConnector extends CommonDbConnector {
                 tapLogger.warn("Postgres physical CDC does not support a specified start time, using the current wal lsn");
             }
             buildSlot(connectorContext, false);
-            AtomicReference<String> lsn = new AtomicReference<>();
-            // recovery-aware: a standby cannot run pg_current_wal_lsn(), use the last replayed lsn there
-            postgresJdbcContext.queryWithNext("SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_lsn() END", resultSet -> lsn.set(resultSet.getString(1)));
-            tapLogger.info("physical timestampToStreamOffset start at {}", lsn.get());
-            return lsn.get();
+            // Find-or-make the seed checkpoint and resolve the page-cache warm-up
+            // anchor HERE, at the true mining start point, not when the stream starts
+            // after the snapshot stage: otherwise pages modified during the full-sync
+            // window are not seedable and their UPDATE/DELETE before-images decode to
+            // null (lost data). Returns "emitLsn[,anchorLsn]".
+            String offset = new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
+                    .useSlot(slotName.toString())
+                    .seedStartOffset();
+            tapLogger.info("physical timestampToStreamOffset start at {}", offset);
+            return offset;
         }
         if (EmptyKit.isNotNull(offsetStartTime)) {
             tapLogger.warn("Postgres specified time start increment is not supported except walminer, use the current time as the start increment");

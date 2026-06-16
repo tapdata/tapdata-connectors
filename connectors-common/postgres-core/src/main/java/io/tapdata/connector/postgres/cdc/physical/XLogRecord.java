@@ -52,6 +52,10 @@ public class XLogRecord {
         public long blockNumber;
         public byte[] data = new byte[0];
         public byte[] image = new byte[0];
+        /* image header fields (only meaningful when hasImage=true) */
+        public int imageHoleOffset;
+        public int imageHoleLength;
+        public int bimgInfo;
     }
 
     public static XLogRecord parse(WalPageDecoder.RawRecord raw) {
@@ -101,14 +105,18 @@ public class XLogRecord {
                 datatotal += blk.dataLength;
                 int imageBytes = 0;
                 if (blk.hasImage) {
-                    imageBytes = r.readUInt16();   // bimg length
-                    r.readUInt16();                // hole_offset
-                    int bimgInfo = r.readUInt8();
+                    imageBytes = r.readUInt16();           // bimg length
+                    blk.imageHoleOffset = r.readUInt16();  // hole_offset
+                    blk.bimgInfo = r.readUInt8();
                     remaining -= 5;
-                    boolean compressed = (bimgInfo & (BKPIMAGE_COMPRESS_PGLZ | BKPIMAGE_COMPRESS_LZ4 | BKPIMAGE_COMPRESS_ZSTD)) != 0;
-                    if ((bimgInfo & BKPIMAGE_HAS_HOLE) != 0 && compressed) {
-                        r.readUInt16();            // hole_length
-                        remaining -= 2;
+                    boolean compressed = (blk.bimgInfo & (BKPIMAGE_COMPRESS_PGLZ | BKPIMAGE_COMPRESS_LZ4 | BKPIMAGE_COMPRESS_ZSTD)) != 0;
+                    if ((blk.bimgInfo & BKPIMAGE_HAS_HOLE) != 0) {
+                        if (compressed) {
+                            blk.imageHoleLength = r.readUInt16();
+                            remaining -= 2;
+                        } else {
+                            blk.imageHoleLength = XLOG_BLCKSZ - imageBytes;
+                        }
                     }
                     datatotal += imageBytes;
                 }
