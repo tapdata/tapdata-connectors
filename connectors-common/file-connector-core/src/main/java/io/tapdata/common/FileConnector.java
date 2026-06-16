@@ -74,7 +74,9 @@ public abstract class FileConnector extends ConnectorBase {
             }
             fileRecordWriter.releaseResource();
         }
-        storage.destroy();
+        if (EmptyKit.isNotNull(storage)) {
+            storage.destroy();
+        }
     }
 
     protected ConcurrentMap<String, TapFile> getFilteredFiles() throws Exception {
