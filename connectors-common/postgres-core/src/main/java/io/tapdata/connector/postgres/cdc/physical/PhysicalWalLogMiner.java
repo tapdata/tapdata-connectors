@@ -71,9 +71,6 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
 
     private String slotName;
     private String startLsn;
-    /* Page-cache warm-up anchor pre-resolved at the mining start point and carried
-     * in the initial offset's second field; 0 when absent (resume / logical). */
-    private long providedAnchorLsn = 0L;
     private RelationCatalog catalog;
     private final Set<String> allowTables = new HashSet<>();
     private final Map<Long, List<NormalRedo>> pendingByXid = new HashMap<>();
@@ -124,13 +121,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     @Override
     public PhysicalWalLogMiner offset(Object offsetState) {
         if (offsetState instanceof String && EmptyKit.isNotBlank((String) offsetState)) {
-            String[] parts = ((String) offsetState).split(",");
-            this.startLsn = parts[0];
-            if (parts.length > 1 && EmptyKit.isNotBlank(parts[1])) {
-                // Second field is the warm-up anchor produced by seedStartOffset()
-                // at the true mining start point; reuse it instead of re-deriving.
-                this.providedAnchorLsn = lsnAsLong(parts[1]);
-            }
+            this.startLsn = ((String) offsetState).split(",")[0];
         }
         return this;
     }
@@ -144,14 +135,26 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         pageCache = walLevelLogical ? null : new PageStateCache(PAGE_CACHE_CAPACITY);
         decodeCtx = new HeapRmgrDecoder.Ctx(pageCache, walLevelLogical,
                 WAL_DEBUG_ENABLED ? (fmt, args) -> tapLogger.info(fmt, args) : null);
-        // Seed strategy. PageStateCache is seeded by each page's first
-        // post-checkpoint FPI, which unlocks UPDATE/DELETE before-image recovery
-        // under wal_level=replica. On a fresh start the find-or-checkpoint and the
-        // read anchor are resolved upstream in PostgresConnector.timestampToStreamOffset
-        // (the TRUE mining start point, ahead of the snapshot stage) and carried in
-        // the offset; here we just reuse that anchor. On a resume (offset carries no
-        // anchor) we re-derive it: prefer a look-back to an existing checkpoint redo,
-        // else force a CHECKPOINT on a primary / warn on a standby.
+        // Seed strategy (standby-friendly). PageStateCache is seeded by each
+        // page's first post-checkpoint FPI, which is what unlocks UPDATE/DELETE
+        // before-image recovery under wal_level=replica. We PREFER a look-back
+        // anchor: replay existing WAL from the redo pointer of the checkpoint
+        // already recorded in the control file, which replays every page's
+        // prior-cycle FPI into the cache without mutating the source and works on
+        // a hot standby. Only when no usable look-back anchor exists do we fall
+        // back to forcing a CHECKPOINT on a primary (so subsequent modifications
+        // carry fresh FPIs) or, on a standby, warning. No-op when bypass is in
+        // effect (logical already self-logs full tuples).
+        long preSeedLsn = 0L;
+        long priorRedoLsn = 0L;
+        boolean seedCheckpointed = false;
+        if (!walLevelLogical) {
+            // Look-back probe only (no source mutation): the redo pointer of the
+            // checkpoint already in the control file, plus the current WAL write
+            // position kept as a last-resort lower bound if we later have to force.
+            priorRedoLsn = queryCheckpointRedoLsn();
+            preSeedLsn = lsnAsLong(queryCurrentLsn());
+        }
         boolean freshStart = EmptyKit.isBlank(startLsn);
         if (freshStart) {
             startLsn = queryCurrentLsn();
@@ -165,27 +168,63 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // dropped at the commit gate in applyDecoded()).
         long readFromLsn = emitFromLsn;
         if (pageCache != null) {
-            long anchor;
-            String anchorSrc;
-            if (providedAnchorLsn > 0) {
-                // Anchor resolved at the true mining start point (timestampToStreamOffset):
-                // reuse it so the full-sync window is seeded from the right checkpoint
-                // redo instead of one that only appears after the snapshot completes.
-                anchor = providedAnchorLsn;
-                anchorSrc = "start-point checkpoint redo";
-                long restartLsn = querySlotRestartLsn();
-                if (restartLsn > 0 && anchor < restartLsn) {
-                    // WAL recycled since the start point: clamp so warming never
-                    // requests removed segments (pages re-seed at their next FPI).
-                    anchor = Math.min(restartLsn, emitFromLsn);
-                    anchorSrc = "slot restart_lsn (start-point redo recycled)";
+            long anchor = 0L;
+            String anchorSrc = null;
+            // (1) Prefer the LOOK-BACK anchor: the redo of the checkpoint already
+            // in the control file. Usable when it sits at/before the emit position
+            // so reading never skips a record we must still emit. It costs the
+            // source nothing, is the only option on a hot standby, and avoids the
+            // checkpoint-redo boundary race entirely — being strictly in the past,
+            // every hot page has been modified (and so written an FPI) after it.
+            if (priorRedoLsn > 0 && priorRedoLsn <= emitFromLsn) {
+                anchor = priorRedoLsn;
+                anchorSrc = "existing checkpoint redo";
+            }
+            // (2) No usable look-back anchor (redo unreadable, or a checkpoint fired
+            // while the task was down so the only redo sits past the emit position):
+            // fall back to forcing a fresh checkpoint. forceSeedCheckpoint() issues
+            // CHECKPOINT on a primary and only warns (returns false) on a standby,
+            // so this degrades to "warn" there. On a fresh start advance the emit
+            // position past the forced checkpoint so emitting begins right after its
+            // redo with no cold FPI-less window ahead of it; on a resume the emit
+            // position is fixed and the forced redo only helps the live tail. The
+            // forced redo seeds via newRedo; preSeedLsn (the position captured before
+            // forcing) is the last resort when pg_control_checkpoint() is not granted
+            // so neither redo is readable.
+            if (anchor <= 0) {
+                seedCheckpointed = forceSeedCheckpoint();
+                if (seedCheckpointed) {
+                    if (freshStart) {
+                        String afterLsn = queryCurrentLsn();
+                        long afterLong = lsnAsLong(afterLsn);
+                        if (afterLong > 0) {
+                            startLsn = afterLsn;
+                            emitFromLsn = afterLong;
+                            readFromLsn = afterLong;
+                        }
+                    }
+                    long newRedo = queryCheckpointRedoLsn();
+                    if (newRedo > 0 && newRedo <= emitFromLsn) {
+                        anchor = newRedo;
+                        anchorSrc = "forced checkpoint redo";
+                    } else if (preSeedLsn > 0 && preSeedLsn <= emitFromLsn) {
+                        anchor = preSeedLsn;
+                        anchorSrc = "pre-checkpoint position";
+                    }
                 }
-            } else {
-                // Resume: no upstream anchor, re-derive without moving the fixed emit
-                // position (look-back preferred, else force on primary / warn on standby).
-                SeedPlan plan = planSeed(emitFromLsn, false);
-                anchor = plan.anchorLsn;
-                anchorSrc = plan.anchorSrc;
+            }
+            // The chosen redo anchor can predate the WAL the slot still retains —
+            // a freshly (re)created slot, or aggressive recycling after a bulk load,
+            // leaves restart_lsn far ahead of the prior checkpoint redo. Reading from
+            // there fails the stream with "requested WAL segment ... has already been
+            // removed". Clamp to restart_lsn, the oldest LSN PostgreSQL guarantees
+            // readable for this slot, so warming never requests recycled segments;
+            // pages whose FPI predates restart_lsn simply seed once the stream crosses
+            // their next FPI (same cold-page ceiling as wal_level=replica in general).
+            long restartLsn = querySlotRestartLsn();
+            if (anchor > 0 && restartLsn > 0 && anchor < restartLsn) {
+                anchor = Math.min(restartLsn, emitFromLsn);
+                anchorSrc = "slot restart_lsn (prior redo recycled)";
             }
             if (anchor > 0 && anchor < readFromLsn) {
                 // Rewind reads to the cycle start so the cold cache warms with every
@@ -869,87 +908,6 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         PGProperty.PREFER_QUERY_MODE.set(props, "simple");
         return props;
     }
-
-    /* Resolve the CDC start offset and pre-seed the page cache at the TRUE mining
-     * start point. Called from PostgresConnector.timestampToStreamOffset BEFORE the
-     * snapshot stage so pages modified during the full-sync window are seedable: if
-     * the find-or-checkpoint ran only when the stream starts (after the snapshot)
-     * each page's first post-start FPI would already be in the past and every
-     * FPI-less UPDATE/DELETE on those pages would decode to null (lost data).
-     * Performs the standby-friendly find-or-checkpoint (look-back preferred, else
-     * force CHECKPOINT on a primary / warn on a standby) and returns
-     * "emitLsn,anchorLsn"; the anchor is dropped when none is usable (logical
-     * bypass, or a standby with no reachable redo). Requires only the jdbc context
-     * and a slot name (set via useSlot). */
-    public String seedStartOffset() {
-        boolean logical = queryWalLevelLogical();
-        long emit = lsnAsLong(queryCurrentLsn());
-        if (logical || emit <= 0) {
-            // wal_level=logical self-logs full tuples; no FPI seeding needed.
-            return emit > 0 ? lsnStr(emit) : queryCurrentLsn();
-        }
-        SeedPlan plan = planSeed(emit, true);
-        if (plan.anchorLsn > 0 && plan.anchorLsn < plan.emitLsn) {
-            tapLogger.info("Physical WAL miner pre-seeded at start point: warm the page cache from {} {} before emitting from {}",
-                    plan.anchorSrc, lsnStr(plan.anchorLsn), lsnStr(plan.emitLsn));
-            return lsnStr(plan.emitLsn) + "," + lsnStr(plan.anchorLsn);
-        }
-        return lsnStr(plan.emitLsn);
-    }
-
-    /* Find-or-make the checkpoint that seeds the page cache and pick the WAL read
-     * anchor for records emitted from emitLsn. Prefers a look-back to an existing
-     * checkpoint redo (no source mutation, works on a standby); otherwise forces a
-     * CHECKPOINT (primary only; forceSeedCheckpoint() warns + returns false on a
-     * standby). freshStart=true lets the emit position advance past a forced
-     * checkpoint so emitting begins right after its redo with no cold FPI-less
-     * window ahead of it. The anchor is clamped to the slot's restart_lsn so
-     * warming never requests recycled WAL segments. */
-    private SeedPlan planSeed(long emitLsn, boolean freshStart) {
-        long anchor = 0L;
-        String anchorSrc = null;
-        long priorRedoLsn = queryCheckpointRedoLsn();
-        long preSeedLsn = lsnAsLong(queryCurrentLsn());
-        if (priorRedoLsn > 0 && priorRedoLsn <= emitLsn) {
-            anchor = priorRedoLsn;
-            anchorSrc = "existing checkpoint redo";
-        } else if (forceSeedCheckpoint()) {
-            if (freshStart) {
-                long after = lsnAsLong(queryCurrentLsn());
-                if (after > 0) {
-                    emitLsn = after;
-                }
-            }
-            long newRedo = queryCheckpointRedoLsn();
-            if (newRedo > 0 && newRedo <= emitLsn) {
-                anchor = newRedo;
-                anchorSrc = "forced checkpoint redo";
-            } else if (preSeedLsn > 0 && preSeedLsn <= emitLsn) {
-                anchor = preSeedLsn;
-                anchorSrc = "pre-checkpoint position";
-            }
-        }
-        long restartLsn = querySlotRestartLsn();
-        if (anchor > 0 && restartLsn > 0 && anchor < restartLsn) {
-            anchor = Math.min(restartLsn, emitLsn);
-            anchorSrc = "slot restart_lsn (prior redo recycled)";
-        }
-        return new SeedPlan(emitLsn, anchor, anchorSrc);
-    }
-
-    /* Outcome of planSeed: the (possibly advanced) emit position, the WAL read
-     * anchor that warms the page cache (0 when none), and a label for logging. */
-    private static final class SeedPlan {
-        final long emitLsn;
-        final long anchorLsn;
-        final String anchorSrc;
-        SeedPlan(long emitLsn, long anchorLsn, String anchorSrc) {
-            this.emitLsn = emitLsn;
-            this.anchorLsn = anchorLsn;
-            this.anchorSrc = anchorSrc;
-        }
-    }
-
 
     private String queryCurrentLsn() {
         String[] lsn = {"0/0"};
