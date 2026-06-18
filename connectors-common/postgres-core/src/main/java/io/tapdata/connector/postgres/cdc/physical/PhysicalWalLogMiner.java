@@ -7,13 +7,20 @@ import io.tapdata.common.concurrent.exception.ConcurrentProcessorApplyException;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.cdc.AbstractWalLogMiner;
 import io.tapdata.connector.postgres.cdc.NormalRedo;
+import io.tapdata.entity.event.TapBaseEvent;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
+import io.tapdata.entity.event.ddl.entity.ValueChange;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldAttributesEvent;
+import io.tapdata.entity.event.ddl.table.TapAlterFieldNameEvent;
+import io.tapdata.entity.event.ddl.table.TapDropFieldEvent;
+import io.tapdata.entity.event.ddl.table.TapNewFieldEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
+import io.tapdata.entity.schema.TapField;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import org.postgresql.PGConnection;
@@ -25,10 +32,12 @@ import java.nio.ByteBuffer;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -73,6 +82,33 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private String startLsn;
     private RelationCatalog catalog;
     private final Set<String> allowTables = new HashSet<>();
+    /* DDL detection: maps each monitored relation's pg_class OID to its
+     * schema/table name, the on-disk relfilenode of pg_catalog.pg_attribute,
+     * and that catalog's column layout. A heap change on pg_attribute whose
+     * attrelid is a monitored OID signals a DDL on the source. Built once at
+     * startup; read only from the consumer thread thereafter. */
+    private final Map<Long, MonitoredTable> monitoredOidToName = new HashMap<>();
+    private long pgAttributeRelNode;
+    private RelationInfo pgAttributeRel;
+    private HeapRmgrDecoder.Ctx catalogDecodeCtx;
+    /* Page-state overlay for pg_attribute itself, so an FPI-less catalog UPDATE
+     * (DROP/RENAME/ALTER COLUMN under wal_level=replica) can still reconstruct
+     * its before/after tuple images from an earlier FPI on the same page.
+     * Separate from the user-table pageCache. Consumer-thread only. */
+    private PageStateCache catalogPageCache;
+    /* Last-known column layout per monitored OID (attnum -> column). Seeded from
+     * the live catalog at startup and advanced from each committed pg_attribute
+     * tuple; used as the before-image fallback when a catalog UPDATE delta does
+     * not carry the old tuple. Consumer-thread only. */
+    private final Map<Long, Map<Integer, ColSnap>> schemaSnapshots = new HashMap<>();
+    /* Resolved SQL type name cache keyed by "atttypid:atttypmod", filled lazily
+     * via format_type so each distinct column type is resolved once. */
+    private final Map<String, String> typeNameCache = new HashMap<>();
+    /* Decoded pg_attribute changes for monitored tables within an open
+     * transaction, buffered by top-level xid and turned into concrete field DDL
+     * on COMMIT (or discarded on ABORT), so DDL is emitted only for committed
+     * transactions and in stream order. Consumer-thread only. */
+    private final Map<Long, List<NormalRedo>> ddlRedosByXid = new HashMap<>();
     private final Map<Long, List<NormalRedo>> pendingByXid = new HashMap<>();
     private long pendingRedoCount;
     private long lastPendingWarnMs;
@@ -135,6 +171,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         pageCache = walLevelLogical ? null : new PageStateCache(PAGE_CACHE_CAPACITY);
         decodeCtx = new HeapRmgrDecoder.Ctx(pageCache, walLevelLogical,
                 WAL_DEBUG_ENABLED ? (fmt, args) -> tapLogger.info(fmt, args) : null);
+        buildDdlWatch();
         // Seed strategy (standby-friendly). PageStateCache is seeded by each
         // page's first post-checkpoint FPI, which is what unlocks UPDATE/DELETE
         // before-image recovery under wal_level=replica. We PREFER a look-back
@@ -622,11 +659,24 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * walminer's full-FPW replay. Index/system pages resolve to a null relation and
      * are skipped; RI-FULL and non-allowed relations don't use the cache. */
     private void seedFpisFromRecord(XLogRecord rec) {
-        if (pageCache == null || rec.blocks.isEmpty()) {
+        if ((pageCache == null && catalogPageCache == null) || rec.blocks.isEmpty()) {
             return;
         }
         for (XLogRecord.BlockRef b : rec.blocks) {
             if (!b.hasImage || b.image.length == 0) {
+                continue;
+            }
+            // pg_attribute pages resolve to no user relation; seed them into the
+            // dedicated catalog overlay so a later FPI-less catalog UPDATE can
+            // reconstruct its before/after tuple from this page image.
+            if (catalogPageCache != null && b.relNumber == pgAttributeRelNode) {
+                byte[] catPage = PageImageExtractor.reconstructPage(b);
+                if (catPage != null) {
+                    catalogPageCache.getOrCreate(b.relNumber, b.blockNumber).seedFromImage(catPage);
+                }
+                continue;
+            }
+            if (pageCache == null) {
                 continue;
             }
             RelationInfo rel = catalog.lookup(b.relNumber);
@@ -710,6 +760,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         pendingRedoCount += redos.size();
                         checkPendingPressure();
                     }
+                } else {
+                    detectCatalogDdl(d.rec, d.xid);
                 }
                 invalidateForMaintenance(d.rec);
                 break;
@@ -720,12 +772,18 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 break;
             case Decoded.COMMIT:
                 List<NormalRedo> redos = drainTransaction(d.xid, d.subxids);
-                // Always drain (frees the per-xid buffer and keeps the page cache
+                List<NormalRedo> ddlChanges = drainDdlRedos(d.xid, d.subxids);
+                // Always drain (frees the per-xid buffers and keeps the page cache
                 // in step), but suppress commits that landed before the emit
                 // position: their records only served to warm the cache and were
                 // already captured by the snapshot / a prior offset.
                 if (d.rec != null && d.rec.lsn < emitFromLsn) {
                     break;
+                }
+                // Emit field DDL before this commit's DML so a target applies the
+                // schema change before any row that depends on it.
+                if (!ddlChanges.isEmpty()) {
+                    emitDdlEvents(ddlChanges, d.commitMillis, batch);
                 }
                 if (!redos.isEmpty()) {
                     // Merge of top-level and subtransaction buckets; stable-sort by
@@ -758,6 +816,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 break;
             case Decoded.ABORT:
                 drainTransaction(d.xid, d.subxids);
+                drainDdlRedos(d.xid, d.subxids);
                 break;
             default:
                 break;
@@ -783,6 +842,26 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         pendingRedoCount -= all.size();
         if (pendingRedoCount < 0) {
             pendingRedoCount = 0;
+        }
+        return all;
+    }
+
+    /* Remove and return the buffered pg_attribute changes under a top-level xid
+     * (and any of its subtransactions). Mirrors drainTransaction so catalog DDL
+     * buffered under a savepoint flushes on the top-level COMMIT. */
+    private List<NormalRedo> drainDdlRedos(long topXid, long[] subxids) {
+        List<NormalRedo> all = new ArrayList<>();
+        List<NormalRedo> top = ddlRedosByXid.remove(topXid);
+        if (top != null) {
+            all.addAll(top);
+        }
+        if (subxids != null) {
+            for (long sub : subxids) {
+                List<NormalRedo> bucket = ddlRedosByXid.remove(sub);
+                if (bucket != null) {
+                    all.addAll(bucket);
+                }
+            }
         }
         return all;
     }
@@ -896,6 +975,424 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             }
         } else if (tableList != null) {
             allowTables.addAll(tableList);
+        }
+    }
+
+    /* Prepare the data needed to attribute pg_attribute catalog changes back to a
+     * monitored table: (1) the pg_class OID of every monitored relation, (2) the
+     * on-disk relfilenode of pg_catalog.pg_attribute (a mapped catalog whose
+     * pg_class.relfilenode is 0, so pg_relation_filenode() is used), and (3) that
+     * catalog's column layout for tuple deformation. Any failure degrades to "DDL
+     * detection disabled" (logged) rather than aborting the miner. */
+    private void buildDdlWatch() {
+        try {
+            postgresJdbcContext.query(
+                    "SELECT c.oid, n.nspname, c.relname FROM pg_class c "
+                            + "JOIN pg_namespace n ON c.relnamespace = n.oid "
+                            + "WHERE c.relkind IN ('r','m','p')",
+                    rs -> {
+                        while (rs.next()) {
+                            String schema = rs.getString("nspname");
+                            String table = rs.getString("relname");
+                            if (isMonitored(schema, table)) {
+                                monitoredOidToName.put(rs.getLong("oid"), new MonitoredTable(schema, table));
+                            }
+                        }
+                    });
+        } catch (Throwable e) {
+            tapLogger.warn("Physical WAL miner could not map monitored tables to OIDs; DDL detection on pg_attribute is disabled: {}", e.getMessage());
+            return;
+        }
+        try {
+            long[] node = {0L};
+            postgresJdbcContext.queryWithNext(
+                    "SELECT pg_relation_filenode('pg_catalog.pg_attribute'::regclass) AS f",
+                    rs -> node[0] = rs.getLong("f"));
+            pgAttributeRelNode = node[0];
+            List<ColumnInfo> columns = new ArrayList<>();
+            postgresJdbcContext.query(
+                    "SELECT attname, attnum, atttypid, attlen, attalign, attisdropped FROM pg_attribute "
+                            + "WHERE attrelid = 'pg_catalog.pg_attribute'::regclass AND attnum > 0 ORDER BY attnum",
+                    rs -> {
+                        while (rs.next()) {
+                            String align = rs.getString("attalign");
+                            columns.add(new ColumnInfo(
+                                    rs.getString("attname"),
+                                    rs.getInt("attnum"),
+                                    rs.getLong("atttypid"),
+                                    rs.getInt("attlen"),
+                                    align == null || align.isEmpty() ? 'c' : align.charAt(0),
+                                    rs.getBoolean("attisdropped")));
+                        }
+                    });
+            pgAttributeRel = new RelationInfo("pg_catalog", "pg_attribute", columns, Collections.emptyList(), false);
+        } catch (Throwable e) {
+            tapLogger.warn("Physical WAL miner could not resolve pg_attribute layout; DDL detection is disabled: {}", e.getMessage());
+            pgAttributeRel = null;
+            return;
+        }
+        // Give the catalog its own page overlay so FPI-less pg_attribute UPDATEs
+        // (DROP/RENAME/ALTER COLUMN) reconstruct their before/after tuple images
+        // from an earlier FPI on the same page, mirroring the user-table cache.
+        catalogPageCache = walLevelLogical ? null : new PageStateCache(PAGE_CACHE_CAPACITY);
+        catalogDecodeCtx = new HeapRmgrDecoder.Ctx(catalogPageCache, walLevelLogical,
+                WAL_DEBUG_ENABLED ? (fmt, args) -> tapLogger.info(fmt, args) : null);
+        // Baseline column layout for every monitored table; later pg_attribute
+        // changes are diffed against this to derive the concrete field DDL.
+        try {
+            schemaSnapshots.putAll(loadSchemas(monitoredOidToName.keySet()));
+        } catch (Throwable e) {
+            tapLogger.warn("Physical WAL miner could not load initial column snapshots; the first DDL diff may be incomplete: {}", e.getMessage());
+        }
+        tapLogger.info("Physical WAL miner DDL watch enabled: pg_attribute relfilenode={}, monitoring {} table OID(s)",
+                pgAttributeRelNode, monitoredOidToName.size());
+    }
+
+    private boolean isMonitored(String schema, String table) {
+        if (withSchema) {
+            return allowTables.contains(schema + "." + table);
+        }
+        return schema.equals(postgresConfig.getSchema()) && allowTables.contains(table);
+    }
+
+    /* Consumer-thread inspection of a heap record that did not resolve to a
+     * monitored user table: when it targets pg_catalog.pg_attribute and its
+     * attrelid is a monitored table's OID, the change is a catalog mutation that
+     * accompanies a DDL (ADD/DROP/ALTER COLUMN, DROP TABLE) on the source. The
+     * decoded pg_attribute tuple is buffered under the transaction's top-level
+     * xid and turned into concrete field DDL on COMMIT (drainDdlRedos +
+     * emitDdlEvents), so a DDL is emitted only once its transaction commits and
+     * in stream order. The decode always runs (even during the cache-warming
+     * prefix) so the catalog page overlay stays current; pre-emit commits drain
+     * and discard the buffer at the commit gate. */
+    private void detectCatalogDdl(XLogRecord rec, long xid) {
+        if (pgAttributeRel == null || pgAttributeRelNode <= 0) {
+            return;
+        }
+        XLogRecord.BlockRef b0 = rec.block(0);
+        if (b0 == null || b0.relNumber != pgAttributeRelNode) {
+            // A catalog heap record on some other table. Surface insert/multi-insert
+            // misses only under WAL debug so a relfilenode mismatch (e.g. pg_attribute
+            // rewritten) on an ADD COLUMN can be spotted without flooding the log.
+            if (WAL_DEBUG_ENABLED && b0 != null
+                    && (rec.heapOp() == XLOG_HEAP_INSERT || rec.heapOp() == XLOG_HEAP2_MULTI_INSERT)) {
+                tapLogger.info("[WAL-DEBUG] catalog heap op=0x{} on relNode={} (pg_attribute relNode={}) lsn={}",
+                        Integer.toHexString(rec.heapOp()), b0.relNumber, pgAttributeRelNode, lsnStr(rec.lsn));
+            }
+            return;
+        }
+        List<NormalRedo> redos;
+        try {
+            redos = HeapRmgrDecoder.decode(rec, pgAttributeRel, catalogDecodeCtx);
+        } catch (RuntimeException ex) {
+            tapLogger.warn("Physical WAL miner failed to decode a pg_attribute change at lsn={}: {}",
+                    lsnStr(rec.lsn), ex.getMessage());
+            return;
+        }
+        // pg_attribute is written only by DDL, so an always-on summary here is rare
+        // and makes a missed ADD/DROP/ALTER COLUMN diagnosable from the log alone.
+        tapLogger.info("Physical WAL miner pg_attribute change: rmid={} op=0x{} lsn={} decodedRows={}",
+                rec.rmid, Integer.toHexString(rec.heapOp()), lsnStr(rec.lsn), redos.size());
+        for (NormalRedo r : redos) {
+            Long attrelid = readAttrelid(r);
+            boolean monitored = attrelid != null && monitoredOidToName.containsKey(attrelid);
+            Integer attnum = readInt(r.getRedoRecord(), "attnum");
+            if (attnum == null) {
+                attnum = readInt(r.getUndoRecord(), "attnum");
+            }
+            String attname = readStr(r.getRedoRecord(), "attname");
+            if (attname == null) {
+                attname = readStr(r.getUndoRecord(), "attname");
+            }
+            tapLogger.info("Physical WAL miner pg_attribute row: op={} attrelid={} attnum={} attname={} monitored={}",
+                    r.getOperation(), attrelid, attnum, attname, monitored);
+            if (monitored) {
+                ddlRedosByXid.computeIfAbsent(xid, k -> new ArrayList<>()).add(r);
+            }
+        }
+    }
+
+    /* attrelid is pg_attribute's first column (the owning relation's OID), decoded
+     * by PgTypeDecoder as a Long. Prefer the after-image; fall back to the
+     * before-image for deletes. */
+    private static Long readAttrelid(NormalRedo r) {
+        Long v = readLong(r.getRedoRecord(), "attrelid");
+        return v != null ? v : readLong(r.getUndoRecord(), "attrelid");
+    }
+
+    /* Turn each buffered pg_attribute change of a committed transaction into a
+     * concrete field DDL, in stream order. The operation drives the kind of DDL:
+     * INSERT is an added column; UPDATE is a drop (attisdropped), rename, type or
+     * nullability change inferred by diffing the tuple's before/after images
+     * (with the snapshot as the before-image fallback); DELETE is the per-column
+     * removal of a dropped table. The snapshot is advanced after each change so
+     * sequential edits to the same column within the transaction classify. */
+    private void emitDdlEvents(List<NormalRedo> changes, long commitMillis, List<TapEvent> batch) {
+        changes.sort(Comparator.comparingLong(PhysicalWalLogMiner::redoLsn));
+        for (NormalRedo r : changes) {
+            Long oid = readAttrelid(r);
+            if (oid == null) {
+                continue;
+            }
+            MonitoredTable t = monitoredOidToName.get(oid);
+            if (t == null) {
+                continue;
+            }
+            Map<Integer, ColSnap> snap = schemaSnapshots.computeIfAbsent(oid, k -> new LinkedHashMap<>());
+            String op = r.getOperation();
+            if (NormalRedo.OperationEnum.INSERT.name().equals(op)) {
+                emitInsert(r.getRedoRecord(), snap, t, commitMillis, batch);
+            } else if (NormalRedo.OperationEnum.UPDATE.name().equals(op)) {
+                emitUpdate(r.getUndoRecord(), r.getRedoRecord(), snap, t, commitMillis, batch);
+            } else if (NormalRedo.OperationEnum.DELETE.name().equals(op)) {
+                Integer attnum = readInt(r.getUndoRecord(), "attnum");
+                if (attnum != null) {
+                    snap.remove(attnum);   // DROP TABLE removes every pg_attribute row
+                }
+            }
+        }
+    }
+
+    /* INSERT on pg_attribute == ADD COLUMN: read the new column's metadata
+     * straight from the inserted tuple, emit TapNewFieldEvent and record it in
+     * the snapshot. System columns (attnum <= 0) are skipped. */
+    private void emitInsert(Map<String, Object> after, Map<Integer, ColSnap> snap,
+                            MonitoredTable t, long commitMillis, List<TapEvent> batch) {
+        Integer attnum = readInt(after, "attnum");
+        if (attnum == null || attnum <= 0) {
+            return;
+        }
+        String name = readStr(after, "attname");
+        if (name == null) {
+            return;
+        }
+        boolean dropped = Boolean.TRUE.equals(readBool(after, "attisdropped"));
+        boolean notNull = Boolean.TRUE.equals(readBool(after, "attnotnull"));
+        String type = resolveType(readLong(after, "atttypid"), readInt(after, "atttypmod"));
+        if (!dropped) {
+            batch.add(stamp(new TapNewFieldEvent().field(new TapField(name, type).nullable(!notNull)), t, commitMillis));
+            tapLogger.info("Physical WAL miner synthesized ADD COLUMN {} {} on {}.{} from a pg_attribute insert.",
+                    name, type, t.schema, t.table);
+        }
+        snap.put(attnum, new ColSnap(name, type, notNull, dropped));
+    }
+
+    /* UPDATE on pg_attribute: classify the change by diffing the after-image
+     * against the before-image (the WAL old tuple when present, otherwise the
+     * snapshot). attisdropped flipping true is a DROP COLUMN; attname change is a
+     * rename; atttypid/atttypmod or attnotnull change is an attribute change. An
+     * absent after-image (unrecoverable replica delta) is logged and skipped. */
+    private void emitUpdate(Map<String, Object> before, Map<String, Object> after,
+                            Map<Integer, ColSnap> snap, MonitoredTable t, long commitMillis, List<TapEvent> batch) {
+        Integer attnum = readInt(after, "attnum");
+        if (attnum == null) {
+            attnum = readInt(before, "attnum");
+        }
+        if (attnum == null || attnum <= 0) {
+            return;
+        }
+        if (after == null || after.get("attname") == null) {
+            tapLogger.warn("Physical WAL miner could not decode a pg_attribute update for {}.{} (attnum={}); "
+                    + "the after-image is unavailable under wal_level=replica. Set REPLICA IDENTITY FULL or use "
+                    + "wal_level=logical for reliable ALTER/DROP/RENAME COLUMN capture.", t.schema, t.table, attnum);
+            return;
+        }
+        ColSnap old = snap.get(attnum);
+        String afterName = readStr(after, "attname");
+        String afterType = resolveType(readLong(after, "atttypid"), readInt(after, "atttypmod"));
+        boolean afterNotNull = Boolean.TRUE.equals(readBool(after, "attnotnull"));
+        boolean afterDropped = Boolean.TRUE.equals(readBool(after, "attisdropped"));
+        // Before-image: prefer the WAL old tuple, fall back to the snapshot.
+        String beforeName = before != null && before.get("attname") != null ? readStr(before, "attname")
+                : (old != null ? old.name : null);
+        String beforeType = before != null && before.get("atttypid") != null
+                ? resolveType(readLong(before, "atttypid"), readInt(before, "atttypmod"))
+                : (old != null ? old.dataType : null);
+        Boolean beforeNotNull = before != null && before.get("attnotnull") != null ? readBool(before, "attnotnull")
+                : (old != null ? old.notNull : null);
+        boolean beforeDropped = before != null && before.get("attisdropped") != null
+                ? Boolean.TRUE.equals(readBool(before, "attisdropped"))
+                : (old != null && old.dropped);
+
+        if (afterDropped && !beforeDropped) {
+            String fname = beforeName != null ? beforeName : afterName;
+            batch.add(stamp(new TapDropFieldEvent().fieldName(fname), t, commitMillis));
+            tapLogger.info("Physical WAL miner synthesized DROP COLUMN {} on {}.{} from a pg_attribute update.",
+                    fname, t.schema, t.table);
+        } else if (!afterDropped) {
+            if (beforeName != null && !beforeName.equals(afterName)) {
+                batch.add(stamp(new TapAlterFieldNameEvent().nameChange(ValueChange.create(beforeName, afterName)), t, commitMillis));
+                tapLogger.info("Physical WAL miner synthesized RENAME COLUMN {} -> {} on {}.{} from a pg_attribute update.",
+                        beforeName, afterName, t.schema, t.table);
+            }
+            boolean typeChanged = afterType != null && beforeType != null && !beforeType.equals(afterType);
+            boolean nullChanged = beforeNotNull != null && beforeNotNull != afterNotNull;
+            if (typeChanged || nullChanged) {
+                TapAlterFieldAttributesEvent ev = new TapAlterFieldAttributesEvent().fieldName(afterName);
+                if (typeChanged) {
+                    ev.dataType(ValueChange.create(beforeType, afterType));
+                }
+                if (nullChanged) {
+                    ev.nullable(ValueChange.create(!beforeNotNull, !afterNotNull));
+                }
+                batch.add(stamp(ev, t, commitMillis));
+                tapLogger.info("Physical WAL miner synthesized ALTER COLUMN {} on {}.{} (typeChanged={}, nullChanged={}) from a pg_attribute update.",
+                        afterName, t.schema, t.table, typeChanged, nullChanged);
+            }
+        }
+        snap.put(attnum, new ColSnap(afterName, afterType != null ? afterType : beforeType, afterNotNull, afterDropped));
+    }
+
+    /* Resolve atttypid + atttypmod to the SQL type name format_type reports
+     * (e.g. "character varying(50)"), caching each (typid, typmod) so the lookup
+     * runs once. Returns null when the type cannot be resolved. */
+    private String resolveType(Long typid, Integer typmod) {
+        if (typid == null) {
+            return null;
+        }
+        int mod = typmod == null ? -1 : typmod;
+        String key = typid + ":" + mod;
+        String cached = typeNameCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        String[] out = {null};
+        try {
+            postgresJdbcContext.queryWithNext(
+                    "SELECT format_type(" + typid + ", " + mod + ") AS t",
+                    rs -> out[0] = rs.getString("t"));
+        } catch (Throwable e) {
+            return null;
+        }
+        if (out[0] != null) {
+            typeNameCache.put(key, out[0]);
+        }
+        return out[0];
+    }
+
+    private static Integer readInt(Map<String, Object> m, String key) {
+        Object v = m == null ? null : m.get(key);
+        if (v instanceof Number) {
+            return ((Number) v).intValue();
+        }
+        if (v == null) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(v.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Long readLong(Map<String, Object> m, String key) {
+        Object v = m == null ? null : m.get(key);
+        if (v instanceof Number) {
+            return ((Number) v).longValue();
+        }
+        if (v == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(v.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Boolean readBool(Map<String, Object> m, String key) {
+        Object v = m == null ? null : m.get(key);
+        if (v instanceof Boolean) {
+            return (Boolean) v;
+        }
+        if (v instanceof Number) {
+            return ((Number) v).intValue() != 0;
+        }
+        if (v == null) {
+            return null;
+        }
+        return Boolean.parseBoolean(v.toString());
+    }
+
+    private static String readStr(Map<String, Object> m, String key) {
+        Object v = m == null ? null : m.get(key);
+        return v == null ? null : v.toString();
+    }
+
+    /* Stamp a freshly built field DDL event with the target table identity and the
+     * source commit time, mirroring how toEvent() tags DML so DDL and DML for the
+     * same table line up downstream. */
+    private <T extends TapBaseEvent> T stamp(T ev, MonitoredTable t, long commitMillis) {
+        ev.setTableId(t.table);
+        ev.setTime(System.currentTimeMillis());
+        ev.setReferenceTime(commitMillis);
+        if (withSchema) {
+            ev.setNamespaces(Lists.newArrayList(t.schema, t.table));
+        }
+        return ev;
+    }
+
+    /* Load the live column layout (attnum -> ColSnap, in physical order, including
+     * dropped tombstones) for a set of relation OIDs in a single pg_attribute
+     * query. format_type renders the SQL type with its modifier so type changes
+     * diff on the same string the catalog reports. */
+    private Map<Long, Map<Integer, ColSnap>> loadSchemas(Collection<Long> oids) throws java.sql.SQLException {
+        Map<Long, Map<Integer, ColSnap>> result = new HashMap<>();
+        if (oids == null || oids.isEmpty()) {
+            return result;
+        }
+        StringBuilder in = new StringBuilder();
+        for (Long oid : oids) {
+            if (in.length() > 0) {
+                in.append(',');
+            }
+            in.append(oid);
+        }
+        postgresJdbcContext.query(
+                "SELECT attrelid, attnum, attname, attnotnull, attisdropped, "
+                        + "format_type(atttypid, atttypmod) AS data_type FROM pg_attribute "
+                        + "WHERE attnum > 0 AND attrelid IN (" + in + ") ORDER BY attrelid, attnum",
+                rs -> {
+                    while (rs.next()) {
+                        long oid = rs.getLong("attrelid");
+                        result.computeIfAbsent(oid, k -> new LinkedHashMap<>())
+                                .put(rs.getInt("attnum"), new ColSnap(
+                                        rs.getString("attname"),
+                                        rs.getString("data_type"),
+                                        rs.getBoolean("attnotnull"),
+                                        rs.getBoolean("attisdropped")));
+                    }
+                });
+        return result;
+    }
+
+    /* Schema/table name a monitored OID resolves to, used to tag synthesized DDL. */
+    private static final class MonitoredTable {
+        final String schema;
+        final String table;
+        MonitoredTable(String schema, String table) {
+            this.schema = schema;
+            this.table = table;
+        }
+        @Override
+        public String toString() {
+            return schema + "." + table;
+        }
+    }
+
+    /* Minimal column attributes needed to diff two layouts into field DDL: the
+     * name, the format_type-rendered SQL type, the NOT NULL flag, and whether the
+     * column is a dropped tombstone (attisdropped). */
+    private static final class ColSnap {
+        final String name;
+        final String dataType;
+        final boolean notNull;
+        final boolean dropped;
+        ColSnap(String name, String dataType, boolean notNull, boolean dropped) {
+            this.name = name;
+            this.dataType = dataType;
+            this.notNull = notNull;
+            this.dropped = dropped;
         }
     }
 

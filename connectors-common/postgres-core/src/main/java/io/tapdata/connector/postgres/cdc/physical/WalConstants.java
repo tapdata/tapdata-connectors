@@ -68,7 +68,7 @@ public final class WalConstants {
     /* ---- resource managers we care about ---- */
     public static final int RM_XLOG_ID = 0;
     public static final int RM_TRANSACTION_ID = 1;
-    public static final int RM_HEAP2_ID = 11;
+    public static final int RM_HEAP2_ID = 9;
     public static final int RM_HEAP_ID = 10;
 
     /* ---- heap opcodes (xl_info & XLOG_HEAP_OPMASK) ---- */

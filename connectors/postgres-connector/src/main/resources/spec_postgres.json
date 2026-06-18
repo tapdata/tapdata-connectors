@@ -8,6 +8,11 @@
     "tags": ["Database", "ssl", "doubleActive", "disableForeignKey","NullsLast"]
   },
   "configOptions": {
+    "supportDDL": {
+      "events": [
+        "new_field_event", "alter_field_name_event", "alter_field_attributes_event", "drop_field_event"
+      ]
+    },
     "capabilities":[
       {
         "id": "dml_insert_policy",

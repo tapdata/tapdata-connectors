@@ -33,6 +33,16 @@ public class PgTypeDecoderTest {
     }
 
     @Test
+    public void testNamePadStripped() {
+        // "name" is a fixed NAMEDATALEN buffer: the value is NUL-terminated and
+        // padded with NULs, which must not leak into the decoded string.
+        byte[] buf = new byte[64];
+        byte[] name = "id".getBytes(StandardCharsets.UTF_8);
+        System.arraycopy(name, 0, buf, 0, name.length);
+        assertEquals("id", PgTypeDecoder.decode(PgTypeDecoder.NAME, buf));
+    }
+
+    @Test
     public void testDate() {
         // 2000-01-02 -> 1 day after PG epoch
         assertEquals(LocalDate.of(2000, 1, 2), PgTypeDecoder.decode(PgTypeDecoder.DATE, le32(1)));

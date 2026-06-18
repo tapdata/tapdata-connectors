@@ -74,6 +74,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static io.tapdata.pdk.apis.entity.ConnectionOptions.*;
+import static io.tapdata.pdk.apis.entity.ConnectionOptions.DDL_DROP_FIELD_EVENT;
+
 /**
  * PDK for Postgresql
  *
@@ -118,6 +121,12 @@ public class PostgresConnector extends CommonDbConnector {
                     , postgresConfig.getLogPluginName()
             )));
             connectionOptions.setNamespaces(Collections.singletonList(postgresConfig.getSchema()));
+            List<Capability> ddlCapabilities = Arrays.asList(
+                    Capability.create(DDL_NEW_FIELD_EVENT).type(Capability.TYPE_DDL),
+                    Capability.create(DDL_ALTER_FIELD_NAME_EVENT).type(Capability.TYPE_DDL),
+                    Capability.create(DDL_ALTER_FIELD_ATTRIBUTES_EVENT).type(Capability.TYPE_DDL),
+                    Capability.create(DDL_DROP_FIELD_EVENT).type(Capability.TYPE_DDL));
+            ddlCapabilities.forEach(connectionOptions::capability);
             return connectionOptions;
         }
     }

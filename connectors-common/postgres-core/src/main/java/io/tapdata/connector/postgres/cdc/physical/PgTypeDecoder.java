@@ -64,11 +64,26 @@ public final class PgTypeDecoder {
             return decodeUuid(v);
         } else if (oid == BYTEA) {
             return v;
-        } else if (oid == CHAR || oid == NAME || oid == TEXT || oid == VARCHAR || oid == BPCHAR
+        } else if (oid == NAME) {
+            // "name" is a fixed NAMEDATALEN (64-byte) buffer holding a
+            // null-terminated string; the bytes past the terminator are NUL
+            // padding and must be dropped (otherwise field names carry \u0000).
+            return cString(v);
+        } else if (oid == CHAR || oid == TEXT || oid == VARCHAR || oid == BPCHAR
                 || oid == JSON || oid == JSONB || oid == XML) {
             return jsonbStrip(oid, new String(v, StandardCharsets.UTF_8));
         }
         return new String(v, StandardCharsets.UTF_8);
+    }
+
+    /* Decode a NUL-terminated string out of a fixed-width buffer (PostgreSQL
+     * "name"): stop at the first NUL so the trailing pad bytes are excluded. */
+    private static String cString(byte[] v) {
+        int len = 0;
+        while (len < v.length && v[len] != 0) {
+            len++;
+        }
+        return new String(v, 0, len, StandardCharsets.UTF_8);
     }
 
     private static Object jsonbStrip(long oid, String s) {
