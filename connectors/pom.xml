@@ -56,6 +56,7 @@
 		<module>aliyun-rds-mariadb-connector</module>
 		<module>databend-connector</module>
 		<module>hazelcast-connector</module>
+		<module>hbase-connector</module>
 		<module>opengauss-connector</module>
 		<module>http-receiver-connector</module>
 		<module>yashandb-connector</module>

@@ -1,0 +1,148 @@
+{
+    "properties": {
+        "name": "HBase",
+        "realName": "HBase",
+        "icon": "icons/hbase.png",
+        "doc": "${doc}",
+        "id": "hbase",
+        "tags": ["Database", "NoSQL", "BigData"]
+    },
+    "configOptions": {
+        "connection": {
+            "type": "object",
+            "properties": {
+                "zookeeperQuorum": {
+                    "required": true,
+                    "type": "string",
+                    "title": "${zookeeperQuorum}",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "apiServerKey": "database_host",
+                    "x-index": 1
+                },
+                "zookeeperParent": {
+                    "required": false,
+                    "type": "string",
+                    "title": "${zookeeperParent}",
+                    "default": "/hbase",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-index": 2
+                },
+                "user": {
+                    "required": false,
+                    "type": "string",
+                    "title": "${user}",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-index": 3
+                },
+                "password": {
+                    "required": false,
+                    "type": "string",
+                    "title": "${password}",
+                    "x-decorator": "FormItem",
+                    "x-component": "Password",
+                    "apiServerKey": "database_password",
+                    "x-index": 4
+                }
+            }
+        },
+        "node": {
+            "type": "object",
+            "properties": {
+                "scanCaching": {
+                    "required": false,
+                    "type": "string",
+                    "title": "${scanCaching}",
+                    "default": 100,
+                    "x-decorator": "FormItem",
+                    "x-component": "InputNumber",
+                    "x-index": 1
+                },
+                "scanBatch": {
+                    "required": false,
+                    "type": "string",
+                    "title": "${scanBatch}",
+                    "default": 100,
+                    "x-decorator": "FormItem",
+                    "x-component": "InputNumber",
+                    "x-index": 2
+                },
+                "writeBatchSize": {
+                    "required": false,
+                    "type": "string",
+                    "title": "${writeBatchSize}",
+                    "default": 1000,
+                    "x-decorator": "FormItem",
+                    "x-component": "InputNumber",
+                    "x-index": 3
+                }
+            }
+        },
+        "capabilities": [
+            {
+                "id": "dynamic_schema"
+            }
+        ]
+    },
+    "messages": {
+        "default": "en_US",
+        "en_US": {
+            "doc": "HBase is a distributed, scalable, big data store. Use this connector to integrate HBase tables with Tapdata.",
+            "zookeeperQuorum": "ZooKeeper Quorum",
+            "zookeeperParent": "ZooKeeper ZNode Parent",
+            "user": "Username",
+            "password": "Password",
+            "scanCaching": "Scan Caching",
+            "scanBatch": "Scan Batch",
+            "writeBatchSize": "Write Batch Size"
+        },
+        "zh_CN": {
+            "doc": "HBase 是一个分布式、可扩展的大数据存储。使用此连接器将 HBase 表与 Tapdata 集成。",
+            "zookeeperQuorum": "ZooKeeper 集群地址",
+            "zookeeperParent": "ZooKeeper ZNode 父路径",
+            "user": "用户名",
+            "password": "密码",
+            "scanCaching": "扫描缓存行数",
+            "scanBatch": "扫描批次列数",
+            "writeBatchSize": "写入批次大小"
+        },
+        "zh_TW": {
+            "doc": "HBase 是一個分佈式、可擴展的大數據存儲。使用此連接器將 HBase 表與 Tapdata 集成。",
+            "zookeeperQuorum": "ZooKeeper 集群地址",
+            "zookeeperParent": "ZooKeeper ZNode 父路徑",
+            "user": "使用者名稱",
+            "password": "密碼",
+            "scanCaching": "掃描快取行數",
+            "scanBatch": "掃描批次列數",
+            "writeBatchSize": "寫入批次大小"
+        }
+    },
+    "dataTypes": {
+        "string": {
+            "to": "TapString"
+        },
+        "binary": {
+            "to": "TapBinary",
+            "queryOnly": true
+        },
+        "int": {
+            "bit": 64,
+            "to": "TapNumber"
+        },
+        "long": {
+            "bit": 64,
+            "to": "TapNumber"
+        },
+        "double": {
+            "to": "TapNumber"
+        },
+        "float": {
+            "to": "TapNumber"
+        },
+        "boolean": {
+            "to": "TapBoolean"
+        }
+    }
+}
