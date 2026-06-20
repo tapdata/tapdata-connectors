@@ -1,6 +1,10 @@
 package io.tapdata.connector.hbase;
 
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.entity.TestItem;
+
+import java.net.InetSocketAddress;
+import java.net.Socket;
 
 import static io.tapdata.base.ConnectorBase.testItem;
 
@@ -32,11 +36,8 @@ public class HbaseTest {
                                 "Invalid port in ZooKeeper quorum: " + parts[1]);
                     }
                 }
-                java.net.Socket socket = new java.net.Socket();
-                try {
-                    socket.connect(new java.net.InetSocketAddress(host, port), 5000);
-                } finally {
-                    socket.close();
+                try (Socket socket = new Socket()) {
+                    socket.connect(new InetSocketAddress(host, port), 5000);
                 }
             }
         } catch (Exception e) {
@@ -48,15 +49,11 @@ public class HbaseTest {
     public TestItem testConnect() {
         try {
             hbaseContext = new HbaseContext(hbaseConfig);
-            hbaseContext.getAdmin().listTableNames();
+            hbaseContext.getConnection().getAdmin().listTableNames();
             return testItem(TestItem.ITEM_LOGIN, TestItem.RESULT_SUCCESSFULLY);
         } catch (Exception e) {
             return testItem(TestItem.ITEM_LOGIN, TestItem.RESULT_FAILED, e.getMessage());
         }
-    }
-
-    public HbaseContext getHbaseContext() {
-        return hbaseContext;
     }
 
     public void close() {

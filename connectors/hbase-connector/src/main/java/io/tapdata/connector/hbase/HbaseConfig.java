@@ -13,6 +13,7 @@ public class HbaseConfig {
     private String zookeeperParent = "/hbase";
     private String user;
     private String password;
+    private String columnFamily = "cf";
     private int scanCaching = 100;
     private int scanBatch = 100;
     private int writeBatchSize = 1000;
@@ -20,6 +21,25 @@ public class HbaseConfig {
     public HbaseConfig load(Map<String, Object> map) {
         beanUtils.mapToBean(map, this);
         return this;
+    }
+
+    /**
+     * Validate required configuration parameters. Call after load() to fail fast
+     * with a clear error message rather than failing later with obscure HBase errors.
+     */
+    public void validate() {
+        if (zookeeperQuorum == null || zookeeperQuorum.trim().isEmpty()) {
+            throw new IllegalArgumentException("ZooKeeper quorum cannot be empty");
+        }
+        if (scanCaching <= 0) {
+            throw new IllegalArgumentException("scanCaching must be positive, got: " + scanCaching);
+        }
+        if (scanBatch <= 0) {
+            throw new IllegalArgumentException("scanBatch must be positive, got: " + scanBatch);
+        }
+        if (writeBatchSize <= 0) {
+            throw new IllegalArgumentException("writeBatchSize must be positive, got: " + writeBatchSize);
+        }
     }
 
     public String getZookeeperQuorum() {
@@ -52,6 +72,14 @@ public class HbaseConfig {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public String getColumnFamily() {
+        return columnFamily;
+    }
+
+    public void setColumnFamily(String columnFamily) {
+        this.columnFamily = columnFamily;
     }
 
     public int getScanCaching() {

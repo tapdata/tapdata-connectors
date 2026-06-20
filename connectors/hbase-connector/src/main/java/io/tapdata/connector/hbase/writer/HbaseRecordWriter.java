@@ -6,23 +6,25 @@ import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
-import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.entity.WriteListResult;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.Row;
 import org.apache.hadoop.hbase.client.Table;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
 public class HbaseRecordWriter {
 
+    private static final Logger logger = LoggerFactory.getLogger(HbaseRecordWriter.class);
     private static final String ROW_KEY_FIELD = "row_key";
 
     private final HbaseContext context;
@@ -38,23 +40,62 @@ public class HbaseRecordWriter {
         WriteListResult<TapRecordEvent> listResult = new WriteListResult<>();
         long insertCount = 0, updateCount = 0, deleteCount = 0;
 
-        List<String> columnFamilyNames = getColumnFamilyNames(table);
+        String columnFamily = config.getColumnFamily();
+        byte[] cfBytes = Bytes.toBytes(columnFamily);
+
+        // Parallel lists: batch.get(i) is the Row for batchEvents.get(i)
+        List<Row> batch = new ArrayList<>();
+        List<TapRecordEvent> batchEvents = new ArrayList<>();
 
         try (Table hTable = context.getConnection().getTable(TableName.valueOf(table.getId()))) {
             for (TapRecordEvent event : events) {
                 try {
                     if (event instanceof TapInsertRecordEvent) {
-                        processInsert((TapInsertRecordEvent) event, hTable, columnFamilyNames);
-                        insertCount++;
+                        Put put = buildPut(cfBytes, ((TapInsertRecordEvent) event).getAfter());
+                        if (put != null) {
+                            batch.add(put);
+                            batchEvents.add(event);
+                        }
                     } else if (event instanceof TapUpdateRecordEvent) {
-                        processUpdate((TapUpdateRecordEvent) event, hTable, columnFamilyNames);
-                        updateCount++;
+                        Put put = buildPut(cfBytes, ((TapUpdateRecordEvent) event).getAfter());
+                        if (put != null) {
+                            batch.add(put);
+                            batchEvents.add(event);
+                        }
                     } else if (event instanceof TapDeleteRecordEvent) {
-                        processDelete((TapDeleteRecordEvent) event, hTable);
-                        deleteCount++;
+                        String rowKey = extractRowKey(((TapDeleteRecordEvent) event).getBefore());
+                        if (rowKey != null) {
+                            batch.add(new Delete(Bytes.toBytes(rowKey)));
+                            batchEvents.add(event);
+                        } else {
+                            logger.warn("Skipping delete event with missing row_key");
+                        }
                     }
                 } catch (Exception e) {
                     listResult.addError(event, e);
+                }
+
+                if (batch.size() >= config.getWriteBatchSize()) {
+                    BatchResult br = flushBatch(hTable, batch, batchEvents);
+                    insertCount += br.inserted;
+                    updateCount += br.updated;
+                    deleteCount += br.deleted;
+                    for (int i = 0; i < br.errors.size(); i++) {
+                        listResult.addError(br.errors.get(i), br.errorCauses.get(i));
+                    }
+                    batch.clear();
+                    batchEvents.clear();
+                }
+            }
+
+            // Flush remaining
+            if (!batch.isEmpty()) {
+                BatchResult br = flushBatch(hTable, batch, batchEvents);
+                insertCount += br.inserted;
+                updateCount += br.updated;
+                deleteCount += br.deleted;
+                for (int i = 0; i < br.errors.size(); i++) {
+                    listResult.addError(br.errors.get(i), br.errorCauses.get(i));
                 }
             }
         }
@@ -65,100 +106,103 @@ public class HbaseRecordWriter {
         consumer.accept(listResult);
     }
 
-    private void processInsert(TapInsertRecordEvent event, Table hTable, List<String> columnFamilyNames) throws Exception {
-        Map<String, Object> after = event.getAfter();
-        if (after == null) {
-            return;
+    /**
+     * Build a Put for the given row data. All non-row-key fields are stored as qualifiers
+     * within the configured column family. Null values are skipped (no qualifier written)
+     * to avoid incorrectly overwriting existing data with empty strings.
+     */
+    private Put buildPut(byte[] cfBytes, Map<String, Object> data) {
+        if (data == null) {
+            return null;
         }
-        String rowKey = String.valueOf(after.get(ROW_KEY_FIELD));
-        if (rowKey == null || "null".equals(rowKey)) {
-            return;
-        }
-
-        Put put = new Put(Bytes.toBytes(rowKey));
-        for (String cf : columnFamilyNames) {
-            Object cfValue = after.get(cf);
-            if (cfValue instanceof Map) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> qualifiers = (Map<String, Object>) cfValue;
-                for (Map.Entry<String, Object> entry : qualifiers.entrySet()) {
-                    String value = entry.getValue() != null ? entry.getValue().toString() : "";
-                    put.addColumn(
-                            Bytes.toBytes(cf),
-                            Bytes.toBytes(entry.getKey()),
-                            Bytes.toBytes(value)
-                    );
-                }
-            } else if (cfValue != null) {
-                put.addColumn(
-                        Bytes.toBytes(cf),
-                        Bytes.toBytes("value"),
-                        Bytes.toBytes(cfValue.toString())
-                );
-            }
-        }
-        hTable.put(put);
-    }
-
-    private void processUpdate(TapUpdateRecordEvent event, Table hTable, List<String> columnFamilyNames) throws Exception {
-        // HBase Put acts as upsert, so update is the same as insert
-        Map<String, Object> after = event.getAfter();
-        if (after == null) {
-            return;
-        }
-        String rowKey = String.valueOf(after.get(ROW_KEY_FIELD));
-        if (rowKey == null || "null".equals(rowKey)) {
-            return;
+        String rowKey = extractRowKey(data);
+        if (rowKey == null) {
+            logger.warn("Skipping insert/update event with missing row_key");
+            return null;
         }
 
         Put put = new Put(Bytes.toBytes(rowKey));
-        for (String cf : columnFamilyNames) {
-            Object cfValue = after.get(cf);
-            if (cfValue instanceof Map) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> qualifiers = (Map<String, Object>) cfValue;
-                for (Map.Entry<String, Object> entry : qualifiers.entrySet()) {
-                    String value = entry.getValue() != null ? entry.getValue().toString() : "";
-                    put.addColumn(
-                            Bytes.toBytes(cf),
-                            Bytes.toBytes(entry.getKey()),
-                            Bytes.toBytes(value)
-                    );
-                }
-            } else if (cfValue != null) {
-                put.addColumn(
-                        Bytes.toBytes(cf),
-                        Bytes.toBytes("value"),
-                        Bytes.toBytes(cfValue.toString())
-                );
+        for (Map.Entry<String, Object> entry : data.entrySet()) {
+            String fieldName = entry.getKey();
+            if (ROW_KEY_FIELD.equals(fieldName)) {
+                continue;
             }
+            if (entry.getValue() == null) {
+                continue; // Skip null values — don't overwrite existing data with empty string
+            }
+            put.addColumn(cfBytes, Bytes.toBytes(fieldName), Bytes.toBytes(entry.getValue().toString()));
         }
-        hTable.put(put);
+        return put;
     }
 
-    private void processDelete(TapDeleteRecordEvent event, Table hTable) throws Exception {
-        Map<String, Object> before = event.getBefore();
-        if (before == null) {
-            return;
-        }
-        String rowKey = String.valueOf(before.get(ROW_KEY_FIELD));
-        if (rowKey == null || "null".equals(rowKey)) {
-            return;
+    /**
+     * Flush a batch of ordered Row actions via Table.batch(). Uses the results array to
+     * determine per-row success/failure, so counts are accurate and errors carry the correct
+     * event reference.
+     */
+    private BatchResult flushBatch(Table hTable, List<Row> batch, List<TapRecordEvent> batchEvents) {
+        BatchResult result = new BatchResult();
+        Object[] results = new Object[batch.size()];
+
+        try {
+            hTable.batch(batch, results);
+        } catch (Exception e) {
+            // Catastrophic batch failure — all rows in this batch are errors
+            logger.error("Batch write failed for {} mutations: {}", batch.size(), e.getMessage());
+            for (TapRecordEvent event : batchEvents) {
+                result.addError(event, e);
+            }
+            return result;
         }
 
-        Delete delete = new Delete(Bytes.toBytes(rowKey));
-        hTable.delete(delete);
-    }
-
-    private List<String> getColumnFamilyNames(TapTable table) {
-        List<String> families = new ArrayList<>();
-        if (table != null && table.getNameFieldMap() != null) {
-            for (Map.Entry<String, TapField> entry : table.getNameFieldMap().entrySet()) {
-                if (!ROW_KEY_FIELD.equals(entry.getKey())) {
-                    families.add(entry.getKey());
+        // Per-row success/failure from the results array
+        for (int i = 0; i < results.length; i++) {
+            TapRecordEvent event = batchEvents.get(i);
+            if (results[i] == null || results[i] instanceof org.apache.hadoop.hbase.client.Result) {
+                // Success: count by original event type
+                if (event instanceof TapInsertRecordEvent) {
+                    result.inserted++;
+                } else if (event instanceof TapUpdateRecordEvent) {
+                    result.updated++;
+                } else if (event instanceof TapDeleteRecordEvent) {
+                    result.deleted++;
                 }
+            } else if (results[i] instanceof Throwable) {
+                result.addError(event, (Throwable) results[i]);
             }
         }
-        return families;
+
+        return result;
+    }
+
+    private String extractRowKey(Map<String, Object> data) {
+        if (data == null) {
+            return null;
+        }
+        Object rowKeyObj = data.get(ROW_KEY_FIELD);
+        if (rowKeyObj == null) {
+            return null;
+        }
+        String rowKey = String.valueOf(rowKeyObj);
+        if (rowKey.isEmpty()) {
+            return null;
+        }
+        return rowKey;
+    }
+
+    /**
+     * Internal result holder for a single batch flush.
+     */
+    private static class BatchResult {
+        long inserted;
+        long updated;
+        long deleted;
+        final List<TapRecordEvent> errors = new ArrayList<>();
+        final List<Throwable> errorCauses = new ArrayList<>();
+
+        void addError(TapRecordEvent event, Throwable cause) {
+            errors.add(event);
+            errorCauses.add(cause);
+        }
     }
 }

@@ -9,15 +9,21 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.client.Admin;
+import org.apache.hadoop.hbase.client.ColumnFamilyDescriptor;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.client.Table;
+import org.apache.hadoop.hbase.client.TableDescriptor;
 import org.apache.hadoop.hbase.filter.FirstKeyOnlyFilter;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -25,6 +31,7 @@ import java.util.function.BiConsumer;
 
 public class HbaseBatchReader {
 
+    private static final Logger logger = LoggerFactory.getLogger(HbaseBatchReader.class);
     private static final String ROW_KEY_FIELD = "row_key";
 
     private final HbaseContext context;
@@ -35,16 +42,25 @@ public class HbaseBatchReader {
         this.config = config;
     }
 
-    public void read(TapConnectorContext connectorContext, TapTable table, int eventBatchSize,
-                     BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
-        List<String> columnFamilies = getColumnFamiliesFromTable(table);
+    public void read(TapConnectorContext connectorContext, TapTable table, Object offsetState,
+                     int eventBatchSize, BiConsumer<List<TapEvent>, Object> eventsOffsetConsumer) throws Throwable {
+        String defaultCF = config.getColumnFamily();
+        List<String> columnFamilies = getColumnFamiliesFromHBase(table);
         List<TapEvent> eventList = new ArrayList<>();
+        String lastRowKey = null;
 
         try (Table hTable = context.getConnection().getTable(TableName.valueOf(table.getId()))) {
             Scan scan = new Scan();
             scan.setCaching(config.getScanCaching());
             scan.setBatch(config.getScanBatch());
             scan.setCacheBlocks(false);
+
+            // Resume from checkpoint if offset is provided
+            if (offsetState instanceof String && !((String) offsetState).isEmpty()) {
+                String offsetKey = (String) offsetState;
+                scan.withStartRow(Bytes.toBytes(offsetKey), false);
+                logger.debug("Resuming scan from row key: {}", offsetKey);
+            }
 
             for (String family : columnFamilies) {
                 scan.addFamily(Bytes.toBytes(family));
@@ -56,12 +72,27 @@ public class HbaseBatchReader {
                         continue;
                     }
 
+                    String rowKey = Bytes.toString(result.getRow());
+                    lastRowKey = rowKey;
                     DataMap after = new DataMap();
-                    after.put(ROW_KEY_FIELD, Bytes.toString(result.getRow()));
+                    after.put(ROW_KEY_FIELD, rowKey);
 
                     for (String family : columnFamilies) {
                         NavigableMap<byte[], byte[]> familyMap = result.getFamilyMap(Bytes.toBytes(family));
-                        if (familyMap != null && !familyMap.isEmpty()) {
+                        if (familyMap == null || familyMap.isEmpty()) {
+                            continue;
+                        }
+
+                        if (isDefaultColumnFamily(family, defaultCF)) {
+                            // Default CF: expose qualifiers as individual string fields
+                            for (Map.Entry<byte[], byte[]> entry : familyMap.entrySet()) {
+                                after.put(
+                                        Bytes.toString(entry.getKey()),
+                                        Bytes.toString(entry.getValue())
+                                );
+                            }
+                        } else {
+                            // Non-default CF: expose as a nested map field (backward compatible)
                             DataMap qualifierMap = new DataMap();
                             for (Map.Entry<byte[], byte[]> entry : familyMap.entrySet()) {
                                 qualifierMap.put(
@@ -80,7 +111,7 @@ public class HbaseBatchReader {
                     eventList.add(recordEvent);
 
                     if (eventList.size() >= eventBatchSize) {
-                        eventsOffsetConsumer.accept(new ArrayList<>(eventList), null);
+                        eventsOffsetConsumer.accept(new ArrayList<>(eventList), lastRowKey);
                         eventList.clear();
                     }
                 }
@@ -88,7 +119,7 @@ public class HbaseBatchReader {
         }
 
         if (!eventList.isEmpty()) {
-            eventsOffsetConsumer.accept(eventList, null);
+            eventsOffsetConsumer.accept(eventList, lastRowKey);
         }
     }
 
@@ -108,7 +139,34 @@ public class HbaseBatchReader {
         return rowCount;
     }
 
-    private List<String> getColumnFamiliesFromTable(TapTable table) {
+    /**
+     * A column family is the "default" if it matches the configured CF name.
+     * Qualifiers in the default CF are exposed as individual fields;
+     * qualifiers in other CFs are exposed as nested map fields.
+     */
+    private boolean isDefaultColumnFamily(String family, String configuredCF) {
+        return configuredCF.equals(family);
+    }
+
+    /**
+     * Discover actual column families from HBase table metadata.
+     * Falls back to TapTable field names if the descriptor cannot be read.
+     */
+    private List<String> getColumnFamiliesFromHBase(TapTable table) {
+        try (Admin admin = context.getAdmin()) {
+            TableDescriptor descriptor = admin.getDescriptor(TableName.valueOf(table.getId()));
+            List<String> families = new ArrayList<>();
+            for (ColumnFamilyDescriptor cf : descriptor.getColumnFamilies()) {
+                families.add(cf.getNameAsString());
+            }
+            if (!families.isEmpty()) {
+                return families;
+            }
+        } catch (IOException e) {
+            logger.warn("Failed to get table descriptor for {}, falling back to TapTable fields: {}",
+                    table.getId(), e.getMessage());
+        }
+        // Fallback: use TapTable field names (backward compatible)
         List<String> families = new ArrayList<>();
         if (table.getNameFieldMap() != null) {
             for (Map.Entry<String, TapField> entry : table.getNameFieldMap().entrySet()) {
