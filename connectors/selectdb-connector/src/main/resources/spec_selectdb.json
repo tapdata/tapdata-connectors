@@ -1,4 +1,7 @@
 {
+  "cyntex": {
+    "modes": ["snapshot"]
+  },
   "properties": {
     "name": "SelectDB",
     "realName": "SelectDB",

@@ -1,4 +1,7 @@
 {
+  "cyntex": {
+    "modes": ["stream"]
+  },
   "properties": {
     "name": "ActiveMQ",
     "realName": "Apache ActiveMQ",
