@@ -37,6 +37,10 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String deploymentMode;
     private ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress;
 
+    // DDL trigger (Attunity-style event trigger for capturing DDL via WAL)
+    private Boolean ddlTriggerEnable = false;
+    private String ddlTriggerSchema;
+
     //customize
     public PostgresConfig() {
         setDbType("postgresql");
@@ -231,5 +235,21 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setMasterSlaveAddress(ArrayList<LinkedHashMap<String, Integer>> masterSlaveAddress) {
         this.masterSlaveAddress = masterSlaveAddress;
+    }
+
+    public Boolean getDdlTriggerEnable() {
+        return ddlTriggerEnable;
+    }
+
+    public void setDdlTriggerEnable(Boolean ddlTriggerEnable) {
+        this.ddlTriggerEnable = ddlTriggerEnable;
+    }
+
+    public String getDdlTriggerSchema() {
+        return ddlTriggerSchema;
+    }
+
+    public void setDdlTriggerSchema(String ddlTriggerSchema) {
+        this.ddlTriggerSchema = ddlTriggerSchema;
     }
 }

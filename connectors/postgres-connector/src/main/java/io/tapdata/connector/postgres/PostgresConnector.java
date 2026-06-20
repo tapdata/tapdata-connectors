@@ -267,6 +267,10 @@ public class PostgresConnector extends CommonDbConnector {
         try {
             onStart(connectorContext);
             if (EmptyKit.isNotNull(cdcRunner)) {
+                // Clean up DDL trigger artifacts before closing the CDC runner
+                if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+                    ErrorKit.ignoreAnyError(() -> cdcRunner.cleanupDdlTrigger(postgresConfig.getSchema()));
+                }
                 cdcRunner.closeCdcRunner();
                 cdcRunner = null;
             }
@@ -729,7 +733,18 @@ public class PostgresConnector extends CommonDbConnector {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            cdcRunner.useSlot(slotName.toString()).watch(new ArrayList<>(tableList)).offset(offsetState).registerConsumer(consumer, recordSize);
+            List<String> watchTables = new ArrayList<>(tableList);
+            // If DDL trigger is enabled, add the audit table to Debezium's watch list
+            // The audit table name is schema-qualified so PostgresDebeziumConfig handles it correctly
+            if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+                String ddlAuditSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
+                        ? postgresConfig.getDdlTriggerSchema()
+                        : postgresConfig.getSchema();
+                watchTables.add(ddlAuditSchema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE);
+                tapLogger.info("DDL trigger enabled, added audit table {} to watch list",
+                        ddlAuditSchema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE);
+            }
+            cdcRunner.useSlot(slotName.toString()).watch(watchTables).offset(offsetState).registerConsumer(consumer, recordSize);
             beforeCdc(tableList,nodeContext.getTableMap());
             cdcRunner.startCdcRunner();
             if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
@@ -752,6 +767,10 @@ public class PostgresConnector extends CommonDbConnector {
                     openIdentity(tapTable);
                 }
             }
+        }
+        // Set up DDL event trigger if enabled (only for logical replication plugins)
+        if (cdcRunner != null && Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+            cdcRunner.setupDdlTrigger(postgresConfig.getSchema());
         }
     }
 
@@ -827,7 +846,22 @@ public class PostgresConnector extends CommonDbConnector {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerConsumer(consumer, batchSize);
+            Map<String, List<String>> watchMap = new HashMap<>(schemaTableMap);
+            // If DDL trigger is enabled, add the audit table to Debezium's watch list
+            if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+                String ddlSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
+                        ? postgresConfig.getDdlTriggerSchema()
+                        : postgresConfig.getSchema();
+                watchMap.computeIfAbsent(ddlSchema, k -> new ArrayList<>())
+                        .add(PostgresJdbcContext.DDL_AUDIT_TABLE);
+                tapLogger.info("DDL trigger enabled, added audit table {}.{} to watch map",
+                        ddlSchema, PostgresJdbcContext.DDL_AUDIT_TABLE);
+            }
+            cdcRunner.useSlot(slotName.toString()).watch(watchMap).offset(offsetState).registerConsumer(consumer, batchSize);
+            // Set up DDL event trigger if enabled
+            if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+                cdcRunner.setupDdlTrigger(postgresConfig.getSchema());
+            }
             cdcRunner.startCdcRunner();
             if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
                 Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());

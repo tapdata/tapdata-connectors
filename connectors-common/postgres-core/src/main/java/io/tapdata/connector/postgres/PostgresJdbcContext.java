@@ -280,4 +280,132 @@ public class PostgresJdbcContext extends JdbcContext {
 
     private final static String POSTGRES_CURRENT_TIME = "SELECT NOW()";
 
+    // ── DDL Trigger (Attunity-style event trigger) ──────────────────────
+
+    /** DDL audit table. Stores intercepted DDL statements temporarily before Debezium captures them from WAL. */
+    public static final String DDL_AUDIT_TABLE = "_tapdata_ddl_audit";
+
+    /**
+     * Quote a PostgreSQL identifier by wrapping it in double quotes and escaping
+     * any embedded double quotes per SQL standard.
+     */
+    private static String quoteIdentifier(String identifier) {
+        if (identifier == null || identifier.isEmpty()) {
+            return "\"\"";
+        }
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
+    }
+
+    /** Event trigger function name. */
+    public static final String DDL_TRIGGER_FUNCTION = "_tapdata_intercept_ddl";
+
+    /** Event trigger name. */
+    public static final String DDL_EVENT_TRIGGER = "_tapdata_intercept_ddl";
+
+    /**
+     * Create the DDL audit table in the given schema.
+     * <p>
+     * Schema: c_key (bigserial PK), c_time (timestamp), c_user (varchar),
+     * c_txn (varchar), c_tag (varchar), c_schema (varchar), c_ddlqry (text).
+     */
+    public static String buildCreateDdlAuditTableSql(String schema) {
+        String s = quoteIdentifier(schema);
+        return "CREATE TABLE IF NOT EXISTS " + s + "." + quoteIdentifier(DDL_AUDIT_TABLE) + " (\n" +
+                "    c_key    BIGSERIAL PRIMARY KEY,\n" +
+                "    c_time   TIMESTAMP DEFAULT now(),\n" +
+                "    c_user   VARCHAR(64),\n" +
+                "    c_txn    VARCHAR(16),\n" +
+                "    c_tag    VARCHAR(24),\n" +
+                "    c_schema VARCHAR(64),\n" +
+                "    c_ddlqry TEXT\n" +
+                ")";
+    }
+
+    /**
+     * Create the event trigger function in the given schema.
+     * <p>
+     * Captures CREATE/ALTER/DROP TABLE (and other DDL) via {@code ddl_command_end},
+     * writes the DDL statement to the audit table (which produces WAL for Debezium),
+     * then immediately deletes it to keep the table clean.
+     */
+    public static String buildCreateDdlTriggerFunctionSql(String schema) {
+        String s = quoteIdentifier(schema);
+        String tbl = quoteIdentifier(DDL_AUDIT_TABLE);
+        return "CREATE OR REPLACE FUNCTION " + s + "." + quoteIdentifier(DDL_TRIGGER_FUNCTION) + "()\n" +
+                "RETURNS event_trigger\n" +
+                "LANGUAGE plpgsql\n" +
+                "AS $$\n" +
+                "DECLARE\n" +
+                "    _r RECORD;\n" +
+                "BEGIN\n" +
+                "    -- Wrap everything in exception handler to prevent blocking user DDL\n" +
+                "    BEGIN\n" +
+                "        IF (tg_tag IN ('CREATE TABLE', 'ALTER TABLE', 'DROP TABLE',\n" +
+                "                       'CREATE INDEX', 'DROP INDEX', 'ALTER INDEX',\n" +
+                "                       'CREATE VIEW', 'DROP VIEW', 'ALTER VIEW',\n" +
+                "                       'CREATE FUNCTION', 'DROP FUNCTION', 'ALTER FUNCTION',\n" +
+                "                       'CREATE SCHEMA', 'DROP SCHEMA', 'ALTER SCHEMA',\n" +
+                "                       'CREATE SEQUENCE', 'DROP SEQUENCE', 'ALTER SEQUENCE',\n" +
+                "                       'CREATE TYPE', 'DROP TYPE', 'ALTER TYPE')) THEN\n" +
+                "            FOR _r IN SELECT * FROM pg_event_trigger_ddl_commands()\n" +
+                "            LOOP\n" +
+                "                INSERT INTO " + s + "." + tbl + "\n" +
+                "                VALUES (DEFAULT,\n" +
+                "                        current_timestamp,\n" +
+                "                        current_user,\n" +
+                "                        CAST(TXID_CURRENT() AS VARCHAR(16)),\n" +
+                "                        _r.command_tag,\n" +
+                "                        COALESCE(_r.schema_name, current_schema),\n" +
+                "                        _r.command);\n" +
+                "            END LOOP;\n" +
+                "            DELETE FROM " + s + "." + tbl + ";\n" +
+                "        END IF;\n" +
+                "    EXCEPTION WHEN OTHERS THEN\n" +
+                "        -- Log error but never block user DDL operations\n" +
+                "        RAISE WARNING 'DDL audit trigger failed for [%]: % (SQLSTATE: %)', tg_tag, SQLERRM, SQLSTATE;\n" +
+                "    END;\n" +
+                "END;\n" +
+                "$$";
+    }
+
+    /**
+     * Create the event trigger on {@code ddl_command_end}.
+     * <p>
+     * <b>Requires superuser privileges.</b>
+     */
+    public static String buildCreateDdlEventTriggerSql(String schema) {
+        return "CREATE EVENT TRIGGER " + quoteIdentifier(DDL_EVENT_TRIGGER) + "\n" +
+                "ON ddl_command_end\n" +
+                "EXECUTE PROCEDURE " + quoteIdentifier(schema) + "." + quoteIdentifier(DDL_TRIGGER_FUNCTION) + "()";
+    }
+
+    /** Drop the event trigger. */
+    public static String buildDropDdlEventTriggerSql() {
+        return "DROP EVENT TRIGGER IF EXISTS " + quoteIdentifier(DDL_EVENT_TRIGGER);
+    }
+
+    /** Drop the event trigger function. */
+    public static String buildDropDdlTriggerFunctionSql(String schema) {
+        return "DROP FUNCTION IF EXISTS " + quoteIdentifier(schema) + "." + quoteIdentifier(DDL_TRIGGER_FUNCTION) + "()";
+    }
+
+    /** Drop the DDL audit table. */
+    public static String buildDropDdlAuditTableSql(String schema) {
+        return "DROP TABLE IF EXISTS " + quoteIdentifier(schema) + "." + quoteIdentifier(DDL_AUDIT_TABLE);
+    }
+
+    /** Check if the event trigger exists. */
+    public static String buildCheckDdlEventTriggerSql() {
+        return "SELECT COUNT(*) FROM pg_event_trigger WHERE evtname = " + quoteLiteral(DDL_EVENT_TRIGGER);
+    }
+
+    /**
+     * Quote a string literal for safe use in a SQL statement.
+     * Doubles embedded single quotes per SQL standard.
+     */
+    private static String quoteLiteral(String literal) {
+        if (literal == null) return "''";
+        return "'" + literal.replace("'", "''") + "'";
+    }
+
 }
