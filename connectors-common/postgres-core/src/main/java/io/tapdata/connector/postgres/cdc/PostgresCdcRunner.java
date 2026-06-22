@@ -5,6 +5,10 @@ import io.debezium.embedded.EmbeddedEngine;
 import io.debezium.embedded.StopConnectorException;
 import io.debezium.engine.DebeziumEngine;
 import io.debezium.engine.StopEngineException;
+import io.tapdata.common.ddl.DDLFactory;
+import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
+import io.tapdata.common.ddl.type.DDLParserType;
+import io.tapdata.common.ddl.wrapper.DDLWrapperConfig;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.cdc.config.PostgresDebeziumConfig;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
@@ -68,6 +72,9 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private String dropTransactionId = null;
     private boolean withSchema = false;
     private final Map<String, Boolean> replicaFull = new HashMap<>();
+    private static final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("\"");
+    private final DDLParserType ddlParserType = DDLParserType.POSTGRES_CCJ_SQL_PARSER;
+
 
     public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext, TapConnectorContext connectorContext) throws SQLException {
         this.postgresJdbcContext = postgresJdbcContext;
@@ -232,12 +239,36 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                             String ddlSchema = after.getString("c_schema");
                             String ddlQuery = after.getString("c_ddlqry");
                             if (ddlQuery != null && !ddlQuery.isEmpty()) {
-                                TapDDLEvent ddlEvent = new TapDDLUnknownEvent();
-                                ddlEvent.setOriginDDL(ddlQuery);
-                                ddlEvent.setReferenceTime(referenceTime);
-                                eventList.add(ddlEvent);
-                                TapLogger.info(TAG, "Captured DDL [{}] on schema '{}': {}",
-                                        ddlTag, ddlSchema, ddlQuery);
+                                PostgresOffset ddlOffset = new PostgresOffset();
+                                ddlOffset.setSourceOffset(TapSimplify.toJson(offset));
+                                try {
+                                    DDLFactory.ddlToTapDDLEvent(
+                                            ddlParserType,
+                                            ddlQuery,
+                                            DDL_WRAPPER_CONFIG,
+                                            connectorContext.getTableMap(),
+                                            tapDDLEvent -> {
+                                                tapDDLEvent.setTime(System.currentTimeMillis());
+                                                tapDDLEvent.setReferenceTime(referenceTime);
+                                                tapDDLEvent.setOriginDDL(ddlQuery);
+                                                tapDDLEvent.setExactlyOnceId(lsn);
+                                                if (withSchema && EmptyKit.isNotBlank(ddlSchema) && EmptyKit.isNotBlank(tapDDLEvent.getTableId())) {
+                                                    tapDDLEvent.setNamespaces(Arrays.asList(ddlSchema, tapDDLEvent.getTableId()));
+                                                }
+                                                consumer.accept(Collections.singletonList(tapDDLEvent), ddlOffset);
+                                            }
+                                    );
+                                } catch (Throwable e) {
+                                    TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
+                                    tapDDLEvent.setTime(System.currentTimeMillis());
+                                    tapDDLEvent.setReferenceTime(referenceTime);
+                                    tapDDLEvent.setOriginDDL(ddlQuery);
+                                    tapDDLEvent.setExactlyOnceId(lsn);
+                                    if (withSchema && EmptyKit.isNotBlank(ddlSchema) && EmptyKit.isNotBlank(tapDDLEvent.getTableId())) {
+                                        tapDDLEvent.setNamespaces(Arrays.asList(ddlSchema, tapDDLEvent.getTableId()));
+                                    }
+                                    consumer.accept(Collections.singletonList(tapDDLEvent), ddlOffset);
+                                }
                             }
                         }
                     }

@@ -330,15 +330,15 @@ public class PostgresJdbcContext extends JdbcContext {
      */
     public static String buildCreateDdlTriggerFunctionSql(String schema) {
         String s = quoteIdentifier(schema);
-        String tbl = quoteIdentifier(DDL_AUDIT_TABLE);
+//        String tbl = quoteIdentifier(DDL_AUDIT_TABLE);
         return "CREATE OR REPLACE FUNCTION " + s + "." + quoteIdentifier(DDL_TRIGGER_FUNCTION) + "()\n" +
                 "RETURNS event_trigger\n" +
-                "LANGUAGE plpgsql\n" +
+                "    LANGUAGE plpgsql\n" +
                 "AS $$\n" +
                 "DECLARE\n" +
-                "    _r RECORD;\n" +
+                "    _r   RECORD;\n" +
+                "    _qry TEXT;\n" +
                 "BEGIN\n" +
-                "    -- Wrap everything in exception handler to prevent blocking user DDL\n" +
                 "    BEGIN\n" +
                 "        IF (tg_tag IN ('CREATE TABLE', 'ALTER TABLE', 'DROP TABLE',\n" +
                 "                       'CREATE INDEX', 'DROP INDEX', 'ALTER INDEX',\n" +
@@ -347,21 +347,20 @@ public class PostgresJdbcContext extends JdbcContext {
                 "                       'CREATE SCHEMA', 'DROP SCHEMA', 'ALTER SCHEMA',\n" +
                 "                       'CREATE SEQUENCE', 'DROP SEQUENCE', 'ALTER SEQUENCE',\n" +
                 "                       'CREATE TYPE', 'DROP TYPE', 'ALTER TYPE')) THEN\n" +
+                "            _qry := current_query();\n" +
                 "            FOR _r IN SELECT * FROM pg_event_trigger_ddl_commands()\n" +
                 "            LOOP\n" +
-                "                INSERT INTO " + s + "." + tbl + "\n" +
+                "                INSERT INTO \"public\".\"_tapdata_ddl_audit\"\n" +
                 "                VALUES (DEFAULT,\n" +
                 "                        current_timestamp,\n" +
                 "                        current_user,\n" +
                 "                        CAST(TXID_CURRENT() AS VARCHAR(16)),\n" +
                 "                        _r.command_tag,\n" +
                 "                        COALESCE(_r.schema_name, current_schema),\n" +
-                "                        _r.command);\n" +
+                "                        _qry);\n" +
                 "            END LOOP;\n" +
-                "            DELETE FROM " + s + "." + tbl + ";\n" +
                 "        END IF;\n" +
                 "    EXCEPTION WHEN OTHERS THEN\n" +
-                "        -- Log error but never block user DDL operations\n" +
                 "        RAISE WARNING 'DDL audit trigger failed for [%]: % (SQLSTATE: %)', tg_tag, SQLERRM, SQLSTATE;\n" +
                 "    END;\n" +
                 "END;\n" +

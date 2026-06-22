@@ -833,6 +833,24 @@
               }
             }
           ]
+        },
+        "ddlTriggerEnable": {
+          "type": "boolean",
+          "title": "${ddlTriggerEnable}",
+          "default": true,
+          "x-index": 21,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
