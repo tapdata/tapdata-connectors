@@ -9,6 +9,7 @@ import io.tapdata.connector.postgres.bean.PostgresColumn;
 import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
 import io.tapdata.connector.postgres.cdc.WalLogMinerV2;
 import io.tapdata.connector.postgres.cdc.WalPgtoMiner;
+import io.tapdata.connector.postgres.cdc.physical.PhysicalWalLogMiner;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
@@ -73,6 +74,9 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static io.tapdata.pdk.apis.entity.ConnectionOptions.*;
+import static io.tapdata.pdk.apis.entity.ConnectionOptions.DDL_DROP_FIELD_EVENT;
+
 /**
  * PDK for Postgresql
  *
@@ -117,6 +121,12 @@ public class PostgresConnector extends CommonDbConnector {
                     , postgresConfig.getLogPluginName()
             )));
             connectionOptions.setNamespaces(Collections.singletonList(postgresConfig.getSchema()));
+            List<Capability> ddlCapabilities = Arrays.asList(
+                    Capability.create(DDL_NEW_FIELD_EVENT).type(Capability.TYPE_DDL),
+                    Capability.create(DDL_ALTER_FIELD_NAME_EVENT).type(Capability.TYPE_DDL),
+                    Capability.create(DDL_ALTER_FIELD_ATTRIBUTES_EVENT).type(Capability.TYPE_DDL),
+                    Capability.create(DDL_DROP_FIELD_EVENT).type(Capability.TYPE_DDL));
+            ddlCapabilities.forEach(connectionOptions::capability);
             return connectionOptions;
         }
     }
@@ -257,6 +267,10 @@ public class PostgresConnector extends CommonDbConnector {
         try {
             onStart(connectorContext);
             if (EmptyKit.isNotNull(cdcRunner)) {
+                // Clean up DDL trigger artifacts before closing the CDC runner
+                if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+                    ErrorKit.ignoreAnyError(() -> cdcRunner.cleanupDdlTrigger(postgresConfig.getSchema()));
+                }
                 cdcRunner.closeCdcRunner();
                 cdcRunner = null;
             }
@@ -294,7 +308,12 @@ public class PostgresConnector extends CommonDbConnector {
     private void buildSlot(TapConnectorContext connectorContext, Boolean needCheck) throws Throwable {
         if (EmptyKit.isNull(slotName)) {
             slotName = "tapdata_cdc_" + UUID.randomUUID().toString().replaceAll("-", "_");
-            String sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
+            String sql;
+            if ("physical".equals(postgresConfig.getLogPluginName())) {
+                sql = "SELECT pg_create_physical_replication_slot('" + slotName + "')";
+            } else {
+                sql = "SELECT pg_create_logical_replication_slot('" + slotName + "','" + postgresConfig.getLogPluginName() + "')";
+            }
             long begin = System.currentTimeMillis();
             try {
                 postgresJdbcContext.execute(sql, 20);
@@ -701,11 +720,31 @@ public class PostgresConnector extends CommonDbConnector {
                         .registerConsumer(consumer, recordSize)
                         .startMiner(this::isAlive);
             }
+        } else if ("physical".equals(postgresConfig.getLogPluginName())) {
+            testReplicateIdentity(nodeContext.getTableMap());
+            buildSlot(nodeContext, true);
+            new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
+                    .useSlot(slotName.toString())
+                    .watch(new ArrayList<>(tableList), nodeContext.getTableMap())
+                    .offset(offsetState)
+                    .registerConsumer(consumer, recordSize)
+                    .startMiner(this::isAlive);
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            cdcRunner.useSlot(slotName.toString()).watch(new ArrayList<>(tableList)).offset(offsetState).registerConsumer(consumer, recordSize);
+            List<String> watchTables = new ArrayList<>(tableList);
+            // If DDL trigger is enabled, add the audit table to Debezium's watch list
+            // The audit table name is schema-qualified so PostgresDebeziumConfig handles it correctly
+            if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+                String ddlAuditSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
+                        ? postgresConfig.getDdlTriggerSchema()
+                        : postgresConfig.getSchema();
+                watchTables.add(ddlAuditSchema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE);
+                tapLogger.info("DDL trigger enabled, added audit table {} to watch list",
+                        ddlAuditSchema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE);
+            }
+            cdcRunner.useSlot(slotName.toString()).watch(watchTables).offset(offsetState).registerConsumer(consumer, recordSize);
             beforeCdc(tableList,nodeContext.getTableMap());
             cdcRunner.startCdcRunner();
             if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
@@ -728,6 +767,10 @@ public class PostgresConnector extends CommonDbConnector {
                     openIdentity(tapTable);
                 }
             }
+        }
+        // Set up DDL event trigger if enabled (only for logical replication plugins)
+        if (cdcRunner != null && Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+            cdcRunner.setupDdlTrigger(postgresConfig.getSchema());
         }
     }
 
@@ -790,11 +833,35 @@ public class PostgresConnector extends CommonDbConnector {
                         .registerConsumer(consumer, batchSize)
                         .startMiner(this::isAlive);
             }
+        } else if ("physical".equals(postgresConfig.getLogPluginName())) {
+            testReplicateIdentity(nodeContext.getTableMap());
+            buildSlot(nodeContext, true);
+            new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
+                    .useSlot(slotName.toString())
+                    .watch(schemaTableMap, nodeContext.getTableMap())
+                    .offset(offsetState)
+                    .registerConsumer(consumer, batchSize)
+                    .startMiner(this::isAlive);
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            cdcRunner.useSlot(slotName.toString()).watch(schemaTableMap).offset(offsetState).registerConsumer(consumer, batchSize);
+            Map<String, List<String>> watchMap = new HashMap<>(schemaTableMap);
+            // If DDL trigger is enabled, add the audit table to Debezium's watch list
+            if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+                String ddlSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
+                        ? postgresConfig.getDdlTriggerSchema()
+                        : postgresConfig.getSchema();
+                watchMap.computeIfAbsent(ddlSchema, k -> new ArrayList<>())
+                        .add(PostgresJdbcContext.DDL_AUDIT_TABLE);
+                tapLogger.info("DDL trigger enabled, added audit table {}.{} to watch map",
+                        ddlSchema, PostgresJdbcContext.DDL_AUDIT_TABLE);
+            }
+            cdcRunner.useSlot(slotName.toString()).watch(watchMap).offset(offsetState).registerConsumer(consumer, batchSize);
+            // Set up DDL event trigger if enabled
+            if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+                cdcRunner.setupDdlTrigger(postgresConfig.getSchema());
+            }
             cdcRunner.startCdcRunner();
             if (EmptyKit.isNotNull(cdcRunner) && EmptyKit.isNotNull(cdcRunner.getThrowable().get())) {
                 Throwable throwable = ErrorKit.getLastCause(cdcRunner.getThrowable().get());
@@ -823,6 +890,17 @@ public class PostgresConnector extends CommonDbConnector {
             String timestamp = timestampToWalLsnV2(offsetStartTime);
             tapLogger.info("timestampToStreamOffset start at {}", timestamp);
             return timestamp;
+        }
+        if ("physical".equals(postgresConfig.getLogPluginName())) {
+            if (EmptyKit.isNotNull(offsetStartTime)) {
+                tapLogger.warn("Postgres physical CDC does not support a specified start time, using the current wal lsn");
+            }
+            buildSlot(connectorContext, false);
+            AtomicReference<String> lsn = new AtomicReference<>();
+            // recovery-aware: a standby cannot run pg_current_wal_lsn(), use the last replayed lsn there
+            postgresJdbcContext.queryWithNext("SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_lsn() END", resultSet -> lsn.set(resultSet.getString(1)));
+            tapLogger.info("physical timestampToStreamOffset start at {}", lsn.get());
+            return lsn.get();
         }
         if (EmptyKit.isNotNull(offsetStartTime)) {
             tapLogger.warn("Postgres specified time start increment is not supported except walminer, use the current time as the start increment");

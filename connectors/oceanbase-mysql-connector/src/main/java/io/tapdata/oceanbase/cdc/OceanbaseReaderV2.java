@@ -45,15 +45,15 @@ import static io.tapdata.base.ConnectorBase.list;
 
 public class OceanbaseReaderV2 {
 
-    private OceanbaseConfig oceanbaseConfig;
-    private List<String> tableList;
-    private KVReadOnlyMap<TapTable> tableMap;
-    private StreamReadConsumer consumer;
-    private Object offsetState;
-    private int recordSize;
+    protected OceanbaseConfig oceanbaseConfig;
+    protected List<String> tableList;
+    protected KVReadOnlyMap<TapTable> tableMap;
+    protected StreamReadConsumer consumer;
+    protected Object offsetState;
+    protected int recordSize;
     private final Map<String, String> dataTypeMap = new HashMap<>();
     private final Map<String, String> dataFormatMap = new HashMap<>();
-    private final String connectorId;
+    protected final String connectorId;
     private ObReadLogServerGrpc.ObReadLogServerBlockingStub blockingStub;
     protected final AtomicBoolean ddlStop = new AtomicBoolean(false);
     private DDLParserType ddlParserType = DDLParserType.MYSQL_CCJ_SQL_PARSER;
@@ -72,12 +72,16 @@ public class OceanbaseReaderV2 {
         this.consumer = consumer;
         this.tableMap = tableMap;
         generateDataTypeMap(tableMap);
+        initSource();
+    }
+
+    protected void initSource() {
         blockingStub = ObReadLogServerGrpc.newBlockingStub(NettyChannelBuilder.forAddress(oceanbaseConfig.getRawLogServerHost(), oceanbaseConfig.getRawLogServerPort())
                 .maxInboundMessageSize(Integer.MAX_VALUE)
                 .negotiationType(NegotiationType.PLAINTEXT).build());
     }
 
-    private void generateDataTypeMap(KVReadOnlyMap<TapTable> tableMap) {
+    protected void generateDataTypeMap(KVReadOnlyMap<TapTable> tableMap) {
         for (String table : tableList) {
             TapTable tapTable = tableMap.get(table);
             if (tapTable != null) {
@@ -97,6 +101,20 @@ public class OceanbaseReaderV2 {
                         .setClusterPassword(oceanbaseConfig.getCdcPassword())
                         .setTbWhiteList(tableList.stream().map(table -> oceanbaseConfig.getTenant() + "." + oceanbaseConfig.getDatabase() + "." + table).collect(Collectors.joining("|")))
                         .build()).setStime((Long) offsetState).setTaskId(connectorId).build());
+        run(new Iterator<ReadLogPayload>() {
+            @Override
+            public boolean hasNext() {
+                return iterator.hasNext();
+            }
+
+            @Override
+            public ReadLogPayload next() {
+                return iterator.next().getPayload();
+            }
+        }, isAlive);
+    }
+
+    protected void run(Iterator<ReadLogPayload> payloads, BooleanSupplier isAlive) throws Throwable {
         consumer.streamReadStarted();
         AtomicReference<Throwable> throwable = new AtomicReference<>();
         try (
@@ -143,8 +161,8 @@ public class OceanbaseReaderV2 {
             });
             t.setName("OceanBaseReader-Consumer");
             t.start();
-            while (isAlive.get() && iterator.hasNext()) {
-                ReadLogPayload payload = iterator.next().getPayload();
+            while (isAlive.get() && payloads.hasNext()) {
+                ReadLogPayload payload = payloads.next();
                 while (ddlStop.get() && isAlive.get()) {
                     TapSimplify.sleep(500);
                 }

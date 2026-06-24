@@ -5,17 +5,26 @@ import io.debezium.embedded.EmbeddedEngine;
 import io.debezium.embedded.StopConnectorException;
 import io.debezium.engine.DebeziumEngine;
 import io.debezium.engine.StopEngineException;
+import io.tapdata.common.ddl.DDLFactory;
+import io.tapdata.common.ddl.ccj.CCJBaseDDLWrapper;
+import io.tapdata.common.ddl.type.DDLParserType;
+import io.tapdata.common.ddl.wrapper.DDLWrapperConfig;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.cdc.config.PostgresDebeziumConfig;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
+import io.tapdata.connector.postgres.error.PostgresErrorCode;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.HeartbeatEvent;
+import io.tapdata.entity.event.ddl.TapDDLEvent;
+import io.tapdata.entity.event.ddl.TapDDLUnknownEvent;
 import io.tapdata.entity.event.dml.TapDeleteRecordEvent;
 import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
+import io.tapdata.exception.TapCodeException;
+import io.tapdata.kit.ErrorKit;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.partition.TapSubPartitionTableInfo;
 import io.tapdata.entity.simplify.TapSimplify;
@@ -63,6 +72,9 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private String dropTransactionId = null;
     private boolean withSchema = false;
     private final Map<String, Boolean> replicaFull = new HashMap<>();
+    private static final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("\"");
+    private final DDLParserType ddlParserType = DDLParserType.POSTGRES_CCJ_SQL_PARSER;
+
 
     public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext, TapConnectorContext connectorContext) throws SQLException {
         this.postgresJdbcContext = postgresJdbcContext;
@@ -215,6 +227,55 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 String lsn = String.valueOf(offset.get("lsn"));
                 String table = struct.getStruct("source").getString("table");
                 String schema = struct.getStruct("source").getString("schema");
+
+                // ── DDL Trigger: intercept DDL audit table records ──
+                if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())
+                        && isDdlAuditRecord(schema, table)) {
+                    // The audit table only ever has INSERT (and DELETE) — we only care about INSERT
+                    if ("c".equals(op)) {
+                        Struct after = struct.getStruct("after");
+                        if (after != null) {
+                            String ddlTag = after.getString("c_tag");
+                            String ddlSchema = after.getString("c_schema");
+                            String ddlQuery = after.getString("c_ddlqry");
+                            if (ddlQuery != null && !ddlQuery.isEmpty()) {
+                                PostgresOffset ddlOffset = new PostgresOffset();
+                                ddlOffset.setSourceOffset(TapSimplify.toJson(offset));
+                                try {
+                                    DDLFactory.ddlToTapDDLEvent(
+                                            ddlParserType,
+                                            ddlQuery,
+                                            DDL_WRAPPER_CONFIG,
+                                            connectorContext.getTableMap(),
+                                            tapDDLEvent -> {
+                                                tapDDLEvent.setTime(System.currentTimeMillis());
+                                                tapDDLEvent.setReferenceTime(referenceTime);
+                                                tapDDLEvent.setOriginDDL(ddlQuery);
+                                                tapDDLEvent.setExactlyOnceId(lsn);
+                                                if (withSchema && EmptyKit.isNotBlank(ddlSchema) && EmptyKit.isNotBlank(tapDDLEvent.getTableId())) {
+                                                    tapDDLEvent.setNamespaces(Arrays.asList(ddlSchema, tapDDLEvent.getTableId()));
+                                                }
+                                                consumer.accept(Collections.singletonList(tapDDLEvent), ddlOffset);
+                                            }
+                                    );
+                                } catch (Throwable e) {
+                                    TapDDLEvent tapDDLEvent = new TapDDLUnknownEvent();
+                                    tapDDLEvent.setTime(System.currentTimeMillis());
+                                    tapDDLEvent.setReferenceTime(referenceTime);
+                                    tapDDLEvent.setOriginDDL(ddlQuery);
+                                    tapDDLEvent.setExactlyOnceId(lsn);
+                                    if (withSchema && EmptyKit.isNotBlank(ddlSchema) && EmptyKit.isNotBlank(tapDDLEvent.getTableId())) {
+                                        tapDDLEvent.setNamespaces(Arrays.asList(ddlSchema, tapDDLEvent.getTableId()));
+                                    }
+                                    consumer.accept(Collections.singletonList(tapDDLEvent), ddlOffset);
+                                }
+                            }
+                        }
+                    }
+                    // Don't process audit table records as normal DML — skip to next record
+                    continue;
+                }
+
                 //双活情形下，需要过滤_tap_double_active记录的同事务数据
                 if (Boolean.TRUE.equals(postgresConfig.getDoubleActive())) {
                     if ("_tap_double_active".equals(table)) {
@@ -387,5 +448,188 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             }
         });
         return subPartitionTableNames;
+    }
+
+    // ── DDL Trigger (Attunity-style event trigger capture) ───────────────
+
+    /**
+     * Set up the DDL event trigger artifacts in the source database.
+     * <p>
+     * Creates three objects:
+     * <ol>
+     *   <li>{@code _tapdata_ddl_audit} — audit table that briefly holds DDL statements</li>
+     *   <li>{@code _tapdata_intercept_ddl()} — event trigger function</li>
+     *   <li>{@code _tapdata_intercept_ddl} — event trigger on {@code ddl_command_end}</li>
+     * </ol>
+     * <p>
+     * The event trigger writes DDL to the audit table (which creates WAL records
+     * that Debezium captures), then immediately deletes the row to keep the table empty.
+     * <p>
+     * <b>Only works with logical replication plugins</b> (pgoutput, wal2json, decoderbufs).
+     * Requires superuser privileges. The audit table must be included in the Debezium
+     * table whitelist.
+     *
+     * @param schema the schema where DDL artifacts will be created
+     * @throws TapCodeException if creation fails
+     */
+    public void setupDdlTrigger(String schema) {
+        if (!Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+            return;
+        }
+        String plugin = postgresConfig.getLogPluginName();
+        if (!"pgoutput".equals(plugin) && !"wal2json".equals(plugin) && !"decoderbufs".equals(plugin)) {
+            throw new TapCodeException(PostgresErrorCode.DDL_TRIGGER_UNSUPPORTED_PLUGIN,
+                    "DDL trigger requires a logical replication plugin (pgoutput, wal2json, decoderbufs), but current plugin is: " + plugin)
+                    .dynamicDescriptionParameters(plugin);
+        }
+        // Use the configured DDL trigger schema, or fall back to the connection schema
+        String targetSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
+                ? postgresConfig.getDdlTriggerSchema()
+                : schema;
+
+        TapLogger.info(TAG, "Setting up DDL event trigger in schema: {}", targetSchema);
+
+        // 0. Check superuser privilege (required for CREATE EVENT TRIGGER)
+        try {
+            checkSuperuserPrivilege();
+        } catch (SQLException e) {
+            throw new TapCodeException(PostgresErrorCode.CREATE_DDL_TRIGGER_FAILED,
+                    "Failed to verify superuser privilege: " + e.getMessage(), e)
+                    .dynamicDescriptionParameters(e.getMessage());
+        }
+
+        // Create all three artifacts in a single transaction for atomicity
+        try (java.sql.Connection conn = postgresJdbcContext.getConnection()) {
+            boolean autoCommit = conn.getAutoCommit();
+            try {
+                conn.setAutoCommit(false);
+                try (java.sql.Statement stmt = conn.createStatement()) {
+                    // 1. Create audit table (idempotent)
+                    String createTableSql = PostgresJdbcContext.buildCreateDdlAuditTableSql(targetSchema);
+                    TapLogger.debug(TAG, "Executing: {}", createTableSql);
+                    stmt.execute(createTableSql);
+
+                    // 2. Create event trigger function (idempotent)
+                    String createFuncSql = PostgresJdbcContext.buildCreateDdlTriggerFunctionSql(targetSchema);
+                    TapLogger.debug(TAG, "Executing: {}", createFuncSql);
+                    stmt.execute(createFuncSql);
+
+                    // 3. Create event trigger if it doesn't already exist
+                    String checkTriggerSql = PostgresJdbcContext.buildCheckDdlEventTriggerSql();
+                    boolean triggerExists = false;
+                    try (java.sql.ResultSet rs = stmt.executeQuery(checkTriggerSql)) {
+                        if (rs.next()) {
+                            triggerExists = rs.getInt(1) > 0;
+                        }
+                    }
+                    if (!triggerExists) {
+                        String createTriggerSql = PostgresJdbcContext.buildCreateDdlEventTriggerSql(targetSchema);
+                        TapLogger.debug(TAG, "Executing: {}", createTriggerSql);
+                        stmt.execute(createTriggerSql);
+                    } else {
+                        TapLogger.info(TAG, "DDL event trigger already exists, skipping creation");
+                    }
+                }
+                conn.commit();
+                TapLogger.info(TAG, "DDL event trigger setup complete in schema: {}", targetSchema);
+            } catch (SQLException e) {
+                try { conn.rollback(); } catch (SQLException ignored) { }
+                throw new TapCodeException(PostgresErrorCode.CREATE_DDL_TRIGGER_FAILED,
+                        "Failed to set up DDL event trigger artifacts in schema " + targetSchema + ": " + e.getMessage(), e)
+                        .dynamicDescriptionParameters(e.getMessage());
+            } finally {
+                try { conn.setAutoCommit(autoCommit); } catch (SQLException ignored) { }
+            }
+        } catch (SQLException e) {
+            throw new TapCodeException(PostgresErrorCode.CREATE_DDL_TRIGGER_FAILED,
+                    "Failed to obtain database connection for DDL trigger setup: " + e.getMessage(), e)
+                    .dynamicDescriptionParameters(e.getMessage());
+        }
+    }
+
+    /**
+     * Verify that the current database user has superuser privileges.
+     * <p>
+     * Event triggers in PostgreSQL require superuser to create.
+     * Fails fast with a clear error message if the user is not a superuser.
+     */
+    private void checkSuperuserPrivilege() throws SQLException {
+        final boolean[] isSuperuser = {false};
+        postgresJdbcContext.queryWithNext(
+                "SELECT usesuper FROM pg_user WHERE usename = current_user",
+                rs -> isSuperuser[0] = rs.getBoolean("usesuper"));
+        if (!isSuperuser[0]) {
+            throw new TapCodeException(PostgresErrorCode.CREATE_DDL_TRIGGER_FAILED,
+                    "DDL event trigger creation requires PostgreSQL superuser privileges, " +
+                    "but the current user is not a superuser. " +
+                    "Connect as a superuser (e.g., 'postgres') or grant superuser to the current user.");
+        }
+    }
+
+    /**
+     * Clean up the DDL event trigger artifacts from the source database.
+     * <p>
+     * Best-effort cleanup — errors are logged but not rethrown so they
+     * don't block the connector shutdown.
+     *
+     * @param schema the schema where DDL artifacts were created
+     */
+    public void cleanupDdlTrigger(String schema) {
+        if (!Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+            return;
+        }
+        String targetSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
+                ? postgresConfig.getDdlTriggerSchema()
+                : schema;
+
+        TapLogger.info(TAG, "Cleaning up DDL event trigger artifacts from schema: {}", targetSchema);
+
+        // Drop order: trigger → function → table (dependency order)
+        ErrorKit.ignoreAnyError(() -> {
+            String sql = PostgresJdbcContext.buildDropDdlEventTriggerSql();
+            TapLogger.debug(TAG, "Executing: {}", sql);
+            postgresJdbcContext.execute(sql);
+            TapLogger.debug(TAG, "Dropped DDL event trigger");
+        });
+        ErrorKit.ignoreAnyError(() -> {
+            String sql = PostgresJdbcContext.buildDropDdlTriggerFunctionSql(targetSchema);
+            TapLogger.debug(TAG, "Executing: {}", sql);
+            postgresJdbcContext.execute(sql);
+            TapLogger.debug(TAG, "Dropped DDL trigger function");
+        });
+        ErrorKit.ignoreAnyError(() -> {
+            String sql = PostgresJdbcContext.buildDropDdlAuditTableSql(targetSchema);
+            TapLogger.debug(TAG, "Executing: {}", sql);
+            postgresJdbcContext.execute(sql);
+            TapLogger.debug(TAG, "Dropped DDL audit table");
+        });
+
+        TapLogger.info(TAG, "DDL event trigger cleanup complete");
+    }
+
+    /**
+     * Returns the schema-qualified name of the DDL audit table.
+     * Used to detect DDL events in {@link #consumeRecords}.
+     */
+    public String getDdlAuditTableFullName() {
+        if (!Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
+            return null;
+        }
+        String schema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
+                ? postgresConfig.getDdlTriggerSchema()
+                : postgresConfig.getSchema();
+        return schema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE;
+    }
+
+    /**
+     * Check whether the current Debezium record represents a DDL event
+     * (i.e., an INSERT into the DDL audit table).
+     */
+    private boolean isDdlAuditRecord(String schema, String table) {
+        String auditSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
+                ? postgresConfig.getDdlTriggerSchema()
+                : postgresConfig.getSchema();
+        return PostgresJdbcContext.DDL_AUDIT_TABLE.equals(table)
+                && auditSchema.equals(schema);
     }
 }

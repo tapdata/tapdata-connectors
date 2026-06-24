@@ -8,6 +8,11 @@
     "tags": ["Database", "ssl", "doubleActive", "disableForeignKey","NullsLast"]
   },
   "configOptions": {
+    "supportDDL": {
+      "events": [
+        "new_field_event", "alter_field_name_event", "alter_field_attributes_event", "drop_field_event"
+      ]
+    },
     "capabilities":[
       {
         "id": "dml_insert_policy",
@@ -263,6 +268,10 @@
             {
               "label": "WALMINER",
               "value": "walminer"
+            },
+            {
+              "label": "PHYSICAL",
+              "value": "physical"
             }
           ],
           "x-reactions": {
@@ -820,6 +829,24 @@
               "fulfill": {
                 "state": {
                   "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "ddlTriggerEnable": {
+          "type": "boolean",
+          "title": "${ddlTriggerEnable}",
+          "default": true,
+          "x-index": 21,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
                 }
               }
             }

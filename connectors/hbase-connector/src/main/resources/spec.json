@@ -1,0 +1,163 @@
+{
+    "properties": {
+        "name": "HBase",
+        "realName": "HBase",
+        "icon": "icons/hbase.png",
+        "doc": "${doc}",
+        "id": "hbase",
+        "tags": ["Database", "NoSQL", "BigData"]
+    },
+    "configOptions": {
+        "connection": {
+            "type": "object",
+            "properties": {
+                "zookeeperQuorum": {
+                    "required": true,
+                    "type": "string",
+                    "title": "${zookeeperQuorum}",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "apiServerKey": "database_host",
+                    "x-index": 1
+                },
+                "zookeeperParent": {
+                    "required": false,
+                    "type": "string",
+                    "title": "${zookeeperParent}",
+                    "default": "/hbase",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-index": 2
+                },
+                "user": {
+                    "required": false,
+                    "type": "string",
+                    "title": "${user}",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-index": 3
+                },
+                "password": {
+                    "required": false,
+                    "type": "string",
+                    "title": "${password}",
+                    "x-decorator": "FormItem",
+                    "x-component": "Password",
+                    "x-index": 4
+                }
+            }
+        },
+        "node": {
+            "type": "object",
+            "properties": {
+                "columnFamily": {
+                    "required": false,
+                    "type": "string",
+                    "title": "${columnFamily}",
+                    "default": "cf",
+                    "x-decorator": "FormItem",
+                    "x-component": "Input",
+                    "x-index": 1,
+                    "tips": "${columnFamily_tip}"
+                },
+                "scanCaching": {
+                    "required": false,
+                    "type": "number",
+                    "title": "${scanCaching}",
+                    "default": 100,
+                    "x-decorator": "FormItem",
+                    "x-component": "InputNumber",
+                    "x-index": 2
+                },
+                "scanBatch": {
+                    "required": false,
+                    "type": "number",
+                    "title": "${scanBatch}",
+                    "default": 100,
+                    "x-decorator": "FormItem",
+                    "x-component": "InputNumber",
+                    "x-index": 3
+                },
+                "writeBatchSize": {
+                    "required": false,
+                    "type": "number",
+                    "title": "${writeBatchSize}",
+                    "default": 1000,
+                    "x-decorator": "FormItem",
+                    "x-component": "InputNumber",
+                    "x-index": 4
+                }
+            }
+        },
+        "capabilities": [
+            {
+                "id": "dynamic_schema"
+            }
+        ]
+    },
+    "messages": {
+        "default": "en_US",
+        "en_US": {
+            "doc": "docs/hbase_en_US.md",
+            "zookeeperQuorum": "ZooKeeper Quorum",
+            "zookeeperParent": "ZooKeeper ZNode Parent",
+            "user": "Username",
+            "password": "Password",
+            "columnFamily": "Column Family",
+            "columnFamily_tip": "HBase column family for storing fields as qualifiers. HBase recommends 2-3 column families per table.",
+            "scanCaching": "Scan Caching",
+            "scanBatch": "Scan Batch",
+            "writeBatchSize": "Write Batch Size"
+        },
+        "zh_CN": {
+            "doc": "docs/hbase_zh_CN.md",
+            "zookeeperQuorum": "ZooKeeper 集群地址",
+            "zookeeperParent": "ZooKeeper ZNode 父路径",
+            "user": "用户名",
+            "password": "密码",
+            "columnFamily": "列族",
+            "columnFamily_tip": "用于存储字段的 HBase 列族。HBase 建议每个表 2-3 个列族。",
+            "scanCaching": "扫描缓存行数",
+            "scanBatch": "扫描批次列数",
+            "writeBatchSize": "写入批次大小"
+        },
+        "zh_TW": {
+            "doc": "docs/hbase_zh_TW.md",
+            "zookeeperQuorum": "ZooKeeper 集群地址",
+            "zookeeperParent": "ZooKeeper ZNode 父路徑",
+            "user": "使用者名稱",
+            "password": "密碼",
+            "columnFamily": "列族",
+            "columnFamily_tip": "用於存儲字段的 HBase 列族。HBase 建議每個表 2-3 個列族。",
+            "scanCaching": "掃描快取行數",
+            "scanBatch": "掃描批次列數",
+            "writeBatchSize": "寫入批次大小"
+        }
+    },
+    "dataTypes": {
+        "string": {
+            "to": "TapString"
+        },
+        "binary": {
+            "to": "TapBinary",
+            "queryOnly": true
+        },
+        "int": {
+            "bit": 64,
+            "to": "TapNumber"
+        },
+        "long": {
+            "bit": 64,
+            "to": "TapNumber"
+        },
+        "double": {
+            "to": "TapNumber"
+        },
+        "float": {
+            "to": "TapNumber"
+        },
+        "boolean": {
+            "to": "TapBoolean"
+        }
+    }
+}

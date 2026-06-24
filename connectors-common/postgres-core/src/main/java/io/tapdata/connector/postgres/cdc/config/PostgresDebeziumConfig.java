@@ -141,12 +141,26 @@ public class PostgresDebeziumConfig {
         }
         if (EmptyKit.isNotEmpty(observedTableList)) {
             //construct tableWhiteList with schema.table(,) as <public.Student,postgres.test>
-            String tableWhiteList = observedTableList.stream().map(v -> StringKit.escapeRegex(postgresConfig.getSchema()) + "." + StringKit.escapeRegex(v)).collect(Collectors.joining(", "));
+            // If a table name already contains a dot, treat it as schema-qualified (e.g. "public._tapdata_ddl_audit")
+            String tableWhiteList = observedTableList.stream().map(v -> {
+                if (v.contains(".")) {
+                    String[] parts = v.split("\\.", 2);
+                    return StringKit.escapeRegex(parts[0]) + "." + StringKit.escapeRegex(parts[1]);
+                }
+                return StringKit.escapeRegex(postgresConfig.getSchema()) + "." + StringKit.escapeRegex(v);
+            }).collect(Collectors.joining(", "));
             builder.with("table.whitelist", tableWhiteList);
         }
         if (EmptyKit.isNotEmpty(schemaTableMap)) {
             //construct tableWhiteList with schema.table(,) as <public.Student,postgres.test>
-            String tableWhiteList = schemaTableMap.entrySet().stream().map(v -> v.getValue().stream().map(l -> StringKit.escapeRegex(v.getKey()) + "." + StringKit.escapeRegex(l)).collect(Collectors.joining(", "))).collect(Collectors.joining(", "));
+            // If a table name already contains a dot, treat it as schema-qualified
+            String tableWhiteList = schemaTableMap.entrySet().stream().map(v -> v.getValue().stream().map(l -> {
+                if (l.contains(".")) {
+                    String[] parts = l.split("\\.", 2);
+                    return StringKit.escapeRegex(parts[0]) + "." + StringKit.escapeRegex(parts[1]);
+                }
+                return StringKit.escapeRegex(v.getKey()) + "." + StringKit.escapeRegex(l);
+            }).collect(Collectors.joining(", "))).collect(Collectors.joining(", "));
             builder.with("table.whitelist", tableWhiteList);
         }
         builder.with("tap.split.update.pk", postgresConfig.getSplitUpdatePk());
