@@ -12,6 +12,7 @@ import io.tapdata.common.ddl.wrapper.DDLWrapperConfig;
 import io.tapdata.connector.postgres.PostgresJdbcContext;
 import io.tapdata.connector.postgres.cdc.config.PostgresDebeziumConfig;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
+import io.tapdata.connector.postgres.cdc.offset.PostgresOffsetStorage;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.error.PostgresErrorCode;
 import io.tapdata.entity.event.TapEvent;
@@ -23,8 +24,6 @@ import io.tapdata.entity.event.dml.TapInsertRecordEvent;
 import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.TapLogger;
-import io.tapdata.exception.TapCodeException;
-import io.tapdata.kit.ErrorKit;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.partition.TapSubPartitionTableInfo;
 import io.tapdata.entity.simplify.TapSimplify;
@@ -32,7 +31,9 @@ import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
+import io.tapdata.exception.TapCodeException;
 import io.tapdata.kit.EmptyKit;
+import io.tapdata.kit.ErrorKit;
 import io.tapdata.kit.NumberKit;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -64,7 +65,6 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private final PostgresJdbcContext postgresJdbcContext;
     private final TapConnectorContext connectorContext;
     private PostgresDebeziumConfig postgresDebeziumConfig;
-    private PostgresOffset postgresOffset;
     private int recordSize;
     private StreamReadConsumer consumer;
     private final AtomicReference<Throwable> throwableAtomicReference = new AtomicReference<>();
@@ -145,9 +145,9 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 
     public PostgresCdcRunner offset(Object offsetState) {
         if (EmptyKit.isNull(offsetState)) {
-            postgresOffset = new PostgresOffset();
+            PostgresOffsetStorage.DBZ_OFFSET.put(runnerName, new PostgresOffset());
         } else {
-            this.postgresOffset = (PostgresOffset) offsetState;
+            PostgresOffsetStorage.DBZ_OFFSET.put(runnerName, (PostgresOffset) offsetState);
         }
         return this;
     }
@@ -392,6 +392,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 
         return "__debezium_unavailable_value".equals(obj.toString());
     }
+
     /**
      * Append sub partition tables for master tables
      *
@@ -533,12 +534,18 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 conn.commit();
                 TapLogger.info(TAG, "DDL event trigger setup complete in schema: {}", targetSchema);
             } catch (SQLException e) {
-                try { conn.rollback(); } catch (SQLException ignored) { }
+                try {
+                    conn.rollback();
+                } catch (SQLException ignored) {
+                }
                 throw new TapCodeException(PostgresErrorCode.CREATE_DDL_TRIGGER_FAILED,
                         "Failed to set up DDL event trigger artifacts in schema " + targetSchema + ": " + e.getMessage(), e)
                         .dynamicDescriptionParameters(e.getMessage());
             } finally {
-                try { conn.setAutoCommit(autoCommit); } catch (SQLException ignored) { }
+                try {
+                    conn.setAutoCommit(autoCommit);
+                } catch (SQLException ignored) {
+                }
             }
         } catch (SQLException e) {
             throw new TapCodeException(PostgresErrorCode.CREATE_DDL_TRIGGER_FAILED,
@@ -561,8 +568,8 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         if (!isSuperuser[0]) {
             throw new TapCodeException(PostgresErrorCode.CREATE_DDL_TRIGGER_FAILED,
                     "DDL event trigger creation requires PostgreSQL superuser privileges, " +
-                    "but the current user is not a superuser. " +
-                    "Connect as a superuser (e.g., 'postgres') or grant superuser to the current user.");
+                            "but the current user is not a superuser. " +
+                            "Connect as a superuser (e.g., 'postgres') or grant superuser to the current user.");
         }
     }
 

@@ -775,21 +775,21 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void flushOffset(TapConnectorContext connectorContext, Object offset) {
-        if (EmptyKit.isNotNull(cdcRunner)) {
-            if (offset instanceof PostgresOffset) {
-                String sourceOffset = ((PostgresOffset) offset).getSourceOffset();
-                if (sourceOffset == null) {
-                    return;
-                }
-                ObjectMapper objectMapper = new ObjectMapper();
-                try {
-                    Map<String, Object> lastOffset = objectMapper.readValue(sourceOffset, Map.class);
-                    cdcRunner.flushOffset(lastOffset);
-                } catch (JsonProcessingException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }
+//        if (EmptyKit.isNotNull(cdcRunner)) {
+//            if (offset instanceof PostgresOffset) {
+//                String sourceOffset = ((PostgresOffset) offset).getSourceOffset();
+//                if (sourceOffset == null) {
+//                    return;
+//                }
+//                ObjectMapper objectMapper = new ObjectMapper();
+//                try {
+//                    Map<String, Object> lastOffset = objectMapper.readValue(sourceOffset, Map.class);
+//                    cdcRunner.flushOffset(lastOffset);
+//                } catch (JsonProcessingException e) {
+//                    throw new RuntimeException(e);
+//                }
+//            }
+//        }
     }
 
     private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
