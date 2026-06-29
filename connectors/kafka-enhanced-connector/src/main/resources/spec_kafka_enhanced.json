@@ -1,4 +1,7 @@
 {
+  "cyntex": {
+    "modes": ["stream"]
+  },
   "properties": {
     "name": "Kafka-Enhanced",
     "realName": "Apache Kafka(Confluent Compatible)",

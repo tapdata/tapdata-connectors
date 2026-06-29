@@ -330,6 +330,28 @@
             }
           }
         },
+        "useNativeCdc": {
+          "type": "boolean",
+          "title": "${useNativeCdc}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "apiServerKey": "useNativeCdc",
+          "x-index": 14,
+          "x-decorator-props": {
+            "tooltip": "${useNativeCdcTooltip}"
+          },
+          "x-reactions": {
+            "dependencies": [
+              "__TAPDATA.connection_type"
+            ],
+            "fulfill": {
+              "schema": {
+                "x-decorator-props.style.display": "{{$deps[0]!==\"target\" ? null:\"none\"}}"
+              }
+            }
+          }
+        },
         "timezone": {
           "type": "string",
           "title": "${timezone}",
@@ -467,6 +489,8 @@
       "rawLogServerPort": "Raw Log Server Port",
       "cdcUser": "CDC User",
       "cdcPassword": "CDC Password",
+      "useNativeCdc": "Native CDC",
+      "useNativeCdcTooltip": "Read incremental logs by driving the obcdc module directly on the engine host (no raw log server needed); requires the obcdc module installed on the engine host",
       "timezone": "timezone",
       "doc": "docs/oceanbase_mysql_en_US.md",
       "hashSplit": "Single Table Concurrent Read",
@@ -487,6 +511,8 @@
       "rawLogServerPort": "日志服务器端口",
       "cdcUser": "CDC账号",
       "cdcPassword": "CDC密码",
+      "useNativeCdc": "原生CDC",
+      "useNativeCdcTooltip": "在引擎主机上直接驱动obcdc模块读取增量日志（无需日志服务器）；要求引擎主机已安装obcdc模块",
       "timezone": "时区",
       "doc": "docs/oceanbase_mysql_zh_CN.md",
       "hashSplit": "单表并发读",
@@ -507,6 +533,8 @@
       "rawLogServerPort": "日誌服務器端口",
       "cdcUser": "CDC賬號",
       "cdcPassword": "CDC密碼",
+      "useNativeCdc": "原生CDC",
+      "useNativeCdcTooltip": "在引擎主機上直接驅動obcdc模塊讀取增量日誌（無需日誌服務器）；要求引擎主機已安裝obcdc模塊",
       "timezone": "時區",
       "doc": "docs/oceanbase_mysql_zh_TW.md",
       "hashSplit": "單表並發讀",

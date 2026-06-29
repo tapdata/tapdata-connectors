@@ -1,4 +1,7 @@
 {
+  "cyntex": {
+    "modes": ["api"]
+  },
   "properties": {
     "name": "Alibaba 1688",
     "realName": "Alibaba 1688",

@@ -38,6 +38,10 @@ public class OceanbaseTest extends MysqlConnectionTest implements AutoCloseable 
     }
 
     public Boolean testObLogProxy() {
+        if (((OceanbaseConfig) commonDbConfig).getUseNativeCdc()) {
+            consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY, "ObLogProxy is available"));
+            return true;
+        }
         try {
             NetUtil.validateHostPortWithSocket(((OceanbaseConfig) commonDbConfig).getRawLogServerHost(), ((OceanbaseConfig) commonDbConfig).getRawLogServerPort());
             consumer.accept(testItem(ITEM_OB_LOG_PROXY, TestItem.RESULT_SUCCESSFULLY, "ObLogProxy is available"));

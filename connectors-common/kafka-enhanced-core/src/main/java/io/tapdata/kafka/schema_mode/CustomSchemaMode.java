@@ -45,6 +45,8 @@ public class CustomSchemaMode extends AbsSchemaMode {
     private static final ScriptFactory scriptFactory = InstanceFactory.instance(ScriptFactory.class, "tapdata");
     // GraalVM JS Context 不允许多线程共享，使用 ThreadLocal 让 discoverSchema 等并发场景每个线程独享一个 Engine
     private final ThreadLocal<ScriptEngine> scriptEngine;
+    // 跟踪所有线程创建的 ScriptEngine，连接器停止时统一关闭，避免 Hazelcast 等长生命周期线程持续持有 GraalJS Context
+    private final Set<ScriptEngine> createdEngines = ConcurrentHashMap.newKeySet();
     private final String composedScript;
     // 每个 topic 已观察到的字段集合（fieldName -> tapType），用于检测新增字段；只增不减
     private final Map<String, Map<String, String>> lastSchemaPerTopic = new ConcurrentHashMap<>();
@@ -65,6 +67,7 @@ public class CustomSchemaMode extends AbsSchemaMode {
             ScriptEngine engine = scriptFactory.create(ScriptFactory.TYPE_JAVASCRIPT,
                     new ScriptOptions().engineName("graal.js").classLoader(appClassLoader));
             engine.eval(composedScript);
+            createdEngines.add(engine);
             return engine;
         } catch (Exception e) {
             throw new CoreException("Engine initialization failed!");
@@ -72,10 +75,23 @@ public class CustomSchemaMode extends AbsSchemaMode {
     }
 
     @Override
+    public void close() throws Exception {
+        for (ScriptEngine engine : createdEngines) {
+            if (engine instanceof AutoCloseable) {
+                try {
+                    ((AutoCloseable) engine).close();
+                } catch (Exception ignore) {
+                }
+            }
+        }
+        createdEngines.clear();
+    }
+
+    @Override
     public void sampleOneSchema(String table, TapTable sampleTable) {
         kafkaService.<String, String>sampleValue(Collections.singletonList(table), null, record -> {
             if (null != record) {
-                Object eventObj = executeScript(scriptEngine.get(), "analyze", record.headers(), record.key(), record.value(), record.partition());
+                Object eventObj = covertData(executeScript(scriptEngine.get(), "analyze", record.headers(), record.key(), record.value(), record.partition()));
                 if (eventObj instanceof Map) {
                     Map<String, Object> after = (Map<String, Object>) ((Map<String, Object>) eventObj).get("after");
                     if (after != null) {
@@ -99,7 +115,10 @@ public class CustomSchemaMode extends AbsSchemaMode {
             return null;
         }
         try {
-            Object value = executeScript(scriptEngine.get(), "analyze", consumerRecord.headers(), consumerRecord.key(), consumerRecord.value(), consumerRecord.partition());
+            Object value = covertData(executeScript(scriptEngine.get(), "analyze", consumerRecord.headers(), consumerRecord.key(), consumerRecord.value(), consumerRecord.partition()));
+            if (value == null) {
+                return null;
+            }
             Map<String, Object> after = (Map<String, Object>) ((Map<String, Object>) value).get("after");
             Map<String, Object> before = (Map<String, Object>) ((Map<String, Object>) value).get("before");
             String op = String.valueOf(((Map<String, Object>) value).get("op"));

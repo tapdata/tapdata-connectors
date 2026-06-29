@@ -149,7 +149,11 @@ public class PostgresTest extends CommonDbTest {
             assert connection != null;
             connection.close();
             String testSlotName = "test_tapdata_" + UUID.randomUUID().toString().replaceAll("-", "_");
-            testSqls.add(String.format(PG_LOG_PLUGIN_CREATE_TEST, testSlotName, ((PostgresConfig) commonDbConfig).getLogPluginName()));
+            if ("physical".equals(((PostgresConfig) commonDbConfig).getLogPluginName())) {
+                testSqls.add(String.format(PG_PHYSICAL_SLOT_CREATE_TEST, testSlotName));
+            } else {
+                testSqls.add(String.format(PG_LOG_PLUGIN_CREATE_TEST, testSlotName, ((PostgresConfig) commonDbConfig).getLogPluginName()));
+            }
             testSqls.add(PG_LOG_PLUGIN_DROP_TEST);
             jdbcContext.batchExecute(testSqls, 20);
             consumer.accept(testItem(TestItem.ITEM_READ_LOG, TestItem.RESULT_SUCCESSFULLY, "Cdc can work normally"));
@@ -295,6 +299,7 @@ public class PostgresTest extends CommonDbTest {
     private final static String PG_TABLE_SELECT_NUM = "SELECT count(*) FROM information_schema.table_privileges " +
             "WHERE grantee='%s' AND table_catalog='%s' AND table_schema='%s' AND privilege_type='SELECT'";
     protected final static String PG_LOG_PLUGIN_CREATE_TEST = "SELECT pg_create_logical_replication_slot('%s','%s')";
+    protected final static String PG_PHYSICAL_SLOT_CREATE_TEST = "SELECT pg_create_physical_replication_slot('%s')";
     protected final static String PG_LOG_PLUGIN_DROP_TEST = "select pg_drop_replication_slot(a.slot_name) " +
             "from (select * from pg_replication_slots where slot_name like 'test_tapdata_%') a;";
 

@@ -31,7 +31,7 @@ class ManagedIOStreamTableWriteTest {
         List<String> order = new ArrayList<>();
         StreamTableWrite delegate = new FakeStreamTableWrite(order, null);
         IOManager ioManager = new FakeIOManager(order, null);
-        ManagedIOStreamTableWrite writer = new ManagedIOStreamTableWrite(delegate, ioManager);
+        ManagedIOStreamTableWrite writer = new ManagedIOStreamTableWrite(delegate, ioManager, null);
 
         writer.close();
 
@@ -47,7 +47,7 @@ class ManagedIOStreamTableWriteTest {
         StreamTableWrite delegate = new FakeStreamTableWrite(order, writeError);
         IOManager ioManager = new FakeIOManager(order, null);
 
-        ManagedIOStreamTableWrite writer = new ManagedIOStreamTableWrite(delegate, ioManager);
+        ManagedIOStreamTableWrite writer = new ManagedIOStreamTableWrite(delegate, ioManager, null);
 
         Exception thrown = assertThrows(Exception.class, writer::close);
         assertSame(writeError, thrown);
@@ -64,7 +64,7 @@ class ManagedIOStreamTableWriteTest {
         StreamTableWrite delegate = new FakeStreamTableWrite(order, writeError);
         IOManager ioManager = new FakeIOManager(order, ioError);
 
-        ManagedIOStreamTableWrite writer = new ManagedIOStreamTableWrite(delegate, ioManager);
+        ManagedIOStreamTableWrite writer = new ManagedIOStreamTableWrite(delegate, ioManager, null);
 
         Exception thrown = assertThrows(Exception.class, writer::close);
         assertSame(writeError, thrown);
@@ -78,7 +78,7 @@ class ManagedIOStreamTableWriteTest {
     void closeShouldWorkWithoutIoManager() throws Exception {
         List<String> order = new ArrayList<>();
         StreamTableWrite delegate = new FakeStreamTableWrite(order, null);
-        ManagedIOStreamTableWrite writer = new ManagedIOStreamTableWrite(delegate, null);
+        ManagedIOStreamTableWrite writer = new ManagedIOStreamTableWrite(delegate, null, null);
 
         writer.close();
 
