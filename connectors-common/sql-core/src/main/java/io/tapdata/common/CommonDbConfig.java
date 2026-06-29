@@ -497,14 +497,6 @@ public class CommonDbConfig implements Serializable {
         this.tableConfig = tableConfig;
     }
 
-    public Boolean getDisableTrigger() {
-        return disableTrigger;
-    }
-
-    public void setDisableTrigger(Boolean disableTrigger) {
-        this.disableTrigger = disableTrigger;
-    }
-
     /**
      * Generic method to get table-specific or global configuration value
      *
@@ -519,5 +511,13 @@ public class CommonDbConfig implements Serializable {
             return tableConfig.get(key).getValue(propertyName, defaultValue);
         }
         return defaultValue;
+    }
+
+    public Boolean getDisableTrigger() {
+        return disableTrigger;
+    }
+
+    public void setDisableTrigger(Boolean disableTrigger) {
+        this.disableTrigger = disableTrigger;
     }
 }

@@ -42,9 +42,10 @@ public abstract class NormalWriteRecorder {
     protected final Map<String, String> columnTypeMap;
     protected boolean hasPk = false;
     protected boolean targetNeedEncode = false;
+    protected boolean smalldatetimeTruncation = false;
     protected String fromCharset;
     protected String toCharset;
-    protected boolean smalldatetimeTruncation = false;
+
     protected String version;
     protected WritePolicyEnum insertPolicy;
     protected Boolean fileInput = false;
@@ -324,6 +325,12 @@ public abstract class NormalWriteRecorder {
     public String getUpsertSql(Map<String, Object> after) throws SQLException {
         throw new UnsupportedOperationException("upsert is not supported");
     }
+    public String getUpsertSqlByAfter(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("upsert is not supported");
+    }
+    public String getInsertIgnoreSqlByAfter(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("insertIgnore is not supported");
+    }
 
     public String getDeleteSql(Map<String, Object> before) throws SQLException {
         boolean containsNull = !hasPk && before.containsValue(null);
@@ -553,11 +560,13 @@ public abstract class NormalWriteRecorder {
     protected Object filterValue(Object value, String dataType) throws SQLException {
         return value;
     }
-    public void setSmalldatetimeTruncation(boolean smalldatetimeTruncation) {
-        this.smalldatetimeTruncation = smalldatetimeTruncation;
-    }
+
+
     public void setTargetNeedEncode(boolean targetNeedEncode) {
         this.targetNeedEncode = targetNeedEncode;
+    }
+    public void setSmalldatetimeTruncation(boolean smalldatetimeTruncation) {
+        this.smalldatetimeTruncation = smalldatetimeTruncation;
     }
 
     public void setFromCharset(String fromCharset) {
@@ -577,7 +586,7 @@ public abstract class NormalWriteRecorder {
         if (null == obj) {
             result = "null";
         } else if (obj instanceof String) {
-            result = transferString((String) obj);
+            result = "'" + ((String) obj).replace("\\", "\\\\").replace("'", "\\'").replace("(", "\\(").replace(")", "\\)") + "'";
         } else if (obj instanceof Number) {
             result = obj.toString();
         } else if (obj instanceof Date) {
@@ -597,12 +606,7 @@ public abstract class NormalWriteRecorder {
         }
         return result;
     }
-    public String getUpsertSqlByAfter(Map<String, Object> after) throws SQLException {
-        throw new UnsupportedOperationException("upsert is not supported");
-    }
-    public String getInsertIgnoreSqlByAfter(Map<String, Object> after) throws SQLException {
-        throw new UnsupportedOperationException("insertIgnore is not supported");
-    }
+
     protected String transferString(String str) {
         return "'" + str.replace("\\", "\\\\").replace("'", "''") + "'";
     }

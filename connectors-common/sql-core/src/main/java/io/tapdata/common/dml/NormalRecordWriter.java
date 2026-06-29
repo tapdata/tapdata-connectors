@@ -179,7 +179,7 @@ public class NormalRecordWriter {
         }
     }
 
-    private void errorHandler(SQLException e, Object data) {
+    public void errorHandler(SQLException e, Object data) {
         if (null != data) {
             data = ErrorCodeUtils.truncateData(data);
         }
@@ -222,6 +222,9 @@ public class NormalRecordWriter {
     }
 
     public void setAutoIncFields(List<String> autoIncFields) {
+        insertRecorder.setAutoIncFields(autoIncFields);
+        updateRecorder.setAutoIncFields(autoIncFields);
+        deleteRecorder.setAutoIncFields(autoIncFields);
         this.autoIncFields = autoIncFields;
     }
 
@@ -277,28 +280,11 @@ public class NormalRecordWriter {
             }
         }
     }
-    public NormalRecordWriter setFromCharset(String fromCharset) {
-        insertRecorder.setFromCharset(fromCharset);
-        updateRecorder.setFromCharset(fromCharset);
-        deleteRecorder.setFromCharset(fromCharset);
-        return this;
-    }
-    public NormalRecordWriter setToCharset(String toCharset) {
-        insertRecorder.setToCharset(toCharset);
-        updateRecorder.setToCharset(toCharset);
-        deleteRecorder.setToCharset(toCharset);
-        return this;
-    }
-    public NormalRecordWriter setTargetNeedEncode(boolean targetNeedEncode) {
-        insertRecorder.setTargetNeedEncode(targetNeedEncode);
-        updateRecorder.setTargetNeedEncode(targetNeedEncode);
-        deleteRecorder.setTargetNeedEncode(targetNeedEncode);
-        return this;
-    }
 
     protected String getOpenIdentitySql() {
         return null;
     }
+
     public void disableTrigger() throws SQLException {
         String sql = getDisableTriggerSql();
         if (EmptyKit.isNotBlank(sql)) {
@@ -317,13 +303,23 @@ public class NormalRecordWriter {
             }
         }
     }
-
-    protected String getDisableTriggerSql() {
-        return null;
+    public NormalRecordWriter setFromCharset(String fromCharset) {
+        insertRecorder.setFromCharset(fromCharset);
+        updateRecorder.setFromCharset(fromCharset);
+        deleteRecorder.setFromCharset(fromCharset);
+        return this;
     }
-
-    protected String getEnableTriggerSql() {
-        return null;
+    public NormalRecordWriter setToCharset(String toCharset) {
+        insertRecorder.setToCharset(toCharset);
+        updateRecorder.setToCharset(toCharset);
+        deleteRecorder.setToCharset(toCharset);
+        return this;
+    }
+    public NormalRecordWriter setTargetNeedEncode(boolean targetNeedEncode) {
+        insertRecorder.setTargetNeedEncode(targetNeedEncode);
+        updateRecorder.setTargetNeedEncode(targetNeedEncode);
+        deleteRecorder.setTargetNeedEncode(targetNeedEncode);
+        return this;
     }
     public NormalRecordWriter setSmalldatetimeTruncation(boolean smalldatetimeTruncation) {
         insertRecorder.setSmalldatetimeTruncation(smalldatetimeTruncation);
@@ -333,4 +329,11 @@ public class NormalRecordWriter {
     }
 
 
+    protected String getDisableTriggerSql() {
+        return null;
+    }
+
+    protected String getEnableTriggerSql() {
+        return null;
+    }
 }
