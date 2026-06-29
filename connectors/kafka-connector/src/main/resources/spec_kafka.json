@@ -1,4 +1,7 @@
 {
+  "cyntex": {
+    "modes": ["stream"]
+  },
   "properties": {
     "name": "Kafka",
     "realName": "Apache Kafka(Deprecated)",

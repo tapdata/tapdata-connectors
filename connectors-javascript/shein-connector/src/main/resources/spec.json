@@ -1,4 +1,7 @@
 {
+  "cyntex": {
+    "modes": ["api"]
+  },
   "properties": {
     "name": "Shein",
     "realName": "Shein",

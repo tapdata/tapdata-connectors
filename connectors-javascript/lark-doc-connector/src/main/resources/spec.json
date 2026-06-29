@@ -1,4 +1,7 @@
 {
+  "cyntex": {
+    "modes": ["api"]
+  },
   "properties": {
     "name": "Lark Doc",
     "realName": "Lark Doc",

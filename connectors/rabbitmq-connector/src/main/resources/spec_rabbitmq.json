@@ -1,4 +1,7 @@
 {
+  "cyntex": {
+    "modes": ["stream"]
+  },
   "properties": {
     "name": "RabbitMQ",
     "realName": "RabbitMQ",
