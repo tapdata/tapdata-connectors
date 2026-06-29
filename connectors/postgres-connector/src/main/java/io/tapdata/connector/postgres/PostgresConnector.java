@@ -564,7 +564,7 @@ public class PostgresConnector extends CommonDbConnector {
             try (
                     Connection connection = jdbcContext.getConnection();
                     Statement statement = connection.createStatement();
-                    ResultSet resultSet = statement.executeQuery("select max(" + field + ") from " + getSchemaAndTable(tapTable.getId()))
+                    ResultSet resultSet = statement.executeQuery("select max(\"" + field + "\") from " + getSchemaAndTable(tapTable.getId()))
             ) {
                 if (resultSet.next()) {
                     String sequenceName = tapTable.getNameFieldMap().get(field).getSequenceName();
