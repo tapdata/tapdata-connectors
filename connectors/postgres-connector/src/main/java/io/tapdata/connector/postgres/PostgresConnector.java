@@ -775,21 +775,9 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void flushOffset(TapConnectorContext connectorContext, Object offset) {
-//        if (EmptyKit.isNotNull(cdcRunner)) {
-//            if (offset instanceof PostgresOffset) {
-//                String sourceOffset = ((PostgresOffset) offset).getSourceOffset();
-//                if (sourceOffset == null) {
-//                    return;
-//                }
-//                ObjectMapper objectMapper = new ObjectMapper();
-//                try {
-//                    Map<String, Object> lastOffset = objectMapper.readValue(sourceOffset, Map.class);
-//                    cdcRunner.flushOffset(lastOffset);
-//                } catch (JsonProcessingException e) {
-//                    throw new RuntimeException(e);
-//                }
-//            }
-//        }
+        if (cdcRunner != null && offset instanceof PostgresOffset) {
+            cdcRunner.processFlushOffset((PostgresOffset) offset);
+        }
     }
 
     private void streamReadMultiConnection(TapConnectorContext nodeContext, List<ConnectionConfigWithTables> connectionConfigWithTables, Object offsetState, int batchSize, StreamReadConsumer consumer) throws Throwable {
@@ -903,7 +891,7 @@ public class PostgresConnector extends CommonDbConnector {
             return lsn.get();
         }
         if (EmptyKit.isNotNull(offsetStartTime)) {
-            tapLogger.warn("Postgres specified time start increment is not supported except walminer, use the current time as the start increment");
+            return offsetStartTime;
         }
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());
