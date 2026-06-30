@@ -891,7 +891,12 @@ public class PostgresConnector extends CommonDbConnector {
             return lsn.get();
         }
         if (EmptyKit.isNotNull(offsetStartTime)) {
-            return offsetStartTime;
+            Integer keepWalHours = postgresConfig.getKeepWalHours();
+            if (keepWalHours != null && keepWalHours > 0) {
+                return offsetStartTime;
+            } else {
+                return new PostgresOffset();
+            }
         }
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());

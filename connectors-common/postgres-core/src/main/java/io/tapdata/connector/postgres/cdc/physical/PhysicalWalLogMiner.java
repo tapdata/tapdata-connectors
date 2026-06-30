@@ -28,7 +28,18 @@ import org.postgresql.PGProperty;
 import org.postgresql.replication.LogSequenceNumber;
 import org.postgresql.replication.PGReplicationStream;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.ArrayList;
@@ -37,13 +48,17 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.PriorityQueue;
 import java.util.Properties;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import static io.tapdata.connector.postgres.cdc.physical.WalConstants.*;
@@ -73,6 +88,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * never match (e.g. very long-running transactions) and a potential OOM. */
     private static final long PENDING_REDO_WARN_THRESHOLD = 1_000_000L;
     private static final long PENDING_WARN_INTERVAL_MS = 30_000L;
+    private static final long REPLICATION_STATUS_INTERVAL_MS = 5_000L;
+    private static final int SPILL_STREAM_RESET_INTERVAL = 10_000;
+    /* Per-xid in-memory limit before spilling to disk to survive multi-million-row
+     * transactions without OOM. ObjectOutputStream writes NormalRedo sequentially
+     * (NormalRedo is already Serializable); the files are read back via streaming
+     * k-way merge on COMMIT and deleted. Set via TAPDATA_WAL_SPILL_THRESHOLD (default 500K). */
+    private static final long PER_XID_SPILL_THRESHOLD = parseSpillThreshold();
     private static final long[] EMPTY_SUBXACTS = new long[0];
     /* How often to surface the running tally of UPDATE/DELETE whose before-image
      * could not be recovered (page-state cache miss under wal_level=replica). */
@@ -110,6 +132,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * transactions and in stream order. Consumer-thread only. */
     private final Map<Long, List<NormalRedo>> ddlRedosByXid = new HashMap<>();
     private final Map<Long, List<NormalRedo>> pendingByXid = new HashMap<>();
+    /* Per-xid spill state: when a single transaction's in-memory NormalRedo list
+     * exceeds PER_XID_SPILL_THRESHOLD the entire bucket is written to a sequential
+     * spill file and the list is cleared, bounding per-xid heap to ~threshold *
+     * sizeof(NormalRedo). On COMMIT/ABORT the files are deserialized back in write
+     * order, merged with any in-memory remainder, and deleted. Consumer-thread only. */
+    private final Map<Long, SpillState> spillStates = new HashMap<>();
+    /* Spill directory root — created once per miner lifecycle, cleaned up on shutdown. */
+    private Path spillDir;
     private long pendingRedoCount;
     private long lastPendingWarnMs;
     /* Page-state cache for in-memory mini-redo: enables UPDATE/DELETE before/after
@@ -128,6 +158,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * record before this LSN is decoded for its cache side effect only and never
      * emitted. Set once in startMiner and read from the reader/consumer threads. */
     private volatile long emitFromLsn;
+    private final AtomicLong lastReceiveLsnForStatus = new AtomicLong();
 
     /* Verbose [WAL-DEBUG] logging is gated behind the TAPDATA_WAL_DEBUG env var
      * so a normal run stays quiet; set TAPDATA_WAL_DEBUG=true to surface the
@@ -169,6 +200,17 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         long segSize = querySegmentSize();
         walLevelLogical = queryWalLevelLogical();
         pageCache = walLevelLogical ? null : new PageStateCache(PAGE_CACHE_CAPACITY);
+        // Spill directory for large transactions — created once per miner lifecycle
+        // so the consumer thread can spill and drain without IO coordination.
+        String spillRoot = System.getenv().getOrDefault("TAPDATA_WAL_SPILL_DIR",
+                System.getProperty("java.io.tmpdir"));
+        spillDir = Paths.get(spillRoot, "physical-wal-spill-" + UUID.randomUUID());
+        try {
+            Files.createDirectories(spillDir);
+            tapLogger.info("Physical WAL miner spill directory: {}", spillDir);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot create spill directory " + spillDir, e);
+        }
         decodeCtx = new HeapRmgrDecoder.Ctx(pageCache, walLevelLogical,
                 WAL_DEBUG_ENABLED ? (fmt, args) -> tapLogger.info(fmt, args) : null);
         buildDdlWatch();
@@ -312,6 +354,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             run(stream, startLsnLong, segSize, isAlive);
         } finally {
             consumer.streamReadEnded();
+            cleanupAllSpills();
         }
     }
 
@@ -325,6 +368,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // only from emitFromLsn so the saved resume point never moves backwards
         // while the cache-warming prefix is being replayed.
         String initialOffset = lsnStr(emitFromLsn);
+        long[] lastStatusUpdateMs = {0L};
         try (ConcurrentProcessor<WalPageDecoder.RawRecord, Decoded> processor =
                      TapExecutors.createSimple(DECODE_THREADS, DECODE_QUEUE_SIZE, "physical-wal-miner")) {
             Thread consumerThread = new Thread(() -> consumeLoop(processor, isAlive, initialOffset));
@@ -334,8 +378,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 while (isAlive.get() && threadException.get() == null) {
                     ByteBuffer buf = stream.readPending();
                     if (buf == null) {
+                        updateReplicationStatusIfDue(stream, lastStatusUpdateMs, false);
                         TimeUnit.MILLISECONDS.sleep(10);
                         continue;
+                    }
+                    LogSequenceNumber recv = stream.getLastReceiveLSN();
+                    if (recv != null) {
+                        lastReceiveLsnForStatus.set(recv.asLong());
+                        updateReplicationStatusIfDue(stream, lastStatusUpdateMs, false);
                     }
                     int n = buf.remaining();
                     byte[] arr = new byte[n];
@@ -343,19 +393,19 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     decoder.feed(arr, 0, n);
                     WalPageDecoder.RawRecord raw;
                     while ((raw = decoder.nextRecord()) != null) {
-                        if (!submit(processor, raw, isAlive)) {
+                        if (!submit(processor, raw, isAlive, stream, lastStatusUpdateMs)) {
                             break;
                         }
                     }
                     decoder.compact();
-                    LogSequenceNumber recv = stream.getLastReceiveLSN();
+                    recv = stream.getLastReceiveLSN();
                     if (recv != null) {
-                        stream.setFlushedLSN(recv);
-                        stream.setAppliedLSN(recv);
-                        stream.forceUpdateStatus();
+                        lastReceiveLsnForStatus.set(recv.asLong());
+                        updateReplicationStatusIfDue(stream, lastStatusUpdateMs, false);
                     }
-                }
+            }
             } finally {
+                ErrorKit.ignoreAnyError(() -> updateReplicationStatusIfDue(stream, lastStatusUpdateMs, true));
                 ErrorKit.ignoreAnyError(stream::close);
             }
             ErrorKit.ignoreAnyError(consumerThread::join);
@@ -368,13 +418,46 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     /* Offer a record for parallel decoding, blocking with backpressure until the
      * processor accepts it; returns false if shutdown or a decode error aborts. */
     private boolean submit(ConcurrentProcessor<WalPageDecoder.RawRecord, Decoded> processor,
-                           WalPageDecoder.RawRecord raw, Supplier<Boolean> isAlive) {
+                           WalPageDecoder.RawRecord raw, Supplier<Boolean> isAlive,
+                           PGReplicationStream stream, long[] lastStatusUpdateMs) throws Exception {
         while (isAlive.get() && threadException.get() == null) {
             if (processor.runAsync(raw, this::decodeUnit, 1, TimeUnit.SECONDS)) {
                 return true;
             }
+            updateReplicationStatusIfDue(stream, lastStatusUpdateMs, false);
         }
         return false;
+    }
+
+    /* Send a standby status update to prevent wal_sender_timeout disconnects.
+     * IMPORTANT: this does NOT advance the replication slot. The slot's
+     * confirmed_flush_lsn is only advanced on transaction COMMIT via the
+     * connector's flushOffset path. Reporting the receive LSN as "flushed"
+     * would allow WAL to be recycled before the consumer has actually
+     * committed the data — a process crash at that point would lose the
+     * uncommitted WAL segment. */
+    private void updateReplicationStatusIfDue(PGReplicationStream stream, long[] lastStatusUpdateMs, boolean force) throws Exception {
+        long now = System.currentTimeMillis();
+        if (!force && now - lastStatusUpdateMs[0] < REPLICATION_STATUS_INTERVAL_MS) {
+            return;
+        }
+        // Only send a status update if we have received at least some WAL;
+        // the flushed/applied LSNs are left at their last committed values
+        // so the slot is NOT advanced here — this is purely a keepalive.
+        long recvLong = lastReceiveLsnForStatus.get();
+        if (recvLong <= 0) {
+            return;
+        }
+        try {
+            stream.forceUpdateStatus();
+            lastStatusUpdateMs[0] = now;
+        } catch (Exception e) {
+            if (force || !(e instanceof org.postgresql.util.PSQLException)) {
+                throw e;
+            }
+            // Shutdown-time Broken Pipe is expected and swallowed
+            tapLogger.warn("Physical WAL miner failed to update replication status: {}", e.getMessage());
+        }
     }
 
     /* Consumer thread: drains decoded units in submission order, buffers heap
@@ -407,6 +490,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     return;
                 }
                 if (d != null) {
+                    String safeOffsetBeforeApply = lastCommitOffset;
                     // Hold offsets back during the cache-warming prefix so a crash
                     // there cannot rewind the saved resume point below the emit
                     // position (which would re-emit snapshot/prior changes).
@@ -416,7 +500,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                             lastCommitOffset = d.offset;
                         }
                     }
-                    applyDecoded(d, batch);
+                    batch = applyDecoded(d, batch, safeOffsetBeforeApply);
                     if (batch.size() >= recordSize) {
                         consumer.accept(batch, lastCommitOffset);
                         batch = new ArrayList<>();
@@ -564,7 +648,17 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             if (!before.containsKey(k)) {
                 return false;   // key not recovered in the before-image: cannot tell, keep the UPDATE
             }
-            if (!Objects.equals(before.get(k), after.get(k))) {
+            Object beforeVal = before.get(k);
+            Object afterVal = after.get(k);
+            if (!Objects.equals(beforeVal, afterVal)) {
+                // Log the type and value of both sides to diagnose false key-change
+                // detections (e.g. Integer vs Long, encoding differences, etc.)
+                TapLogger.warn(TAG,
+                        "[WAL-DEBUG] key-change detected: table={}.{} key={} "
+                        + "before={}({}) after={}({})",
+                        r.getNameSpace(), r.getTableName(), k,
+                        beforeVal, beforeVal != null ? beforeVal.getClass().getSimpleName() : "null",
+                        afterVal, afterVal != null ? afterVal.getClass().getSimpleName() : "null");
                 return true;
             }
         }
@@ -738,7 +832,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * buffer; only this method touches {@code pendingByXid} and the page
      * cache. Heap records are decoded here (not on the pool) so the cache
      * mini-redo sees them in strict WAL order. */
-    private void applyDecoded(Decoded d, List<TapEvent> batch) {
+    private List<TapEvent> applyDecoded(Decoded d, List<TapEvent> batch, String safeOffsetBeforeApply) {
         if (d.rec != null) {
             // Seed from FPIs carried by *any* record (standalone XLOG_FPI /
             // XLOG_FPI_FOR_HINT, heap2 prune/visible/freeze, etc.), not just the
@@ -751,12 +845,12 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         switch (d.kind) {
             case Decoded.HEAP:
                 if (d.rec == null) {
-                    break;
+                    return batch;
                 }
                 if (d.rel != null) {
                     List<NormalRedo> redos = decodeHeapOnConsumer(d.rec, d.rel);
                     if (!redos.isEmpty()) {
-                        pendingByXid.computeIfAbsent(d.xid, k -> new ArrayList<>()).addAll(redos);
+                        appendRedos(d.xid, redos);
                         pendingRedoCount += redos.size();
                         checkPendingPressure();
                     }
@@ -771,26 +865,26 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 }
                 break;
             case Decoded.COMMIT:
-                List<NormalRedo> redos = drainTransaction(d.xid, d.subxids);
-                List<NormalRedo> ddlChanges = drainDdlRedos(d.xid, d.subxids);
-                // Always drain (frees the per-xid buffers and keeps the page cache
-                // in step), but suppress commits that landed before the emit
-                // position: their records only served to warm the cache and were
-                // already captured by the snapshot / a prior offset.
-                if (d.rec != null && d.rec.lsn < emitFromLsn) {
-                    break;
-                }
-                // Emit field DDL before this commit's DML so a target applies the
-                // schema change before any row that depends on it.
-                if (!ddlChanges.isEmpty()) {
-                    emitDdlEvents(ddlChanges, d.commitMillis, batch);
-                }
-                if (!redos.isEmpty()) {
-                    // Merge of top-level and subtransaction buckets; stable-sort by
-                    // source LSN to restore the original intra-transaction order.
-                    redos.sort(Comparator.comparingLong(PhysicalWalLogMiner::redoLsn));
+                // Drain via streaming k-way merge: spill files + in-memory buffers
+                // are merged LSN-ordered without materializing the full transaction.
+                try (DrainResult dr = drainTransaction(d.xid, d.subxids)) {
+                    List<NormalRedo> ddlChanges = drainDdlRedos(d.xid, d.subxids);
+                    // Always drain (frees the per-xid buffers and keeps the page cache
+                    // in step), but suppress commits that landed before the emit
+                    // position: their records only served to warm the cache and were
+                    // already captured by the snapshot / a prior offset.
+                    if (d.rec != null && d.rec.lsn < emitFromLsn) {
+                        break;
+                    }
+                    // Emit field DDL before this commit's DML so a target applies the
+                    // schema change before any row that depends on it.
+                    if (!ddlChanges.isEmpty()) {
+                        emitDdlEvents(ddlChanges, d.commitMillis, batch);
+                    }
                     int emitted = 0;
-                    for (NormalRedo r : redos) {
+                    int totalRedos = dr.count;
+                    while (dr.iterator.hasNext()) {
+                        NormalRedo r = dr.iterator.next();
                         r.setTimestamp(d.commitMillis);
                         r.setCdcSequenceStr(d.offset);
                         TapEvent ev = toEvent(r);
@@ -799,51 +893,92 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                             emitted++;
                             trackNullImage(r);
                             if (WAL_DEBUG_ENABLED) {
-                                // Decoded column maps (not raw tuple bytes) so each emitted
-                                // change lines up directly against the source DML on its
-                                // primary key — the anchor for the parse-correctness diff.
                                 tapLogger.info("[WAL-DEBUG] EMIT op={} {}.{} lsn={} before={} after={}",
                                         r.getOperation(), r.getNameSpace(), r.getTableName(),
                                         lsnStr(redoLsn(r)), r.getUndoRecord(), r.getRedoRecord());
+                            }
+                            // Batch-flush mid-COMMIT so multi-million-row
+                            // transactions don't pile all TapEvents in memory.
+                            //
+                            // IMPORTANT — duplicate-on-crash-replay trade-off:
+                            // These intermediate batches use safeOffsetBeforeApply
+                            // (the offset of the previous COMMIT), NOT the current
+                            // transaction's offset. This is intentional:
+                            //
+                            // 1. If we used the current offset, a crash mid-COMMIT
+                            //    would save a position inside the transaction, and
+                            //    on restart the PRE-commit portion of this xid's
+                            //    WAL would be skipped → data LOSS.
+                            //
+                            // 2. With safeOffsetBeforeApply, a crash mid-COMMIT
+                            //    rewinds to the previous transaction boundary. PG
+                            //    re-decodes this entire xid → already-emitted
+                            //    internal batches are produced again → downstream
+                            //    MUST be idempotent (upsert or dedup semantics).
+                            //
+                            // The final batch (after the while loop) uses the
+                            // current COMMIT offset via consumeLoop's normal
+                            // lastCommitOffset, so a successful full drain
+                            // advances the resume point past this xid.
+                            if (batch.size() >= recordSize && dr.iterator.hasNext()) {
+                                consumer.accept(batch, safeOffsetBeforeApply);
+                                batch = new ArrayList<>();
                             }
                         }
                     }
                     if (WAL_DEBUG_ENABLED) {
                         tapLogger.info("[WAL-DEBUG] COMMIT drain xid={} redos={} emitted={} offset={}",
-                                d.xid, redos.size(), emitted, d.offset);
+                                d.xid, totalRedos, emitted, d.offset);
                     }
                 }
                 break;
             case Decoded.ABORT:
-                drainTransaction(d.xid, d.subxids);
+                discardTransaction(d.xid, d.subxids);
                 drainDdlRedos(d.xid, d.subxids);
                 break;
             default:
                 break;
         }
+        return batch;
     }
 
-    /* Remove and return the buffered changes for a top-level xid together with all
-     * of its subtransaction xids, keeping {@code pendingRedoCount} in step. */
-    private List<NormalRedo> drainTransaction(long topXid, long[] subxids) {
-        List<NormalRedo> all = new ArrayList<>();
-        List<NormalRedo> top = pendingByXid.remove(topXid);
-        if (top != null) {
-            all.addAll(top);
-        }
-        if (subxids != null) {
-            for (long sub : subxids) {
-                List<NormalRedo> bucket = pendingByXid.remove(sub);
-                if (bucket != null) {
-                    all.addAll(bucket);
+    /* Build a streaming, LSN-ordered iterator over the buffered changes for a
+     * top-level xid together with all of its subtransaction xids. Spill files are
+     * opened as ObjectInputStreams and merged via a k-way PriorityQueue so that
+     * COMMIT-time heap is bounded to O(num_streams), not O(total_rows). */
+    private DrainResult drainTransaction(long topXid, long[] subxids) {
+        List<RedoStream> streams = new ArrayList<>();
+        List<Path> spillFiles = new ArrayList<>();
+        int count = 0;
+
+        try {
+            // Close spill writers BEFORE reading to avoid file locking issues
+            closeSpillWriterForXid(topXid);
+            if (subxids != null) {
+                for (long sub : subxids) {
+                    closeSpillWriterForXid(sub);
                 }
             }
+
+            count += collectStreams(topXid, streams, spillFiles);
+            if (subxids != null) {
+                for (long sub : subxids) {
+                    count += collectStreams(sub, streams, spillFiles);
+                }
+            }
+
+            pendingRedoCount -= count;
+            if (pendingRedoCount < 0) {
+                pendingRedoCount = 0;
+            }
+
+            Iterator<NormalRedo> merged = kwayMerge(streams);
+            return new DrainResult(merged, count, spillFiles);
+        } catch (RuntimeException e) {
+            closeStreams(streams);
+            deleteFiles(spillFiles);
+            throw e;
         }
-        pendingRedoCount -= all.size();
-        if (pendingRedoCount < 0) {
-            pendingRedoCount = 0;
-        }
-        return all;
     }
 
     /* Remove and return the buffered pg_attribute changes under a top-level xid
@@ -873,10 +1008,456 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         long now = System.currentTimeMillis();
         if (now - lastPendingWarnMs >= PENDING_WARN_INTERVAL_MS) {
             lastPendingWarnMs = now;
-            tapLogger.warn("Physical WAL miner has buffered {} uncommitted changes across {} open transactions; "
-                    + "check for long-running transactions on the source to avoid excessive memory use",
-                    pendingRedoCount, pendingByXid.size());
+            int spilled = spillStates.size();
+            tapLogger.warn("Physical WAL miner has buffered {} uncommitted changes across {} open transactions"
+                    + (spilled > 0 ? " ({} transaction(s) spilled to disk)" : "")
+                    + "; check for long-running transactions on the source to avoid excessive memory use",
+                    pendingRedoCount, pendingByXid.size(), spilled);
         }
+    }
+
+    private void appendRedos(long xid, List<NormalRedo> redos) {
+        SpillState ss = spillStates.get(xid);
+        if (ss != null && ss.writer != null) {
+            spillRedos(xid, ss, redos);
+            return;
+        }
+        List<NormalRedo> bucket = pendingByXid.computeIfAbsent(xid, k -> new ArrayList<>());
+        bucket.addAll(redos);
+        if (bucket.size() >= PER_XID_SPILL_THRESHOLD) {
+            ss = spillStates.computeIfAbsent(xid, k -> new SpillState());
+            spillRedos(xid, ss, bucket);
+            bucket.clear();
+        }
+    }
+
+    /* Once a transaction crosses the spill threshold, keep appending its later
+     * NormalRedo objects directly to disk instead of repeatedly growing and
+     * serialising a large ArrayList. Called on the consumer thread only. */
+    private void spillRedos(long xid, SpillState ss, List<NormalRedo> redos) {
+        if (redos.isEmpty()) {
+            return;
+        }
+        if (ss.writer == null) {
+            openSpillWriter(xid, ss);
+        }
+        try {
+            for (NormalRedo r : redos) {
+                ss.writer.writeObject(r);
+                ss.spilledCount++;
+                ss.objectsSinceReset++;
+                if (ss.objectsSinceReset >= SPILL_STREAM_RESET_INTERVAL) {
+                    ss.writer.reset();
+                    ss.objectsSinceReset = 0;
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Physical WAL miner failed to append " + redos.size()
+                    + " NormalRedo objects for xid=" + xid + " to spill file " + ss.currentFile
+                    + "; aborting miner so WAL can be replayed", e);
+        }
+    }
+
+    private void openSpillWriter(long xid, SpillState ss) {
+        Path file = spillDir.resolve("spill_" + xid + "_" + ss.files.size() + ".dat");
+        OutputStream fos = null;
+        try {
+            fos = Files.newOutputStream(file);
+            BufferedOutputStream bos = new BufferedOutputStream(fos, 256 * 1024);
+            ss.writer = new ObjectOutputStream(bos);
+            fos = null; // owned by ObjectOutputStream now
+            ss.currentFile = file;
+            ss.files.add(file);
+            tapLogger.info("Physical WAL miner opened spill file for xid={} at {}", xid, file);
+        } catch (IOException e) {
+            if (fos != null) {
+                try { fos.close(); } catch (IOException ignored) {}
+            }
+            throw new IllegalStateException("Physical WAL miner cannot open spill file " + file
+                    + " for xid=" + xid + "; aborting miner so WAL can be replayed", e);
+        }
+    }
+
+    private void closeSpillWriter(SpillState ss) {
+        if (ss == null || ss.writer == null) {
+            return;
+        }
+        try {
+            ss.writer.close();
+        } catch (IOException e) {
+            throw new IllegalStateException("Physical WAL miner failed to close spill file "
+                    + ss.currentFile + "; aborting miner so WAL can be replayed", e);
+        } finally {
+            ss.writer = null;
+            ss.currentFile = null;
+            ss.objectsSinceReset = 0;
+        }
+    }
+
+    private void closeSpillWriterQuietly(SpillState ss) {
+        if (ss == null || ss.writer == null) {
+            return;
+        }
+        try {
+            ss.writer.close();
+        } catch (IOException ignored) {
+        } finally {
+            ss.writer = null;
+            ss.currentFile = null;
+            ss.objectsSinceReset = 0;
+        }
+    }
+
+    /** Close the spill writer for a specific xid if it exists. Called before
+     * COMMIT/ABORT to ensure the file is properly flushed and closed before
+     * reading begins, avoiding file locking issues on some platforms. */
+    private void closeSpillWriterForXid(long xid) {
+        SpillState ss = spillStates.get(xid);
+        if (ss != null) {
+            closeSpillWriter(ss);
+        }
+    }
+
+    /* Per-xid spill state: ordered list of spill files written oldest-first, plus
+     * a running count of objects that have been evicted to disk. */
+    private static final class SpillState {
+        final List<Path> files = new ArrayList<>();
+        ObjectOutputStream writer;
+        Path currentFile;
+        int objectsSinceReset;
+        int spilledCount;
+    }
+
+    /* Delete all remaining spill files and the spill directory. Called at miner
+     * shutdown; any in-flight transaction's spilled rows are lost (the slot
+     * rewinds to the last committed boundary on restart). */
+    private void cleanupAllSpills() {
+        for (SpillState ss : spillStates.values()) {
+            closeSpillWriterQuietly(ss);
+            for (Path file : ss.files) {
+                try {
+                    Files.deleteIfExists(file);
+                } catch (IOException e) {
+                    tapLogger.warn("Physical WAL miner could not delete spill file {} during shutdown: {}",
+                            file, e.getMessage());
+                }
+            }
+        }
+        spillStates.clear();
+        if (spillDir != null) {
+            try {
+                // Walk depth-first so only empty dirs remain for deleteIfExists
+                Files.walk(spillDir)
+                        .sorted(Comparator.reverseOrder())
+                        .forEach(p -> {
+                            try { Files.deleteIfExists(p); } catch (IOException ignored) {}
+                        });
+            } catch (IOException e) {
+                tapLogger.warn("Physical WAL miner could not clean spill directory {}: {}",
+                        spillDir, e.getMessage());
+            }
+        }
+    }
+
+    // ── Streaming spill merge for COMMIT ────────────────────────────────
+    //
+    // Instead of reading all spill files back into a single List at COMMIT time
+    // (which would defeat the purpose of spilling for multi-million-row
+    // transactions), the k-way merge below streams records directly from spill
+    // files via ObjectInputStream, merging across xids with a PriorityQueue
+    // ordered by source LSN. This bounds COMMIT-time heap to O(num_streams)
+    // rather than O(total_rows).
+
+    /** A closeable, sorted stream of NormalRedo objects from one source (in-memory
+     * list or on-disk spill file). */
+    private interface RedoStream extends AutoCloseable, Iterator<NormalRedo> {
+        /** LSN of the next record, or {@code Long.MAX_VALUE} if exhausted. */
+        long peekLsn();
+    }
+
+    private static class InMemoryRedoStream implements RedoStream {
+        private final Iterator<NormalRedo> iter;
+        private NormalRedo next;
+
+        InMemoryRedoStream(List<NormalRedo> list) {
+            this.iter = list.iterator();
+            advance();
+        }
+
+        private void advance() {
+            next = iter.hasNext() ? iter.next() : null;
+        }
+
+        @Override public boolean hasNext() { return next != null; }
+
+        @Override public NormalRedo next() {
+            NormalRedo r = next;
+            advance();
+            return r;
+        }
+
+        @Override public long peekLsn() {
+            Long id = next != null ? next.getCdcSequenceId() : null;
+            return id == null ? Long.MAX_VALUE : id;
+        }
+
+        @Override public void close() {}
+    }
+
+    private class SpillFileRedoStream implements RedoStream {
+        final Path file;
+        private final ObjectInputStream ois;
+        private NormalRedo next;
+
+        SpillFileRedoStream(Path file) throws IOException {
+            this.file = file;
+            this.ois = new ObjectInputStream(
+                    new BufferedInputStream(Files.newInputStream(file), 256 * 1024));
+            advance();
+        }
+
+        private void advance() {
+            try {
+                Object obj = ois.readObject();
+                next = obj instanceof NormalRedo ? (NormalRedo) obj : null;
+            } catch (EOFException e) {
+                next = null;
+            } catch (Exception e) {
+                next = null;
+                throw new IllegalStateException("Physical WAL miner failed to read from spill file "
+                        + file + "; aborting commit so WAL can be replayed", e);
+            }
+        }
+
+        @Override public boolean hasNext() { return next != null; }
+
+        @Override public NormalRedo next() {
+            NormalRedo r = next;
+            advance();
+            return r;
+        }
+
+        @Override public long peekLsn() {
+            Long id = next != null ? next.getCdcSequenceId() : null;
+            return id == null ? Long.MAX_VALUE : id;
+        }
+
+        @Override public void close() {
+            try { ois.close(); } catch (IOException ignored) {}
+        }
+    }
+
+    private class SequentialRedoStream implements RedoStream {
+        private final List<Path> files;
+        private int fileIndex;
+        private SpillFileRedoStream current;
+
+        SequentialRedoStream(List<Path> files) {
+            this.files = files;
+            openNextNonEmpty();
+        }
+
+        private void openNextNonEmpty() {
+            closeCurrent();
+            current = null;
+            while (fileIndex < files.size()) {
+                Path file = files.get(fileIndex++);
+                try {
+                    current = new SpillFileRedoStream(file);
+                    if (current.hasNext()) {
+                        return;
+                    }
+                    closeCurrent();
+                    current = null;
+                } catch (IOException e) {
+                    throw new IllegalStateException("Physical WAL miner cannot open spill file "
+                            + file + "; aborting commit so WAL can be replayed", e);
+                }
+            }
+        }
+
+        private void closeCurrent() {
+            if (current != null) {
+                current.close();
+            }
+        }
+
+        @Override public boolean hasNext() {
+            return current != null && current.hasNext();
+        }
+
+        @Override public NormalRedo next() {
+            NormalRedo r = current.next();
+            if (!current.hasNext()) {
+                openNextNonEmpty();
+            }
+            return r;
+        }
+
+        @Override public long peekLsn() {
+            return current == null ? Long.MAX_VALUE : current.peekLsn();
+        }
+
+        @Override public void close() {
+            closeCurrent();
+        }
+    }
+
+    /** Result of draining a transaction for COMMIT: a merged LSN-ordered iterator
+     * plus metadata for count tracking and spill file cleanup. */
+    private static final class DrainResult implements AutoCloseable {
+        final Iterator<NormalRedo> iterator;
+        final int count;
+        private final List<Path> spillFiles;
+
+        DrainResult(Iterator<NormalRedo> iterator, int count, List<Path> spillFiles) {
+            this.iterator = iterator;
+            this.count = count;
+            this.spillFiles = spillFiles;
+        }
+
+        @Override
+        public void close() {
+            if (iterator instanceof AutoCloseable) {
+                try { ((AutoCloseable) iterator).close(); } catch (Exception ignored) {}
+            }
+            deleteFiles(spillFiles);
+        }
+    }
+
+    private static void closeStreams(List<RedoStream> streams) {
+        for (RedoStream stream : streams) {
+            try { stream.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    private static void deleteFiles(List<Path> files) {
+        for (Path file : files) {
+            try { Files.deleteIfExists(file); } catch (IOException ignored) {}
+        }
+    }
+
+    /** Discard a transaction's buffered changes without reading them (ABORT path).
+     * Removes from pendingByXid, deletes spill files, adjusts pendingRedoCount. */
+    private void discardTransaction(long topXid, long[] subxids) {
+        // Close spill writers first to ensure files are properly closed
+        closeSpillWriterForXid(topXid);
+        if (subxids != null) {
+            for (long sub : subxids) {
+                closeSpillWriterForXid(sub);
+            }
+        }
+
+        int removed = discardBucket(topXid);
+        if (subxids != null) {
+            for (long sub : subxids) {
+                removed += discardBucket(sub);
+            }
+        }
+        pendingRedoCount -= removed;
+        if (pendingRedoCount < 0) {
+            pendingRedoCount = 0;
+        }
+    }
+
+    private int discardBucket(long xid) {
+        List<NormalRedo> inMem = pendingByXid.remove(xid);
+        int memCount = inMem != null ? inMem.size() : 0;
+        SpillState ss = spillStates.remove(xid);
+        if (ss != null) {
+            closeSpillWriterQuietly(ss);
+            for (Path file : ss.files) {
+                try { Files.deleteIfExists(file); } catch (IOException ignored) {}
+            }
+            return memCount + ss.spilledCount;
+        }
+        return memCount;
+    }
+
+    /** K-way merge of sorted RedoStreams, producing LSN-ordered output.
+     * The returned iterator implements {@link AutoCloseable} so that
+     * {@link DrainResult#close()} can close every underlying stream
+     * (and its {@link ObjectInputStream}) even when the merge wraps
+     * multiple spill files. */
+    private static Iterator<NormalRedo> kwayMerge(List<RedoStream> streams) {
+        if (streams.isEmpty()) {
+            return Collections.emptyIterator();
+        }
+        if (streams.size() == 1) {
+            // RedoStream already extends AutoCloseable; the single-stream
+            // case is detected by the instanceof check in DrainResult.close().
+            return streams.get(0);
+        }
+        PriorityQueue<RedoStream> pq = new PriorityQueue<>(
+                Comparator.comparingLong(RedoStream::peekLsn));
+        for (RedoStream s : streams) {
+            if (s.hasNext()) {
+                pq.add(s);
+            }
+        }
+        // Wrap in an AutoCloseable so DrainResult.close() can clean up
+        // all underlying ObjectInputStreams.
+        return new MergedRedoIterator(pq, streams);
+    }
+
+    /** An {@link Iterator}&lt;{@link NormalRedo}&gt; that is also
+     * {@link AutoCloseable} — closes every constituent {@link RedoStream}
+     * when the merge is done or the transaction is discarded. */
+    private static final class MergedRedoIterator implements Iterator<NormalRedo>, AutoCloseable {
+        private final PriorityQueue<RedoStream> pq;
+        private final List<RedoStream> streams;
+
+        MergedRedoIterator(PriorityQueue<RedoStream> pq, List<RedoStream> streams) {
+            this.pq = pq;
+            this.streams = streams;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return !pq.isEmpty();
+        }
+
+        @Override
+        public NormalRedo next() {
+            RedoStream s = pq.poll();
+            NormalRedo r = s.next();
+            if (s.hasNext()) {
+                pq.add(s);
+            }
+            return r;
+        }
+
+        @Override
+        public void close() {
+            for (RedoStream s : streams) {
+                try { s.close(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /** Collect streams for one xid, removing it from pendingByXid and spillStates.
+     * Spill files are represented as one lazy sequential stream, so each xid opens
+     * at most one spill file at a time. Returns the total record count. */
+    private int collectStreams(long xid, List<RedoStream> streams, List<Path> spillFiles) {
+        List<NormalRedo> inMem = pendingByXid.remove(xid);
+        int memCount = inMem != null ? inMem.size() : 0;
+        SpillState ss = spillStates.remove(xid);
+        int spilledCount = 0;
+
+        if (ss != null) {
+            spilledCount = ss.spilledCount;
+            spillFiles.addAll(ss.files);
+            // Writer is already closed by drainTransaction/discardTransaction before calling this
+            if (!ss.files.isEmpty()) {
+                streams.add(new SequentialRedoStream(ss.files));
+            }
+        }
+
+        if (inMem != null && !inMem.isEmpty()) {
+            streams.add(new InMemoryRedoStream(inMem));
+        }
+
+        return memCount + spilledCount;
     }
 
     /* Track UPDATE/DELETE emitted without a before-image — a page-state cache
@@ -1532,6 +2113,21 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 "SHOW wal_segment_size", rs -> raw[0] = rs.getString(1)));
         long parsed = parseSize(raw[0]);
         return parsed > 0 ? parsed : DEFAULT_WAL_SEGMENT_SIZE;
+    }
+
+    static long parseSpillThreshold() {
+        String val = System.getenv("TAPDATA_WAL_SPILL_THRESHOLD");
+        if (val == null || val.trim().isEmpty()) {
+            return 500_000L;
+        }
+        try {
+            long parsed = Long.parseLong(val.trim());
+            return parsed > 0 ? parsed : 500_000L;
+        } catch (NumberFormatException e) {
+            System.err.println("[PhysicalWalLogMiner] Invalid TAPDATA_WAL_SPILL_THRESHOLD='" + val
+                    + "', using default 500000: " + e.getMessage());
+            return 500_000L;
+        }
     }
 
     static int parseCapacity(String text, int fallback) {

@@ -40,6 +40,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     // DDL trigger (Attunity-style event trigger for capturing DDL via WAL)
     private Boolean ddlTriggerEnable = false;
     private String ddlTriggerSchema;
+    private Integer keepWalHours = 0;
 
     //customize
     public PostgresConfig() {
@@ -251,5 +252,13 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setDdlTriggerSchema(String ddlTriggerSchema) {
         this.ddlTriggerSchema = ddlTriggerSchema;
+    }
+
+    public Integer getKeepWalHours() {
+        return keepWalHours;
+    }
+
+    public void setKeepWalHours(Integer keepWalHours) {
+        this.keepWalHours = keepWalHours;
     }
 }

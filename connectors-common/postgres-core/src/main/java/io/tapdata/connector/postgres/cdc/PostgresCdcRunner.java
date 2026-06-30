@@ -1,5 +1,6 @@
 package io.tapdata.connector.postgres.cdc;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
 import io.debezium.embedded.EmbeddedEngine;
 import io.debezium.embedded.StopConnectorException;
@@ -49,6 +50,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -74,6 +76,33 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private final Map<String, Boolean> replicaFull = new HashMap<>();
     private static final DDLWrapperConfig DDL_WRAPPER_CONFIG = CCJBaseDDLWrapper.CCJDDLWrapperConfig.create().split("\"");
     private final DDLParserType ddlParserType = DDLParserType.POSTGRES_CCJ_SQL_PARSER;
+
+    // ── CDC delayed LSN advancement ──────────────────────────────────────
+    //
+    // Design: slot LSN is NOT advanced on every batch. Instead the connector
+    // maintains an in-memory offset and writes {commit_time -> full sourceOffset}
+    // checkpoints to stateMap periodically. After N hours the oldest checkpoint is
+    // used to advance the slot, and then removed. This keeps WAL retention
+    // bounded to ~N hours while still allowing point-in-time CDC backfill via
+    // findNearestCheckpointBefore (which scans the checkpoint index).
+    //
+    // Crash safety: slot is advanced BEFORE the KV entry is deleted, so a
+    // crash between the two steps still has the WAL covered.
+
+    private static final long CDC_CHECKPOINT_INTERVAL_MS = 3 * 60 * 1000; // 3 min, shortened for testing
+    private static final String CDC_CP_PREFIX = "cdc_cp_";          // per-checkpoint key
+    private static final String CDC_CP_INDEX = "cdc_cp_index";      // sorted ts list
+    private static final String CDC_LAST_CP_TIME = "cdc_last_cp_time"; // wall-clock of last checkpoint
+
+    /** In-memory LSN – NOT pushed to slot until checkpoint expires. */
+    private final AtomicReference<Long> inMemoryLsn = new AtomicReference<>();
+    /** Commit timestamp (ms) of the current in-memory LSN (from WAL ts_usec). */
+    private final AtomicReference<Long> inMemoryCommitTimeMs = new AtomicReference<>();
+
+    /** Cache of last checkpoint wall-clock time — avoids stateMap read on every flushOffset. */
+    private final AtomicLong cachedLastCpTime = new AtomicLong();
+
+    private volatile Long filterStartTimeMs;
 
 
     public PostgresCdcRunner(PostgresJdbcContext postgresJdbcContext, TapConnectorContext connectorContext) throws SQLException {
@@ -145,9 +174,20 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
 
     public PostgresCdcRunner offset(Object offsetState) {
         if (EmptyKit.isNull(offsetState)) {
+            this.filterStartTimeMs = null;  // clear any stale time filter
             PostgresOffsetStorage.DBZ_OFFSET.put(runnerName, new PostgresOffset());
-        } else {
+        } else if (offsetState instanceof PostgresOffset) {
+            this.filterStartTimeMs = null;  // clear any stale time filter
             PostgresOffsetStorage.DBZ_OFFSET.put(runnerName, (PostgresOffset) offsetState);
+        } else if (offsetState instanceof Long) {
+            // Time-based CDC: offsetState is the raw timestamp from timestampToStreamOffset.
+            // Resolve the checkpoint LSN and set up the event-level time filter here,
+            // so the Debezium engine (built in registerConsumer) starts from the right LSN.
+            configureTimeBasedCdc((Long) offsetState);
+        } else {
+            throw new IllegalArgumentException(
+                    "Unsupported offset type: " + offsetState.getClass().getName()
+                    + " — expected PostgresOffset or Long (timestamp ms for time-based CDC)");
         }
         return this;
     }
@@ -212,15 +252,34 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             try {
                 offset = sr.sourceOffset();
                 // PG use micros to indicate the time but in pdk api we use millis
-                Long referenceTime = (Long) offset.get("ts_usec") / 1000;
+                Object tsUsecObj = offset.get("ts_usec");
+                Long referenceTime = tsUsecObj instanceof Number
+                        ? ((Number) tsUsecObj).longValue() / 1000
+                        : null;
+
                 Struct struct = ((Struct) sr.value());
                 if (struct == null) {
                     continue;
                 }
+                // ── heartbeat: always emit regardless of time filter ──
+                // Debezium heartbeats may not carry ts_usec; they use
+                // ts_ms instead. Process them before the time filter
+                // so idle-period offset advancement is not blocked.
                 if ("io.debezium.connector.common.Heartbeat".equals(sr.valueSchema().name())) {
-                    eventList.add(new HeartbeatEvent().init().referenceTime(((Struct) sr.value()).getInt64("ts_ms")));
+                    eventList.add(new HeartbeatEvent().init().referenceTime(struct.getInt64("ts_ms")));
                     continue;
-                } else if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
+                }
+                // ── time-based CDC filter ──────────────────────────────
+                // Skip DML/DDL events whose commit time is before the
+                // requested start time. This handles the gap between the
+                // checkpoint LSN and the target offsetStartTime.
+                if (referenceTime == null) {
+                    continue; // malformed DML record (no ts_usec) — skip
+                }
+                if (filterStartTimeMs != null && referenceTime < filterStartTimeMs) {
+                    continue;
+                }
+                if (EmptyKit.isNull(sr.valueSchema().field("op"))) {
                     continue;
                 }
                 String op = struct.getString("op");
@@ -638,5 +697,319 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
                 : postgresConfig.getSchema();
         return PostgresJdbcContext.DDL_AUDIT_TABLE.equals(table)
                 && auditSchema.equals(schema);
+    }
+
+    // ── CDC delayed LSN advancement ──────────────────────────────────────
+    //
+    // Called by PostgresConnector.flushOffset() each time the CDC consumer
+    // commits a batch. Instead of immediately advancing the slot we:
+    //   1. Update the in-memory LSN & commit time.
+    //   2. Periodically persist a {commit_time -> full sourceOffset} checkpoint.
+    //   3. Periodically expire old checkpoints (advancing the slot to the
+    //      oldest expired checkpoint's LSN before deleting it).
+
+    /**
+     * Configure time-based CDC backfill.
+     * <p>
+     * Called from {@link #offset(Object)} when the offset is a {@code Long}
+     * (raw timestamp from {@code timestampToStreamOffset}).  This method:
+     * <ol>
+     *   <li>Finds the nearest checkpoint with timestamp ≤ {@code offsetStartTimeMs}
+     *       from the stateMap checkpoint index.</li>
+     *   <li>Builds a {@link PostgresOffset} from that checkpoint's full source offset
+     *       and puts it in {@link PostgresOffsetStorage#DBZ_OFFSET} so Debezium
+     *       starts streaming from the checkpoint LSN (not the current slot position).</li>
+     *   <li>Sets the event-level filter so {@link #consumeRecords} silently drops
+     *       any event whose commit time is before {@code offsetStartTimeMs}.</li>
+     * </ol>
+     *
+     * @param offsetStartTimeMs target start time (epoch ms) from {@code timestampToStreamOffset}
+     */
+    public void configureTimeBasedCdc(Long offsetStartTimeMs) {
+        if (offsetStartTimeMs == null) return;
+
+        Long nearestCpTime = findNearestCheckpointBefore(offsetStartTimeMs);
+        if (nearestCpTime == null) {
+            throw new IllegalArgumentException(
+                    "No CDC checkpoint found before target time " + offsetStartTimeMs
+                    + " (retention window is " + getKeepWalHoursOrZero() + " hours, may have elapsed). "
+                    + "Increase keepWalHours or use a more recent offsetStartTime.");
+        }
+
+        Map<String, Object> cpOffset = readCheckpointSourceOffset(nearestCpTime);
+        if (cpOffset == null) {
+            throw new IllegalArgumentException(
+                    "CDC checkpoint at " + nearestCpTime + " is missing or corrupt in stateMap — "
+                    + "cannot start time-based CDC. The checkpoint index may be out of sync; "
+                    + "consider clearing CDC state and restarting.");
+        }
+
+        // Build the offset so Debezium starts from the checkpoint LSN
+        try {
+            String sourceOffsetJson = new ObjectMapper().writeValueAsString(cpOffset);
+            PostgresOffset postgresOffset = new PostgresOffset();
+            postgresOffset.setSourceOffset(sourceOffsetJson);
+            PostgresOffsetStorage.DBZ_OFFSET.put(runnerName, postgresOffset);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Failed to serialise CDC checkpoint source offset at " + nearestCpTime
+                    + " for time-based CDC: " + e.getMessage(), e);
+        }
+
+        // Enable event-level filtering for the gap between checkpoint time and target time
+        this.filterStartTimeMs = offsetStartTimeMs;
+        TapLogger.info(TAG, "Time-based CDC configured: targetTime={}, nearestCheckpointTime={}, filterStartTimeMs={}",
+                offsetStartTimeMs, nearestCpTime, filterStartTimeMs);
+    }
+
+    public void processFlushOffset(PostgresOffset offset) {
+        String sourceOffset = offset.getSourceOffset();
+        if (sourceOffset == null) {
+            return;
+        }
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            Map<String, Object> offsetMap = objectMapper.readValue(sourceOffset, Map.class);
+            if (getKeepWalHoursOrZero() == 0) {
+                flushOffset(offsetMap);
+                return;
+            }
+            // ── extract LSN ──────────────────────────────────────────
+            Object lsnObj = offsetMap.get("lsn");
+            if (lsnObj == null) return;
+            long lsn = lsnObj instanceof Number
+                    ? ((Number) lsnObj).longValue()
+                    : parseLsnToLong(lsnObj.toString());
+
+            // ── extract commit timestamp (from WAL, not wall-clock) ──
+            Object tsObj = offsetMap.get("ts_usec"); // Debezium PG connector field
+            Long commitTimeUsec = parseLongValue(tsObj);
+            long commitTimeMs = commitTimeUsec == null
+                    ? System.currentTimeMillis()
+                    : commitTimeUsec / 1000;
+
+            // Always refresh in-memory state (no slot advancement here)
+            inMemoryLsn.set(lsn);
+            inMemoryCommitTimeMs.set(commitTimeMs);
+
+            // ── periodic checkpoint ──────────────────────────────────
+            long now = System.currentTimeMillis();
+            long lastCpTime = cachedLastCpTime.get();
+            if (lastCpTime == 0) {
+                Object lastCpObj = connectorContext.getStateMap().get(CDC_LAST_CP_TIME);
+                Long persistedLastCpTime = parseLongValue(lastCpObj);
+                lastCpTime = persistedLastCpTime == null ? 0 : persistedLastCpTime;
+                if (lastCpTime > 0) {
+                    cachedLastCpTime.compareAndSet(0, lastCpTime);
+                    lastCpTime = cachedLastCpTime.get(); // read the settled value
+                }
+            }
+            if (lastCpTime == 0 || (now - lastCpTime) >= CDC_CHECKPOINT_INTERVAL_MS) {
+                persistCheckpoint(commitTimeMs, lsn, sourceOffset, now);
+                cleanExpiredCheckpoints(now);
+            }
+        } catch (Exception e) {
+            TapLogger.warn(TAG, "processFlushOffset error: {}", e.getMessage(), e);
+        }
+    }
+
+    // ── persist a single {commit_time → full sourceOffset} checkpoint to stateMap ──────
+
+    private void persistCheckpoint(long commitTimeMs, long lsn, String sourceOffset, long now) {
+        String cpKey = CDC_CP_PREFIX + commitTimeMs;
+        connectorContext.getStateMap().put(cpKey, sourceOffset);
+
+        // Maintain a sorted index so we can binary-search later
+        List<Long> timestamps = readCheckpointIndex();
+        if (!timestamps.contains(commitTimeMs)) {
+            timestamps.add(commitTimeMs);
+            Collections.sort(timestamps);
+            writeCheckpointIndex(timestamps);
+        }
+        connectorContext.getStateMap().put(CDC_LAST_CP_TIME, now);
+        cachedLastCpTime.set(now);
+        TapLogger.debug(TAG, "CDC checkpoint persisted: commitTime={}, lsn={}, indexSize={}",
+                commitTimeMs, lsnToString(lsn), timestamps.size());
+    }
+
+    // ── expire checkpoints outside the window, keeping the cutoff anchor ─
+
+    private void cleanExpiredCheckpoints(long now) {
+        int keepWalHours = getKeepWalHoursOrZero();
+        long retentionMs = keepWalHours * 60 * 60 * 1000L;
+        long cutoff = now - retentionMs;
+
+        List<Long> timestamps = readCheckpointIndex();
+        if (timestamps.isEmpty()) return;
+
+        int anchorIndex = findLastCheckpointIndexBefore(timestamps, cutoff);
+        if (anchorIndex < 0) return; // nothing expired yet
+
+        Long anchorTime = timestamps.get(anchorIndex);
+        Map<String, Object> anchorOffset = readCheckpointSourceOffset(anchorTime);
+        if (anchorOffset == null) {
+            // Orphaned or unreadable anchor — remove the bad index entry and retry later.
+            connectorContext.getStateMap().put(CDC_CP_PREFIX + anchorTime, null);
+            timestamps.remove(anchorIndex);
+            writeCheckpointIndex(timestamps);
+            return;
+        }
+        Long anchorLsn = extractLsn(anchorOffset);
+        if (anchorLsn == null) {
+            // Corrupt checkpoint: LSN is unreadable. Remove it from the index
+            // so it doesn't block future cleanups, but DON'T touch the slot.
+            TapLogger.warn(TAG, "CDC checkpoint at {} has an unreadable LSN — removing from index without advancing slot", anchorTime);
+            connectorContext.getStateMap().put(CDC_CP_PREFIX + anchorTime, null);
+            timestamps.remove(anchorIndex);
+            writeCheckpointIndex(timestamps);
+            return;
+        }
+
+        // Step 1: advance slot FIRST (crash-safe — if we crash here,
+        //         the checkpoint is still in stateMap and WAL is preserved).
+        try {
+            flushOffset(anchorOffset);
+            TapLogger.info(TAG, "CDC slot advanced to checkpoint at {}, LSN {}",
+                    anchorTime, lsnToString(anchorLsn));
+        } catch (Exception e) {
+            TapLogger.warn(TAG, "CDC failed to advance slot LSN: {}", e.getMessage());
+            return; // don't delete checkpoint if slot not advanced
+        }
+
+        // Step 2: NOW delete checkpoints older than the anchor.
+        if (anchorIndex > 0) {
+            List<Long> expired = new ArrayList<>(timestamps.subList(0, anchorIndex));
+            for (Long expiredTime : expired) {
+                connectorContext.getStateMap().put(CDC_CP_PREFIX + expiredTime, null);
+            }
+            timestamps.subList(0, anchorIndex).clear();
+            writeCheckpointIndex(timestamps);
+        }
+
+        // Guard against index bloat: warn if index exceeds the expected size
+        // for the configured retention window (one entry per checkpoint interval).
+        long maxExpected = (keepWalHours * 60 * 60 * 1000L) / CDC_CHECKPOINT_INTERVAL_MS + 5;
+        if (timestamps.size() > maxExpected * 2) {
+            TapLogger.warn(TAG, "CDC checkpoint index has {} entries, exceeding the expected maximum of {} "
+                    + "for a {}h retention window — old checkpoints may not be cleaning up correctly",
+                    timestamps.size(), maxExpected, keepWalHours);
+        }
+
+        TapLogger.debug(TAG, "CDC expired checkpoints before anchor {}, remaining: {}",
+                anchorTime, timestamps.size());
+    }
+
+    // ── stateMap index helpers ───────────────────────────────────────────
+
+    private List<Long> readCheckpointIndex() {
+        Object raw = connectorContext.getStateMap().get(CDC_CP_INDEX);
+        if (raw instanceof String && !((String) raw).isEmpty()) {
+            String[] parts = ((String) raw).split(",");
+            List<Long> list = new ArrayList<>(parts.length);
+            for (String p : parts) {
+                try { list.add(Long.parseLong(p.trim())); } catch (NumberFormatException ignored) {}
+            }
+            return list;
+        }
+        return new ArrayList<>();
+    }
+
+    private void writeCheckpointIndex(List<Long> timestamps) {
+        connectorContext.getStateMap().put(CDC_CP_INDEX,
+                timestamps.stream().map(String::valueOf).collect(Collectors.joining(",")));
+    }
+
+    public Long findNearestCheckpointBefore(long targetTimeMs) {
+        List<Long> timestamps = readCheckpointIndex();
+        if (timestamps.isEmpty()) return null;
+        int index = findLastCheckpointIndexBefore(timestamps, targetTimeMs);
+        return index < 0 ? null : timestamps.get(index);
+    }
+
+    public Map<String, Object> readCheckpointSourceOffset(Long checkpointTime) {
+        Object raw = connectorContext.getStateMap().get(CDC_CP_PREFIX + checkpointTime);
+        if (raw == null) return null;
+        try {
+            ObjectMapper objectMapper = new ObjectMapper();
+            if (raw instanceof String) {
+                return objectMapper.readValue((String) raw, Map.class);
+            }
+            if (raw instanceof Map) {
+                return objectMapper.convertValue(raw, Map.class);
+            }
+        } catch (Exception e) {
+            TapLogger.warn(TAG, "Failed to read CDC checkpoint source offset at {}: {}", checkpointTime, e.getMessage());
+        }
+        return null;
+    }
+
+    // ── binary search / LSN / retention helpers ───────────────────────────
+
+    private static int findLastCheckpointIndexBefore(List<Long> timestamps, long targetTimeMs) {
+        int lo = 0, hi = timestamps.size() - 1;
+        int best = -1;
+        while (lo <= hi) {
+            int mid = (lo + hi) >>> 1;
+            long midVal = timestamps.get(mid);
+            if (midVal <= targetTimeMs) {
+                best = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return best;
+    }
+
+    private Long extractLsn(Map<String, Object> sourceOffset) {
+        if (sourceOffset == null) return null;
+        Object lsnObj = sourceOffset.get("lsn");
+        if (lsnObj == null) return null;
+        try {
+            return lsnObj instanceof Number
+                    ? ((Number) lsnObj).longValue()
+                    : parseLsnToLong(lsnObj.toString());
+        } catch (Exception e) {
+            TapLogger.warn(TAG, "Failed to parse CDC checkpoint LSN {}: {}", lsnObj, e.getMessage());
+            return null;
+        }
+    }
+
+    // ── LSN conversion helpers ──────────────────────────────────────────
+    // Debezium stores LSN as a numeric long; human-readable form is "seg/off".
+
+    private static Long parseLongValue(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        if (value instanceof String && !((String) value).trim().isEmpty()) {
+            try {
+                return Long.parseLong(((String) value).trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private int getKeepWalHoursOrZero() {
+        Integer keepWalHours = postgresConfig.getKeepWalHours();
+        return keepWalHours == null ? 0 : keepWalHours;
+    }
+
+    private static long parseLsnToLong(String lsnStr) {
+        if (lsnStr.contains("/")) {
+            String[] parts = lsnStr.split("/", 2);
+            long seg = Long.parseUnsignedLong(parts[0], 16);
+            long off = Long.parseUnsignedLong(parts[1], 16);
+            return (seg << 32) | off;
+        }
+        return Long.parseUnsignedLong(lsnStr);
+    }
+
+    private static String lsnToString(long lsn) {
+        long seg = lsn >>> 32;
+        long off = lsn & 0xFFFFFFFFL;
+        return Long.toHexString(seg) + "/" + Long.toHexString(off);
     }
 }
