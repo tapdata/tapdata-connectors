@@ -41,6 +41,10 @@ public abstract class NormalWriteRecorder {
     protected final List<String> uniqueCondition;
     protected final Map<String, String> columnTypeMap;
     protected boolean hasPk = false;
+    protected boolean targetNeedEncode = false;
+    protected boolean smalldatetimeTruncation = false;
+    protected String fromCharset;
+    protected String toCharset;
 
     protected String version;
     protected WritePolicyEnum insertPolicy;
@@ -63,6 +67,12 @@ public abstract class NormalWriteRecorder {
     protected final List<TapRecordEvent> batchCache = TapSimplify.list(); //event cache
     protected int batchCacheSize = 0;
     protected Log tapLogger;
+    protected List<String> autoIncFields;
+
+
+    public void setAutoIncFields(List<String> autoIncFields) {
+        this.autoIncFields = autoIncFields;
+    }
 
     public NormalWriteRecorder(Connection connection, TapTable tapTable, String schema) {
         this.connection = connection;
@@ -315,6 +325,12 @@ public abstract class NormalWriteRecorder {
     public String getUpsertSql(Map<String, Object> after) throws SQLException {
         throw new UnsupportedOperationException("upsert is not supported");
     }
+    public String getUpsertSqlByAfter(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("upsert is not supported");
+    }
+    public String getInsertIgnoreSqlByAfter(Map<String, Object> after) throws SQLException {
+        throw new UnsupportedOperationException("insertIgnore is not supported");
+    }
 
     public String getDeleteSql(Map<String, Object> before) throws SQLException {
         boolean containsNull = !hasPk && before.containsValue(null);
@@ -545,6 +561,20 @@ public abstract class NormalWriteRecorder {
         return value;
     }
 
+
+    public void setTargetNeedEncode(boolean targetNeedEncode) {
+        this.targetNeedEncode = targetNeedEncode;
+    }
+    public void setSmalldatetimeTruncation(boolean smalldatetimeTruncation) {
+        this.smalldatetimeTruncation = smalldatetimeTruncation;
+    }
+
+    public void setFromCharset(String fromCharset) {
+        this.fromCharset = fromCharset;
+    }
+    public void setToCharset(String toCharset) {
+        this.toCharset = toCharset;
+    }
     // SimpleDateFormat 非线程安全，用 ThreadLocal 保证每个线程独立持有一个实例
     protected static final ThreadLocal<DateFormat> dateFormat =
             ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS"));
@@ -556,7 +586,7 @@ public abstract class NormalWriteRecorder {
         if (null == obj) {
             result = "null";
         } else if (obj instanceof String) {
-            result = transferString((String) obj);
+            result = "'" + ((String) obj).replace("\\", "\\\\").replace("'", "\\'").replace("(", "\\(").replace(")", "\\)") + "'";
         } else if (obj instanceof Number) {
             result = obj.toString();
         } else if (obj instanceof Date) {
