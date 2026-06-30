@@ -648,17 +648,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             if (!before.containsKey(k)) {
                 return false;   // key not recovered in the before-image: cannot tell, keep the UPDATE
             }
-            Object beforeVal = before.get(k);
-            Object afterVal = after.get(k);
-            if (!Objects.equals(beforeVal, afterVal)) {
-                // Log the type and value of both sides to diagnose false key-change
-                // detections (e.g. Integer vs Long, encoding differences, etc.)
-                TapLogger.warn(TAG,
-                        "[WAL-DEBUG] key-change detected: table={}.{} key={} "
-                        + "before={}({}) after={}({})",
-                        r.getNameSpace(), r.getTableName(), k,
-                        beforeVal, beforeVal != null ? beforeVal.getClass().getSimpleName() : "null",
-                        afterVal, afterVal != null ? afterVal.getClass().getSimpleName() : "null");
+            if (!Objects.equals(before.get(k), after.get(k))) {
                 return true;
             }
         }
