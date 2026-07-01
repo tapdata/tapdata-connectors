@@ -587,8 +587,9 @@ public class PostgresConnector extends CommonDbConnector {
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             openIdentity(tapTable);
             List<DataMap> indexes = findIndexes(tapTable);
+            Map<String, List<DataMap>> indexMap = indexes.stream().collect(Collectors.groupingBy(v -> v.getString("indexName")));
             boolean hasUniqueIndex = indexes.stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
-            boolean hasMultiUniqueIndex = indexes.stream().filter(v -> "1".equals(v.getString("isUnique"))).count() > 1;
+            boolean hasMultiUniqueIndex = indexMap.entrySet().stream().filter(e -> e.getValue().stream().anyMatch(v -> "1".equals(v.getString("isUnique")))).count() > 1;
             writtenTableMap.put(tapTable.getId(), DataMap.create().kv(HAS_UNIQUE_INDEX, hasUniqueIndex));
             writtenTableMap.get(tapTable.getId()).put(HAS_MULTI_UNIQUE_INDEX, hasMultiUniqueIndex);
         }
