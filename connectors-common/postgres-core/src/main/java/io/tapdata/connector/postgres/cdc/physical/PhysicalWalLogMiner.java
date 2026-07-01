@@ -1979,9 +1979,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
 
     private String queryCurrentLsn() {
         String[] lsn = {"0/0"};
-        // recovery-aware: a standby cannot run pg_current_wal_lsn(), use the last replayed lsn there
+        // recovery-aware: a standby cannot run pg_current_wal_flush_lsn(), use the last replayed lsn there.
+        // Use flush (not insert) position — same reason as timestampToStreamOffset:
+        // pg_current_wal_lsn() is the insert pointer and can be ahead of the flush pointer by
+        // up to one WAL page, causing physical START_REPLICATION to fail with "requested starting
+        // point is ahead of the WAL flush position".
         ErrorKit.ignoreAnyError(() -> postgresJdbcContext.queryWithNext(
-                "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_lsn() END",
+                "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END",
                 rs -> lsn[0] = rs.getString(1)));
         return lsn[0];
     }

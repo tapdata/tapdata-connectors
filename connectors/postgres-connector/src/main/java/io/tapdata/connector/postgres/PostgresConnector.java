@@ -885,8 +885,14 @@ public class PostgresConnector extends CommonDbConnector {
             }
             buildSlot(connectorContext, false);
             AtomicReference<String> lsn = new AtomicReference<>();
-            // recovery-aware: a standby cannot run pg_current_wal_lsn(), use the last replayed lsn there
-            postgresJdbcContext.queryWithNext("SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_lsn() END", resultSet -> lsn.set(resultSet.getString(1)));
+            // recovery-aware: a standby cannot run pg_current_wal_flush_lsn(), use the last replayed lsn there.
+            // Use flush (not insert) position because PG's physical replication START_REPLICATION
+            // command rejects any start_lsn > pg_current_wal_flush_lsn() with "requested starting
+            // point is ahead of the WAL flush position". The insert position (pg_current_wal_lsn)
+            // can temporarily exceed the flush position by up to one WAL page (wal_writer_delay),
+            // causing a reliable first-call failure that only succeeds on retry once the writer
+            // catches up and slot creation's own WAL has been flushed.
+            postgresJdbcContext.queryWithNext("SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END", resultSet -> lsn.set(resultSet.getString(1)));
             tapLogger.info("physical timestampToStreamOffset start at {}", lsn.get());
             return lsn.get();
         }
