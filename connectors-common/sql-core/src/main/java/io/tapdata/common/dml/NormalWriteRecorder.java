@@ -579,7 +579,7 @@ public abstract class NormalWriteRecorder {
     protected static final ThreadLocal<DateFormat> dateFormat =
             ThreadLocal.withInitial(() -> new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS"));
     // DateTimeFormatter 不可变，天然线程安全
-    private static final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
+    protected static final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
 
     protected String object2String(Object obj) {
         String result;
