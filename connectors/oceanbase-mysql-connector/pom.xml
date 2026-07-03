@@ -202,7 +202,7 @@
                                          且静态归档必须排在 -l:libobcdc.so.4 之前，否则符号会被
                                          libobcdc 先满足、归档不生效。 -->
                                     <commandlineArgs>
-                                        -std=c++14
+                                        -std=c++11
                                         -O2
                                         -D_GLIBCXX_USE_CXX11_ABI=0
                                         -DOB_USE_DRCMSG
