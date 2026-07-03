@@ -210,7 +210,6 @@
                                         -I${env.OBCDC_HOME}/include/libobcdc
                                         -I${env.OBCDC_HOME}/include/drcmsg
                                         -I${obcdc.cpp.dir}
-                                        -static-libstdc++
                                         -static-libgcc
                                         -o ${project.build.directory}/${obcdc.helper.name}
                                         ${obcdc.cpp.dir}/obcdc_helper.cpp
