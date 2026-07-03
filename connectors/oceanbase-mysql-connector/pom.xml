@@ -210,11 +210,9 @@
                                         -I${env.OBCDC_HOME}/include/libobcdc
                                         -I${env.OBCDC_HOME}/include/drcmsg
                                         -I${obcdc.cpp.dir}
-                                        -static-libstdc++
                                         -static-libgcc
                                         -o ${project.build.directory}/${obcdc.helper.name}
                                         ${obcdc.cpp.dir}/obcdc_helper.cpp
-                                        -Wl,--push-state -Wl,-Bstatic -lstdc++ -Wl,--pop-state
                                         -L${env.OBCDC_HOME}/lib64
                                         -l:libobcdc.so.4
                                         -lpthread
