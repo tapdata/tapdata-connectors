@@ -214,7 +214,6 @@
                                         -static-libgcc
                                         -o ${project.build.directory}/${obcdc.helper.name}
                                         ${obcdc.cpp.dir}/obcdc_helper.cpp
-                                        -Wl,--push-state -Wl,-Bstatic -lstdc++ -Wl,--pop-state
                                         -L${env.OBCDC_HOME}/lib64
                                         -l:libobcdc.so.4
                                         -lpthread
