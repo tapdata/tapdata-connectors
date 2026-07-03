@@ -102,10 +102,11 @@ public final class WalConstants {
     public static final int XLOG_XACT_ABORT = 0x20;
     public static final int XLOG_XACT_COMMIT_PREPARED = 0x30;
     public static final int XLOG_XACT_ABORT_PREPARED = 0x40;
+    public static final int XLOG_XACT_ASSIGNMENT = 0x50;
     public static final int XLOG_XACT_OPMASK = 0x70;
 
-    /* xl_info low-nibble flag: an xl_xact_xinfo word follows the commit/abort body */
-    public static final int XLOG_XACT_HAS_INFO = 0x01;
+    /* xl_info flag: an xl_xact_xinfo word follows the commit/abort body */
+    public static final int XLOG_XACT_HAS_INFO = 0x80;
     /* xl_xact_xinfo bits (order of the optional sections that follow) */
     public static final int XACT_XINFO_HAS_DBINFO = (1 << 0);
     public static final int XACT_XINFO_HAS_SUBXACTS = (1 << 1);

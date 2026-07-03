@@ -112,6 +112,21 @@ public class PhysicalWalLogMinerTest {
     }
 
     @Test
+    public void testReadAssignmentParsesTopAndSubxids() {
+        byte[] body = concat(le32(1000), le32(3), le32(1001), le32(1002), le32(1003));
+        PhysicalWalLogMiner.XactAssignment assignment = PhysicalWalLogMiner.readAssignment(body);
+        assertEquals(1000L, assignment.topXid);
+        assertArrayEquals(new long[]{1001L, 1002L, 1003L}, assignment.subxids);
+    }
+
+    @Test
+    public void testReadAssignmentMalformedFallsBackToEmpty() {
+        PhysicalWalLogMiner.XactAssignment assignment = PhysicalWalLogMiner.readAssignment(new byte[]{1, 2, 3});
+        assertEquals(0L, assignment.topXid);
+        assertEquals(0, assignment.subxids.length);
+    }
+
+    @Test
     public void testLsnStrRoundTrip() {
         String[] samples = {"0/0", "0/16B6A50", "16/B374D848", "FF/FFFFFFFF"};
         for (String s : samples) {
