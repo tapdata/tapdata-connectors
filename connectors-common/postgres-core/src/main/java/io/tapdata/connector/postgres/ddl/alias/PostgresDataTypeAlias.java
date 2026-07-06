@@ -18,4 +18,9 @@ public class PostgresDataTypeAlias extends DbDataTypeAlias {
         return "character varying";
     }
 
+    @Override
+    protected String toInteger() {
+        return "integer";
+    }
+
 }
