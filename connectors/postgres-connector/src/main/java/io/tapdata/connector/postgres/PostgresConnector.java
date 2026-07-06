@@ -740,7 +740,7 @@ public class PostgresConnector extends CommonDbConnector {
             if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
                 String ddlAuditSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
                         ? postgresConfig.getDdlTriggerSchema()
-                        : postgresConfig.getSchema();
+                        : "public";
                 watchTables.add(ddlAuditSchema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE);
                 tapLogger.info("DDL trigger enabled, added audit table {} to watch list",
                         ddlAuditSchema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE);
@@ -840,7 +840,7 @@ public class PostgresConnector extends CommonDbConnector {
             if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
                 String ddlSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
                         ? postgresConfig.getDdlTriggerSchema()
-                        : postgresConfig.getSchema();
+                        : "public";
                 watchMap.computeIfAbsent(ddlSchema, k -> new ArrayList<>())
                         .add(PostgresJdbcContext.DDL_AUDIT_TABLE);
                 tapLogger.info("DDL trigger enabled, added audit table {}.{} to watch map",
