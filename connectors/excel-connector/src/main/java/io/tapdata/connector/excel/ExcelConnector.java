@@ -24,6 +24,7 @@ import org.apache.poi.ss.util.CellRangeAddressBase;
 import org.apache.poi.xssf.usermodel.XSSFWorkbookFactory;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -212,6 +213,8 @@ public class ExcelConnector extends FileConnector {
                 } else {
                     field.dataType("STRING");
                 }
+            } else if (val instanceof LocalDateTime) {
+                field.dataType("DATE");
             } else {
                 field.dataType(val.getClass().getSimpleName().toUpperCase());
             }
