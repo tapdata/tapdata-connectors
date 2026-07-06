@@ -545,7 +545,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         // Use the configured DDL trigger schema, or fall back to the connection schema
         String targetSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
                 ? postgresConfig.getDdlTriggerSchema()
-                : schema;
+                : "public";
 
         TapLogger.info(TAG, "Setting up DDL event trigger in schema: {}", targetSchema);
 
@@ -646,7 +646,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         }
         String targetSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
                 ? postgresConfig.getDdlTriggerSchema()
-                : schema;
+                : "public";
 
         TapLogger.info(TAG, "Cleaning up DDL event trigger artifacts from schema: {}", targetSchema);
 
@@ -683,7 +683,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         }
         String schema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
                 ? postgresConfig.getDdlTriggerSchema()
-                : postgresConfig.getSchema();
+                : "public";
         return schema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE;
     }
 
@@ -694,7 +694,7 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
     private boolean isDdlAuditRecord(String schema, String table) {
         String auditSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
                 ? postgresConfig.getDdlTriggerSchema()
-                : postgresConfig.getSchema();
+                : "public";
         return PostgresJdbcContext.DDL_AUDIT_TABLE.equals(table)
                 && auditSchema.equals(schema);
     }
