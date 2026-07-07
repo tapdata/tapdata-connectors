@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZonedDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
@@ -28,7 +29,8 @@ public final class PgTypeDecoder {
     public static final long BOOL = 16, BYTEA = 17, CHAR = 18, NAME = 19, INT8 = 20, INT2 = 21,
             INT4 = 23, TEXT = 25, OID = 26, JSON = 114, XML = 142, FLOAT4 = 700, FLOAT8 = 701,
             BPCHAR = 1042, VARCHAR = 1043, DATE = 1082, TIME = 1083, TIMESTAMP = 1114,
-            TIMESTAMPTZ = 1184, BIT = 1560, VARBIT = 1562, NUMERIC = 1700, UUID_OID = 2950, JSONB = 3802;
+            TIMESTAMPTZ = 1184, TIMETZ = 1266, INTERVAL = 1186, MONEY = 790, BIT = 1560, VARBIT = 1562, NUMERIC = 1700,
+            UUID_OID = 2950, JSONB = 3802;
 
     private static final LocalDate PG_EPOCH = LocalDate.of(2000, 1, 1);
     private static final LocalDateTime PG_EPOCH_TS = LocalDateTime.of(2000, 1, 1, 0, 0);
@@ -53,6 +55,10 @@ public final class PgTypeDecoder {
             return Double.longBitsToDouble(le64(v));
         } else if (oid == BIT || oid == VARBIT) {
             return decodeBit(v);
+        } else if (oid == INTERVAL) {
+            return decodeInterval(v);
+        } else if (oid == MONEY) {
+            return decodeMoney(v);
         } else if (oid == NUMERIC) {
             return decodeNumeric(v);
         } else if (oid == DATE) {
@@ -64,6 +70,8 @@ public final class PgTypeDecoder {
         } else if (oid == TIMESTAMPTZ) {
             long micros = le64(v);
             return PG_EPOCH_TS.plus(micros * 1000L, java.time.temporal.ChronoUnit.NANOS).toInstant(ZoneOffset.UTC);
+        } else if (oid == TIMETZ) {
+            return decodeTimeTz(v);
         } else if (oid == UUID_OID) {
             return decodeUuid(v);
         } else if (oid == BYTEA) {
@@ -111,6 +119,121 @@ public final class PgTypeDecoder {
             }
         }
         return new TapStringValue(sb.toString());
+    }
+
+    /**
+     * Decode PostgreSQL on-disk interval representation into ISO 8601 duration.
+     *
+     * On-disk layout (16 bytes, little-endian):
+     *   int64 time_us  — microseconds
+     *   int32 day      — days
+     *   int32 month    — months
+     *
+     * '1 year 1 mon 1 day 1 hour 2 mins 4.11 secs' yields:
+     *   month=13, day=1, time_us=3724110000 → "P1Y1M1DT1H2M4.11S"
+     */
+    private static String decodeInterval(byte[] v) {
+        if (v == null || v.length < 16) {
+            return null;
+        }
+        long timeUs = le64(v);                   // bytes[0..7]
+        int day = (int) le32(v, 8);              // bytes[8..11]
+        int month = (int) le32(v, 12);           // bytes[12..15]
+
+        StringBuilder iso = new StringBuilder();
+
+        if (timeUs == 0 && day == 0 && month == 0) {
+            return "PT0S";
+        }
+
+        boolean neg = timeUs < 0 || day < 0 || month < 0;
+        if (neg) {
+            iso.append('-');
+            timeUs = -timeUs;
+            day = -day;
+            month = -month;
+        }
+        iso.append('P');
+
+        // years + months
+        if (month != 0) {
+            int years = month / 12;
+            int mons = month % 12;
+            if (years != 0) {
+                iso.append(years).append('Y');
+            }
+            if (mons != 0) {
+                iso.append(mons).append('M');
+            }
+        }
+
+        // days
+        if (day != 0) {
+            iso.append(day).append('D');
+        }
+
+        // time portion
+        if (timeUs != 0) {
+            iso.append('T');
+            long totalSec = timeUs / 1_000_000;
+            long hours = totalSec / 3600;
+            long mins = (totalSec % 3600) / 60;
+            long secInt = totalSec % 60;
+            long fracUs = timeUs % 1_000_000;
+
+            if (hours != 0) {
+                iso.append(hours).append('H');
+            }
+            if (mins != 0) {
+                iso.append(mins).append('M');
+            }
+            if (secInt != 0 || fracUs != 0) {
+                // Strip trailing zeros from fractional seconds for clean output
+                if (fracUs == 0) {
+                    iso.append(secInt).append('S');
+                } else {
+                    // Build seconds string with fractional part, strip trailing zeros
+                    String frac = String.format("%06d", fracUs);
+                    // Strip trailing zeros
+                    frac = frac.replaceAll("0+$", "");
+                    iso.append(secInt).append('.').append(frac).append('S');
+                }
+            }
+        }
+
+        return iso.toString();
+    }
+
+    /**
+     * Decode PostgreSQL money type (8-byte little-endian int64, value in cents).
+     * '1212.09' → 121209 cents → BigDecimal("1212.09")
+     */
+    private static BigDecimal decodeMoney(byte[] v) {
+        if (v == null || v.length < 8) {
+            return null;
+        }
+        long cents = le64(v);
+        return BigDecimal.valueOf(cents, 2);
+    }
+
+    /**
+     * Decode PostgreSQL time-with-time-zone (timetz) on-disk representation.
+     *
+     * On-disk layout (12 bytes, little-endian, fixed-length):
+     *   int64 time_us  — microseconds since midnight
+     *   int32 zone     — timezone offset in seconds (east of GMT positive)
+     *
+     * '12:12:12.000000 +00:00' → ZonedDateTime(1970-01-01T12:12:12Z)
+     */
+    private static ZonedDateTime decodeTimeTz(byte[] v) {
+        if (v == null || v.length < 12) {
+            return null;
+        }
+        long micros = le64(v);           // bytes[0..7]
+        int zoneSecs = (int) le32(v, 8); // bytes[8..11]
+        LocalTime time = LocalTime.ofNanoOfDay(micros * 1000L);
+        ZoneOffset offset = ZoneOffset.ofTotalSeconds(zoneSecs);
+        return ZonedDateTime.of(LocalDate.of(1970, 1, 1), time, offset);
     }
 
     /* Decode a NUL-terminated string out of a fixed-width buffer (PostgreSQL
@@ -205,6 +328,11 @@ public final class PgTypeDecoder {
 
     private static long le32(byte[] b) {
         return (b[0] & 0xFFL) | ((b[1] & 0xFFL) << 8) | ((b[2] & 0xFFL) << 16) | ((b[3] & 0xFFL) << 24);
+    }
+
+    private static long le32(byte[] b, int offset) {
+        return (b[offset] & 0xFFL) | ((b[offset + 1] & 0xFFL) << 8)
+                | ((b[offset + 2] & 0xFFL) << 16) | ((b[offset + 3] & 0xFFL) << 24);
     }
 
     private static long le64(byte[] b) {
