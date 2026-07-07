@@ -32,7 +32,8 @@ import java.util.stream.Collectors;
 public abstract class FileConnector extends ConnectorBase {
 
     protected FileConfig fileConfig;
-    protected TapFileStorage storage;
+    protected volatile TapFileStorage storage;
+    private Map<String, Object> connectionParams;
     protected AbstractFileRecordWriter fileRecordWriter;
     protected ExecutorService executorService;
     protected String firstConnectorId;
@@ -48,16 +49,40 @@ public abstract class FileConnector extends ConnectorBase {
                 connectorContext.getStateMap().put("firstConnectorId", firstConnectorId);
             }
         });
-        fileConfig.load(connectionContext.getConnectionConfig());
+        connectionParams = connectionContext.getConnectionConfig();
+        fileConfig.load(connectionParams);
         fileConfig.load(connectionContext.getNodeConfig());
+        buildStorage();
+        if (EmptyKit.isNotBlank(fileConfig.getWriteFilePath()) && !storage.supportAppendData()) {
+            initMergeCacheFilesThread();
+        }
+    }
+
+    /**
+     * Build a fresh storage instance (opens a new underlying connection/session) from the saved connection params.
+     */
+    protected void buildStorage() throws Exception {
         String clazz = FileProtocolEnum.fromValue(fileConfig.getProtocol()).getStorage();
         storage = new TapFileStorageBuilder()
                 .withClassLoader(Class.forName(clazz).getClassLoader())
-                .withParams(connectionContext.getConnectionConfig())
+                .withParams(connectionParams)
                 .withStorageClassName(clazz)
                 .build();
-        if (EmptyKit.isNotBlank(fileConfig.getWriteFilePath()) && !storage.supportAppendData()) {
-            initMergeCacheFilesThread();
+    }
+
+    /**
+     * Rebuild the storage connection: build the new one first, then destroy the old one, so {@code storage} is never
+     * left null and a build failure keeps the previous (possibly still usable) connection in place.
+     */
+    protected synchronized void reconnectStorage() throws Exception {
+        TapFileStorage old = storage;
+        buildStorage();
+        if (EmptyKit.isNotNull(old)) {
+            try {
+                old.destroy();
+            } catch (Throwable ignore) {
+                // ignore: old connection is being discarded anyway
+            }
         }
     }
 
@@ -154,7 +179,20 @@ public abstract class FileConnector extends ConnectorBase {
         Map<String, TapFile> allFiles = fileOffset.getAllFiles();
         Map<String, TapFile> tempFiles = allFiles.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         Map<String, TapFile> needReadFiles = new HashMap<>();
+        long reconnectIntervalMs = fileConfig.getStreamReadReconnectInterval() * 60_000L;
+        long lastConnectAt = System.currentTimeMillis();
         while (isAlive()) {
+            // Periodically rebuild the storage connection so the directory listing view stays fresh
+            if (reconnectIntervalMs > 0 && System.currentTimeMillis() - lastConnectAt >= reconnectIntervalMs) {
+                try {
+                    reconnectStorage();
+                    lastConnectAt = System.currentTimeMillis();
+                    tapLogger.info(TAG, "Storage connection refreshed by periodic reconnect");
+                } catch (Exception e) {
+                    // keep the old connection and retry next cycle (do not advance lastConnectAt)
+                    tapLogger.warn(TAG, "Periodic reconnect failed, keep old connection and retry next cycle: {}", e.getMessage());
+                }
+            }
             Map<String, TapFile> newFiles = getFilteredFiles();
             AtomicReference<List<TapEvent>> tapEvents = new AtomicReference<>(new ArrayList<>());
             tempFiles.entrySet().stream().filter(v -> !newFiles.containsKey(v.getKey())).forEach(v ->
