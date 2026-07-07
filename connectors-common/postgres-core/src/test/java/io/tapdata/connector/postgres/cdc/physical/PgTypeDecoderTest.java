@@ -188,4 +188,74 @@ public class PgTypeDecoderTest {
         o.write(v & 0xFF);
         o.write((v >> 8) & 0xFF);
     }
+
+    @Test
+    void testDecodePath() {
+        // PATH on-disk: npts(4) + closed(4) + dummy(4) + points(3*16) = 60 bytes
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        write32(o, 3); // npts
+        write32(o, 0); // closed=0 (open)
+        write32(o, 0); // dummy
+        for (int i = 0; i < 3; i++) {
+            double[] pts = {0.0, 0.0, 10.0, 10.0, 20.0, 0.0};
+            long xBits = Double.doubleToLongBits(pts[i * 2]);
+            long yBits = Double.doubleToLongBits(pts[i * 2 + 1]);
+            for (int j = 0; j < 8; j++) {
+                o.write((byte) (xBits >>> (8 * j)));
+            }
+            for (int j = 0; j < 8; j++) {
+                o.write((byte) (yBits >>> (8 * j)));
+            }
+        }
+        Object result = PgTypeDecoder.decode(PgTypeDecoder.PATH, o.toByteArray());
+        assertEquals("[(0.0,0.0),(10.0,10.0),(20.0,0.0)]", result);
+    }
+
+    @Test
+    void testDecodePolygon() {
+        // POLYGON on-disk: npts(4) + boundbox(32) + points(3*16) = 84 bytes
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        write32(o, 3); // npts
+        // boundbox: high=(20,10), low=(0,0)
+        for (double v : new double[]{20.0, 10.0, 0.0, 0.0}) {
+            long bits = Double.doubleToLongBits(v);
+            for (int j = 0; j < 8; j++) o.write((byte) (bits >>> (8 * j)));
+        }
+        // points
+        for (double[] pt : new double[][]{{0, 0}, {10, 10}, {20, 0}}) {
+            for (double v : pt) {
+                long bits = Double.doubleToLongBits(v);
+                for (int j = 0; j < 8; j++) o.write((byte) (bits >>> (8 * j)));
+            }
+        }
+        Object result = PgTypeDecoder.decode(PgTypeDecoder.POLYGON, o.toByteArray());
+        assertEquals("((0.0,0.0),(10.0,10.0),(20.0,0.0))", result);
+    }
+
+    @Test
+    void testDecodeInet() {
+        // Real PG on-disk format: family(1) + bits(1) + ipaddr[4|16] — no is_cidr byte
+        // is_cidr only exists in wire-protocol binary, not on-disk.
+        byte[] cidr = {2, 24, (byte) 192, (byte) 168, 1, 0};
+        assertEquals("192.168.1.0/24", PgTypeDecoder.decode(PgTypeDecoder.CIDR, cidr));
+
+        byte[] inet = {2, 32, 10, 0, 0, 1};
+        assertEquals("10.0.0.1/32", PgTypeDecoder.decode(PgTypeDecoder.INET, inet));
+    }
+
+    @Test
+    void testDecodeTsVector() {
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        write32(o, 2); // size
+        // WordEntry: haspos(1) + len(11) + pos(20), LSB-aligned
+        // we[0]: haspos=0, len=5, pos=0 → (5 << 1) | 0 = 10 = 0x0a
+        write32(o, 10);
+        // we[1]: haspos=0, len=5, pos=5 → (5 << 1) | (5 << 12) = 10 + 20480 = 20490 = 0x500a
+        write32(o, 20490);
+        // string data: "helloworld" (no null terminators needed with pos+len)
+        try { o.write("helloworld".getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+        catch (java.io.IOException e) { throw new RuntimeException(e); }
+        Object result = PgTypeDecoder.decode(PgTypeDecoder.TSVECTOR, o.toByteArray());
+        assertEquals("hello world", result);
+    }
 }

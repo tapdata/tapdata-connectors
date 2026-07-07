@@ -586,39 +586,57 @@ public final class PgTypeDecoder {
     }
 
     /**
-     * path: varlena. After varlena header: 1 byte closed + 4 bytes npts + npts*16 bytes (x,y pairs).
+     * path: varlena. PG on-disk PATH struct (after varlena header stripped):
+     *   int32 npts;     // number of points
+     *   int32 closed;   // 0=open, 1=closed
+     *   int32 dummy;    // alignment padding to double-align points
+     *   Point p[npts];  // each Point = 2 float64 (16 bytes)
      * Output: "(x1,y1),...,(xn,yn)" if open; "((x1,y1),...,(xn,yn))" if closed.
      */
     private static String decodePath(byte[] v) {
-        if (v == null || v.length < 5) return null;
-        boolean closed = v[0] != 0;
-        int npts = (int) le32(v, 1);
+        if (v == null || v.length < 8) return null;
+        int npts = (int) le32(v, 0);
+        // PG stores closed as a 1-byte field at offset 4, then 3 pad bytes,
+        // followed by an optional 4-byte dummy for double alignment.
+        // Reading int32 at offset 4 may get garbage in padding/dummy bytes,
+        // so read only byte 4 for the closed flag.
+        boolean closed = v[4] != 0;
         if (npts <= 0 || npts > 65535) return null;
+        int pointsStart = 12; // npts(4) + closed(1) + pad(3) + dummy(4) = 12
+        if (pointsStart + npts * 16L > v.length) {
+            // PG >= 15 may omit dummy; try without it
+            pointsStart = 8;
+            if (pointsStart + npts * 16L > v.length) return null;
+        }
         StringBuilder sb = new StringBuilder();
-        if (closed) sb.append('(');
+        sb.append(closed ? '(' : '[');
         for (int i = 0; i < npts; i++) {
-            int off = 5 + i * 16;
+            int off = pointsStart + i * 16;
             if (off + 16 > v.length) break;
             if (i > 0) sb.append(',');
             double x = Double.longBitsToDouble(le64(v, off));
             double y = Double.longBitsToDouble(le64(v, off + 8));
             sb.append('(').append(x).append(',').append(y).append(')');
         }
-        if (closed) sb.append(')');
+        sb.append(closed ? ')' : ']');
         return sb.toString();
     }
 
     /**
-     * polygon: varlena. After varlena header: 4 bytes npts + npts*16 bytes (x,y pairs).
+     * polygon: varlena. PG on-disk POLYGON struct (after varlena header stripped):
+     *   int32 npts;          // number of points
+     *   BOX boundbox;        // bounding box (32 bytes: 4 float64, high+low corners)
+     *   Point p[npts];       // each Point = 2 float64 (16 bytes)
      * Output: "((x1,y1),...,(xn,yn))"
      */
     private static String decodePolygon(byte[] v) {
-        if (v == null || v.length < 4) return null;
+        if (v == null || v.length < 36) return null;
         int npts = (int) le32(v, 0);
         if (npts <= 0 || npts > 65535) return null;
+        int pointsStart = 36; // npts(4) + bounding box(32)
         StringBuilder sb = new StringBuilder("(");
         for (int i = 0; i < npts; i++) {
-            int off = 4 + i * 16;
+            int off = pointsStart + i * 16;
             if (off + 16 > v.length) break;
             if (i > 0) sb.append(',');
             double x = Double.longBitsToDouble(le64(v, off));
@@ -630,27 +648,42 @@ public final class PgTypeDecoder {
     }
 
     /**
-     * cidr/inet: varlena. After varlena header:
-     *   1 byte family (2=IPv4, 3=IPv6)
-     *   1 byte bits (netmask length)
-     *   1 byte is_cidr (1=cidr, 0=inet)
-     *   1 byte addr_len (4 or 16)
-     *   addr_len bytes of address
+     * cidr/inet: varlena. PG on-disk inet struct (after varlena header stripped):
+     *   uint8  family;    // PGSQL_AF_INET=2 (IPv4), PGSQL_AF_INET6=3 (IPv6)
+     *   uint8  bits;      // netmask length (e.g. 24 for /24)
+     *   uint8  is_cidr;   // 1 = cidr type, 0 = inet type
+     *   uint8  ipaddr_len;// address length in bytes (4 for IPv4, 16 for IPv6)
+     *   uint8  ipaddr[ipaddr_len];  // address in network byte order
+     */
+    /**
+     * cidr/inet: varlena. PG on-disk inet struct (after varlena header stripped):
+     *   uint8  family;     // PGSQL_AF_INET=2 (IPv4), PGSQL_AF_INET6=3 (IPv6)
+     *   uint8  bits;       // netmask length (e.g. 24 for /24)
+     *   uint8  ipaddr[];   // address bytes in network order (4 for IPv4, 16 for IPv6)
+     *   uint8  is_cidr;    // 1 = cidr type, 0 = inet type (last byte)
+     * Total: 3 + ipaddr_len bytes. For IPv4: 7 bytes, IPv6: 19 bytes.
+     * There is NO explicit ipaddr_len field — it's inferred from total varlena size.
+     */
+    /**
+     * cidr/inet on-disk format (after varlena header stripped):
+     *   family(1) + bits(1) + ip_addr(v.length - 2)
+     * No is_cidr byte — that exists only in the wire-protocol binary format.
+     * IPv4: 6 bytes total. IPv6: 18 bytes total.
      */
     private static String decodeInet(byte[] v) {
-        if (v == null || v.length < 8) return null;
+        if (v == null || v.length < 6) return null;
         int family = v[0] & 0xFF;
         int bits = v[1] & 0xFF;
-        int addrLen = v[3] & 0xFF;
-        if (v.length < 4 + addrLen) return null;
+        int addrLen = v.length - 2;          // family + bits = 2 bytes
+        if (addrLen != 4 && addrLen != 16) return null;
         StringBuilder sb = new StringBuilder();
         if (family == 2) {   // IPv4
-            sb.append(v[4] & 0xFF).append('.').append(v[5] & 0xFF)
-              .append('.').append(v[6] & 0xFF).append('.').append(v[7] & 0xFF);
-        } else {              // IPv6
+            sb.append(v[2] & 0xFF).append('.').append(v[3] & 0xFF)
+              .append('.').append(v[4] & 0xFF).append('.').append(v[5] & 0xFF);
+        } else {             // IPv6
             for (int i = 0; i < addrLen; i++) {
                 if (i > 0 && i % 2 == 0) sb.append(':');
-                sb.append(String.format("%02x", v[4 + i] & 0xFF));
+                sb.append(String.format("%02x", v[2 + i] & 0xFF));
             }
         }
         sb.append('/').append(bits);
@@ -666,30 +699,88 @@ public final class PgTypeDecoder {
     }
 
     /**
-     * tsvector: varlena. After varlena header: int32 size, then lexeme entries.
-     * Best-effort: extract readable ASCII/substrings from the payload.
+     * tsvector: varlena. On-disk layout (after varlena header stripped):
+     *   int32 size;              // number of lexemes
+     *   WordEntry entries[size]; // each: haspos(1b) + len(11b) + pos(20b) = 32 bits
+     *   char data[];             // null-terminated lexeme strings
+     *
+     * Fallback heuristic when WordEntry parsing fails: extract all printable
+     * ASCII runs from the payload separated by spaces.
      */
     private static String decodeTsVector(byte[] v) {
         if (v == null || v.length < 4) return null;
-        try {
-            // Skip the 4-byte size header, return the rest as a best-effort string
-            return new String(v, 4, v.length - 4, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return new String(v, StandardCharsets.UTF_8);
+        int size = (int) le32(v, 0);
+        if (size <= 0 || size > 1000) return extractPrintableRuns(v, 0);
+        int entryBytes = size * 4;
+        if (4 + entryBytes > v.length) return extractPrintableRuns(v, 0);
+
+        // Try WordEntry-based extraction: compute string section start
+        int strStart = 4 + entryBytes;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < size; i++) {
+            int we = (int) le32(v, 4 + i * 4);
+            int haspos = we & 1;
+            int len = (we >>> 1) & 0x7FF;
+            int pos = (we >>> 12) & 0xFFFFF;
+            if (len > 0 && strStart + pos + len <= v.length) {
+                if (sb.length() > 0) sb.append(' ');
+                sb.append(new String(v, strStart + pos, len, StandardCharsets.UTF_8));
+            }
+            // If haspos=1, skip position data after lexemes (handled by next entry's pos)
         }
+        if (sb.length() > 0) return sb.toString();
+
+        // Fallback: extract printable runs from the data section
+        return extractPrintableRuns(v, strStart);
     }
 
     /**
-     * tsquery: varlena. After varlena header: complex query tree.
-     * Best-effort: return as UTF-8 string.
+     * tsquery: varlena. Complex query tree on disk.
+     *   int32 size;              // number of query items
+     *   QueryItem items[size];   // each packed QueryItem (12 bytes of bitfields)
+     *   char data[];             // operand strings with null terminators
+     *
+     * QueryItem bitfield layout is complex (GCC-dependent packing). Rather than
+     * attempting a fragile decode, skip the binary item array and extract
+     * operand strings from the data section via printable-run scanning.
      */
     private static String decodeTsQuery(byte[] v) {
-        if (v == null) return null;
-        try {
-            return new String(v, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return null;
+        if (v == null || v.length < 4) return null;
+        int size = (int) le32(v, 0);
+        if (size <= 0 || size > 1000) return extractPrintableRuns(v, 0);
+
+        // Skip binary header: 4-byte size + size * 12-byte QueryItem array
+        int strStart = 4 + size * 12;
+        if (strStart < v.length) {
+            String words = extractPrintableRuns(v, strStart);
+            if (words != null) return words.replace(" ", " & ");
         }
+        return extractPrintableRuns(v, 0);
+    }
+
+    /**
+     * Extract printable ASCII sequences from binary data, joined by spaces.
+     */
+    private static String extractPrintableRuns(byte[] v, int start) {
+        StringBuilder sb = new StringBuilder();
+        StringBuilder run = new StringBuilder();
+        for (int i = start; i < v.length; i++) {
+            int b = v[i] & 0xFF;
+            if (b >= 0x20 && b < 0x7F) {
+                run.append((char) b);
+            } else {
+                if (run.length() > 0) {
+                    if (sb.length() > 0) sb.append(' ');
+                    sb.append(run);
+                    run.setLength(0);
+                }
+            }
+        }
+        if (run.length() > 0) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(run);
+        }
+        return sb.length() > 0 ? sb.toString() : null;
     }
 
     private static long le64(byte[] b, int offset) {
