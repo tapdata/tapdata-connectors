@@ -12,7 +12,7 @@ import io.tapdata.kit.EmptyKit;
  **/
 public enum DDLParserType {
     MYSQL_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.mysql.ddl.ccj.MysqlWrapperType", "io.tapdata.connector.mysql.ddl.ccj.MysqlDDLFilter"),
-    POSTGRES_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.postgres.ddl.ccj.PostgresWrapperType", ""),
+    POSTGRES_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.postgres.ddl.ccj.PostgresWrapperType", "io.tapdata.connector.postgres.ddl.ccj.PostgresDDLFilter"),
     DB2_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.db2.ddl.ccj.Db2WrapperType", ""),
     ORACLE_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.oracle.ddl.ccj.OracleWrapperType", ""),
     MSSQL_CCJ_SQL_PARSER("com.github.jsqlparser", CCJSqlParser.class, "io.tapdata.connector.mssql.ddl.ccj.MssqlWrapperType", ""),

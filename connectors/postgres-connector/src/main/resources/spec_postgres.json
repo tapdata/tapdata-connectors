@@ -851,6 +851,27 @@
               }
             }
           ]
+        },
+        "keepWalHours": {
+          "type": "string",
+          "title": "${keepWalHours}",
+          "default": 0,
+          "x-index": 22,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${keepWalHoursTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
         }
       }
     }
@@ -917,6 +938,9 @@
       "customPublicationName": "Custom publication name",
       "customPublicationNameTip": "Only effective when partial publication is turned on. If it is left blank, the synchronization task will automatically create and destroy, but needs create publication, table owner permission. If you need to customize the settings of the publication, it is recommended that customers create the publication themselves according to the name. The synchronization account does not need additional permissions and will not be automatically destroyed",
       "splitUpdatePk": "Split update unique key",
+      "ddlTriggerEnable": "Enable DDL trigger",
+      "keepWalHours": "Keep Wal hours",
+      "keepWalHoursTip": "The number of hours to keep the Wal log. If it is set to 0, it will be cleared right now.",
       "walLogSize": "Wal log total size(MB)",
       "clearIdleSlot": "Clear idle replication slot",
       "walLogPercent": "Wal log usage rate"
@@ -981,6 +1005,9 @@
       "customPublicationName": "自定义订阅名",
       "customPublicationNameTip": "仅部分订阅开启时生效，如果置空时，同步任务会自动创建、销毁，但需要create publication，table owner权限，如果需要定制化推荐客户自行按该名称创建publication，则同步账号不需要有额外权限，也不会自动销毁",
       "splitUpdatePk": "修改唯一键拆分",
+      "ddlTriggerEnable": "启用DDL触发器",
+      "keepWalHours": "保留Wal小时数",
+      "keepWalHoursTip": "保留Wal日志的小时数，如果设置为0，则立即清理。",
       "walLogSize": "Wal日志总大小(MB)",
       "clearIdleSlot": "清理空闲复制槽",
       "walLogPercent": "Wal日志占用率"
@@ -1045,6 +1072,9 @@
       "customPublicationName": "自定義訂閱名",
       "customPublicationNameTip": "僅部分訂閱開啟時生效，如果置空時，同步任務會自動創建、銷毀，但需要create publication，table owner權限，如果需要定制化設定推薦客戶自行按該名稱創建publication，則同步賬號不需要有額外權限，也不會自動銷毀",
       "splitUpdatePk": "修改唯一鍵拆分",
+      "ddlTriggerEnable": "啟用DDL觸發器",
+      "keepWalHours": "保留Wal小時數",
+      "keepWalHoursTip": "保留Wal日誌的小时数，如果設置為0，則立即清理。",
       "walLogSize": "Wal日誌總大小(MB)",
       "clearIdleSlot": "清理空閒複製槽",
       "walLogPercent": "Wal日志占用率"

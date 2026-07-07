@@ -587,8 +587,9 @@ public class PostgresConnector extends CommonDbConnector {
         if (EmptyKit.isNull(writtenTableMap.get(tapTable.getId()))) {
             openIdentity(tapTable);
             List<DataMap> indexes = findIndexes(tapTable);
+            Map<String, List<DataMap>> indexMap = indexes.stream().collect(Collectors.groupingBy(v -> v.getString("indexName")));
             boolean hasUniqueIndex = indexes.stream().anyMatch(v -> "1".equals(v.getString("isUnique")));
-            boolean hasMultiUniqueIndex = indexes.stream().filter(v -> "1".equals(v.getString("isUnique"))).count() > 1;
+            boolean hasMultiUniqueIndex = indexMap.entrySet().stream().filter(e -> e.getValue().stream().anyMatch(v -> "1".equals(v.getString("isUnique")))).count() > 1;
             writtenTableMap.put(tapTable.getId(), DataMap.create().kv(HAS_UNIQUE_INDEX, hasUniqueIndex));
             writtenTableMap.get(tapTable.getId()).put(HAS_MULTI_UNIQUE_INDEX, hasMultiUniqueIndex);
         }
@@ -739,7 +740,7 @@ public class PostgresConnector extends CommonDbConnector {
             if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
                 String ddlAuditSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
                         ? postgresConfig.getDdlTriggerSchema()
-                        : postgresConfig.getSchema();
+                        : "public";
                 watchTables.add(ddlAuditSchema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE);
                 tapLogger.info("DDL trigger enabled, added audit table {} to watch list",
                         ddlAuditSchema + "." + PostgresJdbcContext.DDL_AUDIT_TABLE);
@@ -775,20 +776,8 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     private void flushOffset(TapConnectorContext connectorContext, Object offset) {
-        if (EmptyKit.isNotNull(cdcRunner)) {
-            if (offset instanceof PostgresOffset) {
-                String sourceOffset = ((PostgresOffset) offset).getSourceOffset();
-                if (sourceOffset == null) {
-                    return;
-                }
-                ObjectMapper objectMapper = new ObjectMapper();
-                try {
-                    Map<String, Object> lastOffset = objectMapper.readValue(sourceOffset, Map.class);
-                    cdcRunner.flushOffset(lastOffset);
-                } catch (JsonProcessingException e) {
-                    throw new RuntimeException(e);
-                }
-            }
+        if (cdcRunner != null && offset instanceof PostgresOffset) {
+            cdcRunner.processFlushOffset((PostgresOffset) offset);
         }
     }
 
@@ -851,7 +840,7 @@ public class PostgresConnector extends CommonDbConnector {
             if (Boolean.TRUE.equals(postgresConfig.getDdlTriggerEnable())) {
                 String ddlSchema = EmptyKit.isNotBlank(postgresConfig.getDdlTriggerSchema())
                         ? postgresConfig.getDdlTriggerSchema()
-                        : postgresConfig.getSchema();
+                        : "public";
                 watchMap.computeIfAbsent(ddlSchema, k -> new ArrayList<>())
                         .add(PostgresJdbcContext.DDL_AUDIT_TABLE);
                 tapLogger.info("DDL trigger enabled, added audit table {}.{} to watch map",
@@ -897,13 +886,24 @@ public class PostgresConnector extends CommonDbConnector {
             }
             buildSlot(connectorContext, false);
             AtomicReference<String> lsn = new AtomicReference<>();
-            // recovery-aware: a standby cannot run pg_current_wal_lsn(), use the last replayed lsn there
-            postgresJdbcContext.queryWithNext("SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_lsn() END", resultSet -> lsn.set(resultSet.getString(1)));
+            // recovery-aware: a standby cannot run pg_current_wal_flush_lsn(), use the last replayed lsn there.
+            // Use flush (not insert) position because PG's physical replication START_REPLICATION
+            // command rejects any start_lsn > pg_current_wal_flush_lsn() with "requested starting
+            // point is ahead of the WAL flush position". The insert position (pg_current_wal_lsn)
+            // can temporarily exceed the flush position by up to one WAL page (wal_writer_delay),
+            // causing a reliable first-call failure that only succeeds on retry once the writer
+            // catches up and slot creation's own WAL has been flushed.
+            postgresJdbcContext.queryWithNext("SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END", resultSet -> lsn.set(resultSet.getString(1)));
             tapLogger.info("physical timestampToStreamOffset start at {}", lsn.get());
             return lsn.get();
         }
         if (EmptyKit.isNotNull(offsetStartTime)) {
-            tapLogger.warn("Postgres specified time start increment is not supported except walminer, use the current time as the start increment");
+            Integer keepWalHours = postgresConfig.getKeepWalHours();
+            if (keepWalHours != null && keepWalHours > 0) {
+                return offsetStartTime;
+            } else {
+                return new PostgresOffset();
+            }
         }
         //test streamRead log plugin
         boolean canCdc = Boolean.TRUE.equals(postgresTest.testStreamRead());

@@ -1,8 +1,8 @@
 package io.tapdata.connector.postgres.cdc.offset;
 
-import io.tapdata.kit.EmptyKit;
 import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.utils.JsonParser;
+import io.tapdata.kit.EmptyKit;
 import org.apache.kafka.connect.runtime.WorkerConfig;
 import org.apache.kafka.connect.storage.MemoryOffsetBackingStore;
 
@@ -13,7 +13,6 @@ import java.util.Map;
 
 public class PostgresOffsetBackingStore extends MemoryOffsetBackingStore {
 
-    private PostgresOffset postgresOffset;
     private WorkerConfig config;
 
     public PostgresOffsetBackingStore() {
@@ -35,15 +34,13 @@ public class PostgresOffsetBackingStore extends MemoryOffsetBackingStore {
     }
 
     private void load() {
+        PostgresOffset postgresOffset = PostgresOffsetStorage.DBZ_OFFSET.get((String) config.originals().get("slot.name"));
         if (EmptyKit.isNull(postgresOffset) || EmptyKit.isNull(postgresOffset.getSourceOffset())) {
             this.data = new HashMap<>();
         } else {
-//            this.data.put(ByteBuffer.wrap(getOffsetKey().getBytes()), ByteBuffer.wrap(postgresOffset.getSourceOffset().getBytes()));
             this.data.put(ByteBuffer.wrap(getOffsetKey().getBytes()),
                     ByteBuffer.wrap(postgresOffset.getSourceOffset().getBytes()));
         }
-//        System.out.println(getOffsetKey());
-//        System.out.println(postgresOffset.getSourceOffset());
     }
 
     private String getOffsetKey() {
@@ -59,22 +56,6 @@ public class PostgresOffsetBackingStore extends MemoryOffsetBackingStore {
     }
 
     protected void save() {
-//        this.data.forEach((key, value) -> {
-//            if (EmptyKit.isNotNull(key)) {
-//                postgresOffset.setStreamOffsetKey(new String(key.array()));
-//                postgresOffset.setStreamOffsetValue(new String(value.array()));
-//                JSONObject jsonObject = JSONObject.parseObject(postgresOffset.getStreamOffsetValue());
-//                postgresOffset.setStreamOffsetTime(jsonObject.getLong("ts_usec"));
-//            }
-//        });
-//        PostgresOffsetStorage.postgresOffsetMap.put(slotName, postgresOffset);
-//        if (EmptyKit.isNull(PostgresOffsetStorage.manyOffsetMap.get(slotName))) {
-//            PostgresOffsetStorage.manyOffsetMap.put(slotName, Collections.singletonList(postgresOffset));
-//        } else {
-//            PostgresOffsetStorage.manyOffsetMap.get(slotName).add(postgresOffset);
-//        }
-//        System.out.println(postgresOffset.getStreamOffsetKey());
-//        System.out.println(postgresOffset.getStreamOffsetValue());
     }
 
 }
