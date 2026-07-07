@@ -1,9 +1,11 @@
 package io.tapdata.connector.postgres.cdc.physical;
 
+import io.tapdata.entity.schema.value.TapBooleanValue;
+import io.tapdata.entity.schema.value.TapStringValue;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -26,7 +28,7 @@ public final class PgTypeDecoder {
     public static final long BOOL = 16, BYTEA = 17, CHAR = 18, NAME = 19, INT8 = 20, INT2 = 21,
             INT4 = 23, TEXT = 25, OID = 26, JSON = 114, XML = 142, FLOAT4 = 700, FLOAT8 = 701,
             BPCHAR = 1042, VARCHAR = 1043, DATE = 1082, TIME = 1083, TIMESTAMP = 1114,
-            TIMESTAMPTZ = 1184, NUMERIC = 1700, UUID_OID = 2950, JSONB = 3802;
+            TIMESTAMPTZ = 1184, BIT = 1560, VARBIT = 1562, NUMERIC = 1700, UUID_OID = 2950, JSONB = 3802;
 
     private static final LocalDate PG_EPOCH = LocalDate.of(2000, 1, 1);
     private static final LocalDateTime PG_EPOCH_TS = LocalDateTime.of(2000, 1, 1, 0, 0);
@@ -49,6 +51,8 @@ public final class PgTypeDecoder {
             return Float.intBitsToFloat((int) le32(v));
         } else if (oid == FLOAT8) {
             return Double.longBitsToDouble(le64(v));
+        } else if (oid == BIT || oid == VARBIT) {
+            return decodeBit(v);
         } else if (oid == NUMERIC) {
             return decodeNumeric(v);
         } else if (oid == DATE) {
@@ -74,6 +78,39 @@ public final class PgTypeDecoder {
             return jsonbStrip(oid, new String(v, StandardCharsets.UTF_8));
         }
         return new String(v, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Decode PostgreSQL on-disk bit/varbit representation.
+     *
+     * On-disk layout (after varlena header is stripped):
+     *   int32  bit_len     — number of valid bits (little-endian)
+     *   bits8  bit_dat[]   — packed bits, MSB-first, zero-padded in last byte
+     *
+     * bit(1)='1'   → [0x01,0x00,0x00,0x00, 0x80] → true (Boolean)
+     * bit(2)='10'  → [0x02,0x00,0x00,0x00, 0x80] → "10"
+     * bit(2)='00'  → [0x02,0x00,0x00,0x00, 0x00] → "00"
+     * bit(2)='01'  → [0x02,0x00,0x00,0x00, 0x40] → "01"
+     */
+    private static Object decodeBit(byte[] v) {
+        if (v == null || v.length < 4) {
+            return v;
+        }
+        int bitLen = (int) le32(v);
+        int dataStart = 4;
+        // bit(1): return boolean, matching AbstractWalLogMiner.parseType() behavior
+        if (bitLen == 1) {
+            return new TapBooleanValue((v[dataStart] & 0x80) != 0);
+        }
+        // bit(n) n > 1: unpack each bit to a '0'/'1' character string
+        StringBuilder sb = new StringBuilder(bitLen);
+        for (int byteIdx = dataStart; byteIdx < v.length && sb.length() < bitLen; byteIdx++) {
+            int b = v[byteIdx] & 0xFF;
+            for (int bitIdx = 7; bitIdx >= 0 && sb.length() < bitLen; bitIdx--) {
+                sb.append(((b >> bitIdx) & 1) == 1 ? '1' : '0');
+            }
+        }
+        return new TapStringValue(sb.toString());
     }
 
     /* Decode a NUL-terminated string out of a fixed-width buffer (PostgreSQL

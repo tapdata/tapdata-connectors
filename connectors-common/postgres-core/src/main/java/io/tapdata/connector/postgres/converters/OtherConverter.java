@@ -1,6 +1,7 @@
 package io.tapdata.connector.postgres.converters;
 
 import io.debezium.spi.converter.RelationalColumn;
+import io.tapdata.entity.schema.value.TapStringValue;
 import org.apache.kafka.connect.data.SchemaBuilder;
 
 import java.util.Arrays;
@@ -28,6 +29,6 @@ public class OtherConverter extends BaseTapdataConverter {
 
     @Override
     Object convert(Object data, RelationalColumn field) {
-        return data.toString();
+        return new TapStringValue(data.toString());
     }
 }
