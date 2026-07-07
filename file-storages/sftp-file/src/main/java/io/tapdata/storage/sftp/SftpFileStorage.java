@@ -30,10 +30,15 @@ public class SftpFileStorage implements TapFileStorage {
         config.put("StrictHostKeyChecking", "no");
         session.setConfig(config);
         session.setTimeout(10000);
-        session.connect();
-        channel = (ChannelSftp) session.openChannel("sftp");
-        channel.connect();
-        channel.setFilenameEncoding(sftpConfig.getEncoding());
+        try {
+            session.connect();
+            channel = (ChannelSftp) session.openChannel("sftp");
+            channel.connect();
+            channel.setFilenameEncoding(sftpConfig.getEncoding());
+        } catch (JSchException | SftpException e) {
+            destroy();
+            throw e;
+        }
     }
 
     @Override
@@ -159,6 +164,9 @@ public class SftpFileStorage implements TapFileStorage {
                                     boolean recursive,
                                     int batchSize,
                                     Consumer<List<TapFile>> consumer) throws SftpException {
+        if (null == session || !session.isConnected() || null == channel || !channel.isConnected()) {
+            throw new SftpException(ChannelSftp.SSH_FX_CONNECTION_LOST, "SFTP session/channel is down");
+        }
         if (!isDirectoryExist(directoryPath)) {
             return;
         }
