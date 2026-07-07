@@ -31,10 +31,17 @@ public final class PgTypeDecoder {
     }
 
     public static final long BOOL = 16, BYTEA = 17, CHAR = 18, NAME = 19, INT8 = 20, INT2 = 21,
-            INT4 = 23, TEXT = 25, OID = 26, JSON = 114, XML = 142, FLOAT4 = 700, FLOAT8 = 701,
-            BPCHAR = 1042, VARCHAR = 1043, DATE = 1082, TIME = 1083, TIMESTAMP = 1114,
-            TIMESTAMPTZ = 1184, TIMETZ = 1266, INTERVAL = 1186, MONEY = 790, BIT = 1560, VARBIT = 1562, NUMERIC = 1700,
-            UUID_OID = 2950, JSONB = 3802, POINT = 600;
+            INT4 = 23, TEXT = 25, OID = 26, REGPROC = 24, JSON = 114, XML = 142,
+            FLOAT4 = 700, FLOAT8 = 701, BPCHAR = 1042, VARCHAR = 1043,
+            DATE = 1082, TIME = 1083, TIMESTAMP = 1114, TIMESTAMPTZ = 1184, TIMETZ = 1266,
+            INTERVAL = 1186, MONEY = 790,
+            POINT = 600, LSEG = 601, PATH = 602, BOX = 603, POLYGON = 604, LINE = 628, CIRCLE = 718,
+            CIDR = 650, INET = 869, MACADDR = 829,
+            BIT = 1560, VARBIT = 1562, NUMERIC = 1700,
+            REGPROCEDURE = 2202, REGOPER = 2203, REGOPERATOR = 2204,
+            REGCLASS = 2205, REGTYPE = 2206,
+            UUID_OID = 2950, TSVECTOR = 3614, TSQUERY = 3615,
+            REGCONFIG = 3734, REGDICTIONARY = 3769, JSONB = 3802;
 
     private static final LocalDate PG_EPOCH = LocalDate.of(2000, 1, 1);
     private static final LocalDateTime PG_EPOCH_TS = LocalDateTime.of(2000, 1, 1, 0, 0);
@@ -84,6 +91,30 @@ public final class PgTypeDecoder {
             return decodeJsonb(v);
         } else if (oid == POINT) {
             return decodePoint(v);
+        } else if (oid == LSEG) {
+            return decodeLseg(v);
+        } else if (oid == BOX) {
+            return decodeBox(v);
+        } else if (oid == CIRCLE) {
+            return decodeCircle(v);
+        } else if (oid == LINE) {
+            return decodeLine(v);
+        } else if (oid == PATH) {
+            return decodePath(v);
+        } else if (oid == POLYGON) {
+            return decodePolygon(v);
+        } else if (oid == CIDR || oid == INET) {
+            return decodeInet(v);
+        } else if (oid == MACADDR) {
+            return decodeMacaddr(v);
+        } else if (oid == REGPROC || oid == REGPROCEDURE || oid == REGOPER
+                || oid == REGOPERATOR || oid == REGCLASS || oid == REGTYPE
+                || oid == REGCONFIG || oid == REGDICTIONARY) {
+            return le32(v) & 0xFFFFFFFFL;   // reg* types are stored as OIDs (4-byte unsigned int)
+        } else if (oid == TSVECTOR) {
+            return decodeTsVector(v);
+        } else if (oid == TSQUERY) {
+            return decodeTsQuery(v);
         } else if (oid == NAME) {
             // "name" is a fixed NAMEDATALEN (64-byte) buffer holding a
             // null-terminated string; the bytes past the terminator are NUL
@@ -514,6 +545,151 @@ public final class PgTypeDecoder {
         double x = Double.longBitsToDouble(le64(v));
         double y = Double.longBitsToDouble(le64(v, 8));
         return "(" + x + "," + y + ")";
+    }
+
+    /** lseg: 32 bytes = 4 float64 (x1,y1,x2,y2). Output: "[(x1,y1),(x2,y2)]" */
+    private static String decodeLseg(byte[] v) {
+        if (v == null || v.length < 32) return null;
+        double x1 = Double.longBitsToDouble(le64(v, 0));
+        double y1 = Double.longBitsToDouble(le64(v, 8));
+        double x2 = Double.longBitsToDouble(le64(v, 16));
+        double y2 = Double.longBitsToDouble(le64(v, 24));
+        return "[(" + x1 + "," + y1 + "),(" + x2 + "," + y2 + ")]";
+    }
+
+    /** box: 32 bytes = 4 float64 (x1,y1,x2,y2) — upper-right, lower-left corners. */
+    private static String decodeBox(byte[] v) {
+        if (v == null || v.length < 32) return null;
+        double x1 = Double.longBitsToDouble(le64(v, 0));
+        double y1 = Double.longBitsToDouble(le64(v, 8));
+        double x2 = Double.longBitsToDouble(le64(v, 16));
+        double y2 = Double.longBitsToDouble(le64(v, 24));
+        return "(" + x1 + "," + y1 + "),(" + x2 + "," + y2 + ")";
+    }
+
+    /** circle: 24 bytes = 3 float64 (x, y, r). Output: "<(x,y),r>" */
+    private static String decodeCircle(byte[] v) {
+        if (v == null || v.length < 24) return null;
+        double x = Double.longBitsToDouble(le64(v, 0));
+        double y = Double.longBitsToDouble(le64(v, 8));
+        double r = Double.longBitsToDouble(le64(v, 16));
+        return "<(" + x + "," + y + ")," + r + ">";
+    }
+
+    /** line: 24 bytes = 3 float64 (A, B, C). Output: "{A,B,C}" */
+    private static String decodeLine(byte[] v) {
+        if (v == null || v.length < 24) return null;
+        double a = Double.longBitsToDouble(le64(v, 0));
+        double b = Double.longBitsToDouble(le64(v, 8));
+        double c = Double.longBitsToDouble(le64(v, 16));
+        return "{" + a + "," + b + "," + c + "}";
+    }
+
+    /**
+     * path: varlena. After varlena header: 1 byte closed + 4 bytes npts + npts*16 bytes (x,y pairs).
+     * Output: "(x1,y1),...,(xn,yn)" if open; "((x1,y1),...,(xn,yn))" if closed.
+     */
+    private static String decodePath(byte[] v) {
+        if (v == null || v.length < 5) return null;
+        boolean closed = v[0] != 0;
+        int npts = (int) le32(v, 1);
+        if (npts <= 0 || npts > 65535) return null;
+        StringBuilder sb = new StringBuilder();
+        if (closed) sb.append('(');
+        for (int i = 0; i < npts; i++) {
+            int off = 5 + i * 16;
+            if (off + 16 > v.length) break;
+            if (i > 0) sb.append(',');
+            double x = Double.longBitsToDouble(le64(v, off));
+            double y = Double.longBitsToDouble(le64(v, off + 8));
+            sb.append('(').append(x).append(',').append(y).append(')');
+        }
+        if (closed) sb.append(')');
+        return sb.toString();
+    }
+
+    /**
+     * polygon: varlena. After varlena header: 4 bytes npts + npts*16 bytes (x,y pairs).
+     * Output: "((x1,y1),...,(xn,yn))"
+     */
+    private static String decodePolygon(byte[] v) {
+        if (v == null || v.length < 4) return null;
+        int npts = (int) le32(v, 0);
+        if (npts <= 0 || npts > 65535) return null;
+        StringBuilder sb = new StringBuilder("(");
+        for (int i = 0; i < npts; i++) {
+            int off = 4 + i * 16;
+            if (off + 16 > v.length) break;
+            if (i > 0) sb.append(',');
+            double x = Double.longBitsToDouble(le64(v, off));
+            double y = Double.longBitsToDouble(le64(v, off + 8));
+            sb.append('(').append(x).append(',').append(y).append(')');
+        }
+        sb.append(')');
+        return sb.toString();
+    }
+
+    /**
+     * cidr/inet: varlena. After varlena header:
+     *   1 byte family (2=IPv4, 3=IPv6)
+     *   1 byte bits (netmask length)
+     *   1 byte is_cidr (1=cidr, 0=inet)
+     *   1 byte addr_len (4 or 16)
+     *   addr_len bytes of address
+     */
+    private static String decodeInet(byte[] v) {
+        if (v == null || v.length < 8) return null;
+        int family = v[0] & 0xFF;
+        int bits = v[1] & 0xFF;
+        int addrLen = v[3] & 0xFF;
+        if (v.length < 4 + addrLen) return null;
+        StringBuilder sb = new StringBuilder();
+        if (family == 2) {   // IPv4
+            sb.append(v[4] & 0xFF).append('.').append(v[5] & 0xFF)
+              .append('.').append(v[6] & 0xFF).append('.').append(v[7] & 0xFF);
+        } else {              // IPv6
+            for (int i = 0; i < addrLen; i++) {
+                if (i > 0 && i % 2 == 0) sb.append(':');
+                sb.append(String.format("%02x", v[4 + i] & 0xFF));
+            }
+        }
+        sb.append('/').append(bits);
+        return sb.toString();
+    }
+
+    /** macaddr: 6 bytes. Output: "xx:xx:xx:xx:xx:xx" */
+    private static String decodeMacaddr(byte[] v) {
+        if (v == null || v.length < 6) return null;
+        return String.format("%02x:%02x:%02x:%02x:%02x:%02x",
+                v[0] & 0xFF, v[1] & 0xFF, v[2] & 0xFF,
+                v[3] & 0xFF, v[4] & 0xFF, v[5] & 0xFF);
+    }
+
+    /**
+     * tsvector: varlena. After varlena header: int32 size, then lexeme entries.
+     * Best-effort: extract readable ASCII/substrings from the payload.
+     */
+    private static String decodeTsVector(byte[] v) {
+        if (v == null || v.length < 4) return null;
+        try {
+            // Skip the 4-byte size header, return the rest as a best-effort string
+            return new String(v, 4, v.length - 4, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return new String(v, StandardCharsets.UTF_8);
+        }
+    }
+
+    /**
+     * tsquery: varlena. After varlena header: complex query tree.
+     * Best-effort: return as UTF-8 string.
+     */
+    private static String decodeTsQuery(byte[] v) {
+        if (v == null) return null;
+        try {
+            return new String(v, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static long le64(byte[] b, int offset) {
