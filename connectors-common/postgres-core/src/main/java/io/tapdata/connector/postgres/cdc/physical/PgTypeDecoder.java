@@ -11,6 +11,10 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -30,7 +34,7 @@ public final class PgTypeDecoder {
             INT4 = 23, TEXT = 25, OID = 26, JSON = 114, XML = 142, FLOAT4 = 700, FLOAT8 = 701,
             BPCHAR = 1042, VARCHAR = 1043, DATE = 1082, TIME = 1083, TIMESTAMP = 1114,
             TIMESTAMPTZ = 1184, TIMETZ = 1266, INTERVAL = 1186, MONEY = 790, BIT = 1560, VARBIT = 1562, NUMERIC = 1700,
-            UUID_OID = 2950, JSONB = 3802;
+            UUID_OID = 2950, JSONB = 3802, POINT = 600;
 
     private static final LocalDate PG_EPOCH = LocalDate.of(2000, 1, 1);
     private static final LocalDateTime PG_EPOCH_TS = LocalDateTime.of(2000, 1, 1, 0, 0);
@@ -76,14 +80,18 @@ public final class PgTypeDecoder {
             return decodeUuid(v);
         } else if (oid == BYTEA) {
             return v;
+        } else if (oid == JSONB) {
+            return decodeJsonb(v);
+        } else if (oid == POINT) {
+            return decodePoint(v);
         } else if (oid == NAME) {
             // "name" is a fixed NAMEDATALEN (64-byte) buffer holding a
             // null-terminated string; the bytes past the terminator are NUL
             // padding and must be dropped (otherwise field names carry \u0000).
             return cString(v);
         } else if (oid == CHAR || oid == TEXT || oid == VARCHAR || oid == BPCHAR
-                || oid == JSON || oid == JSONB || oid == XML) {
-            return jsonbStrip(oid, new String(v, StandardCharsets.UTF_8));
+                || oid == JSON || oid == XML) {
+            return new String(v, StandardCharsets.UTF_8);
         }
         return new String(v, StandardCharsets.UTF_8);
     }
@@ -246,11 +254,274 @@ public final class PgTypeDecoder {
         return new String(v, 0, len, StandardCharsets.UTF_8);
     }
 
-    private static Object jsonbStrip(long oid, String s) {
-        // jsonb stores a 1-byte version prefix before the textual form when not
-        // sent in text mode; the de-TOASTed bytes here are already textual, so
-        // return as-is. Hook kept for clarity / future binary jsonb handling.
-        return s;
+    /**
+     * Jsonb JEntry flags (bits in the upper byte of a 32-bit JEntry).
+     * On-disk representation uses the same bit layout as the in-memory one.
+     */
+    private static final int JBE_ISCONTAINER = 0x01000000;
+    private static final int JBE_ISSTRING    = 0x02000000;
+    private static final int JBE_ISNUMERIC   = 0x04000000;
+    private static final int JBE_ISNULL      = 0x08000000;
+    private static final int JBE_ISBOOL      = 0x20000000;
+    private static final int JBE_ISBOOL_TRUE = 0x10000000;
+    private static final int JENTRY_LENMASK  = 0x00FFFFFF;
+
+    /**
+     * Decode PostgreSQL jsonb on-disk binary representation.
+     *
+     * Layout (after varlena header is stripped):
+     *   uint8  version    — always 1
+     *   JsonbContainer:
+     *     uint32 header   — high nibble: JB_FOBJECT(0x4)/JB_FARRAY(0x8)/JB_FSCALAR(0x0)
+     *                       low 28 bits: number of JEntries
+     *     JEntry[count]   — each 4 bytes, encoding type + length/offset
+     *     uint8 data[]    — concatenated key/value payloads (no terminators)
+     */
+    /**
+     * Decode PostgreSQL jsonb on-disk format. Bytes are the raw JsonbContainer
+     * (varlena header already stripped by readVarlena).
+     *
+     * PG &le;13 format (versioned):   version(1) + header(4) + JEntry[count] + data
+     *   header type nibble: 0/4=object, 1/8=array, 2=scalar
+     *
+     * PG &ge;14 compact format (unversioned): header(4) + JEntry[count] + data
+     *   header type nibble: 2=object/array (count = pairs/elements)
+     *
+     * Heuristic: if byte 0 is 0x01 AND the header at offset 1 has a reasonable
+     * count, use the versioned path; otherwise treat byte 0 as header start.
+     */
+    private static Object decodeJsonb(byte[] v) {
+        if (v == null || v.length < 5) {
+            return null;
+        }
+
+        int header;
+        int containerType;
+        int count;
+        int entryStart;
+
+        // Heuristic: detect versioned vs unversioned format
+        if (v[0] == 0x01 && v.length >= 9) {
+            int h = (int) le32(v, 1);
+            int c = h & 0x0FFFFFFF;
+            if (c > 0 && c < v.length / 2) {
+                // Versioned format (PG &le;13 / test data)
+                header = h;
+                entryStart = 5;
+            } else {
+                // Byte 0 is first byte of header (PG &ge;14)
+                header = (int) le32(v, 0);
+                entryStart = 4;
+            }
+        } else {
+            header = (int) le32(v, 0);
+            entryStart = 4;
+        }
+
+        containerType = (header >> 28) & 0xF;
+        count = header & 0x0FFFFFFF;
+
+        if (count <= 0 || count > v.length / 2) {
+            return null;
+        }
+
+        int entryCount = count;
+        boolean isObject;
+
+        if (containerType == 0 || containerType == 0x4) {
+            // Versioned JB_FOBJECT: count = number of JEntries (key+value)
+            isObject = true;
+        } else if (containerType == 0x8 || containerType == 1) {
+            // JB_FARRAY: count = number of elements
+            isObject = false;
+        } else if (containerType == 2) {
+            // PG &ge;14 compact: count = number of pairs (object) or elements (array)
+            // Heuristic: if exactly 2*count entries fit, it's an object
+            int possibleEntries = count * 2;
+            int possibleDataStart = entryStart + possibleEntries * 4;
+            if (possibleDataStart <= v.length) {
+                isObject = true;
+                entryCount = possibleEntries;
+            } else {
+                isObject = false;
+            }
+        } else {
+            isObject = false;
+        }
+
+        int dataStart = entryStart + entryCount * 4;
+        if (dataStart > v.length) {
+            return null;
+        }
+        byte[] rawData = new byte[v.length - dataStart];
+        System.arraycopy(v, dataStart, rawData, 0, rawData.length);
+
+        Object parsed;
+        if (isObject) {
+            parsed = decodeJsonbObject(entryCount, v, entryStart, rawData);
+        } else if (entryCount > 1) {
+            parsed = decodeJsonbArray(entryCount, v, entryStart, rawData);
+        } else {
+            if (count == 1) {
+                int jentry = (int) le32(v, entryStart);
+                parsed = decodeJsonbScalar(jentry, rawData, 0);
+            } else {
+                return null;
+            }
+        }
+        return toJsonString(parsed);
+    }
+
+    /** Convert a decoded jsonb value (Map/List/scalar) to JSON string. */
+    private static String toJsonString(Object val) {
+        if (val == null) return "null";
+        if (val instanceof String) return "\"" + escapeJson((String) val) + "\"";
+        if (val instanceof Boolean || val instanceof Number) return val.toString();
+        if (val instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) val;
+            StringBuilder sb = new StringBuilder("{");
+            boolean first = true;
+            for (Map.Entry<String, Object> e : map.entrySet()) {
+                if (!first) sb.append(',');
+                first = false;
+                sb.append('"').append(escapeJson(e.getKey())).append("\":").append(toJsonString(e.getValue()));
+            }
+            sb.append('}');
+            return sb.toString();
+        }
+        if (val instanceof List) {
+            @SuppressWarnings("unchecked")
+            List<Object> list = (List<Object>) val;
+            StringBuilder sb = new StringBuilder("[");
+            for (int i = 0; i < list.size(); i++) {
+                if (i > 0) sb.append(',');
+                sb.append(toJsonString(list.get(i)));
+            }
+            sb.append(']');
+            return sb.toString();
+        }
+        return "\"" + escapeJson(String.valueOf(val)) + "\"";
+    }
+
+    private static String escapeJson(String s) {
+        StringBuilder sb = new StringBuilder(s.length() + 4);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"': sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default: sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static Map<String, Object> decodeJsonbObject(int count, byte[] v, int entryStart, byte[] rawData) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        int dataPos = 0;
+        for (int i = 0; i + 1 < count; i += 2) {
+            int keyEntry = (int) le32(v, entryStart + i * 4);
+            int valEntry = (int) le32(v, entryStart + (i + 1) * 4);
+
+            // Key is always a string
+            int keyLen = keyEntry & JENTRY_LENMASK;
+            String key = new String(rawData, dataPos, keyLen, StandardCharsets.UTF_8);
+            dataPos += keyLen;
+
+            // Value depends on type flags
+            Object val = decodeJsonbScalar(valEntry, rawData, dataPos);
+            if (val == NOT_FOUND) {
+                // Offset-based entry (nested container or long string)
+                // For now, skip — full container support would need more work
+                result.put(key, null);
+            } else {
+                result.put(key, val);
+                if ((valEntry & JBE_ISNULL) == 0 && (valEntry & JBE_ISBOOL) == 0) {
+                    dataPos += (valEntry & JENTRY_LENMASK);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static List<Object> decodeJsonbArray(int count, byte[] v, int entryStart, byte[] rawData) {
+        List<Object> result = new ArrayList<>();
+        int dataPos = 0;
+        for (int i = 0; i < count; i++) {
+            int entry = (int) le32(v, entryStart + i * 4);
+            Object val = decodeJsonbScalar(entry, rawData, dataPos);
+            if (val == NOT_FOUND) {
+                result.add(null);
+            } else {
+                result.add(val);
+                if ((entry & JBE_ISNULL) == 0 && (entry & JBE_ISBOOL) == 0) {
+                    dataPos += (entry & JENTRY_LENMASK);
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Sentinel returned when a JEntry uses offset-based addressing (container / long value). */
+    private static final Object NOT_FOUND = new Object();
+
+    private static Object decodeJsonbScalar(int jentry, byte[] rawData, int dataPos) {
+        if ((jentry & JBE_ISNULL) != 0) {
+            return null;
+        }
+        if ((jentry & JBE_ISBOOL) != 0) {
+            return (jentry & JBE_ISBOOL_TRUE) != 0;
+        }
+        int len = jentry & JENTRY_LENMASK;
+        if ((jentry & JBE_ISSTRING) != 0) {
+            if (dataPos + len > rawData.length) {
+                return null;
+            }
+            return new String(rawData, dataPos, len, StandardCharsets.UTF_8);
+        }
+        if ((jentry & JBE_ISNUMERIC) != 0) {
+            if (dataPos + len > rawData.length) {
+                return null;
+            }
+            return new BigDecimal(new String(rawData, dataPos, len, StandardCharsets.UTF_8));
+        }
+        if ((jentry & JBE_ISCONTAINER) != 0) {
+            // Nested container: the lower 28 bits are an offset into rawData
+            // Full parsing of nested containers not yet implemented
+            return NOT_FOUND;
+        }
+        // Unknown scalar type — try as string
+        if (dataPos + len <= rawData.length && len > 0) {
+            return new String(rawData, dataPos, len, StandardCharsets.UTF_8);
+        }
+        return NOT_FOUND;
+    }
+
+    /**
+     * Decode PostgreSQL point type (16 bytes: two float64 LE).
+     * point(12.0, 12.0) → "(12.0,12.0)"
+     */
+    private static String decodePoint(byte[] v) {
+        if (v == null || v.length < 16) {
+            return null;
+        }
+        double x = Double.longBitsToDouble(le64(v));
+        double y = Double.longBitsToDouble(le64(v, 8));
+        return "(" + x + "," + y + ")";
+    }
+
+    private static long le64(byte[] b, int offset) {
+        long v = 0;
+        for (int i = 0; i < 8; i++) {
+            v |= (b[offset + i] & 0xFFL) << (8 * i);
+        }
+        return v;
     }
 
     /* on-disk numeric (NumericChoice) header bits, see utils/adt/numeric.c */

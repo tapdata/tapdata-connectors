@@ -109,6 +109,81 @@ public class PgTypeDecoderTest {
         assertEquals(0, BigDecimal.ZERO.compareTo(d));
     }
 
+    @Test
+    public void testJsonbObject() {
+        // Build jsonb {"sdkf":"sfs"} on-disk bytes (after varlena strip):
+        // version(1) + header(4 LE) + key_entry(4 LE) + val_entry(4 LE) + data
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        o.write(1); // version
+        // header: JB_FOBJECT(4) | nJEntries=2
+        write32(o, (4 << 28) | 2);
+        // key JEntry: IS_STRING | len=4
+        write32(o, (2 << 24) | 4);
+        // val JEntry: IS_STRING | len=3
+        write32(o, (2 << 24) | 3);
+        // data: "sdkf" + "sfs"
+        o.write("sdkfsfs".getBytes(StandardCharsets.UTF_8), 0, 7);
+
+        Object result = PgTypeDecoder.decode(PgTypeDecoder.JSONB, o.toByteArray());
+        assertNotNull(result, "jsonb decode should not return null");
+        assertEquals("{\"sdkf\":\"sfs\"}", result);
+    }
+
+    @Test
+    public void testJsonbArray() {
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        o.write(1); // version
+        // header: JB_FARRAY(8) | nJEntries=3
+        write32(o, (8 << 28) | 3);
+        // 3 JEntries: IS_STRING | len=1 for "a","b","c"
+        write32(o, (2 << 24) | 1);
+        write32(o, (2 << 24) | 1);
+        write32(o, (2 << 24) | 1);
+        o.write("abc".getBytes(StandardCharsets.UTF_8), 0, 3);
+
+        Object result = PgTypeDecoder.decode(PgTypeDecoder.JSONB, o.toByteArray());
+        assertNotNull(result);
+        assertEquals("[\"a\",\"b\",\"c\"]", result);
+    }
+
+    @Test
+    public void testJsonbNull() {
+        java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+        o.write(1); // version
+        // header: JB_FOBJECT(4) | nJEntries=2
+        write32(o, (4 << 28) | 2);
+        // key: IS_STRING | len=1 ("x")
+        write32(o, (2 << 24) | 1);
+        // val: IS_NULL
+        write32(o, 8 << 24);
+        o.write("x".getBytes(StandardCharsets.UTF_8), 0, 1);
+
+        Object result = PgTypeDecoder.decode(PgTypeDecoder.JSONB, o.toByteArray());
+        assertNotNull(result);
+        assertEquals("{\"x\":null}", result);
+    }
+
+    @Test
+    public void testPoint() {
+        // point(12.0, 12.0) → 16 bytes: two float64 LE
+        byte[] buf = new byte[16];
+        long xBits = Double.doubleToLongBits(12.0);
+        long yBits = Double.doubleToLongBits(12.0);
+        for (int i = 0; i < 8; i++) {
+            buf[i] = (byte) (xBits >>> (8 * i));
+            buf[8 + i] = (byte) (yBits >>> (8 * i));
+        }
+        Object result = PgTypeDecoder.decode(PgTypeDecoder.POINT, buf);
+        assertEquals("(12.0,12.0)", result);
+    }
+
+    private static void write32(java.io.ByteArrayOutputStream o, int v) {
+        o.write(v & 0xFF);
+        o.write((v >> 8) & 0xFF);
+        o.write((v >> 16) & 0xFF);
+        o.write((v >> 24) & 0xFF);
+    }
+
     private static void write16(java.io.ByteArrayOutputStream o, int v) {
         o.write(v & 0xFF);
         o.write((v >> 8) & 0xFF);
