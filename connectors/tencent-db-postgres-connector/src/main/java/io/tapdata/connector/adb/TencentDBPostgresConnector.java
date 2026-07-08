@@ -30,12 +30,12 @@ import java.util.function.Consumer;
 public class TencentDBPostgresConnector extends PostgresConnector {
 
     @Override
-    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) {
+    public ConnectionOptions connectionTest(TapConnectionContext connectionContext, Consumer<TestItem> consumer) throws SQLException {
         postgresConfig = (PostgresConfig) new PostgresConfig().load(connectionContext.getConnectionConfig());
         ConnectionOptions connectionOptions = ConnectionOptions.create();
         connectionOptions.connectionString(postgresConfig.getConnectionString());
         try (
-                TencentDBPostgresTest tencentDBPostgresTest = new TencentDBPostgresTest(postgresConfig, consumer, connectionOptions).initContext()
+                TencentDBPostgresTest tencentDBPostgresTest = (TencentDBPostgresTest) new TencentDBPostgresTest(postgresConfig, consumer, connectionOptions).initContext().withPostgresVersion()
         ) {
             tencentDBPostgresTest.testOneByOne();
             return connectionOptions;
