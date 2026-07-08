@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -124,6 +125,28 @@ public class PhysicalWalLogMinerTest {
         PhysicalWalLogMiner.XactAssignment assignment = PhysicalWalLogMiner.readAssignment(new byte[]{1, 2, 3});
         assertEquals(0L, assignment.topXid);
         assertEquals(0, assignment.subxids.length);
+    }
+
+    @Test
+    public void testMergeSubxidsIncludesAssignmentOnlyChildren() {
+        Map<Long, Long> assignments = new LinkedHashMap<>();
+        assignments.put(1002L, 1000L);
+        assignments.put(1003L, 1000L);
+        assignments.put(2001L, 2000L);
+
+        long[] merged = PhysicalWalLogMiner.mergeSubxids(1000L, new long[]{1001L, 1002L}, assignments);
+
+        assertArrayEquals(new long[]{1001L, 1002L, 1003L}, merged);
+    }
+
+    @Test
+    public void testMergeSubxidsCoversCommitRecordWithoutSubxacts() {
+        Map<Long, Long> assignments = new LinkedHashMap<>();
+        assignments.put(1003L, 1000L);
+
+        long[] merged = PhysicalWalLogMiner.mergeSubxids(1000L, new long[0], assignments);
+
+        assertArrayEquals(new long[]{1003L}, merged);
     }
 
     @Test

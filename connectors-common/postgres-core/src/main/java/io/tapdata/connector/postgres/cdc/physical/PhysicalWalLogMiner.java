@@ -941,18 +941,19 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 }
                 break;
             case Decoded.COMMIT:
+                long[] commitSubxids = subxidsForTop(d.xid, d.subxids);
                 // Debug: log the subxids we parsed from this COMMIT
-                if (WAL_DEBUG_ENABLED && d.subxids != null && d.subxids.length > 0) {
+                if (WAL_DEBUG_ENABLED && commitSubxids.length > 0) {
                     tapLogger.info("[WAL-DEBUG] COMMIT xid={} has {} subxids: {}",
-                            d.xid, d.subxids.length, java.util.Arrays.toString(d.subxids));
+                            d.xid, commitSubxids.length, java.util.Arrays.toString(commitSubxids));
                 }
                 // Drain DDL redos first (pg_attribute changes) - these are processed
                 // separately from normal DML and used to synthesize DDL events.
-                List<NormalRedo> ddlChanges = drainDdlRedos(d.xid, d.subxids);
+                List<NormalRedo> ddlChanges = drainDdlRedos(d.xid, commitSubxids);
                 ddlChanges.sort(Comparator.comparingLong(PhysicalWalLogMiner::redoLsn));
 
                 // Drain normal DML via streaming k-way merge
-                try (DrainResult dr = drainTransaction(d.xid, d.subxids)) {
+                try (DrainResult dr = drainTransaction(d.xid, commitSubxids)) {
                     // Always drain (frees the per-xid buffers and keeps the page cache
                     // in step), but suppress commits that landed before the emit
                     // position: their records only served to warm the cache and were
@@ -960,9 +961,9 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     if (d.rec != null && d.rec.lsn < emitFromLsn) {
                         // Early exit for warm-up transactions, but must still clean up
                         // DDL tracking state to prevent memory leaks
-                        clearDdlPending(d.xid, d.subxids);
-                        clearSubxidAssignments(d.xid, d.subxids);
-                        clearPendingColumnChanges(d.xid, d.subxids);
+                        clearDdlPending(d.xid, commitSubxids);
+                        clearSubxidAssignments(d.xid, commitSubxids);
+                        clearPendingColumnChanges(d.xid, commitSubxids);
                         break;
                     }
 
@@ -1025,16 +1026,17 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     }
                     if (WAL_DEBUG_ENABLED) {
                         tapLogger.info("[WAL-DEBUG] COMMIT drain xid={} redos={} emitted={} ddl={} subxids={} offset={}",
-                                d.xid, totalRedos, emitted, emittedDdl, d.subxids == null ? 0 : d.subxids.length, d.offset);
+                                d.xid, totalRedos, emitted, emittedDdl, commitSubxids.length, d.offset);
                     }
-                    clearDdlPending(d.xid, d.subxids);
-                    clearSubxidAssignments(d.xid, d.subxids);
-                    clearPendingColumnChanges(d.xid, d.subxids);
+                    clearDdlPending(d.xid, commitSubxids);
+                    clearSubxidAssignments(d.xid, commitSubxids);
+                    clearPendingColumnChanges(d.xid, commitSubxids);
                 }
                 break;
             case Decoded.ABORT:
-                discardTransaction(d.xid, d.subxids);
-                List<NormalRedo> abortedDdls = drainDdlRedos(d.xid, d.subxids);
+                long[] abortSubxids = subxidsForTop(d.xid, d.subxids);
+                discardTransaction(d.xid, abortSubxids);
+                List<NormalRedo> abortedDdls = drainDdlRedos(d.xid, abortSubxids);
                 // Revert in-memory RelationCatalog changes from aborted DDL
                 if (!abortedDdls.isEmpty()) {
                     catalog.invalidate();
@@ -1047,7 +1049,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 // Clear DDL tracking for aborted transactions. If this transaction
                 // had activated the barrier, clear it unconditionally to prevent deadlock.
                 synchronized (ddlBarrierLock) {
-                    boolean wasTracked = clearDdlPendingLocked(d.xid, d.subxids);
+                    boolean wasTracked = clearDdlPendingLocked(d.xid, abortSubxids);
                     if (wasTracked && ddlBarrierActive) {
                         // This aborted transaction might have activated the barrier,
                         // clear it to allow reader to resume
@@ -1056,8 +1058,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         tapLogger.info("Physical WAL miner DDL barrier cleared after ABORT xid={}", d.xid);
                     }
                 }
-                clearSubxidAssignments(d.xid, d.subxids);
-                clearPendingColumnChanges(d.xid, d.subxids);
+                clearSubxidAssignments(d.xid, abortSubxids);
+                clearPendingColumnChanges(d.xid, abortSubxids);
                 break;
             default:
                 break;
@@ -1068,6 +1070,42 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private long topXidFor(long xid) {
         Long top = subxidToTopXid.get(xid);
         return top == null ? xid : top;
+    }
+
+    private long[] subxidsForTop(long topXid, long[] walSubxids) {
+        return mergeSubxids(topXid, walSubxids, subxidToTopXid);
+    }
+
+    static long[] mergeSubxids(long topXid, long[] walSubxids, Map<Long, Long> assignments) {
+        if ((walSubxids == null || walSubxids.length == 0) && (assignments == null || assignments.isEmpty())) {
+            return EMPTY_SUBXACTS;
+        }
+        LinkedHashSet<Long> merged = new LinkedHashSet<>();
+        if (walSubxids != null) {
+            for (long sub : walSubxids) {
+                if (sub != 0 && sub != topXid) {
+                    merged.add(sub);
+                }
+            }
+        }
+        if (assignments != null && topXid != 0) {
+            for (Map.Entry<Long, Long> e : assignments.entrySet()) {
+                Long parent = e.getValue();
+                Long sub = e.getKey();
+                if (Objects.equals(parent, topXid) && sub != null && sub != 0 && sub != topXid) {
+                    merged.add(sub);
+                }
+            }
+        }
+        if (merged.isEmpty()) {
+            return EMPTY_SUBXACTS;
+        }
+        long[] out = new long[merged.size()];
+        int i = 0;
+        for (Long sub : merged) {
+            out[i++] = sub;
+        }
+        return out;
     }
 
     private void registerSubxids(long topXid, long[] subxids) {
