@@ -6,6 +6,7 @@ import java.util.Map;
 public class NormalRedo implements Serializable {
 
     private Long cdcSequenceId;
+    private Long sourceXid;
     private String cdcSequenceStr;
     private Long cdcPendingId;
     private String cdcPendingStr;
@@ -37,6 +38,14 @@ public class NormalRedo implements Serializable {
 
     public void setCdcSequenceId(Long cdcSequenceId) {
         this.cdcSequenceId = cdcSequenceId;
+    }
+
+    public Long getSourceXid() {
+        return sourceXid;
+    }
+
+    public void setSourceXid(Long sourceXid) {
+        this.sourceXid = sourceXid;
     }
 
     public String getCdcSequenceStr() {

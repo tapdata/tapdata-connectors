@@ -144,11 +144,10 @@ public final class HeapRmgrDecoder {
                 new Object[]{relTag(rel), blockNumber(b0), offnum, Integer.toHexString(flags),
                         b0 != null && b0.hasImage, cp != null && (b0 == null || !b0.hasImage),
                         hex(rec.mainData), hex(oldTuple)});
-        if (cp != null) {
-            // Tuple is gone; drop it so a later reuse of this slot does not read
-            // the stale version before its INSERT/UPDATE overwrites the overlay.
-            cp.remove(offnum);
-        }
+        // Keep the tuple bytes in the overlay. DELETE WAL is decoded before the
+        // commit/abort gate, and a later ROLLBACK TO SAVEPOINT can make the row
+        // visible again. Slot reuse is still safe because INSERT/UPDATE-new
+        // overwrites the offset before any later record should read it.
         NormalRedo r = base(rec, rel, OperationEnum.DELETE);
         if (oldTuple != null) {
             r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns));
@@ -350,6 +349,7 @@ public final class HeapRmgrDecoder {
         r.setTableName(rel.table);
         r.setTransactionId(String.valueOf(rec.xid));
         r.setCdcSequenceId(rec.lsn);
+        r.setSourceXid(rec.xid);
         return r;
     }
 

@@ -613,6 +613,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         List<RelationCatalog.PgAttributeChange> pending = pendingColumnChanges.remove(tableKey);
         if (pending != null) {
             rel = RelationCatalog.applyPendingChanges(rel, pending);
+            catalog.cache(b0.relNumber, rel);
         }
         return rel;
     }
@@ -637,6 +638,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         List<RelationCatalog.PgAttributeChange> pending = pendingColumnChanges.remove(tableKey);
         if (pending != null) {
             rel = RelationCatalog.applyPendingChanges(rel, pending);
+            catalog.cache(relNumber, rel);
         }
         return rel;
     }
@@ -657,6 +659,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
         for (NormalRedo r : redos) {
             r.setCdcSequenceId(rec.lsn);   // source LSN, used to order a transaction's changes
+            r.setSourceXid(rec.xid);
         }
         return expandKeyUpdates(redos, rel);
     }
@@ -733,6 +736,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         c.setTableName(u.getTableName());
         c.setTransactionId(u.getTransactionId());
         c.setCdcSequenceId(u.getCdcSequenceId());
+        c.setSourceXid(u.getSourceXid());
         return c;
     }
 
@@ -942,6 +946,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 break;
             case Decoded.COMMIT:
                 long[] commitSubxids = subxidsForTop(d.xid, d.subxids);
+                Set<Long> committedXids = committedXids(d.xid, d.subxids);
                 // Debug: log the subxids we parsed from this COMMIT
                 if (WAL_DEBUG_ENABLED && commitSubxids.length > 0) {
                     tapLogger.info("[WAL-DEBUG] COMMIT xid={} has {} subxids: {}",
@@ -950,6 +955,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 // Drain DDL redos first (pg_attribute changes) - these are processed
                 // separately from normal DML and used to synthesize DDL events.
                 List<NormalRedo> ddlChanges = drainDdlRedos(d.xid, commitSubxids);
+                ddlChanges.removeIf(r -> !isCommittedRedo(r, committedXids));
                 ddlChanges.sort(Comparator.comparingLong(PhysicalWalLogMiner::redoLsn));
 
                 // Drain normal DML via streaming k-way merge
@@ -971,6 +977,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     int emittedDdl = 0;
                     int ddlIndex = 0;
                     int totalRedos = dr.count;
+                    int skipped = 0;
                     while (dr.iterator.hasNext()) {
                         NormalRedo r = dr.iterator.next();
                         long dmlLsn = redoLsn(r);
@@ -978,6 +985,15 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                                 && redoLsn(ddlChanges.get(ddlIndex)) <= dmlLsn) {
                             batch = emitDdlAndWait(ddlChanges.get(ddlIndex++), d.commitMillis, batch, safeOffsetBeforeApply, d.xid);
                             emittedDdl++;
+                        }
+                        if (!isCommittedRedo(r, committedXids)) {
+                            skipped++;
+                            if (WAL_DEBUG_ENABLED) {
+                                tapLogger.info("[WAL-DEBUG] SKIP rolled-back xid={} op={} {}.{} lsn={}",
+                                        r.getSourceXid(), r.getOperation(), r.getNameSpace(), r.getTableName(),
+                                        lsnStr(redoLsn(r)));
+                            }
+                            continue;
                         }
                         r.setTimestamp(d.commitMillis);
                         r.setCdcSequenceStr(d.offset);
@@ -1025,8 +1041,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         emittedDdl++;
                     }
                     if (WAL_DEBUG_ENABLED) {
-                        tapLogger.info("[WAL-DEBUG] COMMIT drain xid={} redos={} emitted={} ddl={} subxids={} offset={}",
-                                d.xid, totalRedos, emitted, emittedDdl, commitSubxids.length, d.offset);
+                        tapLogger.info("[WAL-DEBUG] COMMIT drain xid={} redos={} emitted={} skipped={} ddl={} subxids={} offset={}",
+                                d.xid, totalRedos, emitted, skipped, emittedDdl, commitSubxids.length, d.offset);
                     }
                     clearDdlPending(d.xid, commitSubxids);
                     clearSubxidAssignments(d.xid, commitSubxids);
@@ -1035,12 +1051,16 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 break;
             case Decoded.ABORT:
                 long[] abortSubxids = subxidsForTop(d.xid, d.subxids);
-                discardTransaction(d.xid, abortSubxids);
+                boolean subtransactionAbort = subxidToTopXid.containsKey(d.xid);
+                if (subtransactionAbort) {
+                    discardTransaction(d.xid, d.subxids);
+                } else {
+                    discardTransaction(d.xid, abortSubxids);
+                }
                 List<NormalRedo> abortedDdls = drainDdlRedos(d.xid, abortSubxids);
                 // Revert in-memory RelationCatalog changes from aborted DDL
                 if (!abortedDdls.isEmpty()) {
-                    catalog.invalidate();
-                    pendingColumnChanges.clear();
+                    rebuildCatalogOverlaysFromBufferedDdl();
                     if (WAL_DEBUG_ENABLED) {
                         tapLogger.info("[WAL-DEBUG] ABORT xid={} with {} DDL changes; catalog invalidated",
                                 d.xid, abortedDdls.size());
@@ -1074,6 +1094,26 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
 
     private long[] subxidsForTop(long topXid, long[] walSubxids) {
         return mergeSubxids(topXid, walSubxids, subxidToTopXid);
+    }
+
+    static Set<Long> committedXids(long topXid, long[] walSubxids) {
+        Set<Long> committed = new HashSet<>();
+        if (topXid != 0) {
+            committed.add(topXid);
+        }
+        if (walSubxids != null) {
+            for (long sub : walSubxids) {
+                if (sub != 0) {
+                    committed.add(sub);
+                }
+            }
+        }
+        return committed;
+    }
+
+    static boolean isCommittedRedo(NormalRedo redo, Set<Long> committedXids) {
+        Long sourceXid = redo.getSourceXid();
+        return sourceXid == null || committedXids.contains(sourceXid);
     }
 
     static long[] mergeSubxids(long topXid, long[] walSubxids, Map<Long, Long> assignments) {
@@ -1124,11 +1164,11 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     }
 
     private void clearSubxidAssignments(long topXid, long[] subxids) {
+        subxidToTopXid.remove(topXid);
         if (subxids != null && subxids.length > 0) {
             for (long sub : subxids) {
                 subxidToTopXid.remove(sub);
             }
-            return;
         }
         subxidToTopXid.entrySet().removeIf(e -> Objects.equals(e.getValue(), topXid));
     }
@@ -1143,6 +1183,63 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         //
         // For the common path, pendingColumnChanges entries are empty because
         // catalog.applyPgAttributeChange returned true (cache hit).
+    }
+
+    private void rebuildCatalogOverlaysFromBufferedDdl() {
+        catalog.invalidate();
+        pendingColumnChanges.clear();
+        List<NormalRedo> remaining = new ArrayList<>();
+        for (List<NormalRedo> redos : ddlRedosByXid.values()) {
+            remaining.addAll(redos);
+        }
+        remaining.sort(Comparator.comparingLong(PhysicalWalLogMiner::redoLsn));
+        for (NormalRedo r : remaining) {
+            bufferPendingColumnChange(r);
+        }
+    }
+
+    private void bufferPendingColumnChange(NormalRedo r) {
+        Long attrelid = readAttrelid(r);
+        if (attrelid == null) {
+            return;
+        }
+        MonitoredTable mt = monitoredOidToName.get(attrelid);
+        if (mt == null) {
+            return;
+        }
+        Integer attnum = readInt(r.getRedoRecord(), "attnum");
+        if (attnum == null) {
+            attnum = readInt(r.getUndoRecord(), "attnum");
+        }
+        String attname = readStr(r.getRedoRecord(), "attname");
+        if (attname == null) {
+            attname = readStr(r.getUndoRecord(), "attname");
+        }
+        Long atttypid = readLong(r.getRedoRecord(), "atttypid");
+        if (atttypid == null) {
+            atttypid = readLong(r.getUndoRecord(), "atttypid");
+        }
+        Integer attlen = readInt(r.getRedoRecord(), "attlen");
+        if (attlen == null) {
+            attlen = readInt(r.getUndoRecord(), "attlen");
+        }
+        String attalignStr = readStr(r.getRedoRecord(), "attalign");
+        if (attalignStr == null) {
+            attalignStr = readStr(r.getUndoRecord(), "attalign");
+        }
+        Boolean attisdropped = readBool(r.getRedoRecord(), "attisdropped");
+        if (attisdropped == null) {
+            attisdropped = readBool(r.getUndoRecord(), "attisdropped");
+        }
+        if (attnum == null || attname == null || atttypid == null || attlen == null) {
+            return;
+        }
+        char attalign = (attalignStr != null && !attalignStr.isEmpty()) ? attalignStr.charAt(0) : 'c';
+        String tableKey = mt.schema + "." + mt.table;
+        pendingColumnChanges.computeIfAbsent(tableKey, k -> new ArrayList<>())
+                .add(new RelationCatalog.PgAttributeChange(
+                        r.getOperation(), attnum, attname, atttypid, attlen, attalign,
+                        Boolean.TRUE.equals(attisdropped)));
     }
 
     /** Build a streaming, LSN-ordered iterator over the buffered changes for a

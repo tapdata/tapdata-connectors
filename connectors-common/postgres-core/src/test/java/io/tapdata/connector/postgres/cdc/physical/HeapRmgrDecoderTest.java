@@ -236,6 +236,35 @@ public class HeapRmgrDecoderTest {
     }
 
     @Test
+    public void testDeleteKeepsOverlayForPossibleSubtransactionRollback() {
+        PageStateCache cache = new PageStateCache();
+        HeapRmgrDecoder.Ctx ctx = new HeapRmgrDecoder.Ctx(cache, false, null);
+
+        byte[] page = heapPage(new int[]{1}, new byte[][]{onDiskTuple(4, "dd")});
+        XLogRecord seed = new XLogRecord();
+        seed.rmid = RM_HEAP_ID;
+        seed.info = XLOG_HEAP_INSERT;
+        seed.xid = 40;
+        ByteArrayOutputStream seedMd = new ByteArrayOutputStream();
+        u16(seedMd, 1);
+        seed.mainData = seedMd.toByteArray();
+        seed.blocks.add(imageBlock0(page));
+        HeapRmgrDecoder.decode(seed, REL, ctx);
+
+        XLogRecord rolledBackDelete = deleteWithoutOldTuple(41, 1);
+        List<NormalRedo> first = HeapRmgrDecoder.decode(rolledBackDelete, REL, ctx);
+        assertEquals(1, first.size());
+        assertEquals(4, first.get(0).getUndoRecord().get("a"));
+
+        XLogRecord committedDelete = deleteWithoutOldTuple(42, 1);
+        List<NormalRedo> second = HeapRmgrDecoder.decode(committedDelete, REL, ctx);
+        assertEquals(1, second.size());
+        assertNotNull(second.get(0).getUndoRecord());
+        assertEquals(4, second.get(0).getUndoRecord().get("a"));
+        assertEquals("dd", second.get(0).getUndoRecord().get("b"));
+    }
+
+    @Test
     public void testUpdateWithFullOldTuple() {
         XLogRecord rec = new XLogRecord();
         rec.rmid = RM_HEAP_ID;
@@ -295,5 +324,23 @@ public class HeapRmgrDecoderTest {
         assertEquals("x", events.get(0).getRedoRecord().get("b"));
         assertEquals(8, events.get(1).getRedoRecord().get("a"));
         assertEquals("yy", events.get(1).getRedoRecord().get("b"));
+    }
+
+    private static XLogRecord deleteWithoutOldTuple(long xid, int offnum) {
+        XLogRecord rec = new XLogRecord();
+        rec.rmid = RM_HEAP_ID;
+        rec.info = XLOG_HEAP_DELETE;
+        rec.xid = xid;
+        ByteArrayOutputStream md = new ByteArrayOutputStream();
+        u32(md, 0);
+        u16(md, offnum);
+        md.write(0);
+        md.write(0);
+        rec.mainData = md.toByteArray();
+        XLogRecord.BlockRef b = new XLogRecord.BlockRef();
+        b.id = 0;
+        b.relNumber = 16384;
+        rec.blocks.add(b);
+        return rec;
     }
 }

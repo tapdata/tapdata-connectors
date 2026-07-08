@@ -66,6 +66,13 @@ public class RelationCatalog {
         negative.clear();
     }
 
+    public void cache(long relNumber, RelationInfo rel) {
+        if (relNumber > 0 && rel != null) {
+            cache.put(relNumber, rel);
+            negative.remove(relNumber);
+        }
+    }
+
     /**
      * Apply a single pg_attribute change (INSERT/UPDATE/DELETE) to the cached
      * {@link RelationInfo} for the matching schema.table. Called from the consumer
