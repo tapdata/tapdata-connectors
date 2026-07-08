@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -257,5 +259,28 @@ public class PgTypeDecoderTest {
         catch (java.io.IOException e) { throw new RuntimeException(e); }
         Object result = PgTypeDecoder.decode(PgTypeDecoder.TSVECTOR, o.toByteArray());
         assertEquals("hello world", result);
+    }
+
+    @Test
+    void testDecodeCommonArraysFromWalPayload() {
+        Object intArray = PgTypeDecoder.decode(1007, hex("0100000000000000170000000300000001000000010000000200000003000000"));
+        assertEquals(Arrays.asList(1, 2, 3), intArray);
+
+        Object varcharArray = PgTypeDecoder.decode(1015, hex("01000000000000001304000002000000010000001c000000313233001c00000031323300"));
+        assertEquals(Arrays.asList("123", "123"), varcharArray);
+
+        Object timestampArray = PgTypeDecoder.decode(1115, hex("01000000000000005a040000010000000100000000d0c168f2790200"));
+        assertEquals(Arrays.asList(LocalDateTime.of(2022, 2, 1, 12, 0)), timestampArray);
+
+        Object textArray = PgTypeDecoder.decode(1009, hex("0100000000000000190000000400000001000000380000003732383339666a61686400002c00000031323331323331001c00000073645c002000000066617361"));
+        assertEquals(Arrays.asList("72839fjahd", "1231231", "sd\\", "fasa"), textArray);
+    }
+
+    private static byte[] hex(String s) {
+        byte[] out = new byte[s.length() / 2];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = (byte) Integer.parseInt(s.substring(i * 2, i * 2 + 2), 16);
+        }
+        return out;
     }
 }

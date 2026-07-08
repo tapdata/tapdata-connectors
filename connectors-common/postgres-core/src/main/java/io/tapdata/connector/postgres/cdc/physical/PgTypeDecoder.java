@@ -43,6 +43,26 @@ public final class PgTypeDecoder {
             UUID_OID = 2950, TSVECTOR = 3614, TSQUERY = 3615,
             REGCONFIG = 3734, REGDICTIONARY = 3769, JSONB = 3802;
 
+    // pg_type typlen for common element types (negative = varlena)
+    private static final java.util.Map<Long, Integer> TYPE_LEN = new java.util.HashMap<>();
+    static {
+        TYPE_LEN.put(BOOL, 1);
+        TYPE_LEN.put(INT2, 2);
+        TYPE_LEN.put(INT4, 4);
+        TYPE_LEN.put(INT8, 8);
+        TYPE_LEN.put(OID, 4);
+        TYPE_LEN.put(FLOAT4, 4);
+        TYPE_LEN.put(FLOAT8, 8);
+        TYPE_LEN.put(DATE, 4);
+        TYPE_LEN.put(TIME, 8);
+        TYPE_LEN.put(TIMESTAMP, 8);
+        TYPE_LEN.put(TIMESTAMPTZ, 8);
+        TYPE_LEN.put(TIMETZ, 12);
+        TYPE_LEN.put(UUID_OID, 16);
+        TYPE_LEN.put(MONEY, 8);
+        TYPE_LEN.put(INTERVAL, 16);
+    }
+
     private static final LocalDate PG_EPOCH = LocalDate.of(2000, 1, 1);
     private static final LocalDateTime PG_EPOCH_TS = LocalDateTime.of(2000, 1, 1, 0, 0);
 
@@ -124,7 +144,163 @@ public final class PgTypeDecoder {
                 || oid == JSON || oid == XML) {
             return new String(v, StandardCharsets.UTF_8);
         }
+        // Try array type (int[], varchar[], text[], timestamp[], etc.)
+        Object arrResult = decodeArray(v);
+        if (arrResult != null) {
+            return arrResult;
+        }
         return new String(v, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Decode a PostgreSQL array on-disk representation into a Java List.
+     *
+     * On-disk ArrayType layout (after varlena header stripped):
+     *   int32  ndim               — number of dimensions
+     *   int32  dataoffset         — 0 = no null bitmap, otherwise offset to element data
+     *   int32  elemtype           — OID of the element type
+     *   For each dimension: int32 dim, int32 lbound
+     *   Elements:
+     *     — fixed-length (typlen &gt; 0): raw bytes, typlen per element
+     *     — variable-length (typlen &lt; 0): full varlena datum per element
+     */
+    private static Object decodeArray(byte[] v) {
+        if (v == null || v.length < 12) return null;
+        int ndim = (int) le32(v, 0);
+        if (ndim < 1 || ndim > 6) return null;
+        int dataOffset = (int) le32(v, 4);
+        if (dataOffset < 0 || dataOffset > v.length) return null;
+
+        // Try standard elemOid at offset 8; if invalid, try offset 9
+        // (varlena header remnants in WAL images may shift array fields by 1–3 bytes,
+        //  but ndim=1 and dataoffset=0 happen to mask the shift for small-OID types)
+        int elemOff = 8;
+        long elemOid = le32(v, elemOff);
+        if (elemOid < 1 || elemOid > 10000) {
+            elemOff = 9;
+            if (v.length > elemOff + 3) {
+                elemOid = le32(v, elemOff);
+            }
+            if (elemOid < 1 || elemOid > 10000) {
+                return null;
+            }
+        }
+        int headerLen = elemOff + 4; // ndim(4) + dataoffset(4) [+ pad] + elemOid(4)
+
+        int pos = headerLen;
+        int[] dims = new int[ndim];
+        int total = 1;
+        for (int d = 0; d < ndim; d++) {
+            if (pos + 8 > v.length) return null;
+            dims[d] = (int) le32(v, pos);
+            if (dims[d] <= 0 || dims[d] > 1000000) return null;
+            total *= dims[d];
+            pos += 8; // skip lbound
+        }
+
+        // Skip null bitmap if present
+        byte[] nullBitmap = null;
+        if (dataOffset != 0) {
+            int bitmapBytes = (total + 7) / 8;
+            if (pos + bitmapBytes > v.length) return null;
+            nullBitmap = new byte[bitmapBytes];
+            System.arraycopy(v, pos, nullBitmap, 0, bitmapBytes);
+            pos = dataOffset;
+        }
+
+        // Determine element format
+        Integer typlen = TYPE_LEN.get(elemOid);
+        boolean isFixed = typlen != null && typlen > 0;
+
+        List<Object> values = new ArrayList<>(total);
+        for (int i = 0; i < total; i++) {
+            if (nullBitmap != null && ((nullBitmap[i >> 3] & (1 << (i & 7))) == 0)) {
+                values.add(null);
+                continue;
+            }
+
+            byte[] elemBytes;
+            if (isFixed) {
+                // Fixed-length: typlen bytes per element, no length prefix
+                if (pos + typlen > v.length) return null;
+                elemBytes = new byte[typlen];
+                System.arraycopy(v, pos, elemBytes, 0, typlen);
+                pos += typlen;
+            } else {
+                VarlenaDatum datum = readArrayVarlena(v, pos);
+                if (datum == null) return null;
+                pos += datum.consumed;
+                elemBytes = datum.value;
+            }
+
+            values.add(decode(elemOid, elemBytes));
+        }
+
+        return ndim == 1 ? values : nestArray(values, dims, 0, 0).value;
+    }
+
+    private static VarlenaDatum readArrayVarlena(byte[] data, int offset) {
+        if (offset >= data.length) return null;
+        int first = data[offset] & 0xFF;
+
+        if ((first & 0x01) == 0x01) {
+            if (first == 0x01) return null; // external TOAST pointer is not in the tuple image.
+            int total = (first >> 1) & 0x7F;
+            if (total < 1 || offset + total > data.length) return null;
+            byte[] value = new byte[total - 1];
+            System.arraycopy(data, offset + 1, value, 0, value.length);
+            return new VarlenaDatum(value, total);
+        }
+
+        if (offset + 4 > data.length) return null;
+        int header = (int) le32(data, offset);
+        int total = (header >> 2) & 0x3FFFFFFF;
+        if (total < 4 || offset + total > data.length) return null;
+        byte[] value = new byte[total - 4];
+        System.arraycopy(data, offset + 4, value, 0, value.length);
+        return new VarlenaDatum(value, intAlign(total));
+    }
+
+    private static NestedArray nestArray(List<Object> values, int[] dims, int depth, int index) {
+        int size = dims[depth];
+        List<Object> out = new ArrayList<>(size);
+        if (depth == dims.length - 1) {
+            for (int i = 0; i < size; i++) {
+                out.add(values.get(index + i));
+            }
+            return new NestedArray(out, index + size);
+        }
+        int next = index;
+        for (int i = 0; i < size; i++) {
+            NestedArray nested = nestArray(values, dims, depth + 1, next);
+            out.add(nested.value);
+            next = nested.nextIndex;
+        }
+        return new NestedArray(out, next);
+    }
+
+    private static int intAlign(int n) {
+        return (n + 3) & ~3;
+    }
+
+    private static final class VarlenaDatum {
+        final byte[] value;
+        final int consumed;
+
+        VarlenaDatum(byte[] value, int consumed) {
+            this.value = value;
+            this.consumed = consumed;
+        }
+    }
+
+    private static final class NestedArray {
+        final List<Object> value;
+        final int nextIndex;
+
+        NestedArray(List<Object> value, int nextIndex) {
+            this.value = value;
+            this.nextIndex = nextIndex;
+        }
     }
 
     /**
