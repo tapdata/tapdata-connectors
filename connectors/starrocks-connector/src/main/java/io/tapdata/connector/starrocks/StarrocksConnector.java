@@ -343,7 +343,24 @@ public class StarrocksConnector extends CommonDbConnector {
     //the second method to load schema instead of mysql
     @Override
     protected void singleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
-        List<TapTable> tapTableList = starrocksJdbcContext.queryTablesDesc(subList.stream().map(v -> v.getString("tableName")).collect(Collectors.toList()));
+        List<String> tableNames = new ArrayList<>();
+        List<String> viewNames = new ArrayList<>();
+        for (DataMap dm : subList) {
+            String name = dm.getString("tableName");
+            String type = dm.getString("tableType");
+            if ("VIEW".equalsIgnoreCase(type)) {
+                viewNames.add(name);
+            } else {
+                tableNames.add(name);
+            }
+        }
+        List<TapTable> tapTableList = new ArrayList<>();
+        if (!tableNames.isEmpty()) {
+            tapTableList.addAll(starrocksJdbcContext.queryTablesDesc(tableNames));
+        }
+        if (!viewNames.isEmpty()) {
+            tapTableList.addAll(starrocksJdbcContext.queryTablesDesc(viewNames, true));
+        }
         syncSchemaSubmit(tapTableList, consumer);
     }
 
