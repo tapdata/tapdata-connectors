@@ -631,26 +631,80 @@ public final class PgTypeDecoder {
 
     private static Map<String, Object> decodeJsonbObject(int count, byte[] v, int entryStart, byte[] rawData) {
         Map<String, Object> result = new LinkedHashMap<>();
-        int dataPos = 0;
-        for (int i = 0; i + 1 < count; i += 2) {
-            int keyEntry = (int) le32(v, entryStart + i * 4);
-            int valEntry = (int) le32(v, entryStart + (i + 1) * 4);
 
-            // Key is always a string
-            int keyLen = keyEntry & JENTRY_LENMASK;
-            String key = new String(rawData, dataPos, keyLen, StandardCharsets.UTF_8);
-            dataPos += keyLen;
+        // PostgreSQL JSONB object format changed in PG 14:
+        // Old format (PG ≤13): JEntries interleaved (key0, val0, key1, val1, ...)
+        // New format (PG ≥14): JEntries grouped (key0, key1, ..., val0, val1, ...)
+        //
+        // Heuristic detection: In old format, keys at odd indices have JBE_ISSTRING flag.
+        // In new format, keys are in first half, values in second half.
 
-            // Value depends on type flags
-            Object val = decodeJsonbScalar(valEntry, rawData, dataPos);
-            if (val == NOT_FOUND) {
-                // Offset-based entry (nested container or long string)
-                // For now, skip — full container support would need more work
-                result.put(key, null);
-            } else {
-                result.put(key, val);
-                if ((valEntry & JBE_ISNULL) == 0 && (valEntry & JBE_ISBOOL) == 0) {
-                    dataPos += (valEntry & JENTRY_LENMASK);
+        boolean isGroupedFormat = false;
+        if (count >= 4) {
+            // Check if entry at index count/2 looks like a value (not always a string)
+            int midEntry = (int) le32(v, entryStart + (count / 2) * 4);
+            // If it's not a string, likely grouped format
+            isGroupedFormat = (midEntry & JBE_ISSTRING) == 0;
+        }
+
+        if (isGroupedFormat) {
+            // PG ≥14 grouped format: keys first, then values
+            int pairs = count / 2;
+            int keyDataPos = 0;
+            int valDataPos = 0;
+
+            // First pass: measure key data length
+            for (int i = 0; i < pairs; i++) {
+                int keyEntry = (int) le32(v, entryStart + i * 4);
+                keyDataPos += (keyEntry & JENTRY_LENMASK);
+            }
+            valDataPos = keyDataPos;  // Values start after all keys
+
+            // Second pass: decode key-value pairs
+            keyDataPos = 0;
+            for (int i = 0; i < pairs; i++) {
+                int keyEntry = (int) le32(v, entryStart + i * 4);
+                int valEntry = (int) le32(v, entryStart + (pairs + i) * 4);
+
+                // Decode key
+                int keyLen = keyEntry & JENTRY_LENMASK;
+                String key = new String(rawData, keyDataPos, keyLen, StandardCharsets.UTF_8);
+                keyDataPos += keyLen;
+
+                // Decode value
+                Object val = decodeJsonbScalar(valEntry, rawData, valDataPos);
+                if (val == NOT_FOUND) {
+                    result.put(key, null);
+                } else {
+                    result.put(key, val);
+                    if ((valEntry & JBE_ISNULL) == 0 && (valEntry & JBE_ISBOOL) == 0) {
+                        valDataPos += (valEntry & JENTRY_LENMASK);
+                    }
+                }
+            }
+        } else {
+            // Old interleaved format (PG ≤13)
+            int dataPos = 0;
+            for (int i = 0; i + 1 < count; i += 2) {
+                int keyEntry = (int) le32(v, entryStart + i * 4);
+                int valEntry = (int) le32(v, entryStart + (i + 1) * 4);
+
+                // Key is always a string
+                int keyLen = keyEntry & JENTRY_LENMASK;
+                String key = new String(rawData, dataPos, keyLen, StandardCharsets.UTF_8);
+                dataPos += keyLen;
+
+                // Value depends on type flags
+                Object val = decodeJsonbScalar(valEntry, rawData, dataPos);
+                if (val == NOT_FOUND) {
+                    // Offset-based entry (nested container or long string)
+                    // For now, skip — full container support would need more work
+                    result.put(key, null);
+                } else {
+                    result.put(key, val);
+                    if ((valEntry & JBE_ISNULL) == 0 && (valEntry & JBE_ISBOOL) == 0) {
+                        dataPos += (valEntry & JENTRY_LENMASK);
+                    }
                 }
             }
         }

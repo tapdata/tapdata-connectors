@@ -173,7 +173,25 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
             this.filterStartTimeMs = null;  // clear any stale time filter
             PostgresOffsetStorage.DBZ_OFFSET.put(runnerName, (PostgresOffset) offsetState);
         } else if (offsetState instanceof Long) {
-
+            // Time-based CDC: offsetState is a timestamp in epoch milliseconds
+            Long targetTimestampMs = (Long) offsetState;
+            try {
+                // Fast-scan WAL headers to find LSN corresponding to the target timestamp
+                Long startLsn = seekWalToTimestamp(targetTimestampMs);
+                if (startLsn != null) {
+                    PostgresOffset resolvedOffset = new PostgresOffset();
+                    resolvedOffset.setOffsetValue(startLsn);
+                    this.filterStartTimeMs = targetTimestampMs;
+                    PostgresOffsetStorage.DBZ_OFFSET.put(runnerName, resolvedOffset);
+                    TapLogger.info(TAG, "Resolved timestamp {} ms to LSN: {}",
+                            targetTimestampMs, formatLsn(startLsn));
+                } else {
+                    throw new RuntimeException("Failed to find LSN for timestamp: " + targetTimestampMs
+                            + " - WAL may have been cleaned up or timestamp is in the future");
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to seek WAL to timestamp " + targetTimestampMs, e);
+            }
         } else {
             throw new IllegalArgumentException(
                     "Unsupported offset type: " + offsetState.getClass().getName()
@@ -908,5 +926,163 @@ public class PostgresCdcRunner extends DebeziumCdcRunner {
         long seg = lsn >>> 32;
         long off = lsn & 0xFFFFFFFFL;
         return Long.toHexString(seg) + "/" + Long.toHexString(off);
+    }
+
+    // ── WAL timestamp seeking ─────────────────────────────────────────────────
+
+    /**
+     * Fast-scan physical WAL to find the first COMMIT record at or after the target timestamp.
+     * Uses header-only parsing via pg_walinspect (PG 15+) for performance.
+     *
+     * @param targetTimestampMs Target timestamp in epoch milliseconds
+     * @return LSN (as Long) of the first qualifying COMMIT, or null if not found
+     * @throws Exception if WAL reading fails
+     */
+    private Long seekWalToTimestamp(long targetTimestampMs) throws Exception {
+        String slotName = postgresConfig.getLogPluginName();
+
+        // Get slot's restart_lsn as the starting point for scanning
+        Long restartLsn = getSlotRestartLsn(slotName);
+        if (restartLsn == null) {
+            throw new RuntimeException("Cannot find restart_lsn for replication slot: " + slotName);
+        }
+
+        TapLogger.info(TAG, "Seeking WAL from restart_lsn {} to find timestamp >= {} ms",
+                formatLsn(restartLsn), targetTimestampMs);
+
+        // Try using pg_walinspect extension if available (PostgreSQL 15+)
+        Long lsn = trySeekViaWalInspect(restartLsn, targetTimestampMs);
+        if (lsn != null) {
+            return lsn;
+        }
+
+        // Fallback: use restart_lsn as conservative starting point
+        TapLogger.warn(TAG, "pg_walinspect not available - using restart_lsn as fallback. " +
+                "Install pg_walinspect extension for precise timestamp seeking.");
+        return restartLsn;
+    }
+
+    /**
+     * Try to find LSN using pg_get_wal_records_info from pg_walinspect extension (PG 15+).
+     * This scans WAL records by parsing their headers and filtering for COMMIT records
+     * with timestamps >= the target.
+     *
+     * @param startLsn LSN to start scanning from (typically slot's restart_lsn)
+     * @param targetTimestampMs Target timestamp in milliseconds
+     * @return LSN of first COMMIT >= timestamp, or null if not found / extension unavailable
+     */
+    private Long trySeekViaWalInspect(long startLsn, long targetTimestampMs) {
+        try {
+            // Check if pg_walinspect extension is installed
+            final boolean[] hasExtension = {false};
+            postgresJdbcContext.queryWithNext(
+                    "SELECT 1 FROM pg_extension WHERE extname = 'pg_walinspect'",
+                    rs -> hasExtension[0] = true
+            );
+
+            if (!hasExtension[0]) {
+                TapLogger.debug(TAG, "pg_walinspect extension not installed");
+                return null;
+            }
+
+            // Scan WAL records from startLsn to current WAL position
+            // Filter for Transaction COMMIT records and parse their timestamps
+            String sql = String.format(
+                    "SELECT start_lsn, description FROM pg_get_wal_records_info('%s', pg_current_wal_lsn()) " +
+                    "WHERE resource_manager = 'Transaction' AND description LIKE 'COMMIT%%' " +
+                    "ORDER BY start_lsn LIMIT 1000",
+                    formatLsn(startLsn)
+            );
+
+            final Long[] foundLsn = {null};
+            postgresJdbcContext.queryWithNext(sql, rs -> {
+                while (rs.next()) {
+                    String lsnStr = rs.getString("start_lsn");
+                    String desc = rs.getString("description");
+
+                    // Parse commit timestamp from description field
+                    // Format: "COMMIT 2026-07-08 15:30:45.123456 UTC"
+                    Long commitTimeMs = parseCommitTimestamp(desc);
+                    if (commitTimeMs != null && commitTimeMs >= targetTimestampMs) {
+                        TapLogger.info(TAG, "Found target LSN via pg_walinspect: {} (commit time: {} ms)",
+                                lsnStr, commitTimeMs);
+                        foundLsn[0] = parseLsnToLong(lsnStr);
+                        break;  // Found it, stop scanning
+                    }
+                }
+            });
+
+            if (foundLsn[0] == null) {
+                // If we scanned 1000 records and didn't find it, the timestamp might be too far ahead
+                TapLogger.warn(TAG, "Scanned 1000 COMMIT records but didn't find timestamp >= {} ms",
+                        targetTimestampMs);
+            }
+            return foundLsn[0];
+        } catch (Exception e) {
+            TapLogger.debug(TAG, "Failed to seek via pg_walinspect: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Parse commit timestamp from pg_walinspect description string.
+     * Expected format: "COMMIT 2026-07-08 15:30:45.123456 UTC"
+     *
+     * @param description COMMIT record description from pg_walinspect
+     * @return Timestamp in epoch milliseconds, or null if parsing fails
+     */
+    private Long parseCommitTimestamp(String description) {
+        try {
+            // Extract timestamp using regex: "COMMIT YYYY-MM-DD HH:MM:SS.mmmmmm"
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+                    "COMMIT (\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+)");
+            java.util.regex.Matcher matcher = pattern.matcher(description);
+
+            if (!matcher.find()) {
+                return null;
+            }
+
+            String timestampStr = matcher.group(1);
+
+            // Parse using java.time (assumes UTC timezone)
+            java.time.format.DateTimeFormatter formatter =
+                    java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
+            java.time.LocalDateTime localDateTime = java.time.LocalDateTime.parse(timestampStr, formatter);
+            return localDateTime.atZone(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();
+        } catch (Exception e) {
+            TapLogger.debug(TAG, "Failed to parse commit timestamp from description: {}", description);
+            return null;
+        }
+    }
+
+    /**
+     * Get the restart_lsn for the given replication slot.
+     * This is the earliest LSN that the slot guarantees to have available.
+     *
+     * @param slotName Name of the replication slot
+     * @return restart_lsn as Long, or null if slot not found
+     * @throws Exception if query fails
+     */
+    private Long getSlotRestartLsn(String slotName) throws Exception {
+        String sql = "SELECT restart_lsn FROM pg_replication_slots WHERE slot_name = '" + slotName + "'";
+
+        final Long[] result = {null};
+        postgresJdbcContext.queryWithNext(sql, rs -> {
+            String lsnStr = rs.getString("restart_lsn");
+            if (lsnStr != null) {
+                result[0] = parseLsnToLong(lsnStr);
+            }
+        });
+        return result[0];
+    }
+
+    /**
+     * Format Long LSN to PostgreSQL string format (uppercase hex).
+     *
+     * @param lsn LSN as Long
+     * @return LSN in PostgreSQL format (e.g. "1C/926AE1C0")
+     */
+    private String formatLsn(long lsn) {
+        return String.format("%X/%X", (lsn >> 32) & 0xFFFFFFFFL, lsn & 0xFFFFFFFFL);
     }
 }
