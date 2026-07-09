@@ -21,6 +21,8 @@ import java.util.stream.Collectors;
  * @date 7/14/22
  */
 public class StarrocksJdbcContext extends MysqlJdbcContextV2 {
+    public static final String TABLE = "table";
+    public static final String VIEW = "view";
 
     public StarrocksJdbcContext(StarrocksConfig starrocksConfig) {
         super(starrocksConfig);
@@ -34,14 +36,15 @@ public class StarrocksJdbcContext extends MysqlJdbcContextV2 {
     }
 
     public List<TapTable> queryTablesDesc(List<String> tableNames) throws SQLException {
-        return queryTablesDesc(tableNames, false);
+        return queryTablesDesc(tableNames, TABLE);
     }
 
-    public List<TapTable> queryTablesDesc(List<String> tableNames, boolean isView) throws SQLException {
+    public List<TapTable> queryTablesDesc(List<String> tableNames, String tableType) throws SQLException {
         List<TapTable> tableList = new ArrayList<>();
+        boolean isView = VIEW.equals(tableType);
         for (String table : tableNames) {
             TapTable tapTable = new TapTable(table);
-            tapTable.setView(isView);
+            tapTable.setType(tableType);
             AtomicInteger fieldPos = new AtomicInteger(0);
             AtomicInteger keyPos = new AtomicInteger(0);
             String columnSql = isView
