@@ -6,11 +6,7 @@ import io.tapdata.entity.schema.value.TapStringValue;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.ZonedDateTime;
-import java.time.ZoneOffset;
+import java.time.*;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -448,7 +444,7 @@ public final class PgTypeDecoder {
         int zoneSecs = (int) le32(v, 8); // bytes[8..11]
         LocalTime time = LocalTime.ofNanoOfDay(micros * 1000L);
         ZoneOffset offset = ZoneOffset.ofTotalSeconds(zoneSecs);
-        return ZonedDateTime.of(LocalDate.of(1970, 1, 1), time, offset);
+        return time.plusSeconds(offset.getTotalSeconds()).atDate(LocalDate.ofYearDay(1970, 1)).atZone(ZoneOffset.UTC);
     }
 
     /* Decode a NUL-terminated string out of a fixed-width buffer (PostgreSQL
