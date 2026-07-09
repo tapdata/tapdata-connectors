@@ -359,7 +359,7 @@ public class StarrocksConnector extends CommonDbConnector {
             tapTableList.addAll(starrocksJdbcContext.queryTablesDesc(tableNames));
         }
         if (!viewNames.isEmpty()) {
-            tapTableList.addAll(starrocksJdbcContext.queryTablesDesc(viewNames, true));
+            tapTableList.addAll(starrocksJdbcContext.queryTablesDesc(viewNames, StarrocksJdbcContext.VIEW));
         }
         syncSchemaSubmit(tapTableList, consumer);
     }
