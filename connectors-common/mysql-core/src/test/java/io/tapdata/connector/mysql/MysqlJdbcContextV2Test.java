@@ -8,11 +8,14 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
 
 
+import org.springframework.test.util.ReflectionTestUtils;
+
 import java.io.InputStream;
 import java.io.Reader;
 import java.math.BigDecimal;
 import java.net.URL;
 import java.sql.*;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Map;
 
@@ -21,6 +24,24 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 public class MysqlJdbcContextV2Test {
+    @Test
+    void queryAllTablesAndViewsSqlIncludesTableTypeAndViews() {
+        MysqlJdbcContextV2 mysqlJdbcContextV2 = mock(MysqlJdbcContextV2.class, Answers.CALLS_REAL_METHODS);
+
+        String sql = ReflectionTestUtils.invokeMethod(
+                mysqlJdbcContextV2,
+                "queryAllTablesAndViewsSql",
+                "inventory",
+                Arrays.asList("orders", "view'1")
+        );
+
+        Assertions.assertNotNull(sql);
+        Assertions.assertTrue(sql.contains("TABLE_TYPE `tableType`"));
+        Assertions.assertTrue(sql.contains("TABLE_TYPE IN ('BASE TABLE', 'VIEW')"));
+        Assertions.assertTrue(sql.contains("TABLE_SCHEMA = 'inventory'"));
+        Assertions.assertTrue(sql.contains("TABLE_NAME IN ('orders','view''1')"));
+    }
+
     @Nested
     class testQueryTimestamp {
         ResultSet resultSet = new ResultSet() {

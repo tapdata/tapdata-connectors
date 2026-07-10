@@ -19,6 +19,7 @@ import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class MysqlJdbcContextV2 extends JdbcContext {
@@ -65,6 +66,39 @@ public class MysqlJdbcContextV2 extends JdbcContext {
     protected String queryAllTablesSql(String schema, List<String> tableNames) {
         String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'\\")).collect(Collectors.joining("','")) + "')" : "";
         return String.format(MYSQL_ALL_TABLE, StringKit.escape(schema, "'\\"), tableSql);
+    }
+
+    public void queryAllTablesAndViews(List<String> tableNames, int batchSize, Consumer<List<String>> consumer) throws SQLException {
+        List<String> temp = new ArrayList<>();
+        query(queryAllTablesAndViewsSql(getConfig().getSchema(), tableNames),
+                resultSet -> {
+                    while (resultSet.next()) {
+                        String tableName = resultSet.getString("tableName");
+                        if (EmptyKit.isNotBlank(tableName)) {
+                            temp.add(tableName);
+                        }
+                        if (temp.size() >= batchSize) {
+                            consumer.accept(temp);
+                            temp.clear();
+                        }
+                    }
+                });
+        if (EmptyKit.isNotEmpty(temp)) {
+            consumer.accept(temp);
+            temp.clear();
+        }
+    }
+
+    public List<DataMap> queryAllTablesAndViews(List<String> tableNames) throws SQLException {
+        List<DataMap> tableList = new ArrayList<>();
+        query(queryAllTablesAndViewsSql(getConfig().getSchema(), tableNames),
+                resultSet -> tableList.addAll(DbKit.getDataFromResultSet(resultSet)));
+        return tableList;
+    }
+
+    protected String queryAllTablesAndViewsSql(String schema, List<String> tableNames) {
+        String tableSql = EmptyKit.isNotEmpty(tableNames) ? "AND TABLE_NAME IN ('" + tableNames.stream().map(v -> StringKit.escape(v, "'\\")).collect(Collectors.joining("','")) + "')" : "";
+        return String.format(MYSQL_ALL_TABLE_AND_VIEWS, StringKit.escape(schema, "'\\"), tableSql);
     }
 
     @Override
@@ -258,6 +292,18 @@ public class MysqlJdbcContextV2 extends JdbcContext {
                     "WHERE\n" +
                     "\tTABLE_SCHEMA = '%s' %s\n" +
                     "\tAND TABLE_TYPE = 'BASE TABLE'";
+
+    private static final String MYSQL_ALL_TABLE_AND_VIEWS =
+            "SELECT\n" +
+                    "\tTABLE_NAME `tableName`,\n" +
+                    "\tTABLE_COMMENT `tableComment`,\n" +
+                    "\tTABLE_COLLATION `tableCollation`,\n" +
+                    "\tTABLE_TYPE `tableType`\n" +
+                    "FROM\n" +
+                    "\tINFORMATION_SCHEMA.TABLES\n" +
+                    "WHERE\n" +
+                    "\tTABLE_SCHEMA = '%s' %s\n" +
+                    "\tAND TABLE_TYPE IN ('BASE TABLE', 'VIEW')";
 
     private static final String MYSQL_ALL_COLUMN =
             "SELECT TABLE_NAME `tableName`,\n" +

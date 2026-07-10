@@ -16,6 +16,7 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.schema.type.TapNumber;
+import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.entity.TapAdvanceFilter;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
@@ -40,6 +41,43 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 public class MysqlConnectorTest {
+    @Test
+    void singleThreadDiscoverSchemaMarksViewsAndSkipsViewIndexesAndForeignKeys() throws SQLException {
+        TestableMysqlConnector connector = new TestableMysqlConnector();
+        MysqlJdbcContextV2 jdbcContext = mock(MysqlJdbcContextV2.class);
+        ReflectionTestUtils.setField(connector, "jdbcContext", jdbcContext);
+
+        List<DataMap> sourceObjects = Arrays.asList(
+                tableInfo("orders", "BASE TABLE"),
+                tableInfo("order_view", "VIEW")
+        );
+        List<String> allNames = Arrays.asList("orders", "order_view");
+        List<String> baseTableNames = Collections.singletonList("orders");
+
+        when(jdbcContext.queryAllColumns(allNames)).thenReturn(Arrays.asList(
+                columnInfo("orders", "id", "int", "NO"),
+                columnInfo("orders", "name", "varchar(64)", "YES"),
+                columnInfo("order_view", "id", "int", "NO"),
+                columnInfo("order_view", "name", "varchar(64)", "YES")
+        ));
+        when(jdbcContext.queryAllIndexes(anyList())).thenReturn(Collections.singletonList(primaryIndex("orders", "id")));
+        when(jdbcContext.queryAllForeignKeys(anyList())).thenReturn(Collections.emptyList());
+
+        List<TapTable> discovered = new ArrayList<>();
+        connector.callSingleThreadDiscoverSchema(sourceObjects, discovered::addAll);
+
+        TapTable view = discovered.stream()
+                .filter(table -> "order_view".equals(table.getId()))
+                .findFirst()
+                .orElseThrow(AssertionError::new);
+
+        Assertions.assertEquals("view", view.getType());
+        Assertions.assertTrue(view.getNameFieldMap().containsKey("id"));
+        Assertions.assertTrue(view.getIndexList() == null || view.getIndexList().isEmpty());
+        verify(jdbcContext).queryAllIndexes(baseTableNames);
+        verify(jdbcContext).queryAllForeignKeys(baseTableNames);
+    }
+
     @Test
     void testRegisterCapabilitiesQueryTableHash() {
         MysqlConnector postgresConnector = new MysqlConnector();
@@ -82,6 +120,44 @@ public class MysqlConnectorTest {
         numberTapField.setName(name);
         numberTapField.setDataType(name);
         map.put(name, numberTapField);
+    }
+
+    private static DataMap tableInfo(String tableName, String tableType) {
+        DataMap dataMap = DataMap.create();
+        dataMap.put("tableName", tableName);
+        dataMap.put("tableType", tableType);
+        dataMap.put("tableComment", tableName + " comment");
+        dataMap.put("tableCollation", "utf8mb4_bin");
+        return dataMap;
+    }
+
+    private static DataMap columnInfo(String tableName, String columnName, String dataType, String nullable) {
+        DataMap dataMap = DataMap.create();
+        dataMap.put("tableName", tableName);
+        dataMap.put("columnName", columnName);
+        dataMap.put("dataType", dataType);
+        dataMap.put("nullable", nullable);
+        dataMap.put("columnComment", columnName + " comment");
+        dataMap.put("columnDefault", null);
+        dataMap.put("autoInc", "0");
+        return dataMap;
+    }
+
+    private static DataMap primaryIndex(String tableName, String columnName) {
+        DataMap dataMap = DataMap.create();
+        dataMap.put("tableName", tableName);
+        dataMap.put("indexName", "PRIMARY");
+        dataMap.put("isAsc", "1");
+        dataMap.put("isUnique", "1");
+        dataMap.put("isPk", "1");
+        dataMap.put("columnName", columnName);
+        return dataMap;
+    }
+
+    private static class TestableMysqlConnector extends MysqlConnector {
+        void callSingleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
+            super.singleThreadDiscoverSchema(subList, consumer);
+        }
     }
 
     @Test

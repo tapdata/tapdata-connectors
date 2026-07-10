@@ -37,6 +37,7 @@ import io.tapdata.entity.simplify.TapSimplify;
 import io.tapdata.entity.simplify.pretty.BiClassHandlers;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.KVMap;
+import io.tapdata.entity.error.CoreException;
 import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.DbKit;
 import io.tapdata.kit.EmptyKit;
@@ -199,7 +200,13 @@ public class MysqlConnector extends CommonDbConnector {
                 }
             }
         });
-        super.discoverSchema(connectionContext, tables, tableSize, consumer);
+        List<DataMap> tableList = mysqlJdbcContext.queryAllTablesAndViews(tables);
+        multiThreadDiscoverSchema(tableList, tableSize, consumer);
+    }
+
+    @Override
+    protected void getTableNames(TapConnectionContext tapConnectionContext, int batchSize, Consumer<List<String>> listConsumer) throws SQLException {
+        mysqlJdbcContext.queryAllTablesAndViews(Collections.emptyList(), batchSize, listConsumer);
     }
 
     @Override
@@ -461,6 +468,68 @@ public class MysqlConnector extends CommonDbConnector {
                 .withIncrementValue(autoIncrementValue)
                 .withAutoIncCacheValue(autoIncCacheValue)
                 .getTapField();
+    }
+
+    @Override
+    protected void singleThreadDiscoverSchema(List<DataMap> subList, Consumer<List<TapTable>> consumer) throws SQLException {
+        List<TapTable> tapTableList = TapSimplify.list();
+        List<String> subTableNames = subList.stream().map(v -> v.getString("tableName")).collect(Collectors.toList());
+        List<String> baseTableNames = subList.stream()
+                .filter(v -> !isView(v))
+                .map(v -> v.getString("tableName"))
+                .collect(Collectors.toList());
+        List<DataMap> columnList = jdbcContext.queryAllColumns(subTableNames);
+        List<DataMap> indexList = EmptyKit.isEmpty(baseTableNames) ? TapSimplify.list() : jdbcContext.queryAllIndexes(baseTableNames);
+        List<DataMap> fkList = EmptyKit.isEmpty(baseTableNames) ? TapSimplify.list() : jdbcContext.queryAllForeignKeys(baseTableNames);
+        subList.forEach(subTable -> {
+            String table = subTable.getString("tableName");
+            boolean view = isView(subTable);
+            TapTable tapTable = TapSimplify.table(table);
+            if (view) {
+                tapTable.setType("view");
+            }
+            tapTable.setTableAttr(getSpecificAttr(subTable));
+            tapTable.setComment(subTable.getString("tableComment"));
+            String tableCollation = subTable.getString("tableCollation");
+            if (EmptyKit.isNotBlank(tableCollation)) {
+                String charset = tableCollation.split("_")[0];
+                tapTable.setCharset(charset);
+            }
+
+            List<String> primaryKey = TapSimplify.list();
+            List<TapIndex> tapIndexList = TapSimplify.list();
+            if (!view) {
+                makePrimaryKeyAndIndex(indexList, table, primaryKey, tapIndexList);
+            }
+
+            AtomicInteger keyPos = new AtomicInteger(0);
+            columnList.stream().filter(col -> table.equals(col.getString("tableName")))
+                    .forEach(col -> {
+                        try {
+                            TapField tapField = makeTapField(col);
+                            if (null == tapField) return;
+                            tapField.setPos(keyPos.incrementAndGet());
+                            tapField.setPrimaryKey(primaryKey.contains(tapField.getName()));
+                            tapField.setPrimaryKeyPos(primaryKey.indexOf(tapField.getName()) + 1);
+                            if (Boolean.TRUE.equals(tapField.getPrimaryKey())) {
+                                tapField.setNullable(false);
+                            }
+                            tapTable.add(tapField);
+                        } catch (Exception e) {
+                            throw new CoreException("Construct field failed, table: " + table + ", column: " + col + ", error: " + e.getMessage());
+                        }
+                    });
+            if (!view) {
+                tapTable.setIndexList(tapIndexList);
+                tapTable.setConstraintList(makeForeignKey(fkList, table));
+            }
+            tapTableList.add(tapTable);
+        });
+        syncSchemaSubmit(discoverPartitionInfo(tapTableList), consumer);
+    }
+
+    private boolean isView(DataMap dataMap) {
+        return "VIEW".equalsIgnoreCase(dataMap.getString("tableType"));
     }
 
     protected CreateTableOptions createTableV2(TapConnectorContext tapConnectorContext, TapCreateTableEvent tapCreateTableEvent) throws SQLException {
