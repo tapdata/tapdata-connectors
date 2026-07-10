@@ -36,6 +36,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -82,6 +83,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
 
     private String slotName;
     private String startLsn;
+    private Long filterStartTimeMs; // Time-based filtering: drop events before this timestamp
     private RelationCatalog catalog;
     private final Set<String> allowTables = new HashSet<>();
     /* DDL detection: maps each monitored relation's pg_class OID to its
@@ -187,6 +189,22 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     public PhysicalWalLogMiner offset(Object offsetState) {
         if (offsetState instanceof String && EmptyKit.isNotBlank((String) offsetState)) {
             this.startLsn = ((String) offsetState).split(",")[0];
+        }
+        return this;
+    }
+
+    /**
+     * Configure time-based filtering for physical WAL mining.
+     * Events with commit time before the specified timestamp will be silently dropped.
+     *
+     * @param filterStartTimeMs Minimum commit timestamp in milliseconds since epoch
+     * @return this
+     */
+    public PhysicalWalLogMiner setFilterStartTime(Long filterStartTimeMs) {
+        this.filterStartTimeMs = filterStartTimeMs;
+        if (filterStartTimeMs != null) {
+            tapLogger.info("Physical WAL miner configured with time filter: only events >= {} will be emitted",
+                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date(filterStartTimeMs)));
         }
         return this;
     }
@@ -975,6 +993,18 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     if (d.rec != null && d.rec.lsn < emitFromLsn) {
                         // Early exit for warm-up transactions, but must still clean up
                         // DDL tracking state to prevent memory leaks
+                        clearDdlPending(d.xid, commitSubxids);
+                        clearSubxidAssignments(d.xid, commitSubxids);
+                        clearPendingColumnChanges(d.xid, commitSubxids);
+                        break;
+                    }
+
+                    // Time-based filtering: drop transactions committed before the filter time
+                    if (filterStartTimeMs != null && d.commitMillis < filterStartTimeMs) {
+                        if (WAL_DEBUG_ENABLED) {
+                            tapLogger.info("[WAL-DEBUG] FILTER-DROP transaction xid={} with commit time {} < filter time {}",
+                                    d.xid, d.commitMillis, filterStartTimeMs);
+                        }
                         clearDdlPending(d.xid, commitSubxids);
                         clearSubxidAssignments(d.xid, commitSubxids);
                         clearPendingColumnChanges(d.xid, commitSubxids);

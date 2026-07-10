@@ -725,12 +725,39 @@ public class PostgresConnector extends CommonDbConnector {
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
             try {
-                new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
-                        .useSlot(slotName.toString())
-                        .watch(new ArrayList<>(tableList), nodeContext.getTableMap())
-                        .offset(offsetState)
-                        .registerConsumer(consumer, recordSize)
-                        .startMiner(this::isAlive);
+                PhysicalWalLogMiner miner = new PhysicalWalLogMiner(postgresJdbcContext, tapLogger);
+                miner.useSlot(slotName.toString());
+                miner.watch(new ArrayList<>(tableList), nodeContext.getTableMap());
+
+                // Handle time-based CDC: offsetState may be a Long timestamp from timestampToStreamOffset
+                if (offsetState instanceof Long) {
+                    Long startTimeMs = (Long) offsetState;
+                    tapLogger.info("Physical CDC time-based start: timestamp={}, will filter by commit time", startTimeMs);
+                    // Configure time-based filtering
+                    miner.setFilterStartTime(startTimeMs);
+
+                    // Optimize: Use binary search to find the WAL file closest to the target time
+                    String startLsn = approximateWalLsnByTime(startTimeMs);
+                    if (EmptyKit.isNotBlank(startLsn)) {
+                        tapLogger.info("Starting from approximated WAL LSN: {}, will filter events by commit time >= {}",
+                                startLsn, new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(startTimeMs)));
+                        miner.offset(startLsn);
+                    } else {
+                        tapLogger.warn("Could not approximate WAL LSN from time, falling back to earliest available WAL");
+                        String earliestLsn = queryEarliestAvailableWalLsn();
+                        if (EmptyKit.isNotBlank(earliestLsn)) {
+                            miner.offset(earliestLsn);
+                        } else {
+                            miner.offset(null);
+                        }
+                    }
+                } else {
+                    // Normal offset (String LSN or null)
+                    miner.offset(offsetState);
+                }
+
+                miner.registerConsumer(consumer, recordSize);
+                miner.startMiner(this::isAlive);
             } catch (Exception e) {
                 if (e instanceof SQLException) {
                     exceptionCollector.collectTerminateByServer(e);
@@ -834,12 +861,37 @@ public class PostgresConnector extends CommonDbConnector {
         } else if ("physical".equals(postgresConfig.getLogPluginName())) {
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
-                    .useSlot(slotName.toString())
-                    .watch(schemaTableMap, nodeContext.getTableMap())
-                    .offset(offsetState)
-                    .registerConsumer(consumer, batchSize)
-                    .startMiner(this::isAlive);
+            PhysicalWalLogMiner miner = new PhysicalWalLogMiner(postgresJdbcContext, tapLogger);
+            miner.useSlot(slotName.toString());
+            miner.watch(schemaTableMap, nodeContext.getTableMap());
+
+            // Handle time-based CDC: offsetState may be a Long timestamp
+            if (offsetState instanceof Long) {
+                Long startTimeMs = (Long) offsetState;
+                tapLogger.info("Physical CDC multi-connection time-based start: timestamp={}", startTimeMs);
+                miner.setFilterStartTime(startTimeMs);
+
+                // Optimize: Use binary search to find the WAL file closest to the target time
+                String startLsn = approximateWalLsnByTime(startTimeMs);
+                if (EmptyKit.isNotBlank(startLsn)) {
+                    tapLogger.info("Starting from approximated WAL LSN: {}, will filter events by commit time >= {}",
+                            startLsn, new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(startTimeMs)));
+                    miner.offset(startLsn);
+                } else {
+                    tapLogger.warn("Could not approximate WAL LSN from time, falling back to earliest available WAL");
+                    String earliestLsn = queryEarliestAvailableWalLsn();
+                    if (EmptyKit.isNotBlank(earliestLsn)) {
+                        miner.offset(earliestLsn);
+                    } else {
+                        miner.offset(null);
+                    }
+                }
+            } else {
+                miner.offset(offsetState);
+            }
+
+            miner.registerConsumer(consumer, batchSize);
+            miner.startMiner(this::isAlive);
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
@@ -890,10 +942,16 @@ public class PostgresConnector extends CommonDbConnector {
             return timestamp;
         }
         if ("physical".equals(postgresConfig.getLogPluginName())) {
-            if (EmptyKit.isNotNull(offsetStartTime)) {
-                tapLogger.warn("Postgres physical CDC does not support a specified start time, using the current wal lsn");
-            }
             buildSlot(connectorContext, false);
+
+            if (EmptyKit.isNotNull(offsetStartTime)) {
+                // Time-based CDC for physical replication slot
+                // Return the timestamp itself - PhysicalWalLogMiner will filter by commit time
+                tapLogger.info("Physical CDC time-based start requested at timestamp {}, will filter events by commit time",
+                        offsetStartTime);
+                return offsetStartTime;
+            }
+
             AtomicReference<String> lsn = new AtomicReference<>();
             // recovery-aware: a standby cannot run pg_current_wal_flush_lsn(), use the last replayed lsn there.
             // Use flush (not insert) position because PG's physical replication START_REPLICATION
@@ -1575,6 +1633,202 @@ public class PostgresConnector extends CommonDbConnector {
     public String exportEventSql(TapConnectorContext connectorContext, TapEvent tapEvent, TapTable table) throws SQLException {
         PostgresWriteRecorder writeRecorder = new PostgresWriteRecorder(null, table, jdbcContext.getConfig().getSchema());
         return exportEventSql(writeRecorder, connectorContext, tapEvent, table);
+    }
+
+    /**
+     * Query the restart_lsn of a physical replication slot.
+     * This is the earliest LSN that the slot requires PostgreSQL to keep.
+     *
+     * @param slotName Name of the replication slot
+     * @return The restart_lsn as a string (e.g., "1C/972C1D68"), or null if slot doesn't exist or has no restart_lsn
+     */
+    private String querySlotRestartLsn(String slotName) {
+        try {
+            String[] result = new String[1];
+            postgresJdbcContext.query(
+                "SELECT restart_lsn::text FROM pg_replication_slots WHERE slot_name = '" + slotName + "'",
+                rs -> {
+                    if (rs.next()) {
+                        result[0] = rs.getString(1);
+                    }
+                }
+            );
+            return result[0];
+        } catch (Exception e) {
+            tapLogger.warn("Failed to query restart_lsn for slot {}: {}", slotName, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Approximate the WAL LSN closest to a target timestamp using binary search on WAL file modification times.
+     * This significantly speeds up time-based CDC by skipping irrelevant historical WAL files.
+     *
+     * @param targetTimeMs Target timestamp in milliseconds since epoch
+     * @return Approximated LSN string, or null if approximation fails
+     */
+    private String approximateWalLsnByTime(Long targetTimeMs) {
+        if (targetTimeMs == null) {
+            return null;
+        }
+
+        try {
+            // Query all WAL files with their modification times
+            List<WalFileInfo> walFiles = new ArrayList<>();
+            postgresJdbcContext.query(
+                "SELECT name, modification FROM pg_ls_waldir() ORDER BY name",
+                rs -> {
+                    while (rs.next()) {
+                        String name = rs.getString("name");
+                        java.sql.Timestamp modTime = rs.getTimestamp("modification");
+                        if (name != null && modTime != null) {
+                            walFiles.add(new WalFileInfo(name, modTime.getTime()));
+                        }
+                    }
+                }
+            );
+
+            if (walFiles.isEmpty()) {
+                tapLogger.warn("No WAL files found in pg_ls_waldir()");
+                return null;
+            }
+
+            tapLogger.info("Found {} WAL files for binary search (target time: {})",
+                    walFiles.size(), new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(targetTimeMs)));
+
+            // Binary search to find the first WAL file >= target time
+            int left = 0, right = walFiles.size() - 1;
+            int result = 0;
+
+            while (left <= right) {
+                int mid = left + (right - left) / 2;
+                if (walFiles.get(mid).modificationTime < targetTimeMs) {
+                    result = mid + 1;
+                    left = mid + 1;
+                } else {
+                    result = mid;
+                    right = mid - 1;
+                }
+            }
+
+            // Safety margin: go back 2 files to ensure we don't miss transactions
+            // (WAL file modification time may not perfectly align with commit time)
+            int safeIndex = Math.max(0, result - 2);
+            WalFileInfo selectedFile = walFiles.get(safeIndex);
+
+            String lsn = walFileToLsn(selectedFile.name);
+            tapLogger.info("Binary search selected WAL file: {} (mod time: {}), starting from LSN: {}",
+                    selectedFile.name,
+                    new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(selectedFile.modificationTime)),
+                    lsn);
+
+            return lsn;
+        } catch (Exception e) {
+            tapLogger.warn("Failed to approximate WAL LSN by time: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Helper class to store WAL file info for binary search.
+     */
+    private static class WalFileInfo {
+        String name;
+        long modificationTime;
+
+        WalFileInfo(String name, long modificationTime) {
+            this.name = name;
+            this.modificationTime = modificationTime;
+        }
+    }
+
+    /**
+     * Query the earliest available WAL LSN by finding the oldest WAL file.
+     * This LSN represents the oldest WAL that is still retained (by wal_keep_size, replication slots, etc.),
+     * maximizing the chance of capturing historical data for time-based filtering.
+     *
+     * @return The earliest WAL LSN as a string, or null if query fails
+     */
+    private String queryEarliestAvailableWalLsn() {
+        try {
+            String[] result = new String[1];
+
+            // Strategy 1: Try pg_ls_waldir() (PostgreSQL 10+)
+            // Get the oldest WAL file name and convert it to LSN
+            postgresJdbcContext.query(
+                "SELECT min(name) FROM pg_ls_waldir()",
+                rs -> {
+                    if (rs.next()) {
+                        String walFileName = rs.getString(1);
+                        // Convert WAL file name to LSN
+                        result[0] = walFileToLsn(walFileName);
+                    }
+                }
+            );
+
+            if (result[0] != null) {
+                return result[0];
+            }
+
+            // Strategy 2: Fall back to querying min LSN from pg_stat_replication or other sources
+            postgresJdbcContext.query(
+                "SELECT COALESCE(" +
+                "  (SELECT min(restart_lsn) FROM pg_replication_slots WHERE restart_lsn IS NOT NULL)::text, " +
+                "  pg_current_wal_lsn()::text" +
+                ")",
+                rs -> {
+                    if (rs.next()) {
+                        result[0] = rs.getString(1);
+                    }
+                }
+            );
+
+            return result[0];
+        } catch (Exception e) {
+            tapLogger.warn("Failed to query earliest available WAL LSN: {}", e.getMessage());
+            // Final fallback: try to get the oldest LSN from pg_ls_waldir
+            try {
+                String[] result = new String[1];
+                postgresJdbcContext.query(
+                    "SELECT min(name) FROM pg_ls_waldir()",
+                    rs -> {
+                        if (rs.next()) {
+                            String walFileName = rs.getString(1);
+                            result[0] = walFileToLsn(walFileName);
+                        }
+                    }
+                );
+                return result[0];
+            } catch (Exception e2) {
+                tapLogger.warn("Final fallback for earliest WAL also failed: {}", e2.getMessage());
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Convert a WAL file name to an LSN string.
+     * WAL file name format: 000000010000001C00000097
+     * LSN format: 1C/97000000
+     *
+     * @param walFileName WAL file name (24 hex characters)
+     * @return LSN string (e.g., "1C/97000000")
+     */
+    private String walFileToLsn(String walFileName) {
+        if (walFileName == null || walFileName.length() != 24) {
+            return null;
+        }
+
+        // Extract timeline, high 32 bits, and low 32 bits
+        // String timeline = walFileName.substring(0, 8);  // Not needed for LSN
+        String highPart = walFileName.substring(8, 16);
+        String lowPart = walFileName.substring(16, 24);
+
+        // Convert to LSN format: HIGH/LOW000000 (each WAL segment is 16MB = 0x1000000 bytes)
+        long high = Long.parseLong(highPart, 16);
+        long low = Long.parseLong(lowPart, 16);
+
+        return String.format("%X/%X", high, low * 0x1000000L);
     }
 
     protected void clearIdleSlot() throws SQLException {
