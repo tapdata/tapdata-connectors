@@ -21,6 +21,7 @@ import io.tapdata.entity.event.dml.TapRecordEvent;
 import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
+import io.tapdata.entity.schema.TapTable;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import org.postgresql.PGConnection;
@@ -2262,7 +2263,8 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         boolean notNull = Boolean.TRUE.equals(readBool(after, "attnotnull"));
         String type = resolveType(readLong(after, "atttypid"), readInt(after, "atttypmod"));
         if (!dropped) {
-            batch.add(stamp(new TapNewFieldEvent().field(new TapField(name, type).nullable(!notNull)), t, commitMillis));
+            TapTable table = withSchema ? tableMap.get(t.schema + "." + t.table) : tableMap.get(t.table);
+            batch.add(stamp(new TapNewFieldEvent().field(new TapField(name, type).nullable(!notNull).pos(table.getMaxPos() + 1)), t, commitMillis));
             tapLogger.info("Physical WAL miner synthesized ADD COLUMN {} {} on {}.{} from a pg_attribute insert.",
                     name, type, t.schema, t.table);
         }

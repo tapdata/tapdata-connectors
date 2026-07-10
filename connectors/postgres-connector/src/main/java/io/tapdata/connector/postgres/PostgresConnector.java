@@ -724,12 +724,21 @@ public class PostgresConnector extends CommonDbConnector {
         } else if ("physical".equals(postgresConfig.getLogPluginName())) {
             testReplicateIdentity(nodeContext.getTableMap());
             buildSlot(nodeContext, true);
-            new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
-                    .useSlot(slotName.toString())
-                    .watch(new ArrayList<>(tableList), nodeContext.getTableMap())
-                    .offset(offsetState)
-                    .registerConsumer(consumer, recordSize)
-                    .startMiner(this::isAlive);
+            try {
+                new PhysicalWalLogMiner(postgresJdbcContext, tapLogger)
+                        .useSlot(slotName.toString())
+                        .watch(new ArrayList<>(tableList), nodeContext.getTableMap())
+                        .offset(offsetState)
+                        .registerConsumer(consumer, recordSize)
+                        .startMiner(this::isAlive);
+            } catch (Exception e) {
+                if (e instanceof SQLException) {
+                    exceptionCollector.collectTerminateByServer(e);
+                    exceptionCollector.collectCdcConfigInvalid(e);
+                    exceptionCollector.revealException(e);
+                }
+                throw e;
+            }
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
             testReplicateIdentity(nodeContext.getTableMap());
