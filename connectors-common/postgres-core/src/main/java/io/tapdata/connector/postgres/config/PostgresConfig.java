@@ -41,6 +41,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private Boolean ddlTriggerEnable = false;
     private String ddlTriggerSchema;
     private Integer keepWalHours = 0;
+    private Boolean autoClearSlot = true;
 
     //customize
     public PostgresConfig() {
@@ -260,5 +261,13 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setKeepWalHours(Integer keepWalHours) {
         this.keepWalHours = keepWalHours;
+    }
+
+    public Boolean getAutoClearSlot() {
+        return autoClearSlot;
+    }
+
+    public void setAutoClearSlot(Boolean autoClearSlot) {
+        this.autoClearSlot = autoClearSlot;
     }
 }

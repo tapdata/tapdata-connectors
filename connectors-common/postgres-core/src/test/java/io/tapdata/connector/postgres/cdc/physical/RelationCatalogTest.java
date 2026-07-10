@@ -6,6 +6,9 @@ import io.tapdata.entity.logger.Log;
 import org.junit.jupiter.api.Test;
 
 import java.sql.ResultSet;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -84,5 +87,31 @@ public class RelationCatalogTest {
         assertNull(catalog.lookup(99999L));
         // only the pg_class probe runs once; negative cache prevents re-query
         verify(ctx, times(1)).query(anyString(), any(ResultSetConsumer.class));
+    }
+
+    @Test
+    public void applyPendingChangesSkipsSystemColumnsAndReplacesExistingAttnum() {
+        RelationInfo rel = new RelationInfo("public", "t",
+                Arrays.asList(
+                        new ColumnInfo("id", 1, PgTypeDecoder.INT4, 4, 'i', false),
+                        new ColumnInfo("name", 2, PgTypeDecoder.TEXT, -1, 'i', false)),
+                Collections.singletonList("id"), false);
+
+        List<RelationCatalog.PgAttributeChange> pending = Arrays.asList(
+                new RelationCatalog.PgAttributeChange("INSERT", -6, "tableoid", PgTypeDecoder.INT4, 4, 'i', false),
+                new RelationCatalog.PgAttributeChange("INSERT", -1, "ctid", PgTypeDecoder.TEXT, -1, 'i', false),
+                new RelationCatalog.PgAttributeChange("INSERT", 1, "id", PgTypeDecoder.INT4, 4, 'i', false),
+                new RelationCatalog.PgAttributeChange("INSERT", 2, "name", PgTypeDecoder.TEXT, -1, 'i', false),
+                new RelationCatalog.PgAttributeChange("INSERT", 3, "age", PgTypeDecoder.INT4, 4, 'i', false));
+
+        RelationInfo updated = RelationCatalog.applyPendingChanges(rel, pending);
+
+        assertEquals(3, updated.columns.size());
+        assertEquals("id", updated.columns.get(0).name);
+        assertEquals(1, updated.columns.get(0).attnum);
+        assertEquals("name", updated.columns.get(1).name);
+        assertEquals(2, updated.columns.get(1).attnum);
+        assertEquals("age", updated.columns.get(2).name);
+        assertEquals(3, updated.columns.get(2).attnum);
     }
 }

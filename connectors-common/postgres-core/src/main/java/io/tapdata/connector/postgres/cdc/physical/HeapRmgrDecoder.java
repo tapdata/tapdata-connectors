@@ -116,7 +116,7 @@ public final class HeapRmgrDecoder {
             cp.put(offnum, tuple);
         }
         NormalRedo r = base(rec, rel, OperationEnum.INSERT);
-        r.setRedoRecord(HeapTupleDecoder.decode(tuple, rel.columns));
+        r.setRedoRecord(decodeTuple(tuple, rel, ctx, "insert"));
         return r;
     }
 
@@ -150,7 +150,7 @@ public final class HeapRmgrDecoder {
         // overwrites the offset before any later record should read it.
         NormalRedo r = base(rec, rel, OperationEnum.DELETE);
         if (oldTuple != null) {
-            r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns));
+            r.setUndoRecord(decodeTuple(oldTuple, rel, ctx, "delete-old"));
         }
         return r;
     }
@@ -215,10 +215,10 @@ public final class HeapRmgrDecoder {
         }
         NormalRedo r = base(rec, rel, OperationEnum.UPDATE);
         if (oldTuple != null) {
-            r.setUndoRecord(HeapTupleDecoder.decode(oldTuple, rel.columns));
+            r.setUndoRecord(decodeTuple(oldTuple, rel, ctx, "update-old"));
         }
         if (newTuple != null) {
-            r.setRedoRecord(HeapTupleDecoder.decode(newTuple, rel.columns));
+            r.setRedoRecord(decodeTuple(newTuple, rel, ctx, "update-new"));
         }
         return r;
     }
@@ -261,7 +261,7 @@ public final class HeapRmgrDecoder {
                 continue;
             }
             NormalRedo nr = base(rec, rel, OperationEnum.INSERT);
-            nr.setRedoRecord(HeapTupleDecoder.decode(tuples[i], rel.columns));
+            nr.setRedoRecord(decodeTuple(tuples[i], rel, ctx, "multi-insert"));
             out.add(nr);
         }
         ctx.log("[WAL-DEBUG] MULTI_INSERT rel={} blk={} ntuples={} offnums={} dataLen={}",
@@ -275,6 +275,26 @@ public final class HeapRmgrDecoder {
             }
         }
         return out;
+    }
+
+    private static Map<String, Object> decodeTuple(byte[] tuple, RelationInfo rel, Ctx ctx, String image) {
+        if (tuple != null && tuple.length >= SIZE_OF_HEAP_HEADER) {
+            int infomask2 = u16(tuple, 0);
+            int infomask = u16(tuple, 2);
+            int tHoff = tuple[4] & 0xFF;
+            int natts = infomask2 & HEAP_NATTS_MASK;
+            ctx.log("[WAL-DEBUG] TUPLE-DECODE image={} rel={} tupleLen={} natts={} infomask=0x{} tHoff={} relColumns={}",
+                    new Object[]{image, relTag(rel), tuple.length, natts, Integer.toHexString(infomask),
+                            tHoff, columnLayout(rel)});
+        }
+        return HeapTupleDecoder.decode(tuple, rel.columns);
+    }
+
+    private static int u16(byte[] bytes, int offset) {
+        if (bytes == null || bytes.length < offset + 2) {
+            return 0;
+        }
+        return (bytes[offset] & 0xFF) | ((bytes[offset + 1] & 0xFF) << 8);
     }
 
     private static byte[] reconstructNew(XLogRecord.BlockRef b0, int flags, byte[] oldTuple) {
@@ -409,6 +429,24 @@ public final class HeapRmgrDecoder {
 
     private static String relTag(RelationInfo rel) {
         return rel == null ? "?" : rel.schema + "." + rel.table;
+    }
+
+    private static String columnLayout(RelationInfo rel) {
+        if (rel == null || rel.columns == null) {
+            return "[]";
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < rel.columns.size(); i++) {
+            ColumnInfo c = rel.columns.get(i);
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(c.attnum).append(':').append(c.name);
+            if (c.dropped) {
+                sb.append("(dropped)");
+            }
+        }
+        return sb.append(']').toString();
     }
 
     private static long blockNumber(XLogRecord.BlockRef b) {

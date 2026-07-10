@@ -85,6 +85,9 @@ public class RelationCatalog {
     public boolean applyPgAttributeChange(String schema, String table, String op,
                                            int attnum, String attname, long atttypid,
                                            int attlen, char attalign, boolean attisdropped) {
+        if (attnum <= 0) {
+            return false;
+        }
         for (Map.Entry<Long, RelationInfo> entry : cache.entrySet()) {
             RelationInfo rel = entry.getValue();
             if (!rel.schema.equals(schema) || !rel.table.equals(table)) {
@@ -98,7 +101,11 @@ public class RelationCatalog {
                     while (pos < newColumns.size() && newColumns.get(pos).attnum < attnum) {
                         pos++;
                     }
-                    newColumns.add(pos, col);
+                    if (pos < newColumns.size() && newColumns.get(pos).attnum == attnum) {
+                        newColumns.set(pos, col);
+                    } else {
+                        newColumns.add(pos, col);
+                    }
                     break;
                 }
                 case "UPDATE": {
@@ -139,6 +146,9 @@ public class RelationCatalog {
         }
         List<ColumnInfo> columns = new ArrayList<>(rel.columns);
         for (PgAttributeChange c : pending) {
+            if (c.attnum <= 0) {
+                continue;
+            }
             switch (c.op) {
                 case "INSERT": {
                     ColumnInfo col = new ColumnInfo(c.attname, c.attnum, c.atttypid, c.attlen, c.attalign, c.attisdropped);
@@ -146,7 +156,11 @@ public class RelationCatalog {
                     while (pos < columns.size() && columns.get(pos).attnum < c.attnum) {
                         pos++;
                     }
-                    columns.add(pos, col);
+                    if (pos < columns.size() && columns.get(pos).attnum == c.attnum) {
+                        columns.set(pos, col);
+                    } else {
+                        columns.add(pos, col);
+                    }
                     break;
                 }
                 case "UPDATE": {

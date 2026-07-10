@@ -796,12 +796,51 @@
             }
           ]
         },
+        "keepWalHours": {
+          "type": "string",
+          "title": "${keepWalHours}",
+          "default": 0,
+          "x-index": 19,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${keepWalHoursTip}"
+          },
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "autoClearSlot": {
+          "type": "boolean",
+          "title": "${autoClearSlot}",
+          "default": true,
+          "x-index": 20,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["$inputs", ".customSlotName", ".keepWalHours"],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length && $deps[1] !== '' && $deps[2] > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
         "customPublicationName": {
           "type": "string",
           "title": "${customPublicationName}",
           "x-decorator": "FormItem",
           "x-component": "Input",
-          "x-index": 19,
+          "x-index": 21,
           "x-decorator-props": {
             "tooltip": "${customPublicationNameTip}"
           },
@@ -820,7 +859,7 @@
           "type": "boolean",
           "title": "${splitUpdatePk}",
           "default": true,
-          "x-index": 20,
+          "x-index": 22,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-reactions": [
@@ -838,7 +877,7 @@
           "type": "boolean",
           "title": "${ddlTriggerEnable}",
           "default": true,
-          "x-index": 21,
+          "x-index": 23,
           "x-decorator": "FormItem",
           "x-component": "Switch",
           "x-reactions": [
@@ -847,27 +886,6 @@
               "fulfill": {
                 "state": {
                   "display": "{{!$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
-                }
-              }
-            }
-          ]
-        },
-        "keepWalHours": {
-          "type": "string",
-          "title": "${keepWalHours}",
-          "default": 0,
-          "x-index": 22,
-          "x-decorator": "FormItem",
-          "x-component": "InputNumber",
-          "x-decorator-props": {
-            "tooltip": "${keepWalHoursTip}"
-          },
-          "x-reactions": [
-            {
-              "dependencies": ["$inputs"],
-              "fulfill": {
-                "state": {
-                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
                 }
               }
             }
@@ -941,6 +959,7 @@
       "ddlTriggerEnable": "Enable DDL trigger",
       "keepWalHours": "Keep Wal hours",
       "keepWalHoursTip": "The number of hours to keep the Wal log. If it is set to 0, it will be cleared right now.",
+      "autoClearSlot": "Auto clear replication slot",
       "walLogSize": "Wal log total size(MB)",
       "clearIdleSlot": "Clear idle replication slot",
       "walLogPercent": "Wal log usage rate"
@@ -1008,6 +1027,7 @@
       "ddlTriggerEnable": "启用DDL触发器",
       "keepWalHours": "保留Wal小时数",
       "keepWalHoursTip": "保留Wal日志的小时数，如果设置为0，则立即清理。",
+      "autoClearSlot": "自动清理复制槽",
       "walLogSize": "Wal日志总大小(MB)",
       "clearIdleSlot": "清理空闲复制槽",
       "walLogPercent": "Wal日志占用率"
@@ -1075,6 +1095,7 @@
       "ddlTriggerEnable": "啟用DDL觸發器",
       "keepWalHours": "保留Wal小時數",
       "keepWalHoursTip": "保留Wal日誌的小时数，如果設置為0，則立即清理。",
+      "autoClearSlot": "自動清理複製槽",
       "walLogSize": "Wal日誌總大小(MB)",
       "clearIdleSlot": "清理空閒複製槽",
       "walLogPercent": "Wal日志占用率"

@@ -36,7 +36,6 @@ import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -637,8 +636,16 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         String tableKey = rel.schema + "." + rel.table;
         List<RelationCatalog.PgAttributeChange> pending = pendingColumnChanges.remove(tableKey);
         if (pending != null) {
+            if (WAL_DEBUG_ENABLED) {
+                tapLogger.info("[WAL-DEBUG] applying {} pending pg_attribute change(s) to {}.{} before DML decode; beforeColumns={}",
+                        pending.size(), rel.schema, rel.table, columnLayout(rel));
+            }
             rel = RelationCatalog.applyPendingChanges(rel, pending);
             catalog.cache(relNumber, rel);
+            if (WAL_DEBUG_ENABLED) {
+                tapLogger.info("[WAL-DEBUG] applied pending pg_attribute changes to {}.{}; afterColumns={}",
+                        rel.schema, rel.table, columnLayout(rel));
+            }
         }
         return rel;
     }
@@ -1972,6 +1979,24 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return rel.schema.equals(postgresConfig.getSchema()) && allowTables.contains(rel.table);
     }
 
+    private static String columnLayout(RelationInfo rel) {
+        if (rel == null || rel.columns == null) {
+            return "[]";
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < rel.columns.size(); i++) {
+            ColumnInfo c = rel.columns.get(i);
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(c.attnum).append(':').append(c.name);
+            if (c.dropped) {
+                sb.append("(dropped)");
+            }
+        }
+        return sb.append(']').toString();
+    }
+
     private void buildAllowSet() {
         if (withSchema) {
             if (schemaTableMap != null) {
@@ -2140,7 +2165,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 if (attisdropped == null) attisdropped = readBool(r.getUndoRecord(), "attisdropped");
                 if (attisdropped == null) attisdropped = false;
 
-                if (mt != null && atttypid != null && attlen != null && attnum != null && attname != null) {
+                if (mt != null && atttypid != null && attlen != null && attnum != null && attnum > 0 && attname != null) {
                     boolean applied = catalog.applyPgAttributeChange(
                             mt.schema, mt.table, op, attnum, attname,
                             atttypid, attlen, attalign, attisdropped);
@@ -2164,6 +2189,9 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         tapLogger.info("[WAL-DEBUG] catalog column update applied={} {}.{} op={} attnum={} attname={}",
                                 applied, mt.schema, mt.table, op, attnum, attname);
                     }
+                } else if (WAL_DEBUG_ENABLED && mt != null && attnum != null && attnum <= 0) {
+                    tapLogger.info("[WAL-DEBUG] catalog column update ignored system column {}.{} op={} attnum={} attname={}",
+                            mt.schema, mt.table, r.getOperation(), attnum, attname);
                 }
 
                 // Mark this transaction as containing DDL - when its COMMIT is seen,
