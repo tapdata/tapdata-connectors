@@ -336,6 +336,19 @@ public class PostgresConnector extends CommonDbConnector {
             if (existSlot.get()) {
                 tapLogger.info("Using an existing logical replication slot, slotName:{}", slotName);
             } else {
+                long begin = System.currentTimeMillis();
+                if ("physical".equals(postgresConfig.getLogPluginName())) {
+                    String sql = "SELECT pg_create_physical_replication_slot('" + slotName + "')";
+                    try {
+                        postgresJdbcContext.execute(sql, 20);
+                    } catch (SQLException e) {
+                        if (System.currentTimeMillis() - begin > 18000) {
+                            throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_TIMEOUT, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                        } else {
+                            throw new TapCodeException(PostgresErrorCode.CREATE_SLOT_FAILED, "Create slot failed, sql: {}, Error message: " + e.getMessage()).dynamicDescriptionParameters(sql);
+                        }
+                    }
+                }
                 tapLogger.warn("The previous logical replication slot no longer exists. Although it has been rebuilt, there is a possibility of data loss. Please check");
             }
         }
