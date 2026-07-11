@@ -399,6 +399,7 @@ DUMPFILE:                            'DUMPFILE';
 DUPLICATE:                           'DUPLICATE';
 DYNAMIC:                             'DYNAMIC';
 ENABLE:                              'ENABLE';
+ENCRYPTED:                           'ENCRYPTED';
 ENCRYPTION:                          'ENCRYPTION';
 END:                                 'END';
 ENDS:                                'ENDS';
@@ -657,6 +658,7 @@ WRAPPER:                             'WRAPPER';
 X509:                                'X509';
 XA:                                  'XA';
 XML:                                 'XML';
+YES:                                 'YES';
 
 
 // Date format Keywords

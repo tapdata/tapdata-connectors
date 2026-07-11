@@ -2444,6 +2444,15 @@ public class MySqlAntlrDdlParserTest {
     }
 
     @Test
+    public void parseTableWithEncryptedOption() {
+        String ddl = "CREATE TABLE t1 (id INT NOT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB ROW_FORMAT=DYNAMIC `ENCRYPTED`=YES;"
+                + "CREATE TABLE t2 (id INT NOT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB ROW_FORMAT=DYNAMIC ENCRYPTED=YES;";
+        parser.parse(ddl, tables);
+        assertThat(((MySqlAntlrDdlParser) parser).getParsingExceptionsFromWalker().size()).isEqualTo(0);
+        assertThat(tables.size()).isEqualTo(2);
+    }
+
+    @Test
     @FixFor("DBZ-429")
     public void parseTableWithNegativeDefault() {
         String ddl = "CREATE TABLE t (id INT NOT NULL, myvalue INT DEFAULT -10, PRIMARY KEY (`id`));";
