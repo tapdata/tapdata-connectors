@@ -28,6 +28,7 @@ import org.postgresql.PGConnection;
 import org.postgresql.PGProperty;
 import org.postgresql.replication.LogSequenceNumber;
 import org.postgresql.replication.PGReplicationStream;
+import org.postgresql.util.PSQLException;
 
 import java.io.*;
 import java.nio.ByteBuffer;
@@ -321,6 +322,23 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 anchor = Math.min(restartLsn, emitFromLsn);
                 anchorSrc = "slot restart_lsn (prior redo recycled)";
             }
+            // (3) Physical replication slot — no server-enforced WAL retention
+            // floor (restart_lsn is always NULL for physical slots). PostgreSQL
+            // retains WAL segments on disk independently of the slot; a heuristic
+            // look-back of several segments almost certainly crosses a 5-minute
+            // checkpoint boundary whose FPIs will seed the page cache. The
+            // stream-open below validates; if WAL was recycled the retry loop
+            // advances forward until a readable position is found.
+            if (anchor <= 0 && restartLsn == 0) {
+                int lookbackSegs = Integer.parseInt(
+                        System.getProperty("tapdata.wal.lookback.segments", "10"));
+                long lookback = lookbackSegs * segSize;
+                long candidate = emitFromLsn > lookback ? emitFromLsn - lookback : 0L;
+                if (candidate < emitFromLsn) {
+                    anchor = candidate;
+                    anchorSrc = "physical-slot look-back (≤ " + lookbackSegs + " WAL segments)";
+                }
+            }
             if (anchor > 0 && anchor < readFromLsn) {
                 // Rewind reads to the cycle start so the cold cache warms with every
                 // hot page's post-checkpoint FPI before we emit; the earlier records
@@ -359,18 +377,63 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     allowTables.size(), allowTables);
         }
         consumer.streamReadStarted();
-        try (Connection conn = DriverManager.getConnection(postgresConfig.getDatabaseUrl(), replicationProps())) {
-            PGConnection pg = conn.unwrap(PGConnection.class);
-            PGReplicationStream stream = pg.getReplicationAPI()
-                    .replicationStream()
-                    .physical()
-                    .withSlotName(slotName)
-                    .withStartPosition(LogSequenceNumber.valueOf(startLsnLong))
-                    .start();
-            run(stream, startLsnLong, segSize, isAlive);
+        try {
+            openStreamWithWarmRetry(readFromLsn, emitFromLsn, segSize, isAlive);
         } finally {
             consumer.streamReadEnded();
             cleanupAllSpills();
+        }
+    }
+
+    /**
+     * Open a physical replication stream at {@code startLsn}, retrying at
+     * progressively closer positions when the requested WAL segment has been
+     * recycled. The initial {@code startLsn} may be a look-back anchor well
+     * before {@code emitLsn}; on a "requested WAL segment has already been
+     * removed" error the start position is advanced via binary search toward
+     * emitLsn. If even emitLsn is unreachable the exception propagates.
+     */
+    private void openStreamWithWarmRetry(long startLsn, long emitLsn, long segSize,
+                                         Supplier<Boolean> isAlive) throws Throwable {
+        long currentStart = startLsn;
+        int maxAttempts = 8; // binary search over ~10 segments → within 1 segment
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            if (attempt > 0) {
+                tapLogger.info("Physical WAL miner retrying stream open at lsn {} (attempt {}/{})",
+                        lsnStr(currentStart), attempt + 1, maxAttempts);
+            }
+            try (Connection conn = DriverManager.getConnection(
+                    postgresConfig.getDatabaseUrl(), replicationProps())) {
+                PGConnection pg = conn.unwrap(PGConnection.class);
+                PGReplicationStream stream = pg.getReplicationAPI()
+                        .replicationStream()
+                        .physical()
+                        .withSlotName(slotName)
+                        .withStartPosition(LogSequenceNumber.valueOf(currentStart))
+                        .start();
+                run(stream, currentStart, segSize, isAlive);
+                return;
+            } catch (PSQLException e) {
+                String msg = e.getMessage();
+                if (msg != null && (msg.contains("requested WAL segment")
+                        || msg.contains("has already been removed"))) {
+                    if (currentStart >= emitLsn) {
+                        throw e; // even emitLsn is unreachable
+                    }
+                    long remaining = emitLsn - currentStart;
+                    long step = Math.max(remaining / 2, segSize);
+                    currentStart = currentStart + step;
+                    if (currentStart > emitLsn) {
+                        currentStart = emitLsn;
+                    }
+                    // Last attempt: use emitLsn directly
+                    if (attempt >= maxAttempts - 2) {
+                        currentStart = emitLsn;
+                    }
+                    continue;
+                }
+                throw e;
+            }
         }
     }
 
