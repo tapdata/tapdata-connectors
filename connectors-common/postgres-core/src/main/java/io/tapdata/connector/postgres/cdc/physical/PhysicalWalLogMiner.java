@@ -76,7 +76,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * transactions without OOM. ObjectOutputStream writes NormalRedo sequentially
      * (NormalRedo is already Serializable); the files are read back via streaming
      * k-way merge on COMMIT and deleted. Set via TAPDATA_WAL_SPILL_THRESHOLD (default 500K). */
-    private static final long PER_XID_SPILL_THRESHOLD = parseSpillThreshold();
+    private static final long PER_XID_SPILL_THRESHOLD_DEFAULT = 500_000L;
     private static final long[] EMPTY_SUBXACTS = new long[0];
     /* How often to surface the running tally of UPDATE/DELETE whose before-image
      * could not be recovered (page-state cache miss under wal_level=replica). */
@@ -161,21 +161,59 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private volatile long emitFromLsn;
     private final AtomicLong lastReceiveLsnForStatus = new AtomicLong();
 
-    /* Verbose [WAL-DEBUG] logging is gated behind the TAPDATA_WAL_DEBUG env var
-     * so a normal run stays quiet; set TAPDATA_WAL_DEBUG=true to surface the
+    /* Verbose [WAL-DEBUG] logging is gated per task via PostgresConfig.walDebug,
+     * with a fallback to the TAPDATA_WAL_DEBUG env var for backward compatibility.
+     * Set walDebug=true in the node config (or the env var) to surface the
      * per-record and per-checkpoint trace used for byte-level troubleshooting. */
-    static final boolean WAL_DEBUG_ENABLED =
-            "true".equalsIgnoreCase(System.getenv("TAPDATA_WAL_DEBUG"));
+    private boolean isWalDebugEnabled() {
+        Boolean cfg = postgresConfig.getWalDebug();
+        if (cfg != null) {
+            return cfg;
+        }
+        return "true".equalsIgnoreCase(System.getenv("TAPDATA_WAL_DEBUG"));
+    }
 
-    /* Page-cache size. Under wal_level=replica a page's before-image is only
-     * recoverable while its FPI-seeded overlay stays cached. Default is
-     * unbounded (no eviction) so a page is never lost once seen within the read
-     * window — matching walminer's full FPW-replay model — at the cost of heap
-     * proportional to the checkpoint cycle's touched-page count. Set a positive
-     * TAPDATA_WAL_PAGE_CACHE_CAPACITY to re-impose an LRU bound when heap is the
-     * tighter constraint (trading before-image coverage for a fixed budget). */
-    static final int PAGE_CACHE_CAPACITY =
-            parseCapacity(System.getenv("TAPDATA_WAL_PAGE_CACHE_CAPACITY"), 0);
+    /* Instance-level page-cache capacity, configurable via PostgresConfig or env. */
+    private int getPageCacheCapacity() {
+        Integer cfg = postgresConfig.getWalPageCacheCapacity();
+        if (cfg != null && cfg > 0) {
+            return cfg;
+        }
+        String env = System.getenv("TAPDATA_WAL_getPageCacheCapacity()");
+        if (env != null && !env.trim().isEmpty()) {
+            try {
+                int v = Integer.parseInt(env.trim());
+                if (v > 0) return v;
+            } catch (NumberFormatException ignored) { }
+        }
+        return 0;
+    }
+
+    /* Instance-level spill threshold, configurable via PostgresConfig or env. */
+    private long getSpillThreshold() {
+        Integer cfg = postgresConfig.getWalSpillThreshold();
+        if (cfg != null && cfg > 0) {
+            return cfg;
+        }
+        return parseSpillThresholdFromEnv();
+    }
+
+    /* Instance-level lookback segments, configurable via PostgresConfig,
+     * system property, or the default of 10. */
+    private int getLookbackSegments() {
+        Integer cfg = postgresConfig.getWalLookbackSegments();
+        if (cfg != null && cfg > 0) {
+            return cfg;
+        }
+        String prop = System.getProperty("tapdata.wal.lookback.segments");
+        if (prop != null && !prop.trim().isEmpty()) {
+            try {
+                int v = Integer.parseInt(prop.trim());
+                if (v > 0) return v;
+            } catch (NumberFormatException ignored) { }
+        }
+        return 10;
+    }
 
     public PhysicalWalLogMiner(PostgresJdbcContext postgresJdbcContext, Log tapLogger) {
         super(postgresJdbcContext, tapLogger);
@@ -216,11 +254,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         catalog = new RelationCatalog(postgresJdbcContext, tapLogger);
         long segSize = querySegmentSize();
         walLevelLogical = queryWalLevelLogical();
-        pageCache = walLevelLogical ? null : new PageStateCache(PAGE_CACHE_CAPACITY);
+        pageCache = walLevelLogical ? null : new PageStateCache(getPageCacheCapacity());
         // Spill directory for large transactions — created once per miner lifecycle
         // so the consumer thread can spill and drain without IO coordination.
-        String spillRoot = System.getenv().getOrDefault("TAPDATA_WAL_SPILL_DIR",
-                System.getProperty("java.io.tmpdir"));
+        String spillRoot = postgresConfig.getWalSpillDir();
+        if (spillRoot == null || spillRoot.trim().isEmpty()) {
+            spillRoot = System.getenv().getOrDefault("TAPDATA_WAL_SPILL_DIR",
+                    System.getProperty("java.io.tmpdir"));
+        }
         spillDir = Paths.get(spillRoot, "physical-wal-spill-" + UUID.randomUUID());
         try {
             Files.createDirectories(spillDir);
@@ -229,7 +270,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             throw new UncheckedIOException("Cannot create spill directory " + spillDir, e);
         }
         decodeCtx = new HeapRmgrDecoder.Ctx(pageCache, walLevelLogical,
-                WAL_DEBUG_ENABLED ? tapLogger::info : null);
+                isWalDebugEnabled() ? tapLogger::info : null);
         buildDdlWatch();
         // Seed strategy (standby-friendly). PageStateCache is seeded by each
         // page's first post-checkpoint FPI, which is what unlocks UPDATE/DELETE
@@ -330,8 +371,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             // stream-open below validates; if WAL was recycled the retry loop
             // advances forward until a readable position is found.
             if (anchor <= 0 && restartLsn == 0) {
-                int lookbackSegs = Integer.parseInt(
-                        System.getProperty("tapdata.wal.lookback.segments", "10"));
+                int lookbackSegs = getLookbackSegments();
                 long lookback = lookbackSegs * segSize;
                 long candidate = emitFromLsn > lookback ? emitFromLsn - lookback : 0L;
                 if (candidate < emitFromLsn) {
@@ -343,9 +383,11 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 // Rewind reads to the cycle start so the cold cache warms with every
                 // hot page's post-checkpoint FPI before we emit; the earlier records
                 // are dropped at the commit gate in applyDecoded().
-                readFromLsn = anchor;
-                tapLogger.info("Physical WAL miner will warm the page cache from {} {} before emitting from {}",
-                        anchorSrc, lsnStr(readFromLsn), startLsn);
+                // Align to page boundary so WalPageDecoder.resync() can properly
+                // handle page headers and continuation records.
+                readFromLsn = (anchor / XLOG_BLCKSZ) * XLOG_BLCKSZ;
+                tapLogger.info("Physical WAL miner will warm the page cache from {} {} (page-aligned from {}) before emitting from {}",
+                        anchorSrc, lsnStr(readFromLsn), lsnStr(anchor), startLsn);
             } else if (anchor > 0) {
                 // emitFromLsn sits exactly on a checkpoint redo: nothing earlier to
                 // replay, the cache warms in-line as the stream advances.
@@ -369,11 +411,11 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
         long startLsnLong = readFromLsn;
         tapLogger.info("Physical WAL miner starting from lsn {} on slot {}", startLsn, slotName);
-        if (WAL_DEBUG_ENABLED) {
+        if (isWalDebugEnabled()) {
             tapLogger.info("[WAL-DEBUG] miner config: withSchema={} schema={} walLevelLogical={} pageCache={} allowTables({})={}",
                     withSchema, postgresConfig.getSchema(), walLevelLogical,
                     pageCache == null ? "off"
-                            : "on(cap=" + (PAGE_CACHE_CAPACITY > 0 ? String.valueOf(PAGE_CACHE_CAPACITY) : "unbounded") + ")",
+                            : "on(cap=" + (getPageCacheCapacity() > 0 ? String.valueOf(getPageCacheCapacity()) : "unbounded") + ")",
                     allowTables.size(), allowTables);
         }
         consumer.streamReadStarted();
@@ -718,13 +760,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         String tableKey = rel.schema + "." + rel.table;
         List<RelationCatalog.PgAttributeChange> pending = pendingColumnChanges.remove(tableKey);
         if (pending != null) {
-            if (WAL_DEBUG_ENABLED) {
+            if (isWalDebugEnabled()) {
                 tapLogger.info("[WAL-DEBUG] applying {} pending pg_attribute change(s) to {}.{} before DML decode; beforeColumns={}",
                         pending.size(), rel.schema, rel.table, columnLayout(rel));
             }
             rel = RelationCatalog.applyPendingChanges(rel, pending);
             catalog.cache(relNumber, rel);
-            if (WAL_DEBUG_ENABLED) {
+            if (isWalDebugEnabled()) {
                 tapLogger.info("[WAL-DEBUG] applied pending pg_attribute changes to {}.{}; afterColumns={}",
                         rel.schema, rel.table, columnLayout(rel));
             }
@@ -847,12 +889,12 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             for (XLogRecord.BlockRef b : rec.blocks) {
                 pageCache.invalidateRelation(b.relNumber);
             }
-            if (WAL_DEBUG_ENABLED) {
+            if (isWalDebugEnabled()) {
                 tapLogger.info("[WAL-DEBUG] TRUNCATE rmid={} lsn={} cacheSize={}", rec.rmid, lsnStr(rec.lsn), pageCache.size());
             }
             return;
         }
-        if (WAL_DEBUG_ENABLED && rec.rmid == RM_HEAP2_ID) {
+        if (isWalDebugEnabled() && rec.rmid == RM_HEAP2_ID) {
             int op = rec.heapOp();
             if (op == XLOG_HEAP2_PRUNE || op == XLOG_HEAP2_VACUUM
                     || op == XLOG_HEAP2_FREEZE_PAGE || op == XLOG_HEAP2_VISIBLE) {
@@ -866,7 +908,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * each checkpoint resets the per-page FPI-required flag, which is the
      * pivot for understanding why a given record does/doesn't carry an FPI. */
     private void logCheckpointIfAny(XLogRecord rec) {
-        if (!WAL_DEBUG_ENABLED || rec.rmid != RM_XLOG_ID) {
+        if (!isWalDebugEnabled() || rec.rmid != RM_XLOG_ID) {
             return;
         }
         int op = rec.info & XLR_RMGR_INFO_MASK;
@@ -922,7 +964,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             }
             CachedPage cp = pageCache.getOrCreate(b.relNumber, b.blockNumber);
             boolean applied = cp.seedFromImage(page);
-            if (WAL_DEBUG_ENABLED) {
+            if (isWalDebugEnabled()) {
                 if (applied) {
                     tapLogger.info("[WAL-DEBUG] SEED rel={}.{} blk={} offsets={} (FPI rmid={} info=0x{})",
                             rel.schema, rel.table, b.blockNumber, cp.size(),
@@ -1037,7 +1079,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 long[] commitSubxids = subxidsForTop(d.xid, d.subxids);
                 Set<Long> committedXids = committedXids(d.xid, d.subxids);
                 // Debug: log the subxids we parsed from this COMMIT
-                if (WAL_DEBUG_ENABLED && commitSubxids.length > 0) {
+                if (isWalDebugEnabled() && commitSubxids.length > 0) {
                     tapLogger.info("[WAL-DEBUG] COMMIT xid={} has {} subxids: {}",
                             d.xid, commitSubxids.length, java.util.Arrays.toString(commitSubxids));
                 }
@@ -1064,7 +1106,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
 
                     // Time-based filtering: drop transactions committed before the filter time
                     if (filterStartTimeMs != null && d.commitMillis < filterStartTimeMs) {
-                        if (WAL_DEBUG_ENABLED) {
+                        if (isWalDebugEnabled()) {
                             tapLogger.info("[WAL-DEBUG] FILTER-DROP transaction xid={} with commit time {} < filter time {}",
                                     d.xid, d.commitMillis, filterStartTimeMs);
                         }
@@ -1089,7 +1131,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         }
                         if (!isCommittedRedo(r, committedXids)) {
                             skipped++;
-                            if (WAL_DEBUG_ENABLED) {
+                            if (isWalDebugEnabled()) {
                                 tapLogger.info("[WAL-DEBUG] SKIP rolled-back xid={} op={} {}.{} lsn={}",
                                         r.getSourceXid(), r.getOperation(), r.getNameSpace(), r.getTableName(),
                                         lsnStr(redoLsn(r)));
@@ -1103,7 +1145,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                             batch.add(ev);
                             emitted++;
                             trackNullImage(r);
-                            if (WAL_DEBUG_ENABLED) {
+                            if (isWalDebugEnabled()) {
                                 tapLogger.info("[WAL-DEBUG] EMIT op={} {}.{} lsn={} before={} after={}",
                                         r.getOperation(), r.getNameSpace(), r.getTableName(),
                                         lsnStr(redoLsn(r)), r.getUndoRecord(), r.getRedoRecord());
@@ -1141,7 +1183,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         batch = emitDdlAndWait(ddlChanges.get(ddlIndex++), d.commitMillis, batch, safeOffsetBeforeApply, d.xid);
                         emittedDdl++;
                     }
-                    if (WAL_DEBUG_ENABLED) {
+                    if (isWalDebugEnabled()) {
                         tapLogger.info("[WAL-DEBUG] COMMIT drain xid={} redos={} emitted={} skipped={} ddl={} subxids={} offset={}",
                                 d.xid, totalRedos, emitted, skipped, emittedDdl, commitSubxids.length, d.offset);
                     }
@@ -1162,7 +1204,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 // Revert in-memory RelationCatalog changes from aborted DDL
                 if (!abortedDdls.isEmpty()) {
                     rebuildCatalogOverlaysFromBufferedDdl();
-                    if (WAL_DEBUG_ENABLED) {
+                    if (isWalDebugEnabled()) {
                         tapLogger.info("[WAL-DEBUG] ABORT xid={} with {} DDL changes; catalog invalidated",
                                 d.xid, abortedDdls.size());
                     }
@@ -1258,7 +1300,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 subxidToTopXid.put(sub, topXid);
             }
         }
-        if (WAL_DEBUG_ENABLED) {
+        if (isWalDebugEnabled()) {
             tapLogger.info("[WAL-DEBUG] XACT assignment topXid={} subxids={}",
                     topXid, Arrays.toString(subxids));
         }
@@ -1474,7 +1516,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
         List<NormalRedo> bucket = pendingByXid.computeIfAbsent(xid, k -> new ArrayList<>());
         bucket.addAll(redos);
-        if (bucket.size() >= PER_XID_SPILL_THRESHOLD) {
+        if (bucket.size() >= getSpillThreshold()) {
             ss = spillStates.computeIfAbsent(xid, k -> new SpillState());
             spillRedos(xid, ss, bucket);
             bucket.clear();
@@ -1986,13 +2028,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         long now = System.currentTimeMillis();
         if (now - lastNullImageWarnMs >= NULL_IMAGE_WARN_INTERVAL_MS) {
             lastNullImageWarnMs = now;
-            if (PAGE_CACHE_CAPACITY > 0) {
+            if (getPageCacheCapacity() > 0) {
                 tapLogger.warn("Physical WAL miner has emitted {} UPDATE/DELETE without a before-image due to "
                                 + "page-state cache misses under wal_level=replica. This affects large/cold tables whose "
                                 + "working set exceeds the page cache ({} pages) within a checkpoint cycle. Raise "
-                                + "TAPDATA_WAL_PAGE_CACHE_CAPACITY, or set REPLICA IDENTITY FULL on those tables, or use "
+                                + "TAPDATA_WAL_getPageCacheCapacity(), or set REPLICA IDENTITY FULL on those tables, or use "
                                 + "wal_level=logical, to restore full before-image coverage.",
-                        nullImageCount, PAGE_CACHE_CAPACITY);
+                        nullImageCount, getPageCacheCapacity());
             } else {
                 tapLogger.warn("Physical WAL miner has emitted {} UPDATE/DELETE without a before-image under "
                                 + "wal_level=replica. The page cache is unbounded, so these are pages whose "
@@ -2164,9 +2206,9 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // Give the catalog its own page overlay so FPI-less pg_attribute UPDATEs
         // (DROP/RENAME/ALTER COLUMN) reconstruct their before/after tuple images
         // from an earlier FPI on the same page, mirroring the user-table cache.
-        catalogPageCache = walLevelLogical ? null : new PageStateCache(PAGE_CACHE_CAPACITY);
+        catalogPageCache = walLevelLogical ? null : new PageStateCache(getPageCacheCapacity());
         catalogDecodeCtx = new HeapRmgrDecoder.Ctx(catalogPageCache, walLevelLogical,
-                WAL_DEBUG_ENABLED ? tapLogger::info : null);
+                isWalDebugEnabled() ? tapLogger::info : null);
         // Baseline column layout for every monitored table; later pg_attribute
         // changes are diffed against this to derive the concrete field DDL.
         try {
@@ -2204,7 +2246,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             // A catalog heap record on some other table. Surface insert/multi-insert
             // misses only under WAL debug so a relfilenode mismatch (e.g. pg_attribute
             // rewritten) on an ADD COLUMN can be spotted without flooding the log.
-            if (WAL_DEBUG_ENABLED && b0 != null
+            if (isWalDebugEnabled() && b0 != null
                     && (rec.heapOp() == XLOG_HEAP_INSERT || rec.heapOp() == XLOG_HEAP2_MULTI_INSERT)) {
                 tapLogger.info("[WAL-DEBUG] catalog heap op=0x{} on relNode={} (pg_attribute relNode={}) lsn={}",
                         Integer.toHexString(rec.heapOp()), b0.relNumber, pgAttributeRelNode, lsnStr(rec.lsn));
@@ -2279,11 +2321,11 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                                 .add(new RelationCatalog.PgAttributeChange(
                                         op, attnum, attname, atttypid, attlen, attalign, attisdropped));
                     }
-                    if (WAL_DEBUG_ENABLED) {
+                    if (isWalDebugEnabled()) {
                         tapLogger.info("[WAL-DEBUG] catalog column update applied={} {}.{} op={} attnum={} attname={}",
                                 applied, mt.schema, mt.table, op, attnum, attname);
                     }
-                } else if (WAL_DEBUG_ENABLED && mt != null && attnum != null && attnum <= 0) {
+                } else if (isWalDebugEnabled() && mt != null && attnum != null && attnum <= 0) {
                     tapLogger.info("[WAL-DEBUG] catalog column update ignored system column {}.{} op={} attnum={} attname={}",
                             mt.schema, mt.table, r.getOperation(), attnum, attname);
                 }
@@ -2728,7 +2770,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return parsed > 0 ? parsed : DEFAULT_WAL_SEGMENT_SIZE;
     }
 
-    static long parseSpillThreshold() {
+    static long parseSpillThresholdFromEnv() {
         String val = System.getenv("TAPDATA_WAL_SPILL_THRESHOLD");
         if (val == null || val.trim().isEmpty()) {
             return 500_000L;

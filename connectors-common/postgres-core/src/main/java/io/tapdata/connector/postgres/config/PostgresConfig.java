@@ -43,6 +43,18 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private Integer keepWalHours = 0;
     private Boolean autoClearSlot = true;
 
+    // ── Physical WAL miner tuning ──
+    // Per-task switch for verbose [WAL-DEBUG] logging; falls back to env TAPDATA_WAL_DEBUG
+    private Boolean walDebug;
+    // Page-state cache capacity (0 = unbounded); falls back to env TAPDATA_WAL_PAGE_CACHE_CAPACITY
+    private Integer walPageCacheCapacity;
+    // Per-xid spill-to-disk threshold in rows (default 500K)
+    private Integer walSpillThreshold;
+    // Custom spill directory; falls back to env TAPDATA_WAL_SPILL_DIR or java.io.tmpdir
+    private String walSpillDir;
+    // Number of WAL segments to look back for cold-cache warm-up (default 10)
+    private Integer walLookbackSegments;
+
     //customize
     public PostgresConfig() {
         setDbType("postgresql");
@@ -269,5 +281,47 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setAutoClearSlot(Boolean autoClearSlot) {
         this.autoClearSlot = autoClearSlot;
+    }
+
+    // ── Physical WAL miner accessors ──
+
+    public Boolean getWalDebug() {
+        return walDebug;
+    }
+
+    public void setWalDebug(Boolean walDebug) {
+        this.walDebug = walDebug;
+    }
+
+    public Integer getWalPageCacheCapacity() {
+        return walPageCacheCapacity;
+    }
+
+    public void setWalPageCacheCapacity(Integer walPageCacheCapacity) {
+        this.walPageCacheCapacity = walPageCacheCapacity;
+    }
+
+    public Integer getWalSpillThreshold() {
+        return walSpillThreshold;
+    }
+
+    public void setWalSpillThreshold(Integer walSpillThreshold) {
+        this.walSpillThreshold = walSpillThreshold;
+    }
+
+    public String getWalSpillDir() {
+        return walSpillDir;
+    }
+
+    public void setWalSpillDir(String walSpillDir) {
+        this.walSpillDir = walSpillDir;
+    }
+
+    public Integer getWalLookbackSegments() {
+        return walLookbackSegments;
+    }
+
+    public void setWalLookbackSegments(Integer walLookbackSegments) {
+        this.walLookbackSegments = walLookbackSegments;
     }
 }

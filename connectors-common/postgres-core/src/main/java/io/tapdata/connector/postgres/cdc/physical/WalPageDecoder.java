@@ -82,8 +82,28 @@ public class WalPageDecoder {
                 physPos = np;
                 continue;
             }
-            if (totLen < SIZE_OF_XLOG_RECORD) {
-                throw new IllegalStateException("corrupt WAL: tot_len=" + totLen + " at lsn=" + firstLsn[0]);
+            // Defensive bounds check: a valid XLogRecord's xl_tot_len is at least
+            // SIZE_OF_XLOG_RECORD (24) and at most 1 GB (though real records rarely
+            // exceed a few MB). Values outside this range mean we are not at a
+            // record header — typically because the decoder started reading from a
+            // non-record-aligned LSN (e.g. a look-back anchor in the middle of a
+            // record's payload, or a recycled WAL segment whose first page was
+            // zero-filled). The diagnostic hex dump lets post-mortem analysis
+            // determine whether the misalignment is deterministic or transient.
+            if (totLen < SIZE_OF_XLOG_RECORD || totLen > 1024 * 1024 * 1024L) {
+                long recordLsn = firstLsn[0];
+                int pageOff = (int) (recordLsn % XLOG_BLCKSZ);
+                boolean pageAligned = (bufferStartLsn % XLOG_BLCKSZ) == 0;
+                throw new IllegalStateException(String.format(
+                        "Invalid xl_tot_len=%d (0x%08X) at record-lsn=%s " +
+                        "buffer-start=%s page-boundary=%s page-off=%d physPos=%d len=%d. " +
+                        "The decoder is likely NOT at a WAL record header. " +
+                        "First 64 logical bytes at record-lsn: %s",
+                        totLen, totLen,
+                        lsnHex(recordLsn),
+                        lsnHex(bufferStartLsn),
+                        pageAligned, pageOff, physPos, len,
+                        hexDumpLogical(recordLsn, 64)));
             }
             byte[] rec = new byte[(int) totLen];
             int[] ph2 = {p};
@@ -173,6 +193,44 @@ public class WalPageDecoder {
 
     private static long u32(byte[] b, int o) {
         return (b[o] & 0xFFL) | ((b[o + 1] & 0xFFL) << 8) | ((b[o + 2] & 0xFFL) << 16) | ((b[o + 3] & 0xFFL) << 24);
+    }
+
+    private static String lsnHex(long lsn) {
+        long hi = lsn >>> 32;
+        long lo = lsn & 0xFFFFFFFFL;
+        return String.format("%X/%08X", hi, lo);
+    }
+
+    /**
+     * Read up to {@code maxBytes} logical bytes (skipping page headers) starting
+     * from {@code startLsn} and format them as a space-separated hex string for
+     * diagnostic inclusion in error messages. Returns empty string if the
+     * requested LSN range is not yet in buffer.
+     */
+    private String hexDumpLogical(long startLsn, int maxBytes) {
+        StringBuilder sb = new StringBuilder();
+        long lsn = startLsn;
+        int remaining = maxBytes;
+        while (remaining > 0) {
+            int off = (int) (lsn % XLOG_BLCKSZ);
+            if (off == 0) {
+                int hsz = (lsn % segSize == 0) ? SIZE_OF_XLOG_LONG_PHD : SIZE_OF_XLOG_SHORT_PHD;
+                lsn += hsz;
+                continue;
+            }
+            int physOff = (int) (lsn - bufferStartLsn);
+            if (physOff < 0 || physOff >= len) {
+                break;
+            }
+            int chunk = Math.min(remaining, XLOG_BLCKSZ - off);
+            chunk = Math.min(chunk, len - physOff);
+            for (int i = 0; i < chunk; i++) {
+                sb.append(String.format("%02X ", buf[physOff + i] & 0xFF));
+            }
+            remaining -= chunk;
+            lsn += chunk;
+        }
+        return sb.toString().trim();
     }
 
     /** A complete raw record: its start LSN, the next-record LSN, and the bytes. */
