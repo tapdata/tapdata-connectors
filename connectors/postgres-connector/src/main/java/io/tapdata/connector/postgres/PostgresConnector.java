@@ -777,7 +777,9 @@ public class PostgresConnector extends CommonDbConnector {
                     exceptionCollector.collectCdcConfigInvalid(e);
                     exceptionCollector.revealException(e);
                 }
-                throw e;
+                if (isAlive()) {
+                    throw e;
+                }
             }
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
