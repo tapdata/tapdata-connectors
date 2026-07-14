@@ -39,6 +39,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -133,6 +134,12 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * lookup for that table the pending changes are applied to the freshly-loaded
      * RelationInfo and removed. Consumer-thread only. */
     private final Map<String, List<RelationCatalog.PgAttributeChange>> pendingColumnChanges = new HashMap<>();
+    /* Tracks schema version per table (keyed by "schema.table"), incremented on
+     * every DDL change applied to that table's RelationInfo. Pool threads snapshot
+     * the version at decodeUnit() time; the consumer thread re-decodes on version
+     * mismatch, guaranteeing correct column layout for DML decoded before a DDL
+     * record was processed. Read/written from both pool+consumer threads. */
+    private final ConcurrentHashMap<String, Integer> schemaVersions = new ConcurrentHashMap<>();
     /* Per-xid spill state: when a single transaction's in-memory NormalRedo list
      * exceeds PER_XID_SPILL_THRESHOLD the entire bucket is written to a sequential
      * spill file and the list is cleared, bounding per-xid heap to ~threshold *
@@ -149,6 +156,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private PageStateCache pageCache;
     private boolean walLevelLogical;
     private HeapRmgrDecoder.Ctx decodeCtx;
+    /*
+     * Side-effect-free context used only by pool threads for wal_level=logical.
+     * cache=null and walLevelLogical=true guarantee HeapRmgrDecoder will not
+     * read or mutate PageStateCache while pre-decoding DML.
+     */
+    private static final HeapRmgrDecoder.Ctx LOGICAL_FAST_DECODE_CTX =
+            new HeapRmgrDecoder.Ctx(null, true, null);
     /* Running diagnostics for before-image coverage under wal_level=replica:
      * how many emitted UPDATE/DELETE carried a null before-image (cache miss),
      * throttled to one warning per interval. Consumer-thread only. */
@@ -385,7 +399,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 // are dropped at the commit gate in applyDecoded().
                 // Align to page boundary so WalPageDecoder.resync() can properly
                 // handle page headers and continuation records.
-                readFromLsn = (anchor / XLOG_BLCKSZ) * XLOG_BLCKSZ;
+                readFromLsn = pageAlignDown(anchor);
                 tapLogger.info("Physical WAL miner will warm the page cache from {} {} (page-aligned from {}) before emitting from {}",
                         anchorSrc, lsnStr(readFromLsn), lsnStr(anchor), startLsn);
             } else if (anchor > 0) {
@@ -409,8 +423,9 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                         startLsn);
             }
         }
-        long startLsnLong = readFromLsn;
-        tapLogger.info("Physical WAL miner starting from lsn {} on slot {}", startLsn, slotName);
+        long startLsnLong = pageAlignDown(readFromLsn);
+        tapLogger.info("Physical WAL miner opening stream from page-aligned lsn {} on slot {} (emit from {})",
+                lsnStr(startLsnLong), slotName, startLsn);
         if (isWalDebugEnabled()) {
             tapLogger.info("[WAL-DEBUG] miner config: withSchema={} schema={} walLevelLogical={} pageCache={} allowTables({})={}",
                     withSchema, postgresConfig.getSchema(), walLevelLogical,
@@ -437,8 +452,17 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      */
     private void openStreamWithWarmRetry(long startLsn, long emitLsn, long segSize,
                                          Supplier<Boolean> isAlive) throws Throwable {
-        long currentStart = startLsn;
+        long emitStart = pageAlignDown(emitLsn);
+        long currentStart = pageAlignDown(startLsn);
+        if (currentStart > emitStart) {
+            currentStart = emitStart;
+        }
+        if (currentStart != startLsn || emitStart != emitLsn) {
+            tapLogger.info("Physical WAL miner page-aligns stream open: requested_start={} aligned_start={} emit_lsn={} emit_page={}",
+                    lsnStr(startLsn), lsnStr(currentStart), lsnStr(emitLsn), lsnStr(emitStart));
+        }
         int maxAttempts = 8; // binary search over ~10 segments → within 1 segment
+        PSQLException lastRemoved = null;
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
             if (attempt > 0) {
                 tapLogger.info("Physical WAL miner retrying stream open at lsn {} (attempt {}/{})",
@@ -459,24 +483,34 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 String msg = e.getMessage();
                 if (msg != null && (msg.contains("requested WAL segment")
                         || msg.contains("has already been removed"))) {
-                    if (currentStart >= emitLsn) {
-                        throw e; // even emitLsn is unreachable
+                    lastRemoved = e;
+                    if (currentStart >= emitStart) {
+                        throw e; // even the page containing emitLsn is unreachable
                     }
-                    long remaining = emitLsn - currentStart;
+                    long remaining = emitStart - currentStart;
                     long step = Math.max(remaining / 2, segSize);
                     currentStart = currentStart + step;
-                    if (currentStart > emitLsn) {
-                        currentStart = emitLsn;
+                    // Page-align: WalPageDecoder must start at a page boundary so
+                    // resync() can handle XLP_FIRST_IS_CONTRECORD and readLogical()
+                    // can correctly skip page headers. A non-page-aligned start
+                    // lands mid-record and yields garbage xl_tot_len values.
+                    currentStart = pageAlignDown(currentStart);
+                    if (currentStart >= emitStart) {
+                        currentStart = emitStart;
                     }
-                    // Last attempt: use emitLsn directly
+                    // Last attempts: use the page containing emitLsn directly.
                     if (attempt >= maxAttempts - 2) {
-                        currentStart = emitLsn;
+                        currentStart = emitStart;
                     }
                     continue;
                 }
                 throw e;
             }
         }
+        if (lastRemoved != null) {
+            throw lastRemoved;
+        }
+        throw new IllegalStateException("Physical WAL miner stream open retry exhausted without opening a stream");
     }
 
     /* Reader thread: serially frames the WAL byte stream (WalPageDecoder is
@@ -659,16 +693,19 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
     }
 
-    /* CPU-light, order-independent slice executed on the pool threads: parse the
-     * record (XLogRecord.parse is the only heavy part) and pre-resolve the
-     * relation for heap changes. The actual HeapRmgrDecoder pass and any cache
-     * mutation happen on the single consumer thread to keep page-state
-     * mutations race-free; see PageStateCache.javadoc.
+    /* Decode unit executed on pool threads.
      *
-     * Any unchecked exception from XLogRecord.parse (or the catalog lookup) is
-     * swallowed here and the record is downgraded to OTHER. Letting it escape
-     * would surface as a ConcurrentProcessorApplyException on get() and kill
-     * the entire miner over a single malformed/unexpected record. */
+     * Fast path: when wal_level=logical, DML WAL carries enough tuple bytes to
+     * decode without PageStateCache. The worker may pre-decode those records
+     * with LOGICAL_FAST_DECODE_CTX, which has no cache and no debug callback.
+     *
+     * Slow path: replica-level WAL and any DDL-sensitive record are decoded on
+     * the consumer thread in WAL order. Workers must not mutate page cache,
+     * catalog pending changes, or DDL state.
+     *
+     * Any unchecked exception from XLogRecord.parse is swallowed here and the
+     * record is downgraded to OTHER. Letting it escape would surface as a
+     * ConcurrentProcessorApplyException on get() and kill the entire miner. */
     private Decoded decodeUnit(WalPageDecoder.RawRecord raw) {
         Decoded d = new Decoded();
         d.offset = lsnStr(raw.nextLsn);
@@ -682,13 +719,20 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                 // PL-pgSQL EXCEPTION) changes flush on the top-level COMMIT instead
                 // of leaking forever under their subxid.
                 d.xid = rec.topXid != 0 ? rec.topXid : rec.xid;
-                // Defer RelationInfo resolution to the consumer thread so that
-                // catalog DDL changes already applied (via detectCatalogDdl →
-                // applyPgAttributeChange) are visible to this record's DML decode.
-                // Storing only the relNumber avoids pinning a stale RelationInfo
-                // that was cached before a same-transaction DDL ran.
                 XLogRecord.BlockRef b0 = rec.block(0);
                 d.relNumber = b0 != null ? b0.relNumber : 0;
+                if (walLevelLogical) {
+                    // Only logical-level WAL is safe to pre-decode: the context
+                    // below cannot touch PageStateCache. Consumer validates the
+                    // schema version and same-xid DDL state before using d.redos.
+                    RelationInfo rel = resolveRelForFastDecode(d.relNumber);
+                    if (rel != null) {
+                        d.rel = rel;
+                        String tableKey = rel.schema + "." + rel.table;
+                        d.schemaVersion = schemaVersions.getOrDefault(tableKey, 0);
+                        d.redos = decodeHeapLogicalFast(rec, rel);
+                    }
+                }
             } else if (rec.rmid == RM_TRANSACTION_ID) {
                 d.xid = rec.xid;
                 int op = rec.info & XLOG_XACT_OPMASK;
@@ -717,34 +761,26 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         return d;
     }
 
-    /* Pool-side relation lookup: catalog has its own thread-safe cache. Returns
-     * null when the relation is not in the allow set or cannot be resolved. */
-    private RelationInfo resolveRel(XLogRecord rec) {
-        XLogRecord.BlockRef b0 = rec.block(0);
-        if (b0 == null) {
+    /* Pool-thread lookup for the logical fast path. This deliberately does not
+     * apply or consume pendingColumnChanges: those are WAL-order side effects and
+     * belong to resolveRelForConsumer(). */
+    private RelationInfo resolveRelForFastDecode(long relNumber) {
+        if (relNumber <= 0) {
             return null;
         }
-        RelationInfo rel = catalog.lookup(b0.relNumber);
+        if (pgAttributeRelNode > 0 && relNumber == pgAttributeRelNode) {
+            return null;
+        }
+        RelationInfo rel = catalog.lookup(relNumber);
         if (rel == null || !allowed(rel)) {
             return null;
-        }
-        // Apply any pending DDL column changes that were decoded from WAL before
-        // this table's RelationInfo was loaded into the catalog cache. This
-        // handles the edge case where ADD/DROP/RENAME COLUMN precedes the first
-        // DML on the table within a transaction.
-        String tableKey = rel.schema + "." + rel.table;
-        List<RelationCatalog.PgAttributeChange> pending = pendingColumnChanges.remove(tableKey);
-        if (pending != null) {
-            rel = RelationCatalog.applyPendingChanges(rel, pending);
-            catalog.cache(b0.relNumber, rel);
         }
         return rel;
     }
 
-    /* Consumer-thread relation resolution. Same as resolveRel(XLogRecord) but
-     * takes a raw relfilenode — called from applyDecoded (single consumer thread)
-     * after any catalog DDL updates for earlier LSNs have already been applied,
-     * guaranteeing the DML decode sees the correct column layout. */
+    /* Consumer-thread relation resolution. Called from applyDecoded after any
+     * catalog DDL updates for earlier LSNs have already been applied, guaranteeing
+     * the DML decode sees the correct column layout. */
     private RelationInfo resolveRelForConsumer(long relNumber) {
         if (relNumber <= 0) {
             return null;
@@ -772,6 +808,25 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             }
         }
         return rel;
+    }
+
+    /* Side-effect-free pool decode for wal_level=logical. Never call this for
+     * replica-level WAL: old/new tuple reconstruction may require PageStateCache
+     * and must run in consumer WAL order. */
+    private List<NormalRedo> decodeHeapLogicalFast(XLogRecord rec, RelationInfo rel) {
+        List<NormalRedo> redos;
+        try {
+            redos = HeapRmgrDecoder.decode(rec, rel, LOGICAL_FAST_DECODE_CTX);
+        } catch (RuntimeException ex) {
+            tapLogger.warn("skip logical fast heap record at lsn={} rel={}.{} due to decode error: {}",
+                    lsnStr(rec.lsn), rel.schema, rel.table, ex.getMessage());
+            return Collections.emptyList();
+        }
+        for (NormalRedo r : redos) {
+            r.setCdcSequenceId(rec.lsn);
+            r.setSourceXid(rec.xid);
+        }
+        return expandKeyUpdates(redos, rel);
     }
 
     /* Consumer-side heap decode + page-state maintenance. Must run on the
@@ -986,7 +1041,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             return EMPTY_SUBXACTS;
         }
         try {
-            WalByteReader r = new WalByteReader(mainData);
+            WalByteReader r = WalByteReader.borrow(mainData);
             r.skip(8);                       // xact_time (TimestampTz)
             long xinfo = r.readUInt32();     // xl_xact_xinfo
             if ((xinfo & XACT_XINFO_HAS_DBINFO) != 0) {
@@ -1014,7 +1069,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             return XactAssignment.EMPTY;
         }
         try {
-            WalByteReader r = new WalByteReader(mainData);
+            WalByteReader r = WalByteReader.borrow(mainData);
             long topXid = r.readUInt32();
             int n = (int) r.readUInt32();
             if (topXid == 0 || n <= 0) {
@@ -1030,18 +1085,16 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         }
     }
 
-    /* Single-threaded application of the ordered decode result to the per-xid
-     * buffer; only this method touches {@code pendingByXid} and the page
-     * cache. Heap records are decoded here (not on the pool) so the cache
-     * mini-redo sees them in strict WAL order. */
+    /* Consumer-thread application of the ordered decode result to the per-xid
+     * buffer. Heap records are used from the worker only on the logical fast
+     * path and only when no DDL invalidation is visible. Otherwise the consumer
+     * re-decodes in WAL order with the current catalog/page-cache state.
+     *
+     * FPI seeding runs here in WAL order, ensuring page cache state matches the
+     * actual WAL sequence regardless of pool-thread ordering. */
     private List<TapEvent> applyDecoded(Decoded d, List<TapEvent> batch, String safeOffsetBeforeApply) {
         if (d.rec != null) {
-            // Seed from FPIs carried by *any* record (standalone XLOG_FPI /
-            // XLOG_FPI_FOR_HINT, heap2 prune/visible/freeze, etc.), not just the
-            // heap INSERT/UPDATE/DELETE the decoder handles. Runs before heap
-            // decode so primePage's own (identical) reseed leaves heap behaviour
-            // unchanged while cold pages whose post-checkpoint FPI rode on a
-            // non-heap record finally get seeded — matching walminer's FPW replay.
+            // Seed from FPIs carried by *any* record, in strict WAL order.
             seedFpisFromRecord(d.rec);
         }
         switch (d.kind) {
@@ -1050,20 +1103,38 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     return batch;
                 }
                 long xid = topXidFor(d.xid);
-                // Resolve RelationInfo on the CONSUMER thread so that catalog DDL
-                // changes already applied by detectCatalogDdl (same thread, earlier
-                // LSN) are visible. Worker-thread resolution would pin a stale
-                // column layout from before the DDL.
-                d.rel = resolveRelForConsumer(d.relNumber);
-                if (d.rel != null) {
-                    List<NormalRedo> redos = decodeHeapOnConsumer(d.rec, d.rel);
-                    if (!redos.isEmpty()) {
-                        appendRedos(xid, redos);
-                        pendingRedoCount += redos.size();
+                // Check whether the logical fast-path pre-decode is still valid.
+                // Re-decode on consumer when:
+                //   1. This xid has DDL pending (same-xid DDL/DML interleaving)
+                //   2. Schema version changed (cross-xid DDL between decode and apply)
+                //   3. Pre-decode was not possible (d.redos == null)
+                RelationInfo current = d.relNumber > 0 ? catalog.lookup(d.relNumber) : null;
+                String tableKey = current != null ? current.schema + "." + current.table : null;
+                int currentSchemaVersion = tableKey != null ? schemaVersions.getOrDefault(tableKey, 0) : -1;
+                boolean ddlPending = ddlPendingXids.contains(xid);
+                boolean redoValid = walLevelLogical && d.redos != null && !ddlPending
+                        && (d.schemaVersion == currentSchemaVersion || currentSchemaVersion == -1);
+
+                if (redoValid) {
+                    // Logical fast-path result is safe — just append.
+                    if (!d.redos.isEmpty()) {
+                        appendRedos(xid, d.redos);
+                        pendingRedoCount += d.redos.size();
                         checkPendingPressure();
                     }
                 } else {
-                    detectCatalogDdl(d.rec, xid);
+                    // Re-decode on consumer with correct catalog
+                    d.rel = resolveRelForConsumer(d.relNumber);
+                    if (d.rel != null) {
+                        List<NormalRedo> redos = decodeHeapOnConsumer(d.rec, d.rel);
+                        if (!redos.isEmpty()) {
+                            appendRedos(xid, redos);
+                            pendingRedoCount += redos.size();
+                            checkPendingPressure();
+                        }
+                    } else {
+                        detectCatalogDdl(d.rec, xid);
+                    }
                 }
                 invalidateForMaintenance(d.rec);
                 break;
@@ -2069,9 +2140,13 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         /* relfilenode from the WAL block reference — resolved to RelationInfo
          * on the consumer thread so DDL-updated catalog columns are visible. */
         long relNumber;
-        /* Resolved on the consumer thread (not in decodeUnit on the pool) so
-         * that catalog DDL changes already applied are visible to DML decode. */
+        /* Relation snapshot used by the logical fast path, or consumer-resolved
+         * relation for the ordered fallback path. */
         RelationInfo rel;
+        /** Logical fast-path redos from pool thread (null means consumer must decode). */
+        List<NormalRedo> redos;
+        /** Schema version at decodeUnit time; if mismatch detected at consumer, re-decode. */
+        int schemaVersion;
     }
 
     static final class XactAssignment {
@@ -2206,8 +2281,14 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         // Give the catalog its own page overlay so FPI-less pg_attribute UPDATEs
         // (DROP/RENAME/ALTER COLUMN) reconstruct their before/after tuple images
         // from an earlier FPI on the same page, mirroring the user-table cache.
-        catalogPageCache = walLevelLogical ? null : new PageStateCache(getPageCacheCapacity());
-        catalogDecodeCtx = new HeapRmgrDecoder.Ctx(catalogPageCache, walLevelLogical,
+        //
+        // This must stay enabled even when the user-table WAL level is logical:
+        // pg_attribute UPDATE records may still omit the old tuple bytes. DDL
+        // recognition relies on the catalog overlay to recover the before-image
+        // and mark the xid as DDL before later DML in the same transaction is
+        // decoded/emitted.
+        catalogPageCache = new PageStateCache(getPageCacheCapacity());
+        catalogDecodeCtx = new HeapRmgrDecoder.Ctx(catalogPageCache, false,
                 isWalDebugEnabled() ? tapLogger::info : null);
         // Baseline column layout for every monitored table; later pg_attribute
         // changes are diffed against this to derive the concrete field DDL.
@@ -2307,6 +2388,9 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                             atttypid, attlen, attalign, attisdropped);
                     String tableKey = mt.schema + "." + mt.table;
                     if (applied) {
+                        // Increment schema version so pool-thread pre-decodes
+                        // with the old version are detected and re-decoded.
+                        schemaVersions.merge(tableKey, 1, Integer::sum);
                         // Catalog cache was updated in-place — any stale pending
                         // entries for this table are now superseded.
                         pendingColumnChanges.remove(tableKey);
@@ -2826,11 +2910,15 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
         if (mainData == null || mainData.length < 8) {
             return System.currentTimeMillis();
         }
-        long micros = new WalByteReader(mainData).readInt64();
+        long micros = WalByteReader.borrow(mainData).readInt64();
         return (micros + PG_EPOCH_MICROS) / 1000L;
     }
 
     static String lsnStr(long lsn) {
         return LogSequenceNumber.valueOf(lsn).asString();
+    }
+
+    private static long pageAlignDown(long lsn) {
+        return (lsn / XLOG_BLCKSZ) * XLOG_BLCKSZ;
     }
 }

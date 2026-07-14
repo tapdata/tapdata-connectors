@@ -87,7 +87,7 @@ public final class HeapRmgrDecoder {
 
     private static NormalRedo decodeInsert(XLogRecord rec, RelationInfo rel, Ctx ctx) {
         XLogRecord.BlockRef b0 = rec.block(0);
-        WalByteReader md = new WalByteReader(rec.mainData);
+        WalByteReader md = WalByteReader.borrow(rec.mainData);
         int offnum = md.readUInt16();
         boolean initPage = (rec.info & XLOG_HEAP_INIT_PAGE) != 0;
 
@@ -121,7 +121,7 @@ public final class HeapRmgrDecoder {
     }
 
     private static NormalRedo decodeDelete(XLogRecord rec, RelationInfo rel, Ctx ctx) {
-        WalByteReader md = new WalByteReader(rec.mainData);
+        WalByteReader md = WalByteReader.borrow(rec.mainData);
         md.skip(4);                                 // xmax (not needed by the overlay)
         int offnum = md.readUInt16();
         md.skip(1);                                 // infobits
@@ -156,7 +156,7 @@ public final class HeapRmgrDecoder {
     }
 
     private static NormalRedo decodeUpdate(XLogRecord rec, RelationInfo rel, Ctx ctx) {
-        WalByteReader md = new WalByteReader(rec.mainData);
+        WalByteReader md = WalByteReader.borrow(rec.mainData);
         md.skip(4);                                 // old_xmax (not needed by the overlay)
         int oldOffnum = md.readUInt16();
         md.skip(1);                                 // old_infobits
@@ -224,7 +224,7 @@ public final class HeapRmgrDecoder {
     }
 
     private static List<NormalRedo> decodeMultiInsert(XLogRecord rec, RelationInfo rel, Ctx ctx) {
-        WalByteReader md = new WalByteReader(rec.mainData);
+        WalByteReader md = WalByteReader.borrow(rec.mainData);
         md.skip(1);                                 // flags
         md.skip(1);                                 // padding
         int ntuples = md.readUInt16();
@@ -237,7 +237,7 @@ public final class HeapRmgrDecoder {
         CachedPage cp = primePage(ctx, rel, b0, (rec.info & XLOG_HEAP_INIT_PAGE) != 0);
         byte[][] tuples = new byte[ntuples][];
         if (b0 != null && b0.hasData && b0.data.length > 0) {
-            WalByteReader r = new WalByteReader(b0.data);
+            WalByteReader r = WalByteReader.borrow(b0.data);
             for (int i = 0; i < ntuples; i++) {
                 r.align(2);                         // SHORTALIGN before each tuple header
                 int datalen = r.readUInt16();
@@ -302,7 +302,7 @@ public final class HeapRmgrDecoder {
             return null;
         }
         try {
-            WalByteReader r = new WalByteReader(b0.data);
+            WalByteReader r = WalByteReader.borrow(b0.data);
             int prefixlen = (flags & XLH_UPDATE_PREFIX_FROM_OLD) != 0 ? r.readUInt16() : 0;
             int suffixlen = (flags & XLH_UPDATE_SUFFIX_FROM_OLD) != 0 ? r.readUInt16() : 0;
             int infomask2 = r.readUInt16();

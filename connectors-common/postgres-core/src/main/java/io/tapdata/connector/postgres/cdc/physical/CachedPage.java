@@ -21,8 +21,8 @@ import java.util.Map;
  * Writing back the same tuple an FPI already holds is idempotent, so callers
  * need no "already applied" guard.</p>
  *
- * <p>All access is on the single consumer thread (see PhysicalWalLogMiner), so
- * the backing map needs no synchronization. The overlay is bounded by the number
+ * <p>Access is now concurrent (pool threads decode in parallel), so mutation
+ * methods are synchronized. The overlay is bounded by the number
  * of line pointers a page can hold (~292 for 8KB), so it never grows without
  * limit even when prune is a no-op — reused offsets simply overwrite.</p>
  *
@@ -51,7 +51,7 @@ public final class CachedPage {
      *         {@code false} when an empty image was ignored to preserve a
      *         populated overlay.
      */
-    public boolean seedFromImage(byte[] page) {
+    public synchronized boolean seedFromImage(byte[] page) {
         Map<Integer, byte[]> seeded = new HashMap<>();
         int maxOff = PageImageExtractor.maxOffset(page);
         for (int off = 1; off <= maxOff; off++) {
@@ -73,28 +73,28 @@ public final class CachedPage {
     }
 
     /** WAL-format tuple currently at the 1-based offset, or null if unknown. */
-    public byte[] get(int offnum) {
+    public synchronized byte[] get(int offnum) {
         return tuples.get(offnum);
     }
 
     /** Install / overwrite the tuple at a 1-based offset (INSERT, UPDATE new). */
-    public void put(int offnum, byte[] walTuple) {
+    public synchronized void put(int offnum, byte[] walTuple) {
         if (offnum >= 1 && walTuple != null) {
             tuples.put(offnum, walTuple);
         }
     }
 
     /** Drop the tuple at a 1-based offset (DELETE, UPDATE old version). */
-    public void remove(int offnum) {
+    public synchronized void remove(int offnum) {
         tuples.remove(offnum);
     }
 
     /** Forget every tuple, e.g. when a record re-initialises the page in place. */
-    public void clear() {
+    public synchronized void clear() {
         tuples.clear();
     }
 
-    public int size() {
+    public synchronized int size() {
         return tuples.size();
     }
 }

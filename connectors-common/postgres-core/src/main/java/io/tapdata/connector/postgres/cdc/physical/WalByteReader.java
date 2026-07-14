@@ -12,20 +12,45 @@ import java.nio.charset.StandardCharsets;
  */
 public class WalByteReader {
 
-    private final byte[] buf;
+    private byte[] buf;
     private int pos;
-    private final int start;
-    private final int end;
+    private int start;
+    private int end;
+
+    /** Thread-local pool: eliminates WalByteReader allocation on hot paths. */
+    private static final ThreadLocal<WalByteReader> POOL =
+            ThreadLocal.withInitial(WalByteReader::new);
+
+    /** Obtain a pooled instance reset to the given buffer segment. */
+    public static WalByteReader borrow(byte[] buf, int offset, int length) {
+        return POOL.get().reset(buf, offset, length);
+    }
+
+    /** Obtain a pooled instance for the full buffer. */
+    public static WalByteReader borrow(byte[] buf) {
+        return borrow(buf, 0, buf.length);
+    }
+
+    /** Package-private no-arg constructor for the pool. */
+    WalByteReader() {
+        this.buf = new byte[0];
+    }
 
     public WalByteReader(byte[] buf) {
         this(buf, 0, buf.length);
     }
 
     public WalByteReader(byte[] buf, int offset, int length) {
+        reset(buf, offset, length);
+    }
+
+    /** Reset to point at a new buffer segment, avoiding reallocation. */
+    public WalByteReader reset(byte[] buf, int offset, int length) {
         this.buf = buf;
         this.start = offset;
         this.pos = offset;
         this.end = offset + length;
+        return this;
     }
 
     public int position() {
