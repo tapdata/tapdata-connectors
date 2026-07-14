@@ -10,6 +10,8 @@ import io.tapdata.connector.postgres.cdc.PostgresCdcRunner;
 import io.tapdata.connector.postgres.cdc.WalLogMinerV2;
 import io.tapdata.connector.postgres.cdc.WalPgtoMiner;
 import io.tapdata.connector.postgres.cdc.physical.PhysicalWalLogMiner;
+import io.tapdata.connector.postgres.cdc.physical.WalPageDecoder;
+import io.tapdata.connector.postgres.cdc.physical.XLogRecord;
 import io.tapdata.connector.postgres.cdc.offset.PostgresOffset;
 import io.tapdata.connector.postgres.config.PostgresConfig;
 import io.tapdata.connector.postgres.ddl.PostgresDDLSqlGenerator;
@@ -1676,84 +1678,213 @@ public class PostgresConnector extends CommonDbConnector {
     }
 
     /**
-     * Approximate the WAL LSN closest to a target timestamp using binary search on WAL file modification times.
-     * This significantly speeds up time-based CDC by skipping irrelevant historical WAL files.
+     * Approximate the WAL LSN to start from for time-based CDC.
+     * <p>
+     * Scans WAL segments <b>backwards</b> (newest → oldest), logging every
+     * checkpoint encountered. Uses the existing {@code WalPageDecoder} +
+     * {@code XLogRecord.parse()} path (same as {@code PhysicalWalLogMiner}) so
+     * WAL binary parsing is identical to the miner's.  Scanning backwards
+     * means we encounter checkpoints in newer files first — those are the
+     * ones closest to the target time.  Commit timestamps from
+     * {@code RM_TRANSACTION} records drive the stopping decision: once a file
+     * whose commits are entirely <b>before</b> targetTimeMs is reached, we
+     * return the most recently seen checkpoint LSN.
      *
      * @param targetTimeMs Target timestamp in milliseconds since epoch
-     * @return Approximated LSN string, or null if approximation fails
+     * @return Approximated LSN string, or null
      */
     private String approximateWalLsnByTime(Long targetTimeMs) {
         if (targetTimeMs == null) {
             return null;
         }
-
         try {
-            // Query all WAL files with their modification times
-            List<WalFileInfo> walFiles = new ArrayList<>();
-            postgresJdbcContext.query(
-                "SELECT name, modification FROM pg_ls_waldir() ORDER BY name",
-                rs -> {
-                    while (rs.next()) {
-                        String name = rs.getString("name");
-                        java.sql.Timestamp modTime = rs.getTimestamp("modification");
-                        if (name != null && modTime != null) {
-                            walFiles.add(new WalFileInfo(name, modTime.getTime()));
-                        }
-                    }
-                }
-            );
+            // 1. Collect WAL file names ordered by LSN (name-sort = LSN-sort)
+            List<String> names = new ArrayList<>();
+            postgresJdbcContext.query("SELECT name FROM pg_ls_waldir() ORDER BY name",
+                    rs -> { while (rs.next()) names.add(rs.getString("name")); });
 
-            if (walFiles.isEmpty()) {
-                tapLogger.warn("No WAL files found in pg_ls_waldir()");
+            if (names.isEmpty()) {
+                tapLogger.warn("pg_ls_waldir() returned no WAL files");
                 return null;
             }
 
-            tapLogger.info("Found {} WAL files for binary search (target time: {})",
-                    walFiles.size(), new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(targetTimeMs)));
+            // 2. Query the actual WAL segment size
+            long segSize = 16L * 1024 * 1024;
+            try {
+                long[] sz = new long[1];
+                postgresJdbcContext.query(
+                    "SELECT setting::bigint FROM pg_settings WHERE name='wal_segment_size'",
+                    rs -> { if (rs.next()) sz[0] = rs.getLong(1); });
+                if (sz[0] > 0) segSize = sz[0];
+            } catch (Exception ignored) { /* default 16 MB */ }
 
-            // Binary search to find the first WAL file >= target time
-            int left = 0, right = walFiles.size() - 1;
-            int result = 0;
+            SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            tapLogger.info("Scanning {} WAL files backwards from newest to target {}",
+                    names.size(), fmt.format(new java.util.Date(targetTimeMs)));
 
-            while (left <= right) {
-                int mid = left + (right - left) / 2;
-                if (walFiles.get(mid).modificationTime < targetTimeMs) {
-                    result = mid + 1;
-                    left = mid + 1;
-                } else {
-                    result = mid;
-                    right = mid - 1;
+            String closestCheckpointFile = null;
+
+            // 3. Scan backwards: newest → oldest
+            int recycledCount = 0, emptyCount = 0, noCommitCount = 0, readFailCount = 0;
+            int scannedCount = 0;
+            for (int i = names.size() - 1; i >= 0; i--) {
+                String name = names.get(i);
+                long fileStartLsn = walFileStartLsn(name);
+                String lsnStr = String.format("%X/%X", fileStartLsn >>> 32, fileStartLsn & 0xFFFFFFFFL);
+
+                tapLogger.info("Scanning WAL {} (lsn={}, {}/{} files)", name, lsnStr,
+                        names.size() - i, names.size());
+
+                // Read entire WAL segment via pg_read_binary_file
+                byte[][] dataHolder = new byte[1][];
+                try {
+                    postgresJdbcContext.query(
+                        "SELECT pg_read_binary_file('pg_wal/' || '" + name + "')",
+                        rs -> { if (rs.next()) dataHolder[0] = rs.getBytes(1); });
+                } catch (Exception e) {
+                    readFailCount++;
+                    tapLogger.info("  → SKIP: pg_read_binary_file failed for {}: {}", name, e.getMessage());
+                    continue;
+                }
+
+                byte[] data = dataHolder[0];
+                if (data == null || data.length < 8192) {
+                    emptyCount++;
+                    tapLogger.info("  → SKIP: empty or too small ({} bytes)", data == null ? 0 : data.length);
+                    continue;
+                }
+
+                tapLogger.info("  → read {} bytes, file size matches", data.length);
+
+                // Validate first page's xlp_pageaddr — recycled WAL files
+                // (renamed from an older segment) retain their original page
+                // address which won't match the filename-derived LSN.
+                // Page header layout: magic(2) + info(2) + tli(4) + pageaddr(8) → pageaddr at offset 8
+                long pageAddr = u64le(data, 8);
+                if (pageAddr != fileStartLsn) {
+                    recycledCount++;
+                    tapLogger.info("  → SKIP: RECYCLED — xlp_pageaddr={}/{} != file-lsn={}",
+                            pageAddr >>> 32, String.format("%08X", pageAddr & 0xFFFFFFFFL), lsnStr);
+                    continue;
+                }
+
+                tapLogger.info("  → xlp_pageaddr matches, parsing records...");
+
+                // Parse with the same decoder+parser the miner uses
+                WalPageDecoder decoder = new WalPageDecoder(fileStartLsn, segSize);
+                decoder.feed(data, 0, data.length);
+
+                int totalRecords = 0, checkpointCount = 0, commitCount = 0;
+                long minCommitMs = Long.MAX_VALUE, maxCommitMs = Long.MIN_VALUE;
+
+                while (true) {
+                    WalPageDecoder.RawRecord raw;
+                    try {
+                        raw = decoder.nextRecord();
+                    } catch (Exception e) {
+                        tapLogger.info("  → decoder.nextRecord() exception, stopping file scan: {}", e.getMessage());
+                        break;
+                    }
+                    if (raw == null) break;
+                    totalRecords++;
+
+                    XLogRecord rec;
+                    try {
+                        rec = XLogRecord.parse(raw);
+                    } catch (Exception e) {
+                        continue;
+                    }
+
+                    // --- checkpoint detection ---
+                    if (rec.rmid == 0 /* RM_XLOG_ID */) {
+                        int op = rec.info & 0xF0;
+                        if (op == 0x00 || op == 0x10) {
+                            checkpointCount++;
+                            // Always update — after the scan, this will point
+                            // to the checkpoint closest to (but ≤) the target time.
+                            closestCheckpointFile = name;
+                            tapLogger.info("  → CHECKPOINT [{}] at raw.lsn={}/{:08X} rec.lsn={}/{:08X}",
+                                    op == 0x00 ? "SHUTDOWN" : "ONLINE",
+                                    raw.lsn >>> 32, raw.lsn & 0xFFFFFFFFL,
+                                    rec.lsn >>> 32, rec.lsn & 0xFFFFFFFFL);
+                        }
+                    }
+
+                    // --- commit timestamp tracking ---
+                    if (rec.rmid == 1 /* RM_TRANSACTION_ID */
+                            && rec.mainData != null && rec.mainData.length >= 8) {
+                        int op = rec.info & 0x70;
+                        if (op == 0x00 || op == 0x30) {
+                            commitCount++;
+                            long pgMicros = u64le(rec.mainData, 0);
+                            long commitMs = (pgMicros + 946684800_000_000L) / 1000;
+                            if (commitMs > 0 && commitMs < minCommitMs) minCommitMs = commitMs;
+                            if (commitMs > maxCommitMs) maxCommitMs = commitMs;
+                        }
+                    }
+                }
+
+                tapLogger.info("  → parsed {} records: {} commits, {} checkpoints",
+                        totalRecords, commitCount, checkpointCount);
+
+                if (maxCommitMs == Long.MIN_VALUE) {
+                    noCommitCount++;
+                    tapLogger.info("  → SKIP: no valid commit records found in this file");
+                    continue;
+                }
+
+                scannedCount++;
+                tapLogger.info("WAL {} ckpt={} commits: {} ~ {}",
+                        name, checkpointCount,
+                        fmt.format(new java.util.Date(minCommitMs)),
+                        fmt.format(new java.util.Date(maxCommitMs)));
+
+                if (maxCommitMs < targetTimeMs) {
+                    tapLogger.info("Passed target time at file {} (commit {} < target {})",
+                            name, fmt.format(new java.util.Date(maxCommitMs)),
+                            fmt.format(new java.util.Date(targetTimeMs)));
+                    break;
                 }
             }
 
-            // Safety margin: go back 2 files to ensure we don't miss transactions
-            // (WAL file modification time may not perfectly align with commit time)
-            int safeIndex = Math.max(0, result - 2);
-            WalFileInfo selectedFile = walFiles.get(safeIndex);
+            tapLogger.info("Scan summary: {} files, {} recycled, {} empty, {} read-fail, {} no-commit, {} with-commits",
+                    names.size(), recycledCount, emptyCount, readFailCount, noCommitCount, scannedCount);
 
-            String lsn = walFileToLsn(selectedFile.name);
-            tapLogger.info("Binary search selected WAL file: {} (mod time: {}), starting from LSN: {}",
-                    selectedFile.name,
-                    new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(selectedFile.modificationTime)),
-                    lsn);
+            // 4. Return closest checkpoint file's LSN, or fall back to earliest WAL
+            String resultLsn;
+            if (closestCheckpointFile != null) {
+                resultLsn = walFileToLsn(closestCheckpointFile);
+                tapLogger.info("Using checkpoint LSN from file {}: {}",
+                        closestCheckpointFile, resultLsn);
+            } else {
+                tapLogger.warn("No checkpoint found before target time, falling back to earliest WAL");
+                resultLsn = queryEarliestAvailableWalLsn();
+            }
 
-            return lsn;
+            // 5. Safety cap: if the approximated LSN is ahead of the current WAL flush
+            //    position (historical WAL files from a previous timeline/incarnation),
+            //    the replication stream would permanently block at readPending().
+            //    Cap to flush_lsn so the stream opens at the latest readable position.
+            if (resultLsn != null) {
+                String flushLsn = queryCurrentWalFlushLsn();
+                if (flushLsn != null) {
+                    long resultLong = lsnToLong(resultLsn);
+                    long flushLong = lsnToLong(flushLsn);
+                    if (resultLong > flushLong) {
+                        tapLogger.warn("Approximated LSN {} is ahead of current WAL flush position {} "
+                                        + "(historical WAL files on disk do not belong to the current timeline). "
+                                        + "Falling back to flush position; time filter >= {} will skip old records.",
+                                resultLsn, flushLsn,
+                                new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(targetTimeMs)));
+                        return flushLsn;
+                    }
+                }
+            }
+            return resultLsn;
+
         } catch (Exception e) {
-            tapLogger.warn("Failed to approximate WAL LSN by time: {}", e.getMessage());
+            tapLogger.warn("approximateWalLsnByTime failed: {}", e.getMessage(), e);
             return null;
-        }
-    }
-
-    /**
-     * Helper class to store WAL file info for binary search.
-     */
-    private static class WalFileInfo {
-        String name;
-        long modificationTime;
-
-        WalFileInfo(String name, long modificationTime) {
-            this.name = name;
-            this.modificationTime = modificationTime;
         }
     }
 
@@ -1844,6 +1975,48 @@ public class PostgresConnector extends CommonDbConnector {
         long low = Long.parseLong(lowPart, 16);
 
         return String.format("%X/%X", high, low * 0x1000000L);
+    }
+
+    /**
+     * Convert a WAL file name (24 hex chars) to the absolute LSN (long) of the
+     * segment's first byte.  WAL segment = 16 MB = 0x1000000 bytes.
+     */
+    private static long walFileStartLsn(String name) {
+        return (Long.parseLong(name.substring(8, 16), 16) << 32)
+             | (Long.parseLong(name.substring(16, 24), 16) << 24);
+    }
+
+    /** Parse "XX/YYYYYYYY" LSN string to long. */
+    private static long lsnToLong(String lsn) {
+        int slash = lsn.indexOf('/');
+        return (Long.parseLong(lsn.substring(0, slash), 16) << 32)
+             | Long.parseLong(lsn.substring(slash + 1), 16);
+    }
+
+    /** Query pg_current_wal_flush_lsn() (recovery-aware). */
+    private String queryCurrentWalFlushLsn() {
+        try {
+            String[] result = new String[1];
+            postgresJdbcContext.queryWithNext(
+                "SELECT CASE WHEN pg_is_in_recovery() THEN pg_last_wal_replay_lsn() ELSE pg_current_wal_flush_lsn() END",
+                rs -> result[0] = rs.getString(1));
+            return result[0];
+        } catch (Exception e) {
+            tapLogger.warn("Cannot query current WAL flush LSN: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** Little-endian uint64 from byte[] at offset. */
+    private static long u64le(byte[] b, int o) {
+        return (b[o] & 0xFFL)
+             | ((b[o + 1] & 0xFFL) << 8)
+             | ((b[o + 2] & 0xFFL) << 16)
+             | ((b[o + 3] & 0xFFL) << 24)
+             | ((b[o + 4] & 0xFFL) << 32)
+             | ((b[o + 5] & 0xFFL) << 40)
+             | ((b[o + 6] & 0xFFL) << 48)
+             | ((b[o + 7] & 0xFFL) << 56);
     }
 
     protected void clearIdleSlot() throws SQLException {
