@@ -113,56 +113,64 @@ public class PgTypeDecoderTest {
 
     @Test
     public void testJsonbObject() {
-        // Build jsonb {"sdkf":"sfs"} on-disk bytes (after varlena strip):
-        // version(1) + header(4 LE) + key_entry(4 LE) + val_entry(4 LE) + data
         java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
-        o.write(1); // version
-        // header: JB_FOBJECT(4) | nJEntries=2
-        write32(o, (4 << 28) | 2);
-        // key JEntry: IS_STRING | len=4
-        write32(o, (2 << 24) | 4);
-        // val JEntry: IS_STRING | len=3
-        write32(o, (2 << 24) | 3);
-        // data: "sdkf" + "sfs"
+        write32(o, 0x20000001); // JB_FOBJECT | pair count 1
+        write32(o, 4);          // key string len=4
+        write32(o, 3);          // value string len=3
         o.write("sdkfsfs".getBytes(StandardCharsets.UTF_8), 0, 7);
 
         Object result = PgTypeDecoder.decode(PgTypeDecoder.JSONB, o.toByteArray());
-        assertNotNull(result, "jsonb decode should not return null");
         assertEquals("{\"sdkf\":\"sfs\"}", result);
     }
 
     @Test
     public void testJsonbArray() {
         java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
-        o.write(1); // version
-        // header: JB_FARRAY(8) | nJEntries=3
-        write32(o, (8 << 28) | 3);
-        // 3 JEntries: IS_STRING | len=1 for "a","b","c"
-        write32(o, (2 << 24) | 1);
-        write32(o, (2 << 24) | 1);
-        write32(o, (2 << 24) | 1);
+        write32(o, 0x40000003); // JB_FARRAY | element count 3
+        write32(o, 1);          // string len=1
+        write32(o, 1);
+        write32(o, 1);
         o.write("abc".getBytes(StandardCharsets.UTF_8), 0, 3);
 
         Object result = PgTypeDecoder.decode(PgTypeDecoder.JSONB, o.toByteArray());
-        assertNotNull(result);
         assertEquals("[\"a\",\"b\",\"c\"]", result);
     }
 
     @Test
     public void testJsonbNull() {
         java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
-        o.write(1); // version
-        // header: JB_FOBJECT(4) | nJEntries=2
-        write32(o, (4 << 28) | 2);
-        // key: IS_STRING | len=1 ("x")
-        write32(o, (2 << 24) | 1);
-        // val: IS_NULL
-        write32(o, 8 << 24);
+        write32(o, 0x20000001); // JB_FOBJECT | pair count 1
+        write32(o, 1);          // key string len=1
+        write32(o, 0x40000000); // value null
         o.write("x".getBytes(StandardCharsets.UTF_8), 0, 1);
 
         Object result = PgTypeDecoder.decode(PgTypeDecoder.JSONB, o.toByteArray());
-        assertNotNull(result);
         assertEquals("{\"x\":null}", result);
+    }
+
+    @Test
+    public void testJsonbEmptyObjectAndArrayFromPg15WalBytes() {
+        assertEquals("{}", PgTypeDecoder.decode(PgTypeDecoder.JSONB, hex("00000020")));
+        assertEquals("[]", PgTypeDecoder.decode(PgTypeDecoder.JSONB, hex("00000040")));
+    }
+
+    @Test
+    public void testJsonbScalarNullFromPg15WalBytes() {
+        assertEquals("null", PgTypeDecoder.decode(PgTypeDecoder.JSONB, hex("0100005000000040")));
+    }
+
+    @Test
+    public void testJsonbObjectWithNumericFromPg15WalBytes() {
+        assertEquals("{\"dfd\":\"sf\",\"kdkdk\":123123}",
+                PgTypeDecoder.decode(PgTypeDecoder.JSONB,
+                        hex("020000200300008005000000020000000c0000106466646b646b646b736600002800000001800c00330c")));
+    }
+
+    @Test
+    public void testJsonbObjectWithNestedArrayFromPg15WalBytes() {
+        assertEquals("{\"dfd\":\"sf\",\"kdkdk\":[123123,123,123,\"123\"]}",
+                PgTypeDecoder.decode(PgTypeDecoder.JSONB,
+                        hex("02000020030000800500000002000000350000506466646b646b646b73660000040000400a0000900a00001008000010030000002800000001800c00330c00002000000000807b002000000000807b00313233")));
     }
 
     @Test
