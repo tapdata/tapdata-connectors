@@ -155,6 +155,36 @@ public class HeapRmgrDecoderTest {
         assertEquals("bb", r.getRedoRecord().get("b"));
     }
 
+    @Test
+    public void testLogicalUpdateDoesNotUseFpiAsOldImageFallback() {
+        byte[] page = heapPage(new int[]{1, 2},
+                new byte[][]{onDiskTuple(1, "stale"), onDiskTuple(2, "new")});
+
+        XLogRecord rec = new XLogRecord();
+        rec.rmid = RM_HEAP_ID;
+        rec.info = XLOG_HEAP_UPDATE;
+        rec.xid = 21;
+        ByteArrayOutputStream md = new ByteArrayOutputStream();
+        u32(md, 0);                                 // old_xmax
+        u16(md, 1);                                 // old_offnum
+        md.write(0);                                // old_infobits
+        md.write(0);                                // flags: no OLD tuple/key
+        u32(md, 0);                                 // new_xmax
+        u16(md, 2);                                 // new_offnum
+        rec.mainData = md.toByteArray();
+        rec.blocks.add(imageBlock0(page));          // FPI is post-image, not a logical old-image source
+
+        HeapRmgrDecoder.Ctx ctx = new HeapRmgrDecoder.Ctx(null, true, null);
+        List<NormalRedo> events = HeapRmgrDecoder.decode(rec, REL, ctx);
+        assertEquals(1, events.size());
+        NormalRedo r = events.get(0);
+        assertEquals("UPDATE", r.getOperation());
+        assertNull(r.getUndoRecord());
+        assertNotNull(r.getRedoRecord());
+        assertEquals(2, r.getRedoRecord().get("a"));
+        assertEquals("new", r.getRedoRecord().get("b"));
+    }
+
     /**
      * Overlay persistence regression: a hot page that took an FPI on one UPDATE
      * must keep serving before-images to later FPI-less UPDATEs on the same

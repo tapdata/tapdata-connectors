@@ -137,7 +137,7 @@ public final class HeapRmgrDecoder {
             // and stays LP_NORMAL until vacuum, so the before-image is still
             // readable from the overlay at offnum.
             oldTuple = cp.get(offnum);
-        } else if (oldTuple == null && b0 != null && b0.hasImage) {
+        } else if (oldTuple == null && !ctx.walLevelLogical && b0 != null && b0.hasImage) {
             oldTuple = PageImageExtractor.extractWalTuple(b0, offnum);
         }
         ctx.log("[WAL-DEBUG] DELETE rel={} blk={} offnum={} flags=0x{} hasImage={} cacheHit={} mainData={} oldTuple={}",
@@ -174,7 +174,7 @@ public final class HeapRmgrDecoder {
         CachedPage oldCp = b1 != null ? primePage(ctx, rel, b1, false) : newCp;
         if (oldTuple == null && oldCp != null) {
             oldTuple = oldCp.get(oldOffnum);
-        } else if (oldTuple == null) {
+        } else if (oldTuple == null && !ctx.walLevelLogical) {
             XLogRecord.BlockRef oldRef = (b1 != null && b1.hasImage) ? b1 : b0;
             oldTuple = PageImageExtractor.extractWalTuple(oldRef, oldOffnum);
         }
