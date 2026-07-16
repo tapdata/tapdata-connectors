@@ -168,10 +168,12 @@ public class MongodbExceptionCollector extends AbstractExceptionCollector {
             if (null != data && data instanceof List) {
                 int index = ((MongoBulkWriteException) cause).getWriteErrors().get(0).getIndex();
                 List<?> dataList = (List<?>) data;
-                if (index > dataList.size()) {
-                    index = dataList.size() - 1;
+                if (!dataList.isEmpty()) {
+                    if (index < 0 || index >= dataList.size()) {
+                        index = dataList.size() - 1;
+                    }
+                    data = dataList.get(index);
                 }
-                data = dataList.get(index);
             }
             throw new TapPdkViolateUniqueEx(getPdkId(), targetFieldName, data, constraintStr, ErrorKit.getLastCause(cause));
         }
