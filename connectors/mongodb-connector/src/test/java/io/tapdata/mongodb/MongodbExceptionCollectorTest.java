@@ -5,6 +5,7 @@ import com.mongodb.ServerAddress;
 import com.mongodb.bulk.BulkWriteError;
 import com.mongodb.bulk.BulkWriteResult;
 import com.mongodb.bulk.WriteConcernError;
+import io.tapdata.exception.TapPdkViolateUniqueEx;
 import io.tapdata.exception.runtime.TapPdkSkippableDataEx;
 import io.tapdata.mongodb.writer.error.TapMongoBulkWriteException;
 import org.bson.BsonDocument;
@@ -23,6 +24,60 @@ import java.util.Set;
  * @version v1.0 2023/11/29 12:08 Create
  */
 public class MongodbExceptionCollectorTest {
+
+    @Test
+    void testWriteErrorIndexWithinDataSize() {
+        Object firstEvent = new Object();
+        List<Object> dataList = new ArrayList<>();
+        dataList.add(firstEvent);
+        dataList.add(new Object());
+
+        TapPdkViolateUniqueEx exception = Assertions.assertThrows(
+                TapPdkViolateUniqueEx.class,
+                () -> new MongodbExceptionCollector().collectViolateUnique(dataList, mongoBulkWriteException(11000, 0))
+        );
+
+        Assertions.assertSame(firstEvent, exception.getData());
+    }
+
+    @Test
+    void testWriteErrorIndexEqualsDataSize() {
+        Object lastEvent = new Object();
+        List<Object> dataList = new ArrayList<>();
+        dataList.add(new Object());
+        dataList.add(lastEvent);
+
+        TapPdkViolateUniqueEx exception = Assertions.assertThrows(
+                TapPdkViolateUniqueEx.class,
+                () -> new MongodbExceptionCollector().collectViolateUnique(dataList, mongoBulkWriteException(11000, dataList.size()))
+        );
+
+        Assertions.assertSame(lastEvent, exception.getData());
+    }
+
+    @Test
+    void testEmptyDataList() {
+        List<Object> dataList = new ArrayList<>();
+
+        TapPdkViolateUniqueEx exception = Assertions.assertThrows(
+                TapPdkViolateUniqueEx.class,
+                () -> new MongodbExceptionCollector().collectViolateUnique(dataList, mongoBulkWriteException(11000, 0))
+        );
+
+        Assertions.assertSame(dataList, exception.getData());
+    }
+
+    private MongoBulkWriteException mongoBulkWriteException(int code, int index) {
+        List<BulkWriteError> writeErrors = new ArrayList<>();
+        writeErrors.add(new BulkWriteError(code, "duplicate key error", Mockito.mock(BsonDocument.class), index));
+        return new MongoBulkWriteException(
+                Mockito.mock(BulkWriteResult.class),
+                writeErrors,
+                Mockito.mock(WriteConcernError.class),
+                Mockito.mock(ServerAddress.class),
+                new HashSet<>()
+        );
+    }
 
     @Nested
     class ExCode_10010 {
