@@ -224,7 +224,7 @@ public class ExcelConnector extends FileConnector {
     }
 
     Object parseValue(Object val) {
-        if (val instanceof Double || val instanceof Float) {
+        if (val instanceof Double || val instanceof Float || val instanceof Long) {
             val = BigDecimal.valueOf(((Number) val).doubleValue()).stripTrailingZeros().toPlainString();
         } else {
             val = EmptyKit.isNull(val) ? "null" : String.valueOf(val);

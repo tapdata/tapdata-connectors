@@ -4,6 +4,7 @@ import io.tapdata.kit.EmptyKit;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.*;
@@ -66,6 +67,14 @@ public class ExcelUtil {
         return getCellValue(cell, formulaEvaluator);
     }
 
+    static Object parseNumberValue(double val) {
+        BigDecimal bigDecimal = BigDecimal.valueOf(val).stripTrailingZeros();
+        if (bigDecimal.scale() >= 1) {
+            return bigDecimal.doubleValue();
+        }
+        return bigDecimal.longValue();
+    }
+
     public static Object getCellValue(Cell cell, FormulaEvaluator formulaEvaluator) {
         if (EmptyKit.isNull(cell)) {
             return null;
@@ -81,7 +90,7 @@ public class ExcelUtil {
                 if (DateUtil.isCellDateFormatted(cell) || cell.getCellStyle().getDataFormat() == 58) {
                     return Instant.ofEpochMilli((cell.getDateCellValue()).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
                 } else {
-                    return cell.getNumericCellValue();
+                    return parseNumberValue(cell.getNumericCellValue());
                 }
             case FORMULA:
                 if (formulaEvaluator != null) {
@@ -104,11 +113,7 @@ public class ExcelUtil {
                             return cell.getRichStringCellValue().getString();
 
                         case NUMERIC:
-                            if (DateUtil.isCellDateFormatted(cell)) {
-                                return Instant.ofEpochMilli((cell.getDateCellValue()).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
-                            } else {
-                                return cell.getNumericCellValue();
-                            }
+                            return parseNumberValue(cell.getNumericCellValue());
                         case FORMULA:
                             return cell.getCellFormula();
                         case BLANK:
