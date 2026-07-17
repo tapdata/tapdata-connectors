@@ -67,12 +67,89 @@ public class ExcelUtil {
         return getCellValue(cell, formulaEvaluator);
     }
 
-    static Object parseNumberValue(double val) {
-        BigDecimal bigDecimal = BigDecimal.valueOf(val).stripTrailingZeros();
-        if (bigDecimal.scale() >= 1) {
+    public static String getMergedCellDisplayValue(List<CellRangeAddress> mergedList, Map<CellRangeAddress, Cell> mergedDataMap, Cell cell, FormulaEvaluator formulaEvaluator, DataFormatter dataFormatter) {
+        if (EmptyKit.isNull(cell)) {
+            return null;
+        }
+        if (EmptyKit.isEmpty(mergedList)) {
+            return getCellDisplayValue(cell, formulaEvaluator, dataFormatter);
+        }
+        for (CellRangeAddress merge : mergedList) {
+            if (merge.isInRange(cell)) {
+                return getCellDisplayValue(mergedDataMap.get(merge), formulaEvaluator, dataFormatter);
+            }
+        }
+        return getCellDisplayValue(cell, formulaEvaluator, dataFormatter);
+    }
+
+    public static String getCellDisplayValue(Cell cell, FormulaEvaluator formulaEvaluator, DataFormatter dataFormatter) {
+        if (EmptyKit.isNull(cell)) {
+            return null;
+        }
+        DataFormatter formatter = dataFormatter == null ? new DataFormatter() : dataFormatter;
+        try {
+            return formatter.formatCellValue(cell, formulaEvaluator);
+        } catch (Exception e) {
+            if (CellType.FORMULA.equals(cell.getCellType())) {
+                return "=" + cell.getCellFormula();
+            }
+            return String.valueOf(getCellValue(cell, formulaEvaluator));
+        }
+    }
+
+    static Object parseNumberValue(Cell cell) {
+        return parseNumberValue(cell.getNumericCellValue(), cell.getCellStyle());
+    }
+
+    static Object parseNumberValue(double val, CellStyle cellStyle) {
+        BigDecimal bigDecimal = BigDecimal.valueOf(val);
+        if (hasDecimalPlaceholders(cellStyle)) {
             return bigDecimal.doubleValue();
         }
-        return bigDecimal.longValue();
+        return bigDecimal.stripTrailingZeros().longValue();
+    }
+
+    private static boolean hasDecimalPlaceholders(CellStyle cellStyle) {
+        if (cellStyle == null || EmptyKit.isBlank(cellStyle.getDataFormatString())) {
+            return false;
+        }
+        String format = cellStyle.getDataFormatString();
+        if ("General".equalsIgnoreCase(format)) {
+            return false;
+        }
+        boolean inQuote = false;
+        boolean escaped = false;
+        boolean afterDecimalPoint = false;
+        for (int i = 0; i < format.length(); i++) {
+            char c = format.charAt(i);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (c == '"') {
+                inQuote = !inQuote;
+                continue;
+            }
+            if (inQuote) {
+                continue;
+            }
+            if (c == ';') {
+                afterDecimalPoint = false;
+                continue;
+            }
+            if (c == '.') {
+                afterDecimalPoint = true;
+                continue;
+            }
+            if (afterDecimalPoint && (c == '0' || c == '#' || c == '?')) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static Object getCellValue(Cell cell, FormulaEvaluator formulaEvaluator) {
@@ -90,7 +167,7 @@ public class ExcelUtil {
                 if (DateUtil.isCellDateFormatted(cell) || cell.getCellStyle().getDataFormat() == 58) {
                     return Instant.ofEpochMilli((cell.getDateCellValue()).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
                 } else {
-                    return parseNumberValue(cell.getNumericCellValue());
+                    return parseNumberValue(cell);
                 }
             case FORMULA:
                 if (formulaEvaluator != null) {
@@ -113,7 +190,11 @@ public class ExcelUtil {
                             return cell.getRichStringCellValue().getString();
 
                         case NUMERIC:
-                            return parseNumberValue(cell.getNumericCellValue());
+                            if (DateUtil.isCellDateFormatted(cell)) {
+                                return Instant.ofEpochMilli((cell.getDateCellValue()).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime();
+                            } else {
+                                return parseNumberValue(cell);
+                            }
                         case FORMULA:
                             return cell.getCellFormula();
                         case BLANK:
