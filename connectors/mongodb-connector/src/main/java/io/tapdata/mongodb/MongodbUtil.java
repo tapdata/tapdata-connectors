@@ -8,6 +8,7 @@ import com.mongodb.client.*;
 import com.mongodb.connection.ConnectionPoolSettings;
 import io.tapdata.entity.logger.TapLogger;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.entity.schema.value.DateTime;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.StringKit;
@@ -726,7 +727,9 @@ public class MongodbUtil {
 
     public static Object convertValue(Object o) {
         if (null == o) return null;
-        if (ObjectId.class.getName().equals(o.getClass().getName()) && !(o instanceof ObjectId)) {
+        if (o instanceof DateTime) {
+            return ((DateTime) o).toDate();
+        } else if (ObjectId.class.getName().equals(o.getClass().getName()) && !(o instanceof ObjectId)) {
             return new ObjectId(o.toString());
         } else if (o instanceof Map) {
             ((Map<?, Object>) o).entrySet().forEach(en -> en.setValue(convertValue(en.getValue())));
