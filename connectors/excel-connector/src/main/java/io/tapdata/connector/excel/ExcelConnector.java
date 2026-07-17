@@ -74,6 +74,7 @@ public class ExcelConnector extends FileConnector {
                     Workbook wb = WorkbookFactory.create(is, excelConfig.getExcelPassword())
             ) {
                 FormulaEvaluator formulaEvaluator = wb.getCreationHelper().createFormulaEvaluator();
+                DataFormatter dataFormatter = new DataFormatter();
                 List<Integer> sheetNumbers = EmptyKit.isEmpty(excelConfig.getSheetNum()) ? ExcelUtil.getAllSheetNumber(wb.getNumberOfSheets()) : excelConfig.getSheetNum();
                 List<Integer> sheets = sheetNumbers.stream().filter(n -> n >= fileOffset.getSheetNum()).collect(Collectors.toList());
                 for (int i = 0; isAlive() && i < sheets.size(); i++) {
@@ -93,13 +94,17 @@ public class ExcelConnector extends FileConnector {
                         if (j > lastMergedRow) {
                             for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
                                 checkCellType(k, row.getCell(k), cellTypeMap);
-                                Object val = ExcelUtil.getCellValue(row.getCell(k), formulaEvaluator);
+                                Object val = excelConfig.getJustString()
+                                        ? ExcelUtil.getCellDisplayValue(row.getCell(k), formulaEvaluator, dataFormatter)
+                                        : ExcelUtil.getCellValue(row.getCell(k), formulaEvaluator);
                                 after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? parseValue(val) : val);
                             }
                         } else {
                             for (int k = excelConfig.getFirstColumn() - 1; k < excelConfig.getLastColumn(); k++) {
                                 checkCellType(k, row.getCell(k), cellTypeMap);
-                                Object val = ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, row.getCell(k), formulaEvaluator);
+                                Object val = excelConfig.getJustString()
+                                        ? ExcelUtil.getMergedCellDisplayValue(mergedList, mergedDataMap, row.getCell(k), formulaEvaluator, dataFormatter)
+                                        : ExcelUtil.getMergedCellValue(mergedList, mergedDataMap, row.getCell(k), formulaEvaluator);
                                 after.put((String) headers[k - excelConfig.getFirstColumn() + 1], excelConfig.getJustString() ? parseValue(val) : val);
                             }
                         }
