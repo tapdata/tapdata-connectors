@@ -52,7 +52,8 @@ public class ExecuteObject {
 		this.database = executeObj.get("database") == null ? null : executeObj.get("database").toString();
 		this.collection = executeObj.get("collection") == null ? null : executeObj.get("collection").toString();
 		this.filter = getFilter(executeObj.get("filter"));
-		this.opObject = executeObj.get("opObject") == null ? null : (Map<String, Object>) executeObj.get("opObject");
+		Object operationObject = executeObj.get("opObject");
+		this.opObject = operationObject == null ? null : (Map<String, Object>) MongodbUtil.convertValue(operationObject);
 		this.upsert = executeObj.get("upsert") == null ? false : Boolean.valueOf(executeObj.get("upsert").toString());
 		this.multi = executeObj.get("multi") == null ? false : Boolean.valueOf(executeObj.get("multi").toString());
 		this.sort = executeObj.get("sort") == null ? null : (Map<String, Object>) executeObj.get("sort");
