@@ -187,10 +187,10 @@ public abstract class FileConnector extends ConnectorBase {
                 try {
                     reconnectStorage();
                     lastConnectAt = System.currentTimeMillis();
-                    TapLogger.info(TAG, "Storage connection refreshed by periodic reconnect");
+                    tapLogger.info(TAG, "Storage connection refreshed by periodic reconnect");
                 } catch (Exception e) {
                     // keep the old connection and retry next cycle (do not advance lastConnectAt)
-                    TapLogger.warn(TAG, "Periodic reconnect failed, keep old connection and retry next cycle: {}", e.getMessage());
+                    tapLogger.warn(TAG, "Periodic reconnect failed, keep old connection and retry next cycle: {}", e.getMessage());
                 }
             }
             Map<String, TapFile> newFiles = getFilteredFiles();
