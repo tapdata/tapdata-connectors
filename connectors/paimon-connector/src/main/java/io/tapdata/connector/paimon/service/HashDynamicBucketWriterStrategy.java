@@ -25,7 +25,7 @@ final class HashDynamicBucketWriterStrategy extends AbstractPaimonBucketWriterSt
     HashDynamicBucketWriterStrategy(
             PaimonBucketWriterStrategyContext context,
             PaimonBucketWriterRuntimeFactory runtimeFactory) {
-        super(context, BucketMode.HASH_DYNAMIC, requiredRoutingFields(context.table()));
+        super(context, BucketMode.HASH_DYNAMIC, requiredPrimaryKeyFields(context.table()));
         PaimonBucketWriterRuntimeFactory runtime =
                 Objects.requireNonNull(runtimeFactory, "runtimeFactory");
         this.extractor = new RowPartitionKeyExtractor(table.schema());
@@ -48,9 +48,7 @@ final class HashDynamicBucketWriterStrategy extends AbstractPaimonBucketWriterSt
         assigner.prepareCommit(commitIdentifier);
     }
 
-    static Set<String> requiredRoutingFields(FileStoreTable table) {
-        LinkedHashSet<String> fields = new LinkedHashSet<>(table.primaryKeys());
-        fields.addAll(table.partitionKeys());
-        return fields;
+    static Set<String> requiredPrimaryKeyFields(FileStoreTable table) {
+        return new LinkedHashSet<>(table.primaryKeys());
     }
 }

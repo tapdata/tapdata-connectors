@@ -6,12 +6,9 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.RowKind;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
@@ -31,16 +28,6 @@ class HashFixedBucketWriterStrategyTest {
 
         verify(fixture.writer).write(org.mockito.ArgumentMatchers.same(row));
         verify(fixture.writer, never()).write(any(InternalRow.class), anyInt());
-    }
-
-    @Test
-    void requiredRoutingFieldsMustBeEmptyAndImmutable() {
-        Fixture fixture = new Fixture();
-
-        assertTrue(fixture.strategy.requiredRoutingFields().isEmpty());
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> fixture.strategy.requiredRoutingFields().add("id"));
     }
 
     private static final class Fixture {

@@ -7,8 +7,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
@@ -36,16 +34,6 @@ class PostponeBucketWriterStrategyTest {
         fixture.strategy.write(GenericRow.of(1));
 
         verify(fixture.writer, never()).compact(any(), anyInt(), org.mockito.ArgumentMatchers.anyBoolean());
-    }
-
-    @Test
-    void requiredRoutingFieldsMustBeEmptyAndImmutable() {
-        Fixture fixture = new Fixture();
-
-        assertTrue(fixture.strategy.requiredRoutingFields().isEmpty());
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> fixture.strategy.requiredRoutingFields().add("id"));
     }
 
     private static final class Fixture {

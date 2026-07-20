@@ -8,12 +8,12 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -231,14 +231,14 @@ class KeyDynamicBucketWriterStrategyTest {
     }
 
     @Test
-    void requiredFieldsMustBeOrderedAndImmutable() throws Exception {
+    void validationMustRequireTargetPrimaryKeyButAllowNullPartition() throws Exception {
         Fixture fixture = new Fixture();
         KeyDynamicBucketWriterStrategy strategy = fixture.create();
 
-        assertEquals(Arrays.asList("id", "pt"), new ArrayList<>(strategy.requiredRoutingFields()));
+        strategy.validateRoutingRow(GenericRow.of(null, 10), "INSERT");
         assertThrows(
-                UnsupportedOperationException.class,
-                () -> strategy.requiredRoutingFields().add("later"));
+                PaimonFatalWriteException.class,
+                () -> strategy.validateRoutingRow(GenericRow.of(1, null), "INSERT"));
     }
 
     private static RecordReader.RecordIterator<InternalRow> batch(InternalRow... rows)
@@ -261,12 +261,15 @@ class KeyDynamicBucketWriterStrategyTest {
                 mock(PaimonBucketWriterRuntimeFactory.class);
         private final RecordReader<InternalRow> reader = mock(RecordReader.class);
         private final SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        private final RowType rowType = mock(RowType.class);
         private BiConsumer<InternalRow, Integer> collector;
 
         private Fixture() throws Exception {
             when(table.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
-            when(table.primaryKeys()).thenReturn(Arrays.asList("id", "pt"));
+            when(table.primaryKeys()).thenReturn(Collections.singletonList("id"));
             when(table.partitionKeys()).thenReturn(Collections.singletonList("pt"));
+            when(table.rowType()).thenReturn(rowType);
+            when(rowType.getFieldNames()).thenReturn(Arrays.asList("pt", "id"));
             when(table.snapshotManager()).thenReturn(snapshotManager);
             when(snapshotManager.latestSnapshotIdFromFileSystem()).thenReturn(10L, 10L);
             when(runtime.createGlobalIndexAssigner(table)).thenReturn(assigner);

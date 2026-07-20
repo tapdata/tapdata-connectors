@@ -5,7 +5,6 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.CommitMessage;
 
 import java.util.List;
-import java.util.Set;
 
 /**
  * Connector-internal write contract for one Paimon bucket mode.
@@ -19,8 +18,8 @@ interface PaimonBucketWriterStrategy extends AutoCloseable {
 
     BucketMode bucketMode();
 
-    /** Ordered source fields which must exist and be non-null before row conversion. */
-    Set<String> requiredRoutingFields();
+    /** Validate non-null target-row fields required by this bucket strategy. */
+    void validateRoutingRow(InternalRow row, String operation);
 
     void write(InternalRow row) throws Exception;
 

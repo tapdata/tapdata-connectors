@@ -16,6 +16,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
@@ -32,6 +33,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -45,6 +48,154 @@ class PaimonServiceDynamicBucketIntegrationTest {
 
     @TempDir
     java.nio.file.Path tempDir;
+
+    @Test
+    void syntheticHashKeyMustWriteThroughHashDynamicWithoutMutatingSource() throws Exception {
+        PaimonConfig config = config("synthetic-hash-dynamic");
+        config.setHashKey(true);
+        KVMap<Object> stateMap = stateMap();
+        TapTable tapTable = syntheticHashTapTable("synthetic_hash_t", false);
+        Map<String, Object> sourceData = syntheticHashData("value");
+        Map<String, Object> originalSourceData = new LinkedHashMap<>(sourceData);
+
+        PaimonService service = service(config);
+        try {
+            createSyntheticHashDynamicTable(catalog(service), "synthetic_hash_t");
+            service.writeRecords(
+                    Collections.singletonList(cdcInsert("synthetic_hash_t", sourceData)),
+                    tapTable,
+                    context(stateMap));
+
+            List<InternalRow> rows =
+                    readRows(
+                            catalog(service)
+                                    .getTable(
+                                            Identifier.create(
+                                                    DATABASE, "synthetic_hash_t")));
+            assertEquals(1, rows.size());
+            assertEquals(
+                    service.toHash(tapTable.primaryKeys(true), sourceData),
+                    rows.get(0).getString(1).toString());
+            assertEquals(originalSourceData, sourceData);
+            assertFalse(sourceData.containsKey("_hash_key"));
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void syntheticHashKeyInitialSyncMustCommitOnlyAfterInitialSyncCallback() throws Exception {
+        PaimonConfig config = config("synthetic-hash-initial");
+        config.setHashKey(true);
+        KVMap<Object> stateMap = stateMap();
+        TapTable tapTable = syntheticHashTapTable("synthetic_initial_t", false);
+        Map<String, Object> sourceData = syntheticHashData("initial");
+
+        PaimonService service = service(config);
+        try {
+            createSyntheticHashDynamicTable(catalog(service), "synthetic_initial_t");
+            TapConnectorContext connectorContext = context(stateMap);
+            TapInsertRecordEvent event =
+                    new TapInsertRecordEvent()
+                            .init()
+                            .table("synthetic_initial_t")
+                            .after(sourceData);
+
+            service.writeRecords(
+                    Collections.singletonList(event), tapTable, connectorContext);
+            FileStoreTable targetTable =
+                    (FileStoreTable)
+                            catalog(service)
+                                    .getTable(
+                                            Identifier.create(
+                                                    DATABASE, "synthetic_initial_t"));
+            assertNull(targetTable.snapshotManager().latestSnapshotIdFromFileSystem());
+
+            service.afterInitialSync(connectorContext, tapTable);
+
+            assertEquals(1L, targetTable.snapshotManager().latestSnapshotIdFromFileSystem());
+            List<InternalRow> rows = readRows(targetTable);
+            assertEquals(1, rows.size());
+            assertEquals(
+                    service.toHash(tapTable.primaryKeys(true), sourceData),
+                    rows.get(0).getString(1).toString());
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void syntheticHashKeyMustSupportKeyDynamicUpdateDeleteAndNullPartition()
+            throws Exception {
+        PaimonConfig config = config("synthetic-key-dynamic");
+        config.setHashKey(true);
+        KVMap<Object> stateMap = stateMap();
+        TapTable tapTable = syntheticHashTapTable("synthetic_key_t", true);
+
+        PaimonService service = service(config);
+        try {
+            createSyntheticKeyDynamicTable(catalog(service), "synthetic_key_t");
+            TapConnectorContext connectorContext = context(stateMap);
+            Map<String, Object> inserted = syntheticHashData("old", 1);
+            Map<String, Object> moved = syntheticHashData("moved", 2);
+            service.writeRecords(
+                    Collections.singletonList(cdcInsert("synthetic_key_t", inserted)),
+                    tapTable,
+                    connectorContext);
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcUpdate("synthetic_key_t", inserted, moved)),
+                    tapTable,
+                    connectorContext);
+
+            List<InternalRow> movedRows =
+                    readRows(
+                            catalog(service)
+                                    .getTable(
+                                            Identifier.create(
+                                                    DATABASE, "synthetic_key_t")));
+            assertEquals(1, movedRows.size());
+            assertEquals(2, movedRows.get(0).getInt(0));
+            assertEquals("moved", movedRows.get(0).getString(1).toString());
+            assertEquals(
+                    service.toHash(tapTable.primaryKeys(true), moved),
+                    movedRows.get(0).getString(2).toString());
+
+            service.writeRecords(
+                    Collections.singletonList(cdcDelete("synthetic_key_t", moved)),
+                    tapTable,
+                    connectorContext);
+            assertEquals(
+                    0,
+                    readRows(
+                                    catalog(service)
+                                            .getTable(
+                                                    Identifier.create(
+                                                            DATABASE,
+                                                            "synthetic_key_t")))
+                            .size());
+
+            Map<String, Object> nullPartition = syntheticHashData("null-partition", null);
+            service.writeRecords(
+                    Collections.singletonList(
+                            cdcInsert("synthetic_key_t", nullPartition)),
+                    tapTable,
+                    connectorContext);
+            List<InternalRow> nullPartitionRows =
+                    readRows(
+                            catalog(service)
+                                    .getTable(
+                                            Identifier.create(
+                                                    DATABASE, "synthetic_key_t")));
+            assertEquals(1, nullPartitionRows.size());
+            assertTrue(nullPartitionRows.get(0).isNullAt(0));
+            assertEquals(
+                    service.toHash(tapTable.primaryKeys(true), nullPartition),
+                    nullPartitionRows.get(0).getString(2).toString());
+        } finally {
+            service.close();
+        }
+    }
 
     @Test
     void hashDynamicShouldRemainUniqueAcrossRealServiceRestart() throws Exception {
@@ -355,6 +506,73 @@ class PaimonServiceDynamicBucketIntegrationTest {
                         .option("write-buffer-size", "8mb")
                         .build(),
                 false);
+    }
+
+    private void createSyntheticHashDynamicTable(Catalog catalog, String tableName)
+            throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("value", DataTypes.STRING())
+                        // Keep the synthetic key away from index 0 to verify name-based resolution.
+                        .column("_hash_key", DataTypes.VARCHAR(32));
+        for (int i = 1; i <= 6; i++) {
+            builder.column("pk" + i, DataTypes.INT());
+        }
+        catalog.createTable(
+                Identifier.create(DATABASE, tableName),
+                builder.primaryKey("_hash_key")
+                        .option("bucket", "-1")
+                        .option("dynamic-bucket.target-row-num", "1")
+                        .option("write-buffer-size", "8mb")
+                        .build(),
+                false);
+    }
+
+    private void createSyntheticKeyDynamicTable(Catalog catalog, String tableName)
+            throws Exception {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("value", DataTypes.STRING())
+                        .column("_hash_key", DataTypes.VARCHAR(32));
+        for (int i = 1; i <= 6; i++) {
+            builder.column("pk" + i, DataTypes.INT());
+        }
+        catalog.createTable(
+                Identifier.create(DATABASE, tableName),
+                builder.partitionKeys("pt")
+                        .primaryKey("_hash_key")
+                        .option("bucket", "-1")
+                        .option("dynamic-bucket.target-row-num", "1")
+                        .option("write-buffer-size", "8mb")
+                        .build(),
+                false);
+    }
+
+    private TapTable syntheticHashTapTable(String tableName, boolean partitioned) {
+        TapTable table = new TapTable(tableName).add(new TapField("value", "STRING"));
+        for (int i = 1; i <= 6; i++) {
+            table.add(new TapField("pk" + i, "INT").primaryKeyPos(i));
+        }
+        if (partitioned) {
+            table.add(new TapField("pt", "INT"));
+        }
+        return table;
+    }
+
+    private Map<String, Object> syntheticHashData(String value) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("value", value);
+        for (int i = 1; i <= 6; i++) {
+            data.put("pk" + i, i);
+        }
+        return data;
+    }
+
+    private Map<String, Object> syntheticHashData(String value, Integer partition) {
+        Map<String, Object> data = syntheticHashData(value);
+        data.put("pt", partition);
+        return data;
     }
 
     private void createAppendOnlyTable(

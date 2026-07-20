@@ -8,10 +8,11 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 /** Final lifecycle template shared by all concrete bucket-mode strategies. */
 abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucketWriterStrategy {
@@ -21,13 +22,13 @@ abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucketWriterS
     protected final StreamTableWrite delegate;
 
     private final BucketMode expectedMode;
-    private final Set<String> requiredRoutingFields;
+    private final Map<String, Integer> requiredRoutingFieldIndexes;
     private boolean closed;
 
     AbstractPaimonBucketWriterStrategy(
             PaimonBucketWriterStrategyContext context,
             BucketMode expectedMode,
-            Collection<String> requiredRoutingFields) {
+            Collection<String> requiredTargetFields) {
         Objects.requireNonNull(context, "context");
         this.tableKey = context.tableKey();
         this.table = context.table();
@@ -43,10 +44,27 @@ abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucketWriterS
                             + table.bucketMode());
         }
         LinkedHashSet<String> fields = new LinkedHashSet<>();
-        for (String field : Objects.requireNonNull(requiredRoutingFields, "requiredRoutingFields")) {
+        for (String field : Objects.requireNonNull(requiredTargetFields, "requiredTargetFields")) {
             fields.add(Objects.requireNonNull(field, "requiredRoutingField"));
         }
-        this.requiredRoutingFields = Collections.unmodifiableSet(fields);
+        if (fields.isEmpty()) {
+            this.requiredRoutingFieldIndexes = Collections.emptyMap();
+        } else {
+            List<String> targetFieldNames = table.rowType().getFieldNames();
+            LinkedHashMap<String, Integer> indexes = new LinkedHashMap<>();
+            for (String field : fields) {
+                int index = targetFieldNames.indexOf(field);
+                if (index < 0) {
+                    throw new PaimonFatalWriteException(
+                            "Paimon routing field '"
+                                    + field
+                                    + "' is absent from target row type for "
+                                    + tableKey);
+                }
+                indexes.put(field, index);
+            }
+            this.requiredRoutingFieldIndexes = Collections.unmodifiableMap(indexes);
+        }
     }
 
     @Override
@@ -55,8 +73,20 @@ abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucketWriterS
     }
 
     @Override
-    public final Set<String> requiredRoutingFields() {
-        return requiredRoutingFields;
+    public final void validateRoutingRow(InternalRow row, String operation) {
+        Objects.requireNonNull(row, "row");
+        Objects.requireNonNull(operation, "operation");
+        for (Map.Entry<String, Integer> field : requiredRoutingFieldIndexes.entrySet()) {
+            if (row.isNullAt(field.getValue())) {
+                throw new PaimonFatalWriteException(
+                        "Missing non-null Paimon routing field '"
+                                + field.getKey()
+                                + "' for "
+                                + operation
+                                + " on dynamic-bucket table "
+                                + tableKey);
+            }
+        }
     }
 
     @Override

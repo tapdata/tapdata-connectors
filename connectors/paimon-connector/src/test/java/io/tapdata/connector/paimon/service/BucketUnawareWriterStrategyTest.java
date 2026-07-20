@@ -13,7 +13,6 @@ import org.junit.jupiter.params.provider.EnumSource;
 import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
@@ -57,16 +56,6 @@ class BucketUnawareWriterStrategyTest {
                         "default.t", table, mock(StreamTableWrite.class), "user", null);
 
         assertThrows(IllegalArgumentException.class, () -> new BucketUnawareWriterStrategy(context));
-    }
-
-    @Test
-    void requiredRoutingFieldsMustBeEmptyAndImmutable() {
-        Fixture fixture = new Fixture();
-
-        assertTrue(fixture.strategy.requiredRoutingFields().isEmpty());
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> fixture.strategy.requiredRoutingFields().add("id"));
     }
 
     private static final class Fixture {

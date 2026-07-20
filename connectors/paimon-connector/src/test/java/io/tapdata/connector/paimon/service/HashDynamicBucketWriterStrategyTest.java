@@ -18,7 +18,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 
@@ -37,21 +36,21 @@ import static org.mockito.Mockito.when;
 class HashDynamicBucketWriterStrategyTest {
 
     @Test
-    void requiredFieldsMustBeOrderedPrimaryThenDistinctPartitionKeys() {
+    void targetPrimaryKeysMustBeValidatedAfterRowMaterialization() {
         Fixture fixture = new Fixture();
+        InternalRow row = fixture.row();
 
-        assertEquals(
-                Arrays.asList("id", "pt"),
-                new ArrayList<>(fixture.strategy.requiredRoutingFields()));
+        fixture.strategy.validateRoutingRow(row, "INSERT");
     }
 
     @Test
-    void requiredFieldsMustBeImmutable() {
+    void nullTargetPrimaryKeyMustBeRejected() {
         Fixture fixture = new Fixture();
+        InternalRow row = GenericRow.of(7, null, BinaryString.fromString("value"));
 
         assertThrows(
-                UnsupportedOperationException.class,
-                () -> fixture.strategy.requiredRoutingFields().add("later"));
+                PaimonFatalWriteException.class,
+                () -> fixture.strategy.validateRoutingRow(row, "INSERT"));
     }
 
     @Test
@@ -134,6 +133,7 @@ class HashDynamicBucketWriterStrategyTest {
         private Fixture() {
             when(table.bucketMode()).thenReturn(BucketMode.HASH_DYNAMIC);
             when(table.schema()).thenReturn(schema);
+            when(table.rowType()).thenReturn(schema.logicalRowType());
             when(table.primaryKeys()).thenReturn(Arrays.asList("id", "pt"));
             when(table.partitionKeys()).thenReturn(Collections.singletonList("pt"));
             when(runtime.createHashBucketAssigner(table, "user")).thenReturn(assigner);

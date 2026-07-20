@@ -9,10 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -44,23 +41,16 @@ class PaimonTableWriteContextTest {
     }
 
     @Test
-    void routingValidationMustUseStrategyRequiredFields() {
+    void routingValidationMustUseMaterializedTargetRow() {
         Fixture fixture = new Fixture(0L);
-        when(fixture.strategy.requiredRoutingFields())
-                .thenReturn(new LinkedHashSet<>(Arrays.asList("id", "pt")));
-        Map<String, Object> data = new HashMap<>();
-        data.put("id", 1);
-        data.put("pt", 2);
+        InternalRow row = GenericRow.of(1, 2);
 
-        fixture.context.validateRequiredRoutingFields(data, "UPDATE_AFTER");
-        data.remove("pt");
-        assertThrows(
-                PaimonFatalWriteException.class,
-                () -> fixture.context.validateRequiredRoutingFields(data, "UPDATE_AFTER"));
-        data.put("pt", null);
-        assertThrows(
-                PaimonFatalWriteException.class,
-                () -> fixture.context.validateRequiredRoutingFields(data, "DELETE"));
+        fixture.context.validateRoutingRow(row, "UPDATE_AFTER");
+
+        verify(fixture.strategy)
+                .validateRoutingRow(
+                        org.mockito.ArgumentMatchers.same(row),
+                        org.mockito.ArgumentMatchers.eq("UPDATE_AFTER"));
     }
 
     @Test
@@ -259,7 +249,6 @@ class PaimonTableWriteContextTest {
                 PaimonTableWriteContext.CommitStateStore commitStateStore,
                 IOManager ioManager) {
             when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
-            when(strategy.requiredRoutingFields()).thenReturn(Collections.emptySet());
             context =
                     new PaimonTableWriteContext(
                             "default.t",

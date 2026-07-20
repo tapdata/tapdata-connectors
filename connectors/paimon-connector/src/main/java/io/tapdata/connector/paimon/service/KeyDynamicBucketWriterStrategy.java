@@ -29,7 +29,7 @@ final class KeyDynamicBucketWriterStrategy extends AbstractPaimonBucketWriterStr
         super(
                 requireIoManager(context),
                 BucketMode.KEY_DYNAMIC,
-                HashDynamicBucketWriterStrategy.requiredRoutingFields(context.table()));
+                HashDynamicBucketWriterStrategy.requiredPrimaryKeyFields(context.table()));
         PaimonBucketWriterRuntimeFactory runtime =
                 Objects.requireNonNull(runtimeFactory, "runtimeFactory");
         this.assigner =

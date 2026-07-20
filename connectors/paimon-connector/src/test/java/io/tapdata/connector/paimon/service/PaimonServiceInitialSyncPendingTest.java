@@ -7,14 +7,19 @@ import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.cache.KVMap;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.lang.reflect.Field;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -33,12 +38,75 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PaimonServiceInitialSyncPendingTest {
+
+    @Test
+    void syntheticHashKeyMustBeMaterializedBeforeDynamicRoutingValidation() throws Exception {
+        PaimonConfig config = new PaimonConfig();
+        config.setDatabase("default");
+        config.setHashKey(true);
+        config.setBatchAccumulationSize(0);
+        PaimonService service = new PaimonService(config, mock(Log.class));
+
+        List<String> sourcePrimaryKeys =
+                Arrays.asList("pk1", "pk2", "pk3", "pk4", "pk5", "pk6");
+        Map<String, Object> sourceData = new LinkedHashMap<>();
+        for (int i = 0; i < sourcePrimaryKeys.size(); i++) {
+            sourceData.put(sourcePrimaryKeys.get(i), i + 1);
+        }
+        Map<String, Object> originalSourceData = new LinkedHashMap<>(sourceData);
+        String expectedHash = service.toHash(sourcePrimaryKeys, sourceData);
+
+        PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
+        PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
+        when(strategy.bucketMode()).thenReturn(BucketMode.HASH_DYNAMIC);
+        when(strategy.prepareCommit(0L)).thenReturn(Collections.emptyList());
+        PaimonTableWriteContext context =
+                new PaimonTableWriteContext(
+                        "default.t",
+                        "t",
+                        "stable-user",
+                        strategy,
+                        committer,
+                        null,
+                        Collections.emptyList(),
+                        0L);
+        tableContexts(service).put("default.t", context);
+        fieldCache(service).put(
+                "default.t",
+                Collections.singletonList(
+                        new DataField(0, "_hash_key", DataTypes.VARCHAR(32))));
+
+        TapTable tapTable = mock(TapTable.class);
+        when(tapTable.getName()).thenReturn("t");
+        when(tapTable.primaryKeys(true)).thenReturn(sourcePrimaryKeys);
+        TapConnectorContext connectorContext = mock(TapConnectorContext.class);
+        when(connectorContext.getStateMap()).thenReturn(mock(KVMap.class));
+        when(connectorContext.getLog()).thenReturn(mock(Log.class));
+        TapInsertRecordEvent event =
+                new TapInsertRecordEvent().init().table("t").after(sourceData);
+        event.addInfo(TapRecordEvent.INFO_KEY_SYNC_STAGE, "CDC");
+
+        service.writeRecords(Collections.singletonList(event), tapTable, connectorContext);
+
+        ArgumentCaptor<InternalRow> rowCaptor = ArgumentCaptor.forClass(InternalRow.class);
+        InOrder order = inOrder(strategy, committer);
+        order.verify(strategy).validateRoutingRow(rowCaptor.capture(), eq("INSERT"));
+        order.verify(strategy).write(same(rowCaptor.getValue()));
+        order.verify(strategy).prepareCommit(0L);
+        order.verify(committer).filterAndCommit(anyMap());
+        assertEquals(expectedHash, rowCaptor.getValue().getString(0).toString());
+        assertEquals(originalSourceData, sourceData);
+        assertFalse(sourceData.containsKey("_hash_key"));
+        context.close();
+    }
 
     @Test
     void concurrentSourceIngressMustFenceInsteadOfUsingThreadOrder() throws Exception {
@@ -57,7 +125,6 @@ class PaimonServiceInitialSyncPendingTest {
             return null;
         }).when(strategy).write(any());
         when(strategy.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
-        when(strategy.requiredRoutingFields()).thenReturn(Collections.emptySet());
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
                         "default.t",
@@ -134,8 +201,6 @@ class PaimonServiceInitialSyncPendingTest {
         }).when(strategy1).write(any());
         when(strategy1.bucketMode()).thenReturn(BucketMode.HASH_DYNAMIC);
         when(strategy2.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
-        when(strategy1.requiredRoutingFields()).thenReturn(Collections.emptySet());
-        when(strategy2.requiredRoutingFields()).thenReturn(Collections.emptySet());
         PaimonTableWriteContext context1 = new PaimonTableWriteContext(
                 "default.t1", "t1", "user-1", strategy1,
                 mock(PaimonTableCommitter.class), null, Collections.emptyList(), 0L);
@@ -192,7 +257,6 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
-        when(strategy.requiredRoutingFields()).thenReturn(Collections.emptySet());
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
                         "default.t",
@@ -243,7 +307,6 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
-        when(strategy.requiredRoutingFields()).thenReturn(Collections.emptySet());
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
                         "default.t",
@@ -321,15 +384,19 @@ class PaimonServiceInitialSyncPendingTest {
     }
 
     @Test
-    void missingDynamicRoutingFieldMustBeFatalWithoutWritingOrRetrying() throws Exception {
+    void missingDynamicPrimaryKeyMustBeFatalWithoutWritingOrRetrying() throws Exception {
         PaimonConfig config = new PaimonConfig();
         config.setDatabase("default");
         PaimonService service = new PaimonService(config, mock(Log.class));
 
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
-        when(strategy.requiredRoutingFields())
-                .thenReturn(new java.util.LinkedHashSet<>(java.util.Arrays.asList("id", "pt")));
+        PaimonFatalWriteException missingPrimaryKey =
+                new PaimonFatalWriteException(
+                        "Missing non-null Paimon routing field 'id' for INSERT on dynamic-bucket table default.t");
+        doAnswer(invocation -> {
+            throw missingPrimaryKey;
+        }).when(strategy).validateRoutingRow(any(), eq("INSERT"));
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
                         "default.t",
@@ -357,13 +424,13 @@ class PaimonServiceInitialSyncPendingTest {
                 new TapInsertRecordEvent()
                         .init()
                         .table("t")
-                        .after(Collections.singletonMap("id", 1));
+                        .after(Collections.singletonMap("pt", 1));
 
         PaimonFatalWriteException thrown = assertThrows(
                 PaimonFatalWriteException.class,
                 () -> service.writeRecords(
                         Collections.singletonList(event), tapTable, connectorContext));
-        assertTrue(thrown.getMessage().contains("routing field 'pt'"));
+        assertEquals(missingPrimaryKey, thrown);
         verify(strategy, times(0)).write(any());
         context.close();
     }

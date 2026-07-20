@@ -145,18 +145,8 @@ final class PaimonTableWriteContext implements AutoCloseable {
         return writerStrategy.bucketMode();
     }
 
-    void validateRequiredRoutingFields(Map<String, ?> data, String operation) {
-        for (String field : writerStrategy.requiredRoutingFields()) {
-            if (data == null || !data.containsKey(field) || data.get(field) == null) {
-                throw new PaimonFatalWriteException(
-                        "Missing non-null Paimon routing field '"
-                                + field
-                                + "' for "
-                                + operation
-                                + " on dynamic-bucket table "
-                                + tableKey);
-            }
-        }
+    void validateRoutingRow(InternalRow row, String operation) {
+        writerStrategy.validateRoutingRow(row, operation);
     }
 
     synchronized boolean hasPendingCommit() {

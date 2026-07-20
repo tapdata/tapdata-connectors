@@ -6,10 +6,10 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -17,6 +17,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -36,16 +37,46 @@ class AbstractPaimonBucketWriterStrategyTest {
     }
 
     @Test
-    void requiredRoutingFieldsMustBeOrderedAndImmutable() {
+    void routingValidationMustUseTargetRowIndexesAndAllowNullPartition() {
         Fixture fixture = new Fixture(BucketMode.HASH_DYNAMIC);
-        List<String> fields = new ArrayList<>(Arrays.asList("id", "pt", "id"));
-        TestStrategy strategy = fixture.strategy(BucketMode.HASH_DYNAMIC, fields);
-        fields.clear();
+        TestStrategy strategy =
+                fixture.strategy(BucketMode.HASH_DYNAMIC, Collections.singletonList("id"));
+        InternalRow row = GenericRow.of(null, 42);
 
-        assertEquals(Arrays.asList("id", "pt"), new ArrayList<>(strategy.requiredRoutingFields()));
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> strategy.requiredRoutingFields().add("later"));
+        strategy.validateRoutingRow(row, "INSERT");
+    }
+
+    @Test
+    void nullTargetPrimaryKeyMustFailBeforeWriting() throws Exception {
+        Fixture fixture = new Fixture(BucketMode.HASH_DYNAMIC);
+        TestStrategy strategy =
+                fixture.strategy(BucketMode.HASH_DYNAMIC, Collections.singletonList("id"));
+        InternalRow row = GenericRow.of(7, null);
+
+        PaimonFatalWriteException thrown =
+                assertThrows(
+                        PaimonFatalWriteException.class,
+                        () -> strategy.validateRoutingRow(row, "UPDATE_AFTER"));
+
+        assertTrue(thrown.getMessage().contains("routing field 'id'"));
+        assertTrue(thrown.getMessage().contains("UPDATE_AFTER"));
+        verify(fixture.lifecycle, never()).write(org.mockito.ArgumentMatchers.any());
+        verify(fixture.writer, never()).prepareCommit(false, 0L);
+    }
+
+    @Test
+    void missingTargetRoutingFieldMustFailConstructionAsFatal() {
+        Fixture fixture = new Fixture(BucketMode.HASH_DYNAMIC);
+
+        PaimonFatalWriteException thrown =
+                assertThrows(
+                        PaimonFatalWriteException.class,
+                        () ->
+                                fixture.strategy(
+                                        BucketMode.HASH_DYNAMIC,
+                                        Collections.singletonList("missing")));
+
+        assertTrue(thrown.getMessage().contains("routing field 'missing'"));
     }
 
     @Test
@@ -130,10 +161,13 @@ class AbstractPaimonBucketWriterStrategyTest {
         private final FileStoreTable table = mock(FileStoreTable.class);
         private final StreamTableWrite writer = mock(StreamTableWrite.class);
         private final ModeLifecycle lifecycle = mock(ModeLifecycle.class);
+        private final RowType rowType = mock(RowType.class);
         private final PaimonBucketWriterStrategyContext context;
 
         private Fixture(BucketMode actualMode) {
             when(table.bucketMode()).thenReturn(actualMode);
+            when(table.rowType()).thenReturn(rowType);
+            when(rowType.getFieldNames()).thenReturn(Arrays.asList("pt", "id"));
             context = new PaimonBucketWriterStrategyContext("default.t", table, writer, "user", null);
         }
 

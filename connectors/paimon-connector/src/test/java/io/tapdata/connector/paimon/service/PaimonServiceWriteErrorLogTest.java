@@ -25,7 +25,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
@@ -46,6 +45,20 @@ class PaimonServiceWriteErrorLogTest {
     private static final String CACHE_KEY = DATABASE + "." + TABLE_NAME;
     private static final long REFERENCE_TIME = 123456789L;
     private static final String LONG_NAME = repeat('x', 300);
+
+    @Test
+    void legacySyntheticHashMustKeepMissingAndNullPrimaryKeyEncoding() {
+        PaimonService service = new PaimonService(new PaimonConfig(), mock(Log.class));
+        List<String> keys = Arrays.asList("pk1", "pk2", "pk3");
+        Map<String, Object> missing = new LinkedHashMap<>();
+        missing.put("pk1", 1);
+        missing.put("pk3", 3);
+        Map<String, Object> explicitNull = new LinkedHashMap<>(missing);
+        explicitNull.put("pk2", null);
+
+        assertEquals("5989c034788371db039a59ebbdbc5ff8", service.toHash(keys, missing));
+        assertEquals(service.toHash(keys, missing), service.toHash(keys, explicitNull));
+    }
 
     @Test
     void syntheticHashFailureMustNotExposeSourceValues() {
@@ -427,8 +440,7 @@ class PaimonServiceWriteErrorLogTest {
         }
 
         @Override
-        public Set<String> requiredRoutingFields() {
-            return Collections.emptySet();
+        public void validateRoutingRow(InternalRow row, String operation) {
         }
 
         @Override

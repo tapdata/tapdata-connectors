@@ -1614,10 +1614,10 @@ public class PaimonService implements AutoCloseable {
 	 */
 	private void handleStreamInsert(TapInsertRecordEvent event, PaimonTableWriteContext writeContext, TapTable table, Log currentLog) throws Exception {
 		Map<String, Object> after = event.getAfter();
-		writeContext.validateRequiredRoutingFields(after, "INSERT");
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(after, table, identifier);
+		writeContext.validateRoutingRow(row, "INSERT");
 		writeRow(writeContext, event, row, table, after, currentLog);
 	}
 
@@ -1640,11 +1640,11 @@ public class PaimonService implements AutoCloseable {
 		// Convert before and after data to GenericRow first to avoid duplicate conversion
 		GenericRow beforeRow = null;
 		if (before != null && !before.isEmpty()) {
-			writeContext.validateRequiredRoutingFields(before, "UPDATE_BEFORE");
 			beforeRow = convertToGenericRow(before, table, identifier);
+			writeContext.validateRoutingRow(beforeRow, "UPDATE_BEFORE");
 		}
-		writeContext.validateRequiredRoutingFields(after, "UPDATE_AFTER");
 		GenericRow afterRow = convertToGenericRow(after, table, identifier);
+		writeContext.validateRoutingRow(afterRow, "UPDATE_AFTER");
 
 		// Check if primary key update detection is enabled
 		Boolean enablePkUpdate = config.getEnablePrimaryKeyUpdate(table.getName());
@@ -1735,10 +1735,10 @@ public class PaimonService implements AutoCloseable {
 	 */
 	private void handleStreamDelete(TapDeleteRecordEvent event, PaimonTableWriteContext writeContext, TapTable table, Log currentLog) throws Exception {
 		Map<String, Object> before = event.getBefore();
-		writeContext.validateRequiredRoutingFields(before, "DELETE");
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
 		GenericRow row = convertToGenericRow(before, table, identifier);
+		writeContext.validateRoutingRow(row, "DELETE");
 		// Set row kind to DELETE
 		row.setRowKind(RowKind.DELETE);
 		writeRow(writeContext, event, row, table, before, currentLog);
