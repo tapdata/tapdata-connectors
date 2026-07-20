@@ -4,7 +4,7 @@
     "realName": "Apache Paimon",
     "icon": "icons/paimon.png",
     "doc": "${doc}",
-    "tags": ["Database", "schema-free"],
+    "tags": ["Database"],
     "id": "paimon"
   },
   "configOptions": {
