@@ -18,6 +18,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <java.version>8</java.version>
         <paimon.version>1.3.1</paimon.version>
+        <!-- Must stay aligned with the RocksDB JNI supplied by Tapdata Engine. -->
+        <tapdata.rocksdb.version>7.3.1</tapdata.rocksdb.version>
         <hadoop.version>3.3.6</hadoop.version>
         <tapdata.pdk.api.version>2.0.8-SNAPSHOT</tapdata.pdk.api.version>
     </properties>
@@ -60,6 +62,18 @@
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-common</artifactId>
             <version>${paimon.version}</version>
+        </dependency>
+
+        <!--
+            Required by Paimon's KEY_DYNAMIC GlobalIndexAssigner. The engine already owns and
+            loads this JNI library, so the connector must not shade a second RocksDB ABI into the
+            child-first connector classloader.
+        -->
+        <dependency>
+            <groupId>org.rocksdb</groupId>
+            <artifactId>rocksdbjni</artifactId>
+            <version>${tapdata.rocksdb.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <!-- Paimon Format Parquet -->
@@ -194,6 +208,13 @@
                         </goals>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <artifactSet>
+                                <excludes>
+                                    <!-- Native libraries are process-wide and must come from Tapdata Engine. -->
+                                    <exclude>org.rocksdb:rocksdbjni</exclude>
+                                    <exclude>com.ververica:frocksdbjni</exclude>
+                                </excludes>
+                            </artifactSet>
                             <filters>
                                 <filter>
                                     <artifact>**:**</artifact>
@@ -291,6 +312,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
                 <executions>
                     <!--first execution : for preparing JaCoCo runtime agent-->
                     <execution>

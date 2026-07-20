@@ -15,10 +15,7 @@
       },
       {
         "id": "dml_update_policy",
-        "alternatives": ["insert_on_nonexists"]
-      },
-      {
-        "id": "flush_offset_callback"
+        "alternatives": ["ignore_on_nonexists"]
       }
     ],
     "connection": {

@@ -4,10 +4,8 @@ import io.tapdata.base.ConnectorBase;
 import io.tapdata.connector.paimon.config.PaimonConfig;
 import io.tapdata.connector.paimon.service.PaimonService;
 import io.tapdata.entity.codec.TapCodecsRegistry;
-import io.tapdata.entity.event.TapCallbackOffset;
 import io.tapdata.entity.event.TapEvent;
 import io.tapdata.entity.event.control.ControlEvent;
-import io.tapdata.entity.event.control.HeartbeatEvent;
 import io.tapdata.entity.event.ddl.index.TapCreateIndexEvent;
 import io.tapdata.entity.event.ddl.table.TapCreateTableEvent;
 import io.tapdata.entity.event.ddl.table.TapDropTableEvent;
@@ -18,7 +16,6 @@ import io.tapdata.entity.schema.value.*;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
-import io.tapdata.kit.EmptyKit;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.context.TapConnectionContext;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
@@ -49,7 +46,6 @@ public class PaimonConnector extends ConnectorBase {
     
     private PaimonConfig paimonConfig;
     private PaimonService paimonService;
-    private Consumer<Object> flushOffsetCallback;
 
     /**
      * Initialize connection when connector starts
@@ -72,13 +68,8 @@ public class PaimonConnector extends ConnectorBase {
             paimonConfig.load(nodeConfig);
             paimonConfig.setTableConfig(connectionContext.getTableNodeConfig());
         }
-        this.flushOffsetCallback = connectionContext.getFlushOffsetCallback();
-        if (this.flushOffsetCallback != null) {
-            connectionContext.getLog().info("Flush offset callback registered for StarRocks connector");
-        }
         // Initialize Paimon service
         paimonService = new PaimonService(paimonConfig, connectionContext.getLog());
-        paimonService.setFlushOffsetCallback(flushOffsetCallback);
         paimonService.init();
         
         connectionContext.getLog().info("Paimon connector started successfully");
@@ -88,15 +79,19 @@ public class PaimonConnector extends ConnectorBase {
      * Clean up resources when connector stops
      *
      * @param connectionContext connection context
-     */
+    */
     @Override
-    public void onStop(TapConnectionContext connectionContext) {
+    public void onStop(TapConnectionContext connectionContext) throws Throwable {
         if (paimonService != null) {
             try {
                 paimonService.close();
-                paimonService = null;
             } catch (Exception e) {
                 connectionContext.getLog().warn("Error closing Paimon service: " + e.getMessage(), e);
+                // A close failure can mean buffered rows were not committed. Propagate it through
+                // the PDK stop-failure channel so shutdown is never reported as successful.
+                throw e;
+            } finally {
+                paimonService = null;
             }
         }
     }
@@ -487,27 +482,8 @@ public class PaimonConnector extends ConnectorBase {
     }
 
     protected void processControl(TapConnectorContext tapConnectorContext, ControlEvent controlEvent) {
-        if (controlEvent instanceof HeartbeatEvent) {
-            if (paimonService != null && EmptyKit.isEmpty(paimonService.getFirstOffsetByTable())) {
-                TapCallbackOffset tapOffset = new TapCallbackOffset();
-                // 从 TapRecordEvent.info 中提取 offset 信息
-                // 这些信息由 HazelcastTargetPdkBaseNode.handleTapdataEventDML 方法添加
-                Object batchOffset = controlEvent.getInfo("batchOffset");
-                Object streamOffset = controlEvent.getInfo("streamOffset");
-                Object syncStage = controlEvent.getInfo("syncStage");
-                Object sourceTime = controlEvent.getInfo("sourceTime");
-                Object nodeIds = controlEvent.getInfo("nodeIds");
-
-                // 填充 TapOffset
-                tapOffset.batchOffset(batchOffset)
-                        .streamOffset(streamOffset)
-                        .syncStage(syncStage != null ? syncStage.toString() : null)
-                        .sourceTime(sourceTime instanceof Long ? (Long) sourceTime : null)
-                        .eventTime(((HeartbeatEvent) controlEvent).getReferenceTime())
-                        .nodeIds(nodeIds);
-                tapConnectorContext.getFlushOffsetCallback().accept(tapOffset);
-            }
-        }
+        // PLATFORM_MANAGED offset mode: writeRecords confirms every CDC snapshot before return.
+        // The current PDK has no global source sequence for safely interleaving heartbeat and
+        // multi-table DML callbacks, so this connector intentionally does not advance offsets here.
     }
 }
-

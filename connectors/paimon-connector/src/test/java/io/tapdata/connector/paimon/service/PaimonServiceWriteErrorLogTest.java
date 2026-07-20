@@ -8,23 +8,24 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.TableWrite;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -44,6 +46,26 @@ class PaimonServiceWriteErrorLogTest {
     private static final String CACHE_KEY = DATABASE + "." + TABLE_NAME;
     private static final long REFERENCE_TIME = 123456789L;
     private static final String LONG_NAME = repeat('x', 300);
+
+    @Test
+    void syntheticHashFailureMustNotExposeSourceValues() {
+        PaimonService service = new PaimonService(new PaimonConfig(), mock(Log.class));
+        String secret = "primary-key-secret-sentinel";
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", new Object() {
+            @Override
+            public String toString() {
+                throw new IllegalStateException(secret);
+            }
+        });
+
+        RuntimeException error = assertThrows(
+                RuntimeException.class,
+                () -> service.toHash(Collections.singletonList("id"), data));
+
+        assertFalse(error.getMessage().contains(secret));
+        assertFalse(error.toString().contains(secret));
+    }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("writeFailureScenarios")
@@ -62,33 +84,40 @@ class PaimonServiceWriteErrorLogTest {
         when(table.getName()).thenReturn(TABLE_NAME);
 
         seedComputeHashKey(service);
-        seedFieldCache(service, List.of(
+        seedFieldCache(service, Arrays.asList(
                 new DataField(0, "id", DataTypes.BIGINT()),
                 new DataField(1, "name", DataTypes.STRING())
         ));
 
-        try (FailingStreamTableWrite writer = new FailingStreamTableWrite(scenario.failOnWriteCall())) {
-            Exception thrown = assertThrows(Exception.class, () -> scenario.invoke(service, writer, table));
+        try (FailingWriteFixture fixture = new FailingWriteFixture(scenario.failOnWriteCall())) {
+            Exception thrown =
+                    assertThrows(
+                            Exception.class,
+                            () -> scenario.invoke(service, fixture.context(), table));
             assertEquals(scenario.expectedExceptionMessage(), thrown.getMessage());
 
-            assertNotNull(writer.getFailedRow());
-            assertEquals(scenario.expectedRowKind(), writer.getFailedRow().getRowKind().name());
-            assertNull(writer.getFailedRow().getField(0));
-            assertEquals(scenario.expectedSecondFieldValue(), writer.getFailedRow().getField(1).toString());
-            assertEquals(scenario.expectedWriteCount(), writer.getWriteCount());
+            assertNotNull(fixture.getFailedRow());
+            assertEquals(scenario.expectedRowKind(), fixture.getFailedRow().getRowKind().name());
+            assertNull(fixture.getFailedRow().getField(0));
+            assertEquals(
+                    scenario.expectedSecondFieldValue(),
+                    fixture.getFailedRow().getField(1).toString());
+            assertEquals(scenario.expectedWriteCount(), fixture.getWriteCount());
         }
 
         String errorMessage = log.getLastErrorMessage();
         assertNotNull(errorMessage);
-        System.out.println(errorMessage);
-        assertTrue(errorMessage.contains("Failed to write row to Paimon. table=customer_table, bucket=null"));
+        assertTrue(
+                errorMessage.contains(
+                        "Failed to write row to Paimon. table=customer_table, bucket=connector-managed"));
         assertTrue(errorMessage.contains(scenario.expectedSourceDataFragment()));
         assertTrue(errorMessage.contains("fieldMapping=[0:id, 1:name]"));
         assertTrue(errorMessage.contains(scenario.expectedRowValuesFragment()));
         assertTrue(errorMessage.contains("rowKind=" + scenario.expectedRowKind()));
-        if (scenario.expectedTruncationFragment() != null) {
-            assertTrue(errorMessage.contains(scenario.expectedTruncationFragment()));
-        }
+        assertFalse(errorMessage.contains("Alice"));
+        assertFalse(errorMessage.contains("BeforeUpdate"));
+        assertFalse(errorMessage.contains("AfterUpdate"));
+        assertFalse(errorMessage.contains(LONG_NAME.substring(0, 32)));
     }
 
     private static Stream<Arguments> writeFailureScenarios() {
@@ -117,12 +146,12 @@ class PaimonServiceWriteErrorLogTest {
     }
 
     private static void invokeHandleStreamInsert(PaimonService service, TapInsertRecordEvent event,
-                                            StreamTableWrite writer, TapTable table) throws Exception {
+                                            PaimonTableWriteContext writeContext, TapTable table) throws Exception {
         Method method = PaimonService.class.getDeclaredMethod("handleStreamInsert", TapInsertRecordEvent.class,
-                StreamTableWrite.class, TapTable.class);
+                PaimonTableWriteContext.class, TapTable.class, Log.class);
         method.setAccessible(true);
         try {
-            method.invoke(service, event, writer, table);
+            method.invoke(service, event, writeContext, table, serviceLog(service));
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause();
             if (cause instanceof Exception) {
@@ -133,12 +162,12 @@ class PaimonServiceWriteErrorLogTest {
     }
 
     private static void invokeHandleStreamUpdate(PaimonService service, TapUpdateRecordEvent event,
-                                            StreamTableWrite writer, TapTable table) throws Exception {
+                                            PaimonTableWriteContext writeContext, TapTable table) throws Exception {
         Method method = PaimonService.class.getDeclaredMethod("handleStreamUpdate", TapUpdateRecordEvent.class,
-                StreamTableWrite.class, TapTable.class);
+                PaimonTableWriteContext.class, TapTable.class, Log.class);
         method.setAccessible(true);
         try {
-            method.invoke(service, event, writer, table);
+            method.invoke(service, event, writeContext, table, serviceLog(service));
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause();
             if (cause instanceof Exception) {
@@ -146,6 +175,12 @@ class PaimonServiceWriteErrorLogTest {
             }
             throw new RuntimeException(cause);
         }
+    }
+
+    private static Log serviceLog(PaimonService service) throws Exception {
+        Field field = PaimonService.class.getDeclaredField("log");
+        field.setAccessible(true);
+        return (Log) field.get(service);
     }
 
     private static TapInsertRecordEvent buildInsertEvent(Map<String, Object> after) {
@@ -175,7 +210,8 @@ class PaimonServiceWriteErrorLogTest {
 
     @FunctionalInterface
     private interface ScenarioInvoker {
-        void invoke(PaimonService service, StreamTableWrite writer, TapTable table) throws Exception;
+        void invoke(PaimonService service, PaimonTableWriteContext writeContext, TapTable table)
+                throws Exception;
     }
 
     private static class Scenario {
@@ -224,8 +260,8 @@ class PaimonServiceWriteErrorLogTest {
                     1,
                     "Alice",
                     "Required field id cannot be null",
-                    "sourceData={id=null, name=Alice}",
-                    "values={0:id=null, 1:name=\"Alice\"}",
+                    "sourceData={id=null, name=String(len=5)}",
+                    "valueMetadata={0:id=null, 1:name=BinaryString(len=5)}",
                     null,
                     1
             );
@@ -246,8 +282,8 @@ class PaimonServiceWriteErrorLogTest {
                     1,
                     "BeforeUpdate",
                     "Required field id cannot be null",
-                    "sourceData={id=null, name=BeforeUpdate}",
-                    "values={0:id=null, 1:name=\"BeforeUpdate\"}",
+                    "sourceData={id=null, name=String(len=12)}",
+                    "valueMetadata={0:id=null, 1:name=BinaryString(len=12)}",
                     null,
                     1
             );
@@ -268,8 +304,8 @@ class PaimonServiceWriteErrorLogTest {
                     2,
                     "AfterUpdate",
                     "Required field id cannot be null",
-                    "sourceData={id=null, name=AfterUpdate}",
-                    "values={0:id=null, 1:name=\"AfterUpdate\"}",
+                    "sourceData={id=null, name=String(len=11)}",
+                    "valueMetadata={0:id=null, 1:name=BinaryString(len=11)}",
                     null,
                     2
             );
@@ -287,15 +323,17 @@ class PaimonServiceWriteErrorLogTest {
                     1,
                     LONG_NAME,
                     "Required field id cannot be null",
-                    "sourceData={id=null, name=" + LONG_NAME.substring(0, 32),
-                    "values={0:id=null, 1:name=\"" + LONG_NAME.substring(0, 32),
-                    "...(len=300)",
+                    "sourceData={id=null, name=String(len=300)}",
+                    "valueMetadata={0:id=null, 1:name=BinaryString(len=300)}",
+                    null,
                     1
             );
         }
 
-        void invoke(PaimonService service, StreamTableWrite writer, TapTable table) throws Exception {
-            invoker.invoke(service, writer, table);
+        void invoke(
+                PaimonService service, PaimonTableWriteContext writeContext, TapTable table)
+                throws Exception {
+            invoker.invoke(service, writeContext, table);
         }
 
         String expectedRowKind() {
@@ -336,44 +374,61 @@ class PaimonServiceWriteErrorLogTest {
         }
     }
 
-    private static class FailingStreamTableWrite implements StreamTableWrite, AutoCloseable {
+    private static class FailingWriteFixture implements AutoCloseable {
+
+        private final FailingWriterStrategy strategy;
+        private final PaimonTableWriteContext context;
+
+        private FailingWriteFixture(int failOnWriteCall) {
+            this.strategy = new FailingWriterStrategy(failOnWriteCall);
+            this.context =
+                    new PaimonTableWriteContext(
+                            CACHE_KEY,
+                            TABLE_NAME,
+                            "write-error-log-test",
+                            strategy,
+                            new NoopCommitter(),
+                            null,
+                            Collections.emptyList(),
+                            0L);
+        }
+
+        private PaimonTableWriteContext context() {
+            return context;
+        }
+
+        private GenericRow getFailedRow() {
+            return strategy.getFailedRow();
+        }
+
+        private int getWriteCount() {
+            return strategy.getWriteCount();
+        }
+
+        @Override
+        public void close() throws Exception {
+            context.close();
+        }
+    }
+
+    private static class FailingWriterStrategy implements PaimonBucketWriterStrategy {
 
         private final AtomicInteger writeCount = new AtomicInteger();
         private final int failOnWriteCall;
         private final AtomicReference<GenericRow> failedRow = new AtomicReference<>();
 
-        private FailingStreamTableWrite(int failOnWriteCall) {
+        private FailingWriterStrategy(int failOnWriteCall) {
             this.failOnWriteCall = failOnWriteCall;
         }
 
         @Override
-        public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier) {
-            return Collections.emptyList();
+        public BucketMode bucketMode() {
+            return BucketMode.HASH_FIXED;
         }
 
         @Override
-        public TableWrite withIOManager(org.apache.paimon.disk.IOManager ioManager) {
-            return this;
-        }
-
-        @Override
-        public TableWrite withWriteType(RowType writeType) {
-            return this;
-        }
-
-        @Override
-        public TableWrite withMemoryPoolFactory(org.apache.paimon.memory.MemoryPoolFactory memoryPoolFactory) {
-            return this;
-        }
-
-        @Override
-        public org.apache.paimon.data.BinaryRow getPartition(InternalRow row) {
-            return null;
-        }
-
-        @Override
-        public int getBucket(InternalRow row) {
-            return 0;
+        public Set<String> requiredRoutingFields() {
+            return Collections.emptySet();
         }
 
         @Override
@@ -386,22 +441,8 @@ class PaimonServiceWriteErrorLogTest {
         }
 
         @Override
-        public void write(InternalRow row, int bucket) {
-            write(row);
-        }
-
-        @Override
-        public void writeBundle(org.apache.paimon.data.BinaryRow partition, int bucket,
-                                org.apache.paimon.io.BundleRecords bundle) {
-        }
-
-        @Override
-        public void compact(org.apache.paimon.data.BinaryRow partition, int bucket, boolean fullCompaction) {
-        }
-
-        @Override
-        public TableWrite withMetricRegistry(org.apache.paimon.metrics.MetricRegistry registry) {
-            return this;
+        public List<CommitMessage> prepareCommit(long commitIdentifier) {
+            return Collections.emptyList();
         }
 
         @Override
@@ -415,6 +456,17 @@ class PaimonServiceWriteErrorLogTest {
         private int getWriteCount() {
             return writeCount.get();
         }
+    }
+
+    private static class NoopCommitter implements PaimonTableCommitter {
+
+        @Override
+        public int filterAndCommit(Map<Long, List<CommitMessage>> pendingCommits) {
+            return pendingCommits.size();
+        }
+
+        @Override
+        public void close() {}
     }
 
     private static class CapturingLog implements Log {
@@ -436,6 +488,9 @@ class PaimonServiceWriteErrorLogTest {
 
         @Override
         public void warn(String message, Object... params) {
+            lastErrorThrowable = extractThrowable(params);
+            Object[] formattedParams = trimThrowable(params);
+            lastErrorMessage = format(message, formattedParams);
         }
 
         @Override
@@ -515,7 +570,3 @@ class PaimonServiceWriteErrorLogTest {
         }
     }
 }
-
-
-
-
