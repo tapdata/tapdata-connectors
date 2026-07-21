@@ -59,6 +59,7 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String walTdeKey;
     private String walTdeKeyPassword;
     private Integer walTdeDataEncryptionBits;
+    private Boolean checkCdcSlave = false;
 
     //customize
     public PostgresConfig() {
@@ -352,5 +353,13 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setWalTdeDataEncryptionBits(Integer walTdeDataEncryptionBits) {
         this.walTdeDataEncryptionBits = walTdeDataEncryptionBits;
+    }
+
+    public Boolean getCheckCdcSlave() {
+        return checkCdcSlave;
+    }
+
+    public void setCheckCdcSlave(Boolean checkCdcSlave) {
+        this.checkCdcSlave = checkCdcSlave;
     }
 }

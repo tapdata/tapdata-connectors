@@ -48,13 +48,13 @@ public class PostgresTest extends CommonDbTest {
 
     public PostgresTest initContext() {
         if ("master-slave".equals(((PostgresConfig) commonDbConfig).getDeploymentMode())) {
-            testHostPortForMasterSlave();
+            testHostPortForMasterSlave(true);
         }
         jdbcContext = new PostgresJdbcContext((PostgresConfig) commonDbConfig);
         return this;
     }
 
-    public void testHostPortForMasterSlave() {
+    public void testHostPortForMasterSlave(boolean master) {
         AtomicBoolean isMaster = new AtomicBoolean();
         String availableHost = null;
         int availablePort = 0;
@@ -65,13 +65,24 @@ public class PostgresTest extends CommonDbTest {
                 jdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> {
                     isMaster.set(!resultSet.getBoolean(1));
                 });
-                if (isMaster.get()) {
-                    masterConnected = true;
-                    return;
+                if (master) {
+                    if (isMaster.get()) {
+                        masterConnected = true;
+                        return;
+                    } else {
+                        availableHost = commonDbConfig.getHost();
+                        availablePort = commonDbConfig.getPort();
+                        masterConnected = false;
+                    }
                 } else {
-                    availableHost = commonDbConfig.getHost();
-                    availablePort = commonDbConfig.getPort();
-                    masterConnected = false;
+                    if (!isMaster.get()) {
+                        masterConnected = false;
+                        return;
+                    } else {
+                        availableHost = commonDbConfig.getHost();
+                        availablePort = commonDbConfig.getPort();
+                        masterConnected = true;
+                    }
                 }
             } catch (Throwable ignore) {
             }

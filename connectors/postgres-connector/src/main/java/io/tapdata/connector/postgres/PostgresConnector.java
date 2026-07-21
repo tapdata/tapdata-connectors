@@ -39,6 +39,7 @@ import io.tapdata.entity.utils.cache.Entry;
 import io.tapdata.entity.utils.cache.Iterator;
 import io.tapdata.entity.utils.cache.KVReadOnlyMap;
 import io.tapdata.exception.TapCodeException;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.*;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
@@ -65,11 +66,9 @@ import java.sql.Date;
 import java.text.SimpleDateFormat;
 import java.time.*;
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArraySet;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -94,6 +93,7 @@ public class PostgresConnector extends CommonDbConnector {
     private Object slotName; //must be stored in stateMap
     protected String postgresVersion;
     protected PostgresPartitionContext postgresPartitionContext;
+    private ScheduledExecutorService asyncCheckSlaveExecutor;
 
     @Override
     public void onStart(TapConnectionContext connectorContext) {
@@ -498,6 +498,20 @@ public class PostgresConnector extends CommonDbConnector {
                 cdcRunner.closeCdcRunner();
             }
         });
+        ErrorKit.ignoreAnyError(() -> {
+            if (asyncCheckSlaveExecutor != null) {
+                asyncCheckSlaveExecutor.shutdown();
+                try {
+                    if (!asyncCheckSlaveExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        asyncCheckSlaveExecutor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    asyncCheckSlaveExecutor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+                asyncCheckSlaveExecutor = null;
+            }
+        });
         EmptyKit.closeQuietly(postgresTest);
         EmptyKit.closeQuietly(postgresJdbcContext);
     }
@@ -719,7 +733,8 @@ public class PostgresConnector extends CommonDbConnector {
 
     private void streamRead(TapConnectorContext nodeContext, List<String> tableList, Object offsetState, int recordSize, StreamReadConsumer consumer) throws Throwable {
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave();
+            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
+            postgresJdbcContext.refresh();
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
@@ -772,6 +787,7 @@ public class PostgresConnector extends CommonDbConnector {
                 }
 
                 miner.registerConsumer(consumer, recordSize);
+                checkCdcSlaveConnected(miner);
                 miner.startMiner(this::isAlive);
             } catch (Exception e) {
                 if (e instanceof SQLException) {
@@ -858,7 +874,8 @@ public class PostgresConnector extends CommonDbConnector {
             });
         }
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave();
+            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
+            postgresJdbcContext.refresh();
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotEmpty(postgresConfig.getPgtoHost())) {
@@ -908,6 +925,7 @@ public class PostgresConnector extends CommonDbConnector {
             }
 
             miner.registerConsumer(consumer, batchSize);
+            checkCdcSlaveConnected(miner);
             miner.startMiner(this::isAlive);
         } else {
             cdcRunner = new PostgresCdcRunner(postgresJdbcContext, nodeContext);
@@ -944,7 +962,7 @@ public class PostgresConnector extends CommonDbConnector {
 
     private Object timestampToStreamOffset(TapConnectorContext connectorContext, Long offsetStartTime) throws Throwable {
         if ("master-slave".equals(postgresConfig.getDeploymentMode())) {
-            postgresTest.testHostPortForMasterSlave();
+            postgresTest.testHostPortForMasterSlave(!("physical".equals(postgresConfig.getLogPluginName()) && postgresConfig.getCheckCdcSlave()));
         }
         if ("walminer".equals(postgresConfig.getLogPluginName())) {
             if (EmptyKit.isNotBlank(postgresConfig.getPgtoHost())) {
@@ -1008,6 +1026,29 @@ public class PostgresConnector extends CommonDbConnector {
             }
         }
         return new PostgresOffset();
+    }
+
+    private void checkCdcSlaveConnected(PhysicalWalLogMiner miner) {
+        if (postgresConfig.getCheckCdcSlave()) {
+            asyncCheckSlaveExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "slave-async-check");
+                t.setDaemon(true);
+                return t;
+            });
+            asyncCheckSlaveExecutor.scheduleAtFixedRate(() -> {
+                try {
+                    postgresJdbcContext.queryWithNext("SELECT pg_is_in_recovery()", resultSet -> {
+                        boolean isInRecovery = resultSet.getBoolean(1);
+                        if (!isInRecovery) {
+                            tapLogger.warn("The node cdc connected to is master node, we need switch to slave node");
+                            miner.setThreadException(new TapPdkRetryableEx("postgres", new RuntimeException("Master node detected, please switch to slave node for CDC")));
+                        }
+                    });
+                } catch (Exception e) {
+                    tapLogger.warn("Failed to check PostgreSQL server recovery status: {}", e.getMessage());
+                }
+            }, 300, 300, TimeUnit.SECONDS);
+        }
     }
 
     private String getTimestampOffset(Long offsetStartTime) throws SQLException {
