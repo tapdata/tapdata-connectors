@@ -56,6 +56,10 @@ public abstract class AbstractWalLogMiner {
         this.tapLogger = tapLogger;
     }
 
+    public void setThreadException(final Throwable t) {
+        threadException.set(t);
+    }
+
     public AbstractWalLogMiner watch(List<String> tableList, KVReadOnlyMap<TapTable> tableMap) {
         withSchema = false;
         this.tableList = tableList;

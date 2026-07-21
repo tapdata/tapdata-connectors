@@ -285,6 +285,24 @@
             }
           }
         },
+        "checkCdcSlave": {
+          "type": "boolean",
+          "title": "${checkCdcSlave}",
+          "default": false,
+          "x-index": 83,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "deploymentMode", "logPluginName"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='master-slave' && $deps[2]==='physical' ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
         "walTdeKey": {
           "type": "string",
           "title": "${walTdeKey}",
@@ -1072,6 +1090,7 @@
       "password" : "password",
       "logPluginName" : "logPluginName",
       "logPluginNameTip": "The higher version PG comes with the PGOUTPUT plugin, but the before data in the logs is not complete. \nThe author recommends using WAL2JSON, and the installation method can be found in the MD documentation",
+      "checkCdcSlave": "Check CDC slave",
       "walTdeKey": "EDB TDE key file",
       "walTdeKeyTip": "Upload the EDB TDE wrapped key file, usually PGDATA/pg_encryption/key.bin. Only used by the PHYSICAL log plugin to decrypt encrypted WAL.",
       "walTdeKeyPassword": "EDB TDE key password",
@@ -1154,6 +1173,7 @@
       "password" : "密码",
       "logPluginName" : "日志插件",
       "logPluginNameTip": "高版本PG自带PGOUTPUT插件，但是日志的before数据并不完整，笔者推荐使用WAL2JSON，安装方式见MD文档",
+      "checkCdcSlave": "检查CDC优先从库",
       "walTdeKey": "EDB TDE密钥文件",
       "walTdeKeyTip": "上传EDB TDE包装后的密钥文件，通常是PGDATA/pg_encryption/key.bin。仅在日志插件选择PHYSICAL时用于解密加密WAL。",
       "walTdeKeyPassword": "EDB TDE密钥密码",
@@ -1236,6 +1256,7 @@
       "password" : "密碼",
       "logPluginName" : "日誌插件",
       "logPluginNameTip": "高版本PG自帶PGOUTPUT插件，但是日誌的before數據並不完整，筆者推薦使用WAL2JSON，安裝方式見MD文檔",
+      "checkCdcSlave": "檢查CDC優先從庫",
       "walTdeKey": "EDB TDE密鑰文件",
       "walTdeKeyTip": "上傳EDB TDE包裝後的密鑰文件，通常是PGDATA/pg_encryption/key.bin。僅在日誌插件選擇PHYSICAL時用於解密加密WAL。",
       "walTdeKeyPassword": "EDB TDE密鑰密碼",
