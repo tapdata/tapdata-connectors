@@ -285,6 +285,50 @@
             }
           }
         },
+        "walTdeKey": {
+          "type": "string",
+          "title": "${walTdeKey}",
+          "x-decorator": "FormItem",
+          "x-component": "TextFileReader",
+          "x-component-props": {
+            "base64": true
+          },
+          "fileNameField": "walTdeKeyFile",
+          "x-decorator-props": {
+            "tooltip": "${walTdeKeyTip}"
+          },
+          "x-index": 85,
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='physical' ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "walTdeKeyPassword": {
+          "type": "string",
+          "title": "${walTdeKeyPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "x-decorator-props": {
+            "tooltip": "${walTdeKeyPasswordTip}"
+          },
+          "x-index": 86,
+          "x-reactions": [
+            {
+              "dependencies": ["__TAPDATA.connection_type", "logPluginName", "walTdeKey"],
+              "fulfill": {
+                "schema": {
+                  "x-decorator-props.style.display": "{{$deps[0]!==\"target\" && $deps[1]==='physical' && $deps[2] ? null:\"none\"}}"
+                }
+              }
+            }
+          ]
+        },
         "pgtoHost": {
           "type": "string",
           "title": "${pgtoHost}",
@@ -1028,6 +1072,10 @@
       "password" : "password",
       "logPluginName" : "logPluginName",
       "logPluginNameTip": "The higher version PG comes with the PGOUTPUT plugin, but the before data in the logs is not complete. \nThe author recommends using WAL2JSON, and the installation method can be found in the MD documentation",
+      "walTdeKey": "EDB TDE key file",
+      "walTdeKeyTip": "Upload the EDB TDE wrapped key file, usually PGDATA/pg_encryption/key.bin. Only used by the PHYSICAL log plugin to decrypt encrypted WAL.",
+      "walTdeKeyPassword": "EDB TDE key password",
+      "walTdeKeyPasswordTip": "Password used to unwrap the uploaded EDB TDE key file. Leave empty if the uploaded file is already an unwrapped raw key.",
       "pgtoHost": "Pgto Server Host",
       "pgtoPort": "Pgto Server Port",
       "partPublication": "Part publication",
@@ -1106,6 +1154,10 @@
       "password" : "密码",
       "logPluginName" : "日志插件",
       "logPluginNameTip": "高版本PG自带PGOUTPUT插件，但是日志的before数据并不完整，笔者推荐使用WAL2JSON，安装方式见MD文档",
+      "walTdeKey": "EDB TDE密钥文件",
+      "walTdeKeyTip": "上传EDB TDE包装后的密钥文件，通常是PGDATA/pg_encryption/key.bin。仅在日志插件选择PHYSICAL时用于解密加密WAL。",
+      "walTdeKeyPassword": "EDB TDE密钥密码",
+      "walTdeKeyPasswordTip": "用于解开上传的EDB TDE密钥文件的密码。如果上传的是已解开的原始密钥，可以留空。",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
       "partPublication": "部分订阅",
@@ -1184,6 +1236,10 @@
       "password" : "密碼",
       "logPluginName" : "日誌插件",
       "logPluginNameTip": "高版本PG自帶PGOUTPUT插件，但是日誌的before數據並不完整，筆者推薦使用WAL2JSON，安裝方式見MD文檔",
+      "walTdeKey": "EDB TDE密鑰文件",
+      "walTdeKeyTip": "上傳EDB TDE包裝後的密鑰文件，通常是PGDATA/pg_encryption/key.bin。僅在日誌插件選擇PHYSICAL時用於解密加密WAL。",
+      "walTdeKeyPassword": "EDB TDE密鑰密碼",
+      "walTdeKeyPasswordTip": "用於解開上傳的EDB TDE密鑰文件的密碼。如果上傳的是已解開的原始密鑰，可以留空。",
       "pgtoHost": "Pgto Server地址",
       "pgtoPort": "Pgto Server端口",
       "partPublication": "部分訂閱",
