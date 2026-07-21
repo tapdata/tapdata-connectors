@@ -30,7 +30,7 @@ class EdbTdeWalDecryptorTest {
                         + "52 16 84 1e 25 92 26 f5 b5 5c cd 36 00 b2 aa a5");
 
         EdbTdeWalDecryptor decryptor = new EdbTdeWalDecryptor(key, 256, 0x05000000L);
-        byte[] plain = decryptor.decrypt(encrypted, 0, encrypted.length);
+        byte[] plain = decryptor.decrypt(0x05000000L, encrypted, 0, encrypted.length);
 
         assertArrayEquals(hex("16 d1 06 00"), copy(plain, 0, 4));
         assertEquals(0x05000000L, littleEndianLong(plain, 8));
@@ -47,9 +47,27 @@ class EdbTdeWalDecryptorTest {
         byte[] encrypted = hex("50 76 5a 9a 26 f8 d2 31 cf 98 a9 80 3f ce 73 f3");
 
         EdbTdeWalDecryptor decryptor = new EdbTdeWalDecryptor(key, 256, 0x0500001cL);
-        byte[] plain = decryptor.decrypt(encrypted, 0, encrypted.length);
+        byte[] plain = decryptor.decrypt(0x0500001cL, encrypted, 0, encrypted.length);
 
         assertArrayEquals(hex("dd 49 5e 6a 00 00 00 01 00 20 00 00 95 05 00 00"), plain);
+    }
+
+    @Test
+    void decryptsNonContinuousChunksFromExplicitLsn() {
+        byte[] key = Base64.getDecoder().decode(
+                "EECRuRwqVNOA1T+ZhGhqHlsO8omEt4BB4raeuiL1WLR5BW96BgskGhqhyfXgzC5F"
+                        + "ndIC6nzYRu8CkFdO9GmHZgcClEPtRDFryDEXLsWy2GwdzQq8bVPjzSblLlzZ"
+                        + "9pLhGGnUialLjlrbBqZrzrvUcWMy7nGIo1S90E9ivrYLBJY=");
+        byte[] encrypted = hex(
+                "41 c0 f4 89 87 3a ef 09 53 82 24 20 d6 31 70 5d"
+                        + "df 2b 45 35 1b 17 6d 4a");
+
+        EdbTdeWalDecryptor decryptor = new EdbTdeWalDecryptor(key, 256, 0x05000000L);
+        byte[] plain = decryptor.decrypt(0x06000028L, encrypted, 0, encrypted.length);
+
+        assertArrayEquals(hex(
+                "22 00 00 00 4b 03 00 00 c8 06 00 05 00 00 00 00"
+                        + "00 01 00 00 00 88 f8 7d"), plain);
     }
 
     @Test

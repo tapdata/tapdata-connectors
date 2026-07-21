@@ -32,7 +32,6 @@ class EdbTdeWalDecryptor {
     private static final int OPENSSL_AES_BLOCK_LENGTH = 16;
 
     private final byte[] walKey;
-    private long nextLsn;
 
     EdbTdeWalDecryptor(byte[] unwrappedKey, int dataEncryptionBits, long startLsn) {
         int keyLength = dataEncryptionBits == 128 ? 16 : 32;
@@ -43,16 +42,15 @@ class EdbTdeWalDecryptor {
             throw new IllegalArgumentException("EDB TDE unwrapped key is too short for WAL decryption");
         }
         this.walKey = Arrays.copyOfRange(unwrappedKey, WAL_KEY_OFFSET, WAL_KEY_OFFSET + keyLength);
-        this.nextLsn = startLsn;
     }
 
-    byte[] decrypt(byte[] encrypted, int offset, int length) {
+    byte[] decrypt(long startLsn, byte[] encrypted, int offset, int length) {
         if (length <= 0) {
             return new byte[0];
         }
         try {
-            long blockStartLsn = nextLsn - (nextLsn % AES_BLOCK_SIZE);
-            int skip = (int) (nextLsn - blockStartLsn);
+            long blockStartLsn = startLsn - (startLsn % AES_BLOCK_SIZE);
+            int skip = (int) (startLsn - blockStartLsn);
             Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE,
                     new SecretKeySpec(walKey, "AES"),
@@ -69,11 +67,10 @@ class EdbTdeWalDecryptor {
                 output = cipher.doFinal(input);
             }
             byte[] decrypted = skip == 0 ? output : Arrays.copyOfRange(output, skip, skip + length);
-            nextLsn += length;
             return decrypted;
         } catch (Exception e) {
             throw new IllegalStateException("Failed to decrypt EDB TDE WAL stream at LSN "
-                    + PhysicalWalLogMiner.lsnStr(nextLsn), e);
+                    + PhysicalWalLogMiner.lsnStr(startLsn), e);
         }
     }
 
@@ -97,6 +94,10 @@ class EdbTdeWalDecryptor {
             throw new IllegalArgumentException("EDB TDE key file is required");
         }
         String value = uploadedKey.trim();
+        int dataUrlMarker = value.indexOf(";base64,");
+        if (dataUrlMarker >= 0) {
+            value = value.substring(dataUrlMarker + ";base64,".length());
+        }
         try {
             return Base64.getUrlDecoder().decode(value);
         } catch (IllegalArgumentException ignored) {
