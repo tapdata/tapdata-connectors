@@ -40,7 +40,13 @@ class HashFixedBucketWriterStrategyTest {
             strategy =
                     new HashFixedBucketWriterStrategy(
                             new PaimonBucketWriterStrategyContext(
-                                    "default.t", table, writer, "user", null));
+                                    "default.t",
+                                    table,
+                                    writer,
+                                    "user",
+                                    null,
+                                    PaimonWriteSemanticContractTestFactory.forMode(
+                                            BucketMode.HASH_FIXED)));
         }
     }
 }

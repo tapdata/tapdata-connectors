@@ -140,7 +140,13 @@ class HashDynamicBucketWriterStrategyTest {
             strategy =
                     new HashDynamicBucketWriterStrategy(
                             new PaimonBucketWriterStrategyContext(
-                                    "default.t", table, writer, "user", null),
+                                    "default.t",
+                                    table,
+                                    writer,
+                                    "user",
+                                    null,
+                                    PaimonWriteSemanticContractTestFactory.forMode(
+                                            BucketMode.HASH_DYNAMIC)),
                             runtime);
         }
 

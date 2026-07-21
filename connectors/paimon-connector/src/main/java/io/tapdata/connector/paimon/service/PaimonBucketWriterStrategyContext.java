@@ -14,18 +14,22 @@ final class PaimonBucketWriterStrategyContext {
     private final StreamTableWrite writer;
     private final String commitUser;
     private final IOManager ioManager;
+    private final PaimonWriteSemanticContract writeSemanticContract;
 
     PaimonBucketWriterStrategyContext(
             String tableKey,
             FileStoreTable table,
             StreamTableWrite writer,
             String commitUser,
-            IOManager ioManager) {
+            IOManager ioManager,
+            PaimonWriteSemanticContract writeSemanticContract) {
         this.tableKey = Objects.requireNonNull(tableKey, "tableKey");
         this.table = Objects.requireNonNull(table, "table");
         this.writer = Objects.requireNonNull(writer, "writer");
         this.commitUser = Objects.requireNonNull(commitUser, "commitUser");
         this.ioManager = ioManager;
+        this.writeSemanticContract =
+                Objects.requireNonNull(writeSemanticContract, "writeSemanticContract");
     }
 
     String tableKey() {
@@ -46,5 +50,9 @@ final class PaimonBucketWriterStrategyContext {
 
     IOManager ioManager() {
         return ioManager;
+    }
+
+    PaimonWriteSemanticContract writeSemanticContract() {
+        return writeSemanticContract;
     }
 }

@@ -12,6 +12,7 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import java.io.File;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
@@ -86,10 +87,40 @@ final class PaimonTableWriteContextFactory {
             PaimonTableWriteContext.CommitStateStore commitStateStore,
             PaimonBucketWriterRuntimeFactory runtimeFactory)
             throws Exception {
+        PaimonWriteSemanticContract writeSemanticContract =
+                PaimonWriteSemanticContractResolver.resolve(tableKey, fileStoreTable);
+        return create(
+                tableKey,
+                tableName,
+                fileStoreTable,
+                commitUser,
+                configuredTmpDirs,
+                nextCommitIdentifier,
+                commitStateStore,
+                runtimeFactory,
+                writeSemanticContract);
+    }
+
+    static PaimonTableWriteContext create(
+            String tableKey,
+            String tableName,
+            FileStoreTable fileStoreTable,
+            String commitUser,
+            String configuredTmpDirs,
+            long nextCommitIdentifier,
+            PaimonTableWriteContext.CommitStateStore commitStateStore,
+            PaimonBucketWriterRuntimeFactory runtimeFactory,
+            PaimonWriteSemanticContract writeSemanticContract)
+            throws Exception {
+        Objects.requireNonNull(fileStoreTable, "fileStoreTable");
+        Objects.requireNonNull(writeSemanticContract, "writeSemanticContract");
         if (nextCommitIdentifier < 0L) {
             throw new IllegalArgumentException("Negative Paimon commit identifier for " + tableKey);
         }
-
+        if (writeSemanticContract.bucketMode() != fileStoreTable.bucketMode()) {
+            throw new IllegalArgumentException(
+                    "Paimon write semantic contract mode mismatch for " + tableKey);
+        }
         StreamWriteBuilder builder =
                 fileStoreTable.newStreamWriteBuilder().withCommitUser(commitUser);
         boolean requiresIoManager =
@@ -123,7 +154,8 @@ final class PaimonTableWriteContextFactory {
                                     fileStoreTable,
                                     rawWriter,
                                     commitUser,
-                                    ioManager),
+                                    ioManager,
+                                    writeSemanticContract),
                             runtimeFactory);
 
             return new PaimonTableWriteContext(

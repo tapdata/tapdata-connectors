@@ -93,6 +93,11 @@ final class KeyDynamicBucketWriterStrategy extends AbstractPaimonBucketWriterStr
         try {
             assigner.processInput(row);
             for (BucketedRow emitted : emittedRows) {
+                // GlobalIndexAssigner synthesizes cross-partition DELETE rows by copying the
+                // incoming row and changing only InternalRow.RowKind. RowKindGenerator later
+                // trusts the configured rowkind field, so keep both representations consistent.
+                PaimonRowKindField.apply(
+                        writeSemanticContract(), emitted.row, emitted.row.getRowKind());
                 delegate.write(emitted.row, emitted.bucket);
             }
         } finally {

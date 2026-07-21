@@ -1113,10 +1113,12 @@ public class PaimonService implements AutoCloseable {
 				// One context owns writer, committer, dynamic bucket state and commit identifiers.
 				Object lock = commitLocks.computeIfAbsent(tableKey, k -> new Object());
 				synchronized (lock) {
-					writeContext = getOrCreateTableWriteContext(
-							tableKey, tableName, identifier, connectorContext);
-					pendingBeforeBatch = writeContext.hasPendingCommit();
+					writeContext = tableWriteContexts.get(tableKey);
+					pendingBeforeBatch =
+							writeContext != null && writeContext.hasPendingCommit();
 					if (pendingBeforeBatch) {
+						// Preserve the existing recovery order: first make an older prepared commit
+						// durable, then inspect the new source batch.
 						writeContext.retryPendingCommit();
 						commitCallback(tableName);
 						AtomicInteger previousCount = accumulatedRecordCount.get(tableKey);
@@ -1125,6 +1127,21 @@ public class PaimonService implements AutoCloseable {
 						}
 						lastCommitTime.computeIfAbsent(tableKey, k -> new AtomicLong())
 								.set(System.currentTimeMillis());
+					}
+					// Validate the whole source batch before allocating a writer, IOManager or
+					// dynamic-bucket RocksDB state. An existing context supplies the immutable
+					// contract it was created with; a first write resolves it from the target table.
+					DmlBatchPreflight preflight =
+							resolveAndValidateDmlBatch(
+									tableKey, identifier, table, recordEvents);
+					if (writeContext == null) {
+						writeContext = getOrCreateTableWriteContext(
+								tableKey,
+								tableName,
+								identifier,
+								connectorContext,
+								preflight.fileStoreTable,
+								preflight.writeSemanticContract);
 					}
 					ingressStarted = true;
 					for (TapRecordEvent event : recordEvents) {
@@ -1229,9 +1246,10 @@ public class PaimonService implements AutoCloseable {
 			} catch (Exception e) {
 				if (e instanceof PaimonDynamicBucketPollutedException
 						|| e instanceof PaimonFatalWriteException) {
-					if (ingressStarted) {
-						stickyWriteFailure.compareAndSet(null, e);
-					}
+					// A deterministic table contract or input-image failure is task-fatal even
+					// when it occurs before the first writer call. Retrying another table in the
+					// same multi-table task could otherwise advance offsets past the bad event.
+					stickyWriteFailure.compareAndSet(null, e);
 					throw e;
 				}
 				// If commit outcome is ambiguous, retry the prepared messages before considering
@@ -1478,6 +1496,17 @@ public class PaimonService implements AutoCloseable {
 			String tableName,
 			Identifier identifier,
 			TapConnectorContext connectorContext) throws Exception {
+		return getOrCreateTableWriteContext(
+				tableKey, tableName, identifier, connectorContext, null, null);
+	}
+
+	private PaimonTableWriteContext getOrCreateTableWriteContext(
+			String tableKey,
+			String tableName,
+			Identifier identifier,
+			TapConnectorContext connectorContext,
+			FileStoreTable preResolvedTable,
+			PaimonWriteSemanticContract preResolvedContract) throws Exception {
 		Object lifecycleLock = commitLocks.computeIfAbsent(tableKey, ignored -> new Object());
 		synchronized (lifecycleLock) {
 			if (drainingTables.contains(tableKey)) {
@@ -1489,12 +1518,22 @@ public class PaimonService implements AutoCloseable {
 					if (drainingTables.contains(tableKey)) {
 						throw new IllegalStateException("Paimon table is draining for DDL: " + tableKey);
 					}
-					Table table = catalog.getTable(identifier);
+					Table table =
+							preResolvedTable == null
+									? catalog.getTable(identifier)
+									: preResolvedTable;
 					if (!(table instanceof FileStoreTable)) {
 						throw new IllegalArgumentException(
 								"Only FileStoreTable supports connector writes for " + tableKey);
 					}
 					FileStoreTable fileStoreTable = (FileStoreTable) table;
+					// Contract resolution must precede commit-state binding and the HASH_DYNAMIC
+					// RocksDB pollution preflight, not merely raw writer construction.
+					PaimonWriteSemanticContract writeSemanticContract =
+							preResolvedContract == null
+									? PaimonWriteSemanticContractResolver.resolve(
+											tableKey, fileStoreTable)
+									: preResolvedContract;
 					registerPhysicalTableOwner(tableKey, fileStoreTable);
 					try {
 						PaimonCommitStateStore.Binding binding = PaimonCommitStateStore.bind(
@@ -1523,7 +1562,8 @@ public class PaimonService implements AutoCloseable {
 								binding.commitUser(),
 								config.getDiskTmpDir(tableName),
 								binding.nextCommitIdentifier(),
-								binding.store());
+								binding.store(),
+								writeSemanticContract);
 					} catch (Exception e) {
 						unregisterPhysicalTableOwner(tableKey);
 						throw e;
@@ -1539,6 +1579,47 @@ public class PaimonService implements AutoCloseable {
 				}
 				throw e;
 			}
+		}
+	}
+
+	private DmlBatchPreflight resolveAndValidateDmlBatch(
+			String tableKey,
+			Identifier identifier,
+			TapTable tapTable,
+			List<TapRecordEvent> recordEvents) throws Exception {
+		PaimonTableWriteContext existingContext = tableWriteContexts.get(tableKey);
+		PaimonWriteSemanticContract contract;
+		FileStoreTable fileStoreTable = null;
+		if (existingContext != null) {
+			contract = existingContext.writeSemanticContract();
+		} else {
+			Table targetTable = catalog.getTable(identifier);
+			if (!(targetTable instanceof FileStoreTable)) {
+				throw new IllegalArgumentException(
+						"Only FileStoreTable supports connector writes for " + tableKey);
+			}
+			fileStoreTable = (FileStoreTable) targetTable;
+			contract =
+					PaimonWriteSemanticContractResolver.resolve(
+							tableKey, fileStoreTable);
+		}
+
+		PaimonGeneratedFieldDependencies generatedFields =
+				generatedFieldDependencies(tapTable);
+		PaimonDmlImageValidator.validateBatch(
+				tableKey, contract, generatedFields, tapTable, recordEvents);
+		return new DmlBatchPreflight(fileStoreTable, contract);
+	}
+
+	private static final class DmlBatchPreflight {
+		private final FileStoreTable fileStoreTable;
+		private final PaimonWriteSemanticContract writeSemanticContract;
+
+		private DmlBatchPreflight(
+				FileStoreTable fileStoreTable,
+				PaimonWriteSemanticContract writeSemanticContract) {
+			this.fileStoreTable = fileStoreTable;
+			this.writeSemanticContract = writeSemanticContract;
 		}
 	}
 
@@ -1616,7 +1697,9 @@ public class PaimonService implements AutoCloseable {
 		Map<String, Object> after = event.getAfter();
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
+		PaimonWriteSemanticContract contract = writeContext.writeSemanticContract();
 		GenericRow row = convertToGenericRow(after, table, identifier);
+		PaimonRowKindField.apply(contract, row, RowKind.INSERT);
 		writeContext.validateRoutingRow(row, "INSERT");
 		writeRow(writeContext, event, row, table, after, currentLog);
 	}
@@ -1636,15 +1719,14 @@ public class PaimonService implements AutoCloseable {
 
 		Map<String, Object> before = event.getBefore();
 		Map<String, Object> after = event.getAfter();
+		PaimonWriteSemanticContract contract = writeContext.writeSemanticContract();
 
 		// Convert before and after data to GenericRow first to avoid duplicate conversion
 		GenericRow beforeRow = null;
 		if (before != null && !before.isEmpty()) {
 			beforeRow = convertToGenericRow(before, table, identifier);
-			writeContext.validateRoutingRow(beforeRow, "UPDATE_BEFORE");
 		}
 		GenericRow afterRow = convertToGenericRow(after, table, identifier);
-		writeContext.validateRoutingRow(afterRow, "UPDATE_AFTER");
 
 		// Check if primary key update detection is enabled
 		Boolean enablePkUpdate = config.getEnablePrimaryKeyUpdate(table.getName());
@@ -1657,26 +1739,32 @@ public class PaimonService implements AutoCloseable {
 
 			// Check if primary key has changed
 			if (isPrimaryKeyChanged(beforeRow, afterRow, table)) {
-				// Convert update to delete + insert
-				// First, write DELETE using before data
-				beforeRow.setRowKind(RowKind.DELETE);
+				// Validate both effective rows before the first writer call so a malformed
+				// after image cannot leave a half-written DELETE + INSERT pair.
+				PaimonRowKindField.apply(contract, beforeRow, RowKind.DELETE);
+				PaimonRowKindField.apply(contract, afterRow, RowKind.INSERT);
+				writeContext.validateRoutingRow(beforeRow, "DELETE");
+				writeContext.validateRoutingRow(afterRow, "INSERT");
 				writeRow(writeContext, event, beforeRow, table, before, currentLog);
-
-				// Then, write INSERT using after data
-				afterRow.setRowKind(RowKind.INSERT);
 				writeRow(writeContext, event, afterRow, table, after, currentLog);
 				return;
 			}
 		}
 
-		// Normal update logic: Write U- (UPDATE_BEFORE) if before data exists
+		// Apply and validate the complete logical operation before the first write.
 		if (beforeRow != null) {
-			beforeRow.setRowKind(RowKind.UPDATE_BEFORE);
+			PaimonRowKindField.apply(contract, beforeRow, RowKind.UPDATE_BEFORE);
+			writeContext.validateRoutingRow(beforeRow, "UPDATE_BEFORE");
+		}
+		PaimonRowKindField.apply(contract, afterRow, RowKind.UPDATE_AFTER);
+		writeContext.validateRoutingRow(afterRow, "UPDATE_AFTER");
+
+		// Normal update logic: Write U- (UPDATE_BEFORE) if before data exists.
+		if (beforeRow != null) {
 			writeRow(writeContext, event, beforeRow, table, before, currentLog);
 		}
 
 		// Write U+ (UPDATE_AFTER) using after data
-		afterRow.setRowKind(RowKind.UPDATE_AFTER);
 		writeRow(writeContext, event, afterRow, table, after, currentLog);
 	}
 
@@ -1737,11 +1825,28 @@ public class PaimonService implements AutoCloseable {
 		Map<String, Object> before = event.getBefore();
 		String database = config.getDatabase();
 		Identifier identifier = Identifier.create(database, table.getName());
+		PaimonWriteSemanticContract contract = writeContext.writeSemanticContract();
 		GenericRow row = convertToGenericRow(before, table, identifier);
+		PaimonRowKindField.apply(contract, row, RowKind.DELETE);
 		writeContext.validateRoutingRow(row, "DELETE");
-		// Set row kind to DELETE
-		row.setRowKind(RowKind.DELETE);
 		writeRow(writeContext, event, row, table, before, currentLog);
+	}
+
+	private PaimonGeneratedFieldDependencies generatedFieldDependencies(TapTable table) {
+		if (!Boolean.TRUE.equals(computeHashKey.get(table.getName()))) {
+			return PaimonGeneratedFieldDependencies.none();
+		}
+		Collection<String> sourcePrimaryKeys = primaryKeyMap.get(table.getName());
+		if (sourcePrimaryKeys == null || sourcePrimaryKeys.isEmpty()) {
+			throw new PaimonFatalWriteException(
+					"PAIMON_FULL_CHANGELOG_REQUIRED table="
+							+ config.getDatabase()
+							+ "."
+							+ table.getName()
+							+ ", reason=synthetic hash key has no source primary-key dependencies");
+		}
+		return PaimonGeneratedFieldDependencies.of(
+				Collections.singletonMap(HASH_KEY, sourcePrimaryKeys));
 	}
 
 	/**

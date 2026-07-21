@@ -67,6 +67,8 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_DYNAMIC);
+        when(strategy.writeSemanticContract())
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_DYNAMIC));
         when(strategy.prepareCommit(0L)).thenReturn(Collections.emptyList());
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
@@ -125,6 +127,8 @@ class PaimonServiceInitialSyncPendingTest {
             return null;
         }).when(strategy).write(any());
         when(strategy.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
+        when(strategy.writeSemanticContract())
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.KEY_DYNAMIC));
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
                         "default.t",
@@ -201,6 +205,10 @@ class PaimonServiceInitialSyncPendingTest {
         }).when(strategy1).write(any());
         when(strategy1.bucketMode()).thenReturn(BucketMode.HASH_DYNAMIC);
         when(strategy2.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
+        when(strategy1.writeSemanticContract())
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_DYNAMIC));
+        when(strategy2.writeSemanticContract())
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.KEY_DYNAMIC));
         PaimonTableWriteContext context1 = new PaimonTableWriteContext(
                 "default.t1", "t1", "user-1", strategy1,
                 mock(PaimonTableCommitter.class), null, Collections.emptyList(), 0L);
@@ -257,6 +265,8 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
+        when(strategy.writeSemanticContract())
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED));
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
                         "default.t",
@@ -307,6 +317,8 @@ class PaimonServiceInitialSyncPendingTest {
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         PaimonTableCommitter committer = mock(PaimonTableCommitter.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.HASH_FIXED);
+        when(strategy.writeSemanticContract())
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED));
         PaimonTableWriteContext context =
                 new PaimonTableWriteContext(
                         "default.t",
@@ -391,6 +403,8 @@ class PaimonServiceInitialSyncPendingTest {
 
         PaimonBucketWriterStrategy strategy = mock(PaimonBucketWriterStrategy.class);
         when(strategy.bucketMode()).thenReturn(BucketMode.KEY_DYNAMIC);
+        when(strategy.writeSemanticContract())
+                .thenReturn(PaimonWriteSemanticContractTestFactory.forMode(BucketMode.KEY_DYNAMIC));
         PaimonFatalWriteException missingPrimaryKey =
                 new PaimonFatalWriteException(
                         "Missing non-null Paimon routing field 'id' for INSERT on dynamic-bucket table default.t");

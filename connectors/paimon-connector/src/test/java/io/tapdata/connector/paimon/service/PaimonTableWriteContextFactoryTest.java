@@ -1,6 +1,8 @@
 package io.tapdata.connector.paimon.service;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
 import java.util.Collections;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -33,6 +36,8 @@ class PaimonTableWriteContextFactoryTest {
         Fixture fixture = new Fixture(BucketMode.HASH_FIXED);
 
         PaimonTableWriteContext context = fixture.create();
+        org.junit.jupiter.api.Assertions.assertEquals(
+                BucketMode.HASH_FIXED, context.writeSemanticContract().bucketMode());
         context.close();
         context.close();
 
@@ -41,6 +46,27 @@ class PaimonTableWriteContextFactoryTest {
         order.verify(fixture.committer).close();
         verify(fixture.writer).close();
         verify(fixture.committer).close();
+    }
+
+    @Test
+    void preResolvedContractMustBeSharedByContextAndStrategy() throws Exception {
+        Fixture fixture = new Fixture(BucketMode.HASH_FIXED);
+        PaimonWriteSemanticContract contract =
+                PaimonWriteSemanticContractResolver.resolve("default.t", fixture.table);
+
+        try (PaimonTableWriteContext context =
+                PaimonTableWriteContextFactory.create(
+                        "default.t",
+                        "t",
+                        fixture.table,
+                        COMMIT_USER,
+                        null,
+                        0L,
+                        PaimonTableWriteContext.CommitStateStore.NOOP,
+                        fixture.runtimeFactory,
+                        contract)) {
+            assertSame(contract, context.writeSemanticContract());
+        }
     }
 
     @Test
@@ -103,6 +129,33 @@ class PaimonTableWriteContextFactoryTest {
     }
 
     @Test
+    void unsupportedCrossPartitionMergeEngineMustFailBeforeAllocatingPaimonResources() {
+        Fixture fixture = new Fixture(BucketMode.HASH_FIXED);
+        TableSchema schema =
+                TableSchema.create(
+                        0L,
+                        Schema.newBuilder()
+                                .column("id", DataTypes.INT())
+                                .column("pt", DataTypes.STRING())
+                                .partitionKeys("pt")
+                                .primaryKey("id")
+                                .build());
+        when(fixture.table.schema()).thenReturn(schema);
+        when(fixture.table.rowType()).thenReturn(schema.logicalRowType());
+        when(fixture.table.primaryKeys()).thenReturn(schema.primaryKeys());
+        when(fixture.table.partitionKeys()).thenReturn(schema.partitionKeys());
+        when(fixture.coreOptions.mergeEngine()).thenReturn(MergeEngine.FIRST_ROW);
+
+        PaimonFatalWriteException thrown =
+                assertThrows(PaimonFatalWriteException.class, fixture::create);
+
+        org.junit.jupiter.api.Assertions.assertTrue(
+                thrown.getMessage()
+                        .contains("PAIMON_UNSUPPORTED_CROSS_PARTITION_MERGE_ENGINE"));
+        verify(fixture.table, never()).newStreamWriteBuilder();
+    }
+
+    @Test
     void spillableWriterMustReceiveIoManagerWhenConfiguredTmpDirsAreBlank() throws Exception {
         Fixture fixture = new Fixture(BucketMode.HASH_FIXED);
         when(fixture.coreOptions.writeBufferSpillable()).thenReturn(true);
@@ -122,8 +175,23 @@ class PaimonTableWriteContextFactoryTest {
                 mock(PaimonBucketWriterRuntimeFactory.class);
 
         private Fixture(BucketMode mode) {
+            TableSchema schema =
+                    TableSchema.create(
+                            0L,
+                            Schema.newBuilder()
+                                    .column("id", DataTypes.INT())
+                                    .column("value", DataTypes.STRING())
+                                    .primaryKey("id")
+                                    .build());
             when(table.bucketMode()).thenReturn(mode);
             when(table.coreOptions()).thenReturn(coreOptions);
+            when(table.schema()).thenReturn(schema);
+            when(table.rowType()).thenReturn(schema.logicalRowType());
+            when(table.primaryKeys()).thenReturn(schema.primaryKeys());
+            when(table.partitionKeys()).thenReturn(schema.partitionKeys());
+            when(coreOptions.mergeEngine()).thenReturn(MergeEngine.DEDUPLICATE);
+            when(coreOptions.changelogProducer()).thenReturn(ChangelogProducer.NONE);
+            when(coreOptions.rowkindField()).thenReturn(Optional.empty());
             when(table.newStreamWriteBuilder()).thenReturn(builder);
             when(builder.withCommitUser(COMMIT_USER)).thenReturn(builder);
             when(builder.newWrite()).thenReturn(writer);

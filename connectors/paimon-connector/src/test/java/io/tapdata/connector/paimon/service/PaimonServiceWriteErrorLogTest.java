@@ -440,6 +440,11 @@ class PaimonServiceWriteErrorLogTest {
         }
 
         @Override
+        public PaimonWriteSemanticContract writeSemanticContract() {
+            return PaimonWriteSemanticContractTestFactory.forMode(BucketMode.HASH_FIXED);
+        }
+
+        @Override
         public void validateRoutingRow(InternalRow row, String operation) {
         }
 

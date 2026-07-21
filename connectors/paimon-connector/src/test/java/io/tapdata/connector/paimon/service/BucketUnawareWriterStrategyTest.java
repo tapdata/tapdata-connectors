@@ -53,7 +53,13 @@ class BucketUnawareWriterStrategyTest {
         when(table.primaryKeys()).thenReturn(Collections.singletonList("id"));
         PaimonBucketWriterStrategyContext context =
                 new PaimonBucketWriterStrategyContext(
-                        "default.t", table, mock(StreamTableWrite.class), "user", null);
+                        "default.t",
+                        table,
+                        mock(StreamTableWrite.class),
+                        "user",
+                        null,
+                        PaimonWriteSemanticContractTestFactory.forMode(
+                                BucketMode.BUCKET_UNAWARE));
 
         assertThrows(IllegalArgumentException.class, () -> new BucketUnawareWriterStrategy(context));
     }
@@ -69,7 +75,13 @@ class BucketUnawareWriterStrategyTest {
             strategy =
                     new BucketUnawareWriterStrategy(
                             new PaimonBucketWriterStrategyContext(
-                                    "default.t", table, writer, "user", null));
+                                    "default.t",
+                                    table,
+                                    writer,
+                                    "user",
+                                    null,
+                                    PaimonWriteSemanticContractTestFactory.forMode(
+                                            BucketMode.BUCKET_UNAWARE)));
         }
     }
 }

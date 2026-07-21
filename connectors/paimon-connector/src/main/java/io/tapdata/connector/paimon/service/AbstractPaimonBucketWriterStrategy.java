@@ -20,6 +20,7 @@ abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucketWriterS
     protected final String tableKey;
     protected final FileStoreTable table;
     protected final StreamTableWrite delegate;
+    private final PaimonWriteSemanticContract writeSemanticContract;
 
     private final BucketMode expectedMode;
     private final Map<String, Integer> requiredRoutingFieldIndexes;
@@ -33,6 +34,7 @@ abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucketWriterS
         this.tableKey = context.tableKey();
         this.table = context.table();
         this.delegate = context.writer();
+        this.writeSemanticContract = context.writeSemanticContract();
         this.expectedMode = Objects.requireNonNull(expectedMode, "expectedMode");
         if (table.bucketMode() != expectedMode) {
             throw new IllegalArgumentException(
@@ -70,6 +72,11 @@ abstract class AbstractPaimonBucketWriterStrategy implements PaimonBucketWriterS
     @Override
     public final BucketMode bucketMode() {
         return expectedMode;
+    }
+
+    @Override
+    public final PaimonWriteSemanticContract writeSemanticContract() {
+        return writeSemanticContract;
     }
 
     @Override

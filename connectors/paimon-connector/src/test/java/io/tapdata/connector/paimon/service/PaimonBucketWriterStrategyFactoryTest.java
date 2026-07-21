@@ -103,9 +103,11 @@ class PaimonBucketWriterStrategyFactoryTest {
             IOManager ioManager = mock(IOManager.class);
             when(table.bucketMode()).thenReturn(mode);
             if (mode == BucketMode.HASH_DYNAMIC || mode == BucketMode.KEY_DYNAMIC) {
+                TableSchema schema = schema();
                 when(table.primaryKeys()).thenReturn(Arrays.asList("id", "pt"));
                 when(table.partitionKeys()).thenReturn(Collections.singletonList("pt"));
-                when(table.schema()).thenReturn(schema());
+                when(table.schema()).thenReturn(schema);
+                when(table.rowType()).thenReturn(schema.logicalRowType());
             } else {
                 when(table.primaryKeys()).thenReturn(Collections.emptyList());
                 when(table.partitionKeys()).thenReturn(Collections.emptyList());
@@ -115,7 +117,12 @@ class PaimonBucketWriterStrategyFactoryTest {
             when(snapshotManager.latestSnapshotIdFromFileSystem()).thenReturn(1L, 1L);
             return PaimonBucketWriterStrategyFactory.create(
                     new PaimonBucketWriterStrategyContext(
-                            "default.t", table, writer, "user", ioManager),
+                            "default.t",
+                            table,
+                            writer,
+                            "user",
+                            ioManager,
+                            PaimonWriteSemanticContractTestFactory.forMode(mode)),
                     runtime);
         }
 

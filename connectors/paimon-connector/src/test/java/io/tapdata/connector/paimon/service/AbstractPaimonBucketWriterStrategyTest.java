@@ -168,7 +168,14 @@ class AbstractPaimonBucketWriterStrategyTest {
             when(table.bucketMode()).thenReturn(actualMode);
             when(table.rowType()).thenReturn(rowType);
             when(rowType.getFieldNames()).thenReturn(Arrays.asList("pt", "id"));
-            context = new PaimonBucketWriterStrategyContext("default.t", table, writer, "user", null);
+            context =
+                    new PaimonBucketWriterStrategyContext(
+                            "default.t",
+                            table,
+                            writer,
+                            "user",
+                            null,
+                            PaimonWriteSemanticContractTestFactory.forMode(actualMode));
         }
 
         private TestStrategy strategy(BucketMode expectedMode, List<String> fields) {

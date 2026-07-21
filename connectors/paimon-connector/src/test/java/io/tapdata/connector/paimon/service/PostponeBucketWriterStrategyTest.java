@@ -46,7 +46,13 @@ class PostponeBucketWriterStrategyTest {
             strategy =
                     new PostponeBucketWriterStrategy(
                             new PaimonBucketWriterStrategyContext(
-                                    "default.t", table, writer, "user", null));
+                                    "default.t",
+                                    table,
+                                    writer,
+                                    "user",
+                                    null,
+                                    PaimonWriteSemanticContractTestFactory.forMode(
+                                            BucketMode.POSTPONE_MODE)));
         }
     }
 }

@@ -87,6 +87,28 @@ final class PaimonTableWriteContext implements AutoCloseable {
                 runtimeFactory);
     }
 
+    static PaimonTableWriteContext create(
+            String tableKey,
+            String tableName,
+            FileStoreTable fileStoreTable,
+            String commitUser,
+            String configuredTmpDirs,
+            long nextCommitIdentifier,
+            CommitStateStore commitStateStore,
+            PaimonWriteSemanticContract writeSemanticContract)
+            throws Exception {
+        return PaimonTableWriteContextFactory.create(
+                tableKey,
+                tableName,
+                fileStoreTable,
+                commitUser,
+                configuredTmpDirs,
+                nextCommitIdentifier,
+                commitStateStore,
+                DefaultPaimonBucketWriterRuntimeFactory.INSTANCE,
+                writeSemanticContract);
+    }
+
     PaimonTableWriteContext(
             String tableKey,
             String tableName,
@@ -143,6 +165,10 @@ final class PaimonTableWriteContext implements AutoCloseable {
 
     BucketMode bucketMode() {
         return writerStrategy.bucketMode();
+    }
+
+    PaimonWriteSemanticContract writeSemanticContract() {
+        return writerStrategy.writeSemanticContract();
     }
 
     void validateRoutingRow(InternalRow row, String operation) {

@@ -1,6 +1,9 @@
 package io.tapdata.connector.paimon.service;
 
 import org.apache.paimon.crosspartition.GlobalIndexAssigner;
+import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -8,6 +11,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 import org.junit.jupiter.api.Test;
@@ -169,6 +173,48 @@ class KeyDynamicBucketWriterStrategyTest {
     }
 
     @Test
+    void generatedDeleteMustRewriteConfiguredRowKindField() throws Exception {
+        Fixture fixture = new Fixture();
+        when(fixture.rowType.getFieldNames()).thenReturn(Arrays.asList("pt", "id", "rk"));
+        PaimonWriteSemanticContract contract =
+                new PaimonWriteSemanticContract(
+                        BucketMode.KEY_DYNAMIC,
+                        true,
+                        MergeEngine.DEDUPLICATE,
+                        ChangelogProducer.NONE,
+                        false,
+                        Arrays.asList("pt", "id", "rk"),
+                        Collections.singleton("id"),
+                        Collections.singleton("id"),
+                        Collections.singleton("pt"),
+                        "rk",
+                        2);
+        KeyDynamicBucketWriterStrategy strategy = fixture.create(contract);
+        GenericRow input =
+                GenericRow.ofKind(
+                        RowKind.UPDATE_AFTER, 2, 1, BinaryString.fromString("+U"));
+        GenericRow generatedDelete =
+                GenericRow.ofKind(RowKind.DELETE, 1, 1, BinaryString.fromString("+U"));
+        doAnswer(
+                        invocation -> {
+                            fixture.emit(generatedDelete, 5);
+                            fixture.emit(input, 7);
+                            return null;
+                        })
+                .when(fixture.assigner)
+                .processInput(input);
+
+        strategy.write(input);
+
+        assertEquals("-D", generatedDelete.getString(2).toString());
+        assertEquals("+U", input.getString(2).toString());
+        InOrder order = inOrder(fixture.writer);
+        order.verify(fixture.writer)
+                .write(org.mockito.ArgumentMatchers.same(generatedDelete), eq(5));
+        order.verify(fixture.writer).write(org.mockito.ArgumentMatchers.same(input), eq(7));
+    }
+
+    @Test
     void processFailureMustNotWriteBufferedRowsAndMustClearBuffer() throws Exception {
         Fixture fixture = new Fixture();
         KeyDynamicBucketWriterStrategy strategy = fixture.create();
@@ -283,9 +329,20 @@ class KeyDynamicBucketWriterStrategyTest {
         }
 
         private KeyDynamicBucketWriterStrategy create() throws Exception {
+            return create(
+                    PaimonWriteSemanticContractTestFactory.forMode(BucketMode.KEY_DYNAMIC));
+        }
+
+        private KeyDynamicBucketWriterStrategy create(PaimonWriteSemanticContract contract)
+                throws Exception {
             return new KeyDynamicBucketWriterStrategy(
                     new PaimonBucketWriterStrategyContext(
-                            "default.t", table, writer, "user", ioManager),
+                            "default.t",
+                            table,
+                            writer,
+                            "user",
+                            ioManager,
+                            contract),
                     runtime);
         }
 

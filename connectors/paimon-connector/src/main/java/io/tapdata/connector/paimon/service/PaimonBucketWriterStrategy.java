@@ -18,6 +18,9 @@ interface PaimonBucketWriterStrategy extends AutoCloseable {
 
     BucketMode bucketMode();
 
+    /** Immutable target-table semantics resolved before allocating this strategy's resources. */
+    PaimonWriteSemanticContract writeSemanticContract();
+
     /** Validate non-null target-row fields required by this bucket strategy. */
     void validateRoutingRow(InternalRow row, String operation);
 
