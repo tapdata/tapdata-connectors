@@ -136,7 +136,7 @@
 		<repository>
 			<id>nexus-releases</id>
 			<name>nexus-maven-release</name>
-			<url>https://nexus.tapdata.net/repository/maven-releases/</url>
+			<url>https://nexus.tapdata.net/repository/maven-public/</url>
 			<releases>
 				<enabled>true</enabled>
 			</releases>
