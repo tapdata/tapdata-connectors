@@ -544,6 +544,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
     private void run(PGReplicationStream stream, long startLsnLong, long segSize, Supplier<Boolean> isAlive) throws Exception {
         WalPageDecoder decoder = new WalPageDecoder(startLsnLong, segSize);
         EdbTdeWalDecryptor walDecryptor = newWalDecryptorIfConfigured(startLsnLong);
+        long nextChunkLsn = startLsnLong;
         // Frame from startLsnLong (possibly the checkpoint redo) but report offsets
         // only from emitFromLsn so the saved resume point never moves backwards
         // while the cache-warming prefix is being replayed.
@@ -571,8 +572,9 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
                     byte[] arr = new byte[n];
                     buf.get(arr);
                     if (walDecryptor != null) {
-                        arr = walDecryptor.decrypt(arr, 0, n);
+                        arr = walDecryptor.decrypt(nextChunkLsn, arr, 0, n);
                     }
+                    nextChunkLsn += n;
                     decoder.feed(arr, 0, n);
                     WalPageDecoder.RawRecord raw;
                     while ((raw = decoder.nextRecord()) != null) {
