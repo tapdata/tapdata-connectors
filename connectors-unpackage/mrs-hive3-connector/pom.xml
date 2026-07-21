@@ -185,11 +185,12 @@
         </plugins>
     </build>
     <repositories>
-        <repository>
-            <id>huaweicloudsdk</id>
-            <url>https://repo.huaweicloud.com/repository/maven/huaweicloudsdk/</url>
-            <releases><enabled>true</enabled></releases>
-            <snapshots><enabled>true</enabled></snapshots>
-        </repository>
+        <!-- import package performance -->
+<!--        <repository>-->
+<!--            <id>huaweicloudsdk</id>-->
+<!--            <url>https://repo.huaweicloud.com/repository/maven/huaweicloudsdk/</url>-->
+<!--            <releases><enabled>true</enabled></releases>-->
+<!--            <snapshots><enabled>true</enabled></snapshots>-->
+<!--        </repository>-->
     </repositories>
 </project>
