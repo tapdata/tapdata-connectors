@@ -54,6 +54,11 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
     private String walSpillDir;
     // Number of WAL segments to look back for cold-cache warm-up (default 10)
     private Integer walLookbackSegments;
+    // EDB Postgres Advanced Server TDE WAL decryption. Enabled when the TDE key
+    // file is uploaded in connection config.
+    private String walTdeKey;
+    private String walTdeKeyPassword;
+    private Integer walTdeDataEncryptionBits;
 
     //customize
     public PostgresConfig() {
@@ -323,5 +328,29 @@ public class PostgresConfig extends CommonDbConfig implements Serializable {
 
     public void setWalLookbackSegments(Integer walLookbackSegments) {
         this.walLookbackSegments = walLookbackSegments;
+    }
+
+    public String getWalTdeKey() {
+        return walTdeKey;
+    }
+
+    public void setWalTdeKey(String walTdeKey) {
+        this.walTdeKey = walTdeKey;
+    }
+
+    public String getWalTdeKeyPassword() {
+        return walTdeKeyPassword;
+    }
+
+    public void setWalTdeKeyPassword(String walTdeKeyPassword) {
+        this.walTdeKeyPassword = walTdeKeyPassword;
+    }
+
+    public Integer getWalTdeDataEncryptionBits() {
+        return walTdeDataEncryptionBits;
+    }
+
+    public void setWalTdeDataEncryptionBits(Integer walTdeDataEncryptionBits) {
+        this.walTdeDataEncryptionBits = walTdeDataEncryptionBits;
     }
 }
