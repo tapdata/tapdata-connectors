@@ -24,7 +24,7 @@ import static io.tapdata.entity.simplify.TapSimplify.list;
 public abstract class JdbcContext implements AutoCloseable {
 
     private final static String TAG = JdbcContext.class.getSimpleName();
-    private final HikariDataSource hikariDataSource;
+    private HikariDataSource hikariDataSource;
     private final CommonDbConfig config;
     protected ExceptionCollector exceptionCollector = new AbstractExceptionCollector() {
     };
@@ -366,6 +366,16 @@ public abstract class JdbcContext implements AutoCloseable {
 
     public Long queryTimestamp() throws SQLException {
         throw new UnsupportedOperationException();
+    }
+
+    public synchronized void refresh() {
+        HikariDataSource old = this.hikariDataSource;
+        this.hikariDataSource = HikariConnection.getHikariDataSource(config);
+        try {
+            old.close();
+        } catch (Exception ignore) {
+
+        }
     }
 
     @Override

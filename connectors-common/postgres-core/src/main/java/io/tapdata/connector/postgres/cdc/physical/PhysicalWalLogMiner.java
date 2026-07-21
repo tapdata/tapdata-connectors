@@ -22,6 +22,7 @@ import io.tapdata.entity.event.dml.TapUpdateRecordEvent;
 import io.tapdata.entity.logger.Log;
 import io.tapdata.entity.schema.TapField;
 import io.tapdata.entity.schema.TapTable;
+import io.tapdata.exception.TapPdkRetryableEx;
 import io.tapdata.kit.EmptyKit;
 import io.tapdata.kit.ErrorKit;
 import org.postgresql.PGConnection;
@@ -541,7 +542,7 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
      * stateful) and offloads the heavy per-record decoding to a thread pool. A
      * single consumer thread drains the processor in submission order, so the
      * transaction buffer and emitted LSN sequence stay correct. */
-    private void run(PGReplicationStream stream, long startLsnLong, long segSize, Supplier<Boolean> isAlive) throws Exception {
+    private void run(PGReplicationStream stream, long startLsnLong, long segSize, Supplier<Boolean> isAlive) throws Throwable {
         WalPageDecoder decoder = new WalPageDecoder(startLsnLong, segSize);
         EdbTdeWalDecryptor walDecryptor = newWalDecryptorIfConfigured(startLsnLong);
         long nextChunkLsn = startLsnLong;
@@ -596,7 +597,11 @@ public class PhysicalWalLogMiner extends AbstractWalLogMiner {
             ErrorKit.ignoreAnyError(consumerThread::join);
         }
         if (threadException.get() != null) {
-            throw new RuntimeException(threadException.get());
+            Throwable t = threadException.get();
+            if (t instanceof TapPdkRetryableEx) {
+                throw t;
+            }
+            throw new RuntimeException(t);
         }
     }
 
