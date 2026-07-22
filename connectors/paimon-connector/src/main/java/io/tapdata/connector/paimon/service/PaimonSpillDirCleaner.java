@@ -5,32 +5,40 @@ import org.apache.paimon.disk.IOManagerImpl;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
 /**
- * Tracks Paimon {@code paimon-io-<uuid>} spill directories owned by live IOManagers in this JVM
- * and cleans up stale ones left behind by abnormally terminated JVMs (OOM/crash/SIGKILL).
+ * Tracks Paimon {@code paimon-io-<uuid>} spill directories owned by live IOManagers and cleans up
+ * stale ones left behind by abnormally terminated JVMs (OOM/crash/SIGKILL).
  *
  * <p>The normal task-stop path closes the IOManager, which deletes its own spill dir. When the JVM
  * dies abnormally that cleanup never runs, so the dirs accumulate and exhaust local disk. Startup
- * cleanup removes such leftovers, while the live registry guarantees a sibling task's in-use dir in
- * the same JVM is never deleted.
+ * cleanup removes such leftovers. A JVM registry handles local ownership and a sibling advisory
+ * file lock proves cross-process ownership before age-based deletion is allowed.
  */
 public final class PaimonSpillDirCleaner {
 
     /** Prefix of spill directories created by Paimon IOManager: {@code paimon-io-<uuid>}. */
     static final String SPILL_DIR_PREFIX = "paimon-io-";
+    static final String OWNER_LOCK_SUFFIX = ".tapdata-owner.lock";
 
-    /** A spill dir not owned by this JVM and untouched for longer than this is treated as stale. */
+    /** An unlocked spill dir untouched for longer than this is treated as stale. */
     static final long DEFAULT_STALE_GRACE_MS = TimeUnit.MINUTES.toMillis(10);
 
     /** Canonical paths of spill dirs owned by live IOManagers in this JVM. */
     private static final Set<String> LIVE_DIRS = ConcurrentHashMap.newKeySet();
+    /** Cross-process advisory owner locks keyed by canonical spill directory. */
+    private static final Map<String, OwnerLock> OWNER_LOCKS = new ConcurrentHashMap<>();
 
     private PaimonSpillDirCleaner() {
     }
@@ -43,14 +51,41 @@ public final class PaimonSpillDirCleaner {
      */
     public static List<String> registerLiveDirs(IOManager ioManager) {
         List<String> paths = spillDirPaths(ioManager);
-        LIVE_DIRS.addAll(paths);
-        return paths;
+        List<String> registered = new ArrayList<>();
+        try {
+            for (String path : paths) {
+                OwnerLock ownerLock = OwnerLock.tryAcquire(lockFile(path));
+                if (ownerLock == null) {
+                    throw new IllegalStateException(
+                            "Paimon spill directory is already owned by another process");
+                }
+                OwnerLock raced = OWNER_LOCKS.putIfAbsent(path, ownerLock);
+                if (raced != null) {
+                    ownerLock.close();
+                    throw new IllegalStateException(
+                            "Paimon spill directory is already registered in this JVM");
+                }
+                LIVE_DIRS.add(path);
+                registered.add(path);
+            }
+            return paths;
+        } catch (RuntimeException e) {
+            unregisterLiveDirs(registered);
+            throw e;
+        }
     }
 
     /** Remove previously registered spill directories from the live set. */
     public static void unregisterLiveDirs(List<String> spillDirs) {
         if (spillDirs != null) {
-            LIVE_DIRS.removeAll(spillDirs);
+            for (String path : spillDirs) {
+                LIVE_DIRS.remove(path);
+                OwnerLock ownerLock = OWNER_LOCKS.remove(path);
+                if (ownerLock != null) {
+                    ownerLock.close();
+                    deleteQuietly(ownerLock.file);
+                }
+            }
         }
     }
 
@@ -71,8 +106,8 @@ public final class PaimonSpillDirCleaner {
 
     /**
      * Delete stale {@code paimon-io-*} spill directories under the given roots. A directory is
-     * deleted only when it is NOT owned by a live IOManager in this JVM AND has not been modified
-     * within {@code graceMs}.
+     * deleted only when it is not owned by a live IOManager in this JVM, its cross-process owner
+     * lock can be acquired, and it has not been modified within {@code graceMs}.
      *
      * @param roots     temp roots to scan
      * @param graceMs   freshness window protecting recently active / racing dirs
@@ -102,15 +137,34 @@ public final class PaimonSpillDirCleaner {
                 if (LIVE_DIRS.contains(path)) {
                     continue;
                 }
-                if (now - newestModified(child) < graceMs) {
+                File ownerFile = lockFile(path);
+                if (!ownerFile.isFile()) {
+                    // Rolling-upgrade compatibility: older connector versions did not publish an
+                    // owner lock. Such a directory may still be active in an old JVM, so absence of
+                    // a lock file is not permission to delete it. Legacy leftovers require an
+                    // operator-controlled cleanup after all old tasks have stopped.
                     continue;
                 }
-                long size = deleteRecursively(child);
-                if (size >= 0) {
-                    deleted++;
-                    if (onDeleted != null) {
-                        onDeleted.accept(path, size);
+                OwnerLock cleanupLock = OwnerLock.tryAcquire(ownerFile);
+                if (cleanupLock == null) {
+                    // Another JVM still owns this spill directory. Age alone is never sufficient
+                    // evidence that a RocksDB/IOManager directory is inactive.
+                    continue;
+                }
+                try {
+                    if (now - newestModified(child) < graceMs) {
+                        continue;
                     }
+                    long size = deleteRecursively(child);
+                    if (size >= 0) {
+                        deleted++;
+                        if (onDeleted != null) {
+                            onDeleted.accept(path, size);
+                        }
+                    }
+                } finally {
+                    cleanupLock.close();
+                    deleteQuietly(cleanupLock.file);
                 }
             }
         }
@@ -161,6 +215,86 @@ public final class PaimonSpillDirCleaner {
             return file.getCanonicalPath();
         } catch (IOException e) {
             return file.getAbsolutePath();
+        }
+    }
+
+    private static File lockFile(String canonicalSpillDir) {
+        File spillDir = new File(canonicalSpillDir);
+        return new File(
+                spillDir.getParentFile(), "." + spillDir.getName() + OWNER_LOCK_SUFFIX);
+    }
+
+    private static void deleteQuietly(File file) {
+        if (file != null && file.exists()) {
+            // Best effort. A stale unlocked owner file is harmless and is reused by the next scan.
+            file.delete();
+        }
+    }
+
+    private static final class OwnerLock {
+        private final File file;
+        private final RandomAccessFile randomAccessFile;
+        private final FileChannel channel;
+        private final FileLock lock;
+
+        private OwnerLock(
+                File file,
+                RandomAccessFile randomAccessFile,
+                FileChannel channel,
+                FileLock lock) {
+            this.file = file;
+            this.randomAccessFile = randomAccessFile;
+            this.channel = channel;
+            this.lock = lock;
+        }
+
+        private static OwnerLock tryAcquire(File file) {
+            RandomAccessFile randomAccessFile = null;
+            FileChannel channel = null;
+            try {
+                randomAccessFile = new RandomAccessFile(file, "rw");
+                channel = randomAccessFile.getChannel();
+                FileLock lock = channel.tryLock();
+                if (lock == null) {
+                    closeQuietly(channel, randomAccessFile);
+                    return null;
+                }
+                return new OwnerLock(file, randomAccessFile, channel, lock);
+            } catch (OverlappingFileLockException e) {
+                closeQuietly(channel, randomAccessFile);
+                return null;
+            } catch (IOException | RuntimeException e) {
+                closeQuietly(channel, randomAccessFile);
+                // Cleanup must fail closed: inability to prove exclusive ownership means skip.
+                return null;
+            }
+        }
+
+        private void close() {
+            try {
+                lock.release();
+            } catch (IOException ignored) {
+                // Best effort; closing the channel also releases the process lock.
+            }
+            closeQuietly(channel, randomAccessFile);
+        }
+
+        private static void closeQuietly(
+                FileChannel channel, RandomAccessFile randomAccessFile) {
+            if (channel != null) {
+                try {
+                    channel.close();
+                } catch (IOException ignored) {
+                    // Best effort.
+                }
+            }
+            if (randomAccessFile != null) {
+                try {
+                    randomAccessFile.close();
+                } catch (IOException ignored) {
+                    // Best effort.
+                }
+            }
         }
     }
 }
