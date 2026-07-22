@@ -64,10 +64,7 @@ import java.math.BigDecimal;
 import java.sql.*;
 import java.sql.Date;
 import java.text.SimpleDateFormat;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
+import java.time.*;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.CountDownLatch;
@@ -984,7 +981,11 @@ public class PostgresConnector extends CommonDbConnector {
                     value = (((Timestamp) value).toLocalDateTime().minusHours(TimeZone.getDefault().getRawOffset() / 3600000).atZone(ZoneOffset.UTC));
                 }
             } else if (value instanceof Date) {
-                value = (Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
+                if(dataType.equalsIgnoreCase("date")){
+                    value = LocalDate.parse(value.toString()).atStartOfDay();
+                }else{
+                    value = (Instant.ofEpochMilli(((Date) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime());
+                }
             } else if (value instanceof Time) {
                 if (!dataType.endsWith("with time zone")) {
                     value = (Instant.ofEpochMilli(((Time) value).getTime()).atZone(ZoneId.systemDefault()).toLocalDateTime().minusHours(postgresConfig.getZoneOffsetHour()));

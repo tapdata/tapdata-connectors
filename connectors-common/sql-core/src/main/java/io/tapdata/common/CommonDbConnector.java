@@ -31,10 +31,7 @@ import io.tapdata.pdk.apis.entity.TapFilter;
 import io.tapdata.pdk.apis.functions.connector.target.CreateTableOptions;
 
 import java.io.IOException;
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.SQLRecoverableException;
+import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -980,6 +977,31 @@ public abstract class CommonDbConnector extends ConnectorBase {
 
     protected List<String> getAfterUniqueAutoIncrementFields(TapTable tapTable, List<TapIndex> indexList) {
         return new ArrayList<>();
+    }
+
+    protected void filterColumns(TapTable tapTable, List<String> columns, List<String> columnTypes) {
+        Iterator<String> columnIterator = columns.iterator();
+        Iterator<String> typeIterator = columnTypes.iterator();
+        while (columnIterator.hasNext() && typeIterator.hasNext()) {
+            String column = columnIterator.next();
+            typeIterator.next();
+            if (!tapTable.getNameFieldMap().containsKey(column)) {
+                columnIterator.remove();
+                typeIterator.remove();
+            }
+        }
+    }
+
+    protected DataMap filterData(ResultSet resultSet, String[] fields, String[] columnTypes) throws SQLException {
+        DataMap dataMap = new DataMap();
+        for (int i = 0; i < fields.length; i++) {
+            dataMap.put(fields[i], filterData(resultSet.getObject(fields[i]), columnTypes[i]));
+        }
+        return dataMap;
+    }
+
+    protected Object filterData(Object obj, String columnType) {
+        return obj;
     }
 
     protected void executeCommandV2(TapConnectionContext connectionContext, String sqlType, String sql, Consumer<List<DataMap>> consumer) throws Throwable {
